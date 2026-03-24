@@ -1,6 +1,7 @@
 // ── Expression lowering ─────────────────────────────────────────
 
 use crate::ast;
+use crate::intern::sym;
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
 use super::LowerCtx;
@@ -39,7 +40,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     eprintln!("[LOWER IDENT] '{}' → {:?} ty={:?} vt_ty={:?}", name, var_id, ty, ctx.var_table.get(var_id).ty);
                 }
                 ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
-            } else if ctx.env.functions.contains_key(name) {
+            } else if ctx.env.functions.contains_key(&sym(name)) {
                 // Function used as a value (e.g., passed to HOF)
                 ctx.mk(IrExprKind::FnRef { name: name.clone() }, ty, span)
             } else {
@@ -48,7 +49,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
         ast::Expr::TypeName { name, .. } => {
             // Variant constructor used as value (e.g., Red)
-            if ctx.env.constructors.contains_key(name) {
+            if ctx.env.constructors.contains_key(&sym(name)) {
                 ctx.mk(IrExprKind::Call {
                     target: CallTarget::Named { name: name.clone() },
                     args: vec![], type_args: vec![],
@@ -255,7 +256,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     // If pipe result type is Unknown, try to infer from callee's return type
                     let resolved_ty = if matches!(ty, Ty::Unknown) {
                         if let CallTarget::Named { name } = &target {
-                            ctx.env.functions.get(name.as_str())
+                            ctx.env.functions.get(&sym(name))
                                 .map(|f| f.ret.clone())
                                 .unwrap_or(ty)
                         } else { ty }

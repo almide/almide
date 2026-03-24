@@ -8,6 +8,7 @@ pub mod constructor;
 pub use env::TypeEnv;
 pub use unify::{unify, substitute, contains_typevar};
 pub use constructor::{TypeConstructorId, TypeConstructorRegistry, Kind, AlgebraicLaw};
+use crate::intern::Sym;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
@@ -20,23 +21,23 @@ pub enum Ty {
     /// Parameterized type constructor: List[T], Option[T], Result[T,E], Map[K,V], Set[T], etc.
     /// Phase 4 of HKT Foundation — unifies all container types.
     Applied(constructor::TypeConstructorId, Vec<Ty>),
-    Record { fields: Vec<(std::string::String, Ty)> },
-    OpenRecord { fields: Vec<(std::string::String, Ty)> },
-    Variant { name: std::string::String, cases: Vec<VariantCase> },
+    Record { fields: Vec<(Sym, Ty)> },
+    OpenRecord { fields: Vec<(Sym, Ty)> },
+    Variant { name: Sym, cases: Vec<VariantCase> },
     Fn { params: Vec<Ty>, ret: Box<Ty> },
     Tuple(Vec<Ty>),
-    Named(std::string::String, Vec<Ty>),
+    Named(Sym, Vec<Ty>),
     /// Inline union type (e.g., Int | String). Members are sorted and deduplicated.
     Union(Vec<Ty>),
     /// Type variable for user-defined generics (e.g., T, U, A, B)
-    TypeVar(std::string::String),
+    TypeVar(Sym),
     /// Error recovery — unifies with everything to prevent cascade errors
     Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VariantCase {
-    pub name: std::string::String,
+    pub name: Sym,
     pub payload: VariantPayload,
 }
 
@@ -45,7 +46,7 @@ pub struct VariantCase {
 pub enum VariantPayload {
     Unit,
     Tuple(Vec<Ty>),
-    Record(Vec<(std::string::String, Ty, Option<crate::ast::Expr>)>),
+    Record(Vec<(Sym, Ty, Option<crate::ast::Expr>)>),
 }
 
 impl PartialEq for VariantPayload {
@@ -65,8 +66,8 @@ impl PartialEq for VariantPayload {
 /// Protocols declare a set of methods that conforming types must implement.
 #[derive(Debug, Clone)]
 pub struct ProtocolDef {
-    pub name: std::string::String,
-    pub generics: Vec<std::string::String>,
+    pub name: Sym,
+    pub generics: Vec<Sym>,
     pub methods: Vec<ProtocolMethodSig>,
 }
 
@@ -74,23 +75,23 @@ pub struct ProtocolDef {
 /// `Self` in parameters/return type is represented as `Ty::TypeVar("Self")`.
 #[derive(Debug, Clone)]
 pub struct ProtocolMethodSig {
-    pub name: std::string::String,
-    pub params: Vec<(std::string::String, Ty)>,
+    pub name: Sym,
+    pub params: Vec<(Sym, Ty)>,
     pub ret: Ty,
     pub is_effect: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct FnSig {
-    pub params: Vec<(std::string::String, Ty)>,
+    pub params: Vec<(Sym, Ty)>,
     pub ret: Ty,
     pub is_effect: bool,
     #[allow(dead_code)]
-    pub generics: Vec<std::string::String>,
+    pub generics: Vec<Sym>,
     /// Structural bounds for generics: TypeVar name → OpenRecord constraint type
-    pub structural_bounds: std::collections::HashMap<std::string::String, Ty>,
+    pub structural_bounds: std::collections::HashMap<Sym, Ty>,
     /// Protocol bounds for generics: TypeVar name → list of protocol names
-    pub protocol_bounds: std::collections::HashMap<std::string::String, Vec<std::string::String>>,
+    pub protocol_bounds: std::collections::HashMap<Sym, Vec<Sym>>,
 }
 
 /// Convenience macro for creating FnSig without generics (stdlib functions)
@@ -103,13 +104,13 @@ macro_rules! fn_sig {
 
 impl FnSig {
     /// Format parameter list as "name: Type, name: Type, ..."
-    pub fn format_params(&self) -> String {
+    pub fn format_params(&self) -> std::string::String {
         self.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ")
     }
 }
 
 impl Ty {
-    pub fn display(&self) -> std::string::String {
+    pub fn display(&self) -> String {
         match self {
             Ty::Int => "Int".into(),
             Ty::Float => "Float".into(),
@@ -141,7 +142,7 @@ impl Ty {
                 let fs: Vec<_> = fields.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect();
                 format!("{{ {}, .. }}", fs.join(", "))
             }
-            Ty::Variant { name, .. } => name.clone(),
+            Ty::Variant { name, .. } => name.to_string(),
             Ty::Fn { params, ret } => {
                 let ps: Vec<_> = params.iter().map(|t| t.display()).collect();
                 format!("fn({}) -> {}", ps.join(", "), ret.display())
@@ -152,7 +153,7 @@ impl Ty {
             }
             Ty::Named(n, args) => {
                 if args.is_empty() {
-                    n.clone()
+                    n.to_string()
                 } else {
                     let ts: Vec<_> = args.iter().map(|t| t.display()).collect();
                     format!("{}[{}]", n, ts.join(", "))
@@ -162,7 +163,7 @@ impl Ty {
                 let ms: Vec<_> = members.iter().map(|t| t.display()).collect();
                 ms.join(" | ")
             }
-            Ty::TypeVar(n) => n.clone(),
+            Ty::TypeVar(n) => n.to_string(),
             Ty::Unknown => "Unknown".into(),
         }
     }
@@ -270,7 +271,7 @@ impl Ty {
             Ty::Unit => Some(TypeConstructorId::Unit),
             Ty::Applied(id, _) => Some(id.clone()),
             Ty::Tuple(_) => Some(TypeConstructorId::Tuple),
-            Ty::Named(name, _) => Some(TypeConstructorId::UserDefined(name.clone())),
+            Ty::Named(name, _) => Some(TypeConstructorId::UserDefined(name.to_string())),
             _ => None,
         }
     }
@@ -353,14 +354,14 @@ impl Ty {
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
 
             Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(f).collect()),
-            Ty::Named(name, args) => Ty::Named(name.clone(), args.iter().map(f).collect()),
+            Ty::Named(name, args) => Ty::Named(*name, args.iter().map(f).collect()),
             Ty::Union(members) => Ty::union(members.iter().map(f).collect()),
 
             Ty::Record { fields } => Ty::Record {
-                fields: fields.iter().map(|(n, t)| (n.clone(), f(t))).collect(),
+                fields: fields.iter().map(|(n, t)| (*n, f(t))).collect(),
             },
             Ty::OpenRecord { fields } => Ty::OpenRecord {
-                fields: fields.iter().map(|(n, t)| (n.clone(), f(t))).collect(),
+                fields: fields.iter().map(|(n, t)| (*n, f(t))).collect(),
             },
 
             Ty::Fn { params, ret } => Ty::Fn {
@@ -369,14 +370,14 @@ impl Ty {
             },
 
             Ty::Variant { name, cases } => Ty::Variant {
-                name: name.clone(),
+                name: *name,
                 cases: cases.iter().map(|c| VariantCase {
-                    name: c.name.clone(),
+                    name: c.name,
                     payload: match &c.payload {
                         VariantPayload::Unit => VariantPayload::Unit,
                         VariantPayload::Tuple(tys) => VariantPayload::Tuple(tys.iter().map(f).collect()),
                         VariantPayload::Record(fs) => VariantPayload::Record(
-                            fs.iter().map(|(n, t, d)| (n.clone(), f(t), d.clone())).collect(),
+                            fs.iter().map(|(n, t, d)| (*n, f(t), d.clone())).collect(),
                         ),
                     },
                 }).collect(),
@@ -399,14 +400,14 @@ impl Ty {
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
 
             Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(|t| f(t)).collect()),
-            Ty::Named(name, args) => Ty::Named(name.clone(), args.iter().map(|t| f(t)).collect()),
+            Ty::Named(name, args) => Ty::Named(*name, args.iter().map(|t| f(t)).collect()),
             Ty::Union(members) => Ty::union(members.iter().map(|t| f(t)).collect()),
 
             Ty::Record { fields } => Ty::Record {
-                fields: fields.iter().map(|(n, t)| (n.clone(), f(t))).collect(),
+                fields: fields.iter().map(|(n, t)| (*n, f(t))).collect(),
             },
             Ty::OpenRecord { fields } => Ty::OpenRecord {
-                fields: fields.iter().map(|(n, t)| (n.clone(), f(t))).collect(),
+                fields: fields.iter().map(|(n, t)| (*n, f(t))).collect(),
             },
 
             Ty::Fn { params, ret } => Ty::Fn {
@@ -415,14 +416,14 @@ impl Ty {
             },
 
             Ty::Variant { name, cases } => Ty::Variant {
-                name: name.clone(),
+                name: *name,
                 cases: cases.iter().map(|c| VariantCase {
-                    name: c.name.clone(),
+                    name: c.name,
                     payload: match &c.payload {
                         VariantPayload::Unit => VariantPayload::Unit,
                         VariantPayload::Tuple(tys) => VariantPayload::Tuple(tys.iter().map(|t| f(t)).collect()),
                         VariantPayload::Record(fs) => VariantPayload::Record(
-                            fs.iter().map(|(n, t, d)| (n.clone(), f(t), d.clone())).collect(),
+                            fs.iter().map(|(n, t, d)| (*n, f(t), d.clone())).collect(),
                         ),
                     },
                 }).collect(),

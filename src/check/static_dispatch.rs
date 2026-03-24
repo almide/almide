@@ -1,6 +1,7 @@
 /// Static member resolution — fan.*, codec.*, module/alias dispatch, TypeName.method.
 
 use crate::ast;
+use crate::intern::sym;
 use crate::types::{Ty, TypeConstructorId};
 use super::types::resolve_ty;
 use super::Checker;
@@ -163,10 +164,10 @@ impl Checker {
             }
 
             // Direct stdlib/user module call, or resolved alias
-            let resolved_module = if self.env.imported_stdlib.contains(module) || self.env.user_modules.contains(module) {
+            let resolved_module = if self.env.imported_stdlib.contains(&sym(module)) || self.env.user_modules.contains(&sym(module)) {
                 Some(module.to_string())
             } else {
-                self.env.module_aliases.get(module).cloned()
+                self.env.module_aliases.get(&sym(module)).map(|s| s.to_string())
             };
             if let Some(m) = resolved_module {
                 return Some(self.check_named_call(&format!("{}.{}", m, field), arg_tys));
@@ -176,7 +177,7 @@ impl Checker {
         // TypeName.method() — direct convention call
         if let ast::Expr::TypeName { name: type_name, .. } = object {
             let key = format!("{}.{}", type_name, field);
-            if self.env.functions.contains_key(&key) {
+            if self.env.functions.contains_key(&sym(&key)) {
                 return Some(self.check_named_call(&key, arg_tys));
             }
         }
@@ -187,9 +188,9 @@ impl Checker {
     /// Check if a type has a Codec encode function registered.
     fn has_codec_encode(&self, ty: &Ty) -> bool {
         match ty {
-            Ty::Named(name, _) => self.env.functions.contains_key(&format!("{}.encode", name)),
+            Ty::Named(name, _) => self.env.functions.contains_key(&sym(&format!("{}.encode", name))),
             Ty::Record { .. } | Ty::Variant { .. } => {
-                self.env.types.iter().any(|(name, t)| t == ty && self.env.functions.contains_key(&format!("{}.encode", name)))
+                self.env.types.iter().any(|(name, t)| t == ty && self.env.functions.contains_key(&sym(&format!("{}.encode", name))))
             }
             _ => false,
         }

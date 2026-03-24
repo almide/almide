@@ -464,8 +464,8 @@ fn scan_destructure_pattern(pattern: &crate::ir::IrPattern, value_ty: &crate::ty
         crate::ir::IrPattern::RecordPattern { fields, .. } => {
             // Record destructure: resolve field types from value_ty (authoritative).
             let record_fields: Vec<(String, crate::types::Ty)> = match value_ty {
-                crate::types::Ty::Record { fields } => fields.clone(),
-                crate::types::Ty::OpenRecord { fields } => fields.clone(),
+                crate::types::Ty::Record { fields } => fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
+                crate::types::Ty::OpenRecord { fields } => fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
                 _ => vec![],
             };
             let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();

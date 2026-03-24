@@ -78,12 +78,13 @@ impl FuncCompiler<'_> {
             }
 
             Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                let string_fields: Vec<(String, Ty)> = fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect();
                 if fields.iter().all(|(_, t)| self.is_value_type(t)) {
-                    let size = values::record_size(fields);
+                    let size = values::record_size(&string_fields);
                     wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
                 } else {
                     // Field-by-field deep equality
-                    self.emit_record_eq_deep(fields);
+                    self.emit_record_eq_deep(&string_fields);
                 }
             }
 
@@ -139,10 +140,10 @@ impl FuncCompiler<'_> {
                                 crate::types::VariantPayload::Tuple(ts) =>
                                     ts.iter().enumerate().map(|(j, t)| (format!("_{}", j), t.clone())).collect(),
                                 crate::types::VariantPayload::Record(fs) =>
-                                    fs.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect(),
+                                    fs.iter().map(|(n, t, _)| (n.to_string(), t.clone())).collect(),
                                 _ => vec![],
                             };
-                            super::VariantCase { name: c.name.clone(), tag: i as u32, fields }
+                            super::VariantCase { name: c.name.to_string(), tag: i as u32, fields }
                         }).collect();
                         self.emit_variant_eq_deep(&case_infos, &[]);
                     }
@@ -518,7 +519,7 @@ impl FuncCompiler<'_> {
     /// For generic types like Box[Int], substitutes type parameters.
     pub(super) fn extract_record_fields(&self, ty: &Ty) -> Vec<(String, Ty)> {
         match ty {
-            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.clone(),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
             Ty::Named(name, type_args) => {
                 if let Some(fields) = self.emitter.record_fields.get(name.as_str()) {
                     if type_args.is_empty() {

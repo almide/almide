@@ -44,10 +44,10 @@ pub(super) fn specialize_function(
 /// Uses Ty::map_children for uniform recursive traversal.
 pub(super) fn substitute_ty(ty: &Ty, bindings: &HashMap<String, Ty>) -> Ty {
     match ty {
-        Ty::TypeVar(name) => bindings.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Ty::TypeVar(name) => bindings.get(name.as_str()).cloned().unwrap_or_else(|| ty.clone()),
         // In IR, TypeVar("T") may appear as Named("T", [])
-        Ty::Named(name, args) if args.is_empty() && bindings.contains_key(name) => {
-            bindings[name].clone()
+        Ty::Named(name, args) if args.is_empty() && bindings.contains_key(name.as_str()) => {
+            bindings[name.as_str()].clone()
         }
         Ty::OpenRecord { .. } => {
             // OpenRecord パラメータを具体型に置換（__open_N → 具体型）

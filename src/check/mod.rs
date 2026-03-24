@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use crate::ast;
 use crate::ast::ExprId;
 use crate::diagnostic::Diagnostic;
+use crate::intern::sym;
 use crate::types::{Ty, TypeEnv, VariantCase, VariantPayload, ProtocolDef, ProtocolMethodSig};
 use types::{TyVarId, Constraint, UnionFind, resolve_ty};
 
@@ -68,8 +69,8 @@ impl Checker {
 
     /// Register built-in conventions (Eq, Repr, Ord, Hash, Codec, Encode, Decode) as protocols.
     fn register_builtin_protocols(&mut self) {
-        let self_ty = Ty::TypeVar("Self".to_string());
-        let value_ty = Ty::Named("Value".to_string(), vec![]);
+        let self_ty = Ty::TypeVar(sym("Self"));
+        let value_ty = Ty::Named(sym("Value"), vec![]);
 
         // Eq: fn eq(a: Self, b: Self) -> Bool
         self.env.protocols.insert("Eq".into(), ProtocolDef {
@@ -180,7 +181,7 @@ impl Checker {
 
     pub(crate) fn fresh_var(&mut self) -> Ty {
         let id = self.uf.fresh();
-        Ty::TypeVar(format!("?{}", id))
+        Ty::TypeVar(sym(&format!("?{}", id)))
     }
 
     /// Let-polymorphism: instantiate で TypeVar("?N") を fresh var に置換
@@ -227,7 +228,7 @@ impl Checker {
                 let name = alias.as_ref().cloned()
                     .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
                 if crate::stdlib::is_stdlib_module(&name) {
-                    self.env.imported_stdlib.insert(name);
+                    self.env.imported_stdlib.insert(sym(&name));
                 }
             }
         }
@@ -246,7 +247,7 @@ impl Checker {
             let import_name = alias.as_ref().cloned()
                 .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
             if import_name.is_empty()
-                || self.env.used_modules.contains(&import_name)
+                || self.env.used_modules.contains(&sym(&import_name))
                 || import_name.starts_with('_')
                 || path.first().map(|s| s.as_str()) == Some("self")
             { continue; }
@@ -279,14 +280,14 @@ impl Checker {
     fn enter_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) {
         let gs = match generics { Some(gs) => gs, None => return };
         for g in gs.iter() {
-            self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));
+            self.env.types.insert(sym(&g.name), Ty::TypeVar(sym(&g.name)));
             if let Some(bte) = &g.structural_bound {
                 let bt = self.resolve_type_expr(bte);
-                self.env.structural_bounds.insert(g.name.clone(), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
+                self.env.structural_bounds.insert(sym(&g.name), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
             }
             if let Some(bounds) = &g.bounds {
                 if !bounds.is_empty() {
-                    self.env.generic_protocol_bounds.insert(g.name.clone(), bounds.clone());
+                    self.env.generic_protocol_bounds.insert(sym(&g.name), bounds.iter().map(|b| sym(b)).collect());
                 }
             }
         }
@@ -296,9 +297,9 @@ impl Checker {
     fn exit_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) {
         let gs = match generics { Some(gs) => gs, None => return };
         for g in gs.iter() {
-            self.env.types.remove(&g.name);
-            self.env.structural_bounds.remove(&g.name);
-            self.env.generic_protocol_bounds.remove(&g.name);
+            self.env.types.remove(&sym(&g.name));
+            self.env.structural_bounds.remove(&sym(&g.name));
+            self.env.generic_protocol_bounds.remove(&sym(&g.name));
         }
     }
 
@@ -343,7 +344,7 @@ impl Checker {
         for p in params.iter_mut() {
             let ty = self.resolve_type_expr(&p.ty);
             self.env.define_var(&p.name, ty.clone());
-            self.env.param_vars.insert(p.name.clone());
+            self.env.param_vars.insert(sym(&p.name));
             if let Some(ref mut default_expr) = p.default {
                 let dty = self.infer_expr(default_expr);
                 self.constrain(ty, dty, format!("default arg '{}'", p.name));
@@ -383,8 +384,8 @@ impl Checker {
                 let ity = self.infer_expr(value);
                 let resolved = resolve_ty(&ity, &self.uf);
                 // Update env.top_lets with the fully inferred type
-                if matches!(self.env.top_lets.get(name.as_str()), Some(Ty::Unknown) | None) {
-                    self.env.top_lets.insert(name.clone(), resolved);
+                if matches!(self.env.top_lets.get(&sym(name)), Some(Ty::Unknown) | None) {
+                    self.env.top_lets.insert(sym(name), resolved);
                 }
             }
             ast::Decl::Impl { methods, .. } => {
@@ -425,7 +426,7 @@ impl Checker {
     pub(crate) fn check_match_exhaustiveness(&mut self, subject_ty: &Ty, arms: &[ast::MatchArm]) {
         let resolved = self.env.resolve_named(subject_ty);
         let required: Vec<String> = match &resolved {
-            Ty::Variant { cases, .. } => cases.iter().map(|c| c.name.clone()).collect(),
+            Ty::Variant { cases, .. } => cases.iter().map(|c| c.name.to_string()).collect(),
             Ty::Applied(crate::types::TypeConstructorId::Option, _) => vec!["some".into(), "none".into()],
             Ty::Applied(crate::types::TypeConstructorId::Result, _) => vec!["ok".into(), "err".into()],
             Ty::Bool => vec!["true".into(), "false".into()],
@@ -462,7 +463,7 @@ impl Checker {
             ast::TypeExpr::Simple { name } => match name.as_str() {
                 "Int" => Ty::Int, "Float" => Ty::Float, "String" => Ty::String,
                 "Bool" => Ty::Bool, "Unit" => Ty::Unit, "Path" => Ty::String,
-                other => self.env.types.get(other).cloned().unwrap_or(Ty::Named(other.into(), vec![])),
+                other => self.env.types.get(&sym(other)).cloned().unwrap_or(Ty::Named(other.into(), vec![])),
             },
             ast::TypeExpr::Generic { name, args } => {
                 let ra: Vec<Ty> = args.iter().map(|a| self.resolve_type_expr(a)).collect();
@@ -471,22 +472,22 @@ impl Checker {
                     "Option" => Ty::option(ra.first().cloned().unwrap_or(Ty::Unknown)),
                     "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
                     "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
-                    _ => Ty::Named(name.clone(), ra),
+                    _ => Ty::Named(sym(name), ra),
                 }
             },
-            ast::TypeExpr::Record { fields } => Ty::Record { fields: fields.iter().map(|f| (f.name.clone(), self.resolve_type_expr(&f.ty))).collect() },
-            ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord { fields: fields.iter().map(|f| (f.name.clone(), self.resolve_type_expr(&f.ty))).collect() },
+            ast::TypeExpr::Record { fields } => Ty::Record { fields: fields.iter().map(|f| (sym(&f.name), self.resolve_type_expr(&f.ty))).collect() },
+            ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord { fields: fields.iter().map(|f| (sym(&f.name), self.resolve_type_expr(&f.ty))).collect() },
             ast::TypeExpr::Fn { params, ret } => Ty::Fn { params: params.iter().map(|p| self.resolve_type_expr(p)).collect(), ret: Box::new(self.resolve_type_expr(ret)) },
             ast::TypeExpr::Tuple { elements } => Ty::Tuple(elements.iter().map(|e| self.resolve_type_expr(e)).collect()),
             ast::TypeExpr::Newtype { inner } => self.resolve_type_expr(inner),
             ast::TypeExpr::Union { members } => Ty::union(members.iter().map(|m| self.resolve_type_expr(m)).collect()),
             ast::TypeExpr::Variant { cases } => {
                 let cs = cases.iter().map(|c| match c {
-                    ast::VariantCase::Unit { name } => VariantCase { name: name.clone(), payload: VariantPayload::Unit },
-                    ast::VariantCase::Tuple { name, fields } => VariantCase { name: name.clone(), payload: VariantPayload::Tuple(fields.iter().map(|f| self.resolve_type_expr(f)).collect()) },
-                    ast::VariantCase::Record { name, fields } => VariantCase { name: name.clone(), payload: VariantPayload::Record(fields.iter().map(|f| (f.name.clone(), self.resolve_type_expr(&f.ty), f.default.clone())).collect()) },
+                    ast::VariantCase::Unit { name } => VariantCase { name: sym(name), payload: VariantPayload::Unit },
+                    ast::VariantCase::Tuple { name, fields } => VariantCase { name: sym(name), payload: VariantPayload::Tuple(fields.iter().map(|f| self.resolve_type_expr(f)).collect()) },
+                    ast::VariantCase::Record { name, fields } => VariantCase { name: sym(name), payload: VariantPayload::Record(fields.iter().map(|f| (sym(&f.name), self.resolve_type_expr(&f.ty), f.default.clone())).collect()) },
                 }).collect();
-                Ty::Variant { name: String::new(), cases: cs }
+                Ty::Variant { name: sym(""), cases: cs }
             },
         }
     }

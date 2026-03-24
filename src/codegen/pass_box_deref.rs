@@ -272,9 +272,9 @@ fn collect_from_expr(expr: &IrExpr, recursive_enums: &HashSet<String>, type_decl
             };
 
             if let Some(ref ename) = enum_name {
-                if recursive_enums.contains(ename) {
+                if recursive_enums.contains(ename.as_str()) {
                     // Find the type decl to know which fields are recursive
-                    let td = type_decls.iter().find(|td| &td.name == ename);
+                    let td = type_decls.iter().find(|td| *ename == td.name);
                     for arm in arms {
                         collect_deref_from_pattern(&arm.pattern, ename, td, name_to_var, deref_vars);
                         collect_from_expr(&arm.body, recursive_enums, type_decls, name_to_var, deref_vars);

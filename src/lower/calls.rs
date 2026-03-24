@@ -3,6 +3,7 @@
 use crate::ast;
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
+use crate::intern::sym;
 use super::LowerCtx;
 use super::expressions::lower_expr;
 use super::types::resolve_type_expr;
@@ -52,8 +53,8 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
 
     // Named args: resolve to positional order using function signature
     if let (false, CallTarget::Named { name }) = (named_args.is_empty(), &target) {
-        let param_names: Vec<String> = ctx.env.functions.get(name)
-            .map(|sig| sig.params.iter().map(|(n, _)| n.clone()).collect())
+        let param_names: Vec<String> = ctx.env.functions.get(&sym(name))
+            .map(|sig| sig.params.iter().map(|(n, _)| n.to_string()).collect())
             .unwrap_or_default();
         let defaults = ctx.fn_defaults.get(name).cloned();
         let positional_count = ir_args.len();
@@ -102,16 +103,16 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                 // Local variables take precedence over module names
                 if ctx.lookup_var(module).is_none() && (module == "fan"
                     || crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module)
-                    || ctx.env.user_modules.contains(module))
+                    || ctx.env.user_modules.contains(&sym(module)))
                 {
-                    let resolved = ctx.env.module_aliases.get(module).cloned().unwrap_or(module.clone());
+                    let resolved = ctx.env.module_aliases.get(&sym(module)).map(|s| s.to_string()).unwrap_or_else(|| module.clone());
                     return CallTarget::Module { module: resolved, func: field.clone() };
                 }
                 // Ident that's not a module: check if Type.method (protocol impl, e.g. Val.double)
                 if ctx.lookup_var(module).is_none() {
                     let key = format!("{}.{}", module, field);
-                    if ctx.env.functions.contains_key(&key)
-                        || ctx.find_convention_fn(&Ty::Named(module.clone(), vec![]), field).is_some()
+                    if ctx.env.functions.contains_key(&sym(&key))
+                        || ctx.find_convention_fn(&Ty::Named(sym(module), vec![]), field).is_some()
                     {
                         return CallTarget::Named { name: key };
                     }
@@ -120,8 +121,8 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             // TypeName.method(args) → direct named call (not UFCS, no object prepend)
             if let ast::Expr::TypeName { name: type_name, .. } = object.as_ref() {
                 let key = format!("{}.{}", type_name, field);
-                if ctx.env.functions.contains_key(&key)
-                    || ctx.find_convention_fn(&Ty::Named(type_name.clone(), vec![]), field).is_some()
+                if ctx.env.functions.contains_key(&sym(&key))
+                    || ctx.find_convention_fn(&Ty::Named(sym(type_name), vec![]), field).is_some()
                 {
                     return CallTarget::Named { name: key };
                 }
@@ -140,7 +141,7 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             };
             if let Some(module) = builtin_module {
                 let key = format!("{}.{}", module, field);
-                if ctx.env.functions.contains_key(&key)
+                if ctx.env.functions.contains_key(&sym(&key))
                     || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
                 {
                     let ir_obj = lower_expr(ctx, object);
@@ -149,11 +150,11 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             }
             // Check for convention method: dog.repr() → Dog.repr(dog)
             let type_name_opt = match &obj_ty {
-                Ty::Named(name, _) => Some(name.clone()),
+                Ty::Named(name, _) => Some(name.to_string()),
                 Ty::Record { .. } | Ty::Variant { .. } => {
                     ctx.env.types.iter().find_map(|(name, ty)| {
                         if ty == &obj_ty && name.chars().next().map_or(false, |c| c.is_uppercase()) {
-                            Some(name.clone())
+                            Some(name.to_string())
                         } else { None }
                     })
                 }
@@ -161,8 +162,8 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             };
             if let Some(type_name) = type_name_opt {
                 let convention_key = format!("{}.{}", type_name, field);
-                if ctx.env.functions.contains_key(&convention_key)
-                    || ctx.find_convention_fn(&Ty::Named(type_name.clone(), vec![]), field).is_some()
+                if ctx.env.functions.contains_key(&sym(&convention_key))
+                    || ctx.find_convention_fn(&Ty::Named(sym(&type_name), vec![]), field).is_some()
                 {
                     let ir_obj = lower_expr(ctx, object);
                     return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
@@ -171,9 +172,9 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             // Protocol method on TypeVar: item.show() where item: T, T: Showable
             // Lower as "T.show" convention key — monomorphizer will substitute T → ConcreteType
             if let Ty::TypeVar(tv) = &obj_ty {
-                if let Some(proto_names) = ctx.protocol_bounds.get(tv).cloned() {
+                if let Some(proto_names) = ctx.protocol_bounds.get(tv.as_str()).cloned() {
                     for proto_name in &proto_names {
-                        if let Some(proto_def) = ctx.env.protocols.get(proto_name) {
+                        if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
                             if proto_def.methods.iter().any(|m| m.name == *field) {
                                 let ir_obj = lower_expr(ctx, object);
                                 let convention_key = format!("{}.{}", tv, field);

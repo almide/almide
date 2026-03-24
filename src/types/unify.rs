@@ -1,14 +1,15 @@
 use super::Ty;
+use crate::intern::Sym;
 
 /// Check if binding TypeVar `var` to `ty` would create an infinite type.
 /// Uses Ty::any_child_recursive for uniform traversal across all type constructors.
-fn occurs_in(var: &str, ty: &Ty) -> bool {
-    ty.any_child_recursive(&|t| matches!(t, Ty::TypeVar(name) if name == var))
+fn occurs_in(var: Sym, ty: &Ty) -> bool {
+    ty.any_child_recursive(&|t| matches!(t, Ty::TypeVar(name) if *name == var))
 }
 
 /// Unify a signature type against a concrete type, collecting TypeVar bindings.
 /// Returns true if the types are compatible. Unknown still accepts anything (error recovery).
-pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashMap<std::string::String, Ty>) -> bool {
+pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashMap<Sym, Ty>) -> bool {
     // Unknown: both Unknown → accept. One Unknown → accept but don't mask errors.
     // This is still lenient for error recovery, but avoids hiding real mismatches
     // when one side has a known type.
@@ -24,10 +25,10 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
             return bound.compatible(actual_ty);
         } else {
             // Occurs check: prevent infinite types like T = List[T]
-            if occurs_in(name, actual_ty) {
+            if occurs_in(*name, actual_ty) {
                 return false;
             }
-            bindings.insert(name.clone(), actual_ty.clone());
+            bindings.insert(*name, actual_ty.clone());
             return true;
         }
     }
@@ -73,13 +74,13 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
 
 /// Substitute TypeVars in a type using the collected bindings.
 /// Uses Ty::map_children for uniform recursive traversal.
-pub fn substitute(ty: &Ty, bindings: &std::collections::HashMap<std::string::String, Ty>) -> Ty {
+pub fn substitute(ty: &Ty, bindings: &std::collections::HashMap<Sym, Ty>) -> Ty {
     if bindings.is_empty() {
         return ty.clone();
     }
     match ty {
         // TypeVar: look up binding or keep as-is
-        Ty::TypeVar(name) => bindings.get(name).cloned().unwrap_or_else(|| Ty::TypeVar(name.clone())),
+        Ty::TypeVar(name) => bindings.get(name).cloned().unwrap_or_else(|| Ty::TypeVar(*name)),
         // All other types: recursively substitute children
         _ => ty.map_children(&|child| substitute(child, bindings)),
     }

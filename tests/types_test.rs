@@ -1,4 +1,5 @@
 use almide::types::{Ty, TypeEnv, FnSig, VariantCase, VariantPayload, unify, substitute};
+use almide::intern::sym;
 use std::collections::HashMap;
 
 // ---- Ty::display ----
@@ -203,7 +204,7 @@ fn compatible_different_named() {
 fn unify_binds_typevar() {
     let mut bindings = HashMap::new();
     assert!(unify(&Ty::TypeVar("T".into()), &Ty::Int, &mut bindings));
-    assert_eq!(bindings.get("T"), Some(&Ty::Int));
+    assert_eq!(bindings.get(&sym("T")), Some(&Ty::Int));
 }
 
 #[test]
@@ -220,7 +221,7 @@ fn unify_list_with_typevar() {
     let sig = Ty::list(Ty::TypeVar("T".into()));
     let actual = Ty::list(Ty::Int);
     assert!(unify(&sig, &actual, &mut bindings));
-    assert_eq!(bindings.get("T"), Some(&Ty::Int));
+    assert_eq!(bindings.get(&sym("T")), Some(&Ty::Int));
 }
 
 #[test]
@@ -229,8 +230,8 @@ fn unify_result_with_typevars() {
     let sig = Ty::result(Ty::TypeVar("A".into()), Ty::TypeVar("B".into()));
     let actual = Ty::result(Ty::Int, Ty::String);
     assert!(unify(&sig, &actual, &mut bindings));
-    assert_eq!(bindings.get("A"), Some(&Ty::Int));
-    assert_eq!(bindings.get("B"), Some(&Ty::String));
+    assert_eq!(bindings.get(&sym("A")), Some(&Ty::Int));
+    assert_eq!(bindings.get(&sym("B")), Some(&Ty::String));
 }
 
 #[test]
@@ -245,7 +246,7 @@ fn unify_fn_types() {
         ret: Box::new(Ty::Int),
     };
     assert!(unify(&sig, &actual, &mut bindings));
-    assert_eq!(bindings.get("T"), Some(&Ty::Int));
+    assert_eq!(bindings.get(&sym("T")), Some(&Ty::Int));
 }
 
 #[test]
@@ -269,8 +270,8 @@ fn unify_tuple() {
     let sig = Ty::Tuple(vec![Ty::TypeVar("A".into()), Ty::TypeVar("B".into())]);
     let actual = Ty::Tuple(vec![Ty::Int, Ty::String]);
     assert!(unify(&sig, &actual, &mut bindings));
-    assert_eq!(bindings.get("A"), Some(&Ty::Int));
-    assert_eq!(bindings.get("B"), Some(&Ty::String));
+    assert_eq!(bindings.get(&sym("A")), Some(&Ty::Int));
+    assert_eq!(bindings.get(&sym("B")), Some(&Ty::String));
 }
 
 #[test]
@@ -279,8 +280,8 @@ fn unify_map_with_typevars() {
     let sig = Ty::map_of(Ty::TypeVar("K".into()), Ty::TypeVar("V".into()));
     let actual = Ty::map_of(Ty::String, Ty::Int);
     assert!(unify(&sig, &actual, &mut bindings));
-    assert_eq!(bindings.get("K"), Some(&Ty::String));
-    assert_eq!(bindings.get("V"), Some(&Ty::Int));
+    assert_eq!(bindings.get(&sym("K")), Some(&Ty::String));
+    assert_eq!(bindings.get(&sym("V")), Some(&Ty::Int));
 }
 
 // ---- substitute ----

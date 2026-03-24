@@ -248,9 +248,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // For record literals, use bare struct name (no generics — Rust infers them)
             let mut type_name = name.clone().unwrap_or_else(|| {
                 match &expr.ty {
-                    Ty::Named(n, _) => n.clone(),
+                    Ty::Named(n, _) => n.to_string(),
                     Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
-                        let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
+                        let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.to_string()).collect();
                         names.sort();
                         if let Some(n) = ctx.ann.named_records.get(&names) {
                             n.clone()
@@ -432,9 +432,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             let type_name = match &expr.ty {
-                Ty::Named(n, _) => n.clone(),
+                Ty::Named(n, _) => n.to_string(),
                 Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
-                    let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
+                    let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.to_string()).collect();
                     names.sort();
                     ctx.ann.named_records.get(&names).cloned()
                         .or_else(|| ctx.ann.anon_records.get(&names).cloned())

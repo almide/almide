@@ -86,9 +86,9 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let pat_str = match pattern {
                 IrPattern::RecordPattern { name, fields, rest } if name.is_empty() => {
                     let type_name = match &value.ty {
-                        Ty::Named(n, _) => n.clone(),
+                        Ty::Named(n, _) => n.to_string(),
                         Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
-                            let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
+                            let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.to_string()).collect();
                             names.sort();
                             ctx.ann.named_records.get(&names).cloned()
                                 .or_else(|| ctx.ann.anon_records.get(&names).cloned())

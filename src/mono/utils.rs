@@ -22,14 +22,14 @@ pub(super) fn mangle_suffix(bindings: &HashMap<String, Ty>) -> String {
 pub(super) fn mangle_ty(ty: &Ty) -> String {
     match ty {
         Ty::Named(name, args) => {
-            if args.is_empty() { name.clone() }
+            if args.is_empty() { name.to_string() }
             else {
                 let arg_strs: Vec<String> = args.iter().map(mangle_ty).collect();
                 format!("{}_{}", name, arg_strs.join("_"))
             }
         }
         Ty::Record { fields } => {
-            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
             names.sort();
             names.join("_")
         }
@@ -52,7 +52,7 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
 /// Extract the concrete type name from a Ty for protocol method rewriting.
 pub(super) fn ty_to_name(ty: &Ty) -> Option<String> {
     match ty {
-        Ty::Named(name, _) => Some(name.clone()),
+        Ty::Named(name, _) => Some(name.to_string()),
         Ty::Int => Some("Int".into()),
         Ty::Float => Some("Float".into()),
         Ty::String => Some("String".into()),

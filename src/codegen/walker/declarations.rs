@@ -254,7 +254,7 @@ fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mu
 fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
     // Record/OpenRecord: register anonymous record fields
     if let Ty::Record { fields } | Ty::OpenRecord { fields } = ty {
-        let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+        let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
         names.sort();
         if !named.contains(&names) { seen.insert(names); }
     }

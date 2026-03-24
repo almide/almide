@@ -2,12 +2,13 @@
 
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
+use crate::intern::sym;
 
 /// Auto-derive Codec encode: `fn T.encode(t: T) -> Value`
 /// Generates: `value.object([("field1", value.str(t.field1)), ("field2", value.int(t.field2)), ...])`
 pub(super) fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
     let var = vt.alloc("_v".to_string(), type_ty.clone(), Mutability::Let, None);
-    let value_ty = Ty::Named("Value".to_string(), vec![]);
+    let value_ty = Ty::Named(sym("Value"), vec![]);
 
     // Build list of (String, Value) tuples for value.object(...)
     let pairs: Vec<IrExpr> = fields.iter().map(|f| {
@@ -115,7 +116,7 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
 
 /// Auto-derive Codec decode: `fn T.decode(v: Value) -> Result[T, String]`
 pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
-    let value_ty = Ty::Named("Value".to_string(), vec![]);
+    let value_ty = Ty::Named(sym("Value"), vec![]);
     let result_ty = Ty::result(type_ty.clone(), Ty::String);
     let var_v = vt.alloc("_v".to_string(), value_ty.clone(), Mutability::Let, None);
 
@@ -296,7 +297,7 @@ fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, _value_ty: &Ty) -> 
 /// Auto-derive Variant Codec encode: Tagged format
 /// Circle(3.0) → Object([("Circle", Object([("radius", Float(3.0))]))])
 pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, cases: &[IrVariantDecl]) -> IrFunction {
-    let value_ty = Ty::Named("Value".to_string(), vec![]);
+    let value_ty = Ty::Named(sym("Value"), vec![]);
     let var = vt.alloc("_v".to_string(), type_ty.clone(), Mutability::Let, None);
 
     // Build match arms for each variant case
@@ -368,7 +369,7 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
 /// Auto-derive Variant Codec decode: Tagged format
 /// {"Circle": {"radius": 3.0}} → Circle(3.0)
 pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, cases: &[IrVariantDecl]) -> IrFunction {
-    let value_ty = Ty::Named("Value".to_string(), vec![]);
+    let value_ty = Ty::Named(sym("Value"), vec![]);
     let result_ty = Ty::result(type_ty.clone(), Ty::String);
     let var_v = vt.alloc("_v".to_string(), value_ty.clone(), Mutability::Let, None);
 

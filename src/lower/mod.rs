@@ -18,6 +18,7 @@
 
 use std::collections::HashMap;
 use crate::ast;
+use crate::intern::sym;
 use crate::ir::*;
 use crate::types::{Ty, TypeEnv};
 
@@ -71,7 +72,7 @@ impl<'a> LowerCtx<'a> {
         if let Ty::Named(type_name, _) = ty {
             let fn_name = format!("{}.{}", type_name, convention);
             // Check explicit definition
-            if self.env.functions.contains_key(&fn_name) {
+            if self.env.functions.contains_key(&sym(&fn_name)) {
                 return Some(fn_name);
             }
             // Check if auto-derive will generate it
@@ -79,7 +80,7 @@ impl<'a> LowerCtx<'a> {
                 "eq" => "Eq", "repr" => "Repr", "ord" => "Ord", "hash" => "Hash",
                 _ => return None,
             };
-            if self.type_conventions.get(conv_upper).map_or(false, |types| types.contains(type_name)) {
+            if self.type_conventions.get(conv_upper).map_or(false, |types| types.contains(type_name.as_str())) {
                 return Some(fn_name);
             }
         }
@@ -145,7 +146,7 @@ impl<'a> LowerCtx<'a> {
                     let obj_ty = self.expr_ty(object);
                     if let Some(module) = crate::check::calls::builtin_module_for_type(&obj_ty) {
                         let key = format!("{}.{}", module, field);
-                        if let Some(sig) = self.env.functions.get(&key) {
+                        if let Some(sig) = self.env.functions.get(&sym(&key)) {
                             return sig.ret.clone();
                         }
                         // Stdlib functions may not be in env.functions (TOML-defined).
@@ -281,7 +282,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
                 type_decls.push(types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref()));
             }
             ast::Decl::TopLet { name, ty: _, value, .. } => {
-                let val_ty = ctx.env.top_lets.get(name).cloned().unwrap_or_else(|| ctx.expr_ty(value));
+                let val_ty = ctx.env.top_lets.get(&sym(name)).cloned().unwrap_or_else(|| ctx.expr_ty(value));
                 let var = ctx.define_var(name, val_ty.clone(), Mutability::Let, None);
                 let ir_value = lower_expr(&mut ctx, value);
                 let kind = classify_top_let_kind(&ir_value);
@@ -312,7 +313,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
     // Collect effect fn names from TypeEnv (user-defined + stdlib)
     let effect_fn_names: std::collections::HashSet<String> = env.functions.iter()
         .filter(|(_, sig)| sig.is_effect)
-        .map(|(name, _)| name.clone())
+        .map(|(name, _)| name.to_string())
         .collect();
 
     let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default() };
@@ -380,7 +381,7 @@ fn lower_fn(
         });
     }
 
-    let ret_ty = if let Some(sig) = ctx.env.functions.get(name) {
+    let ret_ty = if let Some(sig) = ctx.env.functions.get(&sym(name)) {
         sig.ret.clone()
     } else {
         ctx.expr_ty(body)

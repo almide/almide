@@ -2,6 +2,7 @@
 /// Walks the AST, assigns Ty to each expression, collects constraints.
 
 use crate::ast;
+use crate::intern::{Sym, sym};
 use crate::types::{Ty, TypeConstructorId, VariantPayload};
 use super::types::resolve_ty;
 use super::Checker;
@@ -36,10 +37,10 @@ impl Checker {
             ast::Expr::None { .. } => Ty::option(self.fresh_var()),
 
             ast::Expr::Ident { name, .. } => {
-                self.env.used_vars.insert(name.clone());
+                self.env.used_vars.insert(sym(name));
                 if let Some(ty) = self.env.lookup_var(name).cloned() { self.instantiate_ty(&ty) }
-                else if let Some(ty) = self.env.top_lets.get(name).cloned() { self.instantiate_ty(&ty) }
-                else if let Some(sig) = self.env.functions.get(name).cloned() {
+                else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { self.instantiate_ty(&ty) }
+                else if let Some(sig) = self.env.functions.get(&sym(name)).cloned() {
                     Ty::Fn {
                         params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
                         ret: Box::new(sig.ret.clone()),
@@ -52,9 +53,9 @@ impl Checker {
             }
 
             ast::Expr::TypeName { name, .. } => {
-                if let Some((type_name, _)) = self.env.constructors.get(name) { Ty::Named(type_name.clone(), vec![]) }
-                else if let Some(ty) = self.env.top_lets.get(name).cloned() { ty }
-                else { Ty::Named(name.clone(), vec![]) }
+                if let Some((type_name, _)) = self.env.constructors.get(&sym(name)) { Ty::Named(*type_name, vec![]) }
+                else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
+                else { Ty::Named(sym(name), vec![]) }
             }
 
             ast::Expr::List { elements, .. } => {
@@ -72,15 +73,15 @@ impl Checker {
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
                     // Variant constructor → resolve to parent type name
-                    let type_name = self.env.constructors.get(n.as_str())
-                        .map(|(vname, _)| vname.clone())
-                        .unwrap_or_else(|| n.clone());
+                    let type_name = self.env.constructors.get(&sym(n))
+                        .map(|(vname, _)| *vname)
+                        .unwrap_or_else(|| sym(n));
                     Ty::Named(type_name, vec![])
                 }
                 else {
-                    let field_tys: Vec<(String, Ty)> = fields.iter().map(|f| {
+                    let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {
                         let ty = self.infer_types.get(&f.value.id()).map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
-                        (f.name.clone(), ty)
+                        (sym(&f.name), ty)
                     }).collect();
                     Ty::Record { fields: field_tys }
                 }
@@ -226,7 +227,7 @@ impl Checker {
                 let mutable_captures: Vec<String> = exprs.iter().flat_map(|e| {
                     let mut idents = Vec::new();
                     collect_idents(e, &mut idents);
-                    idents.into_iter().filter(|name| self.env.mutable_vars.contains(name)).collect::<Vec<_>>()
+                    idents.into_iter().filter(|name| self.env.mutable_vars.contains(&sym(name))).collect::<Vec<_>>()
                 }).collect();
                 for name in &mutable_captures {
                     self.emit(super::err(
@@ -489,8 +490,8 @@ impl Checker {
                     } else { t }
                 };
                 self.env.define_var(name, final_ty);
-                self.env.mutable_vars.insert(name.clone());
-                self.env.var_lambda_depth.insert(name.clone(), self.env.lambda_depth);
+                self.env.mutable_vars.insert(sym(name));
+                self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
             }
             ast::Stmt::LetDestructure { pattern, value, .. } => {
                 let val_ty = self.infer_expr(value);
@@ -499,8 +500,8 @@ impl Checker {
             }
             ast::Stmt::Assign { name, value, .. } => {
                 self.infer_expr(value);
-                if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(name.as_str()) {
-                    let hint = if self.env.param_vars.contains(name.as_str()) {
+                if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
+                    let hint = if self.env.param_vars.contains(&sym(name)) {
                         format!("'{}' is a function parameter (immutable). Use a local copy: var {0}_ = {0}", name)
                     } else {
                         format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
@@ -510,8 +511,8 @@ impl Checker {
                         hint, format!("{} = ...", name)).with_code("E009"));
                 }
                 // Escape analysis: block var mutation inside closures in pure fns
-                if self.env.mutable_vars.contains(name.as_str()) && !self.env.can_call_effect {
-                    if let Some(&decl_depth) = self.env.var_lambda_depth.get(name.as_str()) {
+                if self.env.mutable_vars.contains(&sym(name)) && !self.env.can_call_effect {
+                    if let Some(&decl_depth) = self.env.var_lambda_depth.get(&sym(name)) {
                         if self.env.lambda_depth > decl_depth {
                             self.emit(super::err(
                                 format!("mutable variable '{}' is mutated inside a closure in a pure function — use effect fn instead", name),
@@ -553,14 +554,14 @@ impl Checker {
             }
             ast::Pattern::RecordPattern { name, fields, .. } => {
                 let resolved = self.env.resolve_named(ty);
-                let field_tys: Vec<(String, Ty)> = match &resolved {
+                let field_tys: Vec<(Sym, Ty)> = match &resolved {
                     Ty::Record { fields } | Ty::OpenRecord { fields } => fields.clone(),
                     Ty::Variant { cases, .. } => {
                         // Find the specific case matching the pattern name
                         cases.iter()
                             .find(|c| c.name == *name)
                             .and_then(|c| match &c.payload {
-                                VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect()),
+                                VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t, _)| (*n, t.clone())).collect()),
                                 _ => None,
                             })
                             .unwrap_or_default()
@@ -568,7 +569,7 @@ impl Checker {
                     _ => vec![],
                 };
                 for f in fields {
-                    let ft = field_tys.iter().find(|(n, _)| n == &f.name).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown);
+                    let ft = field_tys.iter().find(|(n, _)| *n == f.name).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown);
                     if let Some(ref p) = f.pattern { self.bind_pattern(p, &ft); }
                     else { self.env.define_var(&f.name, ft); }
                 }
@@ -603,22 +604,22 @@ impl Checker {
     /// Resolve a module.func Member expression to a qualified call key.
     fn resolve_module_call(&self, object: &ast::Expr, field: &str) -> Option<String> {
         if let ast::Expr::Ident { name: module, .. } = object {
-            if self.env.imported_stdlib.contains(module) || self.env.user_modules.contains(module.as_str()) {
+            if self.env.imported_stdlib.contains(&sym(module)) || self.env.user_modules.contains(&sym(module)) {
                 return Some(format!("{}.{}", module, field));
             }
-            if let Some(target) = self.env.module_aliases.get(module.as_str()) {
+            if let Some(target) = self.env.module_aliases.get(&sym(module)) {
                 return Some(format!("{}.{}", target, field));
             }
             // Check if Ident.field is a Type.method (protocol implementation)
             let key = format!("{}.{}", module, field);
-            if self.env.functions.contains_key(key.as_str()) {
+            if self.env.functions.contains_key(&sym(&key)) {
                 return Some(key);
             }
         }
         // TypeName.method (e.g. Val.double in pipe)
         if let ast::Expr::TypeName { name: type_name, .. } = object {
             let key = format!("{}.{}", type_name, field);
-            if self.env.functions.contains_key(key.as_str()) {
+            if self.env.functions.contains_key(&sym(&key)) {
                 return Some(key);
             }
         }

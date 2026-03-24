@@ -2,6 +2,7 @@
 
 use crate::ir::*;
 use crate::types::Ty;
+use crate::intern::sym;
 use super::LowerCtx;
 use super::derive_codec::{
     auto_derive_encode, auto_derive_decode,
@@ -18,7 +19,7 @@ pub(super) fn generate_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl
             Some(d) => d,
             None => continue,
         };
-        let type_ty = Ty::Named(td.name.clone(), vec![]);
+        let type_ty = Ty::Named(sym(&td.name), vec![]);
         let fields = match &td.kind {
             IrTypeDeclKind::Record { fields } => Some(fields.clone()),
             _ => None,
