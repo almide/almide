@@ -589,7 +589,7 @@ impl Checker {
     /// Resolve a module.func Member expression to a qualified call key.
     fn resolve_module_call(&self, object: &ast::Expr, field: &str) -> Option<String> {
         if let ast::Expr::Ident { name: module, .. } = object {
-            if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
+            if self.env.imported_stdlib.contains(module) || self.env.user_modules.contains(module.as_str()) {
                 return Some(format!("{}.{}", module, field));
             }
             if let Some(target) = self.env.module_aliases.get(module.as_str()) {

@@ -1,3 +1,4 @@
+import math
 // protocol_edge_test — Edge cases inspired by common protocol/interface problems in other languages
 
 // ── Diamond problem: two protocols require same method name ──

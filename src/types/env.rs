@@ -19,6 +19,8 @@ pub struct TypeEnv {
     pub constructors: std::collections::HashMap<std::string::String, (std::string::String, VariantCase)>,
     /// User-defined module names (for distinguishing from stdlib in module calls)
     pub user_modules: std::collections::HashSet<std::string::String>,
+    /// Stdlib modules available in scope (Tier 1 implicit + explicitly imported)
+    pub imported_stdlib: std::collections::HashSet<std::string::String>,
     /// Whether we're inside a do block (for auto-unwrapping Result in let bindings)
     pub in_do_block: bool,
     /// Track used variables (for unused variable warnings)
@@ -67,6 +69,14 @@ impl TypeEnv {
             effect_fns: std::collections::HashSet::new(),
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
+            imported_stdlib: {
+                let mut s = std::collections::HashSet::new();
+                // Tier 1: implicit imports (core type modules)
+                for m in &["string", "int", "float", "list", "map", "set", "option", "result"] {
+                    s.insert(m.to_string());
+                }
+                s
+            },
             in_do_block: false,
             used_vars: std::collections::HashSet::new(),
             used_modules: std::collections::HashSet::new(),

@@ -1,6 +1,7 @@
 module value_utils
+import value
 // wasm:enabled
-
+import json
 type Person: Codec = { name: String, age: Int, email: String }
 
 test "value.pick" {

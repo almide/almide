@@ -1,4 +1,5 @@
 module codec_list_test
+import json
 // wasm:enabled
 
 type Item: Codec = { id: Int, value: String }

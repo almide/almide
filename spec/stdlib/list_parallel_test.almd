@@ -1,0 +1,57 @@
+// Auto-parallelization tests — verify correct results with pure lambdas
+// The compiler transparently rewrites pure list.map/filter/any/all to
+// parallel variants for the Rust target.
+
+test "list.map pure lambda" {
+  let xs = list.range(0, 100)
+  let doubled = xs.map((x) => x * 2)
+  assert_eq(list.len(doubled), 100)
+  assert_eq(list.first(doubled), some(0))
+  assert_eq(list.last(doubled), some(198))
+}
+
+test "list.filter pure lambda" {
+  let xs = list.range(0, 100)
+  let evens = xs.filter((x) => x % 2 == 0)
+  assert_eq(list.len(evens), 50)
+  assert_eq(list.first(evens), some(0))
+  assert_eq(list.last(evens), some(98))
+}
+
+test "list.any pure lambda" {
+  let xs = list.range(0, 100)
+  assert_eq(xs.any((x) => x == 99), true)
+  assert_eq(xs.any((x) => x == 200), false)
+}
+
+test "list.all pure lambda" {
+  let xs = list.range(0, 100)
+  assert_eq(xs.all((x) => x >= 0), true)
+  assert_eq(xs.all((x) => x > 50), false)
+}
+
+test "list.map with captured immutable" {
+  let factor = 3
+  let xs = [1, 2, 3, 4, 5]
+  let result = xs.map((x) => x * factor)
+  assert_eq(result, [3, 6, 9, 12, 15])
+}
+
+test "list.filter with captured immutable" {
+  let threshold = 3
+  let xs = [1, 2, 3, 4, 5]
+  let result = xs.filter((x) => x > threshold)
+  assert_eq(result, [4, 5])
+}
+
+test "list.map on empty list" {
+  let xs: List[Int] = []
+  let result = xs.map((x) => x * 2)
+  assert_eq(result, [])
+}
+
+test "list.map with string operations" {
+  let words = ["hello", "world"]
+  let upper = words.map((w) => string.to_upper(w))
+  assert_eq(upper, ["HELLO", "WORLD"])
+}

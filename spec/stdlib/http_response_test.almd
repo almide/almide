@@ -1,3 +1,4 @@
+import http
 
 test "http.response creates plain text response" {
   let resp = http.response(200, "Hello");

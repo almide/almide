@@ -221,6 +221,16 @@ impl Checker {
     // ── Main entry point ──
 
     pub fn check_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
+        // Register explicitly imported stdlib modules (Tier 2)
+        for imp in &program.imports {
+            if let ast::Decl::Import { path, alias, .. } = imp {
+                let name = alias.as_ref().cloned()
+                    .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
+                if crate::stdlib::is_stdlib_module(&name) {
+                    self.env.imported_stdlib.insert(name);
+                }
+            }
+        }
         self.register_decls(&program.decls, None);
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();

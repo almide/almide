@@ -1,4 +1,5 @@
 module auto_derive_test
+import json
 // wasm:enabled
 
 // ── Eq derive on records ──

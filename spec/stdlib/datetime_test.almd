@@ -1,3 +1,4 @@
+import datetime
 // datetime module tests — pure functions with runtime implementations only
 
 test "datetime.from_parts basic" {

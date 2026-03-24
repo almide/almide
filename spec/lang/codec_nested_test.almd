@@ -1,4 +1,5 @@
 module weather_test
+import json
 // wasm:enabled
 
 type Coord: Codec = { lon: Float, lat: Float }

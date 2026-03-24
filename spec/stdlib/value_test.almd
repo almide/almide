@@ -1,3 +1,4 @@
+import value
 // value_test — Value type construction and stringify
 
 test "value.int" {

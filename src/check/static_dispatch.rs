@@ -163,7 +163,7 @@ impl Checker {
             }
 
             // Direct stdlib/user module call, or resolved alias
-            let resolved_module = if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module) {
+            let resolved_module = if self.env.imported_stdlib.contains(module) || self.env.user_modules.contains(module) {
                 Some(module.to_string())
             } else {
                 self.env.module_aliases.get(module).cloned()

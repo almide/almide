@@ -1,4 +1,5 @@
 module convenience_test
+import json
 // wasm:enabled
 
 type Person: Codec = { name: String, age: Int }

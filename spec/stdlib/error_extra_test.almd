@@ -1,3 +1,4 @@
+import error
 // error module tests
 
 test "error.message on err" {
