@@ -6,6 +6,7 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
+| [Stdlib Import Control](active/stdlib-import-control.md) | 暗黙/明示 import の3層制御 | Phase 1 |
 | [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
 | [HTTPS Native](active/https-native.md) | rustls統合済。almide build対応+WASM残 | Phase 1 |
 | [Remove `do` Block](active/remove-do-block.md) | do 廃止 → while + try に統一。Canonicity 回復 | Phase 1 |
