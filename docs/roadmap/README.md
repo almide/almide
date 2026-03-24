@@ -6,6 +6,7 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
+| [Effect fn Result Wrapping](active/effect-fn-result-wrapping.md) | effect fn の Rust codegen で ret_ty を Result 化 | Phase 1 |
 | [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
 | [HTTPS Native](active/https-native.md) | rustls統合済。almide build対応+WASM残 | Phase 1 |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 95/110. Phase 5-7 残 | Architecture |
