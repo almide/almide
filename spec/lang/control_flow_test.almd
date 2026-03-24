@@ -177,8 +177,7 @@ test "nested for" {
 // ── do block with guard ──
 test "do guard loop" {
   var count = 0;
-  do {
-    guard count < 5 else ok(());
+  while count < 5 {
     count = count + 1;
   };
   assert_eq(count, 5)
@@ -188,8 +187,7 @@ test "do guard with accumulation" {
   var xs = [1, 2, 3, 4, 5];
   var sum = 0;
   var i = 0;
-  do {
-    guard i < list.len(xs) else ok(());
+  while i < list.len(xs) {
     let v = match list.get(xs, i) {
       some(x) => x,
       none => 0,
@@ -203,15 +201,15 @@ test "do guard with accumulation" {
 // ── do block with guard returning non-unit value ──
 effect fn find_first_negative(xs: List[Int]) -> Result[Int, String] = {
   var i = 0;
-  do {
-    guard i < list.len(xs) else err("no negative found");
+  while i < list.len(xs) {
     let v = match list.get(xs, i) {
       some(x) => x,
       none => 0,
     };
     guard v >= 0 else ok(v);
     i = i + 1;
-  }
+  };
+  err("no negative found")
 }
 
 test "do guard else ok with int value" {
@@ -231,10 +229,10 @@ test "do guard else err when not found" {
 effect fn count_until(limit: Int) -> Result[Int, String] = {
   guard limit > 0 else err("limit must be positive");
   var count = 0;
-  do {
-    guard count < limit else ok(count);
+  while count < limit {
     count = count + 1;
-  }
+  };
+  ok(count)
 }
 
 test "do guard else ok returns accumulated count" {
@@ -246,8 +244,7 @@ test "do guard else ok returns accumulated count" {
 effect fn sum_until_threshold(xs: List[Int], threshold: Int) -> Result[Int, String] = {
   var sum = 0;
   var i = 0;
-  do {
-    guard i < list.len(xs) else ok(sum);
+  while i < list.len(xs) {
     let v = match list.get(xs, i) {
       some(x) => x,
       none => 0,
@@ -255,7 +252,8 @@ effect fn sum_until_threshold(xs: List[Int], threshold: Int) -> Result[Int, Stri
     sum = sum + v;
     guard sum <= threshold else ok(sum);
     i = i + 1;
-  }
+  };
+  ok(sum)
 }
 
 test "do guard ok returns sum at threshold" {
@@ -268,11 +266,11 @@ effect fn collatz_steps(n: Int) -> Result[Int, String] = {
   guard n > 0 else err("only positive integers");
   var current = n;
   var count = 0;
-  do {
-    guard current != 1 else ok(count);
+  while current != 1 {
     current = if current % 2 == 0 then current / 2 else current * 3 + 1;
     count = count + 1;
-  }
+  };
+  ok(count)
 }
 
 test "do guard ok with collatz sequence" {
@@ -283,15 +281,15 @@ test "do guard ok with collatz sequence" {
 
 effect fn find_index_of(xs: List[String], target: String) -> Result[Int, String] = {
   var i = 0;
-  do {
-    guard i < list.len(xs) else err("not found: " + target);
+  while i < list.len(xs) {
     let v = match list.get(xs, i) {
       some(x) => x,
       none => "",
     };
     guard v != target else ok(i);
     i = i + 1;
-  }
+  };
+  err("not found: " + target)
 }
 
 test "do guard ok returns index" {
@@ -303,8 +301,7 @@ test "do guard ok returns index" {
 // ── do block with guard else break/continue ──
 test "do guard else break" {
   var count = 0;
-  do {
-    guard count < 5 else break;
+  while count < 5 {
     count = count + 1;
   };
   assert_eq(count, 5)
@@ -313,8 +310,7 @@ test "do guard else break" {
 test "do guard else break with accumulation" {
   var i = 0;
   var sum = 0;
-  do {
-    guard i < 10 else break;
+  while i < 10 {
     sum = sum + i;
     i = i + 1;
   };
@@ -435,8 +431,7 @@ test "for nested with accumulation" {
 test "do guard countdown" {
   var n = 10;
   var steps = 0;
-  do {
-    guard n > 0 else break;
+  while n > 0 {
     n = n - 1;
     steps = steps + 1;
   };
@@ -447,8 +442,7 @@ test "do guard countdown" {
 test "do guard with complex condition" {
   var x = 1;
   var iterations = 0;
-  do {
-    guard x < 1000 and iterations < 20 else break;
+  while x < 1000 and iterations < 20 {
     x = x * 2;
     iterations = iterations + 1;
   };
@@ -524,8 +518,7 @@ test "for in with list.enumerate" {
 test "do guard building list" {
   var xs: List[Int] = [];
   var i = 0;
-  do {
-    guard i < 5 else break;
+  while i < 5 {
     xs = xs + [i * i];
     i = i + 1;
   };

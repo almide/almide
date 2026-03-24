@@ -1,4 +1,4 @@
-effect fn distance(a: String, b: String) -> Result[Int, String] = do {
+effect fn distance(a: String, b: String) -> Result[Int, String] = {
   guard string.len(a) == string.len(b) else err("strands must be of equal length")
   let pairs = list.zip(string.chars(a), string.chars(b))
   let diffs = list.filter(pairs, (p) => p.0 != p.1)

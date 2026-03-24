@@ -7,7 +7,7 @@
 
 let DATA_DIR = "tools/stdlib-crawler/data/ruby"
 
-effect fn main() -> Unit = do {
+effect fn main() -> Unit = {
   let args = env.args()
   guard list.len(args) >= 1 else err("Usage: ruby.almd <command|module>")
   let command = args[0]

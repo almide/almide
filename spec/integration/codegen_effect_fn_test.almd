@@ -48,8 +48,7 @@ test "chained effect fn fails at even check" {
 
 effect fn find_first_even(xs: List[String]) -> Result[Int, String] = {
   var i = 0
-  do {
-    guard i < list.len(xs) else err("no even number found")
+  while i < list.len(xs) {
     let s = match list.get(xs, i) {
       some(v) => v,
       none => "",
@@ -58,6 +57,7 @@ effect fn find_first_even(xs: List[String]) -> Result[Int, String] = {
     guard n % 2 != 0 else ok(n)
     i = i + 1
   }
+  err("no even number found")
 }
 
 test "effect fn with loop finds even" {

@@ -1,4 +1,4 @@
-effect fn clean(input: String) -> Result[String, String] = do {
+effect fn clean(input: String) -> Result[String, String] = {
   let digits = string.chars(input) |> list.filter((c) => string.is_digit(c))
   let len = list.len(digits)
   guard len >= 10 else err("incorrect number of digits")

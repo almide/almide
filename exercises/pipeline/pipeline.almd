@@ -1,4 +1,4 @@
-effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] = do {
+effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] = {
   let lines = string.split(string.trim(input), "\n")
     |> list.filter((l) => string.len(l) > 0)
   var pairs: List[(String, String)] = []
@@ -10,9 +10,9 @@ effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] =
   ok(pairs)
 }
 
-effect fn validate_keys(pairs: List[(String, String)]) -> Result[List[(String, String)], String] = do {
-  let invalid = list.filter(pairs, (p) => string.len(p.0) == 0)
-  guard list.len(invalid) == 0 else err("empty key found")
+effect fn validate_keys(pairs: List[(String, String)]) -> Result[List[(String, String)], String] = {
+  let invalid_count = list.len(list.filter(pairs, (p) => string.len(p.0) == 0))
+  guard invalid_count == 0 else err("empty key found")
   ok(pairs)
 }
 
@@ -22,7 +22,7 @@ fn transform(pairs: List[(String, String)]) -> List[(String, String)] =
 fn format_output(pairs: List[(String, String)]) -> String =
   pairs |> list.map((p) => "${p.0}: ${p.1}") |> string.join("\n")
 
-effect fn run_pipeline(input: String) -> Result[String, String] = do {
+effect fn run_pipeline(input: String) -> Result[String, String] = {
   let pairs = parse_pairs(input)
   let validated = validate_keys(pairs)
   let transformed = transform(validated)

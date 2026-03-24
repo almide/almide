@@ -2,8 +2,7 @@
 // do_guard_test — do block and guard statement edge cases
 test "do block with guard break" {
   var i = 0;
-  do {
-    guard i < 5 else break;
+  while i < 5 {
     i = i + 1;
   };
   assert_eq(i, 5)
@@ -11,9 +10,9 @@ test "do block with guard break" {
 
 test "do block single iteration" {
   var count = 0;
-  do {
+  while true {
     count = count + 1;
-    guard false else break;
+    if not (false) then break else ();
   };
   assert_eq(count, 1)
 }
@@ -21,8 +20,7 @@ test "do block single iteration" {
 test "do block accumulator" {
   var sum = 0;
   var i = 1;
-  do {
-    guard i <= 10 else break;
+  while i <= 10 {
     sum = sum + i;
     i = i + 1;
   };
@@ -31,9 +29,9 @@ test "do block accumulator" {
 
 test "do block with complex guard" {
   var x = 0;
-  do {
+  while true {
     x = x + 1;
-    guard x < 100 and x % 7 != 0 else break;
+    if not (x < 100 and x % 7 != 0) then break else ();
   };
   assert_eq(x, 7)
 }
@@ -41,8 +39,7 @@ test "do block with complex guard" {
 test "do block string building" {
   var s = "";
   var i = 0;
-  do {
-    guard i < 4 else break;
+  while i < 4 {
     s = s + int.to_string(i);
     i = i + 1;
   };
@@ -52,11 +49,9 @@ test "do block string building" {
 test "nested do blocks" {
   var total = 0;
   var i = 0;
-  do {
-    guard i < 3 else break;
+  while i < 3 {
     var j = 0;
-    do {
-      guard j < 3 else break;
+    while j < 3 {
       total = total + 1;
       j = j + 1;
     };
@@ -76,8 +71,7 @@ test "guard with continue in for" {
 
 test "do block never enters on false guard" {
   var count = 0;
-  do {
-    guard false else break;
+  while false {
     count = count + 1;
   };
   assert_eq(count, 0)

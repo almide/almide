@@ -109,8 +109,7 @@ test "let shadowing in block" {
 // ── Additional variable tests ──
 test "var in do guard loop" {
   var x = 1;
-  do {
-    guard x < 100 else break;
+  while x < 100 {
     x = x * 2;
   };
   assert_eq(x, 128)
@@ -220,8 +219,7 @@ test "let with list type" {
 
 test "var counter decrement" {
   var n = 10;
-  do {
-    guard n > 0 else break;
+  while n > 0 {
     n = n - 1;
   };
   assert_eq(n, 0)
@@ -251,8 +249,7 @@ test "let with float" {
 test "var accumulate string in do" {
   var result = "";
   var i = 0;
-  do {
-    guard i < 3 else break;
+  while i < 3 {
     result = result + int.to_string(i);
     i = i + 1;
   };

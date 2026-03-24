@@ -5,7 +5,7 @@ type Expr =
   | BinOp { op: Op, left: Expr, right: Expr }
   | Neg(Expr)
 
-effect fn eval(e: Expr) -> Result[Float, String] = do {
+effect fn eval(e: Expr) -> Result[Float, String] = {
   match e {
     Lit(n) => ok(n)
     Neg(inner) => {

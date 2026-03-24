@@ -14,7 +14,7 @@ fn data_dir(lang: String) -> String = "tools/stdlib-crawler/data/${lang}"
 
 // ── Entry ──────────────────────────────────────────
 
-effect fn main() -> Unit = do {
+effect fn main() -> Unit = {
   let args = env.args()
   guard list.len(args) >= 2 else err("Usage: stdlib-crawler <language> <command>")
 

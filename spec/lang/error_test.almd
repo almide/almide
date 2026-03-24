@@ -112,8 +112,7 @@ effect fn hamming_distance(a: String, b: String) -> Result[Int, String] = {
   let len = list.len(chars_a);
   var count = 0;
   var i = 0;
-  do {
-    guard i < len else ok(count);
+  while i < len {
     let ca = match list.get(chars_a, i) {
       some(c) => c,
       none => "",
@@ -126,7 +125,8 @@ effect fn hamming_distance(a: String, b: String) -> Result[Int, String] = {
       count = count + 1;
     } else { () };
     i = i + 1;
-  }
+  };
+  ok(count)
 }
 
 test "do guard ok with hamming distance" {
@@ -143,8 +143,7 @@ test "do guard ok hamming error on different lengths" {
 effect fn binary_search(xs: List[Int], target: Int) -> Result[Int, String] = {
   var lo = 0;
   var hi = list.len(xs) - 1;
-  do {
-    guard lo <= hi else err("not found");
+  while lo <= hi {
     let mid = (lo + hi) / 2;
     let v = match list.get(xs, mid) {
       some(x) => x,
@@ -156,7 +155,8 @@ effect fn binary_search(xs: List[Int], target: Int) -> Result[Int, String] = {
     } else {
       hi = mid - 1;
     }
-  }
+  };
+  err("not found")
 }
 
 test "do guard ok with binary search" {
@@ -168,15 +168,13 @@ test "do guard ok with binary search" {
 
 effect fn first_duplicate(xs: List[Int]) -> Result[Int, String] = {
   var i = 0;
-  do {
-    guard i < list.len(xs) else err("no duplicates");
+  while i < list.len(xs) {
     let a = match list.get(xs, i) {
       some(x) => x,
       none => 0,
     };
     var j = i + 1;
-    do {
-      guard j < list.len(xs) else ok(());
+    while j < list.len(xs) {
       let b = match list.get(xs, j) {
         some(x) => x,
         none => 0,
@@ -185,7 +183,8 @@ effect fn first_duplicate(xs: List[Int]) -> Result[Int, String] = {
       j = j + 1;
     };
     i = i + 1;
-  }
+  };
+  err("no duplicates")
 }
 
 test "do guard ok nested do blocks" {

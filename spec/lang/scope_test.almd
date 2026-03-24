@@ -237,8 +237,7 @@ test "shadowing in do block" {
   let x = 100;
   var sum = 0;
   var i = 0;
-  do {
-    guard i < 3 else break;
+  while i < 3 {
     let x = i * 10;
     sum = sum + x;
     i = i + 1;
