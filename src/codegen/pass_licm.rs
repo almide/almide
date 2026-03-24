@@ -19,15 +19,16 @@ impl NanoPass for LICMPass {
     fn targets(&self) -> Option<Vec<Target>> { None }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        let effect_fns = &program.effect_fn_names;
         let mut changed = false;
         for func in &mut program.functions {
-            if hoist_loops(&mut func.body, &mut program.var_table) {
+            if hoist_loops(&mut func.body, &mut program.var_table, effect_fns) {
                 changed = true;
             }
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
-                if hoist_loops(&mut func.body, &mut module.var_table) {
+                if hoist_loops(&mut func.body, &mut module.var_table, effect_fns) {
                     changed = true;
                 }
             }
@@ -38,18 +39,18 @@ impl NanoPass for LICMPass {
 
 /// Recursively walk the expression tree looking for loops, hoisting invariants.
 /// Returns true if any hoisting was performed.
-fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
+fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<String>) -> bool {
     let mut changed = false;
     match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
             let mut new_stmts: Vec<IrStmt> = Vec::new();
             for mut stmt in std::mem::take(stmts) {
-                if hoist_loops_stmt(&mut stmt, vt) {
+                if hoist_loops_stmt(&mut stmt, vt, efns) {
                     changed = true;
                 }
                 // If this stmt is an Expr containing a loop, try to hoist invariants
                 if let IrStmtKind::Expr { expr: ref mut loop_expr } = stmt.kind {
-                    let hoisted = try_hoist_from_loop(loop_expr, vt);
+                    let hoisted = try_hoist_from_loop(loop_expr, vt, efns);
                     if !hoisted.is_empty() {
                         changed = true;
                         new_stmts.extend(hoisted);
@@ -59,7 +60,7 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
             }
             *stmts = new_stmts;
             if let Some(e) = tail {
-                if hoist_loops(e, vt) {
+                if hoist_loops(e, vt, efns) {
                     changed = true;
                 }
             }
@@ -67,11 +68,11 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
         IrExprKind::DoBlock { stmts, expr: tail } => {
             let mut new_stmts: Vec<IrStmt> = Vec::new();
             for mut stmt in std::mem::take(stmts) {
-                if hoist_loops_stmt(&mut stmt, vt) {
+                if hoist_loops_stmt(&mut stmt, vt, efns) {
                     changed = true;
                 }
                 if let IrStmtKind::Expr { expr: ref mut loop_expr } = stmt.kind {
-                    let hoisted = try_hoist_from_loop(loop_expr, vt);
+                    let hoisted = try_hoist_from_loop(loop_expr, vt, efns);
                     if !hoisted.is_empty() {
                         changed = true;
                         new_stmts.extend(hoisted);
@@ -81,41 +82,41 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
             }
             *stmts = new_stmts;
             if let Some(e) = tail {
-                if hoist_loops(e, vt) {
+                if hoist_loops(e, vt, efns) {
                     changed = true;
                 }
             }
         }
         IrExprKind::If { cond, then, else_ } => {
-            if hoist_loops(cond, vt) { changed = true; }
-            if hoist_loops(then, vt) { changed = true; }
-            if hoist_loops(else_, vt) { changed = true; }
+            if hoist_loops(cond, vt, efns) { changed = true; }
+            if hoist_loops(then, vt, efns) { changed = true; }
+            if hoist_loops(else_, vt, efns) { changed = true; }
         }
         IrExprKind::Match { subject, arms } => {
-            if hoist_loops(subject, vt) { changed = true; }
+            if hoist_loops(subject, vt, efns) { changed = true; }
             for arm in arms {
                 if let Some(g) = &mut arm.guard {
-                    if hoist_loops(g, vt) { changed = true; }
+                    if hoist_loops(g, vt, efns) { changed = true; }
                 }
-                if hoist_loops(&mut arm.body, vt) { changed = true; }
+                if hoist_loops(&mut arm.body, vt, efns) { changed = true; }
             }
         }
         IrExprKind::Lambda { body, .. } => {
-            if hoist_loops(body, vt) { changed = true; }
+            if hoist_loops(body, vt, efns) { changed = true; }
         }
         // ForIn/While at the top level of an expression (not inside a Block stmt):
         // We can't hoist before them here since there's no statement list to insert into.
         // They're handled when they appear as Expr stmts inside blocks.
         IrExprKind::ForIn { body, iterable, .. } => {
-            if hoist_loops(iterable, vt) { changed = true; }
+            if hoist_loops(iterable, vt, efns) { changed = true; }
             for s in body {
-                if hoist_loops_stmt(s, vt) { changed = true; }
+                if hoist_loops_stmt(s, vt, efns) { changed = true; }
             }
         }
         IrExprKind::While { cond, body } => {
-            if hoist_loops(cond, vt) { changed = true; }
+            if hoist_loops(cond, vt, efns) { changed = true; }
             for s in body {
-                if hoist_loops_stmt(s, vt) { changed = true; }
+                if hoist_loops_stmt(s, vt, efns) { changed = true; }
             }
         }
         _ => {}
@@ -123,22 +124,22 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
     changed
 }
 
-fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable) -> bool {
+fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, efns: &HashSet<String>) -> bool {
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-            hoist_loops(value, vt)
+            hoist_loops(value, vt, efns)
         }
         IrStmtKind::IndexAssign { index, value, .. } => {
-            hoist_loops(index, vt) | hoist_loops(value, vt)
+            hoist_loops(index, vt, efns) | hoist_loops(value, vt, efns)
         }
         IrStmtKind::MapInsert { key, value, .. } => {
-            hoist_loops(key, vt) | hoist_loops(value, vt)
+            hoist_loops(key, vt, efns) | hoist_loops(value, vt, efns)
         }
         IrStmtKind::Guard { cond, else_ } => {
-            hoist_loops(cond, vt) | hoist_loops(else_, vt)
+            hoist_loops(cond, vt, efns) | hoist_loops(else_, vt, efns)
         }
-        IrStmtKind::Expr { expr } => hoist_loops(expr, vt),
+        IrStmtKind::Expr { expr } => hoist_loops(expr, vt, efns),
         IrStmtKind::Comment { .. } => false,
     }
 }
@@ -146,7 +147,7 @@ fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable) -> bool {
 /// Given a loop expression (ForIn or While), extract loop-invariant expressions
 /// from its body and return them as `let` binding statements to insert before
 /// the loop. The original expressions in the body are replaced with Var references.
-fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable) -> Vec<IrStmt> {
+fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<String>) -> Vec<IrStmt> {
     let mut hoisted = Vec::new();
 
     match &mut expr.kind {
@@ -163,7 +164,7 @@ fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable) -> Vec<IrStmt> {
 
             // Scan body statements for invariant expressions to hoist
             for stmt in body.iter_mut() {
-                extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted);
+                extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, efns);
             }
         }
         IrExprKind::While { cond: _, body } => {
@@ -171,7 +172,7 @@ fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable) -> Vec<IrStmt> {
             collect_defined_vars_stmts(body, &mut loop_defined);
 
             for stmt in body.iter_mut() {
-                extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted);
+                extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, efns);
             }
         }
         _ => {}
@@ -245,13 +246,14 @@ fn extract_invariants_from_stmt(
     loop_defined: &HashSet<VarId>,
     vt: &mut VarTable,
     hoisted: &mut Vec<IrStmt>,
+    efns: &HashSet<String>,
 ) {
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } => {
-            try_hoist_expr(value, loop_defined, vt, hoisted);
+            try_hoist_expr(value, loop_defined, vt, hoisted, efns);
         }
         IrStmtKind::Expr { expr } => {
-            try_hoist_expr(expr, loop_defined, vt, hoisted);
+            try_hoist_expr(expr, loop_defined, vt, hoisted, efns);
         }
         // Don't hoist the whole RHS of assignments — the assignment itself
         // is a side effect (mutates a var). Only recurse into sub-expressions
@@ -262,8 +264,8 @@ fn extract_invariants_from_stmt(
             // which is in loop_defined, so hoisting would be wrong anyway.
         }
         IrStmtKind::Guard { cond, else_ } => {
-            try_hoist_expr(cond, loop_defined, vt, hoisted);
-            try_hoist_expr(else_, loop_defined, vt, hoisted);
+            try_hoist_expr(cond, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(else_, loop_defined, vt, hoisted, efns);
         }
         _ => {}
     }
@@ -277,9 +279,10 @@ fn try_hoist_expr(
     loop_defined: &HashSet<VarId>,
     vt: &mut VarTable,
     hoisted: &mut Vec<IrStmt>,
+    efns: &HashSet<String>,
 ) {
     // Check if the whole expression is hoistable
-    if is_hoistable(expr, loop_defined) {
+    if is_hoistable(expr, loop_defined, efns) {
         let ty = expr.ty.clone();
         let var = vt.alloc("__licm".to_string(), ty.clone(), Mutability::Let, None);
         let original = std::mem::replace(expr, IrExpr {
@@ -303,57 +306,57 @@ fn try_hoist_expr(
     match &mut expr.kind {
         IrExprKind::Call { target, args, .. } => {
             match target {
-                CallTarget::Method { object, .. } => try_hoist_expr(object, loop_defined, vt, hoisted),
-                CallTarget::Computed { callee } => try_hoist_expr(callee, loop_defined, vt, hoisted),
+                CallTarget::Method { object, .. } => try_hoist_expr(object, loop_defined, vt, hoisted, efns),
+                CallTarget::Computed { callee } => try_hoist_expr(callee, loop_defined, vt, hoisted, efns),
                 _ => {}
             }
             for arg in args {
-                try_hoist_expr(arg, loop_defined, vt, hoisted);
+                try_hoist_expr(arg, loop_defined, vt, hoisted, efns);
             }
         }
         IrExprKind::BinOp { left, right, .. } => {
-            try_hoist_expr(left, loop_defined, vt, hoisted);
-            try_hoist_expr(right, loop_defined, vt, hoisted);
+            try_hoist_expr(left, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(right, loop_defined, vt, hoisted, efns);
         }
         IrExprKind::UnOp { operand, .. } => {
-            try_hoist_expr(operand, loop_defined, vt, hoisted);
+            try_hoist_expr(operand, loop_defined, vt, hoisted, efns);
         }
         IrExprKind::If { cond, then, else_ } => {
-            try_hoist_expr(cond, loop_defined, vt, hoisted);
-            try_hoist_expr(then, loop_defined, vt, hoisted);
-            try_hoist_expr(else_, loop_defined, vt, hoisted);
+            try_hoist_expr(cond, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(then, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(else_, loop_defined, vt, hoisted, efns);
         }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements {
-                try_hoist_expr(e, loop_defined, vt, hoisted);
+                try_hoist_expr(e, loop_defined, vt, hoisted, efns);
             }
         }
         IrExprKind::Record { fields, .. } => {
             for (_, v) in fields {
-                try_hoist_expr(v, loop_defined, vt, hoisted);
+                try_hoist_expr(v, loop_defined, vt, hoisted, efns);
             }
         }
         IrExprKind::Member { object, .. } => {
-            try_hoist_expr(object, loop_defined, vt, hoisted);
+            try_hoist_expr(object, loop_defined, vt, hoisted, efns);
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            try_hoist_expr(object, loop_defined, vt, hoisted);
-            try_hoist_expr(index, loop_defined, vt, hoisted);
+            try_hoist_expr(object, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(index, loop_defined, vt, hoisted, efns);
         }
         IrExprKind::StringInterp { parts } => {
             for part in parts {
                 if let IrStringPart::Expr { expr: e } = part {
-                    try_hoist_expr(e, loop_defined, vt, hoisted);
+                    try_hoist_expr(e, loop_defined, vt, hoisted, efns);
                 }
             }
         }
         IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
         | IrExprKind::ResultErr { expr: e } => {
-            try_hoist_expr(e, loop_defined, vt, hoisted);
+            try_hoist_expr(e, loop_defined, vt, hoisted, efns);
         }
         IrExprKind::Range { start, end, .. } => {
-            try_hoist_expr(start, loop_defined, vt, hoisted);
-            try_hoist_expr(end, loop_defined, vt, hoisted);
+            try_hoist_expr(start, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(end, loop_defined, vt, hoisted, efns);
         }
         _ => {}
     }
@@ -364,17 +367,43 @@ fn try_hoist_expr(
 /// 2. It contains no calls to effect functions (side effects)
 /// 3. It is not trivially cheap (skip Var, Lit*, Unit)
 /// 4. It contains no control flow (loops, continue, break, return)
-fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
+fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, efns: &HashSet<String>) -> bool {
     if is_trivial(expr) {
         return false;
     }
-    if has_effect_call(expr) {
+    if has_effect_call(expr, efns) {
         return false;
     }
     if has_control_flow(expr) {
         return false;
     }
+    if has_assignment(expr) {
+        return false;
+    }
     refs_are_outside_loop(expr, loop_defined)
+}
+
+/// Returns true if the expression contains variable assignments.
+/// Assignments are side effects that must not be hoisted out of loops.
+fn has_assignment(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+            stmts.iter().any(|s| matches!(&s.kind, IrStmtKind::Assign { .. } | IrStmtKind::FieldAssign { .. } | IrStmtKind::IndexAssign { .. }) || has_assignment_stmt(s))
+                || tail.as_ref().map_or(false, |e| has_assignment(e))
+        }
+        IrExprKind::If { cond, then, else_ } => has_assignment(cond) || has_assignment(then) || has_assignment(else_),
+        IrExprKind::Match { subject, arms } => has_assignment(subject) || arms.iter().any(|a| has_assignment(&a.body)),
+        _ => false,
+    }
+}
+
+fn has_assignment_stmt(stmt: &IrStmt) -> bool {
+    match &stmt.kind {
+        IrStmtKind::Assign { .. } | IrStmtKind::FieldAssign { .. } | IrStmtKind::IndexAssign { .. } => true,
+        IrStmtKind::Expr { expr } => has_assignment(expr),
+        IrStmtKind::Bind { value, .. } => has_assignment(value),
+        _ => false,
+    }
 }
 
 /// Returns true if the expression contains loops, continue, break, or return.
@@ -440,113 +469,101 @@ fn is_trivial(expr: &IrExpr) -> bool {
 }
 
 /// Returns true if the expression contains any function call that could have side effects.
-/// Conservatively, we consider Module calls to effect-capable modules and all
-/// Method/Computed calls as potentially effectful.
-fn has_effect_call(expr: &IrExpr) -> bool {
+/// Uses the effect_fn_names set populated from TypeEnv during lowering.
+/// Method/Computed calls are conservatively considered effectful.
+fn has_effect_call(expr: &IrExpr, efns: &HashSet<String>) -> bool {
     match &expr.kind {
         IrExprKind::Call { target, args, .. } => {
             let call_is_effectful = match target {
-                // Module calls to known effectful modules
-                CallTarget::Module { module, .. } => {
-                    matches!(module.as_str(), "fs" | "path" | "http" | "url" | "env"
-                        | "process" | "time" | "datetime" | "fan" | "log")
+                CallTarget::Module { module, func } => {
+                    efns.contains(&format!("{}.{}", module, func))
                 }
-                // Named calls to runtime effect functions
-                CallTarget::Named { name } => {
-                    name.starts_with("almide_rt_fs_")
-                    || name.starts_with("almide_rt_http_")
-                    || name.starts_with("almide_rt_env_")
-                    || name.starts_with("almide_rt_time_")
-                    || name.starts_with("almide_rt_log_")
-                    || name.starts_with("almide_rt_fan_")
-                    || name.starts_with("almide_rt_process_")
-                    || name == "println"
-                }
+                CallTarget::Named { name } => efns.contains(name),
                 // Method/Computed calls are conservatively considered effectful
                 CallTarget::Method { .. } | CallTarget::Computed { .. } => true,
             };
             if call_is_effectful {
                 return true;
             }
-            args.iter().any(|a| has_effect_call(a))
+            args.iter().any(|a| has_effect_call(a, efns))
         }
         IrExprKind::BinOp { left, right, .. } => {
-            has_effect_call(left) || has_effect_call(right)
+            has_effect_call(left, efns) || has_effect_call(right, efns)
         }
-        IrExprKind::UnOp { operand, .. } => has_effect_call(operand),
+        IrExprKind::UnOp { operand, .. } => has_effect_call(operand, efns),
         IrExprKind::If { cond, then, else_ } => {
-            has_effect_call(cond) || has_effect_call(then) || has_effect_call(else_)
+            has_effect_call(cond, efns) || has_effect_call(then, efns) || has_effect_call(else_, efns)
         }
         IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
-            stmts.iter().any(|s| has_effect_call_stmt(s))
-                || expr.as_ref().is_some_and(|e| has_effect_call(e))
+            stmts.iter().any(|s| has_effect_call_stmt(s, efns))
+                || expr.as_ref().is_some_and(|e| has_effect_call(e, efns))
         }
         IrExprKind::Match { subject, arms } => {
-            has_effect_call(subject)
+            has_effect_call(subject, efns)
                 || arms.iter().any(|a| {
-                    a.guard.as_ref().is_some_and(|g| has_effect_call(g))
-                        || has_effect_call(&a.body)
+                    a.guard.as_ref().is_some_and(|g| has_effect_call(g, efns))
+                        || has_effect_call(&a.body, efns)
                 })
         }
-        IrExprKind::Lambda { body, .. } => has_effect_call(body),
+        IrExprKind::Lambda { body, .. } => has_effect_call(body, efns),
         IrExprKind::List { elements } | IrExprKind::Tuple { elements }
         | IrExprKind::Fan { exprs: elements } => {
-            elements.iter().any(|e| has_effect_call(e))
+            elements.iter().any(|e| has_effect_call(e, efns))
         }
-        IrExprKind::Record { fields, .. } => fields.iter().any(|(_, v)| has_effect_call(v)),
+        IrExprKind::Record { fields, .. } => fields.iter().any(|(_, v)| has_effect_call(v, efns)),
         IrExprKind::SpreadRecord { base, fields } => {
-            has_effect_call(base) || fields.iter().any(|(_, v)| has_effect_call(v))
+            has_effect_call(base, efns) || fields.iter().any(|(_, v)| has_effect_call(v, efns))
         }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
-            has_effect_call(object)
+            has_effect_call(object, efns)
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            has_effect_call(object) || has_effect_call(index)
+            has_effect_call(object, efns) || has_effect_call(index, efns)
         }
         IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr }
         | IrExprKind::ResultErr { expr } | IrExprKind::Try { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
         | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
-            has_effect_call(expr)
+            has_effect_call(expr, efns)
         }
         IrExprKind::StringInterp { parts } => {
-            parts.iter().any(|p| matches!(p, IrStringPart::Expr { expr } if has_effect_call(expr)))
+            parts.iter().any(|p| matches!(p, IrStringPart::Expr { expr } if has_effect_call(expr, efns)))
         }
         IrExprKind::MapLiteral { entries } => {
-            entries.iter().any(|(k, v)| has_effect_call(k) || has_effect_call(v))
+            entries.iter().any(|(k, v)| has_effect_call(k, efns) || has_effect_call(v, efns))
         }
         IrExprKind::Range { start, end, .. } => {
-            has_effect_call(start) || has_effect_call(end)
+            has_effect_call(start, efns) || has_effect_call(end, efns)
         }
         IrExprKind::ForIn { iterable, body, .. } => {
-            has_effect_call(iterable) || body.iter().any(|s| has_effect_call_stmt(s))
+            has_effect_call(iterable, efns) || body.iter().any(|s| has_effect_call_stmt(s, efns))
         }
         IrExprKind::While { cond, body } => {
-            has_effect_call(cond) || body.iter().any(|s| has_effect_call_stmt(s))
+            has_effect_call(cond, efns) || body.iter().any(|s| has_effect_call_stmt(s, efns))
         }
-        IrExprKind::RustMacro { args, .. } => args.iter().any(|a| has_effect_call(a)),
+        IrExprKind::RustMacro { args, .. } => args.iter().any(|a| has_effect_call(a, efns)),
         // Leaf nodes are pure
         _ => false,
     }
 }
 
-fn has_effect_call_stmt(stmt: &IrStmt) -> bool {
+fn has_effect_call_stmt(stmt: &IrStmt, efns: &HashSet<String>) -> bool {
     match &stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-            has_effect_call(value)
+            has_effect_call(value, efns)
         }
         IrStmtKind::IndexAssign { index, value, .. } => {
-            has_effect_call(index) || has_effect_call(value)
+            has_effect_call(index, efns) || has_effect_call(value, efns)
         }
         IrStmtKind::MapInsert { key, value, .. } => {
-            has_effect_call(key) || has_effect_call(value)
+            has_effect_call(key, efns) || has_effect_call(value, efns)
         }
         IrStmtKind::Guard { cond, else_ } => {
-            has_effect_call(cond) || has_effect_call(else_)
+            has_effect_call(cond, efns) || has_effect_call(else_, efns)
         }
-        IrStmtKind::Expr { expr } => has_effect_call(expr),
+        IrStmtKind::Expr { expr } => has_effect_call(expr, efns),
         IrStmtKind::Comment { .. } => false,
     }
 }

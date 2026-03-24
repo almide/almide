@@ -482,6 +482,10 @@ pub struct IrProgram {
     /// Populated during lowering with user-defined types.
     #[serde(skip)]
     pub type_registry: crate::types::TypeConstructorRegistry,
+    /// Names of all effect functions (user-defined + stdlib).
+    /// Populated during lowering from TypeEnv. Used by LICM to avoid hoisting effect calls.
+    #[serde(skip)]
+    pub effect_fn_names: std::collections::HashSet<String>,
     /// Effect inference results: per-function capability analysis.
     /// Populated by EffectInferencePass during codegen pipeline.
     #[serde(skip)]

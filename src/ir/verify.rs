@@ -440,6 +440,7 @@ mod tests {
             var_table,
             modules: vec![],
             type_registry: Default::default(),
+            effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
         }
@@ -650,6 +651,7 @@ mod tests {
                 var_table: mod_vt,
             }],
             type_registry: Default::default(),
+            effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
         };
@@ -700,6 +702,7 @@ mod tests {
             var_table: vt,
             modules: vec![],
             type_registry: Default::default(),
+            effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
         };
@@ -732,6 +735,7 @@ mod tests {
             var_table: vt,
             modules: vec![],
             type_registry: Default::default(),
+            effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
         };
@@ -899,6 +903,7 @@ mod tests {
                 var_table: VarTable::new(),
             }],
             type_registry: Default::default(),
+            effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
         };
@@ -934,6 +939,7 @@ mod tests {
                 var_table: VarTable::new(),
             }],
             type_registry: Default::default(),
+            effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
         };
