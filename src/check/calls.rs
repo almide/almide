@@ -221,9 +221,6 @@ impl Checker {
                 final_bindings.insert(*g, self.fresh_var());
             }
         }
-        if name.contains("either_map_right") || name.contains("map_right") {
-            eprintln!("[CHECKER CALL] {} bindings={:?} final_bindings={:?}", name, bindings, final_bindings);
-        }
         let ret = if final_bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &final_bindings) };
         ret
     }

@@ -444,9 +444,6 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             crate::ir::IrTypeDeclKind::Variant { cases, .. } => {
                 let mut variant_cases = Vec::new();
                 for (tag, case) in cases.iter().enumerate() {
-                    if td.name == "Maybe" || td.name == "Tree" {
-                        eprintln!("[VARIANT REG] {}.{} tag={}", td.name, case.name, tag);
-                    }
                     let fields: Vec<(String, crate::types::Ty)> = match &case.kind {
                         crate::ir::IrVariantKind::Record { fields } => {
                             fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect()
@@ -594,10 +591,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     compile_variant_eq_funcs(&mut emitter, &program.var_table);
 
     // Phase 2.5: Dead Code Elimination
-    let dce_count = dce::eliminate_dead_code(&mut emitter);
-    if dce_count > 0 {
-        eprintln!("[DCE] eliminated {} of {} functions", dce_count, emitter.compiled.len());
-    }
+    let _dce_count = dce::eliminate_dead_code(&mut emitter);
 
     // Phase 3: Assemble
     assemble(&emitter)
@@ -729,6 +723,7 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
 // ── Test runner ─────────────────────────────────────────────────
 
 /// Compile the __init_globals function.
+#[allow(dead_code)]
 fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     let void_type = emitter.register_type(vec![], vec![]);
 

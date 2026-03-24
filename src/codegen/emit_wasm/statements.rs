@@ -340,11 +340,6 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
         IrExprKind::Match { subject, arms } => {
             scan_expr(subject, locals, vt);
             let resolved_ty = resolve_scan_subject_ty(subject, arms, vt);
-            // Log: find the match with Right/Left constructors
-            let has_either = arms.iter().any(|a| matches!(&a.pattern, crate::ir::IrPattern::Constructor { name, .. } if name == "Right" || name == "Left"));
-            if has_either {
-                eprintln!("[SCAN MATCH EITHER] subject.ty={:?} resolved_ty={:?}", subject.ty, resolved_ty);
-            }
             for arm in arms {
                 scan_pattern(&arm.pattern, &resolved_ty, locals, vt);
                 scan_expr(&arm.body, locals, vt);
@@ -506,7 +501,7 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 locals.push((*var, val_type));
             }
         }
-        crate::ir::IrPattern::Constructor { name: ctor_name, args } => {
+        crate::ir::IrPattern::Constructor { name: _ctor_name, args } => {
             // Resolve field types from subject_ty's type_args for generic variants
             let subject_type_args: Vec<crate::types::Ty> = match subject_ty {
                 crate::types::Ty::Named(_, args) if !args.is_empty() => args.clone(),
@@ -527,7 +522,7 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 }
                 _ => vec![],
             };
-            for (i, arg) in args.iter().enumerate() {
+            for (_i, arg) in args.iter().enumerate() {
                 if let crate::ir::IrPattern::Bind { var, ty: pat_ty } = arg {
                     // Use pattern.ty first (set by mono), fall back to VarTable + substitution
                     let resolved = if !matches!(pat_ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_))

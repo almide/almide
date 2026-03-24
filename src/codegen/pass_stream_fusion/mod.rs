@@ -13,6 +13,7 @@
 //! - FilterMapFoldFusion: `fold(filter_map(x, fm), init, g)` → single-pass fold
 //! - RangeFoldFusion: `fold(range(s, e), init, g)` → for loop (no allocation)
 
+#[allow(dead_code)]
 mod chain_detection;
 mod fusion_rules;
 mod ir_transform;
@@ -23,7 +24,7 @@ use super::pass::{NanoPass, PassResult, Target};
 
 pub use chain_detection::{PipeChain, PipeOp};
 
-use chain_detection::{detect_pipe_chains, classify_stdlib_op};
+use chain_detection::classify_stdlib_op;
 use fusion_rules::*;
 use ir_transform::recursive_transform;
 
@@ -47,40 +48,11 @@ impl NanoPass for StreamFusionPass {
             }
         }
 
-        let debug = std::env::var("ALMIDE_DEBUG_FUSION").is_ok();
-
-        // Debug: dump IR after inlining
-        if debug {
-            for func in &program.functions {
-                dump_calls(&func.body, &func.name);
-            }
-        }
-
         // Phase 2: fuse chains using algebraic laws
         let mut totals = FusionCounts::default();
         for func in &mut program.functions {
             let c = fuse_all(func, &mut program.var_table);
             totals.add(&c);
-        }
-
-        // Debug output
-        if debug {
-            let registry = &program.type_registry;
-            for func in &program.functions {
-                let chains = detect_pipe_chains(&func.body, registry);
-                for chain in &chains {
-                    eprintln!(
-                        "[StreamFusion] {}: {} ({} fusible, container={:?})",
-                        func.name,
-                        chain.ops.iter().map(|o| format!("{:?}", o)).collect::<Vec<_>>().join(" → "),
-                        chain.fusible_pairs,
-                        chain.container_name,
-                    );
-                }
-            }
-            if totals.total() > 0 {
-                eprintln!("[StreamFusion] fused: {}", totals.summary());
-            }
         }
 
         PassResult { program, changed: totals.total() > 0 }
@@ -178,6 +150,7 @@ impl FusionCounts {
         self.range_fold += other.range_fold;
     }
 
+    #[allow(dead_code)]
     fn summary(&self) -> String {
         let mut parts = Vec::new();
         if self.identity > 0 { parts.push(format!("{} identity-map", self.identity)); }
@@ -237,36 +210,6 @@ fn inline_single_use_collection_lets(body: &mut IrExpr, var_table: &VarTable) {
             }
         }
         if let Some(e) = expr { inline_single_use_collection_lets(e, var_table); }
-    }
-}
-
-// ── Debug helpers ────────────────────────────────────────────────
-
-fn dump_calls(expr: &IrExpr, ctx: &str) {
-    match &expr.kind {
-        IrExprKind::Call { target, args, .. } => {
-            let name = match target {
-                CallTarget::Module { module, func } => format!("Module({}.{})", module, func),
-                CallTarget::Named { name } => format!("Named({})", name),
-                _ => "Other".to_string(),
-            };
-            eprintln!("[Fusion-IR] {}: {} with {} args", ctx, name, args.len());
-            for a in args { dump_calls(a, ctx); }
-        }
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts {
-                match &s.kind {
-                    IrStmtKind::Bind { var, value, .. } => {
-                        eprintln!("[Fusion-IR] {}: Bind var={}", ctx, var.0);
-                        dump_calls(value, ctx);
-                    }
-                    IrStmtKind::Expr { expr } => dump_calls(expr, ctx),
-                    _ => {}
-                }
-            }
-            if let Some(e) = expr { dump_calls(e, ctx); }
-        }
-        _ => {}
     }
 }
 

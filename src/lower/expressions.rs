@@ -36,9 +36,6 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Variables ──
         ast::Expr::Ident { name, .. } => {
             if let Some(var_id) = ctx.lookup_var(name) {
-                if name == "v" || name == "doubled" {
-                    eprintln!("[LOWER IDENT] '{}' → {:?} ty={:?} vt_ty={:?}", name, var_id, ty, ctx.var_table.get(var_id).ty);
-                }
                 ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
             } else if ctx.env.functions.contains_key(&sym(name)) {
                 // Function used as a value (e.g., passed to HOF)

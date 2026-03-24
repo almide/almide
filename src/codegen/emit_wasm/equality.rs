@@ -573,6 +573,7 @@ impl FuncCompiler<'_> {
 
 impl FuncCompiler<'_> {
     /// Find variant tag for a unit constructor called as a function (e.g., `Red`).
+    #[allow(dead_code)]
     pub(super) fn find_unit_variant_tag(&self, name: &str) -> Option<u32> {
         for cases in self.emitter.variant_info.values() {
             for case in cases {
@@ -612,9 +613,6 @@ impl FuncCompiler<'_> {
             }
         };
         let cases = self.emitter.variant_info.get(type_name);
-        if cases.is_none() && ctor_name == "Just" {
-            eprintln!("[TAG MISS] ctor='{}' type='{}' variant_info_keys={:?}", ctor_name, type_name, self.emitter.variant_info.keys().collect::<Vec<_>>());
-        }
         let cases = cases?;
         cases.iter().find(|c| c.name == ctor_name).map(|c| c.tag)
     }

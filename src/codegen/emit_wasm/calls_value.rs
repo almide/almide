@@ -1070,7 +1070,6 @@ impl FuncCompiler<'_> {
         } else if let Some(suffix) = name.strip_prefix("__decode_list_") {
             self.emit_decode_list(args, suffix);
         } else {
-            eprintln!("[CODEC MISS] unknown codec helper: {}", name);
             for arg in args { self.emit_expr(arg); }
             wasm!(self.func, { unreachable; });
         }
@@ -1583,7 +1582,7 @@ impl FuncCompiler<'_> {
               local_get(i); local_get(len); i32_ge_u; br_if(1);
         });
         // Read element from source list
-        let elem_stride = match suffix {
+        let _elem_stride = match suffix {
             "int" => 8, "float" => 8, _ => 4,
         };
         match suffix {

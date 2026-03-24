@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use crate::ir::*;
 use crate::types::Ty;
 
-use utils::{MonoKey, BoundedParam, has_typevar, ty_contains_typevar};
+use utils::{MonoKey, BoundedParam, ty_contains_typevar};
 use discovery::{discover_instances, discover_instances_in_frontier};
 use specialization::{specialize_function, substitute_ty, update_var_table_types};
 use rewrite::rewrite_calls;
@@ -121,30 +121,11 @@ pub fn monomorphize(program: &mut IrProgram) {
 fn audit_remaining_typevars(program: &IrProgram) {
     for func in &program.functions {
         audit_expr(&func.body, &func.name, &program.var_table);
-        for param in &func.params {
-            if has_typevar(&param.ty) {
-                eprintln!("[AUDIT] fn {} param '{}' ty={:?}", func.name, param.name, param.ty);
-            }
-        }
-        if has_typevar(&func.ret_ty) {
-            eprintln!("[AUDIT] fn {} ret_ty={:?}", func.name, func.ret_ty);
-        }
     }
 }
 
 #[allow(dead_code)]
 fn audit_expr(expr: &IrExpr, fn_name: &str, vt: &VarTable) {
-    if has_typevar(&expr.ty) {
-        let kind_name = match &expr.kind {
-            IrExprKind::Var { id } => format!("Var({}:'{}')", id.0, vt.get(*id).name),
-            IrExprKind::Call { target, type_args, .. } => format!("Call({:?}, type_args={:?})", target, type_args),
-            IrExprKind::Match { .. } => "Match".to_string(),
-            IrExprKind::LitInt { .. } => "LitInt".to_string(),
-            IrExprKind::Block { .. } => "Block".to_string(),
-            _ => format!("{:?}", std::mem::discriminant(&expr.kind)),
-        };
-        eprintln!("[AUDIT] fn {} expr {} ty={:?}", fn_name, kind_name, expr.ty);
-    }
     // Recurse
     match &expr.kind {
         IrExprKind::BinOp { left, right, .. } => { audit_expr(left, fn_name, vt); audit_expr(right, fn_name, vt); }
@@ -178,10 +159,7 @@ fn audit_expr(expr: &IrExpr, fn_name: &str, vt: &VarTable) {
 #[allow(dead_code)]
 fn audit_stmt(stmt: &IrStmt, fn_name: &str, vt: &VarTable) {
     match &stmt.kind {
-        IrStmtKind::Bind { var, ty, value, .. } => {
-            if has_typevar(ty) {
-                eprintln!("[AUDIT] fn {} Bind {:?} '{}' ty={:?} value.ty={:?}", fn_name, var, vt.get(*var).name, ty, value.ty);
-            }
+        IrStmtKind::Bind { value, .. } => {
             audit_expr(value, fn_name, vt);
         }
         IrStmtKind::BindDestructure { value, .. } | IrStmtKind::Assign { value, .. } => audit_expr(value, fn_name, vt),
