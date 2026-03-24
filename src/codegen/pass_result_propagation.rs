@@ -250,8 +250,16 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                     _ => ty.clone(),
                 };
                 let call_with_result_ty = IrExpr { kind: expr.kind, ty: result_ty.clone(), span };
+                // In tests, use .unwrap() instead of ? (tests return (), not Result)
                 return IrExpr {
-                    kind: IrExprKind::Try { expr: Box::new(call_with_result_ty) },
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Method {
+                            object: Box::new(call_with_result_ty),
+                            method: "unwrap".to_string(),
+                        },
+                        args: vec![],
+                        type_args: vec![],
+                    },
                     ty: inner_ty, span,
                 };
             }
