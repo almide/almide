@@ -109,11 +109,41 @@ IR の before/after を golden file 比較
 
 **工数**: S (1-2日)
 
-### Phase 7: ビルドシステム
+### Phase 7: ビルドシステム — xtask 移行
 
-#### 7.1 build.rs 分割 (1,261行 → 5モジュール)
+rust-analyzer の xtask パターンを採用。build.rs の codegen ロジックを独立バイナリに移行。
 
-xtask クレートまたはサブモジュールに移行 + 検証レイヤー追加
+#### 7.1 xtask クレート作成 + codegen モジュール分割
+
+build.rs (1,261行) → `xtask/src/codegen/` (5モジュール)
+
+```
+xtask/src/
+├── main.rs                 # cargo xtask codegen [--check]
+├── codegen/
+│   ├── mod.rs              # dispatcher + ensure_file_contents()
+│   ├── stdlib_sigs.rs      # stdlib/defs/*.toml → src/generated/stdlib_sigs.rs
+│   ├── arg_transforms.rs   # stdlib/defs/*.toml → src/generated/arg_transforms.rs
+│   ├── emit_calls.rs       # stdlib/defs/*.toml → emit_rust_calls.rs, emit_ts_calls.rs
+│   └── runtime_scan.rs     # runtime/rs/*.rs スキャン → 検証
+```
+
+build.rs にはバージョン埋め込み等の軽量処理のみ残す。
+
+#### 7.2 ensure_file_contents パターン
+
+- `cargo xtask codegen` — 再生成して上書き
+- `cargo xtask codegen --check` — 差分検出のみ (CI用、生成忘れ防止)
+- 生成ファイルは引き続き git にコミット
+
+#### 7.3 freshness テスト
+
+各 codegen モジュールに `#[test] fn generated_files_are_fresh()` を追加。
+`cargo test` で生成ファイルの鮮度を自動検証 (xtask を走らせなくても検出)。
+
+#### 7.4 CI 統合
+
+`.github/workflows/ci.yml` に `cargo xtask codegen --check` ステップ追加。
 
 **工数**: M (5-6日)
 
