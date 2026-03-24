@@ -104,20 +104,15 @@ fn auto_derive_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[Ir
     };
 
     // Build: a.f1 == b.f1 and a.f2 == b.f2 and ...
-    let mut body: Option<IrExpr> = None;
-    for f in fields {
-        let cmp = IrExpr {
+    let body = fields.iter()
+        .map(|f| IrExpr {
             kind: IrExprKind::BinOp { op: BinOp::Eq, left: Box::new(mk_field(var_a, &f.name, &f.ty)), right: Box::new(mk_field(var_b, &f.name, &f.ty)) },
             ty: Ty::Bool, span: None,
-        };
-        body = Some(match body {
-            Some(prev) => IrExpr {
-                kind: IrExprKind::BinOp { op: BinOp::And, left: Box::new(prev), right: Box::new(cmp) },
-                ty: Ty::Bool, span: None,
-            },
-            None => cmp,
+        })
+        .reduce(|prev, cmp| IrExpr {
+            kind: IrExprKind::BinOp { op: BinOp::And, left: Box::new(prev), right: Box::new(cmp) },
+            ty: Ty::Bool, span: None,
         });
-    }
 
     IrFunction {
         name: format!("{}.eq", type_name),
