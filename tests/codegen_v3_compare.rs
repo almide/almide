@@ -112,6 +112,7 @@ fn make_test_program() -> IrProgram {
         var_table,
         modules: vec![],
         type_registry: Default::default(),
+        effect_fn_names: Default::default(),
         effect_map: Default::default(),
         codegen_annotations: Default::default(),
     }
