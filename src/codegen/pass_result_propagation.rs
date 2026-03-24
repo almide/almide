@@ -21,7 +21,9 @@ impl NanoPass for ResultPropagationPass {
     }
 
     fn run(&self, mut program: IrProgram, target: Target) -> PassResult {
-        let wrap_non_result = matches!(target, Target::Rust | Target::Wasm);
+        // Result wrapping is Rust-only: Rust requires `?` which needs Result return type.
+        // TS uses async/await (ResultErasurePass handles it). WASM uses traps.
+        let wrap_non_result = matches!(target, Target::Rust);
 
         // Phase 1: Lift effect fn return types from T to Result<T, String>.
         // Collect fn_name → new Result type so call sites can be updated.
