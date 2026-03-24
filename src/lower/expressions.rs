@@ -39,7 +39,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
             } else if ctx.env.functions.contains_key(&sym(name)) {
                 // Function used as a value (e.g., passed to HOF)
-                ctx.mk(IrExprKind::FnRef { name: name.clone() }, ty, span)
+                ctx.mk(IrExprKind::FnRef { name: sym(name) }, ty, span)
             } else {
                 ctx.mk(IrExprKind::Var { id: VarId(0) }, ty, span) // error recovery
             }
@@ -48,7 +48,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             // Variant constructor used as value (e.g., Red)
             if ctx.env.constructors.contains_key(&sym(name)) {
                 ctx.mk(IrExprKind::Call {
-                    target: CallTarget::Named { name: name.clone() },
+                    target: CallTarget::Named { name: sym(name) },
                     args: vec![], type_args: vec![],
                 }, ty, span)
             } else if let Some(var_id) = ctx.lookup_var(name) {
@@ -75,12 +75,12 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
         // ── Records ──
         ast::Expr::Record { name, fields, .. } => {
-            let fs = fields.iter().map(|f| (f.name.clone(), lower_expr(ctx, &f.value))).collect();
-            ctx.mk(IrExprKind::Record { name: name.clone(), fields: fs }, ty, span)
+            let fs = fields.iter().map(|f| (sym(&f.name), lower_expr(ctx, &f.value))).collect();
+            ctx.mk(IrExprKind::Record { name: name.as_ref().map(|n| sym(n)), fields: fs }, ty, span)
         }
         ast::Expr::SpreadRecord { base, fields, .. } => {
             let ir_base = lower_expr(ctx, base);
-            let fs = fields.iter().map(|f| (f.name.clone(), lower_expr(ctx, &f.value))).collect();
+            let fs = fields.iter().map(|f| (sym(&f.name), lower_expr(ctx, &f.value))).collect();
             ctx.mk(IrExprKind::SpreadRecord { base: Box::new(ir_base), fields: fs }, ty, span)
         }
 
@@ -97,7 +97,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             if op == "==" || op == "!=" {
                 if let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") {
                     let call = ctx.mk(IrExprKind::Call {
-                        target: CallTarget::Named { name: eq_fn },
+                        target: CallTarget::Named { name: sym(&eq_fn) },
                         args: vec![l, r], type_args: vec![],
                     }, Ty::Bool, span);
                     if op == "!=" {
@@ -253,7 +253,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     // If pipe result type is Unknown, try to infer from callee's return type
                     let resolved_ty = if matches!(ty, Ty::Unknown) {
                         if let CallTarget::Named { name } = &target {
-                            ctx.env.functions.get(&sym(name))
+                            ctx.env.functions.get(name)
                                 .map(|f| f.ret.clone())
                                 .unwrap_or(ty)
                         } else { ty }
@@ -338,7 +338,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Access ──
         ast::Expr::Member { object, field, .. } => {
             let obj = lower_expr(ctx, object);
-            ctx.mk(IrExprKind::Member { object: Box::new(obj), field: field.clone() }, ty, span)
+            ctx.mk(IrExprKind::Member { object: Box::new(obj), field: sym(field) }, ty, span)
         }
         ast::Expr::TupleIndex { object, index, .. } => {
             let obj = lower_expr(ctx, object);
@@ -363,7 +363,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     // Operator protocol: dispatch to Repr convention if available
                     if let Some(repr_fn) = ctx.find_convention_fn(&ir_expr.ty, "repr") {
                         ir_expr = ctx.mk(IrExprKind::Call {
-                            target: CallTarget::Named { name: repr_fn },
+                            target: CallTarget::Named { name: sym(&repr_fn) },
                             args: vec![ir_expr], type_args: vec![],
                         }, Ty::String, None);
                     }

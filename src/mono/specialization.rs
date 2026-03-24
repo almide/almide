@@ -27,7 +27,7 @@ pub(super) fn specialize_function(
     substitute_expr_types(&mut body, bindings);
 
     IrFunction {
-        name: format!("{}__{}", orig.name, suffix),
+        name: format!("{}__{}", orig.name, suffix).into(),
         params,
         ret_ty: substitute_ty(&orig.ret_ty, bindings),
         body,
@@ -196,7 +196,7 @@ pub(super) fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String
                         if let Some(concrete_ty) = bindings.get(tv_name) {
                             if let Some(concrete_name) = ty_to_name(concrete_ty) {
                                 let method_name = &method[dot_pos+1..];
-                                *method = format!("{}.{}", concrete_name, method_name);
+                                *method = format!("{}.{}", concrete_name, method_name).into();
                             }
                         }
                     }

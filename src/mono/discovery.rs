@@ -63,7 +63,7 @@ pub(super) fn discover_in_expr(
     match &expr.kind {
         IrExprKind::Call { target, args, type_args } => {
             if let CallTarget::Named { name } = target {
-                if let Some(bounded_params) = bound_fns.get(name) {
+                if let Some(bounded_params) = bound_fns.get::<str>(name) {
                     // Find the original function to get parameter types and generics
                     let orig_fn = program_functions.iter().find(|f| f.name == *name);
                     let param_types: Vec<Ty> = orig_fn
@@ -111,7 +111,7 @@ pub(super) fn discover_in_expr(
                     );
                     if all_concrete {
                         let suffix = mangle_suffix(&bindings);
-                        instances.insert((name.clone(), suffix), bindings);
+                        instances.insert((name.to_string(), suffix), bindings);
                     }
                 }
             }

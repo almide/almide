@@ -43,10 +43,10 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .map(|v| match &v.kind {
                     IrVariantKind::Unit => {
                         ctx.templates.render_with("enum_variant_unit", None, &[], &[("name", v.name.as_str())])
-                            .unwrap_or_else(|| v.name.clone())
+                            .unwrap_or_else(|| v.name.to_string())
                     }
                     IrVariantKind::Tuple { fields } => {
-                        let is_recursive = ctx.ann.recursive_enums.contains(&td.name);
+                        let is_recursive = ctx.ann.recursive_enums.contains(&*td.name);
                         let types: Vec<String> = fields.iter().map(|t| {
                             let rendered = render_type(ctx, t);
                             if is_recursive && ty_contains_name(t, &td.name) { format!("Box<{}>", rendered) } else { rendered }
@@ -70,7 +70,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                         let fields_str = fields.iter()
                             .map(|f| {
                                 let rendered = render_type(ctx, &f.ty);
-                                let boxed = if ctx.ann.recursive_enums.contains(&td.name) && ty_contains_name(&f.ty, &td.name) {
+                                let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && ty_contains_name(&f.ty, &td.name) {
                                     format!("Box<{}>", rendered)
                                 } else {
                                     rendered
@@ -80,7 +80,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             })
                             .collect::<Vec<_>>()
                             .join(", ");
-                        let field_names = fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>().join(", ");
+                        let field_names = fields.iter().map(|f| f.name.to_string()).collect::<Vec<_>>().join(", ");
                         ctx.templates.render_with("enum_variant_record", None, &[], &[("name", v.name.as_str()), ("fields", fields_str.as_str()), ("field_names", field_names.as_str())])
                             .unwrap_or_else(|| format!("{} {{ {} }}", v.name, fields_str))
                     }
@@ -108,18 +108,18 @@ pub fn collect_named_records(program: &IrProgram) -> HashMap<Vec<String>, String
     let mut map = HashMap::new();
     for td in &program.type_decls {
         if let IrTypeDeclKind::Record { fields } = &td.kind {
-            let mut names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+            let mut names: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
             names.sort();
-            map.insert(names, td.name.clone());
+            map.insert(names, td.name.to_string());
         }
     }
     // Also collect from module type declarations
     for module in &program.modules {
         for td in &module.type_decls {
             if let IrTypeDeclKind::Record { fields } = &td.kind {
-                let mut names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                let mut names: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
                 names.sort();
-                map.insert(names, td.name.clone());
+                map.insert(names, td.name.to_string());
             }
         }
     }

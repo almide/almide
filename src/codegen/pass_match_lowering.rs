@@ -522,11 +522,11 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
             for fp in fields {
                 if fp.pattern.is_none() {
                     // Shorthand: field name = var name
-                    let field_var = vt.alloc(fp.name.clone(), Ty::Unknown, Mutability::Let, None);
+                    let field_var = vt.alloc(fp.name.clone().into(), Ty::Unknown, Mutability::Let, None);
                     let val_expr = IrExpr {
                         kind: IrExprKind::Member {
                             object: Box::new(subject.clone()),
-                            field: fp.name.clone(),
+                            field: fp.name.clone().into(),
                         },
                         ty: Ty::Unknown,
                         span: None,
@@ -544,7 +544,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     let val_expr = IrExpr {
                         kind: IrExprKind::Member {
                             object: Box::new(subject.clone()),
-                            field: fp.name.clone(),
+                            field: fp.name.clone().into(),
                         },
                         ty: Ty::Unknown,
                         span: None,

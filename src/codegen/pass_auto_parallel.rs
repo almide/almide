@@ -8,6 +8,7 @@
 //! Rust target only. Uses `std::thread::scope` in the runtime — no external crates.
 
 use crate::ir::*;
+use crate::intern::{Sym, sym};
 use super::pass::PassResult;
 use crate::types::Ty;
 use super::pass::{NanoPass, Target};
@@ -28,17 +29,17 @@ impl NanoPass for AutoParallelPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Collect effect function names for purity analysis
-        let mut effect_fns = std::collections::HashSet::new();
+        let mut effect_fns: std::collections::HashSet<Sym> = std::collections::HashSet::new();
         for func in &program.functions {
             if func.is_effect {
-                effect_fns.insert(func.name.clone());
+                effect_fns.insert(func.name);
             }
         }
         for module in &program.modules {
             for func in &module.functions {
                 if func.is_effect {
-                    effect_fns.insert(format!("{}.{}", module.name, func.name));
-                    effect_fns.insert(func.name.clone());
+                    effect_fns.insert(sym(&format!("{}.{}", module.name, func.name)));
+                    effect_fns.insert(func.name);
                 }
             }
         }
@@ -93,7 +94,7 @@ fn parallel_name(name: &str) -> Option<&'static str> {
 fn is_pure_lambda(
     body: &IrExpr,
     params: &[(VarId, Ty)],
-    effect_fns: &std::collections::HashSet<String>,
+    effect_fns: &std::collections::HashSet<Sym>,
     mutable_vars: &std::collections::HashSet<VarId>,
 ) -> bool {
     let param_ids: std::collections::HashSet<VarId> = params.iter().map(|(id, _)| *id).collect();
@@ -108,7 +109,7 @@ fn is_pure_lambda(
 fn is_pure_expr(
     expr: &IrExpr,
     local_vars: &std::collections::HashSet<VarId>,
-    effect_fns: &std::collections::HashSet<String>,
+    effect_fns: &std::collections::HashSet<Sym>,
     mutable_vars: &std::collections::HashSet<VarId>,
 ) -> bool {
     match &expr.kind {
@@ -136,7 +137,7 @@ fn is_pure_expr(
                     }
                 }
                 CallTarget::Module { module, .. } => {
-                    if matches!(module.as_str(), "fs" | "http" | "env" | "process" | "time" | "log") {
+                    if matches!(&**module, "fs" | "http" | "env" | "process" | "time" | "log") {
                         return false;
                     }
                 }
@@ -271,7 +272,7 @@ fn is_pure_expr(
 fn is_pure_stmt(
     stmt: &IrStmt,
     local_vars: &std::collections::HashSet<VarId>,
-    effect_fns: &std::collections::HashSet<String>,
+    effect_fns: &std::collections::HashSet<Sym>,
     mutable_vars: &std::collections::HashSet<VarId>,
 ) -> bool {
     match &stmt.kind {
@@ -326,7 +327,7 @@ fn collect_stmt_bindings(stmt: &IrStmt, vars: &mut std::collections::HashSet<Var
 
 fn rewrite_expr(
     expr: IrExpr,
-    effect_fns: &std::collections::HashSet<String>,
+    effect_fns: &std::collections::HashSet<Sym>,
     mutable_vars: &std::collections::HashSet<VarId>,
 ) -> IrExpr {
     let ty = expr.ty.clone();
@@ -337,6 +338,7 @@ fn rewrite_expr(
         IrExprKind::Call { target: CallTarget::Named { ref name }, .. }
             if parallel_name(name).is_some() =>
         {
+            let orig_name = *name; // Sym is Copy
             let par_name = parallel_name(name).unwrap();
             // Extract the call (we matched the ref above)
             let IrExprKind::Call { target: CallTarget::Named { name: _ }, args, type_args } = expr.kind else {
@@ -368,14 +370,14 @@ fn rewrite_expr(
 
             if is_pure {
                 IrExprKind::Call {
-                    target: CallTarget::Named { name: par_name.to_string() },
+                    target: CallTarget::Named { name: sym(par_name) },
                     args,
                     type_args,
                 }
             } else {
                 // Not pure — keep original sequential call
                 IrExprKind::Call {
-                    target: CallTarget::Named { name: name.to_string() },
+                    target: CallTarget::Named { name: orig_name },
                     args,
                     type_args,
                 }
@@ -507,7 +509,7 @@ fn rewrite_expr(
 
 fn rewrite_stmts(
     stmts: Vec<IrStmt>,
-    effect_fns: &std::collections::HashSet<String>,
+    effect_fns: &std::collections::HashSet<Sym>,
     mutable_vars: &std::collections::HashSet<VarId>,
 ) -> Vec<IrStmt> {
     stmts.into_iter().map(|s| {

@@ -141,7 +141,7 @@ impl<'a> IrVisitor for Verifier<'a> {
                         // (may be stdlib/builtin resolved at codegen time).
                         // This is intentionally lenient to avoid false positives.
                         let is_constructor = name.chars().next().map_or(false, |c| c.is_uppercase());
-                        if !is_constructor && self.known_functions.contains(name) {
+                        if !is_constructor && self.known_functions.contains::<str>(name) {
                             // Valid: known user function — no error
                         }
                         // else: could be stdlib, builtin, or test function — skip
@@ -149,8 +149,8 @@ impl<'a> IrVisitor for Verifier<'a> {
                     CallTarget::Module { module, func } => {
                         // Only validate user modules (present in known_module_functions).
                         // Stdlib modules are not in known_module_functions and are handled by codegen.
-                        if let Some(funcs) = self.known_module_functions.get(module) {
-                            if !funcs.contains(func) {
+                        if let Some(funcs) = self.known_module_functions.get::<str>(module) {
+                            if !funcs.contains::<str>(func) {
                                 self.err(format!("call to unknown function '{}.{}'", module, func), expr.span);
                             }
                         }
@@ -224,18 +224,18 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
     // Build known function sets for CallTarget validation
     let mut known_functions = std::collections::HashSet::new();
     for f in &program.functions {
-        known_functions.insert(f.name.clone());
+        known_functions.insert(f.name.to_string());
     }
     for m in &program.modules {
         for f in &m.functions {
-            known_functions.insert(f.name.clone());
+            known_functions.insert(f.name.to_string());
         }
     }
 
     let mut known_module_functions: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
     for m in &program.modules {
-        let funcs: std::collections::HashSet<String> = m.functions.iter().map(|f| f.name.clone()).collect();
-        known_module_functions.insert(m.name.clone(), funcs);
+        let funcs: std::collections::HashSet<String> = m.functions.iter().map(|f| f.name.to_string()).collect();
+        known_module_functions.insert(m.name.to_string(), funcs);
     }
 
     // Verify type declarations
@@ -316,7 +316,7 @@ fn verify_function(
 
 fn verify_type_decls(decls: &[IrTypeDecl], module: &str, errors: &mut Vec<IrVerifyError>) {
     for decl in decls {
-        let loc = if module.is_empty() { decl.name.clone() } else { format!("{}.{}", module, decl.name) };
+        let loc = if module.is_empty() { decl.name.to_string() } else { format!("{}.{}", module, decl.name) };
         match &decl.kind {
             IrTypeDeclKind::Record { fields } => {
                 let mut seen = std::collections::HashSet::new();

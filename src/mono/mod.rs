@@ -103,7 +103,7 @@ pub fn monomorphize(program: &mut IrProgram) {
     // those with no call sites (unused generics still carry TypeVars)
     let mono_fn_names: std::collections::HashSet<String> = all_instances.keys().map(|(name, _)| name.clone()).collect();
     program.functions.retain(|f| {
-        if mono_fn_names.contains(&f.name) { return false; } // replaced by specialized
+        if mono_fn_names.contains::<str>(&f.name) { return false; } // replaced by specialized
         // Also remove generic functions with no instances (unused)
         if f.generics.as_ref().map_or(false, |g| !g.is_empty()) && !f.is_test {
             return false;
@@ -222,7 +222,7 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
         // Include all generic functions, even those with no param-based TypeVars
         // (e.g., stack_new[T]() — no params, but has generics and type_args at call site)
         if !bounded.is_empty() || func.generics.as_ref().map_or(false, |g| !g.is_empty()) {
-            result.insert(func.name.clone(), bounded);
+            result.insert(func.name.to_string(), bounded);
         }
     }
     result

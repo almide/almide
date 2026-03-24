@@ -83,7 +83,7 @@ fn resolve_stmts(stmts: &mut Vec<IrStmt>, vt: &VarTable, seen: &mut HashMap<Stri
                 // Recurse into value first
                 resolve_stmts_block(value, vt, seen);
 
-                let name = vt.get(*var).name.clone();
+                let name = vt.get(*var).name.to_string();
                 if seen.contains_key(&name) {
                     // Shadow: convert Bind → Assign (reuse existing variable)
                     let prev_var = seen[&name];

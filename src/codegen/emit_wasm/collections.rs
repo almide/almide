@@ -8,7 +8,7 @@ use super::values;
 impl FuncCompiler<'_> {
     /// Emit a record/variant construction: allocate memory, store fields.
     /// For variants (detected via name + type), prepends a tag i32 before fields.
-    pub(super) fn emit_record(&mut self, name: Option<&str>, fields: &[(String, IrExpr)], result_ty: &Ty) {
+    pub(super) fn emit_record(&mut self, name: Option<&str>, fields: &[(crate::intern::Sym, IrExpr)], result_ty: &Ty) {
         // Check if this is a variant constructor
         let tag = self.resolve_variant_tag(name, result_ty);
         let tag_size: u32 = if tag.is_some() { 4 } else { 0 };
@@ -143,7 +143,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Emit spread record: copy base, then overwrite specified fields.
-    pub(super) fn emit_spread_record(&mut self, base: &IrExpr, overrides: &[(String, IrExpr)], result_ty: &Ty) {
+    pub(super) fn emit_spread_record(&mut self, base: &IrExpr, overrides: &[(crate::intern::Sym, IrExpr)], result_ty: &Ty) {
         let all_fields = self.extract_record_fields(result_ty);
         let tag_offset = self.variant_tag_offset(result_ty);
         let total_size = tag_offset + values::record_size(&all_fields);

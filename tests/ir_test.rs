@@ -477,7 +477,7 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
     let mut param_vars = Vec::new();
 
     for (name, span, is_param) in &vars {
-        let id = var_table.alloc(name.to_string(), Ty::Int, Mutability::Let, *span);
+        let id = var_table.alloc(name.to_string().into(), Ty::Int, Mutability::Let, *span);
         if *is_param {
             param_vars.push(id);
         } else {

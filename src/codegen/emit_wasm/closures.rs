@@ -326,7 +326,7 @@ fn scan_closures_expr(
             // to match emit order (user fn bodies first, then lambda bodies).
         }
         IrExprKind::FnRef { name } => {
-            fn_refs.insert(name.clone());
+            fn_refs.insert(name.to_string());
         }
         IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
             for stmt in stmts {

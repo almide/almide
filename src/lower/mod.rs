@@ -100,7 +100,7 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn define_var(&mut self, name: &str, ty: Ty, mutability: Mutability, span: Option<ast::Span>) -> VarId {
-        let id = self.var_table.alloc(name.to_string(), ty, mutability, span);
+        let id = self.var_table.alloc(sym(name), ty, mutability, span);
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.to_string(), id);
         }
@@ -311,9 +311,9 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
     functions.extend(auto_derived);
 
     // Collect effect fn names from TypeEnv (user-defined + stdlib)
-    let effect_fn_names: std::collections::HashSet<String> = env.functions.iter()
+    let effect_fn_names: std::collections::HashSet<crate::intern::Sym> = env.functions.iter()
         .filter(|(_, sig)| sig.is_effect)
-        .map(|(name, _)| name.to_string())
+        .map(|(name, _)| *name)
         .collect();
 
     let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default() };
@@ -321,7 +321,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
         let arity = td.generics.as_ref().map_or(0, |g| g.len());
-        program.type_registry.register_user_type(&td.name, arity);
+        program.type_registry.register_user_type(&*td.name, arity);
     }
 
     compute_use_counts(&mut program); // After auto-derive so derived functions get correct use_counts
@@ -338,8 +338,8 @@ pub fn lower_module(
 ) -> IrModule {
     let ir_prog = lower_program(prog, expr_types, env);
     IrModule {
-        name: name.to_string(),
-        versioned_name,
+        name: sym(name),
+        versioned_name: versioned_name.map(|v| sym(&v)),
         type_decls: ir_prog.type_decls,
         functions: ir_prog.functions,
         top_lets: ir_prog.top_lets,
@@ -376,7 +376,7 @@ fn lower_fn(
         let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, span.clone());
         let default = p.default.as_ref().map(|d| Box::new(lower_expr(ctx, d)));
         ir_params.push(IrParam {
-            var, ty: ty.clone(), name: p.name.clone(),
+            var, ty: ty.clone(), name: sym(&p.name),
             borrow: ParamBorrow::Own, open_record: None, default,
         });
     }
@@ -400,7 +400,7 @@ fn lower_fn(
     };
 
     IrFunction {
-        name: name.to_string(), params: ir_params, ret_ty, body: ir_body,
+        name: sym(name), params: ir_params, ret_ty, body: ir_body,
         is_effect, is_async, is_test: false,
         generics: generics.clone(), extern_attrs: extern_attrs.to_vec(), visibility: vis,
     }
@@ -411,7 +411,7 @@ fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
     let ir_body = lower_expr(ctx, body);
     ctx.pop_scope();
     IrFunction {
-        name: name.to_string(), params: vec![], ret_ty: Ty::Unit, body: ir_body,
+        name: sym(name), params: vec![], ret_ty: Ty::Unit, body: ir_body,
         is_effect: true, is_async: false, is_test: true,
         generics: None, extern_attrs: vec![], visibility: IrVisibility::Public,
     }

@@ -55,7 +55,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                 CallTarget::Named { ref name } => {
                     // assert / assert_eq / assert_ne → RustMacro
                     if name == "assert" || name == "assert_eq" || name == "assert_ne" {
-                        return IrExpr { kind: IrExprKind::RustMacro { name: name.clone(), args }, ty, span };
+                        return IrExpr { kind: IrExprKind::RustMacro { name: *name, args }, ty, span };
                     }
                     // assert_some → assert!(x.is_some())
                     if name == "assert_some" {
@@ -84,7 +84,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                     // value_* → almide_rt_value_*
                     if name.starts_with("value_") {
                         return IrExpr { kind: IrExprKind::Call {
-                            target: CallTarget::Named { name: format!("almide_rt_{}", name) },
+                            target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
                             args, type_args,
                         }, ty, span };
                     }
@@ -98,7 +98,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         let primitives = ["string", "int", "float", "bool"];
                         if primitives.contains(&type_name) {
                             return IrExpr { kind: IrExprKind::Call {
-                                target: CallTarget::Named { name: format!("almide_rt_{}", name) },
+                                target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
                                 args, type_args,
                             }, ty, span };
                         } else {
@@ -107,7 +107,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             let func_ref = format!("{}_{}", type_name, codec_op);
                             let mut new_args = args;
                             new_args.push(IrExpr {
-                                kind: IrExprKind::FnRef { name: func_ref },
+                                kind: IrExprKind::FnRef { name: func_ref.into() },
                                 ty: Ty::Unknown,
                                 span: None,
                             });
@@ -125,7 +125,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                     // Other __ prefixed → almide_rt_
                     if name.starts_with("__") {
                         return IrExpr { kind: IrExprKind::Call {
-                            target: CallTarget::Named { name: format!("almide_rt_{}", name) },
+                            target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
                             args, type_args,
                         }, ty, span };
                     }
@@ -133,7 +133,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                     if name.contains('.') {
                         let flat = name.replace('.', "_");
                         return IrExpr { kind: IrExprKind::Call {
-                            target: CallTarget::Named { name: flat },
+                            target: CallTarget::Named { name: flat.into() },
                             args, type_args,
                         }, ty, span };
                     }
@@ -148,20 +148,20 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         || method.ends_with(".encode") || method.ends_with(".decode")
                     {
                         let flat_method = method.replace('.', "_");
-                        let call_name = if method.contains('.') {
+                        let call_name: String = if method.contains('.') {
                             flat_method
                         } else {
                             let type_name = match &object.ty {
-                                Ty::Named(n, _) => n.clone(),
-                                Ty::Variant { name, .. } => name.clone(),
-                                _ => "Unknown".into(),
+                                Ty::Named(n, _) => n.to_string(),
+                                Ty::Variant { name, .. } => name.to_string(),
+                                _ => "Unknown".to_string(),
                             };
                             format!("{}_{}", type_name, method)
                         };
                         let mut call_args = vec![*object];
                         call_args.extend(args);
                         return IrExpr { kind: IrExprKind::Call {
-                            target: CallTarget::Named { name: call_name },
+                            target: CallTarget::Named { name: call_name.into() },
                             args: call_args, type_args,
                         }, ty, span };
                     }
@@ -172,7 +172,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         let mut call_args = vec![*object];
                         call_args.extend(args);
                         return IrExpr { kind: IrExprKind::Call {
-                            target: CallTarget::Named { name: flat },
+                            target: CallTarget::Named { name: flat.into() },
                             args: call_args, type_args,
                         }, ty, span };
                     }

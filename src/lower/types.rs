@@ -12,7 +12,7 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
         ast::TypeExpr::Record { fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name.clone(), ty: resolve_type_expr(&f.ty), default, alias: f.alias.clone() }
+                IrFieldDecl { name: sym(&f.name), ty: resolve_type_expr(&f.ty), default, alias: f.alias.as_ref().map(|a| sym(a)) }
             }).collect();
             IrTypeDeclKind::Record { fields: fs }
         }
@@ -32,22 +32,22 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
         ast::Visibility::Mod => IrVisibility::Mod,
         ast::Visibility::Local => IrVisibility::Private,
     };
-    IrTypeDecl { name: name.to_string(), kind, deriving: deriving.clone(), generics: generics.cloned(), visibility: vis }
+    IrTypeDecl { name: sym(name), kind, deriving: deriving.as_ref().map(|d| d.iter().map(|s| sym(s)).collect()), generics: generics.cloned(), visibility: vis }
 }
 
 fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str) -> IrVariantDecl {
     match case {
-        ast::VariantCase::Unit { name } => IrVariantDecl { name: name.clone(), kind: IrVariantKind::Unit },
+        ast::VariantCase::Unit { name } => IrVariantDecl { name: sym(name), kind: IrVariantKind::Unit },
         ast::VariantCase::Tuple { name, fields } => {
             let tys = fields.iter().map(|f| resolve_type_expr(f)).collect();
-            IrVariantDecl { name: name.clone(), kind: IrVariantKind::Tuple { fields: tys } }
+            IrVariantDecl { name: sym(name), kind: IrVariantKind::Tuple { fields: tys } }
         }
         ast::VariantCase::Record { name, fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name.clone(), ty: resolve_type_expr(&f.ty), default, alias: f.alias.clone() }
+                IrFieldDecl { name: sym(&f.name), ty: resolve_type_expr(&f.ty), default, alias: f.alias.as_ref().map(|a| sym(a)) }
             }).collect();
-            IrVariantDecl { name: name.clone(), kind: IrVariantKind::Record { fields: fs } }
+            IrVariantDecl { name: sym(name), kind: IrVariantKind::Record { fields: fs } }
         }
     }
 }

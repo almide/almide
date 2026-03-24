@@ -45,7 +45,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             }
             // Clone/Deref are now IR nodes (CloneInsertionPass / BoxDerefPass)
         }
-        IrExprKind::FnRef { name } => name.clone(),
+        IrExprKind::FnRef { name } => name.to_string(),
 
         // ── Operators ──
         IrExprKind::BinOp { op, left, right } => {
@@ -214,14 +214,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Record { name, fields } => {
             // Build field strings (explicit + defaults for missing)
             let ctor_name_str = name.as_ref().map(|s| s.as_str()).unwrap_or("");
-            let explicit_names: std::collections::HashSet<&str> = fields.iter().map(|(k, _)| k.as_str()).collect();
+            let explicit_names: std::collections::HashSet<&str> = fields.iter().map(|(k, _)| &**k).collect();
             let mut field_strs: Vec<String> = Vec::new();
             // Render explicit fields
             for (k, v) in fields.iter() {
                 let mut val_str = render_expr(ctx, v);
                 // Box recursive fields (annotation is target-aware — empty for non-Rust)
                 if let Some(cn) = name {
-                    if ctx.ann.boxed_fields.contains(&(cn.clone(), k.clone())) {
+                    if ctx.ann.boxed_fields.contains(&(cn.to_string(), k.to_string())) {
                         val_str = format!("Box::new({})", val_str);
                     }
                 }
@@ -238,7 +238,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 let Some(default_expr) = ctx.ann.default_fields.get(&(ctor_name_str.to_string(), field_name.clone())) else { continue; };
                 let mut val_str = render_expr(ctx, default_expr);
                 let needs_box = name.as_ref()
-                    .map_or(false, |cn| ctx.ann.boxed_fields.contains(&(cn.clone(), field_name.clone())));
+                    .map_or(false, |cn| ctx.ann.boxed_fields.contains(&(cn.to_string(), field_name.clone())));
                 if needs_box { val_str = format!("Box::new({})", val_str); }
                 field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", field_name.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| format!("{}: {}", field_name, val_str)));
@@ -246,7 +246,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let fields_str = field_strs.join(", ");
             // Resolve type name: explicit name, or from expr.ty
             // For record literals, use bare struct name (no generics — Rust infers them)
-            let mut type_name = name.clone().unwrap_or_else(|| {
+            let mut type_name = name.map(|n| n.to_string()).unwrap_or_else(|| {
                 match &expr.ty {
                     Ty::Named(n, _) => n.to_string(),
                     Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
@@ -608,7 +608,7 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
             if name.contains('.') {
                 name.replace('.', "_")
             } else {
-                name.clone()
+                name.to_string()
             }
         }
         CallTarget::Method { object, method } => {

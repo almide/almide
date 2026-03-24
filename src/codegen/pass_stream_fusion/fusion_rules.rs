@@ -196,10 +196,10 @@ pub(super) fn try_fuse_map_filter(expr: IrExpr) -> Option<IrExpr> {
                     if let Some(filter_map_lambda) = compose_map_filter(f, p) {
                         let fm_target = match inner_target {
                             CallTarget::Module { module, .. } => CallTarget::Module {
-                                module: module.clone(), func: "filter_map".to_string(),
+                                module: module.clone(), func: "filter_map".into(),
                             },
                             CallTarget::Named { name } => CallTarget::Named {
-                                name: name.replace("_map", "_filter_map"),
+                                name: name.replace("_map", "_filter_map").into(),
                             },
                             other => other.clone(),
                         };

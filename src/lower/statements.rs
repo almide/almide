@@ -54,7 +54,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
         ast::Stmt::FieldAssign { target, field, value, .. } => {
             let var = ctx.lookup_var(target).unwrap_or(VarId(0));
             let ir_val = lower_expr(ctx, value);
-            IrStmtKind::FieldAssign { target: var, field: field.clone(), value: ir_val }
+            IrStmtKind::FieldAssign { target: var, field: sym(field), value: ir_val }
         }
         ast::Stmt::Guard { cond, else_, .. } => {
             let ir_cond = lower_expr(ctx, cond);

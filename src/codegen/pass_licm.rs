@@ -7,6 +7,7 @@
 //! Target: all targets (target-independent optimization).
 
 use std::collections::HashSet;
+use crate::intern::Sym;
 use crate::ir::*;
 use super::pass::{NanoPass, PassResult, Target};
 
@@ -38,7 +39,7 @@ impl NanoPass for LICMPass {
 
 /// Recursively walk the expression tree looking for loops, hoisting invariants.
 /// Returns true if any hoisting was performed.
-fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<String>) -> bool {
+fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<Sym>) -> bool {
     let mut changed = false;
     match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
@@ -123,7 +124,7 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<String>) -> 
     changed
 }
 
-fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, efns: &HashSet<String>) -> bool {
+fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, efns: &HashSet<Sym>) -> bool {
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
@@ -146,7 +147,7 @@ fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, efns: &HashSet<String>
 /// Given a loop expression (ForIn or While), extract loop-invariant expressions
 /// from its body and return them as `let` binding statements to insert before
 /// the loop. The original expressions in the body are replaced with Var references.
-fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<String>) -> Vec<IrStmt> {
+fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<Sym>) -> Vec<IrStmt> {
     let mut hoisted = Vec::new();
 
     match &mut expr.kind {
@@ -245,7 +246,7 @@ fn extract_invariants_from_stmt(
     loop_defined: &HashSet<VarId>,
     vt: &mut VarTable,
     hoisted: &mut Vec<IrStmt>,
-    efns: &HashSet<String>,
+    efns: &HashSet<Sym>,
 ) {
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } => {
@@ -278,12 +279,12 @@ fn try_hoist_expr(
     loop_defined: &HashSet<VarId>,
     vt: &mut VarTable,
     hoisted: &mut Vec<IrStmt>,
-    efns: &HashSet<String>,
+    efns: &HashSet<Sym>,
 ) {
     // Check if the whole expression is hoistable
     if is_hoistable(expr, loop_defined, efns) {
         let ty = expr.ty.clone();
-        let var = vt.alloc("__licm".to_string(), ty.clone(), Mutability::Let, None);
+        let var = vt.alloc("__licm".into(), ty.clone(), Mutability::Let, None);
         let original = std::mem::replace(expr, IrExpr {
             kind: IrExprKind::Var { id: var },
             ty: ty.clone(),
@@ -366,7 +367,7 @@ fn try_hoist_expr(
 /// 2. It contains no calls to effect functions (side effects)
 /// 3. It is not trivially cheap (skip Var, Lit*, Unit)
 /// 4. It contains no control flow (loops, continue, break, return)
-fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, efns: &HashSet<String>) -> bool {
+fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, efns: &HashSet<Sym>) -> bool {
     if is_trivial(expr) {
         return false;
     }
@@ -470,12 +471,12 @@ fn is_trivial(expr: &IrExpr) -> bool {
 /// Returns true if the expression contains any function call that could have side effects.
 /// Uses the effect_fn_names set populated from TypeEnv during lowering.
 /// Method/Computed calls are conservatively considered effectful.
-fn has_effect_call(expr: &IrExpr, efns: &HashSet<String>) -> bool {
+fn has_effect_call(expr: &IrExpr, efns: &HashSet<Sym>) -> bool {
     match &expr.kind {
         IrExprKind::Call { target, args, .. } => {
             let call_is_effectful = match target {
                 CallTarget::Module { module, func } => {
-                    efns.contains(&format!("{}.{}", module, func))
+                    efns.contains(&crate::intern::sym(&format!("{}.{}", module, func)))
                 }
                 CallTarget::Named { name } => efns.contains(name),
                 // Method/Computed calls are conservatively considered effectful
@@ -547,7 +548,7 @@ fn has_effect_call(expr: &IrExpr, efns: &HashSet<String>) -> bool {
     }
 }
 
-fn has_effect_call_stmt(stmt: &IrStmt, efns: &HashSet<String>) -> bool {
+fn has_effect_call_stmt(stmt: &IrStmt, efns: &HashSet<Sym>) -> bool {
     match &stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {

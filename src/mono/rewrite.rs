@@ -12,16 +12,16 @@ pub(super) fn rewrite_calls(
     instances: &HashMap<MonoKey, HashMap<String, Ty>>,
 ) {
     let fn_param_types: HashMap<String, Vec<Ty>> = program.functions.iter()
-        .filter(|f| bound_fns.contains_key(&f.name))
-        .map(|f| (f.name.clone(), f.params.iter().map(|p| p.ty.clone()).collect()))
+        .filter(|f| bound_fns.contains_key::<str>(&f.name))
+        .map(|f| (f.name.to_string(), f.params.iter().map(|p| p.ty.clone()).collect()))
         .collect();
     let fn_generics: HashMap<String, Vec<String>> = program.functions.iter()
-        .filter(|f| bound_fns.contains_key(&f.name))
-        .filter_map(|f| f.generics.as_ref().map(|gs| (f.name.clone(), gs.iter().map(|g| g.name.clone()).collect())))
+        .filter(|f| bound_fns.contains_key::<str>(&f.name))
+        .filter_map(|f| f.generics.as_ref().map(|gs| (f.name.to_string(), gs.iter().map(|g| g.name.clone()).collect())))
         .collect();
     let fn_ret_types: HashMap<String, Ty> = program.functions.iter()
-        .filter(|f| bound_fns.contains_key(&f.name))
-        .map(|f| (f.name.clone(), f.ret_ty.clone()))
+        .filter(|f| bound_fns.contains_key::<str>(&f.name))
+        .map(|f| (f.name.to_string(), f.ret_ty.clone()))
         .collect();
 
     for func in &mut program.functions {
@@ -78,8 +78,8 @@ fn rewrite_expr_calls(
 
                     if !bindings.is_empty() {
                         let suffix = mangle_suffix(&bindings);
-                        if instances.contains_key(&(name.clone(), suffix.clone())) {
-                            *name = format!("{}__{}", name, suffix);
+                        if instances.contains_key(&(name.to_string(), suffix.clone())) {
+                            *name = format!("{}__{}", name, suffix).into();
                             expr.ty = substitute_ty(&expr.ty, &bindings);
                         }
                     }

@@ -437,16 +437,16 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         match &td.kind {
             crate::ir::IrTypeDeclKind::Record { fields } => {
                 let field_list: Vec<(String, crate::types::Ty)> = fields.iter()
-                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .map(|f| (f.name.to_string(), f.ty.clone()))
                     .collect();
-                emitter.record_fields.insert(td.name.clone(), field_list);
+                emitter.record_fields.insert(td.name.to_string(), field_list);
             }
             crate::ir::IrTypeDeclKind::Variant { cases, .. } => {
                 let mut variant_cases = Vec::new();
                 for (tag, case) in cases.iter().enumerate() {
                     let fields: Vec<(String, crate::types::Ty)> = match &case.kind {
                         crate::ir::IrVariantKind::Record { fields } => {
-                            fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect()
+                            fields.iter().map(|f| (f.name.to_string(), f.ty.clone())).collect()
                         }
                         crate::ir::IrVariantKind::Tuple { fields } => {
                             fields.iter().enumerate()
@@ -456,14 +456,14 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                         crate::ir::IrVariantKind::Unit => vec![],
                     };
                     // Also register each case name in record_fields for field access
-                    emitter.record_fields.insert(case.name.clone(), fields.clone());
+                    emitter.record_fields.insert(case.name.to_string(), fields.clone());
                     variant_cases.push(VariantCase {
-                        name: case.name.clone(),
+                        name: case.name.to_string(),
                         tag: tag as u32,
                         fields,
                     });
                 }
-                emitter.variant_info.insert(td.name.clone(), variant_cases);
+                emitter.variant_info.insert(td.name.to_string(), variant_cases);
             }
             _ => {}
         }
@@ -478,7 +478,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                         for f in fields {
                             if let Some(def) = &f.default {
                                 emitter.default_fields.insert(
-                                    (case.name.clone(), f.name.clone()), def.clone()
+                                    (case.name.to_string(), f.name.to_string()), def.clone()
                                 );
                             }
                         }
@@ -489,7 +489,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 for f in fields {
                     if let Some(def) = &f.default {
                         emitter.default_fields.insert(
-                            (td.name.clone(), f.name.clone()), def.clone()
+                            (td.name.to_string(), f.name.to_string()), def.clone()
                         );
                     }
                 }
@@ -530,16 +530,16 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         let reg_name = if func.is_test {
             format!("__test_{}", func.name)
         } else {
-            func.name.clone()
+            func.name.to_string()
         };
         let func_idx = emitter.register_func(&reg_name, type_idx);
         user_meta.push(type_idx);
         user_func_indices.push(func_idx);
         if func.is_test {
-            test_func_indices.push((func_idx, func.name.clone()));
+            test_func_indices.push((func_idx, func.name.to_string()));
         }
         if func.is_effect {
-            emitter.effect_fns.insert(func.name.clone());
+            emitter.effect_fns.insert(func.name.to_string());
         }
     }
 

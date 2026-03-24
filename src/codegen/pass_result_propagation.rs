@@ -33,7 +33,7 @@ impl NanoPass for ResultPropagationPass {
                 let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                 func.ret_ty = Ty::result(orig, Ty::String);
                 func.body = wrap_tail_in_ok(std::mem::take(&mut func.body));
-                lifted_fns.insert(func.name.clone(), func.ret_ty.clone());
+                lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
             }
         }
         for module in &mut program.modules {
@@ -42,7 +42,7 @@ impl NanoPass for ResultPropagationPass {
                     let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                     func.ret_ty = Ty::result(orig, Ty::String);
                     func.body = wrap_tail_in_ok(std::mem::take(&mut func.body));
-                    lifted_fns.insert(func.name.clone(), func.ret_ty.clone());
+                    lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
                 }
             }
         }
@@ -141,10 +141,10 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
     let span = expr.span;
     let kind = match expr.kind {
         IrExprKind::Call { target, args, type_args } => {
-            let fn_name = match &target {
-                CallTarget::Named { name } => Some(name.clone()),
+            let fn_name: Option<String> = match &target {
+                CallTarget::Named { name } => Some(name.to_string()),
                 CallTarget::Module { module, func } => Some(format!("{}.{}", module, func)),
-                CallTarget::Method { method, .. } => Some(method.clone()),
+                CallTarget::Method { method, .. } => Some(method.to_string()),
                 _ => None,
             };
             let args = args.into_iter().map(|a| update_call_types(a, lifted)).collect();
@@ -241,9 +241,9 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
     match expr.kind {
         IrExprKind::Call { ref target, ref args, .. } => {
             let lifted_ty = match target {
-                CallTarget::Named { name } => lifted.get(name),
+                CallTarget::Named { name } => lifted.get::<str>(name),
                 CallTarget::Module { module, func } => lifted.get(&format!("{}.{}", module, func)),
-                CallTarget::Method { method, .. } => lifted.get(method),
+                CallTarget::Method { method, .. } => lifted.get::<str>(method),
                 _ => None,
             };
             if let Some(result_ty) = lifted_ty {
@@ -257,7 +257,7 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                     kind: IrExprKind::Call {
                         target: CallTarget::Method {
                             object: Box::new(call_with_result_ty),
-                            method: "unwrap".to_string(),
+                            method: "unwrap".into(),
                         },
                         args: vec![],
                         type_args: vec![],

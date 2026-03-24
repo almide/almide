@@ -120,7 +120,7 @@ impl NanoPass for EffectInferencePass {
         for func in &program.functions {
             let direct = collect_direct_effects(&func.body);
             let is_effect = func.is_effect;
-            effect_map.functions.insert(func.name.clone(), FunctionEffects {
+            effect_map.functions.insert(func.name.to_string(), FunctionEffects {
                 direct: direct.clone(),
                 transitive: direct,
                 is_effect,
@@ -387,7 +387,7 @@ fn build_call_graph(program: &IrProgram) -> HashMap<String, HashSet<String>> {
     for func in &program.functions {
         let mut callees = HashSet::new();
         collect_callees(&func.body, &mut callees);
-        graph.insert(func.name.clone(), callees);
+        graph.insert(func.name.to_string(), callees);
     }
 
     for module in &program.modules {
@@ -407,7 +407,7 @@ fn collect_callees(expr: &IrExpr, callees: &mut HashSet<String>) {
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
             // Skip runtime functions — they're stdlib, not user functions
             if !name.starts_with("almide_rt_") {
-                callees.insert(name.clone());
+                callees.insert(name.to_string());
             }
             for arg in args {
                 collect_callees(arg, callees);

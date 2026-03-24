@@ -309,7 +309,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
 
     // Allocate a result variable
     let result_var = var_table.alloc(
-        "__tco_result".to_string(),
+        "__tco_result".into(),
         ret_ty.clone(),
         Mutability::Var,
         None,
@@ -318,7 +318,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
     // Allocate temporaries for each param (to avoid order-dependent assignment)
     let temps: Vec<(VarId, Ty)> = func.params.iter().map(|p| {
         let tmp = var_table.alloc(
-            format!("__tco_tmp_{}", p.name),
+            format!("__tco_tmp_{}", p.name).into(),
             p.ty.clone(),
             Mutability::Let,
             None,

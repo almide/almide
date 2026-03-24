@@ -36,7 +36,7 @@ impl NanoPass for StdlibLoweringPass {
         // Resolve remaining bare UFCS calls in module bodies (checker doesn't fully type them)
         for module in &mut program.modules {
             let sibling_names: Vec<String> = module.functions.iter()
-                .map(|f| f.name.clone())
+                .map(|f| f.name.to_string())
                 .collect();
             for func in &mut module.functions {
                 func.body = resolve_unresolved_ufcs(std::mem::take(&mut func.body), &sibling_names);
@@ -48,9 +48,9 @@ impl NanoPass for StdlibLoweringPass {
         // Prefix intra-module Named calls to match renamed definitions
         for module in &mut program.modules {
             let sibling_names: Vec<String> = module.functions.iter()
-                .map(|f| f.name.clone())
+                .map(|f| f.name.to_string())
                 .collect();
-            let mod_name = module.name.clone();
+            let mod_name = module.name.to_string();
             for func in &mut module.functions {
                 func.body = prefix_intra_module_calls(std::mem::take(&mut func.body), &mod_name, &sibling_names);
             }
@@ -99,7 +99,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             // Build the Named call
             let call = IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Named { name: rt_name },
+                    target: CallTarget::Named { name: rt_name.into() },
                     args: decorated_args,
                     type_args,
                 },
@@ -124,7 +124,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             call_args.extend(args);
                             let module_call = IrExpr {
                                 kind: IrExprKind::Call {
-                                    target: CallTarget::Module { module: module.to_string(), func: method },
+                                    target: CallTarget::Module { module: module.to_string().into(), func: method },
                                     args: call_args, type_args,
                                 },
                                 ty: ty.clone(), span,
@@ -149,7 +149,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         call_args.extend(args);
                         let module_call = IrExpr {
                             kind: IrExprKind::Call {
-                                target: CallTarget::Module { module: mod_name.to_string(), func: func_name.to_string() },
+                                target: CallTarget::Module { module: mod_name.into(), func: func_name.into() },
                                 args: call_args, type_args,
                             },
                             ty: ty.clone(), span,
@@ -309,7 +309,7 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
         // and NOT a sibling module function
         IrExprKind::Call { target: CallTarget::Named { ref name }, ref args, .. }
             if !args.is_empty()
-            && !siblings.contains(name)
+            && !siblings.iter().any(|s| s == &**name)
             && !crate::stdlib::resolve_ufcs_candidates(name).is_empty() =>
         {
             let IrExprKind::Call { target: CallTarget::Named { name }, args, type_args } = expr.kind else { unreachable!() };
@@ -320,7 +320,7 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
             if let Some(module) = module {
                 let module_call = IrExpr {
                     kind: IrExprKind::Call {
-                        target: CallTarget::Module { module: module.to_string(), func: name },
+                        target: CallTarget::Module { module: module.to_string().into(), func: name },
                         args, type_args,
                     },
                     ty: ty.clone(), span,
@@ -346,7 +346,7 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
                 call_args.extend(args);
                 let module_call = IrExpr {
                     kind: IrExprKind::Call {
-                        target: CallTarget::Module { module: module.to_string(), func: method },
+                        target: CallTarget::Module { module: module.to_string().into(), func: method },
                         args: call_args, type_args,
                     },
                     ty: ty.clone(), span,
@@ -626,22 +626,22 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
 
     let kind = match expr.kind {
         IrExprKind::Call { target: CallTarget::Named { ref name }, .. }
-            if siblings.contains(name) =>
+            if siblings.iter().any(|s| s == &**name) =>
         {
             let IrExprKind::Call { target: CallTarget::Named { name }, args, type_args } = expr.kind else { unreachable!() };
             let sanitized = name.replace(' ', "_").replace('-', "_").replace('.', "_");
             let prefixed = format!("almide_rt_{}_{}", mod_name, sanitized);
             let args = args.into_iter().map(|a| prefix_intra_module_calls(a, mod_name, siblings)).collect();
             IrExprKind::Call {
-                target: CallTarget::Named { name: prefixed },
+                target: CallTarget::Named { name: prefixed.into() },
                 args,
                 type_args,
             }
         }
-        IrExprKind::FnRef { ref name } if siblings.contains(name) => {
+        IrExprKind::FnRef { ref name } if siblings.iter().any(|s| s == &**name) => {
             let IrExprKind::FnRef { name } = expr.kind else { unreachable!() };
             let sanitized = name.replace(' ', "_").replace('-', "_").replace('.', "_");
-            IrExprKind::FnRef { name: format!("almide_rt_{}_{}", mod_name, sanitized) }
+            IrExprKind::FnRef { name: format!("almide_rt_{}_{}", mod_name, sanitized).into() }
         }
         // Recurse into sub-expressions
         IrExprKind::Call { target, args, type_args } => {
