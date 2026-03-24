@@ -309,7 +309,13 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
     let auto_derived = generate_auto_derives(&mut ctx, &type_decls, &functions);
     functions.extend(auto_derived);
 
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_map: Default::default(), codegen_annotations: Default::default() };
+    // Collect effect fn names from TypeEnv (user-defined + stdlib)
+    let effect_fn_names: std::collections::HashSet<String> = env.functions.iter()
+        .filter(|(_, sig)| sig.is_effect)
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
