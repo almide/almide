@@ -55,7 +55,6 @@ pub enum TypeExpr {
     OpenRecord { fields: Vec<FieldType> },
     Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr> },
     Tuple { elements: Vec<TypeExpr> },
-    Newtype { inner: Box<TypeExpr> },
     Variant { cases: Vec<VariantCase> },
     Union { members: Vec<TypeExpr> },
 }

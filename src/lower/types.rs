@@ -102,7 +102,6 @@ pub(super) fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
             }).collect();
             Ty::Variant { name: sym(""), cases: cs }
         },
-        ast::TypeExpr::Newtype { inner } => resolve_type_expr(inner),
         ast::TypeExpr::Union { members } => Ty::union(members.iter().map(resolve_type_expr).collect()),
     }
 }

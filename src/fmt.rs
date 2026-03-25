@@ -193,7 +193,6 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         TypeExpr::Tuple { elements } => {
             out.push('('); comma_sep(out, elements, |out, e| fmt_type(out, e, depth)); out.push(')');
         }
-        TypeExpr::Newtype { inner } => fmt_type(out, inner, depth),
         TypeExpr::Union { members } => {
             for (i, m) in members.iter().enumerate() {
                 if i > 0 { out.push_str(" | "); }

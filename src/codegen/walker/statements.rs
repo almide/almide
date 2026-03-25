@@ -13,7 +13,28 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         IrStmtKind::Bind { var, ty, value, mutability } => {
             let name_s = ctx.var_name(*var).to_string();
             // Erase Fn types in bindings (Rust can't write `impl Fn` in let position; TS gets `any`)
-            let ty = if matches!(ty, Ty::Fn { .. }) { &Ty::Unknown } else { ty };
+            // Also resolve aliases first — `type Handler = Fn(String) -> String` should erase too
+            let resolved_owned;
+            let ty = if matches!(ty, Ty::Fn { .. }) {
+                &Ty::Unknown
+            } else if let Ty::Named(name, args) = ty {
+                if args.is_empty() {
+                    if let Some(target) = ctx.type_aliases.get(name) {
+                        if matches!(target, Ty::Fn { .. }) {
+                            &Ty::Unknown
+                        } else {
+                            resolved_owned = target.clone();
+                            &resolved_owned
+                        }
+                    } else {
+                        ty
+                    }
+                } else {
+                    ty
+                }
+            } else {
+                ty
+            };
             // Erase named TypeVars (K, V, B) — not in scope for bindings
             let ty_owned;
             let ty = if ty_has_named_typevar(ty) {

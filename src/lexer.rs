@@ -23,7 +23,7 @@ pub enum TokenType {
     If, Then, Else, Match, Ok, Err, Some, None, Do, Todo,
     True, False, Not, And, Or,
     Strict, Pub, Effect, Test,
-    Guard, Break, Continue, While, Local, Mod, Newtype, Fan,
+    Guard, Break, Continue, While, Local, Mod, Fan,
     // Delimiters
     LParen, RParen, LBrace, RBrace, LBracket, RBracket,
     LAngle, RAngle,
@@ -469,7 +469,6 @@ fn keyword(s: &str) -> Option<TokenType> {
         "guard" => Some(TokenType::Guard), "break" => Some(TokenType::Break),
         "continue" => Some(TokenType::Continue), "while" => Some(TokenType::While),
         "local" => Some(TokenType::Local), "mod" => Some(TokenType::Mod),
-        "newtype" => Some(TokenType::Newtype),
         "fan" => Some(TokenType::Fan),
         _ => None,
     }

@@ -118,7 +118,6 @@ fn lex_all_keywords() {
         ("strict", TokenType::Strict),
         ("local", TokenType::Local),
         ("mod", TokenType::Mod),
-        ("newtype", TokenType::Newtype),
     ];
     for (kw, expected) in keywords {
         let toks = token_types(kw);

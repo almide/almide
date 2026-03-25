@@ -21,7 +21,6 @@
     test_keyword: $ => 'test',
     import_keyword: $ => 'import',
     module_keyword: $ => 'module',
-    newtype_keyword: $ => 'newtype',
 
     // flow keywords
     break_keyword: $ => 'break',
@@ -74,7 +73,6 @@
     //   $.match_keyword,
     //   $.mod_keyword,
     //   $.module_keyword,
-    //   $.newtype_keyword,
     //   $.none_keyword,
     //   $.not_keyword,
     //   $.ok_keyword,
