@@ -422,6 +422,9 @@ macro_rules! wasm {
     (@emit $f:expr, memory_grow(0); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::MemoryGrow(0)); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, memory_copy; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 }); wasm!(@emit $f, $($rest)*)
+    };
 }
 
 pub(super) use wasm;

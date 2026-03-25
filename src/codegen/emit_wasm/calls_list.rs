@@ -961,6 +961,132 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(list_ptr);
             }
+            "push" => {
+                // push(xs, v) → Unit. Mutates xs in place by reallocating.
+                // args[0] = xs (var), args[1] = value
+                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_size = values::byte_size(&elem_ty);
+                let vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
+                let old_ptr = self.scratch.alloc_i32();
+                let old_len = self.scratch.alloc_i32();
+                let new_ptr = self.scratch.alloc_i32();
+                let val_scratch = self.scratch.alloc(vt);
+
+                // Evaluate value first (before reading xs, in case of side effects)
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { local_set(val_scratch); });
+
+                // Read xs pointer
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(old_ptr); });
+                wasm!(self.func, { local_get(old_ptr); i32_load(0); local_set(old_len); });
+
+                // Allocate new list: 4 + (old_len + 1) * elem_size
+                wasm!(self.func, {
+                    i32_const(4);
+                    local_get(old_len); i32_const(1); i32_add;
+                    i32_const(elem_size as i32); i32_mul;
+                    i32_add;
+                    call(self.emitter.rt.alloc);
+                    local_set(new_ptr);
+                });
+
+                // Write new len
+                wasm!(self.func, {
+                    local_get(new_ptr);
+                    local_get(old_len); i32_const(1); i32_add;
+                    i32_store(0);
+                });
+
+                // Copy old data: memory.copy(new_ptr+4, old_ptr+4, old_len * elem_size)
+                wasm!(self.func, {
+                    local_get(new_ptr); i32_const(4); i32_add;
+                    local_get(old_ptr); i32_const(4); i32_add;
+                    local_get(old_len); i32_const(elem_size as i32); i32_mul;
+                    memory_copy;
+                });
+
+                // Write new element at new_ptr + 4 + old_len * elem_size
+                wasm!(self.func, {
+                    local_get(new_ptr); i32_const(4); i32_add;
+                    local_get(old_len); i32_const(elem_size as i32); i32_mul;
+                    i32_add;
+                    local_get(val_scratch);
+                });
+                match vt {
+                    ValType::I64 => { wasm!(self.func, { i64_store(0); }); }
+                    ValType::F64 => { wasm!(self.func, { f64_store(0); }); }
+                    _ => { wasm!(self.func, { i32_store(0); }); }
+                }
+
+                // Write back to var: xs = new_ptr
+                if let crate::ir::IrExprKind::Var { id } = &args[0].kind {
+                    if let Some(&local_idx) = self.var_map.get(&id.0) {
+                        wasm!(self.func, { local_get(new_ptr); local_set(local_idx); });
+                    }
+                }
+
+                self.scratch.free(val_scratch, vt);
+                self.scratch.free_i32(new_ptr);
+                self.scratch.free_i32(old_len);
+                self.scratch.free_i32(old_ptr);
+            }
+            "pop" => {
+                // pop(xs) → Option[A]. Removes last element, mutates xs.
+                // Option layout: 0 = none, non-zero ptr = some (payload at ptr)
+                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_size = values::byte_size(&elem_ty);
+                let list_ptr = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(list_ptr); });
+                wasm!(self.func, { local_get(list_ptr); i32_load(0); local_set(len); });
+
+                // if len == 0 → none (0)
+                // else → decrement len, copy last element into alloc'd payload
+                wasm!(self.func, {
+                    local_get(len); i32_eqz;
+                    if_i32;
+                      i32_const(0); // none
+                    else_;
+                });
+
+                // Decrement len in place
+                wasm!(self.func, {
+                    local_get(list_ptr);
+                    local_get(len); i32_const(1); i32_sub;
+                    i32_store(0);
+                });
+
+                // Allocate payload (no tag — Option uses ptr==0 for none)
+                wasm!(self.func, {
+                    i32_const(elem_size as i32);
+                    call(self.emitter.rt.alloc);
+                    local_set(result);
+                    // Copy last element: dst=result, src=list+4+(len-1)*elem_size
+                    local_get(result);
+                    local_get(list_ptr); i32_const(4); i32_add;
+                    local_get(len); i32_const(1); i32_sub;
+                    i32_const(elem_size as i32); i32_mul; i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                self.emit_store_at(&elem_ty, 0);
+                wasm!(self.func, {
+                      local_get(result);
+                    end;
+                });
+
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(list_ptr);
+            }
+            "clear" => {
+                // clear(xs) → Unit. Sets len to 0 in place.
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_const(0); i32_store(0); });
+            }
             _ => return self.emit_list_closure_call(method, args),
         }
         true
