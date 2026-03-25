@@ -8,14 +8,6 @@ use super::FuncCompiler;
 use super::values;
 use super::wasm_macro::wasm;
 
-#[allow(dead_code)]
-fn has_typevar_in_ty(ty: &Ty) -> bool {
-    ty.any_child_recursive(&|t| {
-        matches!(t, Ty::TypeVar(_))
-            || matches!(t, Ty::Named(n, args) if args.is_empty() && n.len() <= 2 && n.chars().next().map_or(false, |c| c.is_uppercase()))
-    })
-}
-
 impl FuncCompiler<'_> {
     /// Emit a for...in loop. Currently supports Range iterables only.
     pub(super) fn emit_for_in(&mut self, var: crate::ir::VarId, var_tuple: Option<&[crate::ir::VarId]>, iterable: &IrExpr, body: &[IrStmt]) {

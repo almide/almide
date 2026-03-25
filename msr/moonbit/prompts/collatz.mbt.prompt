@@ -1,0 +1,12 @@
+fn steps(n : Int) -> Result[Int, String] {
+  abort("todo")
+}
+
+test "zero steps for one" { assert_eq!(steps(1), Ok(0)) }
+test "divide if even" { assert_eq!(steps(16), Ok(4)) }
+test "even and odd steps" { assert_eq!(steps(12), Ok(9)) }
+test "large number" { assert_eq!(steps(1000000), Ok(152)) }
+test "zero is error" { assert_eq!(steps(0), Err("Only positive integers are allowed")) }
+test "negative is error" { assert_eq!(steps(-1), Err("Only positive integers are allowed")) }
+test "reach one from two" { assert_eq!(steps(2), Ok(1)) }
+test "reach one from three" { assert_eq!(steps(3), Ok(7)) }

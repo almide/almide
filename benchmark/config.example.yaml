@@ -1,0 +1,35 @@
+# Benchmark configuration
+# Copy to config.yaml and fill in your API key
+
+anthropic:
+  api_key: "sk-ant-YOUR-KEY-HERE"  # or set ANTHROPIC_API_KEY env var
+
+defaults:
+  model: "claude-sonnet-4-6"
+  max_tokens: 4096
+  temperature: 0.0
+  trials: 10
+  timeout: 30  # seconds per compile+test
+
+# Languages to benchmark (almide, python, ts)
+languages:
+  - almide
+  - python
+  - ts
+
+# Problems to include (directory names under problems/)
+problems:
+  - pangram
+  - calculator
+  - config-merger
+
+# Almide-specific settings
+almide:
+  # Path to the almide binary (default: "almide" from PATH)
+  binary: "almide"
+  # Include cheatsheet in prompts
+  include_cheatsheet: true
+
+# FLE (Fix-Loop Efficiency) settings
+fle:
+  max_attempts: 5  # maximum fix attempts per trial

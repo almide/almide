@@ -342,19 +342,19 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 `int.to_string(n)`, `int.to_hex(n)`, `int.parse(s)` → `Result[Int, String]`, `int.parse_hex(s)` → `Result[Int, String]`, `int.abs(n)`, `int.min(a, b)`, `int.max(a, b)`, `int.band(a, b)`, `int.bor(a, b)`, `int.bxor(a, b)`, `int.bshl(a, n)`, `int.bshr(a, n)`, `int.bnot(a)`, `int.wrap_add(a, b, bits)`, `int.wrap_mul(a, b, bits)`, `int.rotate_right(a, n, bits)`, `int.rotate_left(a, n, bits)`, `int.to_u32(a)`, `int.to_u8(a)`
 `float.to_string(n)`, `float.to_int(n)`, `float.from_int(n)`, `float.round(n)`, `float.floor(n)`, `float.ceil(n)`, `float.abs(n)`, `float.sqrt(n)`, `float.parse(s)` → `Result[Float, String]`
 
-### fs (auto-imported, effect fns)
+### fs (requires `import fs`, effect fns)
 `fs.read_text(path)`, `fs.read_bytes(path)`, `fs.read_lines(path)`, `fs.write(path, content)`, `fs.write_bytes(path, bytes)`, `fs.append(path, content)`, `fs.mkdir_p(path)`, `fs.exists?(path)` → `Bool`, `fs.is_dir?(path)` → `Bool`, `fs.is_file?(path)` → `Bool`, `fs.remove(path)`, `fs.list_dir(path)`, `fs.copy(src, dst)`, `fs.rename(src, dst)`
 
-### path (auto-imported)
+### path (requires `import path`)
 `path.join(base, child)`, `path.dirname(p)`, `path.basename(p)`, `path.extension(p)` → `Option[String]`, `path.is_absolute?(p)` → `Bool`
 
-### env (auto-imported, effect fns)
+### env (requires `import env`, effect fns)
 `env.unix_timestamp()` → `Int`, `env.millis()` → `Int`, `env.args()` → `List[String]`, `env.get(name)` → `Option[String]`, `env.set(name, value)`, `env.cwd()` → `Result[String, String]`, `env.sleep_ms(ms)`
 
-### process (auto-imported, effect fns)
+### process (requires `import process`, effect fns)
 `process.exec(cmd, args)` → `Result[String, String]`, `process.exec_status(cmd, args)` → `Result[{code: Int, stdout: String, stderr: String}, String]`, `process.exit(code)`, `process.stdin_lines()` → `Result[List[String], String]`
 
-### io (auto-imported, effect fns)
+### io (requires `import io`, effect fns)
 `io.read_line()` → `String`, `io.print(s)` (no newline), `io.read_all()` → `String`
 
 ### json (requires `import json`)

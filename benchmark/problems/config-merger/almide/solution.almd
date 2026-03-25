@@ -1,0 +1,83 @@
+fn parse_config(content: String) -> Result[List[List[String]], String] = {
+  if string.len(content) == 0 then ok([])
+  else {
+    let lines = string.split(content, "\n");
+    let indexed = list.fold(lines, [], (acc, line) => {
+      let idx = list.len(acc) + 1;
+      acc + [[int.to_string(idx), line]]
+    });
+    list.fold(indexed, ok([]), (acc, entry) => {
+      match acc {
+        err(e) => err(e),
+        ok(pairs) => {
+          let line_num = match list.get(entry, 0) { some(v) => v, none => "0" };
+          let line = match list.get(entry, 1) { some(v) => v, none => "" };
+          let trimmed = string.trim(line);
+          if trimmed == "" then ok(pairs)
+          else if string.starts_with(trimmed, "#") then ok(pairs)
+          else if string.contains(trimmed, "=") then {
+            let parts = string.split(trimmed, "=");
+            let key = match list.get(parts, 0) { some(v) => v, none => "" };
+            if key == "" then err("line ${line_num}: empty key")
+            else {
+              let indexed_parts = list.fold(parts, [], (a, p) => a + [[int.to_string(list.len(a)), p]]);
+              let rest = list.filter(indexed_parts, (ip) => {
+                match list.get(ip, 0) { some(v) => v != "0", none => false }
+              });
+              let rest_vals = list.map(rest, (ip) => match list.get(ip, 1) { some(v) => v, none => "" });
+              let value = string.join(rest_vals, "=");
+              let existing_keys = list.map(pairs, (p) => match list.get(p, 0) { some(v) => v, none => "" });
+              if list.contains(existing_keys, key) then err("line ${line_num}: duplicate key: ${key}")
+              else ok(pairs + [[key, value]])
+            }
+          }
+          else err("line ${line_num}: missing '='")
+        }
+      }
+    })
+  }
+}
+
+fn merge_configs(base: List[List[String]], overlay: List[List[String]]) -> List[List[String]] = {
+  let overlay_keys = list.map(overlay, (p) => match list.get(p, 0) { some(v) => v, none => "" });
+  let overlay_for_find = overlay;
+  let overlay_for_filter = overlay_for_find;
+  let merged_base = list.map(base, (pair) => {
+    let key = match list.get(pair, 0) { some(v) => v, none => "" };
+    if list.contains(overlay_keys, key) then {
+      match list.find(overlay_for_find, (op) => match list.get(op, 0) { some(v) => v == key, none => false }) {
+        some(found) => found,
+        none => pair
+      }
+    } else pair
+  });
+  let base_keys = list.map(base, (p) => match list.get(p, 0) { some(v) => v, none => "" });
+  let new_overlay = list.filter(overlay_for_filter, (p) => {
+    let key = match list.get(p, 0) { some(v) => v, none => "" };
+    not list.contains(base_keys, key)
+  });
+  merged_base + new_overlay
+}
+
+fn serialize_config(pairs: List[List[String]]) -> String = {
+  let lines = list.map(pairs, (pair) => {
+    let key = match list.get(pair, 0) { some(v) => v, none => "" };
+    let value = match list.get(pair, 1) { some(v) => v, none => "" };
+    key + "=" + value
+  });
+  string.join(lines, "\n")
+}
+
+fn lookup(pairs: List[List[String]], key: String) -> Option[String] = {
+  match list.find(pairs, (pair) => match list.get(pair, 0) { some(v) => v == key, none => false }) {
+    some(pair) => match list.get(pair, 1) { some(v) => some(v), none => none },
+    none => none
+  }
+}
+
+fn filter_by_prefix(pairs: List[List[String]], prefix: String) -> List[List[String]] = {
+  list.filter(pairs, (pair) => {
+    let key = match list.get(pair, 0) { some(v) => v, none => "" };
+    string.starts_with(key, prefix)
+  })
+}

@@ -140,6 +140,12 @@ pub struct RuntimeFuncs {
     pub clock_time_get: u32,
     pub proc_exit: u32,
     pub random_get: u32,
+    pub path_open: u32,
+    pub fd_read: u32,
+    pub fd_close: u32,
+    pub fd_seek: u32,
+    pub fd_filestat_get: u32,
+    pub path_filestat_get: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -271,6 +277,12 @@ impl WasmEmitter {
                 clock_time_get: 0,
                 proc_exit: 0,
                 random_get: 0,
+                path_open: 0,
+                fd_read: 0,
+                fd_close: 0,
+                fd_seek: 0,
+                fd_filestat_get: 0,
+                path_filestat_get: 0,
             },
             heap_ptr_global: 0,
             top_let_globals: HashMap::new(),
@@ -430,6 +442,73 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         module: "wasi_snapshot_preview1".to_string(),
         name: "random_get".to_string(),
         type_idx: random_get_type_idx,
+    });
+
+    // Import path_open
+    let path_open_type_idx = emitter.register_type(
+        vec![
+            ValType::I32, ValType::I32, ValType::I32, ValType::I32,
+            ValType::I32, ValType::I64, ValType::I64, ValType::I32,
+            ValType::I32,
+        ],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "path_open".to_string(),
+        type_idx: path_open_type_idx,
+    });
+
+    // Import fd_read
+    let fd_read_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_read".to_string(),
+        type_idx: fd_read_type_idx,
+    });
+
+    // Import fd_close
+    let fd_close_type_idx = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_close".to_string(),
+        type_idx: fd_close_type_idx,
+    });
+
+    // Import fd_seek
+    let fd_seek_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I64, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_seek".to_string(),
+        type_idx: fd_seek_type_idx,
+    });
+
+    // Import fd_filestat_get
+    let fd_filestat_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_filestat_get".to_string(),
+        type_idx: fd_filestat_get_type_idx,
+    });
+
+    // Import path_filestat_get
+    let path_filestat_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "path_filestat_get".to_string(),
+        type_idx: path_filestat_get_type_idx,
     });
 
     // Register type declarations (record and variant field layouts)
@@ -723,7 +802,7 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
 // ── Test runner ─────────────────────────────────────────────────
 
 /// Compile the __init_globals function.
-#[allow(dead_code)]
+#[allow(dead_code)] // Will be activated when top-let WASM codegen is wired up
 fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     let void_type = emitter.register_type(vec![], vec![]);
 

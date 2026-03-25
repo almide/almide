@@ -40,8 +40,11 @@ impl Checker {
         pb
     }
 
-    pub(super) fn register_fn_sig(&mut self, name: &str, params: &[ast::Param], return_type: &ast::TypeExpr,
-                        effect: &Option<bool>, r#async: &Option<bool>, generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>) {
+    pub(super) fn register_fn_sig(
+        &mut self, name: &str, params: &[ast::Param], return_type: &ast::TypeExpr,
+        effect: &Option<bool>, r#async: &Option<bool>, generics: &Option<Vec<ast::GenericParam>>,
+        prefix: Option<&str>, span: Option<&ast::Span>,
+    ) {
         let gnames: Vec<Sym> = generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default();
         let sb = self.collect_structural_bounds(generics);
         let pb = self.collect_protocol_bounds(generics);
@@ -54,6 +57,9 @@ impl Checker {
         if prefix.is_none() && is_effect { self.env.effect_fns.insert(sym(name)); }
         let min_p = params.iter().take_while(|p| p.default.is_none()).count();
         self.env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb });
+        if let Some(s) = span {
+            self.env.fn_decl_spans.insert(sym(&key), (s.line, s.col));
+        }
         if min_p < params.len() {
             self.env.fn_min_params.insert(sym(&key), min_p);
         }
@@ -225,8 +231,8 @@ impl Checker {
                 ));
                 // Still register methods as convention functions so downstream doesn't break
                 for m in methods {
-                    if let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, .. } = m {
-                        self.register_fn_sig(name, params, return_type, effect, r#async, generics, Some(for_type));
+                    if let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, .. } = m {
+                        self.register_fn_sig(name, params, return_type, effect, r#async, generics, Some(for_type), span.as_ref());
                     }
                 }
                 return;
@@ -238,9 +244,9 @@ impl Checker {
         let mut impl_methods: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for m in methods {
-            if let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, .. } = m {
+            if let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, .. } = m {
                 // Register as convention function: Type.method
-                self.register_fn_sig(name, params, return_type, effect, r#async, generics, Some(for_type));
+                self.register_fn_sig(name, params, return_type, effect, r#async, generics, Some(for_type), span.as_ref());
                 impl_methods.insert(name.to_string());
 
                 // 3. Validate signature matches protocol definition
@@ -363,8 +369,8 @@ impl Checker {
     pub(super) fn register_decls(&mut self, decls: &[ast::Decl], prefix: Option<&str>) {
         for decl in decls {
             match decl {
-                ast::Decl::Fn { name, params, return_type, effect, r#async, generics, .. } => {
-                    self.register_fn_sig(name, params, return_type, effect, r#async, generics, prefix);
+                ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, .. } => {
+                    self.register_fn_sig(name, params, return_type, effect, r#async, generics, prefix, span.as_ref());
                 }
                 ast::Decl::Type { name, ty, deriving, generics, .. } => {
                     self.register_type_decl(name, ty, deriving, generics, prefix);

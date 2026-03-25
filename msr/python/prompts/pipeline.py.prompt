@@ -1,0 +1,47 @@
+def parse_pairs(input: str) -> list[tuple[str, str]]:
+    """Parse key=value lines. Raises ValueError on invalid lines."""
+    pass  # TODO: implement
+
+
+def validate_keys(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Validate that no keys are empty. Raises ValueError if empty key found."""
+    pass  # TODO: implement
+
+
+def transform(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Transform keys to uppercase and strip whitespace from values."""
+    pass  # TODO: implement
+
+
+def format_output(pairs: list[tuple[str, str]]) -> str:
+    """Format pairs as "KEY: value" lines."""
+    pass  # TODO: implement
+
+
+def run_pipeline(input: str) -> str:
+    """Run the full pipeline: parse, validate, transform, format.
+    Raises ValueError on errors.
+    """
+    pass  # TODO: implement
+
+
+# Tests
+r = run_pipeline("name=Alice\nage=30")
+assert "NAME: Alice" in r, "simple pipeline NAME"
+assert "AGE: 30" in r, "simple pipeline AGE"
+
+assert run_pipeline("key= value ") == "KEY: value", "pipeline with spaces"
+
+try:
+    run_pipeline("=value")
+    assert False
+except ValueError as e:
+    assert str(e) == "empty key found", "empty key error"
+
+assert run_pipeline("host=localhost") == "HOST: localhost", "single pair"
+
+try:
+    run_pipeline("no-equals")
+    assert False
+except ValueError as e:
+    assert "invalid line" in str(e), "invalid line"

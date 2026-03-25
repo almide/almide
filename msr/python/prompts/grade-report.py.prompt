@@ -1,0 +1,153 @@
+# Student grade report processor
+# Input format: "name:score1,score2,score3" (one student per line)
+# Scores are integers 0-100
+
+
+def parse_student(line: str) -> list[str]:
+    """Parse a single student line like "Alice:85,92,78".
+    Returns [name, score1, score2, ...] as strings.
+    Raises ValueError: "empty name", "invalid score: X", "score out of range: X",
+                       "no scores", "invalid format"
+    """
+    pass  # TODO: implement
+
+
+def parse_all(input: str) -> list[list[str]]:
+    """Parse multiple students from newline-separated input.
+    Raises ValueError: "empty input", line errors prefixed with "line N: ",
+                       "duplicate name: NAME"
+    """
+    pass  # TODO: implement
+
+
+def average(student: list[str]) -> int:
+    """Calculate average score for a student record [name, score1, score2, ...].
+    Returns integer (floor division). Raises ValueError if no scores.
+    """
+    pass  # TODO: implement
+
+
+def letter_grade(avg: int) -> str:
+    """Convert numeric average to letter grade.
+    90-100: "A", 80-89: "B", 70-79: "C", 60-69: "D", below 60: "F"
+    """
+    pass  # TODO: implement
+
+
+def honor_roll(students: list[list[str]]) -> list[str]:
+    """Find students on honor roll (average >= 85).
+    Returns list of names, sorted alphabetically.
+    """
+    pass  # TODO: implement
+
+
+def class_average(students: list[list[str]]) -> int:
+    """Calculate class average across all students."""
+    pass  # TODO: implement
+
+
+def format_student(student: list[str]) -> str:
+    """Format a single student summary: "name: avg (grade)"."""
+    pass  # TODO: implement
+
+
+def generate_report(input: str) -> str:
+    """Generate full report as multi-line string.
+    Raises ValueError on parse errors.
+    """
+    pass  # TODO: implement
+
+
+# Tests
+assert parse_student("Alice:85,92,78") == ["Alice", "85", "92", "78"], "parse single student"
+assert parse_student("Bob:100") == ["Bob", "100"], "parse student with single score"
+
+try:
+    parse_student(":85,92")
+    assert False
+except ValueError as e:
+    assert str(e) == "empty name", "parse student empty name"
+
+try:
+    parse_student("Alice:85,abc,78")
+    assert False
+except ValueError as e:
+    assert str(e) == "invalid score: abc", "parse student invalid score"
+
+try:
+    parse_student("Alice:85,101,78")
+    assert False
+except ValueError as e:
+    assert str(e) == "score out of range: 101", "parse student score too high"
+
+try:
+    parse_student("Alice:85,-1,78")
+    assert False
+except ValueError as e:
+    assert str(e) == "score out of range: -1", "parse student score negative"
+
+try:
+    parse_student("Alice:")
+    assert False
+except ValueError as e:
+    assert str(e) == "no scores", "parse student no scores"
+
+try:
+    parse_student("Alice")
+    assert False
+except ValueError as e:
+    assert str(e) == "invalid format", "parse student no colon"
+
+assert parse_all("Alice:85,92\nBob:70,80") == [["Alice", "85", "92"], ["Bob", "70", "80"]], "parse all basic"
+
+try:
+    parse_all("")
+    assert False
+except ValueError as e:
+    assert str(e) == "empty input", "parse all empty input"
+
+try:
+    parse_all("Alice:85\nAlice:90")
+    assert False
+except ValueError as e:
+    assert str(e) == "duplicate name: Alice", "parse all duplicate names"
+
+try:
+    parse_all("Alice:85\n:90")
+    assert False
+except ValueError as e:
+    assert str(e) == "line 2: empty name", "parse all error with line number"
+
+assert average(["Alice", "80", "90", "100"]) == 90, "average basic"
+assert average(["Bob", "75"]) == 75, "average single score"
+assert average(["Carol", "80", "81"]) == 80, "average rounds down"
+
+assert letter_grade(95) == "A", "letter grade A"
+assert letter_grade(85) == "B", "letter grade B"
+assert letter_grade(75) == "C", "letter grade C"
+assert letter_grade(65) == "D", "letter grade D"
+assert letter_grade(55) == "F", "letter grade F"
+assert letter_grade(90) == "A", "letter grade boundary 90"
+assert letter_grade(80) == "B", "letter grade boundary 80"
+
+assert honor_roll([["Alice", "90", "95"], ["Bob", "70", "80"], ["Carol", "85", "90"]]) == ["Alice", "Carol"], "honor roll basic"
+assert honor_roll([["Alice", "70", "75"], ["Bob", "60", "65"]]) == [], "honor roll none qualify"
+assert honor_roll([["Zara", "90", "95"], ["Alice", "85", "90"]]) == ["Alice", "Zara"], "honor roll sorted"
+
+assert class_average([["Alice", "80", "90"], ["Bob", "70", "80"]]) == 80, "class average basic"
+
+assert format_student(["Alice", "85", "92", "78"]) == "Alice: 85 (B)", "format student"
+
+assert generate_report("Alice:90,95,100\nBob:70,75,80") == "Alice: 95 (A)\nBob: 75 (C)\nclass average: 85\nhonor roll: Alice", "generate report"
+
+try:
+    generate_report("Alice:90\n:bad")
+    assert False
+except ValueError as e:
+    assert str(e) == "line 2: empty name", "generate report error propagation"
+
+try:
+    generate_report("")
+    assert False
+except ValueError as e:
+    assert str(e) == "empty input", "generate report empty"

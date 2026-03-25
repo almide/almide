@@ -1,0 +1,31 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class Row:
+    id: int
+    name: str
+    value: int
+
+
+TABLE = [Row(1, "alpha", 10), Row(2, "beta", 20), Row(3, "gamma", 30)]
+
+
+def pluck_ids(rows: list[Row]) -> list[int]:
+    pass  # TODO: implement
+
+
+def find_by_id(rows: list[Row], id: int) -> Row | None:
+    pass  # TODO: implement
+
+
+# Tests
+assert pluck_ids(TABLE) == [1, 2, 3], "pluck ids"
+
+r = find_by_id(TABLE, 2)
+assert r is not None and r.name == "beta", "find by id found"
+
+assert find_by_id(TABLE, 99) is None, "find by id not found"
+
+big = pluck_ids([r for r in TABLE if r.value > 15])
+assert big == [2, 3], "filter then pluck"

@@ -1,0 +1,86 @@
+struct Dog {
+  name : String
+  breed : String
+} derive(Eq, Show)
+
+struct Person {
+  name : String
+  age : Int
+  email : String
+} derive(Eq, Show)
+
+struct City {
+  name : String
+  population : Int
+  country : String
+} derive(Eq, Show)
+
+fn describe_dog(d : Dog) -> String {
+  abort("todo")
+}
+
+fn describe_person(p : Person) -> String {
+  abort("todo")
+}
+
+fn describe_city(c : City) -> String {
+  abort("todo")
+}
+
+fn dog_names(dogs : Array[Dog]) -> Array[String] {
+  abort("todo")
+}
+
+fn city_names(cities : Array[City]) -> Array[String] {
+  abort("todo")
+}
+
+fn set_dog_name(d : Dog, new_name : String) -> Dog {
+  abort("todo")
+}
+
+fn set_person_name(p : Person, new_name : String) -> Person {
+  abort("todo")
+}
+
+test "describe dog" { assert_eq!(describe_dog({ name: "Rex", breed: "Lab" }), "name: Rex") }
+test "describe person" { assert_eq!(describe_person({ name: "Alice", age: 30, email: "a@b" }), "name: Alice") }
+test "describe city" { assert_eq!(describe_city({ name: "Tokyo", population: 14000000, country: "Japan" }), "name: Tokyo") }
+test "names from dogs" {
+  assert_eq!(dog_names([{ name: "Rex", breed: "Lab" }, { name: "Fido", breed: "Poodle" }]), ["Rex", "Fido"])
+}
+test "names from cities" {
+  assert_eq!(city_names([{ name: "Tokyo", population: 14000000, country: "Japan" }, { name: "Paris", population: 2100000, country: "France" }]), ["Tokyo", "Paris"])
+}
+test "set_name dog preserves breed" {
+  let d2 = set_dog_name({ name: "Rex", breed: "Lab" }, "Max")
+  assert_eq!(d2.name, "Max")
+  assert_eq!(d2.breed, "Lab")
+}
+test "set_name person preserves age" {
+  let p2 = set_person_name({ name: "Alice", age: 30, email: "a@b" }, "Bob")
+  assert_eq!(p2.name, "Bob")
+  assert_eq!(p2.age, 30)
+}
+test "set_name then describe" {
+  assert_eq!(describe_dog(set_dog_name({ name: "Rex", breed: "Lab" }, "Buddy")), "name: Buddy")
+}
+test "describe different types" {
+  assert_eq!(describe_dog({ name: "Rex", breed: "Lab" }), "name: Rex")
+  assert_eq!(describe_person({ name: "Alice", age: 30, email: "a@b" }), "name: Alice")
+}
+test "set_name on multiple types" {
+  let d = set_dog_name({ name: "A", breed: "B" }, "C")
+  let p = set_person_name({ name: "X", age: 1, email: "e" }, "Y")
+  assert_eq!(d.name, "C")
+  assert_eq!(p.name, "Y")
+}
+
+test "names via map lambda" {
+  let result = [Dog::{ name: "Rex", breed: "Lab" }, { name: "Fido", breed: "Poodle" }].map(fn(d) { describe_dog(d) })
+  assert_eq!(result, ["name: Rex", "name: Fido"])
+}
+test "set_name in map lambda" {
+  let renamed = [Dog::{ name: "Rex", breed: "Lab" }, { name: "Fido", breed: "Poodle" }].map(fn(d) { set_dog_name(d, d.name.to_upper()) })
+  assert_eq!(dog_names(renamed), ["REX", "FIDO"])
+}

@@ -1,0 +1,85 @@
+test "parse basic config" {
+  let content = "host=localhost\nport=8080"
+  assert_eq(parse_config(content), ok([["host", "localhost"], ["port", "8080"]]))
+}
+
+test "parse with comments and blanks" {
+  let content = "# this is a comment\n\nhost=localhost\n# another comment\nport=8080"
+  assert_eq(parse_config(content), ok([["host", "localhost"], ["port", "8080"]]))
+}
+
+test "parse empty string" {
+  assert_eq(parse_config(""), ok([]))
+}
+
+test "parse only comments" {
+  assert_eq(parse_config("# comment\n# another"), ok([]))
+}
+
+test "parse missing equals" {
+  assert_eq(parse_config("host=ok\nbadline"), err("line 2: missing '='"))
+}
+
+test "parse empty key" {
+  assert_eq(parse_config("=value"), err("line 1: empty key"))
+}
+
+test "parse duplicate key" {
+  assert_eq(parse_config("host=a\nhost=b"), err("line 2: duplicate key: host"))
+}
+
+test "parse value with equals" {
+  let content = "formula=a=b+c"
+  assert_eq(parse_config(content), ok([["formula", "a=b+c"]]))
+}
+
+test "merge no overlap" {
+  let base = [["host", "localhost"]]
+  let overlay = [["port", "8080"]]
+  assert_eq(merge_configs(base, overlay), [["host", "localhost"], ["port", "8080"]])
+}
+
+test "merge with override" {
+  let base = [["host", "localhost"], ["port", "3000"]]
+  let overlay = [["port", "8080"]]
+  assert_eq(merge_configs(base, overlay), [["host", "localhost"], ["port", "8080"]])
+}
+
+test "merge empty base" {
+  let overlay = [["port", "8080"]]
+  assert_eq(merge_configs([], overlay), [["port", "8080"]])
+}
+
+test "merge empty overlay" {
+  let base = [["host", "localhost"]]
+  assert_eq(merge_configs(base, []), [["host", "localhost"]])
+}
+
+test "serialize config" {
+  let pairs = [["host", "localhost"], ["port", "8080"]]
+  assert_eq(serialize_config(pairs), "host=localhost\nport=8080")
+}
+
+test "serialize empty" {
+  assert_eq(serialize_config([]), "")
+}
+
+test "lookup found" {
+  let pairs = [["host", "localhost"], ["port", "8080"]]
+  assert_eq(lookup(pairs, "port"), some("8080"))
+}
+
+test "lookup not found" {
+  let pairs = [["host", "localhost"]]
+  assert_eq(lookup(pairs, "port"), none)
+}
+
+test "filter by prefix" {
+  let pairs = [["db_host", "localhost"], ["db_port", "5432"], ["app_port", "8080"]]
+  assert_eq(filter_by_prefix(pairs, "db_"), [["db_host", "localhost"], ["db_port", "5432"]])
+}
+
+test "filter by prefix no match" {
+  let pairs = [["app_port", "8080"]]
+  assert_eq(filter_by_prefix(pairs, "db_"), [])
+}

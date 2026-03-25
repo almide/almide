@@ -1,0 +1,38 @@
+import json
+
+
+# Tests
+j = json.loads('{"name": "Alice", "age": 30}')
+assert j["name"] == "Alice", "parse and get string"
+assert j["age"] == 30, "parse and get int"
+
+j = json.loads('{"x": 1}')
+assert j.get("missing") is None, "get missing key"
+
+j = json.loads('{"a": {"b": 42}}')
+assert j["a"]["b"] == 42, "get nested"
+
+j = json.loads('{"items": [1, 2, 3]}')
+assert len(j["items"]) == 3, "get array"
+
+j = json.loads('{"key": "value"}')
+assert "key" in json.dumps(j), "stringify roundtrip"
+
+j = json.loads('{"active": true}')
+assert j["active"] == True, "get bool"
+
+try:
+    json.loads("not json")
+    assert False, "parse invalid should raise"
+except json.JSONDecodeError:
+    pass  # expected
+
+j = json.loads('{"a": 1, "b": 2}')
+assert len(j.keys()) == 2, "keys"
+
+j = json.loads('{"name": "Alice"}')
+assert "\n" in json.dumps(j, indent=2), "stringify pretty"
+
+j = {"name": "Alice", "age": 30}
+assert j["name"] == "Alice", "builder shortcuts name"
+assert j["age"] == 30, "builder shortcuts age"

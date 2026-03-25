@@ -1,0 +1,30 @@
+from enum import Enum, auto
+
+
+class Light(Enum):
+    Red = auto()
+    Yellow = auto()
+    Green = auto()
+
+
+def next_light(l: Light) -> Light:
+    pass  # TODO: implement
+
+
+def duration(l: Light) -> int:
+    pass  # TODO: implement
+
+
+def describe(l: Light) -> str:
+    pass  # TODO: implement
+
+
+# Tests
+assert next_light(Light.Red) == Light.Green, "next red"
+assert next_light(Light.Green) == Light.Yellow, "next green"
+assert next_light(Light.Yellow) == Light.Red, "next yellow"
+assert next_light(next_light(next_light(Light.Red))) == Light.Red, "full cycle"
+assert duration(Light.Red) == 60, "duration red"
+assert duration(Light.Yellow) == 5, "duration yellow"
+assert duration(Light.Green) == 45, "duration green"
+assert describe(Light.Red) == "stop", "describe"

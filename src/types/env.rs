@@ -59,6 +59,8 @@ pub struct TypeEnv {
     pub type_protocols: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
     /// Protocol conformances already validated via `impl` blocks (skip re-validation)
     pub impl_validated: std::collections::HashSet<(Sym, Sym)>,
+    /// Function declaration locations: fn key -> (line, col)
+    pub fn_decl_spans: std::collections::HashMap<Sym, (usize, usize)>,
 }
 
 impl TypeEnv {
@@ -100,6 +102,7 @@ impl TypeEnv {
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
             impl_validated: std::collections::HashSet::new(),
+            fn_decl_spans: std::collections::HashMap::new(),
         }
     }
 

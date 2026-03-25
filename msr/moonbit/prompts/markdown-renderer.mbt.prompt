@@ -1,0 +1,25 @@
+enum Token {
+  Heading(Int, String)
+  Paragraph(String)
+  Bullet(String)
+  Divider
+} derive(Eq, Show)
+
+fn parse_line(line : String) -> Token {
+  abort("todo")
+}
+
+fn render(token : Token) -> String {
+  abort("todo")
+}
+
+test "h1" { assert_eq!(parse_line("# Hello"), Heading(1, "Hello")) }
+test "h2" { assert_eq!(parse_line("## World"), Heading(2, "World")) }
+test "h3" { assert_eq!(parse_line("### Sub"), Heading(3, "Sub")) }
+test "bullet" { assert_eq!(parse_line("- item"), Bullet("item")) }
+test "divider" { assert_eq!(parse_line("---"), Divider) }
+test "paragraph" { assert_eq!(parse_line("plain text"), Paragraph("plain text")) }
+test "render h1" { assert_eq!(render(Heading(1, "Hi")), "HI\n==") }
+test "render h2" { assert_eq!(render(Heading(2, "Hi")), "Hi\n--") }
+test "render paragraph" { assert_eq!(render(Paragraph("text")), "  text") }
+test "render bullet" { assert_eq!(render(Bullet("item")), "  * item") }

@@ -1,0 +1,52 @@
+from dataclasses import dataclass
+from typing import Union
+
+
+@dataclass
+class Lit:
+    value: int
+
+@dataclass
+class Add:
+    left: 'Expr'
+    right: 'Expr'
+
+@dataclass
+class Mul:
+    left: 'Expr'
+    right: 'Expr'
+
+@dataclass
+class Sub:
+    left: 'Expr'
+    right: 'Expr'
+
+Expr = Union[Lit, Add, Mul, Sub]
+
+
+def eval(e: Expr) -> int:
+    pass  # TODO: implement
+
+
+def to_string(e: Expr) -> str:
+    pass  # TODO: implement
+
+
+# Tests
+assert eval(Lit(5)) == 5, "literal"
+assert eval(Add(Lit(2), Lit(3))) == 5, "add"
+assert eval(Mul(Lit(4), Lit(5))) == 20, "mul"
+assert eval(Sub(Lit(10), Lit(3))) == 7, "sub"
+assert eval(Add(Lit(1), Mul(Lit(2), Lit(3)))) == 7, "nested add mul"
+assert eval(Mul(Add(Lit(1), Lit(2)), Sub(Lit(10), Lit(4)))) == 18, "deep nesting"
+assert to_string(Lit(42)) == "42", "to_string literal"
+assert to_string(Add(Lit(1), Lit(2))) == "(1 + 2)", "to_string add"
+assert to_string(Mul(Add(Lit(1), Lit(2)), Lit(3))) == "((1 + 2) * 3)", "to_string nested"
+
+e = Add(Mul(Lit(2), Lit(3)), Sub(Lit(10), Lit(1)))
+assert eval(e) == 15, "eval matches to_string"
+
+e = Sub(Mul(Add(Lit(1), Lit(2)), Lit(5)), Add(Lit(3), Lit(4)))
+assert eval(e) == 8, "deeply nested eval"
+
+assert eval(Sub(Lit(0), Lit(5))) == -5, "single negative via sub"

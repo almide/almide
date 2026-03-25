@@ -1,0 +1,18 @@
+def is_valid(isbn: str) -> bool:
+    pass  # TODO: implement
+
+# Tests
+assert is_valid("3-598-21508-8") == True, "valid isbn"
+assert is_valid("3-598-21508-9") == False, "invalid isbn check digit"
+assert is_valid("3-598-21507-X") == True, "valid isbn with X check digit"
+assert is_valid("3-598-2X507-0") == False, "invalid isbn with X not at end"
+assert is_valid("3598215088") == True, "valid isbn without dashes"
+assert is_valid("3598215089") == False, "invalid isbn without dashes"
+assert is_valid("3-598-2150") == False, "too short"
+assert is_valid("3-598-21508-88") == False, "too long"
+assert is_valid("") == False, "empty"
+assert is_valid("3-598-abc-8") == False, "invalid characters"
+assert is_valid("359821507X") == True, "valid with X check digit no dashes"
+assert is_valid("3-598-P1581-X") == False, "invalid with letters"
+assert is_valid("X-598-21507-0") == False, "X only at end"
+assert is_valid("0-306-40615-2") == True, "all valid isbns"

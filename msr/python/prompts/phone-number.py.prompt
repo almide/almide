@@ -1,0 +1,59 @@
+def clean(input: str) -> str:
+    """Clean a phone number string. Returns the 10-digit number.
+    Raises ValueError with appropriate message.
+    """
+    pass  # TODO: implement
+
+# Tests
+assert clean("(223) 456-7890") == "2234567890", "cleans number"
+assert clean("223.456.7890") == "2234567890", "cleans with dots"
+assert clean("223 456   7890   ") == "2234567890", "cleans with spaces"
+assert clean("12234567890") == "2234567890", "valid with 11 digits"
+
+try:
+    clean("123-abc-7890")
+    assert False
+except ValueError as e:
+    assert str(e) == "incorrect number of digits", "invalid with letters"
+
+try:
+    clean("123456789")
+    assert False
+except ValueError as e:
+    assert str(e) == "incorrect number of digits", "invalid with 9 digits"
+
+try:
+    clean("22234567890")
+    assert False
+except ValueError as e:
+    assert str(e) == "11 digits must start with 1", "invalid 11 digits not starting with 1"
+
+try:
+    clean("(023) 456-7890")
+    assert False
+except ValueError as e:
+    assert str(e) == "area code cannot start with zero", "invalid if area code starts with 0"
+
+try:
+    clean("(123) 456-7890")
+    assert False
+except ValueError as e:
+    assert str(e) == "area code cannot start with one", "invalid if area code starts with 1"
+
+try:
+    clean("(223) 056-7890")
+    assert False
+except ValueError as e:
+    assert str(e) == "exchange code cannot start with zero", "invalid if exchange code starts with 0"
+
+try:
+    clean("(223) 156-7890")
+    assert False
+except ValueError as e:
+    assert str(e) == "exchange code cannot start with one", "invalid if exchange code starts with 1"
+
+try:
+    clean("523-@:!-7890")
+    assert False
+except ValueError as e:
+    assert str(e) == "incorrect number of digits", "invalid with punctuations"

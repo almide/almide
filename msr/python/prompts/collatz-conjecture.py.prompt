@@ -1,0 +1,25 @@
+def steps(n: int) -> int:
+    """Calculate the number of steps to reach 1 using the Collatz conjecture.
+    If n is even: n / 2
+    If n is odd: 3 * n + 1
+    Raises ValueError for non-positive numbers.
+    """
+    pass  # TODO: implement
+
+# Tests
+assert steps(1) == 0, "zero steps for one"
+assert steps(16) == 4, "divide if even"
+assert steps(12) == 9, "even and odd steps"
+assert steps(1000000) == 152, "large number of even and odd steps"
+
+try:
+    steps(0)
+    assert False, "zero should raise"
+except ValueError as e:
+    assert str(e) == "Only positive integers are allowed", "zero is an error"
+
+try:
+    steps(-15)
+    assert False, "negative should raise"
+except ValueError as e:
+    assert str(e) == "Only positive integers are allowed", "negative value is an error"

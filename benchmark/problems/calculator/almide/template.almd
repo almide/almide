@@ -1,0 +1,11 @@
+type Op = | Add | Sub | Mul | Div
+
+type Expr =
+  | Lit(Float)
+  | BinOp { op: Op, left: Expr, right: Expr }
+  | Neg(Expr)
+
+effect fn eval(e: Expr) -> Result[Float, String] = {
+  // TODO: implement
+  err("not implemented")
+}

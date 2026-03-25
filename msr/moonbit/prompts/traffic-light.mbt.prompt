@@ -1,0 +1,26 @@
+enum Light {
+  Red
+  Yellow
+  Green
+} derive(Eq, Show)
+
+fn next(l : Light) -> Light {
+  abort("todo")
+}
+
+fn duration(l : Light) -> Int {
+  abort("todo")
+}
+
+fn describe(l : Light) -> String {
+  abort("todo")
+}
+
+test "next red" { assert_eq!(next(Red), Green) }
+test "next green" { assert_eq!(next(Green), Yellow) }
+test "next yellow" { assert_eq!(next(Yellow), Red) }
+test "full cycle" { assert_eq!(next(next(next(Red))), Red) }
+test "duration red" { assert_eq!(duration(Red), 60) }
+test "duration yellow" { assert_eq!(duration(Yellow), 5) }
+test "duration green" { assert_eq!(duration(Green), 45) }
+test "describe" { assert_eq!(describe(Red), "stop") }

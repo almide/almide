@@ -1,0 +1,32 @@
+struct Row {
+  id : Int
+  name : String
+  value : Int
+} derive(Eq, Show)
+
+let table : Array[Row] = [
+  { id: 1, name: "alpha", value: 10 },
+  { id: 2, name: "beta", value: 20 },
+  { id: 3, name: "gamma", value: 30 },
+]
+
+fn pluck_ids(rows : Array[Row]) -> Array[Int] {
+  abort("todo")
+}
+
+fn find_by_id(rows : Array[Row], id : Int) -> Option[Row] {
+  abort("todo")
+}
+
+test "pluck ids" { assert_eq!(pluck_ids(table), [1, 2, 3]) }
+test "find by id found" {
+  match find_by_id(table, 2) {
+    Some(r) => assert_eq!(r.name, "beta")
+    None => abort("expected Some")
+  }
+}
+test "find by id not found" { assert_eq!(find_by_id(table, 99), None) }
+test "filter then pluck" {
+  let big = table.filter(fn(r) { r.value > 15 })
+  assert_eq!(pluck_ids(big), [2, 3])
+}

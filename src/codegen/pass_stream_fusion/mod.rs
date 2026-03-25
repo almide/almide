@@ -13,7 +13,6 @@
 //! - FilterMapFoldFusion: `fold(filter_map(x, fm), init, g)` → single-pass fold
 //! - RangeFoldFusion: `fold(range(s, e), init, g)` → for loop (no allocation)
 
-#[allow(dead_code)]
 mod chain_detection;
 mod fusion_rules;
 mod ir_transform;
@@ -150,19 +149,6 @@ impl FusionCounts {
         self.range_fold += other.range_fold;
     }
 
-    #[allow(dead_code)]
-    fn summary(&self) -> String {
-        let mut parts = Vec::new();
-        if self.identity > 0 { parts.push(format!("{} identity-map", self.identity)); }
-        if self.map_map > 0 { parts.push(format!("{} map+map", self.map_map)); }
-        if self.filter_filter > 0 { parts.push(format!("{} filter+filter", self.filter_filter)); }
-        if self.map_fold > 0 { parts.push(format!("{} map+fold", self.map_fold)); }
-        if self.flatmap_flatmap > 0 { parts.push(format!("{} flat_map+flat_map", self.flatmap_flatmap)); }
-        if self.map_filter > 0 { parts.push(format!("{} map+filter", self.map_filter)); }
-        if self.filter_map_fold > 0 { parts.push(format!("{} filter_map+fold", self.filter_map_fold)); }
-        if self.range_fold > 0 { parts.push(format!("{} range+fold", self.range_fold)); }
-        parts.join(", ")
-    }
 }
 
 // ── Let-inlining pre-pass ────────────────────────────────────────

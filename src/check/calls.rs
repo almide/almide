@@ -161,10 +161,14 @@ impl Checker {
 
         // Effect isolation: pure fn cannot call effect fn
         if sig.is_effect && !self.env.can_call_effect {
-            self.emit(super::err(
+            let mut diag = super::err(
                 format!("cannot call effect function '{}' from a pure function", name),
                 "Mark the calling function as `effect fn`",
-                format!("call to {}()", name)).with_code("E006"));
+                format!("call to {}()", name)).with_code("E006");
+            if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(name)) {
+                diag = diag.with_secondary(line, Some(col), format!("'{}' declared as effect fn here", name));
+            }
+            self.emit(diag);
         }
 
         // Validate argument count
@@ -285,10 +289,14 @@ impl Checker {
             let expected_resolved = self.env.resolve_named(&expected);
             let arg_resolved = self.env.resolve_named(arg_ty);
             if types_mismatch(&expected_resolved, &arg_resolved) {
-                self.emit(super::err(
+                let mut diag = super::err(
                     format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
                     Self::hint_with_conversion("Fix the argument type", &expected, arg_ty),
-                    format!("call to {}()", fn_name)).with_code("E005"));
+                    format!("call to {}()", fn_name)).with_code("E005");
+                if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
+                    diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
+                }
+                self.emit(diag);
             }
         }
     }

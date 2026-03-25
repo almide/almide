@@ -256,6 +256,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
 
         // Run with wasmtime
         let output = std::process::Command::new("wasmtime")
+            .arg("--dir=.")
             .arg(wasm_path.to_str().unwrap())
             .output();
 
@@ -293,6 +294,235 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
             }
             Err(e) => {
                 eprintln!("SKIP {} (wasmtime: {})", test_file, e);
+                skipped += 1;
+            }
+        }
+    }
+
+    eprintln!();
+    if skipped > 0 {
+        eprintln!("{} passed, {} failed, {} skipped (of {} files)",
+            passed, failed, skipped, test_files.len());
+    } else {
+        eprintln!("{} passed, {} failed (of {} files)",
+            passed, failed, test_files.len());
+    }
+    if failed > 0 {
+        std::process::exit(1);
+    }
+}
+
+pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
+    use crate::{parse_file, check, diagnostic, resolve, project, project_fetch, ast};
+
+    let test_files: Vec<String> = if !file.is_empty() {
+        let path = std::path::Path::new(file);
+        if path.is_dir() {
+            let mut files = collect_test_files(path);
+            files.sort();
+            if files.is_empty() {
+                eprintln!("No .almd files with test blocks found in {}", file);
+                std::process::exit(1);
+            }
+            files
+        } else {
+            vec![file.to_string()]
+        }
+    } else {
+        let mut files = Vec::new();
+        for dir in &["spec", "exercises"] {
+            let path = std::path::Path::new(dir);
+            if path.exists() {
+                files.extend(collect_test_files(path));
+            }
+        }
+        if files.is_empty() {
+            files = collect_test_files(std::path::Path::new("."));
+        }
+        files.sort();
+        if files.is_empty() {
+            eprintln!("No .almd files with test blocks found.");
+            std::process::exit(1);
+        }
+        files
+    };
+
+    // Detect runtime: prefer deno, fallback to node
+    let (runtime, runtime_args): (&str, Vec<&str>) = if std::process::Command::new("deno")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        ("deno", vec!["test", "--allow-all"])
+    } else if std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        ("node", vec![])
+    } else {
+        eprintln!("Neither deno nor node found. Install Deno (recommended) or Node.js.");
+        std::process::exit(1);
+    };
+
+    let tmp_dir = std::env::temp_dir().join("almide-ts-test");
+    std::fs::create_dir_all(&tmp_dir).ok();
+
+    let mut failed = 0;
+    let mut passed = 0;
+    let mut skipped = 0;
+
+    for test_file in &test_files {
+        let ts_name = test_file.replace('/', "_").replace('.', "_") + ".ts";
+        let ts_path = tmp_dir.join(&ts_name);
+
+        let (mut program, source_text, _parse_errors) = parse_file(test_file);
+
+        // Skip files marked with // ts:skip
+        if source_text.lines().take(3).any(|line| line.contains("// ts:skip")) {
+            skipped += 1;
+            continue;
+        }
+
+        // Resolve dependencies
+        let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> =
+            if std::path::Path::new("almide.toml").exists() {
+                if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+                    project_fetch::fetch_all_deps(&proj)
+                        .unwrap_or_else(|e| { eprintln!("{}", e); vec![] })
+                        .into_iter()
+                        .map(|fd| (fd.pkg_id, fd.source_dir))
+                        .collect()
+                } else { vec![] }
+            } else { vec![] };
+
+        let mut resolved = match resolve::resolve_imports_with_deps(test_file, &program, &dep_paths) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("SKIP {} (resolve: {})", test_file, e);
+                skipped += 1;
+                continue;
+            }
+        };
+
+        // Extract import aliases
+        let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
+            if let ast::Decl::Import { path, alias, .. } = imp {
+                if let Some(a) = alias {
+                    let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
+                    let target = if is_self_import && path.len() >= 2 {
+                        path.last().map(|s| s.to_string()).unwrap_or_default()
+                    } else if is_self_import {
+                        resolved.modules.iter()
+                            .find(|(_, _, _, is_self)| *is_self)
+                            .map(|(name, _, _, _)| name.clone())
+                            .unwrap_or_else(|| path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
+                    } else {
+                        path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
+                    };
+                    Some((a.to_string(), target))
+                } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
+                    let last = path.last().expect("path.len() > 1 checked above").to_string();
+                    Some((last, path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }).collect();
+
+        let mut checker = check::Checker::new();
+        checker.set_source(test_file, &source_text);
+        for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
+            checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
+        }
+        for (alias, target) in &import_aliases {
+            checker.register_alias(alias, target);
+        }
+        let diagnostics = checker.check_program(&mut program);
+        if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
+            eprintln!("SKIP {} (type errors)", test_file);
+            for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Error) {
+                eprintln!("  {}", d.display_with_source(&source_text));
+            }
+            skipped += 1;
+            continue;
+        }
+
+        let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+
+        // Lower user modules to IR
+        for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
+            if almide::stdlib::is_stdlib_module(name) { continue; }
+            let mod_types = checker.check_module_bodies(mod_prog);
+            let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
+            ir_program.modules.push(mod_ir_module);
+        }
+
+        almide::optimize::optimize_program(&mut ir_program);
+        almide::mono::monomorphize(&mut ir_program);
+
+        let ts_code = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::TypeScript) {
+                almide::codegen::CodegenOutput::Source(s) => s,
+                almide::codegen::CodegenOutput::Binary(_) => unreachable!(),
+            }
+        }));
+        let ts_code = match ts_code {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("SKIP {} (TS codegen panic)", test_file);
+                skipped += 1;
+                continue;
+            }
+        };
+
+        if let Err(e) = std::fs::write(&ts_path, &ts_code) {
+            eprintln!("SKIP {} (write: {})", test_file, e);
+            skipped += 1;
+            continue;
+        }
+
+        // Run with deno or node
+        let mut cmd = std::process::Command::new(runtime);
+        for arg in &runtime_args {
+            cmd.arg(arg);
+        }
+        cmd.arg(ts_path.to_str().unwrap());
+        let output = cmd.output();
+
+        match output {
+            Ok(result) => {
+                let stdout = String::from_utf8_lossy(&result.stdout);
+                let stderr = String::from_utf8_lossy(&result.stderr);
+
+                if result.status.success() {
+                    // Count tests: for deno, count "ok" lines; for node, count successful executions
+                    let test_count = if runtime == "deno" {
+                        // Deno test output: "test_name ... ok"
+                        stdout.lines().filter(|l| l.ends_with("... ok")).count()
+                            .max(stderr.lines().filter(|l| l.ends_with("... ok")).count())
+                    } else {
+                        1
+                    };
+                    eprintln!("{}: {} tests passed", test_file, test_count);
+                    passed += 1;
+                } else {
+                    eprintln!("FAIL {}", test_file);
+                    // Show relevant error output
+                    let error_output = if !stderr.is_empty() { &stderr } else { &stdout };
+                    for line in error_output.lines().take(10) {
+                        eprintln!("  {}", line);
+                    }
+                    failed += 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("SKIP {} ({}: {})", test_file, runtime, e);
                 skipped += 1;
             }
         }

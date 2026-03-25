@@ -1,0 +1,44 @@
+struct Student {
+  name : String
+  score : Int
+} derive(Eq, Show)
+
+struct Product {
+  name : String
+  price : Int
+  stock : Int
+} derive(Eq, Show)
+
+struct Keyed {
+  key : Int
+  label : String
+} derive(Eq, Show)
+
+fn sort_by_key(items : Array[Keyed]) -> Array[Keyed] {
+  abort("todo")
+}
+
+test "sort by key" {
+  let items : Array[Keyed] = [{ key: 3, label: "c" }, { key: 1, label: "a" }, { key: 2, label: "b" }]
+  assert_eq!(sort_by_key(items).map(fn(x) { x.label }), ["a", "b", "c"])
+}
+test "sort single" {
+  assert_eq!(sort_by_key([{ key: 5, label: "only" }]).map(fn(x) { x.key }), [5])
+}
+test "sort students by score" {
+  let students : Array[Student] = [{ name: "Alice", score: 85 }, { name: "Bob", score: 92 }, { name: "Carol", score: 78 }]
+  let sorted = students.copy()
+  sorted.sort_by(fn(a, b) { a.score.compare(b.score) })
+  assert_eq!(sorted.map(fn(s) { s.name }), ["Carol", "Alice", "Bob"])
+}
+test "sort products by price" {
+  let products : Array[Product] = [{ name: "Pen", price: 100, stock: 50 }, { name: "Book", price: 500, stock: 10 }, { name: "Eraser", price: 50, stock: 100 }]
+  let sorted = products.copy()
+  sorted.sort_by(fn(a, b) { a.price.compare(b.price) })
+  assert_eq!(sorted.map(fn(p) { p.name }), ["Eraser", "Pen", "Book"])
+}
+test "filter then sort" {
+  let items : Array[Keyed] = [{ key: 5, label: "e" }, { key: 2, label: "b" }, { key: 8, label: "h" }, { key: 1, label: "a" }]
+  let big = sort_by_key(items.filter(fn(x) { x.key > 3 }))
+  assert_eq!(big.map(fn(x) { x.label }), ["e", "h"])
+}
