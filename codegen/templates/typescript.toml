@@ -172,6 +172,9 @@ template = "boolean"
 [type_unit]
 template = "void"
 
+[type_bytes]
+template = "Uint8Array"
+
 [type_list]
 template = "{inner}[]"
 

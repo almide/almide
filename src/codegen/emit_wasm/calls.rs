@@ -209,6 +209,11 @@ impl FuncCompiler<'_> {
                             self.emit_stub_call(args);
                         }
                     }
+                    _ if module == "bytes" => {
+                        if !self.emit_bytes_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
                     _ if module == "map" => {
                         if !self.emit_map_call(func, args) {
                             self.emit_stub_call(args);

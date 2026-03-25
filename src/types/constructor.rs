@@ -23,6 +23,7 @@ pub enum TypeConstructorId {
     String,
     Bool,
     Unit,
+    Bytes,
 
     // kind: * -> *
     List,
@@ -174,6 +175,12 @@ impl TypeConstructorRegistry {
             kind: Kind::Star,
             laws: vec![],
         });
+        self.register(TypeConstructorInfo {
+            id: TypeConstructorId::Bytes,
+            name: "Bytes".into(),
+            kind: Kind::Star,
+            laws: vec![],
+        });
 
         // List: * -> * — satisfies Functor, Filterable, Foldable
         self.register(TypeConstructorInfo {
@@ -288,6 +295,7 @@ impl std::fmt::Display for TypeConstructorId {
             TypeConstructorId::String => write!(f, "String"),
             TypeConstructorId::Bool => write!(f, "Bool"),
             TypeConstructorId::Unit => write!(f, "Unit"),
+            TypeConstructorId::Bytes => write!(f, "Bytes"),
             TypeConstructorId::List => write!(f, "List"),
             TypeConstructorId::Option => write!(f, "Option"),
             TypeConstructorId::Set => write!(f, "Set"),

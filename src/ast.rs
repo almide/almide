@@ -34,6 +34,7 @@ pub enum ResolvedType {
     String,
     Bool,
     Unit,
+    Bytes,
     List,
     Map,
     Set,

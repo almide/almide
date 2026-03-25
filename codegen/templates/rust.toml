@@ -200,6 +200,9 @@ template = "bool"
 [type_unit]
 template = "()"
 
+[type_bytes]
+template = "Vec<u8>"
+
 [type_list]
 template = "Vec<{inner}>"
 
