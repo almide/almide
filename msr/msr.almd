@@ -6,6 +6,7 @@
 //   almide run msr/msr.almd -- --exercise bob         # single exercise
 
 import fs
+import env
 import process
 
 fn find_arg(raw_args: List[String], name: String, fallback: String) -> String = {
