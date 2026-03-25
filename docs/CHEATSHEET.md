@@ -360,7 +360,7 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 ### json (requires `import json`)
 `json.parse(text)` → `Result[Json, String]`, `json.stringify(j)`, `json.stringify_pretty(j)`, `json.get(j, key)` → `Option[Json]`, `json.get_string(j, key)` → `Option[String]`, `json.get_int(j, key)` → `Option[Int]`, `json.get_float(j, key)` → `Option[Float]`, `json.get_bool(j, key)` → `Option[Bool]`, `json.get_array(j, key)` → `Option[List[Json]]`, `json.keys(j)` → `List[String]`, `json.to_string(j)` → `Option[String]`, `json.to_int(j)` → `Option[Int]`, `json.as_string(j)` → `Option[String]`, `json.as_int(j)` → `Option[Int]`, `json.as_float(j)` → `Option[Float]`, `json.as_bool(j)` → `Option[Bool]`, `json.as_array(j)` → `Option[List[Json]]`, `json.object(entries)` → `Json`, `json.s(v)`, `json.i(v)`, `json.f(v)`, `json.b(v)`, `json.null()`, `json.array(items)`, `json.from_string(s)`, `json.from_int(n)`, `json.from_float(n)`, `json.from_bool(b)`, `json.from_map(m)`
 
-### math (auto-imported)
+### math (requires `import math`)
 `math.min(a, b)`, `math.max(a, b)`, `math.abs(n)`, `math.pow(base, exp)`, `math.pi()`, `math.e()`, `math.sin(x)`, `math.cos(x)`, `math.tan(x)`, `math.log(x)`, `math.exp(x)`, `math.sqrt(x)`
 
 ### random (requires `import random`, effect fns)
