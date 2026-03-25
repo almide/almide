@@ -48,6 +48,7 @@ Almideの独自性を確立する。**effect を capability に育てる。**
 - [ ] **Resource/task model** — task/scheduler, resource lifetime
 - [ ] **Persistence/sync primitives** — local-first, CRDT/merge, sync queue
 - [ ] **Observability** — effect trace, IR dump, pass inspector, runtime event timeline
+- [ ] **[Compile-Time Contracts](on-hold/compile-time-contracts.md)** — `where` 句で事前条件・型不変条件。newtype + where で制約付き型。静的検証 + 動的降格 (SMT不要)
 
 **命令: "effect を runtime permission model の核にせよ"**
 

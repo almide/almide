@@ -49,6 +49,7 @@
 | [Effect Type Integration](on-hold/effect-type-integration.md) | FnType に EffectSet を持たせる (構文変更なし) | Phase 3 |
 | ~~Trait System~~ | → Protocol System (done) に統合 | — |
 | [Secure by Design](on-hold/secure-by-design.md) | | Phase 3 |
+| [Compile-Time Contracts](on-hold/compile-time-contracts.md) | `where` 句で事前条件・型不変条件。SMT不要、静的検証+動的降格 | Phase 3 |
 | [Async Backend](on-hold/async-backend.md) | tokio opt-in runtime | Phase 3 |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | | Phase 3 |
 | [Rainbow Bridge](on-hold/rainbow-bridge.md) | 外部コード → Almide | Phase 3 |
