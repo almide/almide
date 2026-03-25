@@ -886,12 +886,15 @@ impl FuncCompiler<'_> {
             "unix_timestamp" => {
                 // WASI clock_time_get(id=0 realtime, precision=0, time_ptr)
                 // Returns nanoseconds as i64, convert to seconds
+                // Allocate 16 bytes to guarantee 8-byte alignment for i64 store
                 let time_ptr = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
+                    i32_const(16); call(self.emitter.rt.alloc);
+                    i32_const(7); i32_add; i32_const(-8); i32_and; // align up to 8
+                    local_set(time_ptr);
                     i32_const(0); // clock_id: realtime
                     i64_const(0); // precision
-                    local_get(time_ptr); // output pointer
+                    local_get(time_ptr); // output pointer (8-byte aligned)
                     call(self.emitter.rt.clock_time_get);
                     drop; // discard error code
                     local_get(time_ptr); i64_load(0);
@@ -902,12 +905,15 @@ impl FuncCompiler<'_> {
             "millis" => {
                 // WASI clock_time_get(id=0 realtime, precision=0, time_ptr)
                 // Returns nanoseconds as i64, convert to milliseconds
+                // Allocate 16 bytes to guarantee 8-byte alignment for i64 store
                 let time_ptr = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
+                    i32_const(16); call(self.emitter.rt.alloc);
+                    i32_const(7); i32_add; i32_const(-8); i32_and; // align up to 8
+                    local_set(time_ptr);
                     i32_const(0); // clock_id: realtime
                     i64_const(0); // precision
-                    local_get(time_ptr); // output pointer
+                    local_get(time_ptr); // output pointer (8-byte aligned)
                     call(self.emitter.rt.clock_time_get);
                     drop; // discard error code
                     local_get(time_ptr); i64_load(0);
@@ -1298,12 +1304,14 @@ impl FuncCompiler<'_> {
                 // Returns nanoseconds as i64 at time_ptr, convert to seconds
                 let time_ptr = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    // Allocate 8 bytes for the i64 result
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
+                    // Allocate 16 bytes and align to 8 for i64 result
+                    i32_const(16); call(self.emitter.rt.alloc);
+                    i32_const(7); i32_add; i32_const(-8); i32_and;
+                    local_set(time_ptr);
                     // clock_time_get(id=0, precision=0, time_ptr)
                     i32_const(0); // clock_id: realtime
                     i64_const(0); // precision
-                    local_get(time_ptr); // output pointer
+                    local_get(time_ptr); // output pointer (8-byte aligned)
                     call(self.emitter.rt.clock_time_get);
                     drop; // discard error code
                     // Load i64 nanoseconds, convert to seconds
@@ -1982,9 +1990,11 @@ impl FuncCompiler<'_> {
                     local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
                 });
 
-                // fd_filestat_get(fd, stat_buf) — stat_buf needs 64 bytes
+                // fd_filestat_get(fd, stat_buf) — stat_buf needs 64 bytes, 8-byte aligned for i64 fields
                 wasm!(self.func, {
-                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(72); call(self.emitter.rt.alloc);
+                    i32_const(7); i32_add; i32_const(-8); i32_and;
+                    local_set(stat_buf);
                     local_get(opened_fd);
                     local_get(stat_buf);
                     call(self.emitter.rt.fd_filestat_get);
@@ -2210,9 +2220,11 @@ impl FuncCompiler<'_> {
                     local_get(path_str); i32_load(0); local_set(path_len);
                 });
 
-                // Allocate 64-byte stat buffer
+                // Allocate 64-byte stat buffer (8-byte aligned for i64 fields)
                 wasm!(self.func, {
-                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(72); call(self.emitter.rt.alloc);
+                    i32_const(7); i32_add; i32_const(-8); i32_and;
+                    local_set(stat_buf);
                 });
 
                 // path_filestat_get(fd=3, flags=0, path_ptr, path_len, stat_buf)
