@@ -11,11 +11,11 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-PROMPT_DIR="msr/prompts"
+PROMPT_DIR="research/benchmark/msr/prompts"
 mkdir -p "$PROMPT_DIR"
 
 count=0
-for ex_dir in exercises/*/; do
+for ex_dir in research/benchmark/exercises/*/; do
   name=$(basename "$ex_dir")
   src=$(find "$ex_dir" -name '*.almd.prompt' | head -1)
   [ -z "$src" ] && continue

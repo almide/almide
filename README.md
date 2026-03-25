@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/almide.svg" alt="Almide" width="200">
+  <img src="./docs/assets/almide.svg" alt="Almide" width="200">
 </p>
 
 <h1 align="center">Almide</h1>
@@ -168,7 +168,7 @@ almide app.almd --emit-ir        # Emit typed IR as JSON
 ## Benchmark
 
 <p align="center">
-  <img src="./assets/benchmark.png" alt="MiniGit Benchmark: Almide vs 15 languages" width="720">
+  <img src="./docs/assets/benchmark.png" alt="MiniGit Benchmark: Almide vs 15 languages" width="720">
 </p>
 
 Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Claude Code implements a mini version control system from a spec, with multiple trials per language.
