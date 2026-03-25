@@ -479,7 +479,6 @@ impl Checker {
             ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord { fields: fields.iter().map(|f| (sym(&f.name), self.resolve_type_expr(&f.ty))).collect() },
             ast::TypeExpr::Fn { params, ret } => Ty::Fn { params: params.iter().map(|p| self.resolve_type_expr(p)).collect(), ret: Box::new(self.resolve_type_expr(ret)) },
             ast::TypeExpr::Tuple { elements } => Ty::Tuple(elements.iter().map(|e| self.resolve_type_expr(e)).collect()),
-            ast::TypeExpr::Newtype { inner } => self.resolve_type_expr(inner),
             ast::TypeExpr::Union { members } => Ty::union(members.iter().map(|m| self.resolve_type_expr(m)).collect()),
             ast::TypeExpr::Variant { cases } => {
                 let cs = cases.iter().map(|c| match c {

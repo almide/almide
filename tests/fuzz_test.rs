@@ -17,7 +17,7 @@ fn almide_like_source() -> impl Strategy<Value = String> {
         "type", "module", "import", "protocol", "impl", "do", "test",
         "ok", "err", "some", "none", "true", "false", "not", "and", "or",
         "effect", "pub", "strict", "guard", "break", "continue", "while",
-        "local", "mod", "newtype", "fan", "todo",
+        "local", "mod", "fan", "todo",
     ]);
     let ops = prop::sample::select(vec![
         "+", "-", "*", "/", "%", "**", "==", "!=", "<", ">", "<=", ">=",

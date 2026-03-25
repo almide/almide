@@ -13,8 +13,9 @@ import <module>
 type Name = { field: Type, ... }                     // record
 type Name = | Case1(Type) | Case2 | Case3{f: Type}  // variant (leading |)
 type Name[A, B] = { first: A, second: B }            // generic (use [] not <>)
-type Name = newtype Type                              // newtype (zero-cost wrapper)
+type Name = Type                                     // type alias (transparent)
 type Name = Case1(Type) | Case2(Type)                // inline variant (no leading |)
+type Handler = (String) -> String                    // function type alias
 ```
 
 ### deriving

@@ -7,7 +7,7 @@
 },
 {
   "name": "keyword.declaration.almide",
-  "match": "\\b(fn|type|protocol|impl|let|var|test|import|module|newtype)\\b"
+  "match": "\\b(fn|type|protocol|impl|let|var|test|import|module)\\b"
 },
 {
   "name": "keyword.control.flow.almide",

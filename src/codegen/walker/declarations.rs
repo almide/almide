@@ -94,6 +94,10 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .unwrap_or(fallback)
         }
         IrTypeDeclKind::Alias { target } => {
+            // Fn type aliases are erased — the type checker expands them at use sites
+            if matches!(target, Ty::Fn { .. }) {
+                return String::new();
+            }
             let type_s = render_type(ctx, target);
             ctx.templates.render_with("type_alias", None, &[], &[("name", td.name.as_str()), ("type", type_s.as_str())])
                 .unwrap_or_else(|| format!("type {} = {};", td.name, render_type(ctx, target)))

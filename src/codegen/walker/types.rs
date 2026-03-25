@@ -37,6 +37,12 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                 return ctx.templates.render_with("type_set", None, &[], &[("inner", &inner)])
                     .unwrap_or_else(|| format!("Set<{}>", inner));
             }
+            // Expand type aliases transparently
+            if args.is_empty() {
+                if let Some(target) = ctx.type_aliases.get(name) {
+                    return render_type(ctx, target);
+                }
+            }
             if args.is_empty() {
                 name.to_string()
             } else {

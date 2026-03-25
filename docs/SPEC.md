@@ -103,7 +103,7 @@ let     var     if      then    else    match   ok      err
 some    none    try     do      todo    unsafe  true    false
 not     and     or      strict  pub     effect  deriving test
 async   await   guard   break   continue while  local   mod
-newtype fan
+fan
 ```
 
 ### 1.6 Operators and Delimiters
@@ -362,16 +362,15 @@ fn show[T: Serializable](item: T) -> String = item.serialize()
 
 No dynamic dispatch — all protocol-bounded generics are monomorphized at compile time.
 
-### 5.6 newtype
+### 5.6 Type Alias
 
 ```
-type UserId = newtype Int
-type Email = newtype String
+type Score = Int
+type Handler = (String) -> String
 ```
 
-- `UserId` and `Int` are not implicitly convertible
-- Wrap: `UserId(42)` / Unwrap: `id.value`
-- Zero runtime cost
+- Transparent alias — `Score` and `Int` are interchangeable
+- Function type aliases use `(Params) -> Return` syntax
 
 ### 5.7 Type Application
 

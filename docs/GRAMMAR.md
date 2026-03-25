@@ -7,7 +7,7 @@ decl        = type_decl | fn_decl | protocol_decl | top_let | strict_decl | test
 protocol_decl = "protocol" IDENT "{" protocol_method* "}"
 protocol_method = "effect"? "fn" IDENT "(" params ")" "->" type
 type_decl   = "type" IDENT type_params? "=" type_body ("deriving" "From")?
-type_body   = record_body | variant_body | "newtype" type
+type_body   = record_body | variant_body | type
 record_body = "{" field ("," field)* "}"
 variant_body= "|"? variant ("|" variant)*
 variant     = IDENT | IDENT "(" type ("," type)* ")" | IDENT "{" field ("," field)* "}"
