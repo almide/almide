@@ -29,6 +29,7 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("bytes", "len") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_bytes_len", required: 1 }),
             ("bytes", "new") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "almide_rt_bytes_new", required: 1 }),
             ("bytes", "repeat") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct], effect: false, name: "almide_rt_bytes_repeat", required: 2 }),
+            ("bytes", "set") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_bytes_set", required: 3 }),
             ("bytes", "slice") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_bytes_slice", required: 3 }),
             ("bytes", "to_list") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_bytes_to_list", required: 1 }),
             ("datetime", "add_days") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_datetime_add_days", required: 2 }),

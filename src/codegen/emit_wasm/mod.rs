@@ -193,6 +193,9 @@ pub struct WasmEmitter {
     pub func_table: Vec<u32>, // list of func_idx in table order
     pub func_to_table_idx: HashMap<u32, u32>, // func_idx → table index
 
+    // User-defined public functions to export (name list, populated during emit)
+    pub user_exports: Vec<String>,
+
     // Type info: record/variant name → field list (for field offset computation)
     pub record_fields: HashMap<String, Vec<(String, crate::types::Ty)>>,
     // Variant info: variant type name → list of (case_name, tag, fields)
@@ -300,6 +303,7 @@ impl WasmEmitter {
             effect_fns: HashSet::new(),
             mutable_captures: HashSet::new(),
             eq_funcs: HashMap::new(),
+            user_exports: Vec::new(),
         }
     }
 
@@ -689,6 +693,15 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     // Phase 2.5: Dead Code Elimination
     let _dce_count = dce::eliminate_dead_code(&mut emitter);
 
+    // Collect public user functions for WASM export
+    for func in &program.functions {
+        if func.is_test { continue; }
+        if !matches!(func.visibility, crate::ir::IrVisibility::Public) { continue; }
+        if func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
+        if func.name.as_str() == "main" { continue; }
+        emitter.user_exports.push(func.name.to_string());
+    }
+
     // Phase 3: Assemble
     assemble(&emitter)
 }
@@ -780,6 +793,16 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
         exports.export("_start", wasm_encoder::ExportKind::Func, main_idx);
     } else if let Some(&runner_idx) = emitter.func_map.get("__test_runner") {
         exports.export("_start", wasm_encoder::ExportKind::Func, runner_idx);
+    }
+    // Export __alloc for FFI callers to allocate WASM linear memory
+    if let Some(&alloc_idx) = emitter.func_map.get("__alloc") {
+        exports.export("__alloc", wasm_encoder::ExportKind::Func, alloc_idx);
+    }
+    // Export public user functions (collected during emit)
+    for name in &emitter.user_exports {
+        if let Some(&idx) = emitter.func_map.get(name.as_str()) {
+            exports.export(name, wasm_encoder::ExportKind::Func, idx);
+        }
     }
     module.section(&exports);
 

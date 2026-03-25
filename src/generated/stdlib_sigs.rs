@@ -13,6 +13,7 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
         ("bytes", "len") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes)], ret: Ty::Int, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "new") => FnSig { generics: vec![], params: vec![(s("len"), Ty::Int)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "repeat") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("n"), Ty::Int)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
+        ("bytes", "set") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("i"), Ty::Int), (s("val"), Ty::Int)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "slice") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("start"), Ty::Int), (s("end"), Ty::Int)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "to_list") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes)], ret: Ty::list(Ty::Int), is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("datetime", "add_days") => FnSig { generics: vec![], params: vec![(s("ts"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
@@ -413,7 +414,7 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
 
 pub fn generated_module_functions(module: &str) -> Vec<&'static str> {
     match module {
-        "bytes" => vec!["concat", "from_list", "get", "get_or", "is_empty", "len", "new", "repeat", "slice", "to_list"],
+        "bytes" => vec!["concat", "from_list", "get", "get_or", "is_empty", "len", "new", "repeat", "set", "slice", "to_list"],
         "datetime" => vec!["add_days", "add_hours", "add_minutes", "add_seconds", "day", "diff_seconds", "format", "from_parts", "from_unix", "hour", "is_after", "is_before", "minute", "month", "now", "parse_iso", "second", "to_iso", "to_unix", "weekday", "year"],
         "env" => vec!["args", "cwd", "get", "millis", "os", "set", "sleep_ms", "temp_dir", "unix_timestamp"],
         "error" => vec!["chain", "context", "message"],
