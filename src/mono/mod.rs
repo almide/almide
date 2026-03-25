@@ -115,6 +115,38 @@ pub fn monomorphize(program: &mut IrProgram) {
     // types (e.g., `let x = mono_fn(...)` where x.ty was set before mono).
     propagate_concrete_types(program);
 
+    // Post-mono guard: ALL TypeVars (including generic params) should be resolved
+    verify_no_typevars_post_mono(program);
+}
+
+/// After monomorphization, no TypeVars of any kind should remain in the IR.
+/// Generic type params (A, B, T) should have been substituted by monomorphization.
+/// Inference vars (?0, ?1) should have been resolved by the type checker.
+fn verify_no_typevars_post_mono(program: &crate::ir::IrProgram) {
+    use crate::types::Ty;
+    fn has_any_typevar(ty: &Ty) -> bool {
+        match ty {
+            Ty::TypeVar(_) => true,
+            Ty::Applied(_, args) => args.iter().any(has_any_typevar),
+            Ty::Tuple(elems) => elems.iter().any(has_any_typevar),
+            Ty::Fn { params, ret } => params.iter().any(has_any_typevar) || has_any_typevar(ret),
+            Ty::Named(_, args) => args.iter().any(has_any_typevar),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_any_typevar(t)),
+            _ => false,
+        }
+    }
+    let mut count = 0;
+    for func in &program.functions {
+        if has_any_typevar(&func.ret_ty) { count += 1; }
+        for p in &func.params { if has_any_typevar(&p.ty) { count += 1; } }
+    }
+    for i in 0..program.var_table.len() {
+        let info = program.var_table.get(crate::ir::VarId(i as u32));
+        if has_any_typevar(&info.ty) { count += 1; }
+    }
+    if count > 0 {
+        eprintln!("[ICE] {} TypeVar(s) remain after monomorphization. Generic params should be fully substituted.", count);
+    }
 }
 
 /// Find functions that have structural bounds, protocol bounds, on generic type parameters,
