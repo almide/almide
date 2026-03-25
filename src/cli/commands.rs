@@ -254,9 +254,9 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
             continue;
         }
 
-        // Run with wasmtime
+        // Run with wasmtime (preopened root dir for full filesystem access)
         let output = std::process::Command::new("wasmtime")
-            .arg("--dir=.")
+            .arg("--dir=/")
             .arg(wasm_path.to_str().unwrap())
             .output();
 

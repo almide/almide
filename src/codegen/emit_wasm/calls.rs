@@ -1974,6 +1974,14 @@ impl FuncCompiler<'_> {
                     i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
                 });
 
+                // Strip leading '/' from path for WASI (requires relative path from preopened dir)
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq; // '/' == 47
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
                 // path_open(fd=3, dirflags=0, path_ptr, path_len, oflags=0,
                 //           rights=fd_read|fd_seek (2|4=6), inheriting=0, fdflags=0, fd_out_ptr)
                 wasm!(self.func, {
@@ -2139,6 +2147,14 @@ impl FuncCompiler<'_> {
                     i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
                 });
 
+                // Strip leading '/' from path for WASI (requires relative path from preopened dir)
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
                 // path_open(fd=3, dirflags=0, path_ptr, path_len,
                 //           oflags=O_CREAT|O_TRUNC(=9),
                 //           rights=fd_write(=64), inheriting=0, fdflags=0, fd_out_ptr)
