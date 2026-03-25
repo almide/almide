@@ -11,5 +11,5 @@ codopsy-report.json
 tools/stdlib-crawler/data/
 __pycache__/
 *.pyc
-benchmark/framework/config.yaml
-benchmark/framework/results/
+research/benchmark/framework/config.yaml
+research/benchmark/framework/results/

@@ -1,9 +1,9 @@
 // msr.almd — MSR (Modification Survival Rate) measurement tool
 //
 // Usage:
-//   almide run benchmark/msr/msr.almd                          # default: haiku
-//   almide run benchmark/msr/msr.almd -- --model sonnet         # use sonnet
-//   almide run benchmark/msr/msr.almd -- --exercise bob         # single exercise
+//   almide run research/benchmark/msr/msr.almd                          # default: haiku
+//   almide run research/benchmark/msr/msr.almd -- --model sonnet         # use sonnet
+//   almide run research/benchmark/msr/msr.almd -- --exercise bob         # single exercise
 
 import fs
 import env
@@ -21,8 +21,8 @@ effect fn main() -> Result[Unit, String] = {
   let raw_args = env.args()
   let model = find_arg(raw_args, "model", "haiku")
   let exercise_raw = find_arg(raw_args, "exercise", "")
-  let prompt_dir = "benchmark/msr/prompts"
-  let output_dir = "benchmark/msr/outputs/" + model
+  let prompt_dir = "research/benchmark/msr/prompts"
+  let output_dir = "research/benchmark/msr/outputs/" + model
 
   fs.mkdir_p(output_dir)
 
@@ -114,7 +114,7 @@ effect fn main() -> Result[Unit, String] = {
     println("No exercises found.")
   }
 
-  let results_dir = "benchmark/msr/results"
+  let results_dir = "research/benchmark/msr/results"
   fs.mkdir_p(results_dir)
   let report = "model: " + model + "\npassed: " + int.to_string(pass) + "\ntotal: " + int.to_string(total)
   fs.write(results_dir + "/" + model + ".txt", report)

@@ -5,13 +5,13 @@
 //!   - runtime_registry:  runtime/ts/, runtime/rs/ → include_str! registries
 //!   - token_table:       grammar/tokens.toml → keyword map, precedence table
 
-#[path = "build_helpers/stdlib_codegen.rs"]
+#[path = "buildscript/stdlib_codegen.rs"]
 mod stdlib_codegen;
 
-#[path = "build_helpers/runtime_registry.rs"]
+#[path = "buildscript/runtime_registry.rs"]
 mod runtime_registry;
 
-#[path = "build_helpers/token_table.rs"]
+#[path = "buildscript/token_table.rs"]
 mod token_table;
 
 fn main() {
