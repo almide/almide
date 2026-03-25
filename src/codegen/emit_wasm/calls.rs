@@ -522,7 +522,18 @@ impl FuncCompiler<'_> {
                 });
 
                 // Closure calling convention type: (env: i32, params...) -> ret
-                if let Ty::Fn { params, ret } = &callee.ty {
+                // Resolve callee type from multiple sources (callee.ty, VarTable)
+                let callee_fn_ty = match &callee.ty {
+                    Ty::Fn { .. } => callee.ty.clone(),
+                    _ => {
+                        if let crate::ir::IrExprKind::Var { id } = &callee.kind {
+                            self.var_table.get(*id).ty.clone()
+                        } else {
+                            callee.ty.clone()
+                        }
+                    }
+                };
+                if let Ty::Fn { params, ret } = &callee_fn_ty {
                     let mut closure_params = vec![ValType::I32]; // env_ptr
                     for p in params {
                         if let Some(vt) = values::ty_to_valtype(p) {

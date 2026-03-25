@@ -492,11 +492,41 @@ impl Checker {
         }
     }
 
-    pub(crate) fn resolve_field_type(&self, ty: &Ty, field: &str) -> Ty {
+    pub(crate) fn resolve_field_type(&mut self, ty: &Ty, field: &str) -> Ty {
         let resolved = self.env.resolve_named(ty);
         match &resolved {
             Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().find(|(n, _)| n == field).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown),
-            Ty::TypeVar(tv) => self.env.structural_bounds.get(tv).map(|b| self.resolve_field_type(b, field)).unwrap_or(Ty::Unknown),
+            Ty::TypeVar(tv) => {
+                // First check existing structural bounds
+                if let Some(bound) = self.env.structural_bounds.get(tv).cloned() {
+                    let result = self.resolve_field_type(&bound, field);
+                    if !matches!(result, Ty::Unknown) {
+                        return result;
+                    }
+                }
+                // Search env.types for record types with this field.
+                // Only unify if exactly one candidate exists (unambiguous).
+                let field_sym = crate::intern::sym(field);
+                let mut candidates: Vec<(crate::intern::Sym, Ty)> = Vec::new();
+                for (_name, reg_ty) in &self.env.types {
+                    match reg_ty {
+                        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                            if let Some((_, fty)) = fields.iter().find(|(n, _)| *n == field_sym) {
+                                candidates.push((*_name, fty.clone()));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if candidates.len() == 1 {
+                    let (type_name, field_ty) = candidates.pop().unwrap();
+                    let named = Ty::Named(type_name, vec![]);
+                    self.unify_infer(ty, &named);
+                    field_ty
+                } else {
+                    Ty::Unknown
+                }
+            }
             _ => Ty::Unknown,
         }
     }
