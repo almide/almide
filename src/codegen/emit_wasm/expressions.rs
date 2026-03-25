@@ -450,10 +450,12 @@ impl FuncCompiler<'_> {
                     local_get(scratch);
                     return_;
                     end;
-                    // Ok: load the unwrapped value
-                    local_get(scratch);
                 });
-                self.emit_load_at(&expr.ty, 4);
+                // Ok: load the unwrapped value (skip for Unit — nothing to load)
+                if !matches!(&expr.ty, Ty::Unit) {
+                    wasm!(self.func, { local_get(scratch); });
+                    self.emit_load_at(&expr.ty, 4);
+                }
                 self.scratch.free_i32(scratch);
             }
 
@@ -582,10 +584,24 @@ impl FuncCompiler<'_> {
             BinOp::ConcatList => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                // Determine element size from left's type
-                let elem_size = if let Ty::Applied(_, args) = &left.ty {
-                    args.first().map(|t| values::byte_size(t)).unwrap_or(8)
-                } else { 8 };
+                // Determine element size from left/right types or VarTable
+                let extract_elem = |ty: &Ty| -> Option<u32> {
+                    if let Ty::Applied(_, args) = ty {
+                        args.first()
+                            .filter(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown))
+                            .map(|t| values::byte_size(t))
+                    } else { None }
+                };
+                let var_elem = |expr: &IrExpr| -> Option<u32> {
+                    if let crate::ir::IrExprKind::Var { id } = &expr.kind {
+                        extract_elem(&self.var_table.get(*id).ty)
+                    } else { None }
+                };
+                let elem_size = extract_elem(&left.ty)
+                    .or_else(|| extract_elem(&right.ty))
+                    .or_else(|| var_elem(left))
+                    .or_else(|| var_elem(right))
+                    .unwrap_or(8);
                 wasm!(self.func, {
                     i32_const(elem_size as i32);
                     call(self.emitter.rt.concat_list);

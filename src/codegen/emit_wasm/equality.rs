@@ -464,6 +464,11 @@ impl FuncCompiler<'_> {
             (Ty::String, CmpKind::Gte) => {
                 wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_ge_s; });
             }
+            // TypeVar/Unknown: default to i64 comparison (Int is the most common unresolved type)
+            (Ty::TypeVar(_) | Ty::Unknown, CmpKind::Lt) => { wasm!(self.func, { i64_lt_s; }); }
+            (Ty::TypeVar(_) | Ty::Unknown, CmpKind::Gt) => { wasm!(self.func, { i64_gt_s; }); }
+            (Ty::TypeVar(_) | Ty::Unknown, CmpKind::Lte) => { wasm!(self.func, { i64_le_s; }); }
+            (Ty::TypeVar(_) | Ty::Unknown, CmpKind::Gte) => { wasm!(self.func, { i64_ge_s; }); }
             _ => { wasm!(self.func, { unreachable; }); }
         }
     }

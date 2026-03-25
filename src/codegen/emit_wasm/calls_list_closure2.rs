@@ -575,9 +575,7 @@ impl FuncCompiler<'_> {
             }
             "filter" => {
                 // filter(list, fn) → new list with matching elements
-                let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
-                    a.first().cloned().unwrap_or(Ty::Int)
-                } else { Ty::Int };
+                let elem_ty = self.resolve_list_elem(&args[0], args.get(1));
                 let elem_size = values::byte_size(&elem_ty);
                 let src = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -740,9 +738,28 @@ impl FuncCompiler<'_> {
     /// Key insight: compute dst address BEFORE call_indirect so result goes
     /// directly onto the stack in the right position for store.
     pub(super) fn emit_list_map(&mut self, list_arg: &IrExpr, fn_arg: &IrExpr, ret_ty: &Ty) {
-        let in_elem_ty = if let Ty::Applied(_, args) = &list_arg.ty {
-            args.first().cloned().unwrap_or(Ty::Int)
-        } else { Ty::Int };
+        // Resolve input element type from multiple sources
+        let in_elem_ty = {
+            let from_list = if let Ty::Applied(_, args) = &list_arg.ty {
+                args.first().cloned()
+            } else { None };
+            let from_var = if from_list.as_ref().map_or(true, |t| matches!(t, Ty::TypeVar(_) | Ty::Unknown)) {
+                if let crate::ir::IrExprKind::Var { id } = &list_arg.kind {
+                    if let Ty::Applied(_, a) = &self.var_table.get(*id).ty {
+                        a.first().cloned()
+                    } else { None }
+                } else { None }
+            } else { None };
+            let from_fn = if let Ty::Fn { params, .. } = &fn_arg.ty {
+                params.first().cloned()
+            } else { None };
+            let from_lambda = if let crate::ir::IrExprKind::Lambda { params, .. } = &fn_arg.kind {
+                params.first().map(|(_, t)| t.clone())
+            } else { None };
+            [from_list, from_var, from_fn, from_lambda].into_iter().flatten()
+                .find(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown))
+                .unwrap_or(Ty::Int)
+        };
         let mut out_elem_ty = if let Ty::Applied(_, args) = ret_ty {
             args.first().cloned().unwrap_or(Ty::Int)
         } else { Ty::Int };
