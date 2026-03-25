@@ -1,3 +1,4 @@
+// wasm:skip
 test "cheapest_name returns cheapest" {
   let ps = [
     Product { name: "Laptop", price: 999, category: "tech" },

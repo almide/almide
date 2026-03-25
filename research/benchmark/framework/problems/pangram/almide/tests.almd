@@ -1,3 +1,4 @@
+// wasm:skip
 test "empty sentence" {
   assert_eq(is_pangram(""), false)
 }

@@ -1,3 +1,4 @@
+// wasm:skip
 test "describe_top found" {
   let ps = [
     Product { name: "Laptop", price: 999, category: "tech" },

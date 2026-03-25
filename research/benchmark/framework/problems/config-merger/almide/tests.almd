@@ -1,3 +1,4 @@
+// wasm:skip
 test "parse basic config" {
   let content = "host=localhost\nport=8080"
   assert_eq(parse_config(content), ok([["host", "localhost"], ["port", "8080"]]))

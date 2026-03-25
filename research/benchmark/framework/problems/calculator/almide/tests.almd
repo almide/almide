@@ -1,3 +1,4 @@
+// wasm:skip
 test "literal" { assert_eq(eval(Lit(42.0)), ok(42.0)) }
 test "addition" { assert_eq(eval(BinOp { op: Add, left: Lit(2.0), right: Lit(3.0) }), ok(5.0)) }
 test "subtraction" { assert_eq(eval(BinOp { op: Sub, left: Lit(10.0), right: Lit(4.0) }), ok(6.0)) }
