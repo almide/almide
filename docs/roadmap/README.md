@@ -9,6 +9,7 @@
 | [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
 | [HTTPS Native](active/https-native.md) | rustls統合済、almide build動作確認済。WASM残 | Phase 1 |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 105/110. 残: テスト 9→10、Codegen統合 9→10 | Architecture |
+| [Stdlib in Almide](active/stdlib-in-almide.md) | stdlib を Almide で書き直し、3 層構造（プリミティブ / Almide 実装 / @native 最適化）に統一。userlib と同じ仕組み | Architecture |
 | [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Rust/TS/WASM 3ターゲットの挙動差異を体系検証 | Phase 2 |
 | [Emit Readability](active/emit-readability.md) | 生成コードの可読性向上 (空行・コメント保持) | Phase 1 |
 
