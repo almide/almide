@@ -10,7 +10,9 @@
 - [x] `fs.read_text(path)` — path_open → fd_filestat_get → fd_read → String 構築
 - [x] `fs.write(path, content)` — path_open(O_CREAT|O_TRUNC) → fd_write
 - [x] `fs.exists(path)` — path_filestat_get → errno チェック
-- [x] wasmtime `--dir=.` オプション追加
+- [x] wasmtime `--dir=/` (root preopened) + WASI absolute path strip
+- [x] top-level let 動的初期化 (`compile_init_globals`)
+- [x] mutable collection operations: `list.push`, `list.pop`, `list.clear`, `map.insert`, `map.delete`, `map.clear`
 
 ## 未実装（優先度順）
 

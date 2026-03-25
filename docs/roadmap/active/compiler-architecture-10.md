@@ -18,7 +18,7 @@
 | モノモーフィゼーション | 7 | **10** | 10 | ✅ |
 | エラー診断 | 9 | **10** | 10 | ✅ |
 | コード品質 | 7 | **10** | 10 | ✅ String interning (Sym型, lasso), Ty/FnSig/TypeEnv 全層 Sym化 |
-| テスト | 8 | **9** | 10 | ✅ fuzzing, 159/159 全通過, 並列実行 (2:30→16s)。残: nanopass ユニットテスト |
+| テスト | 8 | **9** | 10 | ✅ fuzzing, 167/167 WASM全通過, TypeVar regression 6件追加, 並列実行 (2:30→16s)。残: nanopass ユニットテスト |
 | ビルドシステム | 7 | **10** | 10 | ✅ build.rs分割, per-file キャッシュ + 並列テスト実行 |
 | Codegen統合 | 5 | **9** | 10 | ✅ WASM result.collect/partition/collect_map 実装。残: stdlib dispatch一元化 |
 
@@ -64,6 +64,8 @@
 - [x] **テスト全通過** — 159/159 .almd テスト、CI グリーン
 - [x] **テスト並列化** — compile_to_binary + per-file hash cache + thread pool 実行 (2:30 → 16s)
 - [x] **WASM result.collect/partition/collect_map** — CI WASM テスト全通過
+- [x] **TypeVar ICE ガード** — lower後 + mono後の2層ガード、inference TypeVar 全解決
+- [x] **TypeVar regression テスト** — 6パターン: chained fold, none/err比較, generic variant, recursive variant, closure field access
 
 ---
 
