@@ -1,0 +1,56 @@
+test "matrix.zeros creates zero matrix" {
+  let m = matrix.zeros(2, 3)
+  assert_eq(matrix.rows(m), 2)
+  assert_eq(matrix.cols(m), 3)
+  assert_eq(matrix.get(m, 0, 0), 0.0)
+  assert_eq(matrix.get(m, 1, 2), 0.0)
+}
+
+test "matrix.ones creates ones matrix" {
+  let m = matrix.ones(2, 2)
+  assert_eq(matrix.get(m, 0, 0), 1.0)
+  assert_eq(matrix.get(m, 1, 1), 1.0)
+}
+
+test "matrix.from_lists and to_lists roundtrip" {
+  let data = [[1.0, 2.0], [3.0, 4.0]]
+  let m = matrix.from_lists(data)
+  assert_eq(matrix.to_lists(m), data)
+}
+
+test "matrix.transpose" {
+  let m = matrix.from_lists([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+  let t = matrix.transpose(m)
+  assert_eq(matrix.rows(t), 3)
+  assert_eq(matrix.cols(t), 2)
+  assert_eq(matrix.get(t, 0, 0), 1.0)
+  assert_eq(matrix.get(t, 2, 1), 6.0)
+}
+
+test "matrix.add element-wise" {
+  let a = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let b = matrix.from_lists([[10.0, 20.0], [30.0, 40.0]])
+  let c = matrix.add(a, b)
+  assert_eq(matrix.to_lists(c), [[11.0, 22.0], [33.0, 44.0]])
+}
+
+test "matrix.mul matrix multiplication" {
+  let a = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let b = matrix.from_lists([[5.0, 6.0], [7.0, 8.0]])
+  let c = matrix.mul(a, b)
+  assert_eq(matrix.get(c, 0, 0), 19.0)
+  assert_eq(matrix.get(c, 0, 1), 22.0)
+  assert_eq(matrix.get(c, 1, 0), 43.0)
+  assert_eq(matrix.get(c, 1, 1), 50.0)
+}
+
+test "matrix.scale" {
+  let m = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let s = matrix.scale(m, 3.0)
+  assert_eq(matrix.to_lists(s), [[3.0, 6.0], [9.0, 12.0]])
+}
+
+test "matrix.shape" {
+  let m = matrix.zeros(5, 3)
+  assert_eq(matrix.shape(m), (5, 3))
+}

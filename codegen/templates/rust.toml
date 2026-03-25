@@ -203,6 +203,9 @@ template = "()"
 [type_bytes]
 template = "Vec<u8>"
 
+[type_matrix]
+template = "Vec<Vec<f64>>"
+
 [type_list]
 template = "Vec<{inner}>"
 

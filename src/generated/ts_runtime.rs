@@ -14,6 +14,7 @@ const MOD_LIST: &str = include_str!("../../runtime/ts/list.ts");
 const MOD_LOG: &str = include_str!("../../runtime/ts/log.ts");
 const MOD_MAP: &str = include_str!("../../runtime/ts/map.ts");
 const MOD_MATH: &str = include_str!("../../runtime/ts/math.ts");
+const MOD_MATRIX: &str = include_str!("../../runtime/ts/matrix.ts");
 const MOD_OPTION: &str = include_str!("../../runtime/ts/option.ts");
 const MOD_PATH: &str = include_str!("../../runtime/ts/path.ts");
 const MOD_PROCESS: &str = include_str!("../../runtime/ts/process.ts");
@@ -48,6 +49,7 @@ pub static ALL_MODULES: &[RuntimeModule] = &[
     RuntimeModule { name: "log", source: MOD_LOG },
     RuntimeModule { name: "map", source: MOD_MAP },
     RuntimeModule { name: "math", source: MOD_MATH },
+    RuntimeModule { name: "matrix", source: MOD_MATRIX },
     RuntimeModule { name: "option", source: MOD_OPTION },
     RuntimeModule { name: "path", source: MOD_PATH },
     RuntimeModule { name: "process", source: MOD_PROCESS },

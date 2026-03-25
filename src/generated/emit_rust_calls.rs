@@ -371,6 +371,19 @@ pub fn gen_generated_call(
             ("math", "sin") => format!("({} as f64).sin()", args_str[0]),
             ("math", "sqrt") => format!("({} as f64).sqrt()", args_str[0]),
             ("math", "tan") => format!("({} as f64).tan()", args_str[0]),
+            ("matrix", "add") => format!("almide_rt_matrix_add(&{}, &{})", args_str[0], args_str[1]),
+            ("matrix", "cols") => format!("almide_rt_matrix_cols(&{})", args_str[0]),
+            ("matrix", "from_lists") => format!("almide_rt_matrix_from_lists(&{})", args_str[0]),
+            ("matrix", "get") => format!("almide_rt_matrix_get(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("matrix", "map") => format!("almide_rt_matrix_map(&{}, {})", args_str[0], args_str[1]),
+            ("matrix", "mul") => format!("almide_rt_matrix_mul(&{}, &{})", args_str[0], args_str[1]),
+            ("matrix", "ones") => format!("almide_rt_matrix_ones({}, {})", args_str[0], args_str[1]),
+            ("matrix", "rows") => format!("almide_rt_matrix_rows(&{})", args_str[0]),
+            ("matrix", "scale") => format!("almide_rt_matrix_scale(&{}, {})", args_str[0], args_str[1]),
+            ("matrix", "shape") => format!("almide_rt_matrix_shape(&{})", args_str[0]),
+            ("matrix", "to_lists") => format!("almide_rt_matrix_to_lists(&{})", args_str[0]),
+            ("matrix", "transpose") => format!("almide_rt_matrix_transpose(&{})", args_str[0]),
+            ("matrix", "zeros") => format!("almide_rt_matrix_zeros({}, {})", args_str[0], args_str[1]),
             ("option", "filter") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_option_filter({}, |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)

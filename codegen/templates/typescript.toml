@@ -175,6 +175,9 @@ template = "void"
 [type_bytes]
 template = "Uint8Array"
 
+[type_matrix]
+template = "number[][]"
+
 [type_list]
 template = "{inner}[]"
 
