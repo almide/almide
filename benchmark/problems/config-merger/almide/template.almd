@@ -1,0 +1,24 @@
+fn parse_config(content: String) -> Result[List[List[String]], String] = {
+  // TODO: implement
+  err("not implemented")
+}
+
+fn merge_configs(base: List[List[String]], overlay: List[List[String]]) -> List[List[String]] = {
+  // TODO: implement
+  []
+}
+
+fn serialize_config(pairs: List[List[String]]) -> String = {
+  // TODO: implement
+  ""
+}
+
+fn lookup(pairs: List[List[String]], key: String) -> Option[String] = {
+  // TODO: implement
+  none
+}
+
+fn filter_by_prefix(pairs: List[List[String]], prefix: String) -> List[List[String]] = {
+  // TODO: implement
+  []
+}
