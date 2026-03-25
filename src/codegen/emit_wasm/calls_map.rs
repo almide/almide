@@ -611,6 +611,104 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(len);
                 self.scratch.free_i32(pairs);
             }
+            "insert" => {
+                // insert(m, key, value) → Unit. Mutates m via map.set + writeback.
+                // Reuse "set" to produce a new map, then write back to var.
+                let set_args = args.to_vec();
+                self.emit_map_call("set", &set_args);
+                // Write back to var
+                if let crate::ir::IrExprKind::Var { id } = &args[0].kind {
+                    if let Some(&local_idx) = self.var_map.get(&id.0) {
+                        wasm!(self.func, { local_set(local_idx); });
+                    } else {
+                        wasm!(self.func, { drop; });
+                    }
+                } else {
+                    wasm!(self.func, { drop; });
+                }
+            }
+            "delete" => {
+                // delete(m, key) → Unit. Removes key from map in place.
+                let (ks, vs) = self.map_kv_sizes(&args[0].ty);
+                let key_ty = self.map_key_ty(&args[0].ty);
+                let entry = ks + vs;
+                let map_ptr = self.scratch.alloc_i32();
+                let sk_i32 = self.scratch.alloc_i32();
+                let sk_i64 = self.scratch.alloc_i64();
+                let old_len = self.scratch.alloc_i32();
+                let new_map = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let j = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(map_ptr); });
+                self.emit_expr(&args[1]); // key
+                self.emit_search_key_store(&key_ty, sk_i32, sk_i64);
+                wasm!(self.func, {
+                    local_get(map_ptr); i32_load(0); local_set(old_len);
+                    // Alloc new map with old_len entries (may be 1 less)
+                    i32_const(4); local_get(old_len); i32_const(entry as i32); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(new_map);
+                    i32_const(0); local_set(i);
+                    i32_const(0); local_set(j);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(old_len); i32_ge_u; br_if(1);
+                      // Compare key[i] with search key
+                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
+                self.emit_key_eq(&key_ty);
+                wasm!(self.func, {
+                      if_empty;
+                        // Skip this entry (key matches)
+                      else_;
+                        // Copy entry to new_map[j]
+                        local_get(new_map); i32_const(4); i32_add;
+                        local_get(j); i32_const(entry as i32); i32_mul; i32_add;
+                        local_get(map_ptr); i32_const(4); i32_add;
+                        local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                        i32_const(entry as i32);
+                        memory_copy;
+                        local_get(j); i32_const(1); i32_add; local_set(j);
+                      end;
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    // Set new len = j
+                    local_get(new_map); local_get(j); i32_store(0);
+                });
+
+                // Write back to var
+                if let crate::ir::IrExprKind::Var { id } = &args[0].kind {
+                    if let Some(&local_idx) = self.var_map.get(&id.0) {
+                        wasm!(self.func, { local_get(new_map); local_set(local_idx); });
+                    }
+                }
+
+                self.scratch.free_i32(j);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(new_map);
+                self.scratch.free_i32(old_len);
+                self.scratch.free_i64(sk_i64);
+                self.scratch.free_i32(sk_i32);
+                self.scratch.free_i32(map_ptr);
+            }
+            "clear" => {
+                // clear(m) → Unit. Replace with empty map.
+                let new_map = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(new_map);
+                    local_get(new_map); i32_const(0); i32_store(0);
+                });
+                if let crate::ir::IrExprKind::Var { id } = &args[0].kind {
+                    if let Some(&local_idx) = self.var_map.get(&id.0) {
+                        wasm!(self.func, { local_get(new_map); local_set(local_idx); });
+                    }
+                }
+                self.scratch.free_i32(new_map);
+            }
             _ => return self.emit_map_closure_call(method, args),
         }
         true

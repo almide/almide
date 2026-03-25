@@ -132,7 +132,7 @@ fn transform_match_subject(subject: &mut Box<IrExpr>, arms: &[IrMatchArm]) {
                 IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None },
             );
             **subject = IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: true },
+                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: true, mutable: false },
                 ty: Ty::String, // type is still String for downstream
                 span: subject.span,
             };

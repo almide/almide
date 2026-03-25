@@ -36,6 +36,7 @@ pub enum ResolvedType {
     Unit,
     List,
     Map,
+    Set,
     Option,
     Result,
     Fn,

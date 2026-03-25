@@ -27,6 +27,7 @@ pub enum TypeConstructorId {
     // kind: * -> *
     List,
     Option,
+    Set,
 
     // kind: * -> * -> *
     Result,
@@ -211,6 +212,14 @@ impl TypeConstructorRegistry {
             ],
         });
 
+        // Set: * -> * — no standard algebraic laws for stream fusion
+        self.register(TypeConstructorInfo {
+            id: TypeConstructorId::Set,
+            name: "Set".into(),
+            kind: Kind::star_to_star(),
+            laws: vec![],
+        });
+
         // Map: * -> * -> * — no standard algebraic laws for stream fusion
         self.register(TypeConstructorInfo {
             id: TypeConstructorId::Map,
@@ -281,6 +290,7 @@ impl std::fmt::Display for TypeConstructorId {
             TypeConstructorId::Unit => write!(f, "Unit"),
             TypeConstructorId::List => write!(f, "List"),
             TypeConstructorId::Option => write!(f, "Option"),
+            TypeConstructorId::Set => write!(f, "Set"),
             TypeConstructorId::Result => write!(f, "Result"),
             TypeConstructorId::Map => write!(f, "Map"),
             TypeConstructorId::Tuple => write!(f, "Tuple"),

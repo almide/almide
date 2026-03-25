@@ -120,6 +120,7 @@ impl Ty {
                 let name = match id {
                     TypeConstructorId::List => "List",
                     TypeConstructorId::Option => "Option",
+                    TypeConstructorId::Set => "Set",
                     TypeConstructorId::Result => "Result",
                     TypeConstructorId::Map => "Map",
                     TypeConstructorId::Tuple => "Tuple",
@@ -463,7 +464,7 @@ impl Ty {
 
     /// Returns true if this type is a parameterized container (List, Option, Result, Map).
     pub fn is_container(&self) -> bool {
-        matches!(self, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option | TypeConstructorId::Result | TypeConstructorId::Map, _))
+        matches!(self, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option | TypeConstructorId::Set | TypeConstructorId::Result | TypeConstructorId::Map, _))
     }
 
     /// Returns the constructor name for display/debug purposes.
@@ -477,6 +478,7 @@ impl Ty {
             Ty::Applied(id, _) => Some(match id {
                 TypeConstructorId::List => "List",
                 TypeConstructorId::Option => "Option",
+                TypeConstructorId::Set => "Set",
                 TypeConstructorId::Result => "Result",
                 TypeConstructorId::Map => "Map",
                 TypeConstructorId::Tuple => "Tuple",
@@ -513,13 +515,17 @@ impl Ty {
     #[inline]
     pub fn map_of(key: Ty, val: Ty) -> Ty { Ty::Applied(TypeConstructorId::Map, vec![key, val]) }
 
+    /// Construct Set[T]
+    #[inline]
+    pub fn set_of(elem: Ty) -> Ty { Ty::Applied(TypeConstructorId::Set, vec![elem]) }
+
     // ── Accessors (Phase 4: uniform access to container type args) ──
 
-    /// Get the inner type of a single-param container (List or Option).
+    /// Get the inner type of a single-param container (List, Option, or Set).
     /// Returns None for non-container types.
     pub fn inner(&self) -> Option<&Ty> {
         match self {
-            Ty::Applied(TypeConstructorId::List, args) | Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => Some(&args[0]),
+            Ty::Applied(TypeConstructorId::List, args) | Ty::Applied(TypeConstructorId::Option, args) | Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => Some(&args[0]),
             _ => None,
         }
     }
@@ -540,6 +546,8 @@ impl Ty {
     pub fn is_result(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::Result, _)) }
     /// Check if this is a Map type.
     pub fn is_map(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::Map, _)) }
+    /// Check if this is a Set type.
+    pub fn is_set(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::Set, _)) }
     /// Check if this is a function type.
     pub fn is_fn(&self) -> bool { matches!(self, Ty::Fn { .. }) }
 }

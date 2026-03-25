@@ -77,7 +77,7 @@ src/
 │   ├── patterns.rs      Match arm patterns (variant, record, tuple)
 │   ├── types.rs         Type expressions (generics, records, functions)
 │   ├── collections.rs   List, map, record, tuple literals
-│   ├── compounds.rs     for-in, while, do, fan blocks
+│   ├── compounds.rs     for-in, while, fan blocks
 │   ├── helpers.rs       Comma-separated lists, precedence
 │   ├── recovery.rs      Error recovery (skip to sync points)
 │   ├── diagnostics.rs   Parser error formatting

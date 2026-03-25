@@ -5,6 +5,7 @@ pub enum ArgTransform {
     Direct,     // pass as-is
     BorrowStr,  // &*expr (borrow as &str)
     BorrowRef,  // &expr (borrow as reference)
+    BorrowMut,  // &mut expr (mutable borrow, strips clone)
     ToVec,      // (expr).to_vec() (owned copy)
     LambdaClone, // lambda with clone bindings
     WrapSome,   // Some(expr) (wrap in Option)
@@ -168,6 +169,7 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("list", "all") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::LambdaClone], effect: false, name: "almide_rt_list_all", required: 2 }),
             ("list", "any") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::LambdaClone], effect: false, name: "almide_rt_list_any", required: 2 }),
             ("list", "chunk") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct], effect: false, name: "almide_rt_list_chunk", required: 2 }),
+            ("list", "clear") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut], effect: false, name: "almide_rt_list_clear", required: 1 }),
             ("list", "contains") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::BorrowRef], effect: false, name: "almide_rt_list_contains", required: 2 }),
             ("list", "count") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::LambdaClone], effect: false, name: "almide_rt_list_count", required: 2 }),
             ("list", "dedup") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_list_dedup", required: 1 }),
@@ -198,7 +200,9 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("list", "max") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_list_max", required: 1 }),
             ("list", "min") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_list_min", required: 1 }),
             ("list", "partition") => Some(StdlibCallInfo { args: &[ArgTransform::ToVec, ArgTransform::LambdaClone], effect: false, name: "almide_rt_list_partition", required: 2 }),
+            ("list", "pop") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut], effect: false, name: "almide_rt_list_pop", required: 1 }),
             ("list", "product") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_list_product", required: 1 }),
+            ("list", "push") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut, ArgTransform::Direct], effect: false, name: "almide_rt_list_push", required: 2 }),
             ("list", "range") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_list_range", required: 2 }),
             ("list", "reduce") => Some(StdlibCallInfo { args: &[ArgTransform::ToVec, ArgTransform::LambdaClone], effect: false, name: "almide_rt_list_reduce", required: 2 }),
             ("list", "remove_at") => Some(StdlibCallInfo { args: &[ArgTransform::ToVec, ArgTransform::Direct], effect: false, name: "almide_rt_list_remove_at", required: 2 }),
@@ -232,8 +236,10 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("log", "warn_with") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::BorrowRef], effect: true, name: "almide_rt_log_warn_with", required: 2 }),
             ("map", "all") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::LambdaClone], effect: false, name: "almide_rt_map_all", required: 2 }),
             ("map", "any") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::LambdaClone], effect: false, name: "almide_rt_map_any", required: 2 }),
+            ("map", "clear") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut], effect: false, name: "almide_rt_map_clear", required: 1 }),
             ("map", "contains") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::BorrowRef], effect: false, name: "almide_rt_map_contains", required: 2 }),
             ("map", "count") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::LambdaClone], effect: false, name: "almide_rt_map_count", required: 2 }),
+            ("map", "delete") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut, ArgTransform::BorrowRef], effect: false, name: "almide_rt_map_delete", required: 2 }),
             ("map", "each") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::LambdaClone], effect: false, name: "almide_rt_map_each", required: 2 }),
             ("map", "entries") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_map_entries", required: 1 }),
             ("map", "filter") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::LambdaClone], effect: false, name: "almide_rt_map_filter", required: 2 }),
@@ -242,6 +248,7 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("map", "from_list") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "almide_rt_map_from_entries", required: 1 }),
             ("map", "get") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::BorrowRef], effect: false, name: "almide_rt_map_get", required: 2 }),
             ("map", "get_or") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::BorrowRef, ArgTransform::Direct], effect: false, name: "almide_rt_map_get_or", required: 3 }),
+            ("map", "insert") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut, ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_map_insert", required: 3 }),
             ("map", "is_empty") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_map_is_empty", required: 1 }),
             ("map", "keys") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_map_keys", required: 1 }),
             ("map", "len") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_map_len", required: 1 }),

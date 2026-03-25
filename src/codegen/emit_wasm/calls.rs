@@ -71,6 +71,17 @@ impl FuncCompiler<'_> {
                         });
                         // Drop message arg if present (evaluated but unused)
                     }
+                    "panic" => {
+                        // panic(msg) — print "PANIC: " + msg to stderr, then trap
+                        let prefix = self.emitter.intern_string("PANIC: ");
+                        wasm!(self.func, { i32_const(prefix as i32); });
+                        self.emit_expr(&args[0]);
+                        wasm!(self.func, {
+                            call(self.emitter.rt.concat_str);
+                            call(self.emitter.rt.println_str);
+                            unreachable;
+                        });
+                    }
                     "assert_ne" => {
                         // assert_ne(left, right) — trap if equal
                         self.emit_eq(&args[0], &args[1], false);
