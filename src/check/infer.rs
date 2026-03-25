@@ -147,7 +147,11 @@ impl Checker {
                             "Replace ++ with +", "operator ++"));
                         lt
                     }
-                    "==" | "!=" | "<" | ">" | "<=" | ">=" => Ty::Bool,
+                    "==" | "!=" | "<" | ">" | "<=" | ">=" => {
+                        // Unify left/right types so TypeVars in none/err/constructors get resolved
+                        self.unify_infer(&lt, &rt);
+                        Ty::Bool
+                    }
                     "and" | "or" => {
                         let lc = resolve_ty(&lt, &self.uf);
                         let rc = resolve_ty(&rt, &self.uf);

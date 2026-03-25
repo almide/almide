@@ -8,6 +8,19 @@ use super::types::resolve_ty;
 use super::Checker;
 pub(crate) use super::builtin_calls::{builtin_module_for_type, types_mismatch};
 
+/// Substitute named TypeVars in a type with replacement types.
+fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
+    match ty {
+        Ty::TypeVar(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| subst_ty(a, subst)).collect()),
+        Ty::Named(name, args) => Ty::Named(*name, args.iter().map(|a| subst_ty(a, subst)).collect()),
+        Ty::Fn { params, ret } => Ty::Fn { params: params.iter().map(|p| subst_ty(p, subst)).collect(), ret: Box::new(subst_ty(ret, subst)) },
+        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| subst_ty(e, subst)).collect()),
+        Ty::Record { fields } => Ty::Record { fields: fields.iter().map(|(n, t)| (*n, subst_ty(t, subst))).collect() },
+        _ => ty.clone(),
+    }
+}
+
 impl Checker {
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
         let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
@@ -26,6 +39,27 @@ impl Checker {
                     self.check_constructor_args(name, &case, &arg_tys);
                     // Instantiate parent type's generics with fresh inference vars
                     let generic_args = self.instantiate_type_generics(type_name.as_str());
+                    // Unify constructor payload types with arg types to resolve generic vars.
+                    // e.g., Leaf(1) where Leaf(T) → unify T=?fresh with Int → ?fresh=Int
+                    if !generic_args.is_empty() {
+                        if let Some(ty_def) = self.env.types.get(&sym(type_name.as_str())).cloned() {
+                            let mut type_var_names = Vec::new();
+                            crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
+                            // Build substitution map: named TypeVar name → fresh inference var
+                            let subst: std::collections::HashMap<crate::intern::Sym, Ty> = type_var_names.iter()
+                                .zip(generic_args.iter())
+                                .map(|(tv, fresh)| (*tv, fresh.clone()))
+                                .collect();
+                            // Get expected payload types for this case
+                            if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
+                                for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
+                                    // Substitute named TypeVars with fresh inference vars, then unify
+                                    let substituted = subst_ty(ety, &subst);
+                                    self.unify_infer(aty, &substituted);
+                                }
+                            }
+                        }
+                    }
                     Ty::Named(type_name, generic_args)
                 } else { Ty::Named(sym(name), vec![]) }
             }
