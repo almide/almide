@@ -20,10 +20,10 @@
 
 ## ツール
 
-- `msr/msr.almd` — Almide 用 MSR ランナー（Almide 自身で記述）
-- `msr/python/run.sh` — Python 用（25 問プロンプト付き）
-- `msr/moonbit/run.sh` — MoonBit 用（25 問プロンプト付き）
-- `benchmark/runner.py` — 汎用フレームワーク（FAR/MSR/FLE 対応、未使用）
+- `benchmark/msr/msr.almd` — Almide 用 MSR ランナー（Almide 自身で記述）
+- `benchmark/msr/python/run.sh` — Python 用（25 問プロンプト付き）
+- `benchmark/msr/moonbit/run.sh` — MoonBit 用（25 問プロンプト付き）
+- `benchmark/framework/runner.py` — 汎用フレームワーク（FAR/MSR/FLE 対応、未使用）
 
 ## 次のステップ
 
