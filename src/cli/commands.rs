@@ -256,6 +256,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
 
         // Run with wasmtime
         let output = std::process::Command::new("wasmtime")
+            .arg("--dir=.")
             .arg(wasm_path.to_str().unwrap())
             .output();
 
