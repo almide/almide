@@ -48,6 +48,12 @@ pub fn almide_rt_matrix_add(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
         .collect()
 }
 
+pub fn almide_rt_matrix_sub(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
+    a.iter().zip(b.iter())
+        .map(|(ar, br)| ar.iter().zip(br.iter()).map(|(x, y)| x - y).collect())
+        .collect()
+}
+
 pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
     let rows_a = a.len();
     let cols_a = if a.is_empty() { 0 } else { a[0].len() };

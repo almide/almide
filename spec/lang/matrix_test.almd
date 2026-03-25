@@ -54,3 +54,33 @@ test "matrix.shape" {
   let m = matrix.zeros(5, 3)
   assert_eq(matrix.shape(m), (5, 3))
 }
+
+// ── Operator tests ──
+
+test "* operator for matrix multiplication" {
+  let a = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let b = matrix.from_lists([[5.0, 6.0], [7.0, 8.0]])
+  let c = a * b
+  assert_eq(matrix.get(c, 0, 0), 19.0)
+  assert_eq(matrix.get(c, 1, 1), 50.0)
+}
+
+test "+ operator for element-wise addition" {
+  let a = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let b = matrix.from_lists([[10.0, 20.0], [30.0, 40.0]])
+  let c = a + b
+  assert_eq(matrix.to_lists(c), [[11.0, 22.0], [33.0, 44.0]])
+}
+
+test "- operator for element-wise subtraction" {
+  let a = matrix.from_lists([[10.0, 20.0], [30.0, 40.0]])
+  let b = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let c = a - b
+  assert_eq(matrix.to_lists(c), [[9.0, 18.0], [27.0, 36.0]])
+}
+
+test "* operator for scalar multiplication" {
+  let m = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let s = m * 3.0
+  assert_eq(matrix.to_lists(s), [[3.0, 6.0], [9.0, 12.0]])
+}

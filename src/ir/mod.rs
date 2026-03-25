@@ -51,6 +51,7 @@ pub enum BinOp {
     ModInt, ModFloat,
     PowInt, PowFloat,
     XorInt,
+    MulMatrix, AddMatrix, SubMatrix, ScaleMatrix,
     ConcatStr, ConcatList,
     Eq, Neq,
     Lt, Gt, Lte, Gte,

@@ -113,6 +113,12 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let bin_op = match (op.as_str(), left_ty, right_ty) {
                 ("+", Ty::String, _) | ("+", _, Ty::String) => BinOp::ConcatStr,
                 ("+", Ty::Applied(TypeConstructorId::List, _), _) | ("+", _, Ty::Applied(TypeConstructorId::List, _)) => BinOp::ConcatList,
+                // Matrix operators
+                ("+", Ty::Matrix, Ty::Matrix) => BinOp::AddMatrix,
+                ("-", Ty::Matrix, Ty::Matrix) => BinOp::SubMatrix,
+                ("*", Ty::Matrix, Ty::Matrix) => BinOp::MulMatrix,
+                ("*", Ty::Matrix, Ty::Float) | ("*", Ty::Float, Ty::Matrix) => BinOp::ScaleMatrix,
+                ("*", Ty::Matrix, Ty::Int) | ("*", Ty::Int, Ty::Matrix) => BinOp::ScaleMatrix,
                 ("+", Ty::Float, _) | ("+", _, Ty::Float) => BinOp::AddFloat,
                 ("+", _, _) => BinOp::AddInt,
                 ("-", Ty::Float, _) | ("-", _, Ty::Float) => BinOp::SubFloat, ("-", _, _) => BinOp::SubInt,

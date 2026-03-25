@@ -12,6 +12,7 @@ const __almd_matrix = {
   from_lists(rows: number[][]): number[][] { return rows.map(r => [...r]); },
   to_lists(m: number[][]): number[][] { return m.map(r => [...r]); },
   add(a: number[][], b: number[][]): number[][] { return a.map((row, i) => row.map((v, j) => v + b[i][j])); },
+  sub(a: number[][], b: number[][]): number[][] { return a.map((row, i) => row.map((v, j) => v - b[i][j])); },
   mul(a: number[][], b: number[][]): number[][] {
     const rows = a.length, cols = b[0]?.length ?? 0, inner = a[0]?.length ?? 0;
     return Array.from({length: rows}, (_, i) =>
