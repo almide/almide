@@ -1,4 +1,3 @@
-// wasm:skip — Matrix WASM codegen not yet implemented
 test "matrix.zeros creates zero matrix" {
   let m = matrix.zeros(2, 3)
   assert_eq(matrix.rows(m), 2)

@@ -214,6 +214,11 @@ impl FuncCompiler<'_> {
                             self.emit_stub_call(args);
                         }
                     }
+                    _ if module == "matrix" => {
+                        if !self.emit_matrix_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
                     _ if module == "map" => {
                         if !self.emit_map_call(func, args) {
                             self.emit_stub_call(args);

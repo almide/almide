@@ -35,6 +35,7 @@ mod calls_lambda;
 mod calls_map;
 mod calls_map_closure;
 mod calls_bytes;
+mod calls_matrix;
 mod calls_set;
 mod calls_value;
 mod calls_regex;
