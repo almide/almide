@@ -108,6 +108,14 @@ impl FuncCompiler<'_> {
                         self.emit_value_tagged_variant(args);
                     }
                     _ => {
+                        // Module-qualified call: list.fold, map.set, etc.
+                        if let Some(dot) = name.find('.') {
+                            let module = &name[..dot];
+                            let func = &name[dot+1..];
+                            let target = CallTarget::Module { module: crate::intern::sym(module), func: crate::intern::sym(func) };
+                            self.emit_call(&target, args, _ret_ty);
+                            return;
+                        }
                         // Check if this is a variant constructor
                         if let Some((tag, is_unit)) = self.find_variant_ctor_tag(name) {
                             if is_unit && args.is_empty() {

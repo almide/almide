@@ -640,11 +640,46 @@ impl FuncCompiler<'_> {
             }
             "fold" => {
                 // fold(list, init, fn(acc, elem) → acc)
-                let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
+                // Resolve types from closure Fn signature when available
+                // Derive element type from the input list (most reliable source)
+                let list_elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
                     a.first().cloned().unwrap_or(Ty::Int)
                 } else { Ty::Int };
+
+                // Resolve elem_ty: use list element type, Fn param, or lambda param — first concrete wins
+                let elem_ty = [
+                    Some(list_elem_ty),
+                    if let Ty::Fn { params, .. } = &args[2].ty { params.get(1).cloned() } else { None },
+                    if let crate::ir::IrExprKind::Lambda { params: lp, .. } = &args[2].kind { lp.get(1).map(|(_, t)| t.clone()) } else { None },
+                ].into_iter().flatten()
+                    .find(|t| !matches!(t, Ty::Unknown | Ty::TypeVar(_)))
+                    .unwrap_or(Ty::Int);
+
+                // Resolve acc type: use Fn return type or lambda body type, with TypeVar→concrete fallback
+                let acc_ty_resolved = {
+                    // Try closure Fn ret type
+                    let fn_ret = if let Ty::Fn { ret, .. } = &args[2].ty { Some(*ret.clone()) } else { None };
+                    // Try lambda body type
+                    let body_ty = if let crate::ir::IrExprKind::Lambda { body, .. } = &args[2].kind { Some(body.ty.clone()) } else { None };
+                    // Try init type
+                    let init_ty = args[1].ty.clone();
+                    // Pick first concrete (non-TypeVar/Unknown) type
+                    [fn_ret, body_ty, Some(init_ty)].into_iter().flatten()
+                        .find(|t| !matches!(t, Ty::Unknown | Ty::TypeVar(_)))
+                        .unwrap_or_else(|| if let Ty::Fn { ret, .. } = &args[2].ty { *ret.clone() } else { args[1].ty.clone() })
+                };
+                // Resolve TypeVar inside Applied types (e.g., List[TypeVar(?0)] → List[elem_ty])
+                let acc_ty_resolved = match acc_ty_resolved {
+                    Ty::Applied(id, ref inner) if inner.iter().any(|t| matches!(t, Ty::TypeVar(_))) => {
+                        let resolved_inner: Vec<Ty> = inner.iter().map(|t| {
+                            if matches!(t, Ty::TypeVar(_)) { elem_ty.clone() } else { t.clone() }
+                        }).collect();
+                        Ty::Applied(id, resolved_inner)
+                    }
+                    other => other,
+                };
                 let elem_size = values::byte_size(&elem_ty);
-                let acc_vt = values::ty_to_valtype(&args[1].ty).unwrap_or(ValType::I32);
+                let acc_vt = values::ty_to_valtype(&acc_ty_resolved).unwrap_or(ValType::I32);
                 let list_ptr = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
@@ -672,11 +707,11 @@ impl FuncCompiler<'_> {
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, { local_get(closure); i32_load(0); }); // table_idx
                 {
-                    let acc_ty = &args[1].ty;
-                    let mut ct = vec![ValType::I32];
-                    if let Some(vt) = values::ty_to_valtype(acc_ty) { ct.push(vt); }
+                    // Build call_indirect type from resolved acc/elem types
+                    let mut ct = vec![ValType::I32]; // env
+                    if let Some(vt) = values::ty_to_valtype(&acc_ty_resolved) { ct.push(vt); }
                     if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    self.emit_call_indirect(ct, values::ret_type(acc_ty));
+                    self.emit_call_indirect(ct, values::ret_type(&acc_ty_resolved));
                 }
                 wasm!(self.func, {
                     local_set(acc);
