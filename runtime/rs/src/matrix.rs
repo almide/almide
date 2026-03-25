@@ -55,20 +55,47 @@ pub fn almide_rt_matrix_sub(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
 }
 
 pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
-    let rows_a = a.len();
-    let cols_a = if a.is_empty() { 0 } else { a[0].len() };
-    let cols_b = if b.is_empty() { 0 } else { b[0].len() };
-    let mut result = vec![vec![0.0; cols_b]; rows_a];
-    for i in 0..rows_a {
-        for j in 0..cols_b {
-            let mut sum = 0.0;
-            for k in 0..cols_a {
-                sum += a[i][k] * b[k][j];
+    let m = a.len();
+    let n = if a.is_empty() { 0 } else { a[0].len() };
+    let p = if b.is_empty() { 0 } else { b[0].len() };
+    // Flatten to contiguous arrays for cache-friendly access
+    let a_flat: Vec<f64> = a.iter().flat_map(|r| r.iter().copied()).collect();
+    let b_flat: Vec<f64> = b.iter().flat_map(|r| r.iter().copied()).collect();
+    let mut c_flat = vec![0.0f64; m * p];
+    // Tiled matmul: 32×32 blocks for L1 cache locality
+    const TILE: usize = 32;
+    let mut i0 = 0;
+    while i0 < m {
+        let i1 = if i0 + TILE < m { i0 + TILE } else { m };
+        let mut k0 = 0;
+        while k0 < n {
+            let k1 = if k0 + TILE < n { k0 + TILE } else { n };
+            let mut j0 = 0;
+            while j0 < p {
+                let j1 = if j0 + TILE < p { j0 + TILE } else { p };
+                // Multiply tile A[i0..i1, k0..k1] × B[k0..k1, j0..j1]
+                let mut i = i0;
+                while i < i1 {
+                    let mut k = k0;
+                    while k < k1 {
+                        let a_ik = a_flat[i * n + k];
+                        let mut j = j0;
+                        while j < j1 {
+                            c_flat[i * p + j] += a_ik * b_flat[k * p + j];
+                            j += 1;
+                        }
+                        k += 1;
+                    }
+                    i += 1;
+                }
+                j0 += TILE;
             }
-            result[i][j] = sum;
+            k0 += TILE;
         }
+        i0 += TILE;
     }
-    result
+    // Unflatten
+    (0..m).map(|i| c_flat[i * p..(i + 1) * p].to_vec()).collect()
 }
 
 pub fn almide_rt_matrix_scale(m: &AlmideMatrix, s: f64) -> AlmideMatrix {

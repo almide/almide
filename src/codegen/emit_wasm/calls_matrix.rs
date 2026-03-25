@@ -205,17 +205,26 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(a);
             }
             "mul" => {
-                // matrix multiplication: C[i][j] = sum_k(A[i][k] * B[k][j])
+                // Tiled matrix multiplication for cache locality.
+                // Loop order: i-k-j (inner loop scans B row = contiguous memory).
+                // Tile size 32 fits 3 tiles in L1 cache (32×32×8 bytes × 3 = 24KB).
                 let a = self.scratch.alloc_i32();
                 let b = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
-                let ra = self.scratch.alloc_i32(); // rows of A
-                let ca = self.scratch.alloc_i32(); // cols of A = rows of B
-                let cb = self.scratch.alloc_i32(); // cols of B
+                let ra = self.scratch.alloc_i32();
+                let ca = self.scratch.alloc_i32();
+                let cb = self.scratch.alloc_i32();
+                let i0 = self.scratch.alloc_i32();
+                let k0 = self.scratch.alloc_i32();
+                let j0 = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
-                let j = self.scratch.alloc_i32();
                 let k = self.scratch.alloc_i32();
-                let sum = self.scratch.alloc_f64();
+                let j = self.scratch.alloc_i32();
+                let i1 = self.scratch.alloc_i32();
+                let k1 = self.scratch.alloc_i32();
+                let j1 = self.scratch.alloc_i32();
+                let a_ik = self.scratch.alloc_f64();
+                const TILE: i32 = 32;
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(a); });
                 self.emit_expr(&args[1]);
@@ -224,54 +233,126 @@ impl FuncCompiler<'_> {
                     local_get(a); i32_load(0); local_set(ra);
                     local_get(a); i32_load(4); local_set(ca);
                     local_get(b); i32_load(4); local_set(cb);
-                    // alloc result: [ra, cb, data...]
+                    // alloc + zero result
                     local_get(ra); local_get(cb); i32_mul; i32_const(8); i32_mul;
                     i32_const(8); i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(ra); i32_store(0);
                     local_get(dst); local_get(cb); i32_store(4);
-                    // triple loop
-                    i32_const(0); local_set(i);
+                    local_get(dst); i32_const(8); i32_add;
+                    i32_const(0);
+                    local_get(ra); local_get(cb); i32_mul; i32_const(8); i32_mul;
+                    memory_fill;
+                    // Tiled loops: i0, k0, j0 (tile starts)
+                    i32_const(0); local_set(i0);
                     block_empty; loop_empty;
-                      local_get(i); local_get(ra); i32_ge_u; br_if(1);
-                      i32_const(0); local_set(j);
+                      local_get(i0); local_get(ra); i32_ge_u; br_if(1);
+                      // i1 = min(i0+TILE, ra)
+                      local_get(i0); i32_const(TILE); i32_add; local_set(i1);
+                      local_get(i1); local_get(ra); i32_gt_u;
+                      if_empty; local_get(ra); local_set(i1); end;
+
+                      i32_const(0); local_set(k0);
                       block_empty; loop_empty;
-                        local_get(j); local_get(cb); i32_ge_u; br_if(1);
-                        f64_const(0.0); local_set(sum);
-                        i32_const(0); local_set(k);
+                        local_get(k0); local_get(ca); i32_ge_u; br_if(1);
+                        local_get(k0); i32_const(TILE); i32_add; local_set(k1);
+                        local_get(k1); local_get(ca); i32_gt_u;
+                        if_empty; local_get(ca); local_set(k1); end;
+
+                        i32_const(0); local_set(j0);
                         block_empty; loop_empty;
-                          local_get(k); local_get(ca); i32_ge_u; br_if(1);
-                          // sum += A[i][k] * B[k][j]
-                          local_get(sum);
-                          // A[i][k]: a + 8 + (i*ca + k)*8
-                          local_get(a); i32_const(8); i32_add;
-                          local_get(i); local_get(ca); i32_mul; local_get(k); i32_add;
-                          i32_const(8); i32_mul; i32_add; f64_load(0);
-                          // B[k][j]: b + 8 + (k*cb + j)*8
-                          local_get(b); i32_const(8); i32_add;
-                          local_get(k); local_get(cb); i32_mul; local_get(j); i32_add;
-                          i32_const(8); i32_mul; i32_add; f64_load(0);
-                          f64_mul; f64_add; local_set(sum);
-                          local_get(k); i32_const(1); i32_add; local_set(k);
+                          local_get(j0); local_get(cb); i32_ge_u; br_if(1);
+                          local_get(j0); i32_const(TILE); i32_add; local_set(j1);
+                          local_get(j1); local_get(cb); i32_gt_u;
+                          if_empty; local_get(cb); local_set(j1); end;
+
+                          // Inner tile: i, k, j
+                          local_get(i0); local_set(i);
+                          block_empty; loop_empty;
+                            local_get(i); local_get(i1); i32_ge_u; br_if(1);
+
+                            local_get(k0); local_set(k);
+                            block_empty; loop_empty;
+                              local_get(k); local_get(k1); i32_ge_u; br_if(1);
+                              // a_ik = A[i][k]
+                              local_get(a); i32_const(8); i32_add;
+                              local_get(i); local_get(ca); i32_mul; local_get(k); i32_add;
+                              i32_const(8); i32_mul; i32_add; f64_load(0);
+                              local_set(a_ik);
+
+                              // SIMD inner loop: j steps by 2 (f64x2)
+                              // j1_even = j1 & ~1 (round down to even)
+                              local_get(j0); local_set(j);
+                              block_empty; loop_empty;
+                                // if j+1 >= j1, exit SIMD loop
+                                local_get(j); i32_const(1); i32_add; local_get(j1); i32_gt_u; br_if(1);
+                                // addr_c = dst + 8 + (i*cb + j)*8
+                                local_get(dst); i32_const(8); i32_add;
+                                local_get(i); local_get(cb); i32_mul; local_get(j); i32_add;
+                                i32_const(8); i32_mul; i32_add;
+                                // v_c = load C[i][j..j+2]
+                                local_get(dst); i32_const(8); i32_add;
+                                local_get(i); local_get(cb); i32_mul; local_get(j); i32_add;
+                                i32_const(8); i32_mul; i32_add;
+                                v128_load(0);
+                                // v_a = splat(a_ik)
+                                local_get(a_ik); f64x2_splat;
+                                // v_b = load B[k][j..j+2]
+                                local_get(b); i32_const(8); i32_add;
+                                local_get(k); local_get(cb); i32_mul; local_get(j); i32_add;
+                                i32_const(8); i32_mul; i32_add;
+                                v128_load(0);
+                                // v_c += v_a * v_b
+                                f64x2_mul; f64x2_add;
+                                // store C[i][j..j+2]
+                                v128_store(0);
+
+                                local_get(j); i32_const(2); i32_add; local_set(j);
+                                br(0);
+                              end; end;
+                              // Scalar remainder: if j < j1, process 1 more element
+                              local_get(j); local_get(j1); i32_lt_u;
+                              if_empty;
+                                local_get(dst); i32_const(8); i32_add;
+                                local_get(i); local_get(cb); i32_mul; local_get(j); i32_add;
+                                i32_const(8); i32_mul; i32_add;
+                                local_get(dst); i32_const(8); i32_add;
+                                local_get(i); local_get(cb); i32_mul; local_get(j); i32_add;
+                                i32_const(8); i32_mul; i32_add; f64_load(0);
+                                local_get(a_ik);
+                                local_get(b); i32_const(8); i32_add;
+                                local_get(k); local_get(cb); i32_mul; local_get(j); i32_add;
+                                i32_const(8); i32_mul; i32_add; f64_load(0);
+                                f64_mul; f64_add; f64_store(0);
+                              end;
+                              local_get(k); i32_const(1); i32_add; local_set(k);
+                              br(0);
+                            end; end;
+                            local_get(i); i32_const(1); i32_add; local_set(i);
+                            br(0);
+                          end; end;
+
+                          local_get(j0); i32_const(TILE); i32_add; local_set(j0);
                           br(0);
                         end; end;
-                        // dst[i][j] = sum
-                        local_get(dst); i32_const(8); i32_add;
-                        local_get(i); local_get(cb); i32_mul; local_get(j); i32_add;
-                        i32_const(8); i32_mul; i32_add;
-                        local_get(sum); f64_store(0);
-                        local_get(j); i32_const(1); i32_add; local_set(j);
+                        local_get(k0); i32_const(TILE); i32_add; local_set(k0);
                         br(0);
                       end; end;
-                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      local_get(i0); i32_const(TILE); i32_add; local_set(i0);
                       br(0);
                     end; end;
                     local_get(dst);
                 });
-                self.scratch.free_f64(sum);
-                self.scratch.free_i32(k);
+                self.scratch.free_f64(a_ik);
+                self.scratch.free_i32(j1);
+                self.scratch.free_i32(k1);
+                self.scratch.free_i32(i1);
                 self.scratch.free_i32(j);
+                self.scratch.free_i32(k);
                 self.scratch.free_i32(i);
+                self.scratch.free_i32(j0);
+                self.scratch.free_i32(k0);
+                self.scratch.free_i32(i0);
                 self.scratch.free_i32(cb);
                 self.scratch.free_i32(ca);
                 self.scratch.free_i32(ra);
