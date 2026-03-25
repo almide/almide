@@ -1,0 +1,45 @@
+# Affine cipher: E(x) = (ax + b) mod m, D(x) = a^-1 * (x - b) mod m
+
+def gcd(a: int, b: int) -> int:
+    pass  # TODO: implement
+
+def mod_inverse(a: int, m: int) -> int:
+    pass  # TODO: implement
+
+def char_to_num(c: str) -> int:
+    pass  # TODO: implement
+
+def num_to_char(n: int) -> str:
+    pass  # TODO: implement
+
+def encode(a: int, b: int, text: str) -> str:
+    """Raises ValueError if a and m are not coprime."""
+    pass  # TODO: implement
+
+def decode(a: int, b: int, text: str) -> str:
+    """Raises ValueError if a and m are not coprime."""
+    pass  # TODO: implement
+
+# Tests
+assert encode(5, 7, "yes") == "xbt", "encode yes"
+assert encode(15, 18, "no") == "fu", "encode no"
+assert encode(21, 3, "OMG") == "lvz", "encode OMG"
+assert encode(21, 3, "mindblowingly") == "vpqoy alxpq zan", "encode mindblowingly"
+assert encode(3, 4, "Testing,1 2 3, testing.") == "jqgjc rw123 jqgjc rw", "encode numbers"
+assert encode(5, 17, "Truth") == "iynia", "encode deep thought"
+
+try:
+    encode(6, 17, "test")
+    assert False, "encode not coprime should raise"
+except ValueError as e:
+    assert str(e) == "a and m must be coprime", "encode not coprime"
+
+assert decode(3, 7, "tytgn fjr") == "exercism", "decode exercism"
+assert decode(19, 16, "qdber jeppp ewbn plqce") == "anrylbypppyortpxacy", "decode sentence"
+assert decode(25, 7, "odpoz ub123 , ") == "testing123,", "decode numbers"
+
+try:
+    decode(13, 11, "test")
+    assert False, "decode not coprime should raise"
+except ValueError as e:
+    assert str(e) == "a and m must be coprime", "decode not coprime"

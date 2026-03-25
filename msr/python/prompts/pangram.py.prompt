@@ -1,0 +1,14 @@
+def is_pangram(sentence: str) -> bool:
+    pass  # TODO: implement
+
+# Tests
+assert is_pangram("") == False, "empty sentence"
+assert is_pangram("abcdefghijklmnopqrstuvwxyz") == True, "perfect lower case"
+assert is_pangram("the quick brown fox jumps over the lazy dog") == True, "only lower case"
+assert is_pangram("a quick movement of the enemy will jeopardize five gunboats") == False, "missing letter x"
+assert is_pangram("five boxing wizards jump quickly at my request") == False, "missing letter h"
+assert is_pangram("the_quick_brown_fox_jumps_over_the_lazy_dog") == True, "with underscores"
+assert is_pangram("the 1 quick brown fox jumps over the 2 lazy dogs") == True, "with numbers"
+assert is_pangram("7h3 qu1ck brown fox jumps ov3r 7h3 lazy dog") == False, "missing letters replaced by numbers"
+assert is_pangram('"Five quacking Zephyrs jolt my wax bed."') == True, "mixed case and punctuation"
+assert is_pangram("the quick brown fox jumps over with lazy FX") == False, "upper and lower case"

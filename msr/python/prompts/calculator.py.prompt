@@ -1,0 +1,54 @@
+from enum import Enum, auto
+from dataclasses import dataclass
+from typing import Union
+
+
+class Op(Enum):
+    Add = auto()
+    Sub = auto()
+    Mul = auto()
+    Div = auto()
+
+
+@dataclass
+class Lit:
+    value: float
+
+@dataclass
+class BinOp:
+    op: Op
+    left: 'Expr'
+    right: 'Expr'
+
+@dataclass
+class Neg:
+    expr: 'Expr'
+
+Expr = Union[Lit, BinOp, Neg]
+
+
+def eval(e: Expr) -> float:
+    """Evaluate expression. Raises ValueError on division by zero."""
+    pass  # TODO: implement
+
+# Tests
+assert eval(Lit(42.0)) == 42.0, "literal"
+assert eval(BinOp(Op.Add, Lit(2.0), Lit(3.0))) == 5.0, "addition"
+assert eval(BinOp(Op.Sub, Lit(10.0), Lit(4.0))) == 6.0, "subtraction"
+assert eval(BinOp(Op.Mul, Lit(3.0), Lit(7.0))) == 21.0, "multiplication"
+assert eval(BinOp(Op.Div, Lit(10.0), Lit(4.0))) == 2.5, "division"
+
+try:
+    eval(BinOp(Op.Div, Lit(1.0), Lit(0.0)))
+    assert False, "division by zero should raise"
+except ValueError as e:
+    assert str(e) == "division by zero", "division by zero"
+
+assert eval(Neg(Lit(5.0))) == -5.0, "negation"
+assert eval(BinOp(Op.Add, Lit(1.0), BinOp(Op.Mul, Lit(2.0), Lit(3.0)))) == 7.0, "nested"
+
+e = BinOp(Op.Sub, BinOp(Op.Add, Lit(10.0), Lit(5.0)), Neg(Lit(3.0)))
+assert eval(e) == 18.0, "complex"
+
+e = Neg(BinOp(Op.Mul, Neg(Lit(2.0)), BinOp(Op.Add, Lit(3.0), Lit(4.0))))
+assert eval(e) == 14.0, "deeply nested"

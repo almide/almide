@@ -1,0 +1,39 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class Student:
+    name: str
+    score: int
+
+@dataclass
+class Product:
+    name: str
+    price: int
+    stock: int
+
+@dataclass
+class Keyed:
+    key: int
+    label: str
+
+
+def sort_by_key(items: list[Keyed]) -> list[Keyed]:
+    pass  # TODO: implement
+
+
+# Tests
+items = [Keyed(3, "c"), Keyed(1, "a"), Keyed(2, "b")]
+assert [x.label for x in sort_by_key(items)] == ["a", "b", "c"], "sort by key"
+
+assert [x.key for x in sort_by_key([Keyed(5, "only")])] == [5], "sort single"
+
+students = [Student("Alice", 85), Student("Bob", 92), Student("Carol", 78)]
+assert [s.name for s in sorted(students, key=lambda s: s.score)] == ["Carol", "Alice", "Bob"], "sort students by score"
+
+products = [Product("Pen", 100, 50), Product("Book", 500, 10), Product("Eraser", 50, 100)]
+assert [p.name for p in sorted(products, key=lambda p: p.price)] == ["Eraser", "Pen", "Book"], "sort products by price"
+
+items = [Keyed(5, "e"), Keyed(2, "b"), Keyed(8, "h"), Keyed(1, "a")]
+big = sort_by_key([x for x in items if x.key > 3])
+assert [x.label for x in big] == ["e", "h"], "filter then sort"

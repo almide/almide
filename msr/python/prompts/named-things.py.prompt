@@ -1,0 +1,67 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class Dog:
+    name: str
+    breed: str
+
+@dataclass
+class Person:
+    name: str
+    age: int
+    email: str
+
+@dataclass
+class City:
+    name: str
+    population: int
+    country: str
+
+
+def describe(thing) -> str:
+    """Return "name: <name>" for any object with a name attribute."""
+    pass  # TODO: implement
+
+
+def names(things: list) -> list[str]:
+    """Extract names from a list of named things."""
+    pass  # TODO: implement
+
+
+def set_name(thing, new_name: str):
+    """Return a copy of thing with the name replaced. Preserves all other fields."""
+    pass  # TODO: implement
+
+
+# Tests
+assert describe(Dog("Rex", "Lab")) == "name: Rex", "describe dog"
+assert describe(Person("Alice", 30, "a@b")) == "name: Alice", "describe person"
+assert describe(City("Tokyo", 14000000, "Japan")) == "name: Tokyo", "describe city"
+
+assert names([Dog("Rex", "Lab"), Dog("Fido", "Poodle")]) == ["Rex", "Fido"], "names from dogs"
+assert names([City("Tokyo", 14000000, "Japan"), City("Paris", 2100000, "France")]) == ["Tokyo", "Paris"], "names from cities"
+
+d2 = set_name(Dog("Rex", "Lab"), "Max")
+assert d2.name == "Max", "set_name dog name"
+assert d2.breed == "Lab", "set_name dog preserves breed"
+
+p2 = set_name(Person("Alice", 30, "a@b"), "Bob")
+assert p2.name == "Bob", "set_name person name"
+assert p2.age == 30, "set_name person preserves age"
+
+assert describe(set_name(Dog("Rex", "Lab"), "Buddy")) == "name: Buddy", "set_name then describe"
+
+assert describe(Dog("Rex", "Lab")) == "name: Rex", "describe different types dog"
+assert describe(Person("Alice", 30, "a@b")) == "name: Alice", "describe different types person"
+
+d = set_name(Dog("A", "B"), "C")
+p = set_name(Person("X", 1, "e"), "Y")
+assert d.name == "C", "set_name on multiple types dog"
+assert p.name == "Y", "set_name on multiple types person"
+
+result = [describe(d) for d in [Dog("Rex", "Lab"), Dog("Fido", "Poodle")]]
+assert result == ["name: Rex", "name: Fido"], "names via map lambda"
+
+renamed = names([set_name(d, d.name.upper()) for d in [Dog("Rex", "Lab"), Dog("Fido", "Poodle")]])
+assert renamed == ["REX", "FIDO"], "set_name in map lambda"

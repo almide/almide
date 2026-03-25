@@ -1,0 +1,28 @@
+def distance(a: str, b: str) -> int:
+    """Calculate the Hamming distance between two strings.
+    Raises ValueError if strands are of different length.
+    """
+    pass  # TODO: implement
+
+# Tests
+assert distance("", "") == 0, "empty strands"
+assert distance("A", "A") == 0, "single letter identical"
+assert distance("G", "T") == 1, "single letter different"
+assert distance("GGACTGAAATCTG", "GGACTGAAATCTG") == 0, "long identical"
+assert distance("GGACGGATTCTG", "AGGACGGATTCT") == 9, "long different"
+
+try:
+    distance("AATG", "AAA")
+    assert False, "different lengths should raise"
+except ValueError as e:
+    assert str(e) == "strands must be of equal length", "different lengths"
+
+try:
+    distance("AATG", "AAA")
+    assert False, "first strand longer should raise"
+except ValueError as e:
+    assert str(e) == "strands must be of equal length", "first strand longer"
+
+assert distance("GAGCCTACTAACGGGAT", "CATCGTAATGACGGCCT") == 7, "short mutation"
+assert distance("GATACA", "GCATAA") == 4, "all different"
+assert distance("GAT", "GAT") == 0, "no difference"

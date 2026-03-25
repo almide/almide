@@ -1,0 +1,19 @@
+def score(word: str) -> int:
+    pass  # TODO: implement
+
+
+def letter_score(c: str) -> int:
+    pass  # TODO: implement
+
+# Tests
+assert score("a") == 1, "lowercase letter"
+assert score("A") == 1, "uppercase letter"
+assert score("f") == 4, "valuable letter"
+assert score("at") == 2, "short word"
+assert score("zoo") == 12, "short valuable word"
+assert score("street") == 6, "medium word"
+assert score("quirky") == 22, "medium valuable word"
+assert score("OxyphenButaworzone") == 47, "long mixed-case word"
+assert score("pinball") == 11, "english-like word"
+assert score("") == 0, "empty input"
+assert score("abcdefghijklmnopqrstuvwxyz") == 87, "entire alphabet"

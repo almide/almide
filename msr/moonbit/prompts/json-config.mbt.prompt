@@ -1,0 +1,108 @@
+// JSON config exercise
+// Implement a simple JSON parser and accessor API
+
+enum JsonValue {
+  JsonNull
+  JsonBool(Bool)
+  JsonInt(Int)
+  JsonString(String)
+  JsonArray(Array[JsonValue])
+  JsonObject(Array[(String, JsonValue)])
+} derive(Eq, Show)
+
+fn parse_json(input : String) -> Result[JsonValue, String] {
+  abort("todo")
+}
+
+fn get_string(value : JsonValue, key : String) -> Option[String] {
+  abort("todo")
+}
+
+fn get_int(value : JsonValue, key : String) -> Option[Int] {
+  abort("todo")
+}
+
+fn get_bool(value : JsonValue, key : String) -> Option[Bool] {
+  abort("todo")
+}
+
+fn get(value : JsonValue, key : String) -> Option[JsonValue] {
+  abort("todo")
+}
+
+fn get_array(value : JsonValue, key : String) -> Option[Array[JsonValue]] {
+  abort("todo")
+}
+
+fn keys(value : JsonValue) -> Array[String] {
+  abort("todo")
+}
+
+fn stringify(value : JsonValue) -> String {
+  abort("todo")
+}
+
+test "parse and get string" {
+  match parse_json("{\"name\": \"Alice\", \"age\": 30}") {
+    Ok(v) => {
+      assert_eq!(get_string(v, "name"), Some("Alice"))
+      assert_eq!(get_int(v, "age"), Some(30))
+    }
+    Err(_) => abort("expected Ok")
+  }
+}
+
+test "get missing key" {
+  match parse_json("{\"x\": 1}") {
+    Ok(v) => assert_eq!(get_string(v, "missing"), None)
+    Err(_) => abort("expected Ok")
+  }
+}
+
+test "get nested" {
+  match parse_json("{\"a\": {\"b\": 42}}") {
+    Ok(v) => match get(v, "a") {
+      Some(a) => assert_eq!(get_int(a, "b"), Some(42))
+      None => abort("expected Some")
+    }
+    Err(_) => abort("expected Ok")
+  }
+}
+
+test "get array" {
+  match parse_json("{\"items\": [1, 2, 3]}") {
+    Ok(v) => match get_array(v, "items") {
+      Some(a) => assert_eq!(a.length(), 3)
+      None => abort("expected Some")
+    }
+    Err(_) => abort("expected Ok")
+  }
+}
+
+test "stringify roundtrip" {
+  match parse_json("{\"key\": \"value\"}") {
+    Ok(v) => assert_true!(stringify(v).contains("key"))
+    Err(_) => abort("expected Ok")
+  }
+}
+
+test "get bool" {
+  match parse_json("{\"active\": true}") {
+    Ok(v) => assert_eq!(get_bool(v, "active"), Some(true))
+    Err(_) => abort("expected Ok")
+  }
+}
+
+test "parse invalid" {
+  match parse_json("not json") {
+    Ok(_) => abort("expected Err")
+    Err(_) => ()
+  }
+}
+
+test "keys" {
+  match parse_json("{\"a\": 1, \"b\": 2}") {
+    Ok(v) => assert_eq!(keys(v).length(), 2)
+    Err(_) => abort("expected Ok")
+  }
+}

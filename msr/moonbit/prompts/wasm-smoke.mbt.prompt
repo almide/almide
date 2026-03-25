@@ -1,0 +1,14 @@
+fn fibonacci(n : Int) -> Int {
+  abort("todo")
+}
+
+fn fizzbuzz(n : Int) -> String {
+  abort("todo")
+}
+
+fn main {
+  println(fibonacci(10).to_string())
+  for i = 1; i <= 20; i = i + 1 {
+    println(fizzbuzz(i))
+  }
+}

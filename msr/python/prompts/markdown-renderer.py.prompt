@@ -1,0 +1,43 @@
+from dataclasses import dataclass
+from typing import Union
+
+
+@dataclass
+class Heading:
+    level: int
+    text: str
+
+@dataclass
+class Paragraph:
+    text: str
+
+@dataclass
+class Bullet:
+    text: str
+
+@dataclass
+class Divider:
+    pass
+
+Token = Union[Heading, Paragraph, Bullet, Divider]
+
+
+def parse_line(line: str) -> Token:
+    pass  # TODO: implement
+
+
+def render(token: Token) -> str:
+    pass  # TODO: implement
+
+
+# Tests
+assert parse_line("# Hello") == Heading(1, "Hello"), "h1"
+assert parse_line("## World") == Heading(2, "World"), "h2"
+assert parse_line("### Sub") == Heading(3, "Sub"), "h3"
+assert parse_line("- item") == Bullet("item"), "bullet"
+assert parse_line("---") == Divider(), "divider"
+assert parse_line("plain text") == Paragraph("plain text"), "paragraph"
+assert render(Heading(1, "Hi")) == "HI\n==", "render h1"
+assert render(Heading(2, "Hi")) == "Hi\n--", "render h2"
+assert render(Paragraph("text")) == "  text", "render paragraph"
+assert render(Bullet("item")) == "  * item", "render bullet"
