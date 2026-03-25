@@ -456,7 +456,7 @@ impl Checker {
 
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
-            ast::Stmt::Let { name, ty, value, .. } => {
+            ast::Stmt::Let { name, ty, value, span } => {
                 let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
@@ -472,9 +472,12 @@ impl Checker {
                         }
                     } else { t }
                 };
+                if let Some(s) = span {
+                    self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
+                }
                 self.env.define_var(name, final_ty);
             }
-            ast::Stmt::Var { name, ty, value, .. } => {
+            ast::Stmt::Var { name, ty, value, span } => {
                 let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
@@ -489,6 +492,9 @@ impl Checker {
                         }
                     } else { t }
                 };
+                if let Some(s) = span {
+                    self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
+                }
                 self.env.define_var(name, final_ty);
                 self.env.mutable_vars.insert(sym(name));
                 self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
@@ -506,9 +512,13 @@ impl Checker {
                     } else {
                         format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
                     };
-                    self.emit(super::err(
+                    let mut diag = super::err(
                         format!("cannot reassign immutable binding '{}'", name),
-                        hint, format!("{} = ...", name)).with_code("E009"));
+                        hint, format!("{} = ...", name)).with_code("E009");
+                    if let Some(&(line, col)) = self.env.var_decl_locs.get(&sym(name)) {
+                        diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", name));
+                    }
+                    self.emit(diag);
                 }
                 // Escape analysis: block var mutation inside closures in pure fns
                 if self.env.mutable_vars.contains(&sym(name)) && !self.env.can_call_effect {

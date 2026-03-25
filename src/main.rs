@@ -80,7 +80,7 @@ enum Commands {
         /// Output test results as JSON (one per line)
         #[arg(long)]
         json: bool,
-        /// Target: wasm to run tests via direct WASM emit + wasmtime
+        /// Target: wasm (wasmtime), ts/typescript (deno/node)
         #[arg(long)]
         target: Option<String>,
     },
@@ -411,6 +411,8 @@ fn dispatch(cli: Cli) {
             let file_str = file.as_deref().unwrap_or("");
             if target.as_deref() == Some("wasm") {
                 cli::cmd_test_wasm(file_str, run.as_deref());
+            } else if matches!(target.as_deref(), Some("ts" | "typescript")) {
+                cli::cmd_test_ts(file_str, run.as_deref());
             } else if json {
                 cli::cmd_test_json(file_str, run.as_deref());
             } else {
