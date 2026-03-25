@@ -616,7 +616,7 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         | "as_str" | "get" | "keys" | "values" | "abs" | "powi"
         | "is_empty" | "contains_key" | "entry" | "or_insert"
         | "expect" | "ok" | "err" | "and_then" | "map_err"
-        | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref"
+        | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref" | "as_deref"
     );
     // User-defined UFCS: plain method name (no dots) → func(object, args)
     if !method.contains('.') && !is_rust_intrinsic {
