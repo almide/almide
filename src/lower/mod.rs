@@ -328,7 +328,84 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
 
     compute_use_counts(&mut program); // After auto-derive so derived functions get correct use_counts
     demote_unused_mut(&mut program);
+
+    // Debug: report TypeVars remaining in IR (should be zero for correct codegen)
+    if std::env::var("ALMIDE_DEBUG_TYPEVARS").is_ok() {
+        report_remaining_typevars(&program);
+    }
+
     program
+}
+
+/// Report all TypeVar/Unknown types remaining in the IR after lowering.
+fn report_remaining_typevars(program: &IrProgram) {
+    use crate::types::Ty;
+    fn has_typevar(ty: &Ty) -> bool {
+        match ty {
+            Ty::TypeVar(name) => name.starts_with('?'), // Only inference vars, not generic params
+            Ty::Unknown => false,
+            Ty::Applied(_, args) => args.iter().any(has_typevar),
+            Ty::Tuple(elems) => elems.iter().any(has_typevar),
+            Ty::Fn { params, ret } => params.iter().any(has_typevar) || has_typevar(ret),
+            Ty::Named(_, args) => args.iter().any(has_typevar),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_typevar(t)),
+            _ => false,
+        }
+    }
+    fn report_expr(expr: &IrExpr, fn_name: &str, loc: &str) {
+        if has_typevar(&expr.ty) {
+            eprintln!("  [TypeVar] {} in {}: {:?} (expr: {:?})", loc, fn_name, expr.ty, std::mem::discriminant(&expr.kind));
+        }
+        // Recurse into children
+        match &expr.kind {
+            IrExprKind::Call { args, .. } => { for a in args { report_expr(a, fn_name, "call-arg"); } }
+            IrExprKind::Lambda { body, params, .. } => {
+                for (_, ty) in params { if has_typevar(ty) { eprintln!("  [TypeVar] lambda-param in {}: {:?}", fn_name, ty); } }
+                report_expr(body, fn_name, "lambda-body");
+            }
+            IrExprKind::BinOp { left, right, .. } => { report_expr(left, fn_name, "binop-left"); report_expr(right, fn_name, "binop-right"); }
+            IrExprKind::Match { subject, arms, .. } => {
+                report_expr(subject, fn_name, "match-subject");
+                for arm in arms { report_expr(&arm.body, fn_name, "match-arm"); }
+            }
+            IrExprKind::If { cond, then, else_, .. } => {
+                report_expr(cond, fn_name, "if-cond");
+                report_expr(then, fn_name, "if-then");
+                report_expr(else_, fn_name, "if-else");
+            }
+            IrExprKind::Block { stmts, expr, .. } => {
+                for s in stmts {
+                    if let IrStmtKind::Bind { ty, value, .. } = &s.kind {
+                        if has_typevar(ty) { eprintln!("  [TypeVar] bind-ty in {}: {:?}", fn_name, ty); }
+                        report_expr(value, fn_name, "bind-val");
+                    } else if let IrStmtKind::Expr { expr: e } = &s.kind {
+                        report_expr(e, fn_name, "stmt-expr");
+                    }
+                }
+                if let Some(e) = expr { report_expr(e, fn_name, "block-tail"); }
+            }
+            _ => {}
+        }
+    }
+    let mut count = 0;
+    for func in &program.functions {
+        let before = count;
+        report_expr(&func.body, &func.name, "body");
+        for p in &func.params { if has_typevar(&p.ty) { eprintln!("  [TypeVar] param in {}: {:?}", func.name, p.ty); count += 1; } }
+        if has_typevar(&func.ret_ty) { eprintln!("  [TypeVar] ret_ty in {}: {:?}", func.name, func.ret_ty); count += 1; }
+        if count > before { count += 1; }
+    }
+    // VarTable
+    for i in 0..program.var_table.len() {
+        let info = program.var_table.get(VarId(i as u32));
+        if has_typevar(&info.ty) {
+            eprintln!("  [TypeVar] var {} '{}': {:?}", i, info.name, info.ty);
+            count += 1;
+        }
+    }
+    if count > 0 {
+        eprintln!("[TypeVar report] {} TypeVar occurrences found in IR", count);
+    }
 }
 
 pub fn lower_module(

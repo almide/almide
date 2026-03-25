@@ -598,9 +598,27 @@ impl Checker {
     fn infer_plus_op(&mut self, lc: &Ty, rc: &Ty, lt: Ty) -> Ty {
         let is_concat_ty = |t: &Ty| matches!(t, Ty::String | Ty::Applied(TypeConstructorId::List, _));
         let is_unknown_ty = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
+        // When one side is List and the other is TypeVar, unify the TypeVar with the List type
+        if is_unknown_ty(lc) && is_concat_ty(rc) {
+            self.unify_infer(&lt, rc);
+            let resolved_lt = resolve_ty(&lt, &self.uf);
+            // Now unify element types if both resolved to List
+            if let (Ty::Applied(TypeConstructorId::List, la), Ty::Applied(TypeConstructorId::List, ra)) = (&resolved_lt, rc) {
+                if let (Some(le), Some(re)) = (la.first(), ra.first()) {
+                    self.unify_infer(le, re);
+                }
+            }
+            return resolve_ty(&lt, &self.uf);
+        }
         if (is_concat_ty(lc) && (is_concat_ty(rc) || is_unknown_ty(rc)))
             || (is_concat_ty(rc) && is_unknown_ty(lc)) {
-            return lt; // concat: return same type
+            // Unify element types for list concatenation: List[?0] + List[Int] → ?0 = Int
+            if let (Ty::Applied(TypeConstructorId::List, la), Ty::Applied(TypeConstructorId::List, ra)) = (lc, rc) {
+                if let (Some(le), Some(re)) = (la.first(), ra.first()) {
+                    self.unify_infer(le, re);
+                }
+            }
+            return resolve_ty(&lt, &self.uf);
         }
         let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
         if !is_numeric(lc) || !is_numeric(rc) {
