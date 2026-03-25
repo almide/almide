@@ -2,6 +2,8 @@
 //
 // With `type T: Codec`, encode()/decode() are auto-generated.
 // No manual from_json/to_json needed.
+import json
+import http
 
 // ── Domain types (Codec = auto encode/decode) ──
 

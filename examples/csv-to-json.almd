@@ -1,7 +1,9 @@
-
 // csv-to-json — CSV to JSON converter
 //
 // Usage: almide run showcase/csv-to-json.almd -- input.csv
+import env
+import fs
+
 effect fn main() -> Result[Unit, String] = {
   let args = env.args();
   guard list.len(args) >= 1 else err("usage: csv-to-json <file.csv>");
