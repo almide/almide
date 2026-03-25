@@ -262,8 +262,8 @@ pub enum IrExprKind {
     Clone { expr: Box<IrExpr> },
     /// Explicit deref: `*expr` (Box'd pattern bindings)
     Deref { expr: Box<IrExpr> },
-    /// Explicit borrow: `&expr` or `&*expr`
-    Borrow { expr: Box<IrExpr>, as_str: bool },
+    /// Explicit borrow: `&expr`, `&*expr`, or `&mut expr`
+    Borrow { expr: Box<IrExpr>, as_str: bool, #[serde(default)] mutable: bool },
     /// Box wrapping: `Box::new(expr)`
     BoxNew { expr: Box<IrExpr> },
     /// Macro invocation: `name!(args)` (Rust assert_eq!, println!, etc.)

@@ -146,8 +146,8 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             kind: IrExprKind::Deref { expr: Box::new(sub(inner)) },
             ty: expr.ty.clone(), span: expr.span,
         },
-        IrExprKind::Borrow { expr: inner, as_str } => IrExpr {
-            kind: IrExprKind::Borrow { expr: Box::new(sub(inner)), as_str: *as_str },
+        IrExprKind::Borrow { expr: inner, as_str, mutable } => IrExpr {
+            kind: IrExprKind::Borrow { expr: Box::new(sub(inner)), as_str: *as_str, mutable: *mutable },
             ty: expr.ty.clone(), span: expr.span,
         },
         IrExprKind::BoxNew { expr: inner } => IrExpr {

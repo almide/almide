@@ -9,6 +9,7 @@ pub(crate) fn builtin_module_for_type(ty: &Ty) -> Option<&'static str> {
     match ty {
         Ty::Applied(TypeConstructorId::List, _) => Some("list"),
         Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
+        Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
         Ty::String => Some("string"),
         Ty::Int => Some("int"),
         Ty::Float => Some("float"),
@@ -33,6 +34,12 @@ impl Checker {
                 // println/eprintln require String argument
                 if let Some(first) = arg_tys.first() {
                     self.constrain(Ty::String, first.clone(), format!("call to {}()", name));
+                }
+                Some(Ty::Unit)
+            }
+            "panic" => {
+                if let Some(first) = arg_tys.first() {
+                    self.constrain(Ty::String, first.clone(), "call to panic()".to_string());
                 }
                 Some(Ty::Unit)
             }

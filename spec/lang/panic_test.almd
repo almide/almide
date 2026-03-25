@@ -1,0 +1,11 @@
+test "panic compiles in dead branch" {
+  let x = 42
+  if x == 0 then panic("unreachable") else ()
+  assert_eq(x, 42)
+}
+
+test "panic in guard else" {
+  let x = 10
+  guard x > 0 else panic("x must be positive")
+  assert_eq(x, 10)
+}

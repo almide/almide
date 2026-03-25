@@ -445,8 +445,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             ctx.templates.render_with("deref_var", None, &[], &[("name", name_s.as_str())])
                 .unwrap_or_else(|| format!("(*{})", name_s))
         }
-        IrExprKind::Borrow { expr: inner, as_str } => {
-            if *as_str {
+        IrExprKind::Borrow { expr: inner, as_str, mutable } => {
+            if *mutable {
+                format!("&mut {}", render_expr(ctx, inner))
+            } else if *as_str {
                 format!("&*{}", render_expr(ctx, inner))
             } else {
                 format!("&{}", render_expr(ctx, inner))

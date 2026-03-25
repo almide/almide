@@ -50,3 +50,9 @@ pub fn almide_rt_map_update<K: Eq + std::hash::Hash + Clone, V: Clone>(m: HashMa
     if let Some(v) = m.get(&key).cloned() { m.insert(key, f(v)); }
     m
 }
+
+// ── Mutable operations ──
+
+pub fn almide_rt_map_insert<K: Eq + std::hash::Hash, V>(m: &mut HashMap<K, V>, k: K, v: V) { m.insert(k, v); }
+pub fn almide_rt_map_delete<K: Eq + std::hash::Hash, V>(m: &mut HashMap<K, V>, k: &K) { m.remove(k); }
+pub fn almide_rt_map_clear<K, V>(m: &mut HashMap<K, V>) { m.clear(); }

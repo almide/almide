@@ -472,6 +472,7 @@ impl Checker {
                     "Option" => Ty::option(ra.first().cloned().unwrap_or(Ty::Unknown)),
                     "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
                     "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
+                    "Set" => Ty::set_of(ra.first().cloned().unwrap_or(Ty::Unknown)),
                     _ => Ty::Named(sym(name), ra),
                 }
             },

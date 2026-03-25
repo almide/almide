@@ -143,7 +143,7 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
         }
         other if other.starts_with("Set[") => {
             let inner = &other[4..other.len() - 1];
-            format!("Ty::Named(s(\"Set\"), vec![{}])", parse_type(inner, type_params))
+            format!("Ty::set_of({})", parse_type(inner, type_params))
         }
         other if other.starts_with("Map[") => {
             let inner = &other[4..other.len() - 1];
@@ -495,6 +495,8 @@ pub fn generate_stdlib() {
                         } else {
                             "ArgTransform::BorrowStr"
                         }
+                    } else if rust_tmpl.contains(&format!("&mut {{{}}}", pname)) {
+                        "ArgTransform::BorrowMut"
                     } else if rust_tmpl.contains(&format!("&{{{}}}", pname)) {
                         "ArgTransform::BorrowRef"
                     } else {
@@ -799,6 +801,7 @@ pub fn generate_stdlib() {
          \x20   Direct,     // pass as-is\n\
          \x20   BorrowStr,  // &*expr (borrow as &str)\n\
          \x20   BorrowRef,  // &expr (borrow as reference)\n\
+         \x20   BorrowMut,  // &mut expr (mutable borrow, strips clone)\n\
          \x20   ToVec,      // (expr).to_vec() (owned copy)\n\
          \x20   LambdaClone, // lambda with clone bindings\n\
          \x20   WrapSome,   // Some(expr) (wrap in Option)\n\

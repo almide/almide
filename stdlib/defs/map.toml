@@ -226,3 +226,32 @@ params = [
 return = "Map[K, V]"
 rust = "almide_rt_map_update({m}, {key}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_map.update({m}, {key}, ({f.args}) => {f.body})"
+
+# ── Mutable operations ──
+
+[insert]
+description = "Insert a key-value pair in place. Requires var binding."
+example = 'map.insert(m, "name", "Alice")'
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }, { name = "value", type = "V" }]
+return = "Unit"
+rust = "almide_rt_map_insert(&mut {m}, {key}, {value})"
+ts = "{m}.set({key}, {value})"
+
+[delete]
+description = "Remove a key in place. Requires var binding."
+example = 'map.delete(m, "temp")'
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }]
+return = "Unit"
+rust = "almide_rt_map_delete(&mut {m}, &{key})"
+ts = "{m}.delete({key})"
+
+[clear]
+description = "Remove all entries in place. Requires var binding."
+example = 'map.clear(m)'
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }]
+return = "Unit"
+rust = "almide_rt_map_clear(&mut {m})"
+ts = "{m}.clear()"

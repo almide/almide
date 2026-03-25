@@ -1,0 +1,42 @@
+test "list.push appends in place" {
+  var xs = [1, 2, 3]
+  list.push(xs, 4)
+  list.push(xs, 5)
+  assert_eq(xs, [1, 2, 3, 4, 5])
+}
+
+test "list.push builds from empty" {
+  var tokens: List[String] = []
+  list.push(tokens, "hello")
+  list.push(tokens, "world")
+  assert_eq(list.len(tokens), 2)
+  assert_eq(tokens, ["hello", "world"])
+}
+
+test "list.pop removes last element" {
+  var xs = [10, 20, 30]
+  let last = list.pop(xs)
+  assert_eq(last, some(30))
+  assert_eq(xs, [10, 20])
+}
+
+test "list.pop on empty returns none" {
+  var xs: List[Int] = []
+  let result = list.pop(xs)
+  assert_eq(result, none)
+}
+
+test "list.clear removes all elements" {
+  var xs = [1, 2, 3]
+  list.clear(xs)
+  assert(list.is_empty(xs))
+  assert_eq(list.len(xs), 0)
+}
+
+test "list.push for string builder pattern" {
+  var parts: List[String] = []
+  list.push(parts, "fn")
+  list.push(parts, " ")
+  list.push(parts, "main")
+  assert_eq(string.join(parts, ""), "fn main")
+}

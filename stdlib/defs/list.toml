@@ -578,3 +578,32 @@ params = [{ name = "xs", type = "List[A]" }, { name = "n", type = "Int" }]
 return = "List[List[A]]"
 rust = "almide_rt_list_window(({xs}).to_vec(), {n})"
 ts = "__almd_list.window({xs}, {n})"
+
+# ── Mutable operations ──
+
+[push]
+description = "Append an element in place. Requires var binding."
+example = 'list.push(xs, 42)'
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "x", type = "A" }]
+return = "Unit"
+rust = "almide_rt_list_push(&mut {xs}, {x})"
+ts = "{xs}.push({x})"
+
+[pop]
+description = "Remove and discard the last element in place. Requires var binding."
+example = 'list.pop(xs)'
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "Option[A]"
+rust = "almide_rt_list_pop(&mut {xs})"
+ts = "__almd_list.pop({xs})"
+
+[clear]
+description = "Remove all elements in place. Requires var binding."
+example = 'list.clear(xs)'
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "Unit"
+rust = "almide_rt_list_clear(&mut {xs})"
+ts = "{xs}.length = 0"

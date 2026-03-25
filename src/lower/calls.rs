@@ -132,6 +132,7 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             let builtin_module = match &obj_ty {
                 Ty::Applied(TypeConstructorId::List, _) => Some("list"),
                 Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
+                Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
                 Ty::String => Some("string"),
                 Ty::Int => Some("int"),
                 Ty::Float => Some("float"),

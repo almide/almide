@@ -80,6 +80,11 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             ctx.templates.render_with("type_map", None, &[], &[("key", key_s.as_str()), ("value", value_s.as_str())])
                 .unwrap_or_else(|| format!("HashMap<{}, {}>", render_type(ctx, k), render_type(ctx, v)))
         }
+        Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => {
+            let inner_s = render_type(ctx, &args[0]);
+            ctx.templates.render_with("type_set", None, &[], &[("inner", inner_s.as_str())])
+                .unwrap_or_else(|| format!("std::collections::HashSet<{}>", render_type(ctx, &args[0])))
+        }
         // Catch-all for other Applied types (e.g., user-defined type constructors)
         Ty::Applied(id, args) => {
             let name = match id {
