@@ -21,6 +21,16 @@ pub struct StdlibCallInfo {
 
 pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
     match (module, func) {
+            ("bytes", "concat") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::BorrowRef], effect: false, name: "almide_rt_bytes_concat", required: 2 }),
+            ("bytes", "from_list") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_bytes_from_list", required: 1 }),
+            ("bytes", "get") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct], effect: false, name: "almide_rt_bytes_get", required: 2 }),
+            ("bytes", "get_or") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_bytes_get_or", required: 3 }),
+            ("bytes", "is_empty") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_bytes_is_empty", required: 1 }),
+            ("bytes", "len") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_bytes_len", required: 1 }),
+            ("bytes", "new") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "almide_rt_bytes_new", required: 1 }),
+            ("bytes", "repeat") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct], effect: false, name: "almide_rt_bytes_repeat", required: 2 }),
+            ("bytes", "slice") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_bytes_slice", required: 3 }),
+            ("bytes", "to_list") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_bytes_to_list", required: 1 }),
             ("datetime", "add_days") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_datetime_add_days", required: 2 }),
             ("datetime", "add_hours") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_datetime_add_hours", required: 2 }),
             ("datetime", "add_minutes") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_datetime_add_minutes", required: 2 }),

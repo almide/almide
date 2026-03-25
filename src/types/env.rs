@@ -78,7 +78,7 @@ impl TypeEnv {
             imported_stdlib: {
                 let mut s = std::collections::HashSet::new();
                 // Tier 1: implicit imports (core type modules)
-                for m in &["string", "int", "float", "list", "map", "set", "option", "result"] {
+                for m in &["string", "int", "float", "list", "bytes", "map", "set", "option", "result"] {
                     s.insert(sym(m));
                 }
                 s

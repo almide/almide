@@ -58,7 +58,7 @@ pub(super) fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
     match te {
         ast::TypeExpr::Simple { name } => match name.as_str() {
             "Int" => Ty::Int, "Float" => Ty::Float, "String" => Ty::String,
-            "Bool" => Ty::Bool, "Unit" => Ty::Unit, "Path" => Ty::String,
+            "Bool" => Ty::Bool, "Unit" => Ty::Unit, "Bytes" => Ty::Bytes, "Path" => Ty::String,
             _ => Ty::Named(*name, vec![]),
         },
         ast::TypeExpr::Generic { name, args } => {

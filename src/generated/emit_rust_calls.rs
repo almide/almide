@@ -8,6 +8,16 @@ pub fn gen_generated_call(
         inline_lambda: &dyn Fn(usize, usize) -> (Vec<String>, String),
 ) -> Option<String> {
     let expr = match (module, func) {
+            ("bytes", "concat") => format!("almide_rt_bytes_concat(&{}, &{})", args_str[0], args_str[1]),
+            ("bytes", "from_list") => format!("almide_rt_bytes_from_list(&{})", args_str[0]),
+            ("bytes", "get") => format!("almide_rt_bytes_get(&{}, {})", args_str[0], args_str[1]),
+            ("bytes", "get_or") => format!("almide_rt_bytes_get_or(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("bytes", "is_empty") => format!("almide_rt_bytes_is_empty(&{})", args_str[0]),
+            ("bytes", "len") => format!("almide_rt_bytes_len(&{})", args_str[0]),
+            ("bytes", "new") => format!("almide_rt_bytes_new({})", args_str[0]),
+            ("bytes", "repeat") => format!("almide_rt_bytes_repeat(&{}, {})", args_str[0], args_str[1]),
+            ("bytes", "slice") => format!("almide_rt_bytes_slice(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("bytes", "to_list") => format!("almide_rt_bytes_to_list(&{})", args_str[0]),
             ("datetime", "add_days") => format!("{} + {} * 86400", args_str[0], args_str[1]),
             ("datetime", "add_hours") => format!("{} + {} * 3600", args_str[0], args_str[1]),
             ("datetime", "add_minutes") => format!("{} + {} * 60", args_str[0], args_str[1]),
