@@ -76,20 +76,17 @@ impl Diagnostic {
     }
 
     /// Add a secondary source location with a label.
-    #[allow(dead_code)]
     pub fn with_secondary(mut self, line: usize, col: Option<usize>, label: impl Into<String>) -> Self {
         self.secondary.push(SecondarySpan { line, col, label: label.into() });
         self
     }
 
-    #[allow(dead_code)]
     pub fn at(mut self, file: &str, line: usize) -> Self {
         self.file = Some(file.to_string());
         self.line = Some(line);
         self
     }
 
-    #[allow(dead_code)]
     pub fn at_span(mut self, file: &str, span: crate::ast::Span) -> Self {
         self.file = Some(file.to_string());
         self.line = Some(span.line);

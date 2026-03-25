@@ -802,7 +802,7 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
 // ── Test runner ─────────────────────────────────────────────────
 
 /// Compile the __init_globals function.
-#[allow(dead_code)]
+#[allow(dead_code)] // Will be activated when top-let WASM codegen is wired up
 fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     let void_type = emitter.register_type(vec![], vec![]);
 

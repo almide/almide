@@ -529,12 +529,6 @@ impl FuncCompiler<'_> {
         }
     }
 
-    /// Emit a stub for an unimplemented call: evaluate args (for side effects), drop values, unreachable.
-    #[allow(dead_code)]
-    pub(super) fn emit_stub_call_logged(&mut self, args: &[IrExpr], _context: &str) {
-        self.emit_stub_call(args);
-    }
-
     pub(super) fn emit_stub_call(&mut self, args: &[IrExpr]) {
         // Evaluate args for side effects, then return typed default instead of trapping.
         for arg in args {

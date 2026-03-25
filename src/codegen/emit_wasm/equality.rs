@@ -573,7 +573,7 @@ impl FuncCompiler<'_> {
 
 impl FuncCompiler<'_> {
     /// Find variant tag for a unit constructor called as a function (e.g., `Red`).
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Will be used for WASM variant equality codegen
     pub(super) fn find_unit_variant_tag(&self, name: &str) -> Option<u32> {
         for cases in self.emitter.variant_info.values() {
             for case in cases {

@@ -86,7 +86,6 @@ pub struct FnSig {
     pub params: Vec<(Sym, Ty)>,
     pub ret: Ty,
     pub is_effect: bool,
-    #[allow(dead_code)]
     pub generics: Vec<Sym>,
     /// Structural bounds for generics: TypeVar name → OpenRecord constraint type
     pub structural_bounds: std::collections::HashMap<Sym, Ty>,

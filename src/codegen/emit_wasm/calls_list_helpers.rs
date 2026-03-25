@@ -66,7 +66,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Emit take/drop as list slice. For take: start=0,end=n. For drop: start=n,end=len.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Will be activated when list.take/drop WASM codegen lands
     fn emit_list_slice_impl(
         &mut self, xs: &IrExpr, start_arg: Option<&IrExpr>, end_arg: Option<&IrExpr>,
         elem_size: usize, is_take: bool,
@@ -150,7 +150,7 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(xs_ptr);
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Placeholder for list.slice WASM codegen
     fn emit_memcpy_loop(&mut self, _i_local: u32, _dst_local: u32, _start_local: u32, _elem_size: usize) {
         // Generic memcpy for list.slice — complex, use inline for now
         // This is a placeholder; slice uses the same pattern as take/drop
