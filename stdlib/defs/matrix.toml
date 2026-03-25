@@ -1,0 +1,103 @@
+[zeros]
+description = "Create a zero-filled matrix."
+example = 'matrix.zeros(3, 4)'
+params = [{ name = "rows", type = "Int" }, { name = "cols", type = "Int" }]
+return = "Matrix"
+rust = "almide_rt_matrix_zeros({rows}, {cols})"
+ts = "__almd_matrix.zeros({rows}, {cols})"
+
+[ones]
+description = "Create a matrix filled with ones."
+example = 'matrix.ones(3, 4)'
+params = [{ name = "rows", type = "Int" }, { name = "cols", type = "Int" }]
+return = "Matrix"
+rust = "almide_rt_matrix_ones({rows}, {cols})"
+ts = "__almd_matrix.ones({rows}, {cols})"
+
+[shape]
+description = "Get the (rows, cols) shape of a matrix."
+example = 'matrix.shape(m) // => (3, 4)'
+params = [{ name = "m", type = "Matrix" }]
+return = "(Int, Int)"
+rust = "almide_rt_matrix_shape(&{m})"
+ts = "__almd_matrix.shape({m})"
+
+[transpose]
+description = "Transpose a matrix."
+example = 'matrix.transpose(m)'
+params = [{ name = "m", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_transpose(&{m})"
+ts = "__almd_matrix.transpose({m})"
+
+[from_lists]
+description = "Create a matrix from a list of row lists."
+example = 'matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])'
+params = [{ name = "rows", type = "List[List[Float]]" }]
+return = "Matrix"
+rust = "almide_rt_matrix_from_lists(&{rows})"
+ts = "__almd_matrix.from_lists({rows})"
+
+[to_lists]
+description = "Convert a matrix to a list of row lists."
+example = 'matrix.to_lists(m) // => [[1.0, 2.0], [3.0, 4.0]]'
+params = [{ name = "m", type = "Matrix" }]
+return = "List[List[Float]]"
+rust = "almide_rt_matrix_to_lists(&{m})"
+ts = "__almd_matrix.to_lists({m})"
+
+[get]
+description = "Get element at (row, col)."
+example = 'matrix.get(m, 0, 1) // => 2.0'
+params = [{ name = "m", type = "Matrix" }, { name = "row", type = "Int" }, { name = "col", type = "Int" }]
+return = "Float"
+rust = "almide_rt_matrix_get(&{m}, {row}, {col})"
+ts = "__almd_matrix.get({m}, {row}, {col})"
+
+[rows]
+description = "Get the number of rows."
+example = 'matrix.rows(m) // => 3'
+params = [{ name = "m", type = "Matrix" }]
+return = "Int"
+rust = "almide_rt_matrix_rows(&{m})"
+ts = "__almd_matrix.rows({m})"
+
+[cols]
+description = "Get the number of columns."
+example = 'matrix.cols(m) // => 4'
+params = [{ name = "m", type = "Matrix" }]
+return = "Int"
+rust = "almide_rt_matrix_cols(&{m})"
+ts = "__almd_matrix.cols({m})"
+
+[add]
+description = "Element-wise addition of two matrices."
+example = 'matrix.add(a, b)'
+params = [{ name = "a", type = "Matrix" }, { name = "b", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_add(&{a}, &{b})"
+ts = "__almd_matrix.add({a}, {b})"
+
+[mul]
+description = "Matrix multiplication."
+example = 'matrix.mul(a, b)'
+params = [{ name = "a", type = "Matrix" }, { name = "b", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_mul(&{a}, &{b})"
+ts = "__almd_matrix.mul({a}, {b})"
+
+[scale]
+description = "Multiply all elements by a scalar."
+example = 'matrix.scale(m, 2.0)'
+params = [{ name = "m", type = "Matrix" }, { name = "s", type = "Float" }]
+return = "Matrix"
+rust = "almide_rt_matrix_scale(&{m}, {s})"
+ts = "__almd_matrix.scale({m}, {s})"
+
+[map]
+description = "Apply a function to every element."
+example = 'matrix.map(m, (x) => x * x)'
+params = [{ name = "m", type = "Matrix" }, { name = "f", type = "fn(Float) -> Float" }]
+return = "Matrix"
+rust = "almide_rt_matrix_map(&{m}, {f})"
+ts = "__almd_matrix.map({m}, {f})"

@@ -608,6 +608,23 @@ impl FuncCompiler<'_> {
                 });
             }
 
+            // ── Matrix operations (WASM stub — not yet optimized) ──
+            BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix => {
+                // Matrix ops in WASM: call the corresponding stdlib function via module dispatch
+                let func_name = match op {
+                    BinOp::MulMatrix => "mul",
+                    BinOp::AddMatrix => "add",
+                    BinOp::SubMatrix => "sub",
+                    BinOp::ScaleMatrix => "scale",
+                    _ => unreachable!(),
+                };
+                let target = crate::ir::CallTarget::Module {
+                    module: crate::intern::sym("matrix"),
+                    func: crate::intern::sym(func_name),
+                };
+                self.emit_call(&target, &[left.clone(), right.clone()], &Ty::Matrix);
+            }
+
             BinOp::PowInt => {
                 // Integer power: base^exp via mem scratch (no locals needed)
                 // mem[0]=base, mem[8]=result, counter on stack via block/loop
@@ -801,6 +818,7 @@ impl FuncCompiler<'_> {
                     BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte
                     | BinOp::And | BinOp::Or => Ty::Bool,
                     BinOp::ConcatStr => Ty::String,
+                    BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix => Ty::Matrix,
                     BinOp::ConcatList => {
                         let lt = self.infer_type_from_expr(left);
                         lt

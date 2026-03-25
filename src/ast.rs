@@ -35,6 +35,7 @@ pub enum ResolvedType {
     Bool,
     Unit,
     Bytes,
+    Matrix,
     List,
     Map,
     Set,

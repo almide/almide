@@ -16,6 +16,7 @@ pub const RUST_RUNTIME_MODULES: &[(&str, &str)] = &[
     ("log", include_str!("../../runtime/rs/src/log.rs")),
     ("map", include_str!("../../runtime/rs/src/map.rs")),
     ("math", include_str!("../../runtime/rs/src/math.rs")),
+    ("matrix", include_str!("../../runtime/rs/src/matrix.rs")),
     ("option", include_str!("../../runtime/rs/src/option.rs")),
     ("process", include_str!("../../runtime/rs/src/process.rs")),
     ("random", include_str!("../../runtime/rs/src/random.rs")),

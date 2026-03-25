@@ -175,6 +175,21 @@ template = "void"
 [type_bytes]
 template = "Uint8Array"
 
+[type_matrix]
+template = "number[][]"
+
+[matrix_mul]
+template = "__almd_matrix.mul({left}, {right})"
+
+[matrix_add]
+template = "__almd_matrix.add({left}, {right})"
+
+[matrix_sub]
+template = "__almd_matrix.sub({left}, {right})"
+
+[matrix_scale]
+template = "__almd_matrix.scale({left}, {right})"
+
 [type_list]
 template = "{inner}[]"
 

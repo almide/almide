@@ -227,6 +227,21 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
         local_get(0);
         i32_add;
         global_set(emitter.heap_ptr_global);
+        // Grow memory if needed: while heap_ptr > memory.size * 64KB
+        block_empty; loop_empty;
+          global_get(emitter.heap_ptr_global);
+          memory_size(0);
+          i32_const(65536); i32_mul;
+          i32_le_u;
+          br_if(1);
+          // Grow by 16 pages (1MB)
+          i32_const(16);
+          memory_grow(0);
+          // If grow failed (-1), trap
+          i32_const(-1); i32_eq;
+          if_empty; unreachable; end;
+          br(0);
+        end; end;
         local_get(1);
         end;
     });

@@ -12,6 +12,7 @@ pub fn ty_to_valtype(ty: &Ty) -> Option<ValType> {
         Ty::Bool => Some(ValType::I32),
         Ty::String => Some(ValType::I32), // pointer to [len:i32][data:u8...]
         Ty::Bytes => Some(ValType::I32),  // pointer to [len:i32][data:u8...]
+        Ty::Matrix => Some(ValType::I32), // pointer to heap-allocated matrix
         Ty::Unit => None,
         // All heap types (Record, Variant, List, etc.) use i32 pointers
         _ => Some(ValType::I32),
@@ -26,6 +27,7 @@ pub fn byte_size(ty: &Ty) -> u32 {
         Ty::Bool => 4,   // i32
         Ty::String => 4, // i32 pointer
         Ty::Bytes => 4,  // i32 pointer
+        Ty::Matrix => 4, // i32 pointer
         Ty::Unit => 0,
         _ => 4,          // i32 pointer for all heap types
     }

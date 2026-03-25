@@ -250,6 +250,7 @@ fn infer_bind_type(expr: &IrExpr) -> Ty {
                 BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat
                 | BinOp::ModFloat | BinOp::PowFloat => Ty::Float,
                 BinOp::ConcatStr => Ty::String,
+                BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix => Ty::Matrix,
                 BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte
                 | BinOp::And | BinOp::Or => Ty::Bool,
                 BinOp::ConcatList => Ty::Unknown,

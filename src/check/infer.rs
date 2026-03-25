@@ -133,13 +133,18 @@ impl Checker {
                     "-" | "*" | "/" | "%" => {
                         let lc = resolve_ty(&lt, &self.uf);
                         let rc = resolve_ty(&rt, &self.uf);
-                        let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
-                        if !is_numeric(&lc) || !is_numeric(&rc) {
-                            self.emit(super::err(
-                                format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
-                                "Use numeric types (Int or Float)", format!("operator {}", op)));
+                        // Matrix operators: *, +, - on Matrix types
+                        if lc == Ty::Matrix || rc == Ty::Matrix {
+                            Ty::Matrix
+                        } else {
+                            let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
+                            if !is_numeric(&lc) || !is_numeric(&rc) {
+                                self.emit(super::err(
+                                    format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
+                                    "Use numeric types (Int or Float)", format!("operator {}", op)));
+                            }
+                            if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
                         }
-                        if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
                     }
                     "++" => {
                         self.emit(super::err(
@@ -623,6 +628,10 @@ impl Checker {
                 }
             }
             return resolve_ty(&lt, &self.uf);
+        }
+        // Matrix addition
+        if *lc == Ty::Matrix || *rc == Ty::Matrix {
+            return Ty::Matrix;
         }
         let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
         if !is_numeric(lc) || !is_numeric(rc) {

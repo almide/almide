@@ -462,7 +462,7 @@ impl Checker {
         match te {
             ast::TypeExpr::Simple { name } => match name.as_str() {
                 "Int" => Ty::Int, "Float" => Ty::Float, "String" => Ty::String,
-                "Bool" => Ty::Bool, "Unit" => Ty::Unit, "Bytes" => Ty::Bytes, "Path" => Ty::String,
+                "Bool" => Ty::Bool, "Unit" => Ty::Unit, "Bytes" => Ty::Bytes, "Matrix" => Ty::Matrix, "Path" => Ty::String,
                 other => self.env.types.get(&sym(other)).cloned().unwrap_or(Ty::Named(other.into(), vec![])),
             },
             ast::TypeExpr::Generic { name, args } => {

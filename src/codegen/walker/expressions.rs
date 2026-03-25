@@ -536,6 +536,28 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("concat_expr", Some(ty_tag), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("concat(_, _)"))
         }
+        BinOp::MulMatrix => {
+            ctx.templates.render_with("matrix_mul", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("almide_rt_matrix_mul(&{}, &{})", l, r))
+        }
+        BinOp::AddMatrix => {
+            ctx.templates.render_with("matrix_add", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("almide_rt_matrix_add(&{}, &{})", l, r))
+        }
+        BinOp::SubMatrix => {
+            ctx.templates.render_with("matrix_sub", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("almide_rt_matrix_sub(&{}, &{})", l, r))
+        }
+        BinOp::ScaleMatrix => {
+            // Ensure matrix is first arg, scalar is second
+            let (mat, scalar) = if matches!(&left.ty, Ty::Matrix) {
+                (l.as_str(), r.as_str())
+            } else {
+                (r.as_str(), l.as_str())
+            };
+            ctx.templates.render_with("matrix_scale", None, &[], &[("left", mat), ("right", scalar)])
+                .unwrap_or_else(|| format!("almide_rt_matrix_scale(&{}, {})", mat, scalar))
+        }
         BinOp::Eq => {
             ctx.templates.render_with("eq_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("_ == _"))

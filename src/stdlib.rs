@@ -5,7 +5,7 @@
 use crate::types::FnSig;
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "bytes", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "option", "error", "datetime", "testing", "log", "value", "set"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "option", "error", "datetime", "testing", "log", "value", "set"];
 
 
 /// Check if a module name is a hardcoded stdlib module.
@@ -180,6 +180,7 @@ pub fn resolve_ufcs_by_type(method: &str, receiver_type: crate::ast::ResolvedTyp
         ResolvedType::Float => "float",
         ResolvedType::Result => "result",
         ResolvedType::Bytes => "bytes",
+        ResolvedType::Matrix => "matrix",
         _ => return None, // Unknown, Record, etc. — cannot resolve at compile time
     };
     if candidates.contains(&module) {
