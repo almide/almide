@@ -887,10 +887,36 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s);
             }
             "unix_timestamp" => {
-                wasm!(self.func, { i64_const(1711000000); }); // ~2024-03-21
+                // WASI clock_time_get(id=0 realtime, precision=0, time_ptr)
+                // Returns nanoseconds as i64, convert to seconds
+                let time_ptr = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
+                    i32_const(0); // clock_id: realtime
+                    i64_const(0); // precision
+                    local_get(time_ptr); // output pointer
+                    call(self.emitter.rt.clock_time_get);
+                    drop; // discard error code
+                    local_get(time_ptr); i64_load(0);
+                    i64_const(1000000000); i64_div_u;
+                });
+                self.scratch.free_i32(time_ptr);
             }
             "millis" => {
-                wasm!(self.func, { i64_const(1711000000000); }); // ms since epoch
+                // WASI clock_time_get(id=0 realtime, precision=0, time_ptr)
+                // Returns nanoseconds as i64, convert to milliseconds
+                let time_ptr = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
+                    i32_const(0); // clock_id: realtime
+                    i64_const(0); // precision
+                    local_get(time_ptr); // output pointer
+                    call(self.emitter.rt.clock_time_get);
+                    drop; // discard error code
+                    local_get(time_ptr); i64_load(0);
+                    i64_const(1000000); i64_div_u;
+                });
+                self.scratch.free_i32(time_ptr);
             }
             "os" => {
                 let s = self.emitter.intern_string("wasi");

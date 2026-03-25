@@ -14,6 +14,48 @@ pub use commands::{cmd_init, cmd_test, cmd_test_json, cmd_test_wasm, cmd_fmt, cm
 
 use std::hash::{Hash, Hasher};
 
+/// Check that all effects used in the program are allowed by [permissions].allow in almide.toml.
+/// Returns Ok(()) if no violations, or Err with a description of violations.
+pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> Result<(), String> {
+    use almide::codegen::pass_effect_inference::{EffectInferencePass, Effect};
+    use almide::codegen::pass::NanoPass;
+
+    let result = EffectInferencePass.run(ir.clone(), almide::codegen::pass::Target::Rust);
+    let ir_after = result.program;
+
+    let allowed: std::collections::HashSet<Effect> = permissions.iter()
+        .filter_map(|s| match s.as_str() {
+            "IO" => Some(Effect::IO),
+            "Net" => Some(Effect::Net),
+            "Env" => Some(Effect::Env),
+            "Time" => Some(Effect::Time),
+            "Rand" => Some(Effect::Rand),
+            "Fan" => Some(Effect::Fan),
+            "Log" => Some(Effect::Log),
+            _ => None,
+        })
+        .collect();
+
+    let mut violations = 0;
+    for (name, fe) in &ir_after.effect_map.functions {
+        let forbidden: Vec<_> = fe.transitive.iter()
+            .filter(|e| !allowed.contains(e))
+            .collect();
+        if !forbidden.is_empty() {
+            eprintln!("error: capability violation in `{}`", name);
+            for e in &forbidden {
+                eprintln!("  {} is not in [permissions].allow", e);
+            }
+            violations += 1;
+        }
+    }
+    if violations > 0 {
+        eprintln!("\n{} capability violation(s)", violations);
+        return Err(format!("{} capability violation(s)", violations));
+    }
+    Ok(())
+}
+
 /// Compute a 64-bit hash of a byte slice (using DefaultHasher).
 fn hash64(data: &[u8]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();

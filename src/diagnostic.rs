@@ -142,15 +142,30 @@ impl Diagnostic {
         let file = self.file.as_deref().unwrap_or("");
         let line = self.line.unwrap_or(0);
         let col = self.col.unwrap_or(0);
+        let end_col = match self.end_col {
+            Some(c) => c.to_string(),
+            None => "null".to_string(),
+        };
+        let secondary_items: Vec<String> = self.secondary.iter().map(|s| {
+            let s_col = match s.col {
+                Some(c) => c.to_string(),
+                None => "null".to_string(),
+            };
+            format!(
+                r#"{{"line":{},"col":{},"label":"{}"}}"#,
+                s.line, s_col, s.label.replace('"', r#"\""#),
+            )
+        }).collect();
+        let secondary = format!("[{}]", secondary_items.join(","));
         // Manual JSON to avoid serde dependency in this module
         format!(
-            r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","context":"{}","file":"{}","line":{},"col":{}}}"#,
+            r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
             level, code,
             self.message.replace('"', r#"\""#).replace('\n', "\\n"),
             self.hint.replace('"', r#"\""#).replace('\n', "\\n"),
             self.context.replace('"', r#"\""#),
             file.replace('"', r#"\""#),
-            line, col,
+            line, col, end_col, secondary,
         )
     }
 
