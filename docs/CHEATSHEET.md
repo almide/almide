@@ -35,8 +35,6 @@ type ConfigError =
 ```
 fn name(x: Type, y: Type) -> RetType = expr
 effect fn name(x: Type) -> Result[T, E] = expr       // has side effects
-async fn name(x: Type) -> Result[T, E] = expr        // async (implies effect)
-async effect fn name(x: Type) -> Result[T, E] = expr // explicit async+effect
 ```
 
 ### Visibility (optional prefix before fn/type)
@@ -44,7 +42,7 @@ async effect fn name(x: Type) -> Result[T, E] = expr // explicit async+effect
 - `mod fn f()` — same project only (`pub(crate)` in Rust)
 - `local fn f()` — this file only (private)
 
-### Modifiers (order matters): `[local|mod]? async? effect? fn`
+### Modifiers (order matters): `[local|mod]? effect? fn`
 
 ### Predicate: `fn empty?(xs: List[T]) -> Bool` (? suffix = Bool return only)
 
@@ -144,8 +142,6 @@ for key in m {
   println(key)           // iterates keys only
 }
 ```
-**Prefer `for...in` over `do { guard ... }` for iterating lists.**
-
 ### While loop
 ```
 var i = 0
@@ -154,7 +150,6 @@ while i < 10 {
   i = i + 1
 }
 ```
-**Use `while` for condition-based loops. Use `do { guard ... }` only when you need to return a value from the loop.**
 
 ### Range
 ```
@@ -163,24 +158,6 @@ while i < 10 {
 for i in 0..n { ... }    // optimized: no list allocation
 let xs = list.map(0..10, (i) => i * i)   // range as List[Int]
 ```
-
-### Do block (loop + auto-propagation)
-```
-// As loop with dynamic condition: use guard to break
-do {
-  guard current != "NONE" else ok(())   // break condition
-  let data = fs.read_text(path)
-  current = next
-}
-
-// As error propagation block:
-do {
-  let text = fs.read_text(path)    // auto try
-  let raw = json.parse(text)       // auto try
-  decode(raw)                       // last expr is the result
-}
-```
-**Use `for...in` for simple iteration. Use `do { guard ... }` only when you need dynamic break conditions (e.g., linked-list traversal).**
 
 ### Pipe
 ```
@@ -261,31 +238,6 @@ guard not fs.exists?(path) else {
   ok(())
 }
 ```
-In `do { }` loops, `guard cond else ok(())` acts as a break condition.
-
-### Try / Await
-```
-let text = try fs.read_text(path)   // unwrap Result, propagate error
-let data = await fetch(url)          // unwrap async, must be in async fn
-```
-
-## Async
-```
-async fn fetch(url: String) -> Result[String, HttpError] = _
-async fn load(url: String) -> Result[Config, AppError] =
-  do {
-    let text = await fetch(url)
-    parse(text)
-  }
-```
-
-### Structured concurrency
-```
-await parallel(tasks)      // all must succeed
-await race(tasks)          // first to complete
-await timeout(duration, task) // with timeout
-```
-
 ## Test
 ```
 test "description" {
@@ -334,10 +286,10 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 `string.trim(s)`, `string.trim_start(s)`, `string.trim_end(s)`, `string.split(s, sep)`, `string.join(list, sep)`, `string.len(s)`, `string.lines(s)`, `string.pad_left(s, n, ch)`, `string.pad_right(s, n, ch)`, `string.starts_with?(s, prefix)`, `string.ends_with?(s, suffix)`, `string.slice(s, start)`, `string.slice(s, start, end)`, `string.to_bytes(s)`, `string.from_bytes(bytes)`, `string.contains(s, sub)`, `string.to_upper(s)`, `string.to_lower(s)`, `string.to_int(s)` → `Result[Int, String]`, `string.replace(s, from, to)`, `string.char_at(s, i)` → `Option[String]`, `string.chars(s)` → `List[String]`, `string.index_of(s, needle)` → `Option[Int]`, `string.repeat(s, n)`, `string.count(s, sub)` → `Int`, `string.reverse(s)`, `string.is_empty?(s)` → `Bool`, `string.is_digit?(s)`, `string.is_alpha?(s)`, `string.is_alphanumeric?(s)`, `string.is_whitespace?(s)`, `string.strip_prefix(s, prefix)` → `Option[String]`, `string.strip_suffix(s, suffix)` → `Option[String]`
 
 ### list (auto-imported)
-`list.len(xs)`, `list.get(xs, i)` → `Option[T]`, `list.get_or(xs, i, default)` → `T`, `list.first(xs)` → `Option[T]`, `list.last(xs)` → `Option[T]`, `list.sort(xs)`, `list.sort_by(xs, (x) => key)`, `list.reverse(xs)`, `list.contains(xs, x)`, `list.index_of(xs, x)` → `Option[Int]`, `list.any(xs, (x) => bool)`, `list.all(xs, (x) => bool)`, `list.each(xs, f)`, `list.map(xs, f)`, `list.flat_map(xs, f)`, `list.filter(xs, f)`, `list.find(xs, f)`, `list.fold(xs, init, f)`, `list.enumerate(xs)` → `List[(Int, T)]`, `list.zip(a, b)` → `List[(T, U)]`, `list.flatten(xss)`, `list.take(xs, n)`, `list.drop(xs, n)`, `list.chunk(xs, n)` → `List[List[T]]`, `list.unique(xs)`, `list.join(xs, sep)` → `String`, `list.sum(xs)` → `Int`, `list.product(xs)` → `Int`, `list.min(xs)` → `Option[T]`, `list.max(xs)` → `Option[T]`, `list.is_empty?(xs)` → `Bool`
+`list.len(xs)`, `list.get(xs, i)` → `Option[T]`, `list.get_or(xs, i, default)` → `T`, `list.first(xs)` → `Option[T]`, `list.last(xs)` → `Option[T]`, `list.sort(xs)`, `list.sort_by(xs, (x) => key)`, `list.reverse(xs)`, `list.contains(xs, x)`, `list.index_of(xs, x)` → `Option[Int]`, `list.any(xs, (x) => bool)`, `list.all(xs, (x) => bool)`, `list.each(xs, f)`, `list.map(xs, f)`, `list.flat_map(xs, f)`, `list.filter(xs, f)`, `list.filter_map(xs, (x) => Option[B])` → `List[B]`, `list.find(xs, f)`, `list.fold(xs, init, f)`, `list.enumerate(xs)` → `List[(Int, T)]`, `list.zip(a, b)` → `List[(T, U)]`, `list.flatten(xss)`, `list.take(xs, n)`, `list.drop(xs, n)`, `list.chunk(xs, n)` → `List[List[T]]`, `list.unique(xs)`, `list.repeat(val, n)`, `list.join(xs, sep)` → `String`, `list.sum(xs)` → `Int`, `list.product(xs)` → `Int`, `list.min(xs)` → `Option[T]`, `list.max(xs)` → `Option[T]`, `list.is_empty?(xs)` → `Bool`, `list.push(xs, x)` (var), `list.pop(xs)` → `Option[T]` (var), `list.clear(xs)` (var)
 
 ### map (auto-imported)
-`map.new()` → empty `Map[K, V]`, `map.get(m, key)` → `Option[V]`, `map.get_or(m, key, default)` → `V`, `map.set(m, key, value)` → `Map[K, V]`, `map.contains(m, key)` → `Bool`, `map.remove(m, key)` → `Map[K, V]`, `map.merge(a, b)` → `Map[K, V]`, `map.keys(m)` → `List[K]` (sorted), `map.values(m)` → `List[V]`, `map.len(m)` → `Int`, `map.entries(m)` → `List[(K, V)]`, `map.from_list(xs, (x) => (k, v))` → `Map[K, V]`, `map.is_empty?(m)` → `Bool`
+`map.new()` → empty `Map[K, V]`, `map.get(m, key)` → `Option[V]`, `map.get_or(m, key, default)` → `V`, `map.set(m, key, value)` → `Map[K, V]`, `map.contains(m, key)` → `Bool`, `map.remove(m, key)` → `Map[K, V]`, `map.merge(a, b)` → `Map[K, V]`, `map.keys(m)` → `List[K]` (sorted), `map.values(m)` → `List[V]`, `map.len(m)` → `Int`, `map.entries(m)` → `List[(K, V)]`, `map.from_list(xs, (x) => (k, v))` → `Map[K, V]`, `map.is_empty?(m)` → `Bool`, `map.insert(m, key, value)` (var), `map.delete(m, key)` (var), `map.clear(m)` (var)
 
 ### int / float (auto-imported)
 `int.to_string(n)`, `int.to_hex(n)`, `int.parse(s)` → `Result[Int, String]`, `int.parse_hex(s)` → `Result[Int, String]`, `int.abs(n)`, `int.min(a, b)`, `int.max(a, b)`, `int.band(a, b)`, `int.bor(a, b)`, `int.bxor(a, b)`, `int.bshl(a, n)`, `int.bshr(a, n)`, `int.bnot(a)`, `int.wrap_add(a, b, bits)`, `int.wrap_mul(a, b, bits)`, `int.rotate_right(a, n, bits)`, `int.rotate_left(a, n, bits)`, `int.to_u32(a)`, `int.to_u8(a)`
@@ -386,7 +338,7 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 - Empty list = `[]`, empty map = `[:]` (with type annotation)
 - `_` is ONLY for match wildcard patterns, never as a variable name
 - The stdlib functions listed above are exhaustive — no other functions exist
-- Use `for x in xs { ... }` for iteration, NOT `do { var i = 0; guard ... }`
+- Use `for x in xs { ... }` for iteration
 
 ## Common mistakes (DO NOT)
 - `list[1, 2, 3]` → **WRONG**. Write `[1, 2, 3]`. `list` is a module, not a type constructor

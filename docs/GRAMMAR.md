@@ -11,7 +11,7 @@ type_body   = record_body | variant_body | type
 record_body = "{" field ("," field)* "}"
 variant_body= "|"? variant ("|" variant)*
 variant     = IDENT | IDENT "(" type ("," type)* ")" | IDENT "{" field ("," field)* "}"
-fn_decl     = visibility? "async"? "effect"? "fn" IDENT type_params? "(" params ")" "->" type "=" expr
+fn_decl     = visibility? "effect"? "fn" IDENT type_params? "(" params ")" "->" type "=" expr
 visibility  = "local" | "mod"                             (* default is public *)
 top_let     = "let" IDENT (":" type)? "=" expr            (* module-scope constant *)
 strict_decl = "strict" IDENT                              (* strict mode directive *)
@@ -20,7 +20,7 @@ type        = "Int" | "Float" | "String" | "Bool" | "Unit" | "Path"
               | IDENT | IDENT "[" type ("," type)* "]"    (* generics use [] not <> *)
               | "(" type ("," type)+ ")"                  (* tuple type *)
               | "Fn" "(" type* ")" "->" type              (* function type *)
-expr        = block | if_expr | match_expr | for_in | while_expr | do_expr
+expr        = block | if_expr | match_expr | for_in | while_expr
               | fan_expr | guard | let | var | assign | binary | pipe | call
               | lambda | literal | range
 block       = "{" stmt* expr? "}"
@@ -29,7 +29,6 @@ match_expr  = "match" expr "{" arm ("," arm)* "}"
 arm         = pattern ("if" expr)? "=>" expr              (* optional guard *)
 for_in      = "for" (IDENT | "(" IDENT "," IDENT ")") "in" expr block
 while_expr  = "while" expr block                          (* condition-based loop *)
-do_expr     = "do" "{" (guard | stmt)* "}"                (* loop or error propagation *)
 fan_expr    = "fan" "{" expr+ "}"                         (* concurrent execution *)
 guard       = "guard" expr "else" expr                    (* early exit / loop break *)
 let         = "let" IDENT (":" type)? "=" expr
@@ -77,13 +76,12 @@ See [STDLIB-SPEC.md](./STDLIB-SPEC.md) for the complete stdlib function referenc
 - No `return`, `class`, `null`, `!` — use Almide alternatives
 - `for x in xs { ... }` for iterating lists; `for (k, v) in m { ... }` for maps
 - `while cond { ... }` for condition-based loops
-- `do { guard ... }` for dynamic break with values; also serves as error propagation block
 - `fan { a; b }` for structured concurrent execution
 - `import module` or `import self as alias` or `import pkg.submodule`
 - Map literal: `["key": value]`, empty map: `[:]` (with type annotation)
 - Single-quote strings `'hello'` for literal strings (no interpolation, no escapes)
 - `if` always requires `else`
-- `effect fn` marks functions with side effects; `async fn` for async
+- `effect fn` marks functions with side effects
 - `fn` visibility: `pub` (default), `mod` (same project), `local` (same file)
 - Default arguments and named arguments are supported
 - `unsafe` is a reserved keyword (not yet implemented as a block expression)

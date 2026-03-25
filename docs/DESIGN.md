@@ -9,7 +9,7 @@ Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch 
 | Null handling | `null`, `nil`, `None`, `undefined` | `Option[T]` only | Eliminates null-check hallucination |
 | Error handling | `throw`, `try/catch`, `panic`, error codes | `Result[T, E]` only | Error path always visible in types |
 | Generics | `<T>` (ambiguous with `<` `>`) | `[T]` | No parser ambiguity with comparisons |
-| Loops | `while`, `for`, `loop`, `forEach`, recursion | `for x in xs { }` for collection iteration, `while cond { ... }` for condition-based loops, `do { guard ... }` for structured break with values | Each form has one purpose |
+| Loops | `while`, `for`, `loop`, `forEach`, recursion | `for x in xs { }` for collection iteration, `while cond { ... }` for condition-based loops | Each form has one purpose |
 | Early exit | `return`, `break`, `continue`, `throw` | Last expression only; `guard ... else` is the canonical structured escape hatch | No early-return confusion |
 | Lambdas | `=>`, `->`, `lambda`, `fn`, `\x ->`, blocks | `(x) => expr` only | One syntax, zero alternatives |
 | Statement termination | `;`, optional `;`, ASI rules | Newline-separated | No insertion ambiguity |
@@ -44,7 +44,7 @@ This means the LLM can generate code by looking only at the current function's s
 
 ## Concurrency: `fan` — Boring on Purpose
 
-Almide keeps concurrency boring on purpose: explicit fork, explicit join, automatic cancellation, and the same fail-fast semantics as `do`. There is no `async`/`await` — `effect fn` is the async boundary, and the compiler handles the rest.
+Almide keeps concurrency boring on purpose: explicit fork, explicit join, automatic cancellation, and fail-fast semantics. There is no `async`/`await` — `effect fn` is the async boundary, and the compiler handles the rest.
 
 One keyword, three forms:
 
@@ -59,7 +59,7 @@ The rules are minimal:
 - No `var` capture inside `fan` — only `let` bindings from outer scope are readable (prevents data races)
 - No unstructured `spawn` — all concurrency is scoped
 
-This mirrors `do` exactly: `do` exits on the first `Result` error; `fan` exits on the first failed task. Sequential and concurrent code follow the same fail-fast rule.
+`fan` exits on the first failed task. Sequential and concurrent code follow the same fail-fast rule.
 
 ## UFCS: Why Two Forms is Acceptable
 
@@ -71,15 +71,12 @@ This mirrors `do` exactly: `do` exits on the first `Result` error; `fan` exits o
 - The compiler does not need method lookup — it rewrites `x.f(y)` to `f(x, y)` at parse time
 - A future formatter will normalize to canonical form, eliminating style drift
 
-## Iteration: `for...in` + `while` + `do { guard }`
+## Iteration: `for...in` + `while`
 
-Three loop constructs, each with a clear purpose:
+Two loop constructs, each with a clear purpose:
 
 - **`for x in xs { ... }`** — iterate over a collection. The natural choice for lists and map keys. Effect-compatible (I/O inside the loop body is fine).
 - **`while cond { ... }`** — condition-based loop. Runs while the condition is true. The straightforward choice when you have a simple loop condition.
-- **`do { guard ... else ... }`** — loop with structured break and return values (e.g., linked-list traversal, reading until EOF). `guard condition else break_expr` is the only way to exit, and the `else` branch produces the loop's value.
-
-In our tests, forcing all iteration through `do { guard }` consistently caused extra index-management boilerplate. `for...in` and `while` eliminate this entirely.
 
 ## Compiler Diagnostics: Single Likely Fix
 

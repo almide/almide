@@ -9,14 +9,6 @@
 
 ## 構文
 
-### `while` キーワード
-
-**却下理由**: Canonicity 違反。Almide のループは 2 形態:
-- `for x in xs { }` — コレクション走査
-- `do { guard ... else break }` — 条件駆動ループ
-
-`while` を追加すると 3 種のループになり、LLM が選択に迷う。`do { guard }` で同じ表現力がある。
-
 ### `??` (nullish coalescing) 演算子
 
 **却下理由**: Canonicity 違反。`unwrap_or` が同じ機能を提供:
