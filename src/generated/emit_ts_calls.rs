@@ -10,6 +10,7 @@ pub fn gen_generated_call(module: &str, func: &str, args_str: &[String]) -> Opti
             ("bytes", "len") => format!("__almd_bytes.len({})", args_str[0]),
             ("bytes", "new") => format!("__almd_bytes.new_bytes({})", args_str[0]),
             ("bytes", "repeat") => format!("__almd_bytes.repeat({}, {})", args_str[0], args_str[1]),
+            ("bytes", "set") => format!("__almd_bytes.set({}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("bytes", "slice") => format!("__almd_bytes.slice({}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("bytes", "to_list") => format!("__almd_bytes.to_list({})", args_str[0]),
             ("datetime", "add_days") => format!("{} + {} * 86400", args_str[0], args_str[1]),

@@ -16,6 +16,7 @@ pub fn gen_generated_call(
             ("bytes", "len") => format!("almide_rt_bytes_len(&{})", args_str[0]),
             ("bytes", "new") => format!("almide_rt_bytes_new({})", args_str[0]),
             ("bytes", "repeat") => format!("almide_rt_bytes_repeat(&{}, {})", args_str[0], args_str[1]),
+            ("bytes", "set") => format!("almide_rt_bytes_set({}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("bytes", "slice") => format!("almide_rt_bytes_slice(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("bytes", "to_list") => format!("almide_rt_bytes_to_list(&{})", args_str[0]),
             ("datetime", "add_days") => format!("{} + {} * 86400", args_str[0], args_str[1]),

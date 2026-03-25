@@ -85,6 +85,33 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(buf);
             }
+            "set" => {
+                // bytes.set(b, i, val) → Bytes (mutate in place, return same pointer)
+                let buf = self.scratch.alloc_i32();
+                let idx = self.scratch.alloc_i32();
+                let val = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(buf); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i32_wrap_i64; local_set(idx); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(val);
+                    // bounds check: idx < len
+                    local_get(idx); local_get(buf); i32_load(0); i32_lt_u;
+                    if_empty;
+                      // store byte: mem[buf + 4 + idx] = val
+                      local_get(buf); i32_const(4); i32_add; local_get(idx); i32_add;
+                      local_get(val);
+                      i32_store8(0);
+                    end;
+                    // return buf pointer
+                    local_get(buf);
+                });
+                self.scratch.free_i32(val);
+                self.scratch.free_i32(idx);
+                self.scratch.free_i32(buf);
+            }
             "new" => {
                 // bytes.new(len) → Bytes: alloc [len:i32][zeroed data]
                 let n = self.scratch.alloc_i32();

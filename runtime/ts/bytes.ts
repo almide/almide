@@ -3,6 +3,7 @@ const __almd_bytes = {
   len(b: Uint8Array): number { return b.length; },
   get(b: Uint8Array, i: number): number | null { return (i >= 0 && i < b.length) ? b[i] : null; },
   get_or(b: Uint8Array, i: number, d: number): number { return (i >= 0 && i < b.length) ? b[i] : d; },
+  set(b: Uint8Array, i: number, val: number): Uint8Array { const r = new Uint8Array(b); if (i >= 0 && i < r.length) r[i] = val & 0xFF; return r; },
   slice(b: Uint8Array, start: number, end: number): Uint8Array { return b.slice(Math.max(0, start), Math.min(b.length, end)); },
   from_list(xs: number[]): Uint8Array { return new Uint8Array(xs.map(x => x & 0xFF)); },
   to_list(b: Uint8Array): number[] { return Array.from(b); },
