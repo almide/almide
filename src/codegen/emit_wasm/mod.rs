@@ -622,7 +622,18 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }
     }
 
-    let init_globals_idx: Option<u32> = None; // globals are initialized inline
+    // Check if any top-level let needs dynamic initialization (non-constant values)
+    let needs_init = program.top_lets.iter().any(|tl| !matches!(&tl.value.kind,
+        crate::ir::IrExprKind::LitInt { .. } | crate::ir::IrExprKind::LitFloat { .. } |
+        crate::ir::IrExprKind::LitBool { .. } | crate::ir::IrExprKind::LitStr { .. }
+    ));
+    let init_globals_idx: Option<u32> = if needs_init {
+        let void_ty = emitter.register_type(vec![], vec![]);
+        let idx = emitter.register_func("__init_globals", void_ty);
+        Some(idx)
+    } else {
+        None
+    };
 
     // If no main but has tests, register a test runner as _start
     let test_runner_idx = if !has_main && !test_func_indices.is_empty() {
@@ -656,6 +667,11 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         let compiled = functions::compile_function(&mut emitter, func, &program.var_table, type_idx);
         emitter.add_compiled(compiled);
         user_idx += 1;
+    }
+
+    // Init globals (dynamic top-level let initialization, must come before test runner)
+    if init_globals_idx.is_some() {
+        compile_init_globals(&mut emitter, program);
     }
 
     // Test runner (if needed)
