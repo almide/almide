@@ -210,15 +210,20 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
 }
 
 /// __alloc(size: i32) -> i32
-/// Bump allocator: returns current heap_ptr, then advances it by size.
+/// Bump allocator: returns current heap_ptr (8-byte aligned), then advances by size.
+/// All returned pointers are guaranteed to be 8-byte aligned, matching wasi-libc
+/// and Emscripten conventions. This ensures i64 loads/stores never trap on alignment.
 fn compile_alloc(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.alloc];
     let mut f = Function::new([(1, ValType::I32)]); // local 1: $ptr
 
     wasm!(f, {
+        // Align heap_ptr up to 8-byte boundary: ptr = (heap_ptr + 7) & ~7
         global_get(emitter.heap_ptr_global);
+        i32_const(7); i32_add; i32_const(-8); i32_and;
         local_set(1);
-        global_get(emitter.heap_ptr_global);
+        // Advance heap_ptr past the allocation: heap_ptr = ptr + size
+        local_get(1);
         local_get(0);
         i32_add;
         global_set(emitter.heap_ptr_global);
