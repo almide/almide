@@ -1,0 +1,41 @@
+// Bytes type basic tests
+
+test "bytes.new creates zero-filled buffer" {
+  let b = bytes.new(4)
+  assert_eq(bytes.len(b), 4)
+  assert_eq(bytes.get_or(b, 0, 99), 0)
+  assert_eq(bytes.get_or(b, 3, 99), 0)
+}
+
+test "bytes.from_list and bytes.to_list roundtrip" {
+  let original = [10, 20, 30, 40, 255]
+  let b = bytes.from_list(original)
+  assert_eq(bytes.len(b), 5)
+  let back = bytes.to_list(b)
+  assert_eq(back, original)
+}
+
+test "bytes.get returns Option" {
+  let b = bytes.from_list([72, 105])
+  assert_eq(bytes.get(b, 0), some(72))
+  assert_eq(bytes.get(b, 1), some(105))
+  assert_eq(bytes.get(b, 2), none)
+}
+
+test "bytes.slice extracts sub-range" {
+  let b = bytes.from_list([10, 20, 30, 40, 50])
+  let s = bytes.slice(b, 1, 4)
+  assert_eq(bytes.to_list(s), [20, 30, 40])
+}
+
+test "bytes.concat joins two buffers" {
+  let a = bytes.from_list([1, 2])
+  let b = bytes.from_list([3, 4])
+  let c = bytes.concat(a, b)
+  assert_eq(bytes.to_list(c), [1, 2, 3, 4])
+}
+
+test "bytes.is_empty" {
+  assert_eq(bytes.is_empty(bytes.new(0)), true)
+  assert_eq(bytes.is_empty(bytes.from_list([])), true)
+}

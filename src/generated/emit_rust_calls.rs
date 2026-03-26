@@ -8,6 +8,17 @@ pub fn gen_generated_call(
         inline_lambda: &dyn Fn(usize, usize) -> (Vec<String>, String),
 ) -> Option<String> {
     let expr = match (module, func) {
+            ("bytes", "concat") => format!("almide_rt_bytes_concat(&{}, &{})", args_str[0], args_str[1]),
+            ("bytes", "from_list") => format!("almide_rt_bytes_from_list(&{})", args_str[0]),
+            ("bytes", "get") => format!("almide_rt_bytes_get(&{}, {})", args_str[0], args_str[1]),
+            ("bytes", "get_or") => format!("almide_rt_bytes_get_or(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("bytes", "is_empty") => format!("almide_rt_bytes_is_empty(&{})", args_str[0]),
+            ("bytes", "len") => format!("almide_rt_bytes_len(&{})", args_str[0]),
+            ("bytes", "new") => format!("almide_rt_bytes_new({})", args_str[0]),
+            ("bytes", "repeat") => format!("almide_rt_bytes_repeat(&{}, {})", args_str[0], args_str[1]),
+            ("bytes", "set") => format!("almide_rt_bytes_set({}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("bytes", "slice") => format!("almide_rt_bytes_slice(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("bytes", "to_list") => format!("almide_rt_bytes_to_list(&{})", args_str[0]),
             ("datetime", "add_days") => format!("{} + {} * 86400", args_str[0], args_str[1]),
             ("datetime", "add_hours") => format!("{} + {} * 3600", args_str[0], args_str[1]),
             ("datetime", "add_minutes") => format!("{} + {} * 60", args_str[0], args_str[1]),
@@ -165,6 +176,7 @@ pub fn gen_generated_call(
                 format!("almide_rt_list_any(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("list", "chunk") => format!("almide_rt_list_chunk(&{}, {})", args_str[0], args_str[1]),
+            ("list", "clear") => format!("almide_rt_list_clear(&mut {})", args_str[0]),
             ("list", "contains") => format!("almide_rt_list_contains(&{}, &{})", args_str[0], args_str[1]),
             ("list", "count") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
@@ -231,7 +243,9 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_list_partition(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
+            ("list", "pop") => format!("almide_rt_list_pop(&mut {})", args_str[0]),
             ("list", "product") => format!("almide_rt_list_product(&{})", args_str[0]),
+            ("list", "push") => format!("almide_rt_list_push(&mut {}, {})", args_str[0], args_str[1]),
             ("list", "range") => format!("almide_rt_list_range({}, {})", args_str[0], args_str[1]),
             ("list", "reduce") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
@@ -292,11 +306,13 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
                 format!("almide_rt_map_any(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
             },
+            ("map", "clear") => format!("almide_rt_map_clear(&mut {})", args_str[0]),
             ("map", "contains") => format!("almide_rt_map_contains(&{}, &{})", args_str[0], args_str[1]),
             ("map", "count") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
                 format!("almide_rt_map_count(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
             },
+            ("map", "delete") => format!("almide_rt_map_delete(&mut {}, &{})", args_str[0], args_str[1]),
             ("map", "each") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
                 format!("almide_rt_map_each(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
@@ -317,6 +333,7 @@ pub fn gen_generated_call(
             ("map", "from_list") => format!("almide_rt_map_from_entries({})", args_str[0]),
             ("map", "get") => format!("almide_rt_map_get(&{}, &{})", args_str[0], args_str[1]),
             ("map", "get_or") => format!("almide_rt_map_get_or(&{}, &{}, {})", args_str[0], args_str[1], args_str[2]),
+            ("map", "insert") => format!("almide_rt_map_insert(&mut {}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("map", "is_empty") => format!("almide_rt_map_is_empty(&{})", args_str[0]),
             ("map", "keys") => format!("almide_rt_map_keys(&{})", args_str[0]),
             ("map", "len") => format!("almide_rt_map_len(&{})", args_str[0]),
@@ -354,6 +371,19 @@ pub fn gen_generated_call(
             ("math", "sin") => format!("({} as f64).sin()", args_str[0]),
             ("math", "sqrt") => format!("({} as f64).sqrt()", args_str[0]),
             ("math", "tan") => format!("({} as f64).tan()", args_str[0]),
+            ("matrix", "add") => format!("almide_rt_matrix_add(&{}, &{})", args_str[0], args_str[1]),
+            ("matrix", "cols") => format!("almide_rt_matrix_cols(&{})", args_str[0]),
+            ("matrix", "from_lists") => format!("almide_rt_matrix_from_lists(&{})", args_str[0]),
+            ("matrix", "get") => format!("almide_rt_matrix_get(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("matrix", "map") => format!("almide_rt_matrix_map(&{}, {})", args_str[0], args_str[1]),
+            ("matrix", "mul") => format!("almide_rt_matrix_mul(&{}, &{})", args_str[0], args_str[1]),
+            ("matrix", "ones") => format!("almide_rt_matrix_ones({}, {})", args_str[0], args_str[1]),
+            ("matrix", "rows") => format!("almide_rt_matrix_rows(&{})", args_str[0]),
+            ("matrix", "scale") => format!("almide_rt_matrix_scale(&{}, {})", args_str[0], args_str[1]),
+            ("matrix", "shape") => format!("almide_rt_matrix_shape(&{})", args_str[0]),
+            ("matrix", "to_lists") => format!("almide_rt_matrix_to_lists(&{})", args_str[0]),
+            ("matrix", "transpose") => format!("almide_rt_matrix_transpose(&{})", args_str[0]),
+            ("matrix", "zeros") => format!("almide_rt_matrix_zeros({}, {})", args_str[0], args_str[1]),
             ("option", "filter") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_option_filter({}, |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)

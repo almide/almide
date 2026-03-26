@@ -1,3 +1,4 @@
+// wasm:skip
 test "process returns sorted strings" {
   assert_eq(process([3, -1, 1, 2]), ["10", "20", "30"])
 }

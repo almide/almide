@@ -169,6 +169,17 @@ impl Parser {
         ))
     }
 
+    pub(crate) fn expect_ident_or_underscore(&mut self) -> Result<Sym, String> {
+        if self.check(TokenType::Ident) {
+            return Ok(self.advance_and_get_sym());
+        }
+        if self.check(TokenType::Underscore) {
+            self.advance();
+            return Ok(sym("_"));
+        }
+        self.expect_ident() // delegate for error message
+    }
+
     pub(crate) fn expect_type_name(&mut self) -> Result<Sym, String> {
         if self.check(TokenType::TypeName) {
             return Ok(self.advance_and_get_sym());

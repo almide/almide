@@ -5,18 +5,8 @@
 use crate::types::FnSig;
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "option", "error", "datetime", "testing", "log", "value", "set"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "option", "error", "datetime", "testing", "log", "value", "set"];
 
-/// Prelude modules: automatically available without explicit `import`.
-/// These are core modules that virtually every program needs.
-pub const PRELUDE_MODULES: &[&str] = &[
-    "string", "list", "int", "float", "math", "map", "result", "option", "value", "set",
-];
-
-/// Check if a module name is a prelude module (auto-imported).
-pub fn is_prelude_module(name: &str) -> bool {
-    PRELUDE_MODULES.contains(&name)
-}
 
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -74,72 +64,94 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "replace_first" | "last_index_of" => vec!["string"],
 
         // ── list-only ──
-        "enumerate" | "take" | "drop"
-        | "sort_by" | "unique"
-        | "last" | "chunk" | "sum" | "product"
-        | "first"
+        "enumerate"
+        | "sort_by" | "unique" | "unique_by"
+        | "chunk" | "sum" | "product"
         | "filter_map" | "take_while" | "drop_while"
         | "reduce" | "group_by"
-        | "insert" | "remove_at" | "find_index"
+        | "remove_at" | "find_index"
         | "scan" | "intersperse"
-        | "windows" | "dedup" | "zip_with" => vec!["list"],
+        | "windows" | "dedup" | "zip_with"
+        | "push" | "pop"
+        | "shuffle" | "window" => vec!["list"],
+
+        // ── list + map + set ──
+        "each" | "fold" | "any" | "all" => vec!["list", "map", "set"],
 
         // ── list + map ──
-        "each" | "fold" | "find" | "any" | "all"
-        | "partition" | "update" => vec!["list", "map"],
+        "find" | "partition" | "update" => vec!["list", "map"],
 
         // ── map-only ──
         "keys" | "values" | "entries" | "merge"
+        | "delete"
         => vec!["map"],
 
+        // ── set-only ──
+        "union" | "intersection" | "difference" | "symmetric_difference"
+        | "is_subset" | "is_disjoint" => vec!["set"],
+
         // ── int-only ──
-        "to_string" | "to_hex" => vec!["int"],
+        "to_string" | "to_hex"
+        | "band" | "bor" | "bxor" | "bnot" | "bshl" | "bshr"
+        | "wrap_add" | "wrap_mul" | "rotate_right" | "rotate_left"
+        | "to_u32" | "to_u8" => vec!["int"],
 
         // ── float-only ──
         "to_fixed" | "round" | "floor" | "ceil" | "sqrt"
-        | "is_nan" | "is_infinite" => vec!["float"],
+        | "is_nan" | "is_infinite" | "to_int" => vec!["float"],
 
         // ── option-only ──
-        "is_some" | "is_none" | "to_result" | "or_else"
-        | "to_list" => vec!["option"],
+        "is_some" | "is_none" | "to_result" | "or_else" => vec!["option"],
+        "to_list" => vec!["set", "option"],
 
         // ── result-only ──
         "map_err"
         | "is_ok" | "is_err"
-        | "to_err_option" => vec!["result"],
+        | "to_err_option" | "to_option" => vec!["result"],
 
         // ── error-only ──
-        "context" => vec!["error"],
+        "context" | "message" | "chain" => vec!["error"],
 
         // ── datetime-only ──
         "is_before" | "is_after" => vec!["datetime"],
 
         // ── ambiguous: string + list ──
+        "first" | "last" => vec!["string", "list"],
+        "take" | "drop" | "take_end" | "drop_end" => vec!["string", "list"],
         "reverse" => vec!["string", "list"],
         "index_of" => vec!["string", "list"],
         "join" => vec!["string", "list"],
-        "count" => vec!["string", "list", "map"],
         "slice" => vec!["string", "list"],
 
+        // ── ambiguous: string + list + map + set ──
+        "len" => vec!["string", "list", "map", "set"],
+        "contains" => vec!["string", "list", "map", "set"],
+        "is_empty" => vec!["string", "list", "map", "set"],
+
         // ── ambiguous: string + list + map ──
-        "len" => vec!["string", "list", "map"],
-        "contains" => vec!["string", "list", "map"],
-        "is_empty" => vec!["string", "list", "map"],
+        "count" => vec!["string", "list", "map"],
 
         // ── ambiguous: list + result + option ──
         "flat_map" => vec!["list", "result", "option"],
-        "map" | "filter" => vec!["list", "map", "result", "option"],
         "unwrap_or" | "unwrap_or_else" => vec!["result", "option"],
         "flatten" | "zip" => vec!["list", "option"],
+
+        // ── ambiguous: list + map + result + option ──
+        "map" | "filter" => vec!["list", "map", "set", "result", "option"],
+
+        // ── ambiguous: list + map ──
+        "insert" | "clear" => vec!["list", "map", "set"],
+        "remove" => vec!["map", "set"],
 
         // ── ambiguous: list + map ──
         "get" | "get_or" => vec!["string", "list", "map"],
         "set" => vec!["list", "map"],
-        "swap" => vec!["list"],
-        "sort" => vec!["list"],
-        "to_option" => vec!["result"],
 
-        // ── ambiguous: string + int ──
+        // ── ambiguous: list ──
+        "swap" | "sort" | "min" | "max" => vec!["list"],
+
+        // ── ambiguous: int + float ──
+        "abs" | "clamp" => vec!["int", "float"],
         "to_float" => vec!["string", "int"],
 
         // ── ambiguous: math + float ──
@@ -163,9 +175,12 @@ pub fn resolve_ufcs_by_type(method: &str, receiver_type: crate::ast::ResolvedTyp
         ResolvedType::String => "string",
         ResolvedType::List => "list",
         ResolvedType::Map => "map",
+        ResolvedType::Set => "set",
         ResolvedType::Int => "int",
         ResolvedType::Float => "float",
         ResolvedType::Result => "result",
+        ResolvedType::Bytes => "bytes",
+        ResolvedType::Matrix => "matrix",
         _ => return None, // Unknown, Record, etc. — cannot resolve at compile time
     };
     if candidates.contains(&module) {
@@ -186,7 +201,7 @@ pub fn min_params(module: &str, func: &str) -> Option<usize> {
 
 /// Names of built-in effect functions (not module-scoped).
 pub fn builtin_effect_fns() -> Vec<&'static str> {
-    vec!["println", "eprintln"]
+    vec!["println", "eprintln", "panic"]
 }
 
 /// Return all function names in a stdlib module (for "did you mean?" suggestions).

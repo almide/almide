@@ -105,7 +105,6 @@ fn lex_all_keywords() {
         ("effect", TokenType::Effect),
         ("test", TokenType::Test),
         ("pub", TokenType::Pub),
-        ("do", TokenType::Do),
         ("guard", TokenType::Guard),
         ("break", TokenType::Break),
         ("continue", TokenType::Continue),
@@ -118,7 +117,6 @@ fn lex_all_keywords() {
         ("strict", TokenType::Strict),
         ("local", TokenType::Local),
         ("mod", TokenType::Mod),
-        ("newtype", TokenType::Newtype),
     ];
     for (kw, expected) in keywords {
         let toks = token_types(kw);

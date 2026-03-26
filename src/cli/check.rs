@@ -73,39 +73,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             if !proj.permissions.is_empty() {
                 let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
-                use almide::codegen::pass_effect_inference::{EffectInferencePass, Effect};
-                use almide::codegen::pass::NanoPass;
-                let result = EffectInferencePass.run(ir, almide::codegen::pass::Target::Rust);
-                let ir_mut = result.program;
-
-                let allowed: std::collections::HashSet<Effect> = proj.permissions.iter()
-                    .filter_map(|s| match s.as_str() {
-                        "IO" => Some(Effect::IO),
-                        "Net" => Some(Effect::Net),
-                        "Env" => Some(Effect::Env),
-                        "Time" => Some(Effect::Time),
-                        "Rand" => Some(Effect::Rand),
-                        "Fan" => Some(Effect::Fan),
-                        "Log" => Some(Effect::Log),
-                        _ => None,
-                    })
-                    .collect();
-
-                let mut violations = 0;
-                for (name, fe) in &ir_mut.effect_map.functions {
-                    let forbidden: Vec<_> = fe.transitive.iter()
-                        .filter(|e| !allowed.contains(e))
-                        .collect();
-                    if !forbidden.is_empty() {
-                        eprintln!("error: capability violation in `{}`", name);
-                        for e in &forbidden {
-                            eprintln!("  {} is not in [permissions].allow", e);
-                        }
-                        violations += 1;
-                    }
-                }
-                if violations > 0 {
-                    eprintln!("\n{} capability violation(s)", violations);
+                if let Err(_) = super::check_permissions(&ir, &proj.permissions) {
                     std::process::exit(1);
                 }
             }

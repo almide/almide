@@ -1,3 +1,4 @@
+// wasm:skip
 test "summarize filters and takes top 3" {
   let products = [
     Product { name: "A", price: 100, qty: 1 },

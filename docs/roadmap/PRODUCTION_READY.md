@@ -18,7 +18,7 @@ Almide が**既に回避した**他言語の失敗:
 |-------------|--------------|
 | Python asyncio: 関数カラーリング問題 | `fan` — async/await なし。コンパイラが自動挿入 |
 | Rust async: Pin/Unpin, runtime 選択 | `fan` — thread backend。ユーザーに runtime を見せない |
-| Go: `if err != nil` 地獄 | `effect fn` + auto-`?` + `do` block |
+| Go: `if err != nil` 地獄 | `effect fn` + auto-`?` + `guard` |
 | Go: nil panic | `Option[T]` — null は存在しない |
 | Go: sum type 不在 | `type | Variant` + exhaustive `match` |
 | Ruby: 可変デフォルト + monkey patching | immutable values, no metaprogramming |
@@ -35,7 +35,7 @@ Almide が**既に回避した**他言語の失敗:
 コンパイラ          84 ファイル / 19,536 行
                     生成コードは外部 crate 不要（stdlib ランタイムを自己内包）
 stdlib             22 モジュール / 390 関数 / ランタイム 100%
-テスト             161 .almd テストファイル (2,042 blocks) + 639 Rust unit tests = 2,681 total
+テスト             167 .almd テストファイル + Rust unit tests (TypeVar regression 6件含む)
 ターゲット          Rust, TypeScript, JavaScript, npm package, WASM
 Exercises          25 本 / 6 tiers
 並行処理           fan { }, fan.map, fan.race, fan.any, fan.settle, fan.timeout
@@ -57,7 +57,7 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 | 機能 | v0.1.0 | v0.6.0 |
 |------|--------|--------|
 | 型システム | Int, String, Bool | + Float, List, Map, Tuple, Record, Variant, Option, Result, Generics, Union |
-| エラー処理 | なし | effect fn, auto-?, do block, guard |
+| エラー処理 | なし | effect fn, auto-?, guard |
 | 並行処理 | なし | fan ファミリー 6 API |
 | セキュリティ | なし | Effect Isolation |
 | Codec | なし | auto-derive, Value, JSON roundtrip |
@@ -78,7 +78,7 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 
 ### Almide 1.0 が約束すること
 
-1. **構文凍結**: `effect fn`, `fan`, `do`, `guard`, `match`, `for...in` — 現在の構文は永続
+1. **構文凍結**: `effect fn`, `fan`, `guard`, `match`, `for...in`, `while` — 現在の構文は永続
 2. **コア stdlib API 凍結**: 22 モジュール / 390 関数のシグネチャは不変。関数の追加はするが、既存の変更はしない
 3. **クロスターゲット一致**: 同じ `.almd` が Rust と TS で同じ出力を生む
 4. **edition フィールド**: `almide.toml` に `edition = "2026"` を追加。将来の破壊的変更は新 edition で吸収 (Rust editions の教訓)
@@ -127,7 +127,7 @@ Almide 1.0 = ALL of:
 ターゲット品質
   ■ Tier 1 (Rust): 161/161 テストファイル全通過、全 exercises 動作
   ■ Tier 2 (TS/JS): 106/106 pass (100%)
-  ■ Tier 3 (WASM): smoke test pass (fibonacci + fizzbuzz + list.map, 305KB)
+  ■ Tier 3 (WASM): 167/194 pass (0 failed, 27 skipped), mutable collections, fs.write/read_text, top-level let
 
 テスト
   ■ テスト 2,500+                        (2,681 ✅)

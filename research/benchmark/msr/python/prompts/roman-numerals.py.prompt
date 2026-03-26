@@ -1,0 +1,23 @@
+def to_roman(n: int) -> str:
+    pass  # TODO: implement
+
+# Tests
+assert to_roman(1) == "I", "1 is I"
+assert to_roman(2) == "II", "2 is II"
+assert to_roman(3) == "III", "3 is III"
+assert to_roman(4) == "IV", "4 is IV"
+assert to_roman(5) == "V", "5 is V"
+assert to_roman(6) == "VI", "6 is VI"
+assert to_roman(9) == "IX", "9 is IX"
+assert to_roman(14) == "XIV", "14 is XIV"
+assert to_roman(27) == "XXVII", "27 is XXVII"
+assert to_roman(48) == "XLVIII", "48 is XLVIII"
+assert to_roman(49) == "XLIX", "49 is XLIX"
+assert to_roman(59) == "LIX", "59 is LIX"
+assert to_roman(93) == "XCIII", "93 is XCIII"
+assert to_roman(141) == "CXLI", "141 is CXLI"
+assert to_roman(163) == "CLXIII", "163 is CLXIII"
+assert to_roman(402) == "CDII", "402 is CDII"
+assert to_roman(575) == "DLXXV", "575 is DLXXV"
+assert to_roman(911) == "CMXI", "911 is CMXI"
+assert to_roman(3000) == "MMM", "3000 is MMM"

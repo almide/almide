@@ -130,16 +130,21 @@ impl Checker {
                         let rc = resolve_ty(&rt, &self.uf);
                         self.infer_plus_op(&lc, &rc, lt)
                     }
-                    "-" | "*" | "/" | "%" => {
+                    "-" | "*" | "/" | "%" | "^" => {
                         let lc = resolve_ty(&lt, &self.uf);
                         let rc = resolve_ty(&rt, &self.uf);
-                        let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
-                        if !is_numeric(&lc) || !is_numeric(&rc) {
-                            self.emit(super::err(
-                                format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
-                                "Use numeric types (Int or Float)", format!("operator {}", op)));
+                        // Matrix operators: *, +, - on Matrix types
+                        if lc == Ty::Matrix || rc == Ty::Matrix {
+                            Ty::Matrix
+                        } else {
+                            let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
+                            if !is_numeric(&lc) || !is_numeric(&rc) {
+                                self.emit(super::err(
+                                    format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
+                                    "Use numeric types (Int or Float)", format!("operator {}", op)));
+                            }
+                            if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
                         }
-                        if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
                     }
                     "++" => {
                         self.emit(super::err(
@@ -147,7 +152,11 @@ impl Checker {
                             "Replace ++ with +", "operator ++"));
                         lt
                     }
-                    "==" | "!=" | "<" | ">" | "<=" | ">=" => Ty::Bool,
+                    "==" | "!=" | "<" | ">" | "<=" | ">=" => {
+                        // Unify left/right types so TypeVars in none/err/constructors get resolved
+                        self.unify_infer(&lt, &rt);
+                        Ty::Bool
+                    }
                     "and" | "or" => {
                         let lc = resolve_ty(&lt, &self.uf);
                         let rc = resolve_ty(&rt, &self.uf);
@@ -164,7 +173,6 @@ impl Checker {
                         }
                         Ty::Bool
                     }
-                    "^" => Ty::Int,
                     _ => lt,
                 }
             }
@@ -456,7 +464,7 @@ impl Checker {
 
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
-            ast::Stmt::Let { name, ty, value, .. } => {
+            ast::Stmt::Let { name, ty, value, span } => {
                 let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
@@ -472,9 +480,12 @@ impl Checker {
                         }
                     } else { t }
                 };
+                if let Some(s) = span {
+                    self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
+                }
                 self.env.define_var(name, final_ty);
             }
-            ast::Stmt::Var { name, ty, value, .. } => {
+            ast::Stmt::Var { name, ty, value, span } => {
                 let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
@@ -489,6 +500,9 @@ impl Checker {
                         }
                     } else { t }
                 };
+                if let Some(s) = span {
+                    self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
+                }
                 self.env.define_var(name, final_ty);
                 self.env.mutable_vars.insert(sym(name));
                 self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
@@ -506,9 +520,13 @@ impl Checker {
                     } else {
                         format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
                     };
-                    self.emit(super::err(
+                    let mut diag = super::err(
                         format!("cannot reassign immutable binding '{}'", name),
-                        hint, format!("{} = ...", name)).with_code("E009"));
+                        hint, format!("{} = ...", name)).with_code("E009");
+                    if let Some(&(line, col)) = self.env.var_decl_locs.get(&sym(name)) {
+                        diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", name));
+                    }
+                    self.emit(diag);
                 }
                 // Escape analysis: block var mutation inside closures in pure fns
                 if self.env.mutable_vars.contains(&sym(name)) && !self.env.can_call_effect {
@@ -588,9 +606,31 @@ impl Checker {
     fn infer_plus_op(&mut self, lc: &Ty, rc: &Ty, lt: Ty) -> Ty {
         let is_concat_ty = |t: &Ty| matches!(t, Ty::String | Ty::Applied(TypeConstructorId::List, _));
         let is_unknown_ty = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
+        // When one side is List and the other is TypeVar, unify the TypeVar with the List type
+        if is_unknown_ty(lc) && is_concat_ty(rc) {
+            self.unify_infer(&lt, rc);
+            let resolved_lt = resolve_ty(&lt, &self.uf);
+            // Now unify element types if both resolved to List
+            if let (Ty::Applied(TypeConstructorId::List, la), Ty::Applied(TypeConstructorId::List, ra)) = (&resolved_lt, rc) {
+                if let (Some(le), Some(re)) = (la.first(), ra.first()) {
+                    self.unify_infer(le, re);
+                }
+            }
+            return resolve_ty(&lt, &self.uf);
+        }
         if (is_concat_ty(lc) && (is_concat_ty(rc) || is_unknown_ty(rc)))
             || (is_concat_ty(rc) && is_unknown_ty(lc)) {
-            return lt; // concat: return same type
+            // Unify element types for list concatenation: List[?0] + List[Int] → ?0 = Int
+            if let (Ty::Applied(TypeConstructorId::List, la), Ty::Applied(TypeConstructorId::List, ra)) = (lc, rc) {
+                if let (Some(le), Some(re)) = (la.first(), ra.first()) {
+                    self.unify_infer(le, re);
+                }
+            }
+            return resolve_ty(&lt, &self.uf);
+        }
+        // Matrix addition
+        if *lc == Ty::Matrix || *rc == Ty::Matrix {
+            return Ty::Matrix;
         }
         let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
         if !is_numeric(lc) || !is_numeric(rc) {

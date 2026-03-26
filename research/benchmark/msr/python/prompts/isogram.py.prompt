@@ -1,0 +1,17 @@
+def is_isogram(phrase: str) -> bool:
+    pass  # TODO: implement
+
+# Tests
+assert is_isogram("") == True, "empty string"
+assert is_isogram("isogram") == True, "isogram with only lower case characters"
+assert is_isogram("eleven") == False, "word with one duplicated character"
+assert is_isogram("zzyzx") == False, "word with one duplicated character from end"
+assert is_isogram("subdermatoglyphic") == True, "longest reported english isogram"
+assert is_isogram("Alphabet") == False, "word with duplicated character in mixed case"
+assert is_isogram("alphAbet") == False, "word with duplicated character in mixed case lowercase first"
+assert is_isogram("thumbscrew-japingly") == True, "hypothetical isogrammic word with hyphen"
+assert is_isogram("thumbscrew-jappingly") == False, "hypothetical word with duplicated character following hyphen"
+assert is_isogram("six-year-old") == True, "isogram with duplicated hyphen"
+assert is_isogram("Emily Jung Schwartzkopf") == True, "made-up name that is an isogram"
+assert is_isogram("accentor") == False, "duplicated character in the middle"
+assert is_isogram("angola") == False, "same first and last characters"

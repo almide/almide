@@ -1,0 +1,19 @@
+def fibonacci(n: int) -> int:
+    pass  # TODO: implement
+
+
+def fizzbuzz(n: int) -> str:
+    pass  # TODO: implement
+
+
+# Tests (basic smoke tests)
+assert fibonacci(0) == 0, "fibonacci 0"
+assert fibonacci(1) == 1, "fibonacci 1"
+assert fibonacci(10) == 55, "fibonacci 10"
+assert fibonacci(20) == 6765, "fibonacci 20"
+
+assert fizzbuzz(1) == "1", "fizzbuzz 1"
+assert fizzbuzz(3) == "Fizz", "fizzbuzz 3"
+assert fizzbuzz(5) == "Buzz", "fizzbuzz 5"
+assert fizzbuzz(15) == "FizzBuzz", "fizzbuzz 15"
+assert fizzbuzz(7) == "7", "fizzbuzz 7"

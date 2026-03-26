@@ -20,10 +20,10 @@ pub enum TokenType {
     Ident, TypeName, IdentQ,
     // Keywords
     Module, Import, Type, Protocol, Impl, For, In, Fn, Let, Var,
-    If, Then, Else, Match, Ok, Err, Some, None, Do, Todo,
+    If, Then, Else, Match, Ok, Err, Some, None, Todo,
     True, False, Not, And, Or,
     Strict, Pub, Effect, Test,
-    Guard, Break, Continue, While, Local, Mod, Newtype, Fan,
+    Guard, Break, Continue, While, Local, Mod, Fan,
     // Delimiters
     LParen, RParen, LBrace, RBrace, LBracket, RBracket,
     LAngle, RAngle,
@@ -37,7 +37,7 @@ pub enum TokenType {
     BangEq,    // !=
     LtEq,      // <=
     GtEq,      // >=
-    Plus, Minus, Star, StarStar, Slash, Percent,
+    Plus, Minus, Star, Slash, Percent,
     PlusPlus,  // ++
     Pipe,      // |
     PipeArrow, // |>
@@ -145,8 +145,8 @@ impl Lexer {
                 continue;
             }
 
-            // Identifier or keyword
-            if ch.is_ascii_alphabetic() || ch == '_' {
+            // Identifier or keyword (lone `_` falls through to operator lexing → Underscore)
+            if ch.is_ascii_alphabetic() || (ch == '_' && pos + 1 < chars.len() && (chars[pos + 1].is_ascii_alphanumeric() || chars[pos + 1] == '_')) {
                 let (tok, new_pos) = lex_ident(&chars, pos, line, col);
                 let len = new_pos - pos;
                 tokens.push(tok);
@@ -255,12 +255,11 @@ fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
     (Token { token_type: tt, value, line, col }, pos, line, col + len)
 }
 
-/// Single-quote string: `'...'` — double quotes don't need escaping.
-/// Supports interpolation `${expr}` and escape sequences (`\\`, `\'`, `\n`, `\t`).
+/// Single-quote string: `'...'` — no interpolation.
+/// Supports escape sequences (`\\`, `\'`, `\n`, `\t`, `\r`).
 fn lex_single_quote_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
     let mut pos = start + 1; // skip opening '
     let mut value = String::new();
-    let mut has_interpolation = false;
 
     while pos < chars.len() && chars[pos] != '\'' {
         if chars[pos] == '\\' && pos + 1 < chars.len() {
@@ -273,9 +272,6 @@ fn lex_single_quote_string(chars: &[char], start: usize, line: usize, col: usize
                 'r' => { value.push('\r'); pos += 2; }
                 _ => { value.push(chars[pos]); pos += 1; }
             }
-        } else if chars[pos] == '$' && pos + 1 < chars.len() && chars[pos + 1] == '{' {
-            has_interpolation = true;
-            pos = lex_interpolation(chars, pos, &mut value);
         } else {
             value.push(chars[pos]);
             pos += 1;
@@ -283,9 +279,8 @@ fn lex_single_quote_string(chars: &[char], start: usize, line: usize, col: usize
     }
     if pos < chars.len() { pos += 1; } // skip closing '
 
-    let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
     let len = pos - start;
-    (Token { token_type: tt, value, line, col }, pos, line, col + len)
+    (Token { token_type: TokenType::String, value, line, col }, pos, line, col + len)
 }
 
 fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
@@ -457,9 +452,8 @@ fn keyword(s: &str) -> Option<TokenType> {
         "let" => Some(TokenType::Let), "var" => Some(TokenType::Var),
         "if" => Some(TokenType::If), "then" => Some(TokenType::Then),
         "else" => Some(TokenType::Else), "match" => Some(TokenType::Match),
-        "ok" => Some(TokenType::Ok), "err" => Some(TokenType::Err),
-        "some" => Some(TokenType::Some), "none" => Some(TokenType::None),
-        "do" => Some(TokenType::Do),
+        "ok" | "Ok" => Some(TokenType::Ok), "err" | "Err" => Some(TokenType::Err),
+        "some" | "Some" => Some(TokenType::Some), "none" | "None" => Some(TokenType::None),
         "todo" => Some(TokenType::Todo),
         "true" => Some(TokenType::True), "false" => Some(TokenType::False),
         "not" => Some(TokenType::Not), "and" => Some(TokenType::And),
@@ -469,7 +463,6 @@ fn keyword(s: &str) -> Option<TokenType> {
         "guard" => Some(TokenType::Guard), "break" => Some(TokenType::Break),
         "continue" => Some(TokenType::Continue), "while" => Some(TokenType::While),
         "local" => Some(TokenType::Local), "mod" => Some(TokenType::Mod),
-        "newtype" => Some(TokenType::Newtype),
         "fan" => Some(TokenType::Fan),
         _ => None,
     }
@@ -516,7 +509,7 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
         ('>', _, _) => (TokenType::RAngle, ">", 1),
         ('+', _, _) => (TokenType::Plus, "+", 1),
         ('-', _, _) => (TokenType::Minus, "-", 1),
-        ('*', Some('*'), _) => (TokenType::StarStar, "**", 2),
+        ('*', Some('*'), _) => (TokenType::Caret, "^", 2), // ** is an alias for ^ (power)
         ('*', _, _) => (TokenType::Star, "*", 1),
         ('/', _, _) => (TokenType::Slash, "/", 1),
         ('%', _, _) => (TokenType::Percent, "%", 1),

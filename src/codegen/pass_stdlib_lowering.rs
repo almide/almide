@@ -260,6 +260,7 @@ fn resolve_module_from_ty(ty: &Ty, method: &str) -> Option<&'static str> {
     let module = match ty {
         Ty::Applied(TypeConstructorId::List, _) => Some("list"),
         Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
+        Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
         Ty::String => Some("string"),
         Ty::Int => Some("int"),
         Ty::Float => Some("float"),
@@ -462,7 +463,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
         ArgTransform::BorrowStr => {
             // &*expr
             IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true },
+                kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true, mutable: false },
                 ty, span,
             }
         }
@@ -470,7 +471,19 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
         ArgTransform::BorrowRef => {
             // &expr
             IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false },
+                kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: false },
+                ty, span,
+            }
+        }
+
+        ArgTransform::BorrowMut => {
+            // &mut expr — strip Clone wrapper (mutable borrow doesn't clone)
+            let inner = match arg.kind {
+                IrExprKind::Clone { expr } => *expr,
+                _ => arg,
+            };
+            IrExpr {
+                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: false, mutable: true },
                 ty, span,
             }
         }
@@ -710,7 +723,7 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
         },
         IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
         IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
-        IrExprKind::Borrow { expr, as_str } => IrExprKind::Borrow { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)), as_str },
+        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)), as_str, mutable },
         IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
         IrExprKind::Tuple { elements } => IrExprKind::Tuple {
             elements: elements.into_iter().map(|e| prefix_intra_module_calls(e, mod_name, siblings)).collect(),

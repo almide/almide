@@ -18,6 +18,8 @@ pub enum Ty {
     String,
     Bool,
     Unit,
+    Bytes,
+    Matrix,
     /// Parameterized type constructor: List[T], Option[T], Result[T,E], Map[K,V], Set[T], etc.
     /// Phase 4 of HKT Foundation — unifies all container types.
     Applied(constructor::TypeConstructorId, Vec<Ty>),
@@ -86,7 +88,6 @@ pub struct FnSig {
     pub params: Vec<(Sym, Ty)>,
     pub ret: Ty,
     pub is_effect: bool,
-    #[allow(dead_code)]
     pub generics: Vec<Sym>,
     /// Structural bounds for generics: TypeVar name → OpenRecord constraint type
     pub structural_bounds: std::collections::HashMap<Sym, Ty>,
@@ -117,10 +118,13 @@ impl Ty {
             Ty::String => "String".into(),
             Ty::Bool => "Bool".into(),
             Ty::Unit => "Unit".into(),
+            Ty::Bytes => "Bytes".into(),
+            Ty::Matrix => "Matrix".into(),
             Ty::Applied(id, args) => {
                 let name = match id {
                     TypeConstructorId::List => "List",
                     TypeConstructorId::Option => "Option",
+                    TypeConstructorId::Set => "Set",
                     TypeConstructorId::Result => "Result",
                     TypeConstructorId::Map => "Map",
                     TypeConstructorId::Tuple => "Tuple",
@@ -217,6 +221,8 @@ impl Ty {
             (Ty::String, Ty::String) => true,
             (Ty::Bool, Ty::Bool) => true,
             (Ty::Unit, Ty::Unit) => true,
+            (Ty::Bytes, Ty::Bytes) => true,
+            (Ty::Matrix, Ty::Matrix) => true,
             (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
                 args1.iter().zip(args2.iter()).all(|(a, b)| a.compatible(b))
             }
@@ -269,6 +275,8 @@ impl Ty {
             Ty::String => Some(TypeConstructorId::String),
             Ty::Bool => Some(TypeConstructorId::Bool),
             Ty::Unit => Some(TypeConstructorId::Unit),
+            Ty::Bytes => Some(TypeConstructorId::Bytes),
+            Ty::Matrix => Some(TypeConstructorId::Matrix),
             Ty::Applied(id, _) => Some(id.clone()),
             Ty::Tuple(_) => Some(TypeConstructorId::Tuple),
             Ty::Named(name, _) => Some(TypeConstructorId::UserDefined(name.to_string())),
@@ -301,7 +309,7 @@ impl Ty {
     pub fn children(&self) -> Vec<&Ty> {
         match self {
             // Leaf types — no children
-            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
+            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix
             | Ty::TypeVar(_) | Ty::Unknown => vec![],
 
             // Parameterized types (List, Option, Result, Map, user-defined)
@@ -348,7 +356,7 @@ impl Ty {
         F: Fn(&Ty) -> Ty,
     {
         match self {
-            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
+            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix
             | Ty::TypeVar(_) | Ty::Unknown => self.clone(),
 
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
@@ -394,7 +402,7 @@ impl Ty {
         F: FnMut(&Ty) -> Ty,
     {
         match self {
-            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
+            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix
             | Ty::TypeVar(_) | Ty::Unknown => self.clone(),
 
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
@@ -464,7 +472,7 @@ impl Ty {
 
     /// Returns true if this type is a parameterized container (List, Option, Result, Map).
     pub fn is_container(&self) -> bool {
-        matches!(self, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option | TypeConstructorId::Result | TypeConstructorId::Map, _))
+        matches!(self, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option | TypeConstructorId::Set | TypeConstructorId::Result | TypeConstructorId::Map, _))
     }
 
     /// Returns the constructor name for display/debug purposes.
@@ -475,9 +483,12 @@ impl Ty {
             Ty::String => Some("String"),
             Ty::Bool => Some("Bool"),
             Ty::Unit => Some("Unit"),
+            Ty::Bytes => Some("Bytes"),
+            Ty::Matrix => Some("Matrix"),
             Ty::Applied(id, _) => Some(match id {
                 TypeConstructorId::List => "List",
                 TypeConstructorId::Option => "Option",
+                TypeConstructorId::Set => "Set",
                 TypeConstructorId::Result => "Result",
                 TypeConstructorId::Map => "Map",
                 TypeConstructorId::Tuple => "Tuple",
@@ -486,6 +497,8 @@ impl Ty {
                 TypeConstructorId::String => "String",
                 TypeConstructorId::Bool => "Bool",
                 TypeConstructorId::Unit => "Unit",
+                TypeConstructorId::Bytes => "Bytes",
+                TypeConstructorId::Matrix => "Matrix",
                 TypeConstructorId::UserDefined(n) => return Some(n.as_str()),
             }),
             Ty::Tuple(_) => Some("Tuple"),
@@ -514,13 +527,17 @@ impl Ty {
     #[inline]
     pub fn map_of(key: Ty, val: Ty) -> Ty { Ty::Applied(TypeConstructorId::Map, vec![key, val]) }
 
+    /// Construct Set[T]
+    #[inline]
+    pub fn set_of(elem: Ty) -> Ty { Ty::Applied(TypeConstructorId::Set, vec![elem]) }
+
     // ── Accessors (Phase 4: uniform access to container type args) ──
 
-    /// Get the inner type of a single-param container (List or Option).
+    /// Get the inner type of a single-param container (List, Option, or Set).
     /// Returns None for non-container types.
     pub fn inner(&self) -> Option<&Ty> {
         match self {
-            Ty::Applied(TypeConstructorId::List, args) | Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => Some(&args[0]),
+            Ty::Applied(TypeConstructorId::List, args) | Ty::Applied(TypeConstructorId::Option, args) | Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => Some(&args[0]),
             _ => None,
         }
     }
@@ -541,6 +558,8 @@ impl Ty {
     pub fn is_result(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::Result, _)) }
     /// Check if this is a Map type.
     pub fn is_map(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::Map, _)) }
+    /// Check if this is a Set type.
+    pub fn is_set(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::Set, _)) }
     /// Check if this is a function type.
     pub fn is_fn(&self) -> bool { matches!(self, Ty::Fn { .. }) }
 }

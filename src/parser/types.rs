@@ -10,11 +10,6 @@ impl Parser {
         result
     }
     fn parse_type_expr_inner(&mut self) -> Result<TypeExpr, String> {
-        if self.check(TokenType::Newtype) {
-            self.advance();
-            let inner = self.parse_type_expr()?;
-            return Ok(TypeExpr::Newtype { inner: Box::new(inner) });
-        }
         if self.check(TokenType::Pipe) { return self.parse_variant_type(); }
         if self.check(TokenType::LBrace) { return self.parse_record_type(); }
         if self.check(TokenType::Fn) { return self.parse_fn_type(); }

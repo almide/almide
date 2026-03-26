@@ -13,6 +13,7 @@
 
 - [x] **Phase 1: Effect 推論エンジン** — EffectInferencePass, 7 カテゴリ (IO/Net/Env/Time/Rand/Fan/Log), 推移的推論, `almide check --effects`
 - [x] **Phase 2: Self-package 制限** — `almide.toml [permissions]`, 通常の `almide check` に統合, Security Layer 2
+- [x] **Phase 2b: Permissions 貫通** — `almide run`/`almide build` でも permissions チェック実行 (`check_permissions()` 共通関数化)
 
 ---
 

@@ -1,6 +1,8 @@
 // api-client — typed HTTP API client
 //
 // Demonstrates: convention methods (Go-style), json, option, result
+import json
+import http
 
 type User = { id: Int, name: String, email: String }
 type Post = { id: Int, title: String, body: String, user_id: Int }

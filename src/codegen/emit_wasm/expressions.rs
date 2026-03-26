@@ -2,16 +2,11 @@
 
 use crate::ir::{BinOp, IrExpr, IrExprKind, UnOp};
 use crate::types::Ty;
-use wasm_encoder::{Instruction, MemArg, ValType};
+use wasm_encoder::{Instruction, ValType};
 
 use super::FuncCompiler;
 use super::values;
 use super::wasm_macro::wasm;
-
-#[allow(dead_code)]
-pub(super) fn mem(offset: u64) -> MemArg {
-    MemArg { offset, align: 2, memory_index: 0 }
-}
 
 #[derive(Clone, Copy)]
 pub(super) enum CmpKind {
@@ -455,10 +450,12 @@ impl FuncCompiler<'_> {
                     local_get(scratch);
                     return_;
                     end;
-                    // Ok: load the unwrapped value
-                    local_get(scratch);
                 });
-                self.emit_load_at(&expr.ty, 4);
+                // Ok: load the unwrapped value (skip for Unit — nothing to load)
+                if !matches!(&expr.ty, Ty::Unit) {
+                    wasm!(self.func, { local_get(scratch); });
+                    self.emit_load_at(&expr.ty, 4);
+                }
                 self.scratch.free_i32(scratch);
             }
 
@@ -587,14 +584,45 @@ impl FuncCompiler<'_> {
             BinOp::ConcatList => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                // Determine element size from left's type
-                let elem_size = if let Ty::Applied(_, args) = &left.ty {
-                    args.first().map(|t| values::byte_size(t)).unwrap_or(8)
-                } else { 8 };
+                // Determine element size from left/right types or VarTable
+                let extract_elem = |ty: &Ty| -> Option<u32> {
+                    if let Ty::Applied(_, args) = ty {
+                        args.first()
+                            .filter(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown))
+                            .map(|t| values::byte_size(t))
+                    } else { None }
+                };
+                let var_elem = |expr: &IrExpr| -> Option<u32> {
+                    if let crate::ir::IrExprKind::Var { id } = &expr.kind {
+                        extract_elem(&self.var_table.get(*id).ty)
+                    } else { None }
+                };
+                let elem_size = extract_elem(&left.ty)
+                    .or_else(|| extract_elem(&right.ty))
+                    .or_else(|| var_elem(left))
+                    .or_else(|| var_elem(right))
+                    .unwrap_or(8);
                 wasm!(self.func, {
                     i32_const(elem_size as i32);
                     call(self.emitter.rt.concat_list);
                 });
+            }
+
+            // ── Matrix operations (WASM stub — not yet optimized) ──
+            BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix => {
+                // Matrix ops in WASM: call the corresponding stdlib function via module dispatch
+                let func_name = match op {
+                    BinOp::MulMatrix => "mul",
+                    BinOp::AddMatrix => "add",
+                    BinOp::SubMatrix => "sub",
+                    BinOp::ScaleMatrix => "scale",
+                    _ => unreachable!(),
+                };
+                let target = crate::ir::CallTarget::Module {
+                    module: crate::intern::sym("matrix"),
+                    func: crate::intern::sym(func_name),
+                };
+                self.emit_call(&target, &[left.clone(), right.clone()], &Ty::Matrix);
             }
 
             BinOp::PowInt => {
@@ -688,11 +716,6 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(result_s);
                 self.scratch.free_i64(base_s);
             }
-            BinOp::XorInt => {
-                self.emit_expr(left);
-                self.emit_expr(right);
-                self.func.instruction(&Instruction::I64Xor);
-            }
         }
     }
 
@@ -784,12 +807,13 @@ impl FuncCompiler<'_> {
             IrExprKind::BinOp { op, left, .. } => {
                 match op {
                     BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt | BinOp::ModInt
-                    | BinOp::PowInt | BinOp::XorInt => Ty::Int,
+                    | BinOp::PowInt => Ty::Int,
                     BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat
                     | BinOp::ModFloat | BinOp::PowFloat => Ty::Float,
                     BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte
                     | BinOp::And | BinOp::Or => Ty::Bool,
                     BinOp::ConcatStr => Ty::String,
+                    BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix => Ty::Matrix,
                     BinOp::ConcatList => {
                         let lt = self.infer_type_from_expr(left);
                         lt

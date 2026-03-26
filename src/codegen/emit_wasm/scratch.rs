@@ -73,6 +73,7 @@ pub struct ScratchAllocator {
     i32: TypedSlots,
     i64: TypedSlots,
     f64: TypedSlots,
+    v128: TypedSlots,
 }
 
 impl ScratchAllocator {
@@ -81,6 +82,7 @@ impl ScratchAllocator {
             i32: TypedSlots::new(),
             i64: TypedSlots::new(),
             f64: TypedSlots::new(),
+            v128: TypedSlots::new(),
         }
     }
 
@@ -99,11 +101,16 @@ impl ScratchAllocator {
         self.f64.base = f64_base;
     }
 
+    pub fn set_v128_base(&mut self, base: u32) {
+        self.v128.base = base;
+    }
+
     // ── Alloc ──
 
     pub fn alloc_i32(&mut self) -> u32 { self.i32.alloc() }
     pub fn alloc_i64(&mut self) -> u32 { self.i64.alloc() }
     pub fn alloc_f64(&mut self) -> u32 { self.f64.alloc() }
+    pub fn alloc_v128(&mut self) -> u32 { self.v128.alloc() }
 
     /// Allocate a scratch local for the given ValType.
     pub fn alloc(&mut self, vt: ValType) -> u32 {
@@ -111,6 +118,7 @@ impl ScratchAllocator {
             ValType::I32 => self.alloc_i32(),
             ValType::I64 => self.alloc_i64(),
             ValType::F64 => self.alloc_f64(),
+            ValType::V128 => self.alloc_v128(),
             _ => self.alloc_i32(), // fallback
         }
     }
@@ -120,6 +128,7 @@ impl ScratchAllocator {
     pub fn free_i32(&mut self, idx: u32) { self.i32.free(idx); }
     pub fn free_i64(&mut self, idx: u32) { self.i64.free(idx); }
     pub fn free_f64(&mut self, idx: u32) { self.f64.free(idx); }
+    pub fn free_v128(&mut self, idx: u32) { self.v128.free(idx); }
 
     /// Free a scratch local for the given ValType.
     pub fn free(&mut self, idx: u32, vt: ValType) {
@@ -127,6 +136,7 @@ impl ScratchAllocator {
             ValType::I32 => self.free_i32(idx),
             ValType::I64 => self.free_i64(idx),
             ValType::F64 => self.free_f64(idx),
+            ValType::V128 => self.free_v128(idx),
             _ => self.free_i32(idx),
         }
     }
@@ -136,6 +146,7 @@ impl ScratchAllocator {
     pub fn hwm_i32(&self) -> usize { self.i32.hwm }
     pub fn hwm_i64(&self) -> usize { self.i64.hwm }
     pub fn hwm_f64(&self) -> usize { self.f64.hwm }
+    pub fn hwm_v128(&self) -> usize { self.v128.hwm }
 
     /// Assert no scratch locals are still live (call at function end).
     pub fn assert_all_freed(&self) {

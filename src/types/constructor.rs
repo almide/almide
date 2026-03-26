@@ -23,10 +23,13 @@ pub enum TypeConstructorId {
     String,
     Bool,
     Unit,
+    Bytes,
+    Matrix,
 
     // kind: * -> *
     List,
     Option,
+    Set,
 
     // kind: * -> * -> *
     Result,
@@ -173,6 +176,18 @@ impl TypeConstructorRegistry {
             kind: Kind::Star,
             laws: vec![],
         });
+        self.register(TypeConstructorInfo {
+            id: TypeConstructorId::Bytes,
+            name: "Bytes".into(),
+            kind: Kind::Star,
+            laws: vec![],
+        });
+        self.register(TypeConstructorInfo {
+            id: TypeConstructorId::Matrix,
+            name: "Matrix".into(),
+            kind: Kind::Star,
+            laws: vec![],
+        });
 
         // List: * -> * — satisfies Functor, Filterable, Foldable
         self.register(TypeConstructorInfo {
@@ -209,6 +224,14 @@ impl TypeConstructorRegistry {
                 FunctorComposition,
                 FunctorIdentity,
             ],
+        });
+
+        // Set: * -> * — no standard algebraic laws for stream fusion
+        self.register(TypeConstructorInfo {
+            id: TypeConstructorId::Set,
+            name: "Set".into(),
+            kind: Kind::star_to_star(),
+            laws: vec![],
         });
 
         // Map: * -> * -> * — no standard algebraic laws for stream fusion
@@ -279,8 +302,11 @@ impl std::fmt::Display for TypeConstructorId {
             TypeConstructorId::String => write!(f, "String"),
             TypeConstructorId::Bool => write!(f, "Bool"),
             TypeConstructorId::Unit => write!(f, "Unit"),
+            TypeConstructorId::Bytes => write!(f, "Bytes"),
+            TypeConstructorId::Matrix => write!(f, "Matrix"),
             TypeConstructorId::List => write!(f, "List"),
             TypeConstructorId::Option => write!(f, "Option"),
+            TypeConstructorId::Set => write!(f, "Set"),
             TypeConstructorId::Result => write!(f, "Result"),
             TypeConstructorId::Map => write!(f, "Map"),
             TypeConstructorId::Tuple => write!(f, "Tuple"),

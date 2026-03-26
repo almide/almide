@@ -11,6 +11,8 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::String => template_or(ctx, "type_string", &[], "String"),
         Ty::Bool => template_or(ctx, "type_bool", &[], "bool"),
         Ty::Unit => template_or(ctx, "type_unit", &[], "()"),
+        Ty::Bytes => template_or(ctx, "type_bytes", &[], "Vec<u8>"),
+        Ty::Matrix => template_or(ctx, "type_matrix", &[], "AlmideMatrix"),
         Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
             let inner = &args[0];
             let inner_s = render_type(ctx, inner);
@@ -36,6 +38,12 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                 let inner = render_type(ctx, &args[0]);
                 return ctx.templates.render_with("type_set", None, &[], &[("inner", &inner)])
                     .unwrap_or_else(|| format!("Set<{}>", inner));
+            }
+            // Expand type aliases transparently
+            if args.is_empty() {
+                if let Some(target) = ctx.type_aliases.get(name) {
+                    return render_type(ctx, target);
+                }
             }
             if args.is_empty() {
                 name.to_string()
@@ -73,6 +81,11 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             let value_s = render_type(ctx, v);
             ctx.templates.render_with("type_map", None, &[], &[("key", key_s.as_str()), ("value", value_s.as_str())])
                 .unwrap_or_else(|| format!("HashMap<{}, {}>", render_type(ctx, k), render_type(ctx, v)))
+        }
+        Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => {
+            let inner_s = render_type(ctx, &args[0]);
+            ctx.templates.render_with("type_set", None, &[], &[("inner", inner_s.as_str())])
+                .unwrap_or_else(|| format!("std::collections::HashSet<{}>", render_type(ctx, &args[0])))
         }
         // Catch-all for other Applied types (e.g., user-defined type constructors)
         Ty::Applied(id, args) => {

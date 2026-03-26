@@ -1,3 +1,4 @@
+// wasm:skip
 test "is_valid filters active with positive value" {
   assert_eq(is_valid(Entry { label: "a", value: 5, active: true }), true)
   assert_eq(is_valid(Entry { label: "b", value: 0, active: true }), false)

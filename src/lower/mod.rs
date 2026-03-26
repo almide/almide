@@ -328,7 +328,85 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
 
     compute_use_counts(&mut program); // After auto-derive so derived functions get correct use_counts
     demote_unused_mut(&mut program);
+
+    // Verify no inference TypeVars remain in IR (ICE if any found)
+    verify_no_inference_typevars(&program);
+
     program
+}
+
+/// Verify no inference TypeVars (?N) remain in the IR.
+/// Any remaining TypeVar indicates a type checker bug — the codegen cannot
+/// reliably generate correct code without concrete types.
+fn verify_no_inference_typevars(program: &IrProgram) {
+    use crate::types::Ty;
+    fn has_typevar(ty: &Ty) -> bool {
+        match ty {
+            Ty::TypeVar(name) => name.starts_with('?'), // Only inference vars, not generic params
+            Ty::Unknown => false,
+            Ty::Applied(_, args) => args.iter().any(has_typevar),
+            Ty::Tuple(elems) => elems.iter().any(has_typevar),
+            Ty::Fn { params, ret } => params.iter().any(has_typevar) || has_typevar(ret),
+            Ty::Named(_, args) => args.iter().any(has_typevar),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_typevar(t)),
+            _ => false,
+        }
+    }
+    let verbose = std::env::var("ALMIDE_DEBUG_TYPEVARS").is_ok();
+    fn count_expr(expr: &IrExpr, fn_name: &str, loc: &str, verbose: bool) -> usize {
+        let mut c = 0;
+        if has_typevar(&expr.ty) {
+            c += 1;
+            if verbose { eprintln!("  [TypeVar] {} in {}: {:?}", loc, fn_name, expr.ty); }
+        }
+        match &expr.kind {
+            IrExprKind::Call { args, .. } => { for a in args { c += count_expr(a, fn_name, "call-arg", verbose); } }
+            IrExprKind::Lambda { body, params, .. } => {
+                for (_, ty) in params { if has_typevar(ty) { c += 1; if verbose { eprintln!("  [TypeVar] lambda-param in {}: {:?}", fn_name, ty); } } }
+                c += count_expr(body, fn_name, "lambda-body", verbose);
+            }
+            IrExprKind::BinOp { left, right, .. } => { c += count_expr(left, fn_name, "binop-left", verbose); c += count_expr(right, fn_name, "binop-right", verbose); }
+            IrExprKind::Match { subject, arms, .. } => {
+                c += count_expr(subject, fn_name, "match-subject", verbose);
+                for arm in arms { c += count_expr(&arm.body, fn_name, "match-arm", verbose); }
+            }
+            IrExprKind::If { cond, then, else_, .. } => {
+                c += count_expr(cond, fn_name, "if-cond", verbose);
+                c += count_expr(then, fn_name, "if-then", verbose);
+                c += count_expr(else_, fn_name, "if-else", verbose);
+            }
+            IrExprKind::Block { stmts, expr, .. } => {
+                for s in stmts {
+                    if let IrStmtKind::Bind { ty, value, .. } = &s.kind {
+                        if has_typevar(ty) { c += 1; if verbose { eprintln!("  [TypeVar] bind-ty in {}: {:?}", fn_name, ty); } }
+                        c += count_expr(value, fn_name, "bind-val", verbose);
+                    } else if let IrStmtKind::Expr { expr: e } = &s.kind {
+                        c += count_expr(e, fn_name, "stmt-expr", verbose);
+                    }
+                }
+                if let Some(e) = expr { c += count_expr(e, fn_name, "block-tail", verbose); }
+            }
+            _ => {}
+        }
+        c
+    }
+    let mut count = 0;
+    for func in &program.functions {
+        count += count_expr(&func.body, &func.name, "body", verbose);
+        for p in &func.params { if has_typevar(&p.ty) { count += 1; if verbose { eprintln!("  [TypeVar] param in {}: {:?}", func.name, p.ty); } } }
+        if has_typevar(&func.ret_ty) { count += 1; if verbose { eprintln!("  [TypeVar] ret_ty in {}: {:?}", func.name, func.ret_ty); } }
+    }
+    for i in 0..program.var_table.len() {
+        let info = program.var_table.get(VarId(i as u32));
+        if has_typevar(&info.ty) {
+            count += 1;
+            if verbose { eprintln!("  [TypeVar] var {} '{}': {:?}", i, info.name, info.ty); }
+        }
+    }
+    if count > 0 {
+        eprintln!("[ICE] {} unresolved inference TypeVar(s) in IR after lowering. This is a type checker bug.", count);
+        eprintln!("[ICE] Codegen may produce incorrect code. Set ALMIDE_DEBUG_TYPEVARS=1 for details.");
+    }
 }
 
 pub fn lower_module(

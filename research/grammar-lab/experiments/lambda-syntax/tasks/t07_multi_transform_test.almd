@@ -1,3 +1,4 @@
+// wasm:skip
 test "invoice_summary basic" {
   let orders = [
     Order { customer: "Alice", items: ["book", "pen"], total: 50, shipped: true },

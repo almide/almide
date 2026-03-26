@@ -1,0 +1,35 @@
+test "map.insert mutates in place" {
+  var m = map.new()
+  map.insert(m, "a", 1)
+  map.insert(m, "b", 2)
+  assert_eq(map.len(m), 2)
+  assert_eq(map.get(m, "a"), some(1))
+  assert_eq(map.get(m, "b"), some(2))
+}
+
+test "map.insert overwrites existing key" {
+  var m = map.new()
+  map.insert(m, "x", 10)
+  map.insert(m, "x", 20)
+  assert_eq(map.len(m), 1)
+  assert_eq(map.get(m, "x"), some(20))
+}
+
+test "map.delete removes key in place" {
+  var m = map.new()
+  map.insert(m, "a", 1)
+  map.insert(m, "b", 2)
+  map.delete(m, "a")
+  assert_eq(map.len(m), 1)
+  assert_eq(map.get(m, "a"), none)
+  assert_eq(map.get(m, "b"), some(2))
+}
+
+test "map.clear removes all entries" {
+  var m = map.new()
+  map.insert(m, "a", 1)
+  map.insert(m, "b", 2)
+  map.clear(m)
+  assert_eq(map.len(m), 0)
+  assert(map.is_empty(m))
+}

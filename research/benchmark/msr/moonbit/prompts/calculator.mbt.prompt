@@ -1,0 +1,36 @@
+enum Op {
+  Add
+  Sub
+  Mul
+  Div
+}
+
+enum Expr {
+  Lit(Double)
+  BinOp(Op, Expr, Expr)
+  Neg(Expr)
+}
+
+fn eval(e : Expr) -> Result[Double, String] {
+  abort("todo")
+}
+
+test "literal" { assert_eq!(eval(Lit(42.0)), Ok(42.0)) }
+test "addition" { assert_eq!(eval(BinOp(Add, Lit(2.0), Lit(3.0))), Ok(5.0)) }
+test "subtraction" { assert_eq!(eval(BinOp(Sub, Lit(10.0), Lit(4.0))), Ok(6.0)) }
+test "multiplication" { assert_eq!(eval(BinOp(Mul, Lit(3.0), Lit(7.0))), Ok(21.0)) }
+test "division" { assert_eq!(eval(BinOp(Div, Lit(10.0), Lit(4.0))), Ok(2.5)) }
+test "division by zero" { assert_eq!(eval(BinOp(Div, Lit(1.0), Lit(0.0))), Err("division by zero")) }
+test "negation" { assert_eq!(eval(Neg(Lit(5.0))), Ok(-5.0)) }
+test "nested" {
+  let e = BinOp(Add, Lit(1.0), BinOp(Mul, Lit(2.0), Lit(3.0)))
+  assert_eq!(eval(e), Ok(7.0))
+}
+test "complex" {
+  let e = BinOp(Sub, BinOp(Add, Lit(10.0), Lit(5.0)), Neg(Lit(3.0)))
+  assert_eq!(eval(e), Ok(18.0))
+}
+test "deeply nested" {
+  let e = Neg(BinOp(Mul, Neg(Lit(2.0)), BinOp(Add, Lit(3.0), Lit(4.0))))
+  assert_eq!(eval(e), Ok(14.0))
+}

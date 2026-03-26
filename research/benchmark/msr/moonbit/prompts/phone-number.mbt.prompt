@@ -1,0 +1,16 @@
+fn clean(input : String) -> Result[String, String] {
+  abort("todo")
+}
+
+test "cleans number" { assert_eq!(clean("(223) 456-7890"), Ok("2234567890")) }
+test "cleans with dots" { assert_eq!(clean("223.456.7890"), Ok("2234567890")) }
+test "cleans with spaces" { assert_eq!(clean("223 456   7890   "), Ok("2234567890")) }
+test "valid with 11 digits" { assert_eq!(clean("12234567890"), Ok("2234567890")) }
+test "invalid with letters" { assert_eq!(clean("123-abc-7890"), Err("incorrect number of digits")) }
+test "invalid with 9 digits" { assert_eq!(clean("123456789"), Err("incorrect number of digits")) }
+test "invalid 11 digits not starting with 1" { assert_eq!(clean("22234567890"), Err("11 digits must start with 1")) }
+test "invalid if area code starts with 0" { assert_eq!(clean("(023) 456-7890"), Err("area code cannot start with zero")) }
+test "invalid if area code starts with 1" { assert_eq!(clean("(123) 456-7890"), Err("area code cannot start with one")) }
+test "invalid if exchange code starts with 0" { assert_eq!(clean("(223) 056-7890"), Err("exchange code cannot start with zero")) }
+test "invalid if exchange code starts with 1" { assert_eq!(clean("(223) 156-7890"), Err("exchange code cannot start with one")) }
+test "invalid with punctuations" { assert_eq!(clean("523-@:!-7890"), Err("incorrect number of digits")) }

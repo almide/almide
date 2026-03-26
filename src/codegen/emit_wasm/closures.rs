@@ -441,6 +441,9 @@ fn resolve_lambda_param_ty(param_ty: &crate::types::Ty, _body_ty: &crate::types:
                     return info.ty.clone();
                 }
             }
+            // Fallback: default to Int. This matches the most common case (numeric).
+            // For non-numeric types (String, List, etc.), the caller must resolve
+            // the type from call context (e.g., list element type, fn signature).
             crate::types::Ty::Int
         }
         _ => param_ty.clone(),

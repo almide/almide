@@ -11,4 +11,6 @@
 pub mod int;
 pub mod string;
 pub mod list;
+pub mod bytes;
+pub mod matrix;
 pub mod value;

@@ -464,6 +464,11 @@ impl FuncCompiler<'_> {
             (Ty::String, CmpKind::Gte) => {
                 wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_ge_s; });
             }
+            // TypeVar/Unknown: default to i64 comparison (Int is the most common unresolved type)
+            (Ty::TypeVar(_) | Ty::Unknown, CmpKind::Lt) => { wasm!(self.func, { i64_lt_s; }); }
+            (Ty::TypeVar(_) | Ty::Unknown, CmpKind::Gt) => { wasm!(self.func, { i64_gt_s; }); }
+            (Ty::TypeVar(_) | Ty::Unknown, CmpKind::Lte) => { wasm!(self.func, { i64_le_s; }); }
+            (Ty::TypeVar(_) | Ty::Unknown, CmpKind::Gte) => { wasm!(self.func, { i64_ge_s; }); }
             _ => { wasm!(self.func, { unreachable; }); }
         }
     }
@@ -573,7 +578,7 @@ impl FuncCompiler<'_> {
 
 impl FuncCompiler<'_> {
     /// Find variant tag for a unit constructor called as a function (e.g., `Red`).
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Will be used for WASM variant equality codegen
     pub(super) fn find_unit_variant_tag(&self, name: &str) -> Option<u32> {
         for cases in self.emitter.variant_info.values() {
             for case in cases {

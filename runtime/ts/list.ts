@@ -58,4 +58,5 @@ const __almd_list = {
   unique_by<T, K>(xs: T[], f: (x: T) => K): T[] { const seen = new Set<K>(); return xs.filter(x => { const k = f(x); if (seen.has(k)) return false; seen.add(k); return true; }); },
   shuffle<T>(xs: T[]): T[] { const r = [...xs]; for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; } return r; },
   window<T>(xs: T[], n: number): T[][] { const r: T[][] = []; for (let i = 0; i <= xs.length - n; i++) r.push(xs.slice(i, i + n)); return r; },
+  pop<T>(xs: T[]): T | null { return xs.length > 0 ? xs.pop()! : null; },
 };

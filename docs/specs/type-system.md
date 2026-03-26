@@ -62,18 +62,7 @@ Three forms: unit (no payload), tuple-style (positional), record-style (named fi
 - Non-generic variants use `use Enum::*` for unqualified constructor access
 - `deriving From` generates `impl From<InnerType>` for single-field tuple cases
 
-### 3.3 Newtype
-
-```almide
-type UserId = newtype Int
-type Email = newtype String
-```
-
-- Wrap: `UserId(42)` / Unwrap: `id.value`
-- Zero runtime cost
-- Prevents mix-ups at the type level
-
-### 3.4 Type Alias
+### 3.3 Type Alias
 
 ```almide
 type Name = String

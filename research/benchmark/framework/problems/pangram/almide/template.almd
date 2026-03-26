@@ -1,0 +1,4 @@
+fn is_pangram(sentence: String) -> Bool = {
+  // TODO: implement
+  false
+}

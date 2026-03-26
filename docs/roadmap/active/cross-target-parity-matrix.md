@@ -1,7 +1,7 @@
 # Cross-Target Parity Matrix [ACTIVE]
 
 **優先度:** High — WASM 対応進行中の今が最適タイミング
-**前提:** Cross-Target CI (106/106) 完了済み、WASM 130/130 pass
+**前提:** Cross-Target CI 完了済み、WASM 167/194 pass (0 failed, 27 skipped), TS テストランナー追加済み
 **目標:** Rust/TS/WASM 3ターゲット間の挙動差異を体系的に検出・防止する自動検証基盤
 
 > 「CI で "全テスト通過" は必要条件。パリティマトリクスは十分条件。」

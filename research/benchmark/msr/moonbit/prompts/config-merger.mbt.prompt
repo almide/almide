@@ -1,0 +1,121 @@
+// Config file merger exercise
+// Config format: "key=value" lines (# comments, blank lines ignored)
+// Merge rule: later files override earlier files for same key
+// Validation: keys must be non-empty, no duplicate keys within a single file
+
+// Parse a config string into key-value pairs
+// Skip blank lines and lines starting with #
+// Errors: "line N: missing '='", "line N: empty key", "line N: duplicate key: KEY"
+fn parse_config(content : String) -> Result[Array[Array[String]], String] {
+  abort("todo")
+}
+
+// Merge two parsed configs: entries in `overlay` override `base` for matching keys
+// Non-matching keys from both are preserved. Order: base keys first, then new overlay keys
+fn merge_configs(base : Array[Array[String]], overlay : Array[Array[String]]) -> Array[Array[String]] {
+  abort("todo")
+}
+
+// Serialize config pairs back to string format (key=value lines)
+fn serialize_config(pairs : Array[Array[String]]) -> String {
+  abort("todo")
+}
+
+// Lookup a key in config pairs, returns Option
+fn lookup(pairs : Array[Array[String]], key : String) -> Option[String] {
+  abort("todo")
+}
+
+// Filter config pairs by key prefix (e.g. "db_" returns all db_* keys)
+fn filter_by_prefix(pairs : Array[Array[String]], prefix : String) -> Array[Array[String]] {
+  abort("todo")
+}
+
+test "parse basic config" {
+  let content = "host=localhost\nport=8080"
+  assert_eq!(parse_config(content), Ok([["host", "localhost"], ["port", "8080"]]))
+}
+
+test "parse with comments and blanks" {
+  let content = "# this is a comment\n\nhost=localhost\n# another comment\nport=8080"
+  assert_eq!(parse_config(content), Ok([["host", "localhost"], ["port", "8080"]]))
+}
+
+test "parse empty string" {
+  assert_eq!(parse_config(""), Ok([]))
+}
+
+test "parse only comments" {
+  assert_eq!(parse_config("# comment\n# another"), Ok([]))
+}
+
+test "parse missing equals" {
+  assert_eq!(parse_config("host=ok\nbadline"), Err("line 2: missing '='"))
+}
+
+test "parse empty key" {
+  assert_eq!(parse_config("=value"), Err("line 1: empty key"))
+}
+
+test "parse duplicate key" {
+  assert_eq!(parse_config("host=a\nhost=b"), Err("line 2: duplicate key: host"))
+}
+
+test "parse value with equals" {
+  let content = "formula=a=b+c"
+  assert_eq!(parse_config(content), Ok([["formula", "a=b+c"]]))
+}
+
+test "merge no overlap" {
+  let base : Array[Array[String]] = [["host", "localhost"]]
+  let overlay : Array[Array[String]] = [["port", "8080"]]
+  assert_eq!(merge_configs(base, overlay), [["host", "localhost"], ["port", "8080"]])
+}
+
+test "merge with override" {
+  let base : Array[Array[String]] = [["host", "localhost"], ["port", "3000"]]
+  let overlay : Array[Array[String]] = [["port", "8080"]]
+  assert_eq!(merge_configs(base, overlay), [["host", "localhost"], ["port", "8080"]])
+}
+
+test "merge empty base" {
+  let overlay : Array[Array[String]] = [["port", "8080"]]
+  let base : Array[Array[String]] = []
+  assert_eq!(merge_configs(base, overlay), [["port", "8080"]])
+}
+
+test "merge empty overlay" {
+  let base : Array[Array[String]] = [["host", "localhost"]]
+  let overlay : Array[Array[String]] = []
+  assert_eq!(merge_configs(base, overlay), [["host", "localhost"]])
+}
+
+test "serialize config" {
+  let pairs : Array[Array[String]] = [["host", "localhost"], ["port", "8080"]]
+  assert_eq!(serialize_config(pairs), "host=localhost\nport=8080")
+}
+
+test "serialize empty" {
+  let pairs : Array[Array[String]] = []
+  assert_eq!(serialize_config(pairs), "")
+}
+
+test "lookup found" {
+  let pairs : Array[Array[String]] = [["host", "localhost"], ["port", "8080"]]
+  assert_eq!(lookup(pairs, "port"), Some("8080"))
+}
+
+test "lookup not found" {
+  let pairs : Array[Array[String]] = [["host", "localhost"]]
+  assert_eq!(lookup(pairs, "port"), None)
+}
+
+test "filter by prefix" {
+  let pairs : Array[Array[String]] = [["db_host", "localhost"], ["db_port", "5432"], ["app_port", "8080"]]
+  assert_eq!(filter_by_prefix(pairs, "db_"), [["db_host", "localhost"], ["db_port", "5432"]])
+}
+
+test "filter by prefix no match" {
+  let pairs : Array[Array[String]] = [["app_port", "8080"]]
+  assert_eq!(filter_by_prefix(pairs, "db_"), [])
+}

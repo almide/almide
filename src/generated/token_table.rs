@@ -31,7 +31,6 @@ pub fn build_keyword_map_generated() -> HashMap<&'static str, TokenType> {
         m.insert("match", TokenType::Match);
         m.insert("mod", TokenType::Mod);
         m.insert("module", TokenType::Module);
-        m.insert("newtype", TokenType::Newtype);
         m.insert("none", TokenType::None);
         m.insert("not", TokenType::Not);
         m.insert("ok", TokenType::Ok);
@@ -55,14 +54,14 @@ pub fn build_keyword_map_generated() -> HashMap<&'static str, TokenType> {
 }
 
 /// All keywords as a flat list (for validation, tree-sitter, TextMate generation)
-pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "effect", "else", "err", "false", "fan", "fn", "for", "guard", "if", "impl", "import", "in", "let", "local", "match", "mod", "module", "newtype", "none", "not", "ok", "or", "protocol", "pub", "some", "strict", "test", "then", "todo", "true", "type", "var", "while"];
+pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "effect", "else", "err", "false", "fan", "fn", "for", "guard", "if", "impl", "import", "in", "let", "local", "match", "mod", "module", "none", "not", "ok", "or", "protocol", "pub", "some", "strict", "test", "then", "todo", "true", "type", "var", "while"];
 
 /*
 ── Tree-sitter keyword list ──────────────────────────────────────────
     // control
     "if", "then", "else", "match", "for", "in", "while", "guard",
     // declaration
-    "fn", "type", "protocol", "impl", "let", "var", "test", "import", "module", "newtype",
+    "fn", "type", "protocol", "impl", "let", "var", "test", "import", "module",
     // flow
     "break", "continue", "fan",
     // modifier
@@ -76,7 +75,7 @@ pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "effect", "else"
     // scope: keyword.control.almide
     // pattern: \\b(if|then|else|match|for|in|while|guard)\\b
     // scope: keyword.declaration.almide
-    // pattern: \\b(fn|type|protocol|impl|let|var|test|import|module|newtype)\\b
+    // pattern: \\b(fn|type|protocol|impl|let|var|test|import|module)\\b
     // scope: keyword.control.flow.almide
     // pattern: \\b(break|continue|fan)\\b
     // scope: storage.modifier.almide

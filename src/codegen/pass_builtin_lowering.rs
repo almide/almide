@@ -75,6 +75,12 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             }],
                         }, ty, span };
                     }
+                    // panic → RustMacro
+                    if name == "panic" {
+                        let mut macro_args = vec![IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None }];
+                        macro_args.extend(args);
+                        return IrExpr { kind: IrExprKind::RustMacro { name: "panic".into(), args: macro_args }, ty, span };
+                    }
                     // println → RustMacro
                     if name == "println" {
                         let mut macro_args = vec![IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None }];

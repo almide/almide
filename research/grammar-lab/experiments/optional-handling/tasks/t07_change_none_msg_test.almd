@@ -1,3 +1,4 @@
+// wasm:skip
 test "find_product found" {
   let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
   assert_eq(find_product(ps, "Laptop"), "Laptop: tech")

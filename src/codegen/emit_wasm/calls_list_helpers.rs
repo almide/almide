@@ -16,6 +16,47 @@ impl FuncCompiler<'_> {
         } else { Ty::Int }
     }
 
+    /// Resolve the element type of a list expression, checking multiple sources
+    /// to handle TypeVar/Unknown types that the type checker left unresolved.
+    pub(super) fn resolve_list_elem(&self, list_expr: &IrExpr, fn_expr: Option<&IrExpr>) -> Ty {
+        // 1. From list expression type directly
+        let from_expr = if let Ty::Applied(_, args) = &list_expr.ty {
+            args.first().cloned()
+        } else { None };
+        if from_expr.as_ref().is_some_and(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown)) {
+            return from_expr.unwrap();
+        }
+        // 2. From VarTable (if list_expr is a Var)
+        if let crate::ir::IrExprKind::Var { id } = &list_expr.kind {
+            if let Ty::Applied(_, a) = &self.var_table.get(*id).ty {
+                let t = a.first().cloned();
+                if t.as_ref().is_some_and(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown)) {
+                    return t.unwrap();
+                }
+            }
+        }
+        // 3. From fn expression's Fn type (first param = elem type for map/filter/each)
+        if let Some(fn_e) = fn_expr {
+            if let Ty::Fn { params, .. } = &fn_e.ty {
+                let t = params.first().cloned();
+                if t.as_ref().is_some_and(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown)) {
+                    return t.unwrap();
+                }
+            }
+            // 4. From Lambda params directly
+            if let crate::ir::IrExprKind::Lambda { params, .. } = &fn_e.kind {
+                let t = params.first().map(|(_, t)| t.clone());
+                if t.as_ref().is_some_and(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown)) {
+                    return t.unwrap();
+                }
+            }
+        }
+        // Fallback: if still TypeVar/Unknown, default to Int
+        from_expr
+            .filter(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown))
+            .unwrap_or(Ty::Int)
+    }
+
     /// Copy one element from [stack: dst_addr, src_addr] based on type.
     pub(super) fn emit_elem_copy(&mut self, ty: &Ty) {
         match values::ty_to_valtype(ty) {
@@ -66,7 +107,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Emit take/drop as list slice. For take: start=0,end=n. For drop: start=n,end=len.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Will be activated when list.take/drop WASM codegen lands
     fn emit_list_slice_impl(
         &mut self, xs: &IrExpr, start_arg: Option<&IrExpr>, end_arg: Option<&IrExpr>,
         elem_size: usize, is_take: bool,
@@ -150,7 +191,7 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(xs_ptr);
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Placeholder for list.slice WASM codegen
     fn emit_memcpy_loop(&mut self, _i_local: u32, _dst_local: u32, _start_local: u32, _elem_size: usize) {
         // Generic memcpy for list.slice — complex, use inline for now
         // This is a placeholder; slice uses the same pattern as take/drop

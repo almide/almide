@@ -71,6 +71,17 @@ impl FuncCompiler<'_> {
                         });
                         // Drop message arg if present (evaluated but unused)
                     }
+                    "panic" => {
+                        // panic(msg) — print "PANIC: " + msg to stderr, then trap
+                        let prefix = self.emitter.intern_string("PANIC: ");
+                        wasm!(self.func, { i32_const(prefix as i32); });
+                        self.emit_expr(&args[0]);
+                        wasm!(self.func, {
+                            call(self.emitter.rt.concat_str);
+                            call(self.emitter.rt.println_str);
+                            unreachable;
+                        });
+                    }
                     "assert_ne" => {
                         // assert_ne(left, right) — trap if equal
                         self.emit_eq(&args[0], &args[1], false);
@@ -97,6 +108,14 @@ impl FuncCompiler<'_> {
                         self.emit_value_tagged_variant(args);
                     }
                     _ => {
+                        // Module-qualified call: list.fold, map.set, etc.
+                        if let Some(dot) = name.find('.') {
+                            let module = &name[..dot];
+                            let func = &name[dot+1..];
+                            let target = CallTarget::Module { module: crate::intern::sym(module), func: crate::intern::sym(func) };
+                            self.emit_call(&target, args, _ret_ty);
+                            return;
+                        }
                         // Check if this is a variant constructor
                         if let Some((tag, is_unit)) = self.find_variant_ctor_tag(name) {
                             if is_unit && args.is_empty() {
@@ -187,6 +206,16 @@ impl FuncCompiler<'_> {
                     }
                     _ if module == "list" => {
                         if !self.emit_list_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
+                    _ if module == "bytes" => {
+                        if !self.emit_bytes_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
+                    _ if module == "matrix" => {
+                        if !self.emit_matrix_call(func, args) {
                             self.emit_stub_call(args);
                         }
                     }
@@ -310,6 +339,9 @@ impl FuncCompiler<'_> {
                     }
                     _ if module == "regex" => {
                         self.emit_regex_call(func, args);
+                    }
+                    _ if module == "fs" => {
+                        self.emit_fs_call(func, args);
                     }
                     _ => {
                         // Try Type.method dispatch (protocol implementations, e.g. Val.double)
@@ -508,7 +540,18 @@ impl FuncCompiler<'_> {
                 });
 
                 // Closure calling convention type: (env: i32, params...) -> ret
-                if let Ty::Fn { params, ret } = &callee.ty {
+                // Resolve callee type from multiple sources (callee.ty, VarTable)
+                let callee_fn_ty = match &callee.ty {
+                    Ty::Fn { .. } => callee.ty.clone(),
+                    _ => {
+                        if let crate::ir::IrExprKind::Var { id } = &callee.kind {
+                            self.var_table.get(*id).ty.clone()
+                        } else {
+                            callee.ty.clone()
+                        }
+                    }
+                };
+                if let Ty::Fn { params, ret } = &callee_fn_ty {
                     let mut closure_params = vec![ValType::I32]; // env_ptr
                     for p in params {
                         if let Some(vt) = values::ty_to_valtype(p) {
@@ -524,12 +567,6 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(scratch);
             }
         }
-    }
-
-    /// Emit a stub for an unimplemented call: evaluate args (for side effects), drop values, unreachable.
-    #[allow(dead_code)]
-    pub(super) fn emit_stub_call_logged(&mut self, args: &[IrExpr], _context: &str) {
-        self.emit_stub_call(args);
     }
 
     pub(super) fn emit_stub_call(&mut self, args: &[IrExpr]) {
@@ -887,10 +924,36 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s);
             }
             "unix_timestamp" => {
-                wasm!(self.func, { i64_const(1711000000); }); // ~2024-03-21
+                // WASI clock_time_get(id=0 realtime, precision=0, time_ptr)
+                // Returns nanoseconds as i64, convert to seconds
+                let time_ptr = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
+                    i32_const(0); // clock_id: realtime
+                    i64_const(0); // precision
+                    local_get(time_ptr);
+                    call(self.emitter.rt.clock_time_get);
+                    drop; // discard error code
+                    local_get(time_ptr); i64_load(0);
+                    i64_const(1000000000); i64_div_u;
+                });
+                self.scratch.free_i32(time_ptr);
             }
             "millis" => {
-                wasm!(self.func, { i64_const(1711000000000); }); // ms since epoch
+                // WASI clock_time_get(id=0 realtime, precision=0, time_ptr)
+                // Returns nanoseconds as i64, convert to milliseconds
+                let time_ptr = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
+                    i32_const(0); // clock_id: realtime
+                    i64_const(0); // precision
+                    local_get(time_ptr);
+                    call(self.emitter.rt.clock_time_get);
+                    drop; // discard error code
+                    local_get(time_ptr); i64_load(0);
+                    i64_const(1000000); i64_div_u;
+                });
+                self.scratch.free_i32(time_ptr);
             }
             "os" => {
                 let s = self.emitter.intern_string("wasi");
@@ -1275,12 +1338,12 @@ impl FuncCompiler<'_> {
                 // Returns nanoseconds as i64 at time_ptr, convert to seconds
                 let time_ptr = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    // Allocate 8 bytes for the i64 result
+                    // Allocate 8 bytes for i64 result (allocator guarantees 8-byte alignment)
                     i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
                     // clock_time_get(id=0, precision=0, time_ptr)
                     i32_const(0); // clock_id: realtime
                     i64_const(0); // precision
-                    local_get(time_ptr); // output pointer
+                    local_get(time_ptr); // output pointer (8-byte aligned)
                     call(self.emitter.rt.clock_time_get);
                     drop; // discard error code
                     // Load i64 nanoseconds, convert to seconds
@@ -1880,6 +1943,350 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(hdrs);
                 self.scratch.free_i32(tuple);
                 self.scratch.free_i32(s);
+            }
+            _ => {
+                self.emit_stub_call(args);
+            }
+        }
+    }
+
+    /// fs module: read_text, write, exists
+    fn emit_fs_call(&mut self, func: &str, args: &[IrExpr]) {
+        match func {
+            "read_text" => {
+                // fs.read_text(path: String) -> Result[String, String]
+                // 1. Evaluate path arg (Almide String ptr: [len:i32][data:u8...])
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let fd_out_ptr = self.scratch.alloc_i32();
+                let opened_fd = self.scratch.alloc_i32();
+                let stat_buf = self.scratch.alloc_i32();
+                let file_size = self.scratch.alloc_i32();
+                let data_buf = self.scratch.alloc_i32();
+                let iov_ptr = self.scratch.alloc_i32();
+                let nread_ptr = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let str_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    // path_ptr = path_str + 4 (skip length prefix)
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    // path_len = *path_str
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                // Allocate fd_out (4 bytes) via bump allocator
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                });
+
+                // Strip leading '/' from path for WASI (requires relative path from preopened dir)
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq; // '/' == 47
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+                // path_open(fd=3, dirflags=0, path_ptr, path_len, oflags=0,
+                //           rights=fd_read|fd_seek (2|4=6), inheriting=0, fdflags=0, fd_out_ptr)
+                wasm!(self.func, {
+                    i32_const(3);
+                    i32_const(0);
+                    local_get(path_ptr);
+                    local_get(path_len);
+                    i32_const(0);
+                    i64_const(6);
+                    i64_const(0);
+                    i32_const(0);
+                    local_get(fd_out_ptr);
+                    call(self.emitter.rt.path_open);
+                    local_set(errno);
+                });
+
+                // If errno != 0, return err("file not found")
+                wasm!(self.func, {
+                    local_get(errno);
+                    i32_const(0);
+                    i32_ne;
+                    if_i32;
+                });
+                // Build err result
+                let err_msg = self.emitter.intern_string("file not found");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+
+                // Load opened fd
+                wasm!(self.func, {
+                    local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
+                });
+
+                // fd_filestat_get(fd, stat_buf) — stat_buf needs 64 bytes (allocator guarantees 8-byte alignment)
+                wasm!(self.func, {
+                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    local_get(opened_fd);
+                    local_get(stat_buf);
+                    call(self.emitter.rt.fd_filestat_get);
+                    drop;
+                });
+
+                // file_size = i32(stat_buf[32..40]) — file size is at offset 32 as i64, take lower 32 bits
+                wasm!(self.func, {
+                    local_get(stat_buf); i32_const(32); i32_add; i32_load(0); local_set(file_size);
+                });
+
+                // Allocate buffer for file data
+                wasm!(self.func, {
+                    local_get(file_size); call(self.emitter.rt.alloc); local_set(data_buf);
+                });
+
+                // Build iov struct: [buf_ptr:i32, buf_len:i32]
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    local_get(iov_ptr); local_get(data_buf); i32_store(0);
+                    local_get(iov_ptr); local_get(file_size); i32_store(4);
+                });
+
+                // nread_ptr
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                });
+
+                // fd_read(fd, iov_ptr, 1, nread_ptr)
+                wasm!(self.func, {
+                    local_get(opened_fd);
+                    local_get(iov_ptr);
+                    i32_const(1);
+                    local_get(nread_ptr);
+                    call(self.emitter.rt.fd_read);
+                    drop;
+                });
+
+                // fd_close(fd)
+                wasm!(self.func, {
+                    local_get(opened_fd);
+                    call(self.emitter.rt.fd_close);
+                    drop;
+                });
+
+                // Build Almide String: [len:i32][data:u8...]
+                // Use nread as actual length (may be <= file_size)
+                wasm!(self.func, {
+                    local_get(nread_ptr); i32_load(0); local_set(file_size);
+                    local_get(file_size); i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(str_ptr);
+                    local_get(str_ptr); local_get(file_size); i32_store(0);
+                });
+
+                // Copy data_buf[0..file_size] to str_ptr+4
+                // Byte-by-byte copy loop
+                let counter = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(0); local_set(counter);
+                    block_empty; loop_empty;
+                    local_get(counter); local_get(file_size); i32_ge_u; br_if(1);
+                    local_get(str_ptr); i32_const(4); i32_add; local_get(counter); i32_add;
+                    local_get(data_buf); local_get(counter); i32_add;
+                    i32_load8_u(0);
+                    i32_store8(0);
+                    local_get(counter); i32_const(1); i32_add; local_set(counter);
+                    br(0);
+                    end; end;
+                });
+                self.scratch.free_i32(counter);
+
+                // Build ok result: [tag=0:i32][str_ptr:i32]
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); local_get(str_ptr); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(str_ptr);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(nread_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(data_buf);
+                self.scratch.free_i32(file_size);
+                self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(opened_fd);
+                self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "write" => {
+                // fs.write(path: String, content: String) -> Result[Unit, String]
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let content_str = self.scratch.alloc_i32();
+                let fd_out_ptr = self.scratch.alloc_i32();
+                let opened_fd = self.scratch.alloc_i32();
+                let iov_ptr = self.scratch.alloc_i32();
+                let nwritten_ptr = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                // Evaluate path
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                // Evaluate content
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { local_set(content_str); });
+
+                // Allocate fd_out
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                });
+
+                // Strip leading '/' from path for WASI (requires relative path from preopened dir)
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+                // path_open(fd=3, dirflags=0, path_ptr, path_len,
+                //           oflags=O_CREAT|O_TRUNC(=9),
+                //           rights=fd_write(=64), inheriting=0, fdflags=0, fd_out_ptr)
+                wasm!(self.func, {
+                    i32_const(3);
+                    i32_const(0);
+                    local_get(path_ptr);
+                    local_get(path_len);
+                    i32_const(9);
+                    i64_const(64);
+                    i64_const(0);
+                    i32_const(0);
+                    local_get(fd_out_ptr);
+                    call(self.emitter.rt.path_open);
+                    local_set(errno);
+                });
+
+                // If errno != 0, return err
+                wasm!(self.func, {
+                    local_get(errno);
+                    i32_const(0);
+                    i32_ne;
+                    if_i32;
+                });
+                let err_msg = self.emitter.intern_string("failed to open file for writing");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+
+                // Load opened fd
+                wasm!(self.func, {
+                    local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
+                });
+
+                // Build iov: [content_ptr+4, content_len]
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    local_get(iov_ptr); local_get(content_str); i32_const(4); i32_add; i32_store(0);
+                    local_get(iov_ptr); local_get(content_str); i32_load(0); i32_store(4);
+                });
+
+                // nwritten_ptr
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nwritten_ptr);
+                });
+
+                // fd_write(fd, iov_ptr, 1, nwritten_ptr)
+                wasm!(self.func, {
+                    local_get(opened_fd);
+                    local_get(iov_ptr);
+                    i32_const(1);
+                    local_get(nwritten_ptr);
+                    call(self.emitter.rt.fd_write);
+                    drop;
+                });
+
+                // fd_close(fd)
+                wasm!(self.func, {
+                    local_get(opened_fd);
+                    call(self.emitter.rt.fd_close);
+                    drop;
+                });
+
+                // Build ok(unit) result: [tag=0:i32][0:i32]
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(0); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(nwritten_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(opened_fd);
+                self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(content_str);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "exists" => {
+                // fs.exists(path: String) -> Bool
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let stat_buf = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                // Allocate 64-byte stat buffer (allocator guarantees 8-byte alignment)
+                wasm!(self.func, {
+                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                });
+
+                // path_filestat_get(fd=3, flags=0, path_ptr, path_len, stat_buf)
+                wasm!(self.func, {
+                    i32_const(3);
+                    i32_const(0);
+                    local_get(path_ptr);
+                    local_get(path_len);
+                    local_get(stat_buf);
+                    call(self.emitter.rt.path_filestat_get);
+                    // errno == 0 → true (1), else false (0)
+                    i32_eqz;
+                });
+
+                self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
             }
             _ => {
                 self.emit_stub_call(args);

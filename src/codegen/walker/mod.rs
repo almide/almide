@@ -38,11 +38,12 @@ pub struct RenderContext<'a> {
     pub target: Target,
     pub auto_unwrap: bool,
     pub ann: CodegenAnnotations,
+    pub type_aliases: std::collections::HashMap<crate::intern::Sym, crate::types::Ty>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, ann: CodegenAnnotations::default() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -91,6 +92,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         target: ctx.target,
         auto_unwrap: func.is_effect && !func.is_test,
         ann: ctx.ann.clone(),
+        type_aliases: ctx.type_aliases.clone(),
     };
 
     // Extern fn: emit import/use via template
@@ -218,6 +220,13 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
 
 pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Build constructor → enum name map
+    // Build type alias map for transparent expansion
+    let mut type_aliases = std::collections::HashMap::new();
+    for td in &program.type_decls {
+        if let IrTypeDeclKind::Alias { target } = &td.kind {
+            type_aliases.insert(td.name, target.clone());
+        }
+    }
     let mut ctx = RenderContext {
         templates: ctx.templates,
         var_table: ctx.var_table,
@@ -225,6 +234,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         target: ctx.target,
         auto_unwrap: ctx.auto_unwrap,
         ann: ctx.ann.clone(),
+        type_aliases,
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
@@ -313,6 +323,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             target: ctx.target,
             auto_unwrap: false,
             ann: ctx.ann.clone(),
+            type_aliases: ctx.type_aliases.clone(),
         };
         // Module type decls
         for td in &module.type_decls {

@@ -1,0 +1,30 @@
+# Raindrops: convert a number to raindrop sounds.
+#
+# Rules:
+#   - If the number has 3 as a factor, add "Pling"
+#   - If the number has 5 as a factor, add "Plang"
+#   - If the number has 7 as a factor, add "Plong"
+#   - If the number has none of those factors, return the number as a string
+
+def convert(n: int) -> str:
+    pass  # TODO: implement
+
+# Tests
+assert convert(1) == "1", "the sound for 1 is 1"
+assert convert(3) == "Pling", "the sound for 3 is Pling"
+assert convert(5) == "Plang", "the sound for 5 is Plang"
+assert convert(7) == "Plong", "the sound for 7 is Plong"
+assert convert(6) == "Pling", "the sound for 6 is Pling"
+assert convert(8) == "8", "the sound for 8 is 8"
+assert convert(9) == "Pling", "the sound for 9 is Pling"
+assert convert(10) == "Plang", "the sound for 10 is Plang"
+assert convert(14) == "Plong", "the sound for 14 is Plong"
+assert convert(15) == "PlingPlang", "the sound for 15 is PlingPlang"
+assert convert(21) == "PlingPlong", "the sound for 21 is PlingPlong"
+assert convert(25) == "Plang", "the sound for 25 is Plang"
+assert convert(27) == "Pling", "the sound for 27 is Pling"
+assert convert(35) == "PlangPlong", "the sound for 35 is PlangPlong"
+assert convert(49) == "Plong", "the sound for 49 is Plong"
+assert convert(52) == "52", "the sound for 52 is 52"
+assert convert(105) == "PlingPlangPlong", "the sound for 105 is PlingPlangPlong"
+assert convert(3125) == "Plang", "the sound for 3125 is Plang"

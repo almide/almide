@@ -952,7 +952,7 @@ impl FuncCompiler<'_> {
         } else { Ty::Int }
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Will be used for option.flat_map WASM codegen
     fn fn_ret_inner_ty(&self, ty: &Ty) -> Ty {
         // For flat_map: f returns Option[T], extract T
         let ret = self.fn_ret_ty(ty);

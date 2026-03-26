@@ -2,7 +2,7 @@
 //!
 //! All `__str_*` runtime function registration and compilation lives here.
 
-use super::{CompiledFunc, StringRuntime, WasmEmitter};
+use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::{Function, ValType};
 
 /// Register all string runtime function signatures.
@@ -105,14 +105,6 @@ pub fn compile(emitter: &mut WasmEmitter) {
     super::rt_string_extra::compile_is_upper(emitter);
     super::rt_string_extra::compile_is_lower(emitter);
     super::rt_string_extra::compile_cmp(emitter);
-}
-
-// ── Helpers ──
-
-/// Shorthand to access StringRuntime indices.
-#[allow(dead_code)]
-fn s(emitter: &WasmEmitter) -> &StringRuntime {
-    &emitter.rt.string
 }
 
 // ── Core ──

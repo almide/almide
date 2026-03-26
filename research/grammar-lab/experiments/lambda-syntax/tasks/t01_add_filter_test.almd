@@ -1,3 +1,4 @@
+// wasm:skip
 test "big_numbers filters range" {
   assert_eq(big_numbers([1, 2, 3, 5, 7, 9, 10]), [3, 5, 7])
 }

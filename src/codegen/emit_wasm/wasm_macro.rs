@@ -419,8 +419,33 @@ macro_rules! wasm {
     (@emit $f:expr, f64_const($v:expr); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64Const($v)); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, memory_size(0); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::MemorySize(0)); wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, memory_grow(0); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::MemoryGrow(0)); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, memory_copy; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 }); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, memory_fill; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::MemoryFill(0)); wasm!(@emit $f, $($rest)*)
+    };
+    // ── SIMD (v128) instructions ──
+    (@emit $f:expr, v128_load($offset:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::V128Load(wasm_encoder::MemArg { offset: $offset, align: 4, memory_index: 0 })); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, v128_store($offset:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::V128Store(wasm_encoder::MemArg { offset: $offset, align: 4, memory_index: 0 })); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64x2_mul; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64x2Mul); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64x2_add; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64x2Add); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64x2_splat; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64x2Splat); wasm!(@emit $f, $($rest)*)
     };
 }
 

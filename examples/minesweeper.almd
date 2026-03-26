@@ -1,0 +1,240 @@
+// minesweeper — Terminal Minesweeper (9x9, 10 mines)
+
+import random
+import io
+
+// Build the adjacent-mine-count grid
+// mines: flat List[Bool] (81 cells), returns flat List[Int] (-1 = mine, 0..8 = count)
+fn build_adjacent(mines: List[Bool]) -> List[Int] = {
+  var result: List[Int] = []
+  for idx in 0..81 {
+    let r = idx / 9
+    let c = idx % 9
+    if mines[idx] then {
+      result = result + [-1]
+    } else {
+      var count = 0
+      for dr in [-1, 0, 1] {
+        for dc in [-1, 0, 1] {
+          guard not (dr == 0 and dc == 0) else continue
+          let nr = r + dr
+          let nc = c + dc
+          if nr >= 0 and nr < 9 and nc >= 0 and nc < 9 then {
+            if mines[nr * 9 + nc] then {
+              count = count + 1
+            } else ()
+          } else ()
+        }
+      }
+      result = result + [count]
+    }
+  }
+  result
+}
+
+// Place mines randomly, excluding 3x3 zone around (sr, sc)
+effect fn place_mines(sr: Int, sc: Int) -> Result[List[Bool], String] = {
+  var mines: List[Bool] = []
+  for _i in 0..81 {
+    mines = mines + [false]
+  }
+  var placed = 0
+  while placed < 10 {
+    let r = random.int(0, 8)
+    let c = random.int(0, 8)
+    let idx = r * 9 + c
+    let in_safe = int.abs(r - sr) <= 1 and int.abs(c - sc) <= 1
+    if not in_safe and not mines[idx] then {
+      mines[idx] = true
+      placed = placed + 1
+    } else ()
+  }
+  ok(mines)
+}
+
+// Flood-fill reveal for empty cells
+fn flood_fill(adjacent: List[Int], revealed: List[Bool], start_idx: Int) -> List[Bool] = {
+  var rev = revealed
+  var stack = [start_idx]
+  while list.len(stack) > 0 {
+    let idx = stack[list.len(stack) - 1]
+    stack = list.take(stack, list.len(stack) - 1)
+    if rev[idx] then {
+      ()
+    } else {
+      rev[idx] = true
+      if adjacent[idx] == 0 then {
+        let r = idx / 9
+        let c = idx % 9
+        for dr in [-1, 0, 1] {
+          for dc in [-1, 0, 1] {
+            guard not (dr == 0 and dc == 0) else continue
+            let nr = r + dr
+            let nc = c + dc
+            if nr >= 0 and nr < 9 and nc >= 0 and nc < 9 then {
+              let ni = nr * 9 + nc
+              if not rev[ni] then {
+                stack = stack + [ni]
+              } else ()
+            } else ()
+          }
+        }
+      } else ()
+    }
+  }
+  rev
+}
+
+// Count remaining non-mine unrevealed cells
+fn count_unrevealed(adjacent: List[Int], revealed: List[Bool]) -> Int = {
+  var count = 0
+  for i in 0..81 {
+    if not revealed[i] and adjacent[i] != -1 then {
+      count = count + 1
+    } else ()
+  }
+  count
+}
+
+// Count flags
+fn count_flags(flagged: List[Bool]) -> Int = {
+  var count = 0
+  for i in 0..81 {
+    if flagged[i] then {
+      count = count + 1
+    } else ()
+  }
+  count
+}
+
+// Render the board
+fn render_board(adjacent: List[Int], revealed: List[Bool], flagged: List[Bool], show_mines: Bool) -> String = {
+  var out = "    0 1 2 3 4 5 6 7 8\n"
+  out = out + "  +-------------------+\n"
+  for r in 0..9 {
+    var row = int.to_string(r) + " | "
+    for c in 0..9 {
+      let idx = r * 9 + c
+      let cell = if show_mines and adjacent[idx] == -1 then "● "
+        else if flagged[idx] then "⚑ "
+        else if not revealed[idx] then "■ "
+        else if adjacent[idx] == 0 then "  "
+        else int.to_string(adjacent[idx]) + " "
+      row = row + cell
+    }
+    out = out + row + "|\n"
+  }
+  out = out + "  +-------------------+"
+  out
+}
+
+// Parse input: "r,c" or "f r,c"
+fn parse_input(input: String) -> Result[{flag: Bool, row: Int, col: Int}, String] = {
+  let trimmed = string.trim(input)
+  let is_flag = string.starts_with(trimmed, "f ")
+  let coords_str = if is_flag then string.slice(trimmed, 2) else trimmed
+  let parts = string.split(string.trim(coords_str), ",")
+  guard list.len(parts) == 2 else err("Invalid input. Use: r,c or f r,c")
+  let r_str = string.trim(parts[0])
+  let c_str = string.trim(parts[1])
+  match (int.parse(r_str), int.parse(c_str)) {
+    (ok(r), ok(c)) => {
+      guard r >= 0 and r < 9 and c >= 0 and c < 9 else err("Out of bounds (0-8)")
+      ok({flag: is_flag, row: r, col: c})
+    },
+    _ => err("Invalid coordinates. Use numbers: r,c"),
+  }
+}
+
+// Initialize a list of 81 false values
+fn make_bools() -> List[Bool] = {
+  var xs: List[Bool] = []
+  for _i in 0..81 {
+    xs = xs + [false]
+  }
+  xs
+}
+
+// Initialize a list of 81 zeros
+fn make_zeros() -> List[Int] = {
+  var xs: List[Int] = []
+  for _i in 0..81 {
+    xs = xs + [0]
+  }
+  xs
+}
+
+effect fn main() -> Result[Unit, String] = {
+  println("=== MINESWEEPER ===")
+  println("9x9 grid, 10 mines")
+  println("Commands: r,c to reveal | f r,c to flag/unflag")
+  println("")
+
+  var adj = make_zeros()
+  var rev = make_bools()
+  var flg = make_bools()
+  var is_first = true
+  var turn_count = 0
+  var game_over = false
+  var won = false
+
+  while not game_over {
+    println(render_board(adj, rev, flg, false))
+    let flags = count_flags(flg)
+    let remaining = 10 - flags
+    println("Mines: ${int.to_string(remaining)} remaining | Turn: ${int.to_string(turn_count)}")
+    io.print("> ")
+
+    let input = io.read_line()
+    match parse_input(input) {
+      err(msg) => {
+        println(msg)
+      },
+      ok(cmd) => {
+        let idx = cmd.row * 9 + cmd.col
+        if cmd.flag then {
+          if rev[idx] then {
+            println("Cannot flag a revealed cell.")
+          } else {
+            flg[idx] = not flg[idx]
+          }
+        } else {
+          if rev[idx] then {
+            println("Already revealed.")
+          } else if flg[idx] then {
+            println("Unflag first (f r,c) before revealing.")
+          } else {
+            if is_first then {
+              let mines = place_mines(cmd.row, cmd.col)
+              adj = build_adjacent(mines)
+              is_first = false
+            } else ()
+
+            if adj[idx] == -1 then {
+              rev[idx] = true
+              game_over = true
+              won = false
+            } else {
+              rev = flood_fill(adj, rev, idx)
+              if count_unrevealed(adj, rev) == 0 then {
+                game_over = true
+                won = true
+              } else ()
+            }
+          }
+        }
+        turn_count = turn_count + 1
+      },
+    }
+  }
+
+  println("")
+  if won then {
+    println(render_board(adj, rev, flg, false))
+    println("YOU WIN! Cleared in ${int.to_string(turn_count)} turns.")
+  } else {
+    println(render_board(adj, rev, flg, true))
+    println("BOOM! You hit a mine. Game over.")
+  }
+  ok(())
+}

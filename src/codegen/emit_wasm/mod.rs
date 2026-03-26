@@ -34,6 +34,8 @@ mod calls_list_closure2;
 mod calls_lambda;
 mod calls_map;
 mod calls_map_closure;
+mod calls_bytes;
+mod calls_matrix;
 mod calls_set;
 mod calls_value;
 mod calls_regex;
@@ -140,6 +142,12 @@ pub struct RuntimeFuncs {
     pub clock_time_get: u32,
     pub proc_exit: u32,
     pub random_get: u32,
+    pub path_open: u32,
+    pub fd_read: u32,
+    pub fd_close: u32,
+    pub fd_seek: u32,
+    pub fd_filestat_get: u32,
+    pub path_filestat_get: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -185,6 +193,9 @@ pub struct WasmEmitter {
     // Function table: func_idx → table_idx (for call_indirect / FnRef)
     pub func_table: Vec<u32>, // list of func_idx in table order
     pub func_to_table_idx: HashMap<u32, u32>, // func_idx → table index
+
+    // User-defined public functions to export (name list, populated during emit)
+    pub user_exports: Vec<String>,
 
     // Type info: record/variant name → field list (for field offset computation)
     pub record_fields: HashMap<String, Vec<(String, crate::types::Ty)>>,
@@ -271,6 +282,12 @@ impl WasmEmitter {
                 clock_time_get: 0,
                 proc_exit: 0,
                 random_get: 0,
+                path_open: 0,
+                fd_read: 0,
+                fd_close: 0,
+                fd_seek: 0,
+                fd_filestat_get: 0,
+                path_filestat_get: 0,
             },
             heap_ptr_global: 0,
             top_let_globals: HashMap::new(),
@@ -287,6 +304,7 @@ impl WasmEmitter {
             effect_fns: HashSet::new(),
             mutable_captures: HashSet::new(),
             eq_funcs: HashMap::new(),
+            user_exports: Vec::new(),
         }
     }
 
@@ -432,6 +450,73 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         type_idx: random_get_type_idx,
     });
 
+    // Import path_open
+    let path_open_type_idx = emitter.register_type(
+        vec![
+            ValType::I32, ValType::I32, ValType::I32, ValType::I32,
+            ValType::I32, ValType::I64, ValType::I64, ValType::I32,
+            ValType::I32,
+        ],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "path_open".to_string(),
+        type_idx: path_open_type_idx,
+    });
+
+    // Import fd_read
+    let fd_read_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_read".to_string(),
+        type_idx: fd_read_type_idx,
+    });
+
+    // Import fd_close
+    let fd_close_type_idx = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_close".to_string(),
+        type_idx: fd_close_type_idx,
+    });
+
+    // Import fd_seek
+    let fd_seek_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I64, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_seek".to_string(),
+        type_idx: fd_seek_type_idx,
+    });
+
+    // Import fd_filestat_get
+    let fd_filestat_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_filestat_get".to_string(),
+        type_idx: fd_filestat_get_type_idx,
+    });
+
+    // Import path_filestat_get
+    let path_filestat_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "path_filestat_get".to_string(),
+        type_idx: path_filestat_get_type_idx,
+    });
+
     // Register type declarations (record and variant field layouts)
     for td in &program.type_decls {
         match &td.kind {
@@ -543,7 +628,18 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }
     }
 
-    let init_globals_idx: Option<u32> = None; // globals are initialized inline
+    // Check if any top-level let needs dynamic initialization (non-constant values)
+    let needs_init = program.top_lets.iter().any(|tl| !matches!(&tl.value.kind,
+        crate::ir::IrExprKind::LitInt { .. } | crate::ir::IrExprKind::LitFloat { .. } |
+        crate::ir::IrExprKind::LitBool { .. } | crate::ir::IrExprKind::LitStr { .. }
+    ));
+    let init_globals_idx: Option<u32> = if needs_init {
+        let void_ty = emitter.register_type(vec![], vec![]);
+        let idx = emitter.register_func("__init_globals", void_ty);
+        Some(idx)
+    } else {
+        None
+    };
 
     // If no main but has tests, register a test runner as _start
     let test_runner_idx = if !has_main && !test_func_indices.is_empty() {
@@ -579,6 +675,11 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         user_idx += 1;
     }
 
+    // Init globals (dynamic top-level let initialization, must come before test runner)
+    if init_globals_idx.is_some() {
+        compile_init_globals(&mut emitter, program);
+    }
+
     // Test runner (if needed)
     if let Some(_runner_idx) = test_runner_idx {
         compile_test_runner(&mut emitter, &test_func_indices, init_globals_idx);
@@ -592,6 +693,15 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Phase 2.5: Dead Code Elimination
     let _dce_count = dce::eliminate_dead_code(&mut emitter);
+
+    // Collect public user functions for WASM export
+    for func in &program.functions {
+        if func.is_test { continue; }
+        if !matches!(func.visibility, crate::ir::IrVisibility::Public) { continue; }
+        if func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
+        if func.name.as_str() == "main" { continue; }
+        emitter.user_exports.push(func.name.to_string());
+    }
 
     // Phase 3: Assemble
     assemble(&emitter)
@@ -685,6 +795,16 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
     } else if let Some(&runner_idx) = emitter.func_map.get("__test_runner") {
         exports.export("_start", wasm_encoder::ExportKind::Func, runner_idx);
     }
+    // Export __alloc for FFI callers to allocate WASM linear memory
+    if let Some(&alloc_idx) = emitter.func_map.get("__alloc") {
+        exports.export("__alloc", wasm_encoder::ExportKind::Func, alloc_idx);
+    }
+    // Export public user functions (collected during emit)
+    for name in &emitter.user_exports {
+        if let Some(&idx) = emitter.func_map.get(name.as_str()) {
+            exports.export(name, wasm_encoder::ExportKind::Func, idx);
+        }
+    }
     module.section(&exports);
 
     // ── Element section (populate function table, must come before Code) ──
@@ -723,7 +843,7 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
 // ── Test runner ─────────────────────────────────────────────────
 
 /// Compile the __init_globals function.
-#[allow(dead_code)]
+#[allow(dead_code)] // Will be activated when top-let WASM codegen is wired up
 fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     let void_type = emitter.register_type(vec![], vec![]);
 
@@ -738,11 +858,15 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     for _ in 0..scratch_i64_cap { local_decls.push((1, ValType::I64)); }
     let scratch_f64_base = local_decls.len() as u32;
     for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); }
+    let scratch_v128_cap = 4usize;
+    let scratch_v128_base = local_decls.len() as u32;
+    for _ in 0..scratch_v128_cap { local_decls.push((1, ValType::V128)); }
 
     let wasm_func = Function::new(local_decls);
     let compiled_func = {
         let mut scratch_alloc = scratch::ScratchAllocator::new();
         scratch_alloc.set_bases_with_capacity(scratch_i32_base, scratch_i32_cap, scratch_i64_base, scratch_i64_cap, scratch_f64_base, scratch_f64_cap);
+        scratch_alloc.set_v128_base(scratch_v128_base);
         let mut compiler = FuncCompiler {
             emitter: &mut *emitter,
             func: wasm_func,

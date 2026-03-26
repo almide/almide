@@ -1,0 +1,33 @@
+
+// type_alias_test — type alias declarations
+type Score = Int
+
+type Label = String
+
+test "type alias for Int" {
+  let s: Score = 100;
+  assert_eq(s, 100)
+}
+
+test "type alias arithmetic" {
+  let a: Score = 80;
+  let b: Score = 20;
+  assert_eq(a + b, 100)
+}
+
+test "type alias for String" {
+  let name: Label = "hello";
+  assert_eq(name, "hello")
+}
+
+test "type alias string UFCS" {
+  let name: Label = "Alice";
+  assert_eq(name.len(), 5)
+}
+
+test "type alias in comparison" {
+  let a: Score = 50;
+  let b: Score = 75;
+  assert_eq(a < b, true)
+}
+

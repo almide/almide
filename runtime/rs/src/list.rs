@@ -204,3 +204,9 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone>(xs: &Vec<A>, f: impl Fn(A)
     });
     !failed.load(std::sync::atomic::Ordering::Relaxed)
 }
+
+// ── Mutable operations ──
+
+pub fn almide_rt_list_push<A>(xs: &mut Vec<A>, x: A) { xs.push(x); }
+pub fn almide_rt_list_pop<A>(xs: &mut Vec<A>) -> Option<A> { xs.pop() }
+pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }

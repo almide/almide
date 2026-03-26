@@ -1,3 +1,0 @@
-model: haiku
-passed: 0
-total: 1

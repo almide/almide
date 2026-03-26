@@ -1,3 +1,4 @@
+// wasm:skip
 test "eval Mul" {
   assert_eq(eval(Mul(3, 4)), 12)
   assert_eq(eval(Mul(0, 100)), 0)

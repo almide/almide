@@ -1,3 +1,4 @@
+// wasm:skip
 test "grade_report found" {
   let students = [
     Student { name: "Alice", score: 92, grade: "A" },

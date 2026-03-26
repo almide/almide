@@ -115,58 +115,37 @@ pub fn monomorphize(program: &mut IrProgram) {
     // types (e.g., `let x = mono_fn(...)` where x.ty was set before mono).
     propagate_concrete_types(program);
 
+    // Post-mono guard: ALL TypeVars (including generic params) should be resolved
+    verify_no_typevars_post_mono(program);
 }
 
-#[allow(dead_code)]
-fn audit_remaining_typevars(program: &IrProgram) {
+/// After monomorphization, no TypeVars of any kind should remain in the IR.
+/// Generic type params (A, B, T) should have been substituted by monomorphization.
+/// Inference vars (?0, ?1) should have been resolved by the type checker.
+fn verify_no_typevars_post_mono(program: &crate::ir::IrProgram) {
+    use crate::types::Ty;
+    fn has_any_typevar(ty: &Ty) -> bool {
+        match ty {
+            Ty::TypeVar(_) => true,
+            Ty::Applied(_, args) => args.iter().any(has_any_typevar),
+            Ty::Tuple(elems) => elems.iter().any(has_any_typevar),
+            Ty::Fn { params, ret } => params.iter().any(has_any_typevar) || has_any_typevar(ret),
+            Ty::Named(_, args) => args.iter().any(has_any_typevar),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_any_typevar(t)),
+            _ => false,
+        }
+    }
+    let mut count = 0;
     for func in &program.functions {
-        audit_expr(&func.body, &func.name, &program.var_table);
+        if has_any_typevar(&func.ret_ty) { count += 1; }
+        for p in &func.params { if has_any_typevar(&p.ty) { count += 1; } }
     }
-}
-
-#[allow(dead_code)]
-fn audit_expr(expr: &IrExpr, fn_name: &str, vt: &VarTable) {
-    // Recurse
-    match &expr.kind {
-        IrExprKind::BinOp { left, right, .. } => { audit_expr(left, fn_name, vt); audit_expr(right, fn_name, vt); }
-        IrExprKind::UnOp { operand, .. } => audit_expr(operand, fn_name, vt),
-        IrExprKind::If { cond, then, else_ } => { audit_expr(cond, fn_name, vt); audit_expr(then, fn_name, vt); audit_expr(else_, fn_name, vt); }
-        IrExprKind::Match { subject, arms } => {
-            audit_expr(subject, fn_name, vt);
-            for arm in arms { audit_expr(&arm.body, fn_name, vt); }
-        }
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { audit_stmt(s, fn_name, vt); }
-            if let Some(e) = expr { audit_expr(e, fn_name, vt); }
-        }
-        IrExprKind::Call { target, args, .. } => {
-            match target { CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => audit_expr(object, fn_name, vt), _ => {} }
-            for a in args { audit_expr(a, fn_name, vt); }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => { audit_expr(iterable, fn_name, vt); for s in body { audit_stmt(s, fn_name, vt); } }
-        IrExprKind::While { cond, body } => { audit_expr(cond, fn_name, vt); for s in body { audit_stmt(s, fn_name, vt); } }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => { for e in elements { audit_expr(e, fn_name, vt); } }
-        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => { for (_, e) in fields { audit_expr(e, fn_name, vt); } }
-        IrExprKind::Lambda { body, .. } => audit_expr(body, fn_name, vt),
-        IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
-        | IrExprKind::Try { expr: e } | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } => audit_expr(e, fn_name, vt),
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } | IrExprKind::IndexAccess { object, .. } => audit_expr(object, fn_name, vt),
-        IrExprKind::StringInterp { parts } => { for p in parts { if let IrStringPart::Expr { expr: e } = p { audit_expr(e, fn_name, vt); } } }
-        _ => {}
+    for i in 0..program.var_table.len() {
+        let info = program.var_table.get(crate::ir::VarId(i as u32));
+        if has_any_typevar(&info.ty) { count += 1; }
     }
-}
-
-#[allow(dead_code)]
-fn audit_stmt(stmt: &IrStmt, fn_name: &str, vt: &VarTable) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } => {
-            audit_expr(value, fn_name, vt);
-        }
-        IrStmtKind::BindDestructure { value, .. } | IrStmtKind::Assign { value, .. } => audit_expr(value, fn_name, vt),
-        IrStmtKind::IndexAssign { index, value, .. } => { audit_expr(index, fn_name, vt); audit_expr(value, fn_name, vt); }
-        IrStmtKind::Expr { expr } => audit_expr(expr, fn_name, vt),
-        IrStmtKind::Guard { cond, else_ } => { audit_expr(cond, fn_name, vt); audit_expr(else_, fn_name, vt); }
-        _ => {}
+    if count > 0 {
+        eprintln!("[ICE] {} TypeVar(s) remain after monomorphization. Generic params should be fully substituted.", count);
     }
 }
 

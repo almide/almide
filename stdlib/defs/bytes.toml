@@ -1,0 +1,87 @@
+[len]
+description = "Return the number of bytes."
+example = 'bytes.len(b) // => 3'
+params = [{ name = "b", type = "Bytes" }]
+return = "Int"
+rust = "almide_rt_bytes_len(&{b})"
+ts = "__almd_bytes.len({b})"
+
+[get]
+description = "Get a byte value (0-255) at an index."
+example = 'bytes.get(b, 0) // => some(72)'
+params = [{ name = "b", type = "Bytes" }, { name = "i", type = "Int" }]
+return = "Option[Int]"
+rust = "almide_rt_bytes_get(&{b}, {i})"
+ts = "__almd_bytes.get({b}, {i})"
+
+[get_or]
+description = "Get a byte value at an index, or a default if out of bounds."
+example = 'bytes.get_or(b, 0, 0) // => 72'
+params = [{ name = "b", type = "Bytes" }, { name = "i", type = "Int" }, { name = "default", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_get_or(&{b}, {i}, {default})"
+ts = "__almd_bytes.get_or({b}, {i}, {default})"
+
+[set]
+description = "Set a byte value at an index (mutates in place for var bindings)."
+example = 'bytes.set(b, 0, 255)'
+params = [{ name = "b", type = "Bytes" }, { name = "i", type = "Int" }, { name = "val", type = "Int" }]
+return = "Bytes"
+rust = "almide_rt_bytes_set({b}, {i}, {val})"
+ts = "__almd_bytes.set({b}, {i}, {val})"
+
+[slice]
+description = "Extract a sub-range of bytes [start, end)."
+example = 'bytes.slice(b, 1, 3)'
+params = [{ name = "b", type = "Bytes" }, { name = "start", type = "Int" }, { name = "end", type = "Int" }]
+return = "Bytes"
+rust = "almide_rt_bytes_slice(&{b}, {start}, {end})"
+ts = "__almd_bytes.slice({b}, {start}, {end})"
+
+[from_list]
+description = "Create Bytes from a list of integers (each masked to 0-255)."
+example = 'bytes.from_list([72, 105]) // => <bytes>'
+params = [{ name = "xs", type = "List[Int]" }]
+return = "Bytes"
+rust = "almide_rt_bytes_from_list(&{xs})"
+ts = "__almd_bytes.from_list({xs})"
+
+[to_list]
+description = "Convert Bytes to a list of integers (0-255)."
+example = 'bytes.to_list(b) // => [72, 105]'
+params = [{ name = "b", type = "Bytes" }]
+return = "List[Int]"
+rust = "almide_rt_bytes_to_list(&{b})"
+ts = "__almd_bytes.to_list({b})"
+
+[is_empty]
+description = "Check if byte buffer is empty."
+example = 'bytes.is_empty?([]) // => true'
+params = [{ name = "b", type = "Bytes" }]
+return = "Bool"
+rust = "almide_rt_bytes_is_empty(&{b})"
+ts = "__almd_bytes.is_empty({b})"
+
+[concat]
+description = "Concatenate two byte buffers."
+example = 'bytes.concat(a, b)'
+params = [{ name = "a", type = "Bytes" }, { name = "b", type = "Bytes" }]
+return = "Bytes"
+rust = "almide_rt_bytes_concat(&{a}, &{b})"
+ts = "__almd_bytes.concat({a}, {b})"
+
+[repeat]
+description = "Repeat a byte buffer n times."
+example = 'bytes.repeat(b, 3)'
+params = [{ name = "b", type = "Bytes" }, { name = "n", type = "Int" }]
+return = "Bytes"
+rust = "almide_rt_bytes_repeat(&{b}, {n})"
+ts = "__almd_bytes.repeat({b}, {n})"
+
+[new]
+description = "Create a zero-filled byte buffer of given length."
+example = 'bytes.new(1024) // => <1024 zero bytes>'
+params = [{ name = "len", type = "Int" }]
+return = "Bytes"
+rust = "almide_rt_bytes_new({len})"
+ts = "__almd_bytes.new_bytes({len})"

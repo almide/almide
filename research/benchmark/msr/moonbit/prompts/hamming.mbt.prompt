@@ -1,0 +1,14 @@
+fn distance(a : String, b : String) -> Result[Int, String] {
+  abort("todo")
+}
+
+test "empty strands" { assert_eq!(distance("", ""), Ok(0)) }
+test "single letter identical" { assert_eq!(distance("A", "A"), Ok(0)) }
+test "single letter different" { assert_eq!(distance("G", "T"), Ok(1)) }
+test "long identical" { assert_eq!(distance("GGACTGAAATCTG", "GGACTGAAATCTG"), Ok(0)) }
+test "long different" { assert_eq!(distance("GGACGGATTCTG", "AGGACGGATTCT"), Ok(9)) }
+test "different lengths" { assert_eq!(distance("AATG", "AAA"), Err("strands must be of equal length")) }
+test "first strand longer" { assert_eq!(distance("AATG", "AAA"), Err("strands must be of equal length")) }
+test "short mutation" { assert_eq!(distance("GAGCCTACTAACGGGAT", "CATCGTAATGACGGCCT"), Ok(7)) }
+test "all different" { assert_eq!(distance("GATACA", "GCATAA"), Ok(4)) }
+test "no difference" { assert_eq!(distance("GAT", "GAT"), Ok(0)) }

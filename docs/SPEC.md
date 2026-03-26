@@ -100,16 +100,16 @@ Block comments nest: `/* outer /* inner */ still outer */` is valid.
 ```
 module  import  type    trait   impl    for     in      fn
 let     var     if      then    else    match   ok      err
-some    none    try     do      todo    unsafe  true    false
+some    none    todo    unsafe  true    false
 not     and     or      strict  pub     effect  deriving test
-async   await   guard   break   continue while  local   mod
-newtype fan
+guard   break   continue while  local   mod
+fan
 ```
 
 ### 1.6 Operators and Delimiters
 
 ```
-Operators:   +  -  *  **  /  %  ^  ==  !=  <  <=  >  >=  |>  ..  ..=
+Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  ..  ..=
 Unary:       -  not
 Logical:     and  or
 Assignment:  =
@@ -117,9 +117,8 @@ Arrows:      ->  =>
 Delimiters:  (  )  {  }  [  ]  ,  .  :  ;  |  _  @  ...
 ```
 
-- `^` is XOR (integer)
+- `^` is exponentiation (right-associative). `**` is accepted as an alias
 - `+` is overloaded: addition for numbers, concatenation for strings and lists
-- `**` is exponentiation (right-associative)
 - `..` is exclusive range, `..=` is inclusive range
 - `...` is spread (in records)
 - `_` is wildcard (in match patterns) or placeholder (in pipe arguments)
@@ -147,7 +146,7 @@ A newline is ignored and the statement continues when:
 - Opening brackets: `(`, `{`, `[`
 - Arrows: `->`, `=>`
 - Assignment: `=`
-- Keywords: `if`, `then`, `else`, `match`, `try`, `do`, `not`, `|`
+- Keywords: `if`, `then`, `else`, `match`, `not`, `|`
 
 **The next line starts with:**
 - `.` (method chaining)
@@ -180,9 +179,9 @@ Expr      ::= Literal | Name | InterpolatedStr
             | CallExpr | MemberExpr | IndexExpr
             | PipeExpr | BinaryExpr | UnaryExpr
             | IfExpr | MatchExpr
-            | ForInExpr | WhileExpr | DoExpr | FanExpr
+            | ForInExpr | WhileExpr | FanExpr
             | BlockExpr | LambdaExpr
-            | HoleExpr | TodoExpr | TryExpr | AwaitExpr
+            | HoleExpr | TodoExpr
             | RangeExpr | TupleExpr | UnsafeExpr
             | "(" Expr ")"
 ```
@@ -362,16 +361,15 @@ fn show[T: Serializable](item: T) -> String = item.serialize()
 
 No dynamic dispatch — all protocol-bounded generics are monomorphized at compile time.
 
-### 5.6 newtype
+### 5.6 Type Alias
 
 ```
-type UserId = newtype Int
-type Email = newtype String
+type Score = Int
+type Handler = (String) -> String
 ```
 
-- `UserId` and `Int` are not implicitly convertible
-- Wrap: `UserId(42)` / Unwrap: `id.value`
-- Zero runtime cost
+- Transparent alias — `Score` and `Int` are interchangeable
+- Function type aliases use `(Params) -> Return` syntax
 
 ### 5.7 Type Application
 
@@ -405,7 +403,7 @@ Fn(Int, Int) -> Bool
 
 ```
 TraitDecl ::= "trait" TypeName GenericParams? "{" TraitMethod* "}"
-TraitMethod ::= "async"? "effect"? "fn" Name "(" ParamList ")" "->" TypeExpr
+TraitMethod ::= "effect"? "fn" Name "(" ParamList ")" "->" TypeExpr
 ```
 
 ```
@@ -477,7 +475,7 @@ Used as receivers for external input. Requires explicit conversion before use in
 ## 8. Function Declarations
 
 ```
-FnDecl ::= Visibility? "async"? "effect"? "fn" Name GenericParams?
+FnDecl ::= Visibility? "effect"? "fn" Name GenericParams?
             "(" ParamList? ")" "->" TypeExpr "=" Expr
 
 Visibility ::= "local" | "mod"        // default is public
@@ -485,7 +483,7 @@ ParamList  ::= Param ( "," Param )*
 Param      ::= Identifier ":" TypeExpr ( "=" Expr )?   // default value optional
 ```
 
-Modifier order: `[local|mod]? async? effect? fn`
+Modifier order: `[local|mod]? effect? fn`
 
 ### 8.1 Principles
 
@@ -600,16 +598,6 @@ effect fn validate(x: Int) -> Result[Int, String] = {
   guard x > 0 else err("must be positive")
   guard x < 1000 else err("too large")
   ok(x * 2)
-}
-```
-
-In `do` loops, `guard cond else ok(())` acts as a break condition:
-
-```
-do {
-  guard current != "NONE" else ok(())
-  let data = fs.read_text(current)
-  current = next
 }
 ```
 
@@ -734,36 +722,7 @@ while i < 10 {
 
 Loops while the condition is true. The loop body is `Unit`-typed.
 
-### 10.8 do Block
-
-Two roles: error propagation block and loop with structured break.
-
-**Error propagation:**
-
-```
-effect fn load(path: String) -> Result[Config, AppError] =
-  do {
-    let text = fs.read_text(path)     // auto try: Result unwrapped
-    let raw = json.parse(text)        // auto try: Result unwrapped
-    decode[Config](raw)
-  }
-```
-
-Inside a `do` block, expressions returning `Result[T, E]` are automatically unwrapped. If error types differ, conversion via `From` is attempted.
-
-**Loop with guard:**
-
-```
-do {
-  guard current != "NONE" else ok(())   // break condition
-  let data = fs.read_text(path)
-  current = next
-}
-```
-
-When a `do` block contains `guard`, it becomes a loop. `guard cond else expr` is the only way to exit.
-
-### 10.9 fan (Structured Concurrency)
+### 10.8 fan (Structured Concurrency)
 
 ```
 fan { expr1; expr2; expr3 }
@@ -873,13 +832,11 @@ let msg = "hello ${name}, 1+1=${1 + 1}"
 
 Works in double-quote strings, single-quote strings, and heredocs (but not raw strings).
 
-### 10.18 Hole / Todo / Try / Await
+### 10.18 Hole / Todo
 
 ```
 fn parse(text: String) -> Ast = _                     // hole (type-checked stub)
 fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
-let text = try fs.read_text(path)                      // unwrap Result, propagate error
-let (a, b) = fan { task_a(); task_b() }               // concurrent execution
 ```
 
 `_` (hole) and `todo(msg)` accept any expected type. The compiler reports the expected type, available variables, and suggestions.
@@ -946,23 +903,9 @@ In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equal
 
 Exceptions **do not exist**. There is no `throw`/`catch`.
 
-### 12.2 try
+### 12.2 Auto Error Propagation
 
-`try` unwraps a `Result[T, E]` or `Option[T]`, propagating the error to the enclosing function:
-
-```
-// In a function returning Result[R, E]:
-let value = try some_result    // unwraps T, propagates E
-
-// In a function returning Option[R]:
-let value = try some_option    // unwraps T, propagates none
-```
-
-No automatic conversion between `Result` and `Option`. Use explicit conversion:
-
-```
-let value = try opt.ok_or("missing")
-```
+Inside `effect fn`, expressions returning `Result[T, E]` are automatically unwrapped. If the expression returns an error, it propagates to the enclosing function immediately.
 
 ### 12.3 Error Conversion with deriving From
 
@@ -972,12 +915,11 @@ type AppError =
   | Parse(ParseError)
   deriving From
 
-effect fn load(path: String) -> Result[Config, AppError] =
-  do {
-    let text = fs.read_text(path)    // IoError -> AppError via From
-    let raw = json.parse(text)       // ParseError -> AppError via From
-    decode[Config](raw)
-  }
+effect fn load(path: String) -> Result[Config, AppError] = {
+  let text = fs.read_text(path)    // IoError -> AppError via From (auto-propagated)
+  let raw = json.parse(text)       // ParseError -> AppError via From (auto-propagated)
+  decode[Config](raw)
+}
 ```
 
 ---
@@ -1032,7 +974,7 @@ let first = fan.race([task_a, task_b])              // first to complete wins
 - `fan { }` only inside `effect fn` — pure functions cannot fork
 - No `var` capture — only `let` bindings from outer scope (prevents data races)
 - No unstructured `spawn` — all concurrency is scoped
-- Same fail-fast semantics as `do` — first error cancels all siblings
+- Fail-fast semantics — first error cancels all siblings
 
 ---
 
@@ -1316,7 +1258,7 @@ Cascading derived errors are suppressed. A single root cause is presented.
   "location": { "file": "app.almd", "line": 12, "col": 5 },
   "expected": "Result[Config, IoError]",
   "actual": "String",
-  "suggestions": ["ok(text)", "try parse_config(text)"]
+  "suggestions": ["ok(text)", "parse_config(text)"]
 }
 ```
 
@@ -1344,7 +1286,7 @@ The compiler recognizes common syntax from other languages and provides actionab
 - Type conversion candidates
 - Missing match arms
 - Missing `effect` modifier
-- Suggest `do` blocks when multiple `try` expressions appear
+- Suggest `effect fn` when pure function calls effectful code
 
 ### 22.5 Official Formatter
 
@@ -1413,24 +1355,6 @@ G,p1 |- e1 : R  ...  G,pn |- en : R
 exhaustive(p1...pn, T)
 ---------------------------------------
 G |- match e { p1=>e1, ..., pn=>en } : R
-```
-
-### try
-
-```
-G |- e : Result[T, E]         G |- e : Option[T]
-return_type = Result[R, E]    return_type = Option[R]
-----------------------------   ----------------------------
-G |- try e : T                 G |- try e : T
-```
-
-### do Block
-
-```
-return_type = Result[R, E]
-G |- block : R   (with implicit try on Result[_, E] expressions)
-----------------------------
-G |- do { block } : Result[R, E]
 ```
 
 ### pipe
@@ -1503,14 +1427,13 @@ fn with_description(config: Config, desc: String) -> Config =
 fn summary(config: Config) -> String =
   "root=${config.root}, bare=${config.bare}"
 
-effect fn load(path: String) -> Result[Config, ConfigError] =
-  do {
-    let text = fs.read_text(path)
-    let raw = json.parse(text)
-    json.get_string(raw, "root")
-      |> option.ok_or("missing root")
-      |> result.map((r) => { root: r, bare: false, description: "" })
-  }
+effect fn load(path: String) -> Result[Config, ConfigError] = {
+  let text = fs.read_text(path)
+  let raw = json.parse(text)
+  json.get_string(raw, "root")
+    |> option.ok_or("missing root")
+    |> result.map((r) => { root: r, bare: false, description: "" })
+}
 
 effect fn main(args: List[String]) -> Result[Unit, ConfigError] = {
   let path = match list.get(args, 1) {

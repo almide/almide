@@ -33,6 +33,49 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     );
     emitter.rt.random_get = emitter.register_import(random_get_ty);
 
+    // path_open(fd, dirflags, path, path_len, oflags, fs_rights_base, fs_rights_inheriting, fdflags, fd_out) -> errno
+    let path_open_ty = emitter.register_type(
+        vec![
+            ValType::I32, ValType::I32, ValType::I32, ValType::I32,
+            ValType::I32, ValType::I64, ValType::I64, ValType::I32,
+            ValType::I32,
+        ],
+        vec![ValType::I32],
+    );
+    emitter.rt.path_open = emitter.register_import(path_open_ty);
+
+    // fd_read(fd, iovs, iovs_len, nread) -> errno
+    let fd_read_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.fd_read = emitter.register_import(fd_read_ty);
+
+    // fd_close(fd) -> errno
+    let fd_close_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.rt.fd_close = emitter.register_import(fd_close_ty);
+
+    // fd_seek(fd, offset_i64, whence, new_offset_ptr) -> errno
+    let fd_seek_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I64, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.fd_seek = emitter.register_import(fd_seek_ty);
+
+    // fd_filestat_get(fd, buf) -> errno
+    let fd_filestat_get_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.fd_filestat_get = emitter.register_import(fd_filestat_get_ty);
+
+    // path_filestat_get(fd, flags, path, path_len, buf) -> errno
+    let path_filestat_get_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.path_filestat_get = emitter.register_import(path_filestat_get_ty);
+
     // __alloc(size: i32) -> i32
     let alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.alloc = emitter.register_func("__alloc", alloc_ty);
@@ -167,18 +210,38 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
 }
 
 /// __alloc(size: i32) -> i32
-/// Bump allocator: returns current heap_ptr, then advances it by size.
+/// Bump allocator: returns current heap_ptr (8-byte aligned), then advances by size.
+/// All returned pointers are guaranteed to be 8-byte aligned, matching wasi-libc
+/// and Emscripten conventions. This ensures i64 loads/stores never trap on alignment.
 fn compile_alloc(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.alloc];
     let mut f = Function::new([(1, ValType::I32)]); // local 1: $ptr
 
     wasm!(f, {
+        // Align heap_ptr up to 8-byte boundary: ptr = (heap_ptr + 7) & ~7
         global_get(emitter.heap_ptr_global);
+        i32_const(7); i32_add; i32_const(-8); i32_and;
         local_set(1);
-        global_get(emitter.heap_ptr_global);
+        // Advance heap_ptr past the allocation: heap_ptr = ptr + size
+        local_get(1);
         local_get(0);
         i32_add;
         global_set(emitter.heap_ptr_global);
+        // Grow memory if needed: while heap_ptr > memory.size * 64KB
+        block_empty; loop_empty;
+          global_get(emitter.heap_ptr_global);
+          memory_size(0);
+          i32_const(65536); i32_mul;
+          i32_le_u;
+          br_if(1);
+          // Grow by 16 pages (1MB)
+          i32_const(16);
+          memory_grow(0);
+          // If grow failed (-1), trap
+          i32_const(-1); i32_eq;
+          if_empty; unreachable; end;
+          br(0);
+        end; end;
         local_get(1);
         end;
     });

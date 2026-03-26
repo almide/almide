@@ -129,7 +129,7 @@ fn transform_children(
         IrExprKind::Await { expr: e } => IrExprKind::Await { expr: Box::new(rec!(*e)) },
         IrExprKind::Clone { expr: e } => IrExprKind::Clone { expr: Box::new(rec!(*e)) },
         IrExprKind::Deref { expr: e } => IrExprKind::Deref { expr: Box::new(rec!(*e)) },
-        IrExprKind::Borrow { expr: e, as_str } => IrExprKind::Borrow { expr: Box::new(rec!(*e)), as_str },
+        IrExprKind::Borrow { expr: e, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(rec!(*e)), as_str, mutable },
         IrExprKind::BoxNew { expr: e } => IrExprKind::BoxNew { expr: Box::new(rec!(*e)) },
         IrExprKind::ToVec { expr: e } => IrExprKind::ToVec { expr: Box::new(rec!(*e)) },
         // Leaf nodes — pass through

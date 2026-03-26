@@ -29,6 +29,7 @@ function __div(a: any, b: any): any {
 }
 function println(s: string): void { console.log(s); }
 function eprintln(s: string): void { console.error(s); }
+function panic(s: string): never { console.error("PANIC: " + s); process.exit(1); }
 class __Err { constructor(public message: string, public value?: any) {} }
 function __deep_eq(a: any, b: any): boolean {
   if (a === b) return true;

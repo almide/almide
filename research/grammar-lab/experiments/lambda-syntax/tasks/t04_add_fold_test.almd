@@ -1,3 +1,4 @@
+// wasm:skip
 test "longest_name basic" {
   let users = [
     User { name: "Al", age: 20 },

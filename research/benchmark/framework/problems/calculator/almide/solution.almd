@@ -1,0 +1,26 @@
+type Op = | Add | Sub | Mul | Div
+
+type Expr =
+  | Lit(Float)
+  | BinOp { op: Op, left: Expr, right: Expr }
+  | Neg(Expr)
+
+effect fn eval(e: Expr) -> Result[Float, String] = {
+  match e {
+    Lit(n) => ok(n)
+    Neg(inner) => {
+      let v = eval(inner)
+      ok(0.0 - v)
+    }
+    BinOp { op, left, right } => {
+      let l = eval(left)
+      let r = eval(right)
+      match op {
+        Add => ok(l + r)
+        Sub => ok(l - r)
+        Mul => ok(l * r)
+        Div => if r == 0.0 then err("division by zero") else ok(l / r)
+      }
+    }
+  }
+}

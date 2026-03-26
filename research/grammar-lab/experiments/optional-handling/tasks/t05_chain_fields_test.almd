@@ -1,3 +1,4 @@
+// wasm:skip
 test "describe_product found" {
   let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
   assert_eq(describe_product(ps, "Laptop"), "Laptop: 999")

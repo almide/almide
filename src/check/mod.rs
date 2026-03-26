@@ -462,7 +462,7 @@ impl Checker {
         match te {
             ast::TypeExpr::Simple { name } => match name.as_str() {
                 "Int" => Ty::Int, "Float" => Ty::Float, "String" => Ty::String,
-                "Bool" => Ty::Bool, "Unit" => Ty::Unit, "Path" => Ty::String,
+                "Bool" => Ty::Bool, "Unit" => Ty::Unit, "Bytes" => Ty::Bytes, "Matrix" => Ty::Matrix, "Path" => Ty::String,
                 other => self.env.types.get(&sym(other)).cloned().unwrap_or(Ty::Named(other.into(), vec![])),
             },
             ast::TypeExpr::Generic { name, args } => {
@@ -472,6 +472,7 @@ impl Checker {
                     "Option" => Ty::option(ra.first().cloned().unwrap_or(Ty::Unknown)),
                     "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
                     "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
+                    "Set" => Ty::set_of(ra.first().cloned().unwrap_or(Ty::Unknown)),
                     _ => Ty::Named(sym(name), ra),
                 }
             },
@@ -479,7 +480,6 @@ impl Checker {
             ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord { fields: fields.iter().map(|f| (sym(&f.name), self.resolve_type_expr(&f.ty))).collect() },
             ast::TypeExpr::Fn { params, ret } => Ty::Fn { params: params.iter().map(|p| self.resolve_type_expr(p)).collect(), ret: Box::new(self.resolve_type_expr(ret)) },
             ast::TypeExpr::Tuple { elements } => Ty::Tuple(elements.iter().map(|e| self.resolve_type_expr(e)).collect()),
-            ast::TypeExpr::Newtype { inner } => self.resolve_type_expr(inner),
             ast::TypeExpr::Union { members } => Ty::union(members.iter().map(|m| self.resolve_type_expr(m)).collect()),
             ast::TypeExpr::Variant { cases } => {
                 let cs = cases.iter().map(|c| match c {
@@ -492,11 +492,41 @@ impl Checker {
         }
     }
 
-    pub(crate) fn resolve_field_type(&self, ty: &Ty, field: &str) -> Ty {
+    pub(crate) fn resolve_field_type(&mut self, ty: &Ty, field: &str) -> Ty {
         let resolved = self.env.resolve_named(ty);
         match &resolved {
             Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().find(|(n, _)| n == field).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown),
-            Ty::TypeVar(tv) => self.env.structural_bounds.get(tv).map(|b| self.resolve_field_type(b, field)).unwrap_or(Ty::Unknown),
+            Ty::TypeVar(tv) => {
+                // First check existing structural bounds
+                if let Some(bound) = self.env.structural_bounds.get(tv).cloned() {
+                    let result = self.resolve_field_type(&bound, field);
+                    if !matches!(result, Ty::Unknown) {
+                        return result;
+                    }
+                }
+                // Search env.types for record types with this field.
+                // Only unify if exactly one candidate exists (unambiguous).
+                let field_sym = crate::intern::sym(field);
+                let mut candidates: Vec<(crate::intern::Sym, Ty)> = Vec::new();
+                for (_name, reg_ty) in &self.env.types {
+                    match reg_ty {
+                        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                            if let Some((_, fty)) = fields.iter().find(|(n, _)| *n == field_sym) {
+                                candidates.push((*_name, fty.clone()));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if candidates.len() == 1 {
+                    let (type_name, field_ty) = candidates.pop().unwrap();
+                    let named = Ty::Named(type_name, vec![]);
+                    self.unify_infer(ty, &named);
+                    field_ty
+                } else {
+                    Ty::Unknown
+                }
+            }
             _ => Ty::Unknown,
         }
     }

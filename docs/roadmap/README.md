@@ -9,6 +9,7 @@
 | [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
 | [HTTPS Native](active/https-native.md) | rustls統合済、almide build動作確認済。WASM残 | Phase 1 |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 105/110. 残: テスト 9→10、Codegen統合 9→10 | Architecture |
+| [Stdlib in Almide](active/stdlib-in-almide.md) | stdlib を Almide で書き直し、3 層構造（プリミティブ / Almide 実装 / @native 最適化）に統一。userlib と同じ仕組み | Architecture |
 | [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Rust/TS/WASM 3ターゲットの挙動差異を体系検証 | Phase 2 |
 | [Emit Readability](active/emit-readability.md) | 生成コードの可読性向上 (空行・コメント保持) | Phase 1 |
 
@@ -48,6 +49,7 @@
 | [Effect Type Integration](on-hold/effect-type-integration.md) | FnType に EffectSet を持たせる (構文変更なし) | Phase 3 |
 | ~~Trait System~~ | → Protocol System (done) に統合 | — |
 | [Secure by Design](on-hold/secure-by-design.md) | | Phase 3 |
+| [Compile-Time Contracts](on-hold/compile-time-contracts.md) | `where` 句で事前条件・型不変条件。SMT不要、静的検証+動的降格 | Phase 3 |
 | [Async Backend](on-hold/async-backend.md) | tokio opt-in runtime | Phase 3 |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | | Phase 3 |
 | [Rainbow Bridge](on-hold/rainbow-bridge.md) | 外部コード → Almide | Phase 3 |

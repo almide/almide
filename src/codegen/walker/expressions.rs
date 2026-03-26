@@ -445,8 +445,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             ctx.templates.render_with("deref_var", None, &[], &[("name", name_s.as_str())])
                 .unwrap_or_else(|| format!("(*{})", name_s))
         }
-        IrExprKind::Borrow { expr: inner, as_str } => {
-            if *as_str {
+        IrExprKind::Borrow { expr: inner, as_str, mutable } => {
+            if *mutable {
+                format!("&mut {}", render_expr(ctx, inner))
+            } else if *as_str {
                 format!("&*{}", render_expr(ctx, inner))
             } else {
                 format!("&{}", render_expr(ctx, inner))
@@ -534,6 +536,28 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("concat_expr", Some(ty_tag), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("concat(_, _)"))
         }
+        BinOp::MulMatrix => {
+            ctx.templates.render_with("matrix_mul", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("almide_rt_matrix_mul(&{}, &{})", l, r))
+        }
+        BinOp::AddMatrix => {
+            ctx.templates.render_with("matrix_add", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("almide_rt_matrix_add(&{}, &{})", l, r))
+        }
+        BinOp::SubMatrix => {
+            ctx.templates.render_with("matrix_sub", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("almide_rt_matrix_sub(&{}, &{})", l, r))
+        }
+        BinOp::ScaleMatrix => {
+            // Ensure matrix is first arg, scalar is second
+            let (mat, scalar) = if matches!(&left.ty, Ty::Matrix) {
+                (l.as_str(), r.as_str())
+            } else {
+                (r.as_str(), l.as_str())
+            };
+            ctx.templates.render_with("matrix_scale", None, &[], &[("left", mat), ("right", scalar)])
+                .unwrap_or_else(|| format!("almide_rt_matrix_scale(&{}, {})", mat, scalar))
+        }
         BinOp::Eq => {
             ctx.templates.render_with("eq_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("_ == _"))
@@ -557,7 +581,6 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
                 BinOp::MulInt | BinOp::MulFloat => "*",
                 BinOp::DivInt | BinOp::DivFloat => "/",
                 BinOp::ModInt | BinOp::ModFloat => "%",
-                BinOp::XorInt => "^",
                 BinOp::Lt => "<",
                 BinOp::Gt => ">",
                 BinOp::Lte => "<=",
@@ -616,7 +639,7 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         | "as_str" | "get" | "keys" | "values" | "abs" | "powi"
         | "is_empty" | "contains_key" | "entry" | "or_insert"
         | "expect" | "ok" | "err" | "and_then" | "map_err"
-        | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref"
+        | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref" | "as_deref"
     );
     // User-defined UFCS: plain method name (no dots) → func(object, args)
     if !method.contains('.') && !is_rust_intrinsic {

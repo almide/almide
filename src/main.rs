@@ -80,7 +80,7 @@ enum Commands {
         /// Output test results as JSON (one per line)
         #[arg(long)]
         json: bool,
-        /// Target: wasm to run tests via direct WASM emit + wasmtime
+        /// Target: wasm (wasmtime), ts/typescript (deno/node)
         #[arg(long)]
         target: Option<String>,
     },
@@ -186,16 +186,18 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
     let (mut program, source_text, parse_errors) = parse_file(file);
     let has_parse_errors = !parse_errors.is_empty();
 
-    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project_fetch::fetch_all_deps(&proj)
-                .map_err(|e| { eprintln!("{}", e); e.to_string() })?
-                .into_iter()
-                .map(|fd| (fd.pkg_id, fd.source_dir))
-                .collect()
-        } else {
-            vec![]
-        }
+    let parsed_project = if std::path::Path::new("almide.toml").exists() {
+        project::parse_toml(std::path::Path::new("almide.toml")).ok()
+    } else {
+        None
+    };
+
+    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if let Some(ref proj) = parsed_project {
+        project_fetch::fetch_all_deps(proj)
+            .map_err(|e| { eprintln!("{}", e); e.to_string() })?
+            .into_iter()
+            .map(|fd| (fd.pkg_id, fd.source_dir))
+            .collect()
     } else {
         vec![]
     };
@@ -289,8 +291,7 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
         almide::ir::reclassify_top_lets(ir);
     }
 
-    // Verify IR integrity (debug builds only)
-    #[cfg(debug_assertions)]
+    // Verify IR integrity
     if let Some(ref ir) = ir_program {
         let verify_errors = almide::ir::verify_program(ir);
         if !verify_errors.is_empty() {
@@ -298,6 +299,15 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
                 eprintln!("internal compiler error: {}", e);
             }
             return Err(format!("{} IR verification error(s)", verify_errors.len()));
+        }
+    }
+
+    // Security Layer 2: check permissions if defined in almide.toml
+    if let Some(ref proj) = parsed_project {
+        if !proj.permissions.is_empty() {
+            if let Some(ref ir) = ir_program {
+                cli::check_permissions(ir, &proj.permissions)?;
+            }
         }
     }
 
@@ -401,6 +411,8 @@ fn dispatch(cli: Cli) {
             let file_str = file.as_deref().unwrap_or("");
             if target.as_deref() == Some("wasm") {
                 cli::cmd_test_wasm(file_str, run.as_deref());
+            } else if matches!(target.as_deref(), Some("ts" | "typescript")) {
+                cli::cmd_test_ts(file_str, run.as_deref());
             } else if json {
                 cli::cmd_test_json(file_str, run.as_deref());
             } else {

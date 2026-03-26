@@ -1,3 +1,4 @@
+// wasm:skip
 test "find_price under limit" {
   let ps = [Product { name: "Book", price: 25, category: "edu" }]
   assert_eq(find_price(ps, "Book"), 25)

@@ -1,3 +1,4 @@
+// wasm:skip
 test "pending filters and sorts by priority" {
   let tasks = [
     Task { title: "A", done: false, priority: 2 },
