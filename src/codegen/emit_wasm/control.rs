@@ -319,9 +319,25 @@ impl FuncCompiler<'_> {
         let is_last = idx + 1 >= arms.len();
 
         match &arm.pattern {
-            // Wildcard: always matches, emit body directly
+            // Wildcard: always matches, but may have a guard
             IrPattern::Wildcard => {
-                self.emit_expr(&arm.body);
+                if let Some(guard) = &arm.guard {
+                    self.emit_expr(guard);
+                    let bt = values::block_type(result_ty);
+                    self.func.instruction(&Instruction::If(bt));
+                    let _g = self.depth_push();
+                    self.emit_expr(&arm.body);
+                    wasm!(self.func, { else_; });
+                    if is_last {
+                        wasm!(self.func, { unreachable; });
+                    } else {
+                        self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                    }
+                    self.depth_pop(_g);
+                    wasm!(self.func, { end; });
+                } else {
+                    self.emit_expr(&arm.body);
+                }
             }
 
             // Bind: store subject in variable, then emit body
