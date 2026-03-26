@@ -71,7 +71,7 @@ IntLiteral       ::= [0-9]+ | "0x" [0-9a-fA-F]+     // decimal or hex
 FloatLiteral     ::= [0-9]+ "." [0-9]+ ([eE] [+-]? [0-9]+)?
 StringLiteral    ::= '"' (char | "\n" | "\t" | "\r" | "\\" | "\"" | "\$")* '"'
 InterpolatedStr  ::= '"' (char | "${" Expr "}")* '"'
-SingleQuoteStr   ::= "'" (char | "\'" | "\\")* "'"   // escapes, interpolation via ${expr}
+SingleQuoteStr   ::= "'" (char | "\'" | "\\" | "\n" | "\t" | "\r")* "'"   // escapes only, no interpolation
 HeredocStr       ::= '"""' ... '"""'                   // multiline, indent-stripped
 RawHeredocStr    ::= 'r"""' ... '"""'                  // no escapes, no interpolation
 RawStr           ::= 'r"' ... '"'                      // no escapes, no interpolation
@@ -80,7 +80,7 @@ BoolLiteral      ::= "true" | "false"
 
 There is **no** null literal. Absence is represented by `none` (a constructor of `Option[T]`).
 
-Double-quote strings support interpolation via `${expr}` and backslash escapes. Single-quote strings also support interpolation and the escape sequences `\'`, `\\`, `\n`, `\t`, `\r`. Raw strings and raw heredocs support neither interpolation nor escapes.
+Double-quote strings support interpolation via `${expr}` and backslash escapes. Single-quote strings support escape sequences (`\'`, `\\`, `\n`, `\t`, `\r`) but **no interpolation**. Raw strings and raw heredocs support neither interpolation nor escapes.
 
 Heredoc strings strip leading whitespace based on minimum indent of non-empty lines. The first line (if blank after `"""`) and the last line (if whitespace-only before `"""`) are dropped.
 
@@ -95,14 +95,14 @@ Numeric literals support `_` as a visual separator (e.g., `1_000_000`).
 
 Block comments nest: `/* outer /* inner */ still outer */` is valid.
 
-### 1.5 Keywords (42)
+### 1.5 Keywords (35)
 
 ```
-module  import  type    trait   impl    for     in      fn
-let     var     if      then    else    match   ok      err
-some    none    todo    unsafe  true    false
-not     and     or      strict  pub     effect  deriving test
-guard   break   continue while  local   mod
+module  import  type    protocol impl    for     in      fn
+let     var     if      then     else    match   ok      err
+some    none    todo    true     false
+not     and     or      strict   pub     effect  test
+guard   break   continue while   local   mod
 fan
 ```
 
@@ -310,25 +310,27 @@ Inline variant (without leading `|`):
 type Direction = North | South | East | West
 ```
 
-### 5.4 deriving
+### 5.4 Conventions (deriving)
 
 ```
-DerivingClause ::= "deriving" TypeName
+ConventionClause ::= ":" TypeName ("," TypeName)*
 ```
 
-Automatically derives `From` trait implementations for variant types:
+Convention names are specified after the type name with `:`, before `=`:
 
 ```
-type ConfigError =
+type ConfigError: From =
   | Io(IoError)
   | Parse(ParseError)
   | Decode(DecodeError)
-  deriving From
 
 // Equivalent to:
 // impl From[IoError] for ConfigError { fn from(e: IoError) -> ConfigError = Io(e) }
 // impl From[ParseError] for ConfigError { fn from(e: ParseError) -> ConfigError = Parse(e) }
 // impl From[DecodeError] for ConfigError { fn from(e: DecodeError) -> ConfigError = Decode(e) }
+
+type Color: Eq, Repr =
+  | Red | Green | Blue
 ```
 
 ### 5.5 Protocols
@@ -434,8 +436,8 @@ impl Iterable[T] for List[T] {
 
 ### 6.3 Built-in Protocols
 
-- **Eq** and **Hash** are compiler-derived automatically from type structure. No `deriving` needed.
-- `deriving From` is the only explicit deriving directive (for error type conversions).
+- **Eq** and **Hash** are compiler-derived automatically from type structure. No annotation needed.
+- Conventions are specified with `:` after the type name: `type Foo: From = ...`
 
 ---
 
@@ -907,13 +909,12 @@ Exceptions **do not exist**. There is no `throw`/`catch`.
 
 Inside `effect fn`, expressions returning `Result[T, E]` are automatically unwrapped. If the expression returns an error, it propagates to the enclosing function immediately.
 
-### 12.3 Error Conversion with deriving From
+### 12.3 Error Conversion with From
 
 ```
-type AppError =
+type AppError: From =
   | Io(IoError)
   | Parse(ParseError)
-  deriving From
 
 effect fn load(path: String) -> Result[Config, AppError] = {
   let text = fs.read_text(path)    // IoError -> AppError via From (auto-propagated)
@@ -1413,10 +1414,9 @@ type Config = {
   description: String,
 }
 
-type ConfigError =
+type ConfigError: From =
   | Io(IoError)
   | Parse(ParseError)
-  deriving From
 
 fn default_config(root: String) -> Config =
   { root: root, bare: false, description: "" }
