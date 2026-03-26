@@ -204,7 +204,7 @@ template = "()"
 template = "Vec<u8>"
 
 [type_matrix]
-template = "Vec<Vec<f64>>"
+template = "AlmideMatrix"
 
 [matrix_mul]
 template = "almide_rt_matrix_mul(&{left}, &{right})"

@@ -88,14 +88,50 @@ lto = true
 codegen-units = 1
 "#;
 
+const GENERATED_CARGO_TOML_ML: &str = r#"[package]
+name = "almide-out"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+webpki-roots = "0.26"
+burn = { version = "0.16", features = ["ndarray"] }
+ndarray = { version = "0.16", features = ["blas"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+blas-src = { version = "0.10", features = ["accelerate"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+blas-src = { version = "0.10", features = ["openblas"] }
+openblas-src = { version = "0.10", features = ["static"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+"#;
+
+const BURN_MATRIX_RUNTIME: &str = include_str!("../../runtime/rs/burn/matrix_burn.rs");
+
 /// Build generated Rust code using cargo.
 /// Returns the path to the built binary on success.
 fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {
+    let uses_matrix = rs_code.contains("almide_rt_matrix_");
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
-    std::fs::write(project_dir.join("Cargo.toml"), GENERATED_CARGO_TOML)
+    let cargo_toml = if uses_matrix { GENERATED_CARGO_TOML_ML } else { GENERATED_CARGO_TOML };
+    std::fs::write(project_dir.join("Cargo.toml"), cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
-    std::fs::write(src_dir.join("main.rs"), rs_code)
+    let final_code = if uses_matrix {
+        replace_matrix_runtime(rs_code)
+    } else {
+        rs_code.to_string()
+    };
+    std::fs::write(src_dir.join("main.rs"), &final_code)
         .map_err(|e| format!("failed to write main.rs: {}", e))?;
 
     let mut cmd = std::process::Command::new("cargo");
@@ -152,6 +188,39 @@ fn cargo_build_test(rs_code: &str, project_dir: &std::path::Path) -> Result<std:
     }
 
     Err("could not determine test binary path from cargo output".to_string())
+}
+
+/// Replace the Vec<Vec<f64>> matrix runtime with burn-backed implementation.
+fn replace_matrix_runtime(rs_code: &str) -> String {
+    let mut result = String::with_capacity(rs_code.len() + BURN_MATRIX_RUNTIME.len());
+    let mut in_matrix_block = false;
+    let mut inserted = false;
+
+    for line in rs_code.lines() {
+        if !in_matrix_block && line.contains("pub type AlmideMatrix = Vec<Vec<f64>>") {
+            in_matrix_block = true;
+            if !inserted {
+                result.push_str("// ── burn-backed Matrix runtime (auto-inserted by almide build) ──\n");
+                result.push_str(BURN_MATRIX_RUNTIME);
+                result.push('\n');
+                inserted = true;
+            }
+            continue;
+        }
+        if in_matrix_block {
+            if line.starts_with("pub fn almide_rt_matrix_")
+                || line.starts_with("    ")
+                || line.starts_with("        ")
+                || line.starts_with("// matrix")
+                || line == "}" || line.is_empty() {
+                continue;
+            }
+            in_matrix_block = false;
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    result
 }
 
 /// Recursively collect .almd files that contain `test` blocks.

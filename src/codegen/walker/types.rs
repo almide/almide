@@ -12,7 +12,7 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::Bool => template_or(ctx, "type_bool", &[], "bool"),
         Ty::Unit => template_or(ctx, "type_unit", &[], "()"),
         Ty::Bytes => template_or(ctx, "type_bytes", &[], "Vec<u8>"),
-        Ty::Matrix => template_or(ctx, "type_matrix", &[], "Vec<Vec<f64>>"),
+        Ty::Matrix => template_or(ctx, "type_matrix", &[], "AlmideMatrix"),
         Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
             let inner = &args[0];
             let inner_s = render_type(ctx, inner);
