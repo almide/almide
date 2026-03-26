@@ -242,7 +242,8 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
                 else if ch == '\r' { out.push_str("\\r"); }
                 else if ch == '\\' { out.push_str("\\\\"); }
                 else if ch == quote { out.push('\\'); out.push(ch); }
-                else if ch == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+                else if !use_single && ch == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+                    // Only escape ${ in double-quote strings (single-quote has no interpolation)
                     out.push_str("\\${");
                     i += 2; continue;
                 }
@@ -394,10 +395,11 @@ fn fmt_map(out: &mut String, entries: &[(Expr, Expr)], depth: usize) {
 }
 
 fn fmt_istring_parts(out: &mut String, parts: &[StringPart], depth: usize) {
-    // Use single quotes if any literal part contains a double quote (avoids \")
+    let has_interp = parts.iter().any(|p| matches!(p, StringPart::Expr { .. }));
+    // Single quotes don't support interpolation, so only use them for pure-literal strings
     let has_dquote = parts.iter().any(|p| matches!(p, StringPart::Lit { value } if value.contains('"')));
     let has_squote = parts.iter().any(|p| matches!(p, StringPart::Lit { value } if value.contains('\'')));
-    let use_single = has_dquote && !has_squote;
+    let use_single = !has_interp && has_dquote && !has_squote;
 
     let quote = if use_single { '\'' } else { '"' };
     out.push(quote);

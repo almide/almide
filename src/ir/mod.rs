@@ -50,7 +50,6 @@ pub enum BinOp {
     DivInt, DivFloat,
     ModInt, ModFloat,
     PowInt, PowFloat,
-    XorInt,
     MulMatrix, AddMatrix, SubMatrix, ScaleMatrix,
     ConcatStr, ConcatList,
     Eq, Neq,

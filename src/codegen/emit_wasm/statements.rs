@@ -246,7 +246,7 @@ fn infer_bind_type(expr: &IrExpr) -> Ty {
             use crate::ir::BinOp;
             match op {
                 BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt
-                | BinOp::ModInt | BinOp::PowInt | BinOp::XorInt => Ty::Int,
+                | BinOp::ModInt | BinOp::PowInt => Ty::Int,
                 BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat
                 | BinOp::ModFloat | BinOp::PowFloat => Ty::Float,
                 BinOp::ConcatStr => Ty::String,

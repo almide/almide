@@ -36,6 +36,6 @@ fn is_expr_start(tt: &TokenType) -> bool {
         | TokenType::Ident | TokenType::TypeName | TokenType::LParen
         | TokenType::LBracket | TokenType::LBrace | TokenType::Minus
         | TokenType::None | TokenType::Some | TokenType::Fn
-        | TokenType::If | TokenType::Match | TokenType::Do
+        | TokenType::If | TokenType::Match
     )
 }

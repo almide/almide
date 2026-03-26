@@ -385,7 +385,7 @@ fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, v: &mut Verifier
 
     let expected = match op {
         BinOp::AddInt | BinOp::SubInt | BinOp::MulInt
-        | BinOp::DivInt | BinOp::ModInt | BinOp::PowInt | BinOp::XorInt => Some(Ty::Int),
+        | BinOp::DivInt | BinOp::ModInt | BinOp::PowInt => Some(Ty::Int),
         BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat
         | BinOp::DivFloat | BinOp::PowFloat => Some(Ty::Float),
         BinOp::ConcatStr => Some(Ty::String),

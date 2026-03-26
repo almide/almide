@@ -115,14 +115,14 @@ impl Parser {
             self.advance();
             let mut names = Vec::new();
             while !self.check(TokenType::RParen) {
-                names.push(self.expect_ident()?);
+                names.push(self.expect_ident_or_underscore()?);
                 if self.check(TokenType::Comma) { self.advance(); }
             }
             self.expect(TokenType::RParen)?;
             let first = names.first().copied().unwrap_or_else(|| sym(""));
             return Ok(LambdaParam { name: first, tuple_names: Some(names), ty: None });
         }
-        let name = self.expect_ident()?;
+        let name = self.expect_ident_or_underscore()?;
         let ty = if self.check(TokenType::Colon) {
             self.advance();
             Some(self.parse_type_expr()?)

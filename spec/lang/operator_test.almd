@@ -67,17 +67,17 @@ test "equality on Option" {
   assert_eq(x == none, true)
 }
 
-// ── Power (**) / XOR (^) ──
+// ── Power (^) ──
 test "float power" {
-  assert_eq(2.0 ** 3.0, 8.0);
-  assert_eq(3.0 ** 2.0, 9.0);
-  assert_eq(4.0 ** 0.5, 2.0)
+  assert_eq(2.0 ^ 3.0, 8.0);
+  assert_eq(3.0 ^ 2.0, 9.0);
+  assert_eq(4.0 ^ 0.5, 2.0)
 }
 
-test "int xor" {
-  assert_eq(5 ^ 3, 6);
-  assert_eq(0 ^ 0, 0);
-  assert_eq(255 ^ 255, 0)
+test "int xor via stdlib" {
+  assert_eq(int.bxor(5, 3), 6);
+  assert_eq(int.bxor(0, 0), 0);
+  assert_eq(int.bxor(255, 255), 0)
 }
 
 // ── Bitwise operations (stdlib) ──
@@ -145,16 +145,16 @@ test "pipe with string operations" {
   assert_eq(result, "hello world")
 }
 
-test "int xor properties" {
-  assert_eq(42 ^ 42, 0);
-  assert_eq(42 ^ 0, 42);
-  assert_eq(0 ^ 42, 42);
-  assert_eq((5 ^ 3) ^ 3, 5)
+test "int xor properties via stdlib" {
+  assert_eq(int.bxor(42, 42), 0);
+  assert_eq(int.bxor(42, 0), 42);
+  assert_eq(int.bxor(0, 42), 42);
+  assert_eq(int.bxor(int.bxor(5, 3), 3), 5)
 }
 
 test "float power edge cases" {
-  assert_eq(0.0 ** 1.0, 0.0);
-  assert_eq(1.0 ** 0.0, 1.0);
+  assert_eq(0.0 ^ 1.0, 0.0);
+  assert_eq(1.0 ^ 0.0, 1.0);
   assert_eq(2.0 ** 1.0, 2.0);
   assert_eq(100.0 ** 0.5, 10.0)
 }

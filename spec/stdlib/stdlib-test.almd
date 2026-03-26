@@ -200,9 +200,9 @@ test "string interpolation" {
   assert_eq("hello ${name}", "hello world")
 }
 
-test "xor operator" {
-  assert_eq(5 ^ 3, 6)
-  assert_eq(0 ^ 0, 0)
+test "xor via stdlib" {
+  assert_eq(int.bxor(5, 3), 6)
+  assert_eq(int.bxor(0, 0), 0)
 }
 
 test "boolean operators" {

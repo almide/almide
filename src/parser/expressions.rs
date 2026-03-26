@@ -128,26 +128,35 @@ impl Parser {
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_range()?;
-        loop {
-            self.skip_newlines_if_followed_by_any(&[TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq]);
-            if !(self.check(TokenType::EqEq)
-                || self.check(TokenType::BangEq)
-                || self.check(TokenType::LAngle)
-                || self.check(TokenType::RAngle)
-                || self.check(TokenType::LtEq)
-                || self.check(TokenType::GtEq)) { break; }
-            let span = Some(self.current_span());
-            let op = sym(&self.current().value);
-            self.advance();
-            self.skip_newlines();
-            let right = self.parse_add_sub()?;
-            left = Expr::Binary {
-                op, left: Box::new(left), right: Box::new(right),
-                id: self.next_id(), span, resolved_type: None,
-            };
+        let left = self.parse_range()?;
+        self.skip_newlines_if_followed_by_any(&[TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq]);
+        if !(self.check(TokenType::EqEq)
+            || self.check(TokenType::BangEq)
+            || self.check(TokenType::LAngle)
+            || self.check(TokenType::RAngle)
+            || self.check(TokenType::LtEq)
+            || self.check(TokenType::GtEq)) { return Ok(left); }
+        let span = Some(self.current_span());
+        let op = sym(&self.current().value);
+        self.advance();
+        self.skip_newlines();
+        let right = self.parse_range()?;
+        let result = Expr::Binary {
+            op, left: Box::new(left), right: Box::new(right),
+            id: self.next_id(), span, resolved_type: None,
+        };
+        // Reject chained comparisons: a < b < c
+        if self.check(TokenType::EqEq) || self.check(TokenType::BangEq)
+            || self.check(TokenType::LAngle) || self.check(TokenType::RAngle)
+            || self.check(TokenType::LtEq) || self.check(TokenType::GtEq)
+        {
+            let tok = self.current();
+            return Err(format!(
+                "Chained comparison operators are not allowed at line {}:{}\n  Hint: Use 'and' to combine comparisons. Write: a < b and b < c",
+                tok.line, tok.col
+            ));
         }
-        Ok(left)
+        Ok(result)
     }
 
     fn parse_range(&mut self) -> Result<Expr, String> {
@@ -197,9 +206,9 @@ impl Parser {
     fn parse_mul_div(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_power()?;
         loop {
-            self.skip_newlines_if_followed_by_any(&[TokenType::Star, TokenType::Slash, TokenType::Percent, TokenType::Caret]);
+            self.skip_newlines_if_followed_by_any(&[TokenType::Star, TokenType::Slash, TokenType::Percent]);
             if !(self.check(TokenType::Star) || self.check(TokenType::Slash)
-                || self.check(TokenType::Percent) || self.check(TokenType::Caret)) { break; }
+                || self.check(TokenType::Percent)) { break; }
             let span = Some(self.current_span());
             let op = sym(&self.current().value);
             self.advance();
@@ -215,14 +224,14 @@ impl Parser {
 
     fn parse_power(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_unary()?;
-        // ** is right-associative
-        if self.check(TokenType::StarStar) {
+        // ^ is right-associative (2 ^ 3 ^ 2 = 2 ^ (3 ^ 2))
+        if self.check(TokenType::Caret) {
             let span = Some(self.current_span());
             self.advance();
             self.skip_newlines();
             let right = self.parse_power()?;
             left = Expr::Binary {
-                op: sym("**"), left: Box::new(left), right: Box::new(right),
+                op: sym("^"), left: Box::new(left), right: Box::new(right),
                 id: self.next_id(), span, resolved_type: None,
             };
         }
@@ -247,6 +256,13 @@ impl Parser {
                 op: sym("not"), operand: Box::new(operand),
                 id: self.next_id(), span, resolved_type: None,
             });
+        }
+        if self.check(TokenType::Bang) {
+            let tok = self.current();
+            return Err(format!(
+                "'!' is not valid in Almide at line {}:{}\n  Hint: Use 'not' for boolean negation. Write: not x",
+                tok.line, tok.col
+            ));
         }
         self.parse_postfix()
     }

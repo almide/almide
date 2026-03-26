@@ -49,6 +49,20 @@ impl Parser {
             self.expect(TokenType::RParen)?;
             return Ok(first);
         }
+        // Negative numeric literal: -1, -3.14
+        if self.check(TokenType::Minus)
+            && self.peek_at(1).map(|t| matches!(t.token_type, TokenType::Int | TokenType::Float)).unwrap_or(false)
+        {
+            let span = Some(self.current_span());
+            self.advance(); // skip -
+            let operand = self.parse_primary()?;
+            return Ok(Pattern::Literal {
+                value: Box::new(Expr::Unary {
+                    op: sym("-"), operand: Box::new(operand),
+                    id: self.next_id(), span, resolved_type: None,
+                }),
+            });
+        }
         if self.check(TokenType::Int) || self.check(TokenType::Float) || self.check(TokenType::String) {
             let expr = self.parse_primary()?;
             return Ok(Pattern::Literal { value: Box::new(expr) });
