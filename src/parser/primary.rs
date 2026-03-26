@@ -10,11 +10,15 @@ impl Parser {
 
         if self.check(TokenType::Int) {
             self.advance();
+            let clean = tok.value.replace('_', "");
+            let parsed: i64 = if clean.starts_with("0x") || clean.starts_with("0X") {
+                i64::from_str_radix(&clean[2..], 16).unwrap_or(0)
+            } else {
+                clean.parse().unwrap_or(0)
+            };
             return Ok(Expr::Int {
                 value: serde_json::Value::Number(
-                    tok.value.parse::<i64>()
-                        .ok()
-                        .and_then(|n| serde_json::Number::from_f64(n as f64))
+                    serde_json::Number::from_f64(parsed as f64)
                         .unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
                 raw: tok.value.clone(),
@@ -23,7 +27,7 @@ impl Parser {
         }
         if self.check(TokenType::Float) {
             self.advance();
-            let v: f64 = tok.value.parse().unwrap_or(0.0);
+            let v: f64 = tok.value.replace('_', "").parse().unwrap_or(0.0);
             return Ok(Expr::Float { value: v, id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::String) {
@@ -106,7 +110,7 @@ impl Parser {
         if self.check(TokenType::For) {
             return self.parse_for_expr();
         }
-        if self.check(TokenType::Do) {
+        if self.check_ident("do") {
             let span = self.current_span();
             self.advance();
             return Err(format!("`do` blocks have been removed — use `while` for loops or remove `do` from effect fn bodies (line {})", span.line));
@@ -293,10 +297,10 @@ impl Parser {
         self.advance(); // skip 'for'
         let (var_name, var_tuple) = if self.check(TokenType::LParen) {
             self.advance();
-            let mut names = vec![self.expect_ident()?];
+            let mut names = vec![self.expect_ident_or_underscore()?];
             while self.check(TokenType::Comma) {
                 self.advance();
-                names.push(self.expect_ident()?);
+                names.push(self.expect_ident_or_underscore()?);
             }
             self.expect(TokenType::RParen)?;
             (names[0], Some(names))

@@ -716,11 +716,6 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(result_s);
                 self.scratch.free_i64(base_s);
             }
-            BinOp::XorInt => {
-                self.emit_expr(left);
-                self.emit_expr(right);
-                self.func.instruction(&Instruction::I64Xor);
-            }
         }
     }
 
@@ -812,7 +807,7 @@ impl FuncCompiler<'_> {
             IrExprKind::BinOp { op, left, .. } => {
                 match op {
                     BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt | BinOp::ModInt
-                    | BinOp::PowInt | BinOp::XorInt => Ty::Int,
+                    | BinOp::PowInt => Ty::Int,
                     BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat
                     | BinOp::ModFloat | BinOp::PowFloat => Ty::Float,
                     BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte

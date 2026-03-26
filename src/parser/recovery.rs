@@ -19,7 +19,7 @@ impl Parser {
                         // Statement-level sync points
                         TokenType::Let | TokenType::Var | TokenType::Guard
                         | TokenType::If | TokenType::Match | TokenType::For
-                        | TokenType::While | TokenType::Do
+                        | TokenType::While
                         | TokenType::Ident | TokenType::TypeName
                         | TokenType::RBrace | TokenType::EOF
                         // Declaration-level sync points

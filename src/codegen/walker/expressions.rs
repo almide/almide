@@ -581,7 +581,6 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
                 BinOp::MulInt | BinOp::MulFloat => "*",
                 BinOp::DivInt | BinOp::DivFloat => "/",
                 BinOp::ModInt | BinOp::ModFloat => "%",
-                BinOp::XorInt => "^",
                 BinOp::Lt => "<",
                 BinOp::Gt => ">",
                 BinOp::Lte => "<=",

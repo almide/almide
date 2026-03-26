@@ -89,7 +89,7 @@ Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols too.
 if cond then expr else expr
 if a then x else if b then y else z
 ```
-**`if` without `else` is a syntax error.** Use `guard` for early return instead.
+**`if` without `else` returns Unit.** Use `guard` for early return instead.
 
 ### Match (exhaustive, supports guards)
 ```
@@ -110,7 +110,7 @@ TypeName(args...)          // constructor
 TypeName{ field1, field2 } // record pattern
 literal                    // int, float, string, bool
 ```
-**`_` can ONLY appear in match patterns.** `let _ = x` is a syntax error.
+**`_` can appear in match patterns, `let _ = x` (discard), `for _ in xs`, and lambda params `(_ ) => expr`.**
 
 ### Lambda
 ```
@@ -273,9 +273,9 @@ effect fn main(args: List[String]) -> Result[Unit, AppError] = {
 The runtime calls `main(args)` where `args` includes the program name at index 0.
 
 ## Operators (precedence high→low)
-`. ()` > `not -` > `* / % ^` > `+ -` > `== != < > <= >=` > `and` > `or` > `|>`
+`. ()` > `not -` > `^` (power) > `* / %` > `+ -` > `== != < > <= >=` (non-assoc) > `and` > `or` > `|>` `>>`
 
-`^` is XOR (integer), `+` is concatenation for strings and lists (overloaded with addition).
+`^` is exponentiation (right-associative, `**` also accepted). `+` is concatenation for strings and lists (overloaded with addition). XOR is available as `int.bxor(a, b)`.
 
 ## UFCS
 `f(x, y)` ≡ `x.f(y)` — compiler resolves automatically.

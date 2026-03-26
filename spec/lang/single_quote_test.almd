@@ -21,8 +21,9 @@ test "single quote with escape" {
   assert(string.contains(s, "'"))
 }
 
-test "single quote with interpolation and quotes" {
+test "single quote no interpolation" {
   let name = "alice";
   let json = '{"user": "${name}"}';
-  assert(string.contains(json, "alice"))
+  // single-quote strings do NOT interpolate — ${name} is literal
+  assert(string.contains(json, '${name}'))
 }

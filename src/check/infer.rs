@@ -130,7 +130,7 @@ impl Checker {
                         let rc = resolve_ty(&rt, &self.uf);
                         self.infer_plus_op(&lc, &rc, lt)
                     }
-                    "-" | "*" | "/" | "%" => {
+                    "-" | "*" | "/" | "%" | "^" => {
                         let lc = resolve_ty(&lt, &self.uf);
                         let rc = resolve_ty(&rt, &self.uf);
                         // Matrix operators: *, +, - on Matrix types
@@ -173,7 +173,6 @@ impl Checker {
                         }
                         Ty::Bool
                     }
-                    "^" => Ty::Int,
                     _ => lt,
                 }
             }

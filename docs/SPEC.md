@@ -109,7 +109,7 @@ fan
 ### 1.6 Operators and Delimiters
 
 ```
-Operators:   +  -  *  **  /  %  ^  ==  !=  <  <=  >  >=  |>  ..  ..=
+Operators:   +  -  *  /  %  ^  ==  !=  <  <=  >  >=  |>  ..  ..=
 Unary:       -  not
 Logical:     and  or
 Assignment:  =
@@ -117,9 +117,8 @@ Arrows:      ->  =>
 Delimiters:  (  )  {  }  [  ]  ,  .  :  ;  |  _  @  ...
 ```
 
-- `^` is XOR (integer)
+- `^` is exponentiation (right-associative). `**` is accepted as an alias
 - `+` is overloaded: addition for numbers, concatenation for strings and lists
-- `**` is exponentiation (right-associative)
 - `..` is exclusive range, `..=` is inclusive range
 - `...` is spread (in records)
 - `_` is wildcard (in match patterns) or placeholder (in pipe arguments)

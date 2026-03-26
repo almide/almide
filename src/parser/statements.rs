@@ -177,6 +177,9 @@ impl Parser {
         while !self.check(TokenType::RParen) {
             if self.check(TokenType::LParen) {
                 elements.push(self.parse_destructure_tuple()?);
+            } else if self.check(TokenType::Underscore) {
+                self.advance();
+                elements.push(Pattern::Wildcard);
             } else {
                 let name = self.expect_ident()?;
                 elements.push(Pattern::Ident { name });
