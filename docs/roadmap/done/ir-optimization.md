@@ -1,5 +1,5 @@
 <!-- description: Constant folding, dead code elimination, and basic inlining passes -->
-# IR Optimization Passes [ACTIVE]
+# IR Optimization Passes
 
 ## Summary
 IR-to-IR optimization passes: constant folding, DCE, and basic inlining.

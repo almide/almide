@@ -1,5 +1,5 @@
 <!-- description: WASI-based filesystem I/O for WASM target -->
-# WASM Filesystem I/O [DONE]
+# WASM Filesystem I/O
 
 **完了日:** 2026-03-25
 

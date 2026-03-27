@@ -1,5 +1,5 @@
 <!-- description: Type system soundness fixes (Unknown propagation, unification, occurs) -->
-# Type System Soundness [ACTIVE]
+# Type System Soundness
 
 ## Summary
 型システムの健全性を B+ → A+ に引き上げる。Critical 3 + High 4 + Medium 3 + P1 4 = 14 修正完了。

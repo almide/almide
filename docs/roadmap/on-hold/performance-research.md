@@ -1,5 +1,5 @@
 <!-- description: Research plan to surpass hand-written Rust via semantic-aware optimization -->
-# Performance Research: Path to World #1 [ON-HOLD]
+# Performance Research: Path to World #1
 
 **Research thesis**: High-level semantic information preserved through the compilation pipeline enables optimizations impossible in traditional low-level compilers. A language designed for LLM accuracy is simultaneously optimized for compiler analysis — both benefit from explicit semantics, clear data flow, and minimal aliasing.
 

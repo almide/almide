@@ -1,5 +1,5 @@
 <!-- description: Remaining codec features after Phase 0-2 completion -->
-# Codec Remaining [ACTIVE]
+# Codec Remaining
 
 Phase 0-2 完了。残りの機能。
 

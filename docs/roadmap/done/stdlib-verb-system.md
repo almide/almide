@@ -1,5 +1,5 @@
 <!-- description: Unified verb system across all stdlib container types -->
-# Stdlib API Surface Reform [ACTIVE]
+# Stdlib API Surface Reform
 
 ## Vision
 

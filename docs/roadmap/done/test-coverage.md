@@ -1,5 +1,5 @@
 <!-- description: Almide language-level test coverage targets (1500+ cases) -->
-# Language Test Coverage (`almide test`) [ACTIVE]
+# Language Test Coverage (`almide test`)
 
 `.almd` language-level tests. Separate from Rust compiler tests (`cargo test`, see [rust-test-coverage.md](./rust-test-coverage.md)).
 

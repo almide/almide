@@ -1,5 +1,5 @@
 <!-- description: Heredoc multi-line strings and raw string literals -->
-# String Handling [DONE]
+# String Handling
 
 ### Heredoc
 

@@ -1,5 +1,5 @@
 <!-- description: Test case specification for codec based on Serde/Codable/Jackson patterns -->
-# Codec Test Specification [ACTIVE]
+# Codec Test Specification
 
 Swift Codable / Serde / Kotlin serialization / Jackson の知見に基づくテストケース集。
 実装前に仕様を明文化するためのもの。

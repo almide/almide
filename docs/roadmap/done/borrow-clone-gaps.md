@@ -1,5 +1,5 @@
 <!-- description: Fix cases where Rust codegen fails to insert necessary clones -->
-# Borrow/Clone Gaps [ACTIVE]
+# Borrow/Clone Gaps
 
 Rust codegen が変数の clone を挿入し損ねるケースを徹底的に潰す。
 

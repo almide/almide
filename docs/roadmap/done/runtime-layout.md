@@ -1,5 +1,5 @@
 <!-- description: Unify Rust and TS runtime file layout and management -->
-# Runtime Layout Unification [ACTIVE]
+# Runtime Layout Unification
 
 ## Problem
 

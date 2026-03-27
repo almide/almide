@@ -1,5 +1,5 @@
 <!-- description: Format-agnostic codec protocol with JSON as first implementation -->
-# Codec Protocol & JSON [ACTIVE]
+# Codec Protocol & JSON
 
 ## Vision
 

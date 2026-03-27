@@ -1,5 +1,5 @@
 <!-- description: Ground-up rewrite of the 890-line source formatter -->
-# Formatter Rewrite [ACTIVE]
+# Formatter Rewrite
 
 ## Summary
 `src/fmt.rs` (890行) を 0 から書き直し。旧コードは lambda 構文更新済みだが、全体設計が古い。

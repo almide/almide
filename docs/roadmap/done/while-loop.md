@@ -1,5 +1,5 @@
 <!-- description: Dedicated while loop syntax replacing do-block guard pattern -->
-# While Loop [DONE]
+# While Loop
 
 ## The Problem
 

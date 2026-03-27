@@ -1,5 +1,5 @@
 <!-- description: Mitigations for LLM failures with immutable data patterns -->
-# LLM and Immutable Data Structures [ACTIVE]
+# LLM and Immutable Data Structures
 
 LLMs trained on Python/JS/Go default to mutable algorithms. Almide's immutable lists cause systematic failures when LLMs port mutable patterns directly.
 

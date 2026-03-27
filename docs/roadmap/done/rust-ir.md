@@ -1,5 +1,5 @@
 <!-- description: Two-stage Rust codegen pipeline via RustIR intermediate repr -->
-# RustIR: Rust Codegen Intermediate Representation [ACTIVE]
+# RustIR: Rust Codegen Intermediate Representation
 
 ## 動機
 

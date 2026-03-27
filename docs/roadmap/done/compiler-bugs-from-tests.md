@@ -1,5 +1,5 @@
 <!-- description: Seven compiler bugs discovered during test coverage expansion -->
-# Compiler Bugs Found by Test Expansion [ACTIVE]
+# Compiler Bugs Found by Test Expansion
 
 テストカバレッジ拡大（806→1501）で発見されたコンパイラバグ7件。テスト側で回避中だが、コンパイラを修正してテストをあるべき姿に戻す。
 

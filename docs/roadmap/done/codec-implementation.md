@@ -1,5 +1,5 @@
 <!-- description: Three-layer codec implementation: compiler, format library, user code -->
-# Codec Implementation Plan [ACTIVE]
+# Codec Implementation Plan
 
 ## 3層モデル
 

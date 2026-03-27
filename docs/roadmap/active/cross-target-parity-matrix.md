@@ -1,5 +1,5 @@
 <!-- description: Automated verification that Rust, TS, and WASM produce identical output -->
-# Cross-Target Parity Matrix [ACTIVE]
+# Cross-Target Parity Matrix
 
 **優先度:** High — WASM 対応進行中の今が最適タイミング
 **前提:** Cross-Target CI 完了済み、WASM 167/194 pass (0 failed, 27 skipped), TS テストランナー追加済み

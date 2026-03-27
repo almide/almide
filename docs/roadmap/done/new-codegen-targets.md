@@ -1,5 +1,5 @@
 <!-- description: Candidate new codegen targets (Go, Python, C, Swift, Kotlin) -->
-# New Codegen Targets [ACTIVE]
+# New Codegen Targets
 
 IR redesign 完了により、新ターゲット追加のコストが大幅低下。`&IrProgram` を受け取って文字列を返すだけで新バックエンドが書ける。
 

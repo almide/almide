@@ -1,5 +1,5 @@
 <!-- description: Complete removal of do block from the language -->
-# Remove `do` Block [DONE]
+# Remove `do` Block
 
 **完了**: 2026-03-24
 

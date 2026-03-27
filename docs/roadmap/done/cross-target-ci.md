@@ -1,5 +1,5 @@
 <!-- description: Run all tests on both Rust and TS targets, verify output match -->
-# Cross-Target CI [DONE]
+# Cross-Target CI
 
 > "ターゲット選択がプログラムの挙動を変えてはならない" — TypeScript の教訓
 

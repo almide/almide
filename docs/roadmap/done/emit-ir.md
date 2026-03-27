@@ -1,5 +1,5 @@
 <!-- description: Export typed IR as JSON via --emit-ir flag -->
-# --emit-ir: IR JSON Export [ACTIVE]
+# --emit-ir: IR JSON Export
 
 ## Summary
 

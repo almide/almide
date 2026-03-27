@@ -1,5 +1,5 @@
 <!-- description: Automatic deep equality for all value types without deriving -->
-# Eq Protocol [DONE]
+# Eq Protocol
 
 Automatic `==` / `!=` for all value types. No `deriving` needed.
 

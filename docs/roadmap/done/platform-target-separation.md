@@ -1,5 +1,5 @@
 <!-- description: Separate --target (output language) from --platform (runtime env) -->
-# Platform / Target Separation [ON HOLD]
+# Platform / Target Separation
 
 ## Thesis
 

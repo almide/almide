@@ -1,5 +1,5 @@
 <!-- description: CSE and inlining passes for cross-target IR optimization -->
-# IR Optimization Tier 2 [ON HOLD]
+# IR Optimization Tier 2
 
 **優先度:** Medium — 全ターゲットに自動適用される最適化
 **前提:** Tier 1 (constant folding, DCE) 完了済み、nanopass パイプライン確立済み

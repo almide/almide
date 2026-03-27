@@ -1,5 +1,5 @@
 <!-- description: Benchmark comparing LLM code generation cost across 16 languages -->
-# Benchmark Report: LLM Code Generation Cost by Language [ON HOLD]
+# Benchmark Report: LLM Code Generation Cost by Language
 
 ## Goal
 

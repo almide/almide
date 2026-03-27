@@ -1,5 +1,5 @@
 <!-- description: Continue parsing after syntax errors to report multiple diagnostics -->
-# Parser Error Recovery [ACTIVE]
+# Parser Error Recovery
 
 ## Summary
 1 つのシンタックスエラーでパースが停止する現状を改善。複数エラーを報告し、エラー後もパースを継続する。

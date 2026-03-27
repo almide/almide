@@ -1,5 +1,5 @@
 <!-- description: Bidirectional type inference for lambda parameters via two-pass checker -->
-# Bidirectional Type Inference for Lambda Parameters [DONE]
+# Bidirectional Type Inference for Lambda Parameters
 
 **Status**: 実装完了 (commit 002180d, 2026-03-14)。checker の two-pass 推論 + lowerer への型伝搬を実装。
 

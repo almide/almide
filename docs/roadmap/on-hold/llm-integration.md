@@ -1,5 +1,5 @@
 <!-- description: Built-in LLM commands for library generation, auto-fix, and code explanation -->
-# LLM Integration [ON HOLD]
+# LLM Integration
 
 ## Thesis
 

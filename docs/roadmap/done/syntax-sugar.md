@@ -1,5 +1,5 @@
 <!-- description: Syntax sugar (ranges, exhaustiveness check, lambda shorthand) -->
-# Syntax Sugar [ACTIVE]
+# Syntax Sugar
 
 ## Range Literals ✅
 

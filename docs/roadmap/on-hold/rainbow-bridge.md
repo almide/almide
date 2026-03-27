@@ -1,5 +1,5 @@
 <!-- description: Wrap external Rust/TS/Python code as native Almide packages via @extern -->
-# Rainbow Bridge — Wrap External Code as Almide Packages [ON HOLD]
+# Rainbow Bridge — Wrap External Code as Almide Packages
 
 ## Thesis
 

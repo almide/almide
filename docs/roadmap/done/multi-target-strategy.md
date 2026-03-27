@@ -1,5 +1,5 @@
 <!-- description: Strategy for adding new codegen targets with minimal cost -->
-# Multi-Target Strategy [ACTIVE]
+# Multi-Target Strategy
 
 ## Vision
 

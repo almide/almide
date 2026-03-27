@@ -1,5 +1,5 @@
 <!-- description: Fixed conventions with colon syntax for polymorphism without traits -->
-# Derive Conventions [DONE]
+# Derive Conventions
 
 ## Summary
 trait/typeclass を導入せず、固定 convention + コロン構文で polymorphism を実現する。

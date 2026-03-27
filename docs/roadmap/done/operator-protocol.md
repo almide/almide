@@ -1,5 +1,5 @@
 <!-- description: Convention-based operator dispatch (==, repr, sort, hash) -->
-# Operator Protocol [ACTIVE]
+# Operator Protocol
 
 Convention 宣言に基づく演算子・言語機能のディスパッチ。
 Derive Conventions Phase 1-2 (convention 宣言 + method resolution) の上に構築。

@@ -1,5 +1,5 @@
 <!-- description: Warn on unused variables and imports, suppressible with _ prefix -->
-# Unused Variable Warnings [ACTIVE]
+# Unused Variable Warnings
 
 ## Summary
 未使用の変数・インポートに対して warning を出す。`_` プレフィックスで抑制可能。

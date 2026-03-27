@@ -1,5 +1,5 @@
 <!-- description: Rewrite TS codegen to two-stage pipeline (IR to TsIR to String) -->
-# TS/JS Codegen Rewrite [ACTIVE]
+# TS/JS Codegen Rewrite
 
 ## Summary
 `src/emit_ts/` を書き直し。Rust codegen と同じ 2 段パイプライン (IR → TsIR → String) に統一。

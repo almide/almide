@@ -1,5 +1,5 @@
 <!-- description: Phase 4 clone reduction targeting field-level borrow analysis -->
-# Clone Reduction Phase 4 [ACTIVE]
+# Clone Reduction Phase 4
 
 Phases 0-3 (done in [codegen-optimization](../done/codegen-optimization.md)) established single-use move analysis, concat optimization, and Lobster-style borrow inference. Phase 4 targets the remaining unnecessary `.clone()` calls that survived those passes.
 

@@ -1,5 +1,5 @@
 <!-- description: Compile Almide to publish-ready npm packages via --target npm -->
-# npm Package Target [DONE]
+# npm Package Target
 
 Compile Almide code into a publish-ready npm package. Write libraries in Almide and distribute them to the JS ecosystem via `almide build --target npm`.
 

@@ -1,5 +1,5 @@
 <!-- description: First-party Hono-like web framework with template and Codec integration -->
-# Web Framework [ON HOLD]
+# Web Framework
 
 ## Vision
 

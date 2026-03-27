@@ -1,5 +1,5 @@
 <!-- description: Achieve 10/10 on every compiler architecture quality metric -->
-# Compiler Architecture: All 10s [ACTIVE]
+# Compiler Architecture: All 10s
 
 **目標**: コンパイラアーキテクチャ全項目 10/10
 **現状**: 105/110 — 残り: テスト 9→10、Codegen統合 9→10

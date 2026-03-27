@@ -1,5 +1,5 @@
 <!-- description: Generic functions, records, variants, and recursive generics -->
-# Generics [DONE]
+# Generics
 
 ## Status: Phase 1 Complete + Recursive Variants
 

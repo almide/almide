@@ -1,5 +1,5 @@
 <!-- description: Advanced codec features: structured errors, validation, schema -->
-# Codec Advanced [ACTIVE]
+# Codec Advanced
 
 Codec 基盤 (encode/decode/Value/JSON roundtrip) は完成。高度な機能。
 

@@ -1,5 +1,5 @@
 <!-- description: Activate secondary spans showing declaration sites in error messages -->
-# Diagnostic Secondary Spans [DONE]
+# Diagnostic Secondary Spans
 
 **完了日:** 2026-03-25
 

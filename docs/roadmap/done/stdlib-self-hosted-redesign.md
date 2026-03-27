@@ -1,5 +1,5 @@
 <!-- description: Self-hosted stdlib with .almd-first design and @extern for host deps -->
-# Stdlib Runtime Architecture Reform [ACTIVE]
+# Stdlib Runtime Architecture Reform
 
 ## Vision
 

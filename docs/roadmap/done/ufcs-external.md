@@ -1,5 +1,5 @@
 <!-- description: Extend UFCS resolution to external library functions -->
-# UFCS for External Libraries [ACTIVE]
+# UFCS for External Libraries
 
 ## Problem
 

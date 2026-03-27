@@ -1,5 +1,5 @@
 <!-- description: Direct WASM binary emission with linear memory and WASI imports -->
-# Direct WASM Emission [ACTIVE]
+# Direct WASM Emission
 
 ## Status: 129/129 tests passing (100%), WASI imports operational
 

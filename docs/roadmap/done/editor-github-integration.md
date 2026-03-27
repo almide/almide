@@ -1,5 +1,5 @@
 <!-- description: TextMate grammar, VS Code extension, and Chrome syntax highlighting -->
-# Editor & GitHub Integration [ON HOLD]
+# Editor & GitHub Integration
 
 ### TextMate Grammar + Editor Extensions
 

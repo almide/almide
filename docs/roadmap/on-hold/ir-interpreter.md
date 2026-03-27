@@ -1,5 +1,5 @@
 <!-- description: Direct IR execution for instant REPL, playground, and fast test runs -->
-# IR Interpreter [ON HOLD]
+# IR Interpreter
 
 IR を直接実行するインタプリタ。codegen → rustc を経由せずに即時実行。
 

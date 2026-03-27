@@ -1,5 +1,5 @@
 <!-- description: Native TS output for edge runtimes (Workers, Deno Deploy, Vercel) -->
-# TS Edge-Native Deployment [ON HOLD]
+# TS Edge-Native Deployment
 
 ## Thesis
 

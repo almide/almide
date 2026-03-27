@@ -1,5 +1,5 @@
 <!-- description: Debug-time IR integrity checks and self-describing IR nodes -->
-# IR Verification & Self-Describing IR [ACTIVE]
+# IR Verification & Self-Describing IR
 
 Debug-only integrity checks + IR self-description improvements. Verification runs after optimization, before monomorphization. Self-describing IR ensures every node's meaning is unambiguous without type inspection.
 

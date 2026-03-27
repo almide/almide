@@ -1,5 +1,5 @@
 <!-- description: Improve readability of generated Rust and TypeScript output -->
-# Emit Readability [ACTIVE]
+# Emit Readability
 
 **優先度:** Medium — LLM が修正する生成コードの品質に直結
 **前提:** codegen v3 (TOML template walker) 完了済み

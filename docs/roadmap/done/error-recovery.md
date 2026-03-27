@@ -1,5 +1,5 @@
 <!-- description: Report all errors at once instead of stopping at the first one -->
-# Error Recovery [DONE]
+# Error Recovery
 
 ## Why This Is Critical
 
@@ -42,15 +42,15 @@ fn bar() -> String = {  // ← ここは別の宣言なのでパースされる
 4. **Structured Diagnostics Everywhere** — パーサーエラーもチェッカーと同じ `Diagnostic` 形式で出力
 
 ```
-Program  → sync on declaration keywords (fn, type, test, impl)     [DONE]
-Function → sync on statement boundaries (newline + keyword)        [DONE]
-Statement → sync on expression terminators (, ) ] } newline)       [DONE]
-Expression → produce ErrorExpr node, continue parsing              [DONE]
+Program  → sync on declaration keywords (fn, type, test, impl)
+Function → sync on statement boundaries (newline + keyword)
+Statement → sync on expression terminators (, ) ] } newline)
+Expression → produce ErrorExpr node, continue parsing
 ```
 
 ## Phases
 
-### Phase 1: Structured Parser Errors [DONE]
+### Phase 1: Structured Parser Errors
 
 パーサーエラーを `String` から `Diagnostic` に変換。チェッカーと同じ形式で出力。
 
@@ -63,7 +63,7 @@ Expression → produce ErrorExpr node, continue parsing              [DONE]
   - 全デリミタ（`()`, `[]`, `{}`）の主要呼び出し箇所に適用
 - [x] テスト: パーサーエラーのスナップショットテスト追加（12テスト）
 
-### Phase 2: Statement-Level Recovery [DONE]
+### Phase 2: Statement-Level Recovery
 
 ブロック内でパースエラーが起きたとき、次の文の境界まで同期して残りの文をパースし続ける。
 
@@ -72,7 +72,7 @@ Expression → produce ErrorExpr node, continue parsing              [DONE]
 - [x] 1関数内に複数パースエラー → 全報告
 - [x] エラー後の文は `Stmt::Error` としてASTに記録
 
-### Phase 3: Error AST Nodes [DONE]
+### Phase 3: Error AST Nodes
 
 - [x] `Expr::Error { span }` / `Stmt::Error { span }` をASTに追加
 - [x] パーサーがエラー時に `Stmt::Error` ノードを生成（ブロック内リカバリ）
@@ -82,7 +82,7 @@ Expression → produce ErrorExpr node, continue parsing              [DONE]
 - [x] チェッカー: `Stmt::Error` → skip（cascading error 抑制）
 - [x] フォーマッタ: `Expr::Error` → `/* error */`、`Stmt::Error` → skip
 
-### Phase 4: Statement-Level Expression Recovery [DONE]
+### Phase 4: Statement-Level Expression Recovery
 
 ブロック内でステートメントのパースが失敗したとき、エラーを収集し `Stmt::Error` を挿入して次のステートメントまでスキップ。
 
@@ -90,7 +90,7 @@ Expression → produce ErrorExpr node, continue parsing              [DONE]
 - [x] `skip_to_next_stmt()` で次のステートメント境界まで同期
 - [x] 部分ASTがチェッカーに渡り、型エラーも同時報告
 
-### Phase 5: Common Typo Detection [DONE]
+### Phase 5: Common Typo Detection
 
 よくある間違いを検出して具体的な修正案を提示。
 
@@ -103,7 +103,7 @@ Expression → produce ErrorExpr node, continue parsing              [DONE]
 - [x] `let mut` → `Use 'var'` (既存)
 - [x] `<>` generics → `Use []` (既存)
 
-### Phase 6: Checker Continuation on Partial AST [DONE]
+### Phase 6: Checker Continuation on Partial AST
 
 パースエラーがあっても部分ASTをチェッカーに渡し、パースエラー + 型エラーを一括報告。
 

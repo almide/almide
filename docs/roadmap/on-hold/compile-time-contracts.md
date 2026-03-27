@@ -1,5 +1,5 @@
 <!-- description: Compile-time preconditions and type invariants via where clauses -->
-# Compile-Time Contracts [ON HOLD]
+# Compile-Time Contracts
 
 **優先度:** 2.x — 型システム安定後
 **原則:** LLM が「動くけど間違っている」コードを生成する確率を下げる。modification survival rate を型チェック + α で引き上げる。

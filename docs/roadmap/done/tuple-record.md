@@ -1,5 +1,5 @@
 <!-- description: Named record construction and tuple index access -->
-# Tuple & Record [DONE]
+# Tuple & Record
 
 ### Named Record Construction ✅ Implemented
 

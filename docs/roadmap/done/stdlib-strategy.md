@@ -1,5 +1,5 @@
 <!-- description: Stdlib expansion strategy via Rust ecosystem wrapping -->
-# Stdlib Strategy [ACTIVE]
+# Stdlib Strategy
 
 普及には「書きたいものがすぐ書ける」stdlib の厚みが必要。現在 15 モジュール 266 関数。主要言語と比較すると：
 

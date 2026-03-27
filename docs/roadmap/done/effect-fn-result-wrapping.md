@@ -1,5 +1,5 @@
 <!-- description: Fix effect fn Rust codegen to wrap return type in Result -->
-# Effect fn Result Wrapping [DONE]
+# Effect fn Result Wrapping
 
 **優先度:** 1.0 blocker
 **前提:** ResultPropagationPass 既存

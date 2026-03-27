@@ -1,5 +1,5 @@
 <!-- description: Allow main.almd to access pub functions from same-package mod.almd -->
-# `import self` — Package Entry Point Access [DONE]
+# `import self` — Package Entry Point Access
 
 ## Problem
 

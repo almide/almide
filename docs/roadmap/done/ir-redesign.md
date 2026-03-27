@@ -1,5 +1,5 @@
 <!-- description: Self-contained typed IR so codegen never references AST -->
-# Codegen IR Redesign [DONE]
+# Codegen IR Redesign
 
 Self-contained typed IR — codegen が AST を一切参照せず、IR のみで完全なコード生成を行う。Phase 1〜5 全完了。
 

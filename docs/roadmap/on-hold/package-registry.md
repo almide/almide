@@ -1,5 +1,5 @@
 <!-- description: Lock file, semver resolution, and central package registry -->
-# Package Registry [ON HOLD]
+# Package Registry
 
 ## Current State (v0.5.13)
 

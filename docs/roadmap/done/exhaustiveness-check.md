@@ -1,5 +1,5 @@
 <!-- description: Promote pattern match exhaustiveness from warning to hard error -->
-# Exhaustiveness Check — Hard Error [ACTIVE]
+# Exhaustiveness Check — Hard Error
 
 ## Current State
 

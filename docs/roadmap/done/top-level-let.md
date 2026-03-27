@@ -1,5 +1,5 @@
 <!-- description: Allow let bindings at module scope for constant values -->
-# Top-Level Let [DONE]
+# Top-Level Let
 
 ## The Problem
 
