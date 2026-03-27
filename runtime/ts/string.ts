@@ -43,4 +43,5 @@ const __almd_string = {
   take_end(s: string, n: number): string { return n >= s.length ? s : s.slice(s.length - n); },
   drop(s: string, n: number): string { return s.slice(n); },
   drop_end(s: string, n: number): string { return n >= s.length ? "" : s.slice(0, s.length - n); },
+  codepoint(s: string): number | null { return s.length > 0 ? s.codePointAt(0)! : null; },
 };
