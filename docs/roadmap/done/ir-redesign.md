@@ -167,9 +167,9 @@ pub struct IrModule {
 
 | Emitter field | → IR location |
 |---|---|
-| `effect_fns` | `IrFunction::is_effect`（既存、クエリで取得） |
-| `result_fns` | `IrFunction::ret_ty` が `Ty::Result` |
-| `named_record_types` | `IrTypeDecl::Record` から構築 |
+| `effect_fns` | `IrFunction::is_effect` (existing, obtained via query) |
+| `result_fns` | `IrFunction::ret_ty` is `Ty::Result` |
+| `named_record_types` | Built from `IrTypeDecl::Record` |
 | `generic_variant_constructors` | `IrTypeDeclKind::Variant { is_generic }` |
 | `generic_variant_unit_ctors` | `IrVariantKind::Unit` + `is_generic` |
 | `boxed_variant_args` | `IrTypeDeclKind::Variant::boxed_args` |
@@ -242,7 +242,7 @@ Eliminated `use crate::ast::*` from all codegen. Emitter performs complete code 
 - [x] Deleted all AST fallback branches from `emit_program()` (including `ast_decl_map`, `has_unknown_ret`)
 - [x] Deleted AST functions: `collect_fn_info`, `collect_named_records`, `collect_open_record_aliases`, `emit_decl`, `emit_type_decl`, `emit_type_decl_vis`, `emit_fn_decl`, `emit_user_module`, `gen_type`, `gen_type_boxed`, `type_references_name`, `build_open_field_infos`, `ty_to_type_expr`, `ty_contains_unknown`, `count_var_uses`
 - [x] Changed `emit_with_options` signature to: `(ir: &IrProgram, options, import_aliases, module_irs)`
-- [x] `emit_rust/mod.rs`, `emit_rust/program.rs`: `use crate::ast::*` 削除
+- [x] `emit_rust/mod.rs`, `emit_rust/program.rs`: removed `use crate::ast::*`
 
 **TS emitter (5b):**
 - [x] Added `ir_ty_to_ts(&Ty)` (IR version of `gen_type_expr`)
@@ -250,7 +250,7 @@ Eliminated `use crate::ast::*` from all codegen. Emitter performs complete code 
 - [x] Rewrote `emit_program()`, `emit_npm_program()`, `generate_dts()` to IR-based
 - [x] Changed entry point signatures to: `emit_with_modules(ir: &IrProgram)`, `emit_npm_package(ir: &IrProgram, config)`
 - [x] Deleted AST functions: `collect_generic_variant_info`, `gen_decl`, `gen_type_decl`, `gen_type_expr`, `gen_fn_decl`, `emit_user_module`
-- [x] `emit_ts/mod.rs`, `emit_ts/declarations.rs`: `use crate::ast::*` 削除
+- [x] `emit_ts/mod.rs`, `emit_ts/declarations.rs`: removed `use crate::ast::*`
 
 - [x] Updated caller side in `cli.rs`, `main.rs`
 - [x] Tests: `cargo test` (567 tests) + `almide test` (66 files) all pass

@@ -19,7 +19,7 @@ Codegen (src/emit_rust/)    → Cannot convert OpenRecord / TypeVar("Named") to 
 ### Pattern A: Direct OpenRecord Parameter
 ```almide
 fn greet(who: { name: String, .. }) -> String = "Hello, ${who.name}!"
-greet(Dog { name: "Rex", breed: "Lab" })  // Dog は name を持つ
+greet(Dog { name: "Rex", breed: "Lab" })  // Dog has a name field
 ```
 **Not recognized by monomorphizer** — because there are no generics.
 

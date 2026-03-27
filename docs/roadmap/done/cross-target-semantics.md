@@ -10,7 +10,7 @@ Fix cases where the same `.almd` produces different results on Rust vs TS. Guara
 
 ```typescript
 // emit_ts_runtime.rs — __deep_eq
-const ka = Object.keys(a), kb = Object.keys(b);  // Map には効かない
+const ka = Object.keys(a), kb = Object.keys(b);  // Does not work for Map
 ```
 
 `Object.keys()` returns `[]` for `Map`, so all Map comparisons become `true` (both appear empty).
@@ -27,7 +27,7 @@ const ka = Object.keys(a), kb = Object.keys(b);  // Map には効かない
 ```rust
 // collection_runtime.txt
 fn almide_rt_map_entries<K, V>(map: &HashMap<K, V>) -> Vec<(K, V)> {
-    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()  // ソートなし
+    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()  // unsorted
 }
 ```
 
@@ -63,7 +63,7 @@ let y = x + 1               // Rust: wraps to -9223372036854775808, TS: 92233720
 
 ```almide
 let f = 0.1 + 0.2
-println("{f}")  // Rust: "0.30000000000000004", TS: "0.30000000000000004" (通常一致するが保証なし)
+println("{f}")  // Rust: "0.30000000000000004", TS: "0.30000000000000004" (usually matches but not guaranteed)
 ```
 
 Differences appear at extremely large/small values.
@@ -90,7 +90,7 @@ Differences appear at extremely large/small values.
 catch (__e) { x = new __Err(__e.message); }  // original value is lost
 ```
 
-**修正:**
+**Fix:**
 - [ ] Preserve `__e.__almd_value` during re-wrap
 - [ ] Test: verify nested Result match works correctly in TS tests
 

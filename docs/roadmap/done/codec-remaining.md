@@ -7,20 +7,20 @@ Phase 0-2 complete. Remaining features.
 ## Done
 
 ### Variant encode (Tagged) ✅
-Unit/Tuple/Record variant → `{"CaseName": payload}` 形式で encode
-Variant decode は stub (err を返す) — full decode は Future
+Unit/Tuple/Record variant → encode in `{"CaseName": payload}` format
+Variant decode is a stub (returns err) — full decode is Future
 
-### json decode パターン ✅
+### json decode pattern ✅
 ```almide
 match json.parse(text) { ok(v) => Person.decode(v), err(e) => err(e) }
 ```
-`json.decode[T](text)` convenience は checker 型引数解決が必要 → Future
+`json.decode[T](text)` convenience requires checker type argument resolution → Future
 
-### value ユーティリティ ✅
-- `value.pick(v, keys)` / `value.omit(v, keys)` — フィールド選択/除外
-- `value.merge(a, b)` — Object 結合
-- `value.to_camel_case(v)` / `value.to_snake_case(v)` — キー名変換
-- `value.rename_keys(v, fn)` — 汎用キー変換 (runtime 内部)
+### value utilities ✅
+- `value.pick(v, keys)` / `value.omit(v, keys)` — field selection/exclusion
+- `value.merge(a, b)` — Object merging
+- `value.to_camel_case(v)` / `value.to_snake_case(v)` — key name conversion
+- `value.rename_keys(v, fn)` — generic key conversion (runtime internal)
 
 ### Naming strategy ✅
 ```almide
@@ -35,7 +35,7 @@ Legacy TOML → runtime crate migration is in the scope of [Stdlib Runtime Archi
 
 ### Structured DecodeError
 - `DecodeError { path: List[String], kind: DecodeErrorKind }`
-- error path: `"coord.lon"` 形式
+- error path: `"coord.lon"` format
 
 ### json.validate[T] / json.repair[T]
 - validate: enumerate issues without decoding

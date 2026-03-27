@@ -21,7 +21,7 @@ Current:
 
 ```
 runtime/
-├── rust/src/*.rs       Rust ランタイム（現状維持）
+├── rust/src/*.rs       Rust runtime (no changes)
 └── ts/
     ├── string.ts       TS runtime (plain .ts)
     ├── list.ts

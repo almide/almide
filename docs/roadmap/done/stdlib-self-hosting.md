@@ -7,8 +7,8 @@ As of v0.2.1, all stdlib functions have been extracted from inline codegen to se
 ### Why self-hosting matters
 
 ```
-extern "rust" で書く → Rustでしか動かない
-Almideで書く         → Rust/TS 両方に自動出力される
+Write with extern "rust" -> only works in Rust
+Write in Almide          -> automatically outputs to both Rust/TS
 ```
 
 Almide's design principle is "the same code outputs to multiple targets." The stdlib should follow this principle too. `extern` is a last resort, and the main strategy is **increasing Almide's expressiveness to write stdlib in Almide**.

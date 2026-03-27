@@ -85,7 +85,7 @@ Confirm that the checker works in WASM.
 
 #### 1.2 System prompt optimization
 Include Almide-specific patterns in the Playground LLM repair prompt:
-- `var` vs `let` の使い分け
+- `var` vs `let` usage differences
 - `list.swap` for in-place algorithms
 - `list.get` returns nullable → use `list.get_or`
 - tuple return for functions that modify + return
@@ -120,7 +120,7 @@ Users watch the repair process in real time.
 
 ## Success Metric
 
-quicksort (immutable patterns) を Playground で:
+quicksort (immutable patterns) in the Playground:
 1. User writes with mutable pattern -> `cannot reassign immutable binding` error
 2. "Fix with AI" -> LLM fixes with `var` + tuple return + `list.swap`
 3. Repair completes in 1 turn, sorted result is displayed

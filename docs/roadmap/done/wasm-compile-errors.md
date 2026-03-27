@@ -77,8 +77,8 @@
 
 ## Related Files
 
-- `src/codegen/emit_wasm/calls_list_closure.rs` — closure list 関数 (find, any, all, etc.)
-- `src/codegen/emit_wasm/calls_list_closure2.rs` — closure list 関数 (take_while, fold, map, etc.)
-- `src/codegen/emit_wasm/calls_map_closure.rs` — closure map 関数
+- `src/codegen/emit_wasm/calls_list_closure.rs` — closure list functions (find, any, all, etc.)
+- `src/codegen/emit_wasm/calls_list_closure2.rs` — closure list functions (take_while, fold, map, etc.)
+- `src/codegen/emit_wasm/calls_map_closure.rs` — closure map functions
 - `src/codegen/emit_wasm/statements.rs` — count_scratch_depth
-- `src/mono.rs` — VarTable 更新 (open record generic)
+- `src/mono.rs` — VarTable update (open record generic)

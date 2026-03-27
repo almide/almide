@@ -6,12 +6,12 @@
 
 ## Bugs
 
-### 1. ~~`float.abs()` が Rust で free function `abs(x)` を生成~~
+### 1. ~~`float.abs()` generates free function `abs(x)` in Rust~~
 
 - **Actual**: `almide_rt_float_abs()` exists in the runtime and works correctly. Test description error.
 - **Status**: [x] NOT A BUG
 
-### 2. top-level let + String → `const` 生成で `to_string()` 呼べない
+### 2. top-level let + String → cannot call `to_string()` in generated `const`
 
 - **Expected**: Initialize with `lazy_static` or `static` or `let`
 - **Actual**: `const NAME: String = "hello".to_string()` → `E0015: cannot call non-const method in constants`
@@ -20,7 +20,7 @@
 - **Fix**: String/non-const expressions → change to `static LazyLock<T>`, use `(*name).clone()` when referencing variables
 - **Status**: [x] DONE
 
-### 3. top-level let + float演算 → 型不一致
+### 3. top-level let + float arithmetic → type mismatch
 
 - **Expected**: `const TRIPLE_PI: f64 = PI * 3.0`
 - **Actual**: `const TRIPLE_PI: i64 = (PI * 3.0f64)` → `E0308: mismatched types`
@@ -29,7 +29,7 @@
 - **Fix**: Infer f64 when IR expression contains float literals
 - **Status**: [x] DONE
 
-### 4. generic variant の型推論ヒント不足
+### 4. Insufficient type inference hints for generic variants
 
 - **Expected**: Generate type annotation like `let e1: Either<String, i64> = Right(5)`
 - **Actual**: `let e1 = Right(5i64)` → `E0283: type annotations needed for Either<_, i64>`
@@ -38,7 +38,7 @@
 - **Found by**: lang/type_system_test.almd
 - **Status**: [x] DONE
 
-### 5. generic container の borrow 推論不足
+### 5. Insufficient borrow inference for generic containers
 
 - **Expected**: `c` is cloned or borrowed in `container_add(c, 1)`
 - **Actual**: `c` is moved and subsequent `assert_eq!(c.label)` gives `E0382: borrow of moved value`
@@ -47,7 +47,7 @@
 - **Fix**: Borrow analysis had already been improved to insert automatic clones. Also resolved by type information improvements from Bug #4/7 fix
 - **Status**: [x] DONE
 
-### 6. `map.from_list` クロージャ内の borrow 推論不足
+### 6. Insufficient borrow inference inside `map.from_list` closures
 
 - **Expected**: Closure argument `w` is cloned
 - **Actual**: `|w| { (w, string.len(&*w)) }` → `w` borrowed after move → `E0382`
@@ -56,7 +56,7 @@
 - **Found by**: lang/edge_cases_test.almd
 - **Status**: [x] DONE
 
-### 7. named record 型に構造体リテラルが代入できない
+### 7. Cannot assign struct literal to named record type
 
 - **Expected**: `{ items: [], label: "x" }` can be assigned to `type Container = { items: List[T], label: String }`
 - **Actual**: `cannot assign { items: List[Int], label: String } to Container`

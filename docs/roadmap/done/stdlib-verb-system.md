@@ -29,11 +29,11 @@ Renamed 24 functions. All applied, CI green.
 
 | Change | Status |
 |---|---|
-| `and_then` → `flat_map` | ✅ 削除済 |
-| `map_values` → `map.map` | ✅ 統一済 |
-| `char_at` → `string.get` | ✅ 統一済 |
-| `string.to_int` → 削除 | ✅ 削除済 |
-| `string.to_float` → 削除 | ✅ 削除済 |
+| `and_then` -> `flat_map` | ✅ Removed |
+| `map_values` -> `map.map` | ✅ Unified |
+| `char_at` -> `string.get` | ✅ Unified |
+| `string.to_int` -> removed | ✅ Removed |
+| `string.to_float` -> removed | ✅ Removed |
 | `int.parse` → `int.from_string` | 🔲 New name addition needed |
 | `float.parse` → `float.from_string` | 🔲 New name addition needed |
 | `uuid.parse` → `uuid.from_string` | 🔲 New name addition needed |
@@ -60,7 +60,7 @@ Make Map "a first-class container."
 
 Make String and List slice operations symmetric.
 
-| 関数 | 状態 |
+| Function | Status |
 |---|---|
 | `string.first` | 🔲 |
 | `string.last` | 🔲 |
@@ -73,7 +73,7 @@ Make String and List slice operations symmetric.
 
 Currently Option operations are scattered. Consolidate into an independent module.
 
-| 関数 | 状態 |
+| Function | Status |
 |---|---|
 | `option.map` | 🔲 |
 | `option.flat_map` | 🔲 |
@@ -89,7 +89,7 @@ Currently Option operations are scattered. Consolidate into an independent modul
 
 ### 🔲 Step 6: Fill List gaps
 
-| 関数 | 状態 |
+| Function | Status |
 |---|---|
 | `list.unique_by` | 🔲 |
 | `list.shuffle` | 🔲 |
@@ -99,9 +99,9 @@ Currently Option operations are scattered. Consolidate into an independent modul
 
 ### ✅ Step 7: Delete old names (done)
 
-- `map.from_entries` 削除 → `map.from_list` に統一 (spec準拠)
-- `parse` は維持 (spec原則3: `parse` = fallible解釈。`from_string` はスコープ外)
-- `option.to_list` 追加 (spec準拠)
+- `map.from_entries` removed -> unified to `map.from_list` (spec-compliant)
+- `parse` maintained (spec principle 3: `parse` = fallible interpretation. `from_string` is out of scope)
+- `option.to_list` added (spec-compliant)
 
 ---
 
@@ -125,8 +125,8 @@ Currently Option operations are scattered. Consolidate into an independent modul
 ## Success Criteria
 
 - [x] No `?` suffix on any predicate
-- [x] `and_then` → `flat_map` 統一
-- [x] `map_values` → `map.map` 統一
+- [x] `and_then` -> `flat_map` unified
+- [x] `map_values` -> `map.map` unified
 - [ ] `map` usable across all container types (List, Map, Option, Result)
 - [ ] `flat_map` usable across all container types
 - [ ] `filter`, `fold`, `any`, `all`, `each` usable across all collection types (List, Map)

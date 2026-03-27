@@ -18,11 +18,11 @@ Every keyword addition or operator change requires manual synchronization across
 
 ```
 grammar/
-├── tokens.toml         # キーワード、演算子、デリミタの定義
-├── precedence.toml     # 演算子優先順位テーブル
-└── rules.toml          # 文法規則 (宣言、式、パターン等)
+├── tokens.toml         # Keyword, operator, and delimiter definitions
+├── precedence.toml     # Operator precedence table
+└── rules.toml          # Grammar rules (declarations, expressions, patterns, etc.)
 
-build.rs (or standalone tool) が生成:
+build.rs (or standalone tool) generates:
 ├── tree-sitter-almide/grammar.js
 ├── vscode-almide/syntaxes/almide.tmLanguage.json
 └── src/generated/token_table.rs
@@ -124,7 +124,7 @@ Declarative description of grammar rules. A PEG/BNF-style DSL. Since the design 
 
 ## Priority
 
-**P1** — tree-sitter と vscode-almide が動き始めた今、同期コストが現実の問題になる。Phase 1 だけでも大きな効果。
+**P1** — Now that tree-sitter and vscode-almide are up and running, synchronization cost becomes a real problem. Even Phase 1 alone provides significant benefit.
 
 ## Reference
 

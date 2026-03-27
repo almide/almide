@@ -48,10 +48,9 @@ Sequential execution produces the same results.
 ### Deep equality [3 files]
 nested list equality, deep equality on nested structures, recursive variant types
 
-**Root**: `assert_eq` で nested containers (List[List[T]], variant with payloads) の
-deep equality が incomplete。`option_eq_i64` / `list_eq` が shallow comparison のみ。
+**Root**: Deep equality in `assert_eq` for nested containers (List[List[T]], variant with payloads) is incomplete. `option_eq_i64` / `list_eq` only perform shallow comparison.
 
-**Fix**: runtime の eq 関数を recursive にする。型情報に基づいた dispatch が必要。
+**Fix**: Make runtime eq functions recursive. Requires dispatch based on type information.
 
 ### Record/Variant features [3 files]
 let record destructure, nested open record, basic variant record construction

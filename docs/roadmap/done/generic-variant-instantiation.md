@@ -7,7 +7,7 @@
 
 ## Problem
 
-`type Maybe[T] = | Just(T) | Nothing` + `let y: Maybe[Int] = Nothing()` が以下を生成:
+`type Maybe[T] = | Just(T) | Nothing` + `let y: Maybe[Int] = Nothing()` generates the following:
 
 ```rust
 let y = Maybe::Nothing;  // error: type annotations needed for Maybe<_>

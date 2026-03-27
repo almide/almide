@@ -5,10 +5,10 @@
 Separate Almide's stdlib into 3 layers. Treat WASM as a first-class citizen and clearly separate pure computation from OS dependencies.
 
 Languages referenced:
-- **MoonBit**: core (pure) / x (platform) の 2 層。WASM-first。JSON は core に含む
-- **Gleam**: stdlib (target-independent) / gleam_erlang / gleam_javascript の分離
-- **Rust**: core / alloc / std の 3 層。WASM で使えない関数はコンパイルエラー
-- **Zig**: comptime でターゲット判定。未使用コード自動削除
+- **MoonBit**: 2 layers of core (pure) / x (platform). WASM-first. JSON included in core
+- **Gleam**: Separation of stdlib (target-independent) / gleam_erlang / gleam_javascript
+- **Rust**: 3 layers of core / alloc / std. Functions unavailable in WASM cause compile errors
+- **Zig**: Target detection via comptime. Automatic dead code elimination
 
 ### Layer 1: core (all targets, WASM OK)
 
@@ -81,10 +81,10 @@ Enable bundled .almd modules in Playground (WASM).
 
 ### Extern / FFI Design ✅ (implemented in v0.2.1)
 
-Gleam の `@external` パターンを参考に、Almide 版の extern を実装。
+Implemented Almide's version of extern, referencing Gleam's `@external` pattern.
 
 **Design decisions:**
-- Syntax: `@extern(target, "module", "function")` attribute — target は `rs`/`ts`
+- Syntax: `@extern(target, "module", "function")` attribute — target is `rs`/`ts`
 - Specification: module + function name (not file paths)
 - Type mapping: trust-based (compiler trusts the declared signature)
 - Body = fallback: if a body exists, it's used for targets without `@extern`

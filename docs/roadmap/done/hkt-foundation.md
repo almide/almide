@@ -26,5 +26,5 @@
 
 ## Follow-up (on-hold, 2.x)
 
-- [Effect Type Integration](../on-hold/effect-type-integration.md) — FnType に EffectSet を持たせる
-- [Trait System](../on-hold/trait-system.md) — HKT 基盤上の Protocol/Interface
+- [Effect Type Integration](../on-hold/effect-type-integration.md) — Add EffectSet to FnType
+- [Trait System](../on-hold/trait-system.md) — Protocol/Interface on the HKT foundation

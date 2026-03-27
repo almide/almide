@@ -2,24 +2,24 @@
 <!-- done: 2026-03-18 -->
 # Lower Two-Pass Separation
 
-**優先度:** post-1.0
-**見積:** ±500行, 大
+**Priority:** post-1.0
+**Estimate:** ±500 lines, large
 
-## 現状
+## Current State
 
-`lower/` が AST→IR 変換と use-count analysis を同時実行。責務が混在。
+`lower/` runs AST-to-IR conversion and use-count analysis simultaneously. Responsibilities are mixed.
 
-## 理想
+## Ideal
 
-- Pass 1: AST→IR (純粋な構造変換)
-- Pass 2: use-count / codegen分析 (UseCountPass)
+- Pass 1: AST→IR (pure structural transformation)
+- Pass 2: use-count / codegen analysis (UseCountPass)
 
-## タスク
+## Tasks
 
-- [ ] lower をAST→IR純粋変換に限定
-- [ ] use-count analysis を独立 Nanopass に分離
-- [ ] codegen判断ロジックを lower から排除
+- [ ] Limit lower to pure AST→IR transformation
+- [ ] Separate use-count analysis into an independent Nanopass
+- [ ] Remove codegen decision logic from lower
 
-## 判断
+## Decision
 
-壊れてない。保守性改善だが 1.0 前にリスクを取る理由がない。
+Not broken. A maintainability improvement, but no reason to take the risk before 1.0.

@@ -56,17 +56,17 @@ Nested calls advance the offset with `match_depth += N` to avoid collisions.
 
 ```rust
 struct ScratchAllocator {
-    // 型ごとの使用中スロット
+    // In-use slots per type
     i32_slots: Vec<bool>,  // true = in use
     i64_slots: Vec<bool>,
     f64_slots: Vec<bool>,
 
-    // 確保された最大数（local宣言用）
+    // Maximum allocated count (for local declarations)
     i32_max: u32,
     i64_max: u32,
     f64_max: u32,
 
-    // base indices（関数コンパイル後に確定）
+    // Base indices (determined after function compilation)
     i32_base: u32,
     i64_base: u32,
     f64_base: u32,

@@ -22,7 +22,7 @@ There is no mechanism to "answer these questions with experiments and numbers."
 
 ```
 Experiment = {
-  hypothesis: "短縮 lambda は modification survival rate を下げない"
+  hypothesis: "Short lambda does not reduce modification survival rate"
   variants: [
     A: { syntax: fn(x) => expr,  corpus: [...tasks...] }
     B: { syntax: (x) => expr,    corpus: [...tasks...] }
@@ -78,7 +78,7 @@ type Experiment = {
 type Variant = {
   name: String                    // "fn-lambda" / "paren-lambda"
   description: String
-  corpus_dir: String              // 構文バリアント版コーパスのパス
+  corpus_dir: String              // Path to the syntax variant corpus
 }
 
 type ModelConfig = {
@@ -91,10 +91,10 @@ type Provider = | Anthropic | OpenAI | Google
 
 type Task = {
   name: String
-  description: String             // modification instructions passed to LLM
-  base_file: String               // file to be modified
-  test_file: String               // test file
-  max_attempts: Int               // retry count
+  description: String             // Modification instructions passed to LLM
+  base_file: String               // File to be modified
+  test_file: String               // Test file
+  max_attempts: Int               // Retry count
 }
 
 type TrialResult = {

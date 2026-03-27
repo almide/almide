@@ -43,43 +43,43 @@ A pure function that converts RustIR to Rust source code. Zero decision logic. O
 ## RustIR Definition
 
 ```rust
-/// Rust コードの構造を表すデータ型。
-/// 文字列ではなく構造として持つことで、変換・検査・テストが容易になる。
+/// Data types representing the structure of Rust code.
+/// Holding as structure rather than strings makes transformation, inspection, and testing easier.
 
-// ── 式 ──
+// ── Expressions ──
 
 enum RustExpr {
-    // リテラル
+    // Literals
     IntLit(i64),
     FloatLit(f64),
     StringLit(String),
     BoolLit(bool),
     Unit,
 
-    // 変数
+    // Variables
     Var(String),
 
-    // 演算
+    // Operations
     BinOp { op: RustBinOp, left: Box<RustExpr>, right: Box<RustExpr> },
     UnOp { op: RustUnOp, operand: Box<RustExpr> },
 
-    // 呼び出し
+    // Calls
     Call { func: String, args: Vec<RustExpr> },
     MethodCall { receiver: Box<RustExpr>, method: String, args: Vec<RustExpr> },
     MacroCall { name: String, args: Vec<RustExpr> },  // println!, format!, vec!, etc.
 
-    // 制御フロー
+    // Control flow
     If { cond: Box<RustExpr>, then: Box<RustExpr>, else_: Option<Box<RustExpr>> },
     Match { subject: Box<RustExpr>, arms: Vec<RustMatchArm> },
     Block { stmts: Vec<RustStmt>, expr: Option<Box<RustExpr>> },
     For { var: String, iter: Box<RustExpr>, body: Vec<RustStmt> },
     While { cond: Box<RustExpr>, body: Vec<RustStmt> },
-    Loop { body: Vec<RustStmt> },  // guard 用
+    Loop { body: Vec<RustStmt> },  // for guard
     Break,
     Continue,
     Return(Option<Box<RustExpr>>),
 
-    // 所有権・エラー
+    // Ownership / Error handling
     Clone(Box<RustExpr>),              // expr.clone()
     ToOwned(Box<RustExpr>),            // expr.to_owned() / .to_string() / .to_vec()
     Borrow(Box<RustExpr>),             // &expr
@@ -89,45 +89,45 @@ enum RustExpr {
     OptionSome(Box<RustExpr>),         // Some(expr)
     OptionNone,                        // None
 
-    // コレクション
+    // Collections
     Vec(Vec<RustExpr>),                // vec![a, b, c]
     HashMap(Vec<(RustExpr, RustExpr)>), // HashMap::from([(k, v), ...])
     Tuple(Vec<RustExpr>),              // (a, b, c)
 
-    // アクセス
+    // Access
     Field(Box<RustExpr>, String),      // expr.field
     Index(Box<RustExpr>, Box<RustExpr>), // expr[idx]
     TupleIndex(Box<RustExpr>, usize),  // expr.0
 
-    // 構造体
+    // Structs
     StructInit { name: String, fields: Vec<(String, RustExpr)> },
     StructUpdate { base: Box<RustExpr>, fields: Vec<(String, RustExpr)> }, // { ..base, field: val }
 
-    // ラムダ
+    // Lambdas
     Closure { params: Vec<RustParam>, body: Box<RustExpr> },
 
-    // 文字列
+    // Strings
     Format { template: String, args: Vec<RustExpr> },  // format!("...", args)
 
-    // 型キャスト
+    // Type cast
     Cast { expr: Box<RustExpr>, ty: RustType },  // expr as Type
 
     // unsafe
     Unsafe(Box<RustExpr>),
 }
 
-// ── 文 ──
+// ── Statements ──
 
 enum RustStmt {
     Let { name: String, ty: Option<RustType>, mutable: bool, value: RustExpr },
     Assign { target: String, value: RustExpr },
     FieldAssign { target: String, field: String, value: RustExpr },
     IndexAssign { target: String, index: RustExpr, value: RustExpr },
-    Expr(RustExpr),  // 式文（副作用のみ）
+    Expr(RustExpr),  // Expression statement (side effects only)
     Comment(String),
 }
 
-// ── 型 ──
+// ── Types ──
 
 enum RustType {
     I64, F64, Bool, String, Unit,
@@ -136,16 +136,16 @@ enum RustType {
     Option(Box<RustType>),
     Result(Box<RustType>, Box<RustType>),
     Tuple(Vec<RustType>),
-    Named(String),                    // ユーザー定義型
+    Named(String),                    // User-defined type
     Generic(String, Vec<RustType>),   // Type<A, B>
     Ref(Box<RustType>),               // &Type
     RefStr,                           // &str
     Slice(Box<RustType>),             // &[T]
     Fn(Vec<RustType>, Box<RustType>), // impl Fn(A) -> B
-    Infer,                            // _ (型推論に任せる)
+    Infer,                            // _ (left to type inference)
 }
 
-// ── トップレベル ──
+// ── Top-level ──
 
 struct RustFunction {
     name: String,
@@ -196,7 +196,7 @@ struct RustProgram {
     enums: Vec<RustEnum>,
     functions: Vec<RustFunction>,
     impls: Vec<RustImpl>,
-    runtime: String,              // 埋め込みランタイムコード
+    runtime: String,              // Embedded runtime code
 }
 ```
 
@@ -213,12 +213,12 @@ struct RustProgram {
 Replace existing `gen_ir_expr` one by one with RustIR generation:
 
 ```
-Week 1: リテラル、変数、二項演算、単項演算
-Week 2: 関数呼び出し（auto-? をここで統一）
+Week 1: Literals, variables, binary ops, unary ops
+Week 2: Function calls (unify auto-? here)
 Week 3: if/match/block
-Week 4: for/while/do-block/guard（バグの巣窟を一掃）
-Week 5: clone/borrow 挿入（散在ロジックを集約）
-Week 6: トップレベル（関数宣言、型宣言、main ラッパー）
+Week 4: for/while/do-block/guard (clean out the bug nest)
+Week 5: clone/borrow insertion (consolidate scattered logic)
+Week 6: Top-level (function declarations, type declarations, main wrapper)
 ```
 
 Verify all `almide test` passes at each step.

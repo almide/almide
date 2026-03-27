@@ -453,7 +453,7 @@ Binary size increase: ~a few hundred KB. WASM target does not use tokio (separat
 **Decision: use native async/await directly.**
 
 - `effect fn` → `async function`
-- effect fn 呼び出し → `await`
+- effect fn calls → `await`
 - `fan { }` → `Promise.all([...])`
 - `fan.race` → `Promise.race([...])`
 - Cancellation is **best-effort** (JS limitation. `Promise.race` does not abort losers)

@@ -170,7 +170,7 @@ Enforce this pattern across all modules. LLMs learn consistent patterns more eas
 string.trim(s)
 s.trim()
 
-// LLM は UFCS を好む傾向がある（メソッドチェーンが読みやすい）
+// LLMs tend to prefer UFCS (method chains are more readable)
 text
   |> string.trim()
   |> string.split(",")
@@ -245,124 +245,124 @@ effect fn main() =
 **Recommended: Via each language's reflection/documentation tools (no scraping needed)**
 
 ```bash
-# Python: inspect で全関数のシグネチャを JSON 化
+# Python: Convert all function signatures to JSON using inspect
 python3 -c "import inspect, json, datetime; print(json.dumps([
   {'name': n, 'params': str(inspect.signature(f))}
   for n, f in inspect.getmembers(datetime, inspect.isfunction)
 ]))"
 
-# Go: go doc -json でパッケージ情報を構造化出力
+# Go: Structured output of package info with go doc -json
 go doc -all -json time
 
-# Rust: rustdoc が JSON 出力をサポート
+# Rust: rustdoc supports JSON output
 rustdoc --output-format json --edition 2021 src/lib.rs
 
-# Deno: deno doc が JSON 出力をサポート
+# Deno: deno doc supports JSON output
 deno doc --json https://deno.land/std/csv/mod.ts
 
-# Node: TypeScript 型定義 (.d.ts) をパース
-# or: Object.keys(require('fs')) で関数一覧取得
+# Node: Parse TypeScript type definitions (.d.ts)
+# or: Get function list with Object.keys(require('fs'))
 ```
 
-Almide の `process.exec` でこれらのコマンドを叩き、JSON を統合するだけで正確な API リファレンスが取れる。HTTP スクレイピングよりも確実で正確。
+By using Almide's `process.exec` to invoke these commands and merging the JSON, you get accurate API references. More reliable and accurate than HTTP scraping.
 
-| 言語 | ツール | 形式 | 精度 |
+| Language | Tool | Format | Accuracy |
 |------|--------|------|------|
-| Python | `inspect` module | JSON (自前変換) | 完全（シグネチャ + docstring） |
-| Go | `go doc -json` | JSON | 完全（型情報含む） |
-| Rust | `rustdoc --output-format json` | JSON | 完全（crate 単位） |
-| Deno | `deno doc --json` | JSON | 完全（モジュール単位） |
-| Node/npm | `.d.ts` ファイルパース | TypeScript AST | 高精度 |
-| Swift | `swift-symbolgraph-extract` | JSON (Symbol Graph) | 完全（モジュール単位） |
-| Kotlin | `dokka` or `kotlin-reflect` | JSON / リフレクション | 高精度 |
-| Ruby | `ri --format=json` or `RDoc::RI` | JSON | 完全（メソッド + docstring） |
+| Python | `inspect` module | JSON (custom conversion) | Complete (signatures + docstrings) |
+| Go | `go doc -json` | JSON | Complete (includes type info) |
+| Rust | `rustdoc --output-format json` | JSON | Complete (per crate) |
+| Deno | `deno doc --json` | JSON | Complete (per module) |
+| Node/npm | `.d.ts` file parsing | TypeScript AST | High accuracy |
+| Swift | `swift-symbolgraph-extract` | JSON (Symbol Graph) | Complete (per module) |
+| Kotlin | `dokka` or `kotlin-reflect` | JSON / Reflection | High accuracy |
+| Ruby | `ri --format=json` or `RDoc::RI` | JSON | Complete (methods + docstrings) |
 
 ```bash
-# Swift: Symbol Graph で全 API を JSON 出力
+# Swift: Output all APIs as JSON via Symbol Graph
 swift-symbolgraph-extract -module-name Foundation -target x86_64-apple-macosx
 
-# Kotlin: kotlin-reflect でクラス/関数一覧
+# Kotlin: List classes/functions with kotlin-reflect
 kotlinc -script -e "kotlin.io.path.Path::class.members.forEach { println(it) }"
-# or: Dokka で JSON ドキュメント生成
+# or: Generate JSON documentation with Dokka
 
-# Ruby: ri でメソッド一覧
+# Ruby: List methods with ri
 ri --format=json File
-# or: Ruby リフレクション
+# or: Ruby reflection
 ruby -e "puts File.methods(false).sort"
 ```
 
-**フォールバック: Web API / HTML スクレイピング**
+**Fallback: Web API / HTML Scraping**
 
-ローカルにツールがない場合のフォールバック：
+Fallback when local tools are unavailable:
 
-| 言語 | ソース | 形式 |
+| Language | Source | Format |
 |------|--------|------|
-| Go | `pkg.go.dev` | HTML スクレイピング |
-| Python | `docs.python.org` | HTML スクレイピング |
-| Rust | `docs.rs` | HTML スクレイピング |
+| Go | `pkg.go.dev` | HTML scraping |
+| Python | `docs.python.org` | HTML scraping |
+| Rust | `docs.rs` | HTML scraping |
 | Deno | `doc.deno.land` | JSON API |
 | npm | `registry.npmjs.org` | JSON API |
-| Swift | `developer.apple.com/documentation` | HTML スクレイピング |
-| Kotlin | `kotlinlang.org/api` | HTML スクレイピング |
-| Ruby | `ruby-doc.org` | HTML スクレイピング |
+| Swift | `developer.apple.com/documentation` | HTML scraping |
+| Kotlin | `kotlinlang.org/api` | HTML scraping |
+| Ruby | `ruby-doc.org` | HTML scraping |
 
-### 拡張
+### Extensions
 
-- stdlib → third-party lib にも同じ仕組みで展開
-- `almide stdlib-compare datetime` で Go/Python/Rust/Deno の datetime 相当を一覧表示
-- CI で定期実行 → `docs/roadmap/stdlib/auto/` に自動更新
+- Expand to third-party libs using the same mechanism as stdlib
+- `almide stdlib-compare datetime` displays a list of datetime equivalents across Go/Python/Rust/Deno
+- Run periodically in CI -> auto-update `docs/roadmap/stdlib/auto/`
 
-### 前提条件
+### Prerequisites
 
-- Almide の http + json + string で十分実装可能（追加機能不要）
-- HTML パース用の簡易セレクタがあると便利（将来 stdlib 候補）
+- Fully implementable with Almide's http + json + string (no additional features needed)
+- A simple selector for HTML parsing would be useful (future stdlib candidate)
 
-## ベンチマーク対象言語
+## Benchmark Target Languages
 
-### 従来言語（stdlib 機能比較）
+### Traditional Languages (stdlib feature comparison)
 
-| 言語 | リフレクション手段 | stdlib 規模 |
+| Language | Reflection Tool | stdlib Scale |
 |------|-------------------|-------------|
 | Go | `go doc -json` | ~150 packages |
 | Python | `inspect` module | ~200 modules |
 | Rust | `rustdoc --output-format json` | ~50 modules + crates |
 | Deno | `deno doc --json` | ~30 modules |
-| Swift | `swift-symbolgraph-extract` | Foundation + 標準 |
+| Swift | `swift-symbolgraph-extract` | Foundation + standard |
 | Kotlin | `dokka` / `kotlin-reflect` | kotlin-stdlib + kotlinx |
 | Ruby | `ri --format=json` | ~100 modules |
 
-### LLM 時代の言語（修正成功率・設計思想比較）
+### LLM-Era Languages (modification success rate and design philosophy comparison)
 
-| 言語 | 登場 | 特徴 | Almide との比較ポイント |
+| Language | Appeared | Characteristics | Comparison Points with Almide |
 |------|------|------|----------------------|
-| **Mojo** | 2023 | Python スーパーセット、AI/ML 向け、コンパイル型 | 性能 vs 書きやすさのバランス、LLM が Python 知識を転用できる設計 |
-| **Moonbit** | 2023 | WASM-first、core/x の 2 層 stdlib、AI 支援前提設計 | stdlib 設計が最も参考になる。Almide の 3 層設計の元ネタ |
-| **Gleam** | 2024 (1.0) | 型安全、BEAM + JS マルチターゲット、シンプル構文 | マルチターゲット codegen、エラー設計、@extern パターンの参考元 |
-| **Pkl** | 2024 | Apple 発、設定言語、型付き構造化データ | 設定ファイル用途での DSL 設計 |
-| **Bend** | 2024 | 超並列関数型、GPU 自動並列化 | 並列計算モデル、関数型最適化 |
-| **Roc** | 開発中 | 関数型、ランタイム例外ゼロ、platform 分離 | platform 分離、エラーなし設計、LLM 向けシンプルさ |
+| **Mojo** | 2023 | Python superset, AI/ML focused, compiled | Balance of performance vs writability, designed for LLMs to leverage Python knowledge |
+| **Moonbit** | 2023 | WASM-first, 2-layer stdlib of core/x, designed for AI assistance | Most relevant stdlib design reference. Origin of Almide's 3-layer design |
+| **Gleam** | 2024 (1.0) | Type-safe, BEAM + JS multi-target, simple syntax | Multi-target codegen, error design, reference for @extern pattern |
+| **Pkl** | 2024 | By Apple, configuration language, typed structured data | DSL design for configuration file purposes |
+| **Bend** | 2024 | Massively parallel functional, automatic GPU parallelization | Parallel computation model, functional optimization |
+| **Roc** | In development | Functional, zero runtime exceptions, platform separation | Platform separation, error-free design, simplicity for LLMs |
 
-### LLM 修正成功率で直接比較すべき 3 言語
+### 3 Languages for Direct Comparison by LLM Modification Success Rate
 
-1. **Mojo** — Python 互換の知識転用 vs Almide の独自構文。LLM の既存知識量で Mojo が有利な可能性
-2. **Moonbit** — WASM-first + AI 支援前提。stdlib 設計思想が最も近い。直接競合
-3. **Gleam** — シンプル構文 + 強い型。マルチターゲットの先行事例。`@extern` パターンを Almide が参考にした
+1. **Mojo** -- Python-compatible knowledge transfer vs Almide's unique syntax. Mojo may have an advantage due to LLMs' existing Python knowledge
+2. **Moonbit** -- WASM-first + designed for AI assistance. Closest stdlib design philosophy. Direct competitor
+3. **Gleam** -- Simple syntax + strong types. Prior example of multi-target. Almide referenced Gleam's `@extern` pattern
 
-### 計測方法
+### Measurement Method
 
-Grammar Lab の A/B テスト基盤で、同じタスクを Almide / Mojo / Moonbit / Gleam で LLM に書かせ、修正成功率を比較する。
+Using Grammar Lab's A/B testing framework, have LLMs write the same tasks in Almide / Mojo / Moonbit / Gleam, and compare modification success rates.
 
 ```
-タスク例:
-- FizzBuzz → JSON API サーバー（段階的に複雑化）
-- CSV → JSON 変換ツール
-- TODO アプリ（CRUD + テスト）
+Example tasks:
+- FizzBuzz -> JSON API server (progressively more complex)
+- CSV -> JSON conversion tool
+- TODO app (CRUD + tests)
 
-計測項目:
-- 初回正答率（一発で正しく書けるか）
-- 修正成功率（エラーから自力修復できるか）
-- コード量（同じ機能を書くのに何行か）
-- エラーメッセージの有用性（LLM がエラーから修正できるか）
+Metrics:
+- First-attempt success rate (can it write correctly on the first try?)
+- Modification success rate (can it self-repair from errors?)
+- Code volume (how many lines for the same feature?)
+- Error message usefulness (can the LLM fix code from error messages?)
 ```
 
 ### Auto-Collection Targets

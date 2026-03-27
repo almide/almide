@@ -11,8 +11,8 @@ Built on top of Derive Conventions Phase 1-2 (convention declaration + method re
 |------|------|------|
 | `a == b` where a: Dog | `Dog.eq(a, b)` | `type Dog: Eq` |
 | `"${d}"` where d: Dog | `Dog.repr(d)` | `type Dog: Repr` |
-| `list.sort(dogs)` | `Dog.ord` を comparator に | `type Dog: Ord` |
-| `map[dog]` | `Dog.hash(dog)` をキーに | `type Dog: Hash` |
+| `list.sort(dogs)` | `Dog.ord` as comparator | `type Dog: Ord` |
+| `map[dog]` | `Dog.hash(dog)` as key | `type Dog: Hash` |
 
 ## Implementation
 

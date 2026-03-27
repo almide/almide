@@ -47,8 +47,8 @@ effect fn process_stream(url: String) -> Unit = {
 ### Rust
 
 - WebSocket: `tungstenite` (sync) or `tokio-tungstenite` (async backend)
-- SSE: HTTP chunked response のパース
-- Stream trait: `Iterator` ベース (sync) or `futures::Stream` (async)
+- SSE: Parsing HTTP chunked responses
+- Stream trait: `Iterator`-based (sync) or `futures::Stream` (async)
 
 ### TS
 

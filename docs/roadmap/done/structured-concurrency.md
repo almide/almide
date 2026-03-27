@@ -164,7 +164,7 @@ await sleep(100ms)
 
 | Spec | Phase | Content | Impact on Almide |
 |------|---------|------|----------------|
-| **JSPI** (JS Promise Integration) | **Phase 4 (standardized)**| WASM↔JS Promise の自動ブリッジ。同期的 WASM コードから async JS API を透過的に呼べる。~1μs/call。Chrome 137+, Firefox 139+ | **最重要**。Almide WASM ターゲットのベース技術 |
+| **JSPI** (JS Promise Integration) | **Phase 4 (standardized)**| Automatic WASM<->JS Promise bridge. Transparently call async JS APIs from synchronous WASM code. ~1us/call. Chrome 137+, Firefox 139+ | **Most important**. Base technology for Almide's WASM target |
 | **Asyncify** (Binaryen) | Available | Compile-time transformation to save/restore WASM stack. Code size +50% | Fallback for environments where JSPI is unavailable |
 | **Threads + SharedArrayBuffer** | Standardized | Shared memory between Workers. CORS constraints | Only when true parallelism is needed. Not needed in Phase 1 |
 | **Stack Switching** | Phase 3 | WASM-level coroutines/fibers | Could become the foundation for cooperative executors in the future |
@@ -246,7 +246,7 @@ Dependency impact:
 
 ```typescript
 // Almide: async let a = fetch_a()
-// TS:     const __a_promise = fetch_a();  // 即座に開始
+// TS:     const __a_promise = fetch_a();  // starts immediately
 
 // Almide: await a
 // TS:     await __a_promise
@@ -270,10 +270,10 @@ Challenges:
 With JSPI (Phase 4, Chrome 137+ / Firefox 139+), async JS APIs can be called from synchronous WASM code. For Almide's WASM target:
 
 ```
-async let a = fetch_a()   →  WASM 内では逐次実行（JSPI が suspend/resume）
-async let b = fetch_b()   →  a 完了後に b 開始
-await a                    →  既に完了済
-await b                    →  既に完了済
+async let a = fetch_a()   ->  Sequential execution within WASM (JSPI handles suspend/resume)
+async let b = fetch_b()   ->  b starts after a completes
+await a                    ->  Already completed
+await b                    ->  Already completed
 ```
 
 In Phase 1, `async let` degrades to "sequential execution on a single thread." This is not correct but safe (no deadlocks, same results, just slower).
@@ -315,8 +315,8 @@ async fn risky_compute() -> Result[Int, String] =
 - Parsing of `async fn` / `await` (AST: `Decl::Fn { async: Some(bool) }`, `Expr::Await`)
 - Type checking: `async fn` treated equivalently to `effect fn`. `await` unwraps `Result<T, E>` to `T`
 - IR: `IrExprKind::Await`, `IrFunction { is_async }`
-- Rust codegen: `async fn` → Rust `async fn`。`await` → `almide_block_on(expr)`
-- TS codegen: `async fn` → TS `async function`。`await` → `await expr`
+- Rust codegen: `async fn` -> Rust `async fn`. `await` -> `almide_block_on(expr)`
+- TS codegen: `async fn` -> TS `async function`. `await` -> `await expr`
 - HTTP stdlib has native async functions
 
 ### Known Issues
@@ -334,11 +334,11 @@ async fn risky_compute() -> Result[Int, String] =
 
 Stabilize existing async/await before proceeding to Layer 2.
 
-- [ ] **`almide_block_on` を tokio に置換**
+- [ ] **Replace `almide_block_on` with tokio**
   - `tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(future)`
   - Codegen change to add tokio dependency to generated `Cargo.toml`
   - Add branch to not use tokio for WASM target
-- [ ] **Layer 1 テスト追加** (`spec/lang/async_test.almd`)
+- [ ] **Add Layer 1 tests** (`spec/lang/async_test.almd`)
   - `async fn` declaration and calling with `await`
   - Error propagation with `async fn` + `do` block
   - Calling stdlib async functions inside `async fn` (`http.get` etc.)
@@ -362,8 +362,8 @@ Stabilize existing async/await before proceeding to Layer 2.
 - [ ] `async let` only usable inside `async fn` (error otherwise)
 
 **IR**:
-- [ ] `IrStmtKind::AsyncLet { var: VarId, value: IrExpr }` 追加
-- [ ] `IrExprKind::AwaitHandle { var: VarId }` 追加（`Await` とは別。ハンドル変数の join）
+- [ ] Add `IrStmtKind::AsyncLet { var: VarId, value: IrExpr }`
+- [ ] Add `IrExprKind::AwaitHandle { var: VarId }` (separate from `Await`; joins the handle variable)
 
 **Rust codegen**:
 ```rust
@@ -375,7 +375,7 @@ let __handle_a = tokio::task::spawn_local(async move { fetch_a().await });
 // ↓
 let a = __handle_a.await.unwrap();
 
-// スコープ終了（do ブロック）— sibling cancellation
+// Scope exit (do block) -- sibling cancellation
 // ↓
 // JoinSet::abort_all() + drop
 ```
@@ -394,11 +394,11 @@ const __a_promise = fetch_a();
 // ↓
 const a = await __a_promise;
 
-// do ブロック内のエラー伝播は既存の try/catch で処理
+// Error propagation inside do block handled by existing try/catch
 ```
-- [ ] `async let` → 即座に Promise を開始する `const` 束縛に変換
-- [ ] `await x` → `await __x_promise`
-- [ ] `do` ブロック内: `Promise.allSettled` でのクリーンアップは best-effort
+- [ ] `async let` -> convert to `const` binding that immediately starts a Promise
+- [ ] `await x` -> `await __x_promise`
+- [ ] Inside `do` block: cleanup with `Promise.allSettled` is best-effort
 
 **WASM codegen**:
 - [ ] Phase 1 uses eager sequential fallback: `async let a = f()` is equivalent to `let a = await f()`
@@ -433,13 +433,13 @@ const a = await __a_promise;
 // sleep(100) → new Promise(r => setTimeout(r, 100))
 ```
 
-- [ ] テスト (`spec/stdlib/async_test.almd`)
+- [ ] Tests (`spec/stdlib/async_test.almd`)
 
 ### Phase 3: Async streams (future)
 
-- [ ] `Stream[T]` 型
+- [ ] `Stream[T]` type
 - [ ] `stream.for_each(fn(item) => ...)`, `stream.map(...)`, `stream.collect()`
-- [ ] `for item in stream { }` — existing `for...in` recognizes Stream
+- [ ] `for item in stream { }` -- existing `for...in` recognizes Stream
 - [ ] Backpressure via bounded channels
 - [ ] Note: `for await x in stream { }` syntax will not be added. Handle with existing `for...in` syntax
 

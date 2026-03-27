@@ -87,7 +87,7 @@ Separate `--target` (output language) from `--platform` (API availability), and 
 Enable natural patterns for writing HTTP handlers in Almide.
 
 ```almide
-// Cloudflare Workers 向けの最小例
+// Minimal example for Cloudflare Workers
 effect fn handle(req: Request) -> Response =
   match req.method {
     "GET" => Response.text("Hello from Almide"),
@@ -95,9 +95,9 @@ effect fn handle(req: Request) -> Response =
   }
 ```
 
-- [ ] `Request`/`Response` 型の定義 (Web standard Fetch API 準拠 — `@extern(js-web, ...)`)
-- [ ] `export default { fetch: handle }` 形式の出力
-- [ ] Cloudflare Workers / Deno Deploy / Vercel Edge 向けのエントリポイントテンプレート
+- [ ] Define `Request`/`Response` types (compliant with Web standard Fetch API -- `@extern(js-web, ...)`)
+- [ ] Output in `export default { fetch: handle }` format
+- [ ] Entry point templates for Cloudflare Workers / Deno Deploy / Vercel Edge
 
 ### Phase 4: Benchmarks & Validation
 

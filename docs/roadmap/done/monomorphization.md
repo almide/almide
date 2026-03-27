@@ -47,10 +47,10 @@ Common solution: **clone the function for each concrete type at the call site (m
 fn set_name[T: { name: String, .. }](x: T, n: String) -> T =
   { ...x, name: n }
 
-// Dog で呼ばれた → Dog 版を生成:
+// Called with Dog → generates Dog version:
 // fn set_name__Dog(x: Dog, n: String) -> Dog { Dog { name: n, ..x } }
 
-// Person で呼ばれた → Person 版を生成:
+// Called with Person → generates Person version:
 // fn set_name__Person(x: Person, n: String) -> Person { Person { name: n, ..x } }
 ```
 
@@ -94,7 +94,7 @@ transform[T=List[Int]]          → set_name__List_Int
 To write generically:
 
 ```almide
-// これは書けない — list.map は List 専用
+// Cannot write this — list.map is List-specific
 fn double_all[F: Mappable](container: F[Int]) -> F[Int] =
   container.map((x) => x * 2)
 ```
@@ -104,8 +104,8 @@ fn double_all[F: Mappable](container: F[Int]) -> F[Int] =
 Almide has no trait/typeclass. Instead, protocols are expressed via **fixed conventions**:
 
 ```almide
-// Protocol = 構造的制約 + 固定メソッド名
-// Mappable は「.map(f) を持つコンテナ」
+// Protocol = structural constraint + fixed method names
+// Mappable means "a container that has .map(f)"
 
 fn transform[C: Mappable[Int, Int]](c: C, f: fn(Int) -> Int) -> C =
   c.map(f)
@@ -129,12 +129,12 @@ This is close to HKT (Higher-Kinded Types), but Almide substitutes with the foll
 fn transform[C: Mappable](xs: C[Int], f: fn(Int) -> Int) -> C[Int] =
   xs.map(f)
 
-// C = List[Int] の場合:
+// When C = List[Int]:
 // fn transform__List_Int(xs: Vec<i64>, f: impl Fn(i64) -> i64) -> Vec<i64> {
 //     list_map(xs, f)
 // }
 
-// C = Option[Int] の場合:
+// When C = Option[Int]:
 // fn transform__Option_Int(xs: Option<i64>, f: impl Fn(i64) -> i64) -> Option<i64> {
 //     xs.map(f)
 // }

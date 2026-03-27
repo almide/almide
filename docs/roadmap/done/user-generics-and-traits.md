@@ -34,32 +34,32 @@ Opens the convention system to user-defined protocols. Built-in conventions (Eq,
 ### Syntax
 
 ```almide
-// protocol 定義
+// Protocol definition
 protocol Action {
   fn name(a: Self) -> String
   fn execute(a: Self, ctx: Context) -> Result[String, String]
 }
 
-// 型が protocol を満たすことを宣言（既存の convention 構文と同じ）
+// Declare that a type satisfies a protocol (same syntax as existing conventions)
 type GreetAction: Action = { greeting: String }
 
-// convention methods で実装（既存の仕組み、変更なし）
+// Implement with convention methods (existing mechanism, no changes)
 fn GreetAction.name(a: GreetAction) -> String = "greet"
 fn GreetAction.execute(a: GreetAction, ctx: Context) -> Result[String, String] =
   ok(a.greeting)
 
-// generic bounds で使用
+// Used in generic bounds
 fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
   action.execute(ctx)
 
-// impl ブロックで実装（convention methods の代替構文）
+// Implement with impl block (alternative syntax for convention methods)
 impl Action for GreetAction {
   fn name(a: GreetAction) -> String = "greet"
   fn execute(a: GreetAction, ctx: Context) -> Result[String, String] =
     ok(a.greeting)
 }
 
-// derive との共存
+// Coexistence with derive
 type User: Codec = { name: String, age: Int } derive(Codec)
 ```
 

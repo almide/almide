@@ -13,10 +13,10 @@ Almide's compilation pipeline already has cross-target-ready structure:
 ```
 Source (.almd)
   → Lexer → Parser → AST
-  → Checker → IR (共通)
+  → Checker → IR (shared)
   → emit_rust/  (native CLI / cargo crate)
-  → emit_ts/    (TS/JS / npm パッケージ)
-  → emit_wasm/  (将来: WASM 直接出力 + JS グルー)
+  → emit_ts/    (TS/JS / npm package)
+  → emit_wasm/  (future: direct WASM output + JS glue)
 ```
 
 - Checker and IR are common across all targets

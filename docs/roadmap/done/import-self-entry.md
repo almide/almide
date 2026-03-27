@@ -45,7 +45,7 @@ grammar.keyword_groups()   // access pub fn from mod.almd
 
 ## Implementation
 
-`src/resolve.rs` の `resolve_imports_with_deps` 内:
+In `resolve_imports_with_deps` in `src/resolve.rs`:
 
 ```rust
 if is_self_import {

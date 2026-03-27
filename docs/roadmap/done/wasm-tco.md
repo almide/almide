@@ -81,8 +81,8 @@ Use `return_call` / `return_call_indirect` instructions from the WASM Tail Call 
 Convert recursive calls to "return next call info" form and run in a driver loop.
 
 ```wasm
-;; 各関数は "Continue(args)" か "Done(result)" を返す
-;; ドライバーがループで Continue を処理
+;; Each function returns "Continue(args)" or "Done(result)"
+;; The driver processes Continue in a loop
 ```
 
 **Advantages**: Handles mutual recursion
@@ -92,10 +92,10 @@ Convert recursive calls to "return next call info" form and run in a driver loop
 
 ### Phase 1: Self-Recursive Tail Call → Loop (Top Priority)
 
-1. **Tail position 検出器**: `is_tail_position(expr, fn_name) -> bool`
-   - 関数body末尾の Call
-   - if/match の各分岐末尾の Call
-   - do ブロック末尾の Call
+1. **Tail position detector**: `is_tail_position(expr, fn_name) -> bool`
+   - Call at the end of function body
+   - Call at the end of each if/match branch
+   - Call at the end of do block
 
 2. **Loop rewrite pass**: `pass_tco.rs`
    - Target: functions that call themselves in tail position
@@ -119,7 +119,7 @@ Waiting for wasmtime default support. Once available, use wasm-encoder's `return
 
 ## Related Files
 
-- `src/codegen/target.rs` — codegen パイプライン定義
-- `src/codegen/emit_wasm/calls.rs:128-137` — `call` 命令の emit
-- `src/ir/mod.rs:218` — `Call` IR ノード
-- `spec/lang/tco_test.almd` — TCO テスト
+- `src/codegen/target.rs` — codegen pipeline definition
+- `src/codegen/emit_wasm/calls.rs:128-137` — emit of `call` instructions
+- `src/ir/mod.rs:218` — `Call` IR node
+- `spec/lang/tco_test.almd` — TCO tests
