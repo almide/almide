@@ -5,7 +5,11 @@
 use crate::types::FnSig;
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "option", "error", "datetime", "testing", "log", "value", "set"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "error", "datetime", "testing", "log", "value", "set"];
+
+/// Bundled stdlib modules that should be auto-imported (Tier 1 behavior).
+/// These are written in Almide but available without explicit `import`.
+pub const AUTO_IMPORT_BUNDLED: &[&str] = &["option", "result"];
 
 
 /// Check if a module name is a hardcoded stdlib module.
@@ -19,6 +23,8 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
     match name {
         "args" => Some(include_str!("../stdlib/args.almd")),
         "path" => Some(include_str!("../stdlib/path.almd")),
+        "option" => Some(include_str!("../stdlib/option.almd")),
+        "result" => Some(include_str!("../stdlib/result.almd")),
         _ => None,
     }
 }

@@ -320,6 +320,32 @@ impl Parser {
                     callee: Box::new(expr), args, named_args, type_args: None,
                     id: self.next_id(), span, resolved_type: None,
                 };
+            } else if self.check(TokenType::Bang) && !self.newline_before_current() {
+                // expr! — unwrap with error propagation
+                let span = Some(self.current_span());
+                self.advance();
+                expr = Expr::Unwrap {
+                    expr: Box::new(expr),
+                    id: self.next_id(), span, resolved_type: None,
+                };
+            } else if self.check(TokenType::QuestionQuestion) {
+                // expr ?? fallback — unwrap with default
+                let span = Some(self.current_span());
+                self.advance();
+                self.skip_newlines();
+                let fallback = self.parse_unary()?;
+                expr = Expr::UnwrapOr {
+                    expr: Box::new(expr), fallback: Box::new(fallback),
+                    id: self.next_id(), span, resolved_type: None,
+                };
+            } else if self.check(TokenType::Question) && !self.newline_before_current() {
+                // expr? — convert to Option
+                let span = Some(self.current_span());
+                self.advance();
+                expr = Expr::ToOption {
+                    expr: Box::new(expr),
+                    id: self.next_id(), span, resolved_type: None,
+                };
             } else {
                 break;
             }

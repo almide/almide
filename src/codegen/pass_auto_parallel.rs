@@ -217,8 +217,13 @@ fn is_pure_expr(
         IrExprKind::OptionSome { expr } | IrExprKind::Clone { expr } |
         IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. } |
         IrExprKind::BoxNew { expr } | IrExprKind::ToVec { expr } |
-        IrExprKind::Try { expr } | IrExprKind::Await { expr } => {
+        IrExprKind::Try { expr } | IrExprKind::Await { expr } |
+        IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr } => {
             is_pure_expr(expr, local_vars, effect_fns, mutable_vars)
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            is_pure_expr(expr, local_vars, effect_fns, mutable_vars) &&
+            is_pure_expr(fallback, local_vars, effect_fns, mutable_vars)
         }
 
         // Nested lambda: treat as pure boundary (it captures, but we check its own refs)
@@ -477,6 +482,9 @@ fn rewrite_expr(
             }).collect(),
         },
         IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
+        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)), fallback: Box::new(rewrite_expr(*fallback, effect_fns, mutable_vars)) },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
         IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
         IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
         IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },

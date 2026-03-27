@@ -341,6 +341,64 @@ impl Checker {
             ast::Expr::Break { .. } | ast::Expr::Continue { .. } => Ty::Unit,
             ast::Expr::Hole { .. } | ast::Expr::Todo { .. } => self.fresh_var(),
             ast::Expr::Await { expr, .. } => self.infer_expr(expr),
+
+            // expr! — unwrap with propagation (Option[T] → T, Result[T,E] → T)
+            ast::Expr::Unwrap { expr: inner, .. } => {
+                let t = self.infer_expr(inner);
+                let resolved = resolve_ty(&t, &self.uf);
+                if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
+                    inner_ty
+                } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+                    self.fresh_var()
+                } else {
+                    self.emit(super::err(
+                        format!("operator '!' requires Option or Result type but got {}", resolved.display()),
+                        "Use '!' only on Option[T] or Result[T, E] values",
+                        "operator !",
+                    ));
+                    Ty::Unknown
+                }
+            }
+            // expr ?? fallback — unwrap with default (Option[T] → T, Result[T,E] → T)
+            ast::Expr::UnwrapOr { expr: inner, fallback, .. } => {
+                let t = self.infer_expr(inner);
+                let ft = self.infer_expr(fallback);
+                let resolved = resolve_ty(&t, &self.uf);
+                let inner_ty = if let Some(ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
+                    ty
+                } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+                    ft.clone()
+                } else {
+                    self.emit(super::err(
+                        format!("operator '??' requires Option or Result type but got {}", resolved.display()),
+                        "Use '??' only on Option[T] or Result[T, E] values",
+                        "operator ??",
+                    ));
+                    ft.clone()
+                };
+                self.unify_infer(&inner_ty, &ft);
+                inner_ty
+            }
+            // expr? — to Option (Result[T,E] → Option[T], Option[T] → Option[T])
+            ast::Expr::ToOption { expr: inner, .. } => {
+                let t = self.infer_expr(inner);
+                let resolved = resolve_ty(&t, &self.uf);
+                if let Some(ok_ty) = resolved.result_ok_ty() {
+                    Ty::option(ok_ty)
+                } else if resolved.is_option() {
+                    resolved.clone()
+                } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+                    Ty::option(self.fresh_var())
+                } else {
+                    self.emit(super::err(
+                        format!("operator '?' requires Option or Result type but got {}", resolved.display()),
+                        "Use '?' only on Option[T] or Result[T, E] values",
+                        "operator ?",
+                    ));
+                    Ty::Unknown
+                }
+            }
+
             ast::Expr::Error { .. } | ast::Expr::Placeholder { .. } => Ty::Unknown,
 
             ast::Expr::MapLiteral { entries, .. } => {

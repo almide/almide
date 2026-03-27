@@ -255,6 +255,12 @@ pub enum IrExprKind {
     OptionSome { expr: Box<IrExpr> },
     OptionNone,
     Try { expr: Box<IrExpr> },
+    /// expr! — unwrap with error propagation (effect fn only)
+    Unwrap { expr: Box<IrExpr> },
+    /// expr ?? fallback — unwrap with default value
+    UnwrapOr { expr: Box<IrExpr>, fallback: Box<IrExpr> },
+    /// expr? — convert Result to Option (identity for Option)
+    ToOption { expr: Box<IrExpr> },
     Await { expr: Box<IrExpr> },
 
     // ── Codegen-specific (inserted by Nanopass passes) ──
