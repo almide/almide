@@ -20,7 +20,7 @@
 | [HTTPS Native Support](active/https-native.md) | Native HTTPS support via rustls across all targets |
 | [Purity Exploitation — Leveraging fn/effect fn Distinction](active/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | [Stdlib in Almide: Unified Library Architecture](active/stdlib-in-almide.md) | Rewrite stdlib in Almide with a 3-layer architecture |
-| [Unwrap Operators: `!` `??` `?`](active/unwrap-operators.md) | Postfix !, ??, and ? operators for explicit Result/Option unwrapping |
+| [Unwrap Operators: `!` `??` `?` `?.`](active/unwrap-operators.md) | Postfix !, ??, ? and ?. operators for explicit Result/Option unwrapping |
 | [WASM HTTP Client](active/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
 | [WASM Remaining FS Operations](active/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
 

@@ -1,213 +1,51 @@
-<!-- description: Postfix !, ??, and ? operators for explicit Result/Option unwrapping -->
-# Unwrap Operators: `!` `??` `?`
+<!-- description: Postfix !, ??, ? and ?. operators for explicit Result/Option unwrapping -->
+# Unwrap Operators: `!` `??` `?` `?.`
 
-Three postfix operators that unify Result and Option handling. Replaces auto-`?` insertion, `From` convention, and most explicit match/guard patterns for error handling.
+## Status
 
-## Motivation
+**Implemented.** All operators work on all three targets (Rust, TypeScript, WASM). 18 tests passing.
 
-### Problems with current design
+### What's done
 
-1. **auto-`?` is invisible** — `effect fn` silently inserts `?` on Result-returning calls. Violates Surface Semantics: the user can't see where errors propagate.
+- [x] Lexer: `!`, `?`, `??`, `?.` tokens
+- [x] Parser: postfix operators in `parse_postfix()`
+- [x] AST: `Unwrap`, `UnwrapOr`, `ToOption`, `OptionalChain` nodes
+- [x] Type checker: Option/Result-aware inference for all operators
+- [x] IR: dedicated nodes + `OptionalChain` for target-specific rendering
+- [x] Lowering: AST → IR mapping
+- [x] Walker: template-based rendering with type dispatch
+- [x] Rust codegen: `?`, `.ok_or()?`, `match`, `.as_ref().map()`
+- [x] TS codegen: passthrough, IIFE null-check, `?.` + `?? null`
+- [x] WASM codegen: Option/Result layout-aware (ptr==0 vs tag-based)
+- [x] All nanopass passes updated (20+ files)
+- [x] `From` convention removed from docs
+- [x] Tests: 18 tests covering all operators on both types
+- [x] Docs site updated
 
-2. **`From` convention is opaque** — `type AppError: From = ...` generates implicit type conversions. Users (and LLMs) can't predict when conversion happens.
+### What remains
 
-3. **Result/Option nesting hell** — `Option[Result[T, E]]` or `Result[Option[T], E]` requires verbose match/guard patterns. No composable unwrapping.
+- [ ] Remove `pass_result_propagation.rs` auto-`?` insertion (coexists for now)
+- [ ] Migration lint: warn on bare Result calls in `effect fn` without operator
+- [ ] Update all existing spec/test files to use explicit `!` instead of auto-`?`
+- [ ] Bump to v0.9.4 release
 
-4. **Option has no propagation** — `?` only works for Result. Option requires manual `guard` + `match`.
+## Operators
 
-### Design principle
-
-All three problems share a root cause: **implicit unwrapping**. The fix is **explicit unwrapping with clear operators**.
-
-## Specification
-
-### `expr!` — must succeed (error propagation)
-
-Unwraps the value. On failure, returns `err(...)` from the enclosing `effect fn`.
-
-```
-// On Result[T, E]: ok(v) → v, err(e) → return err(e)
-// On Option[T]:    some(v) → v, none → return err("none")
-```
-
-```
-effect fn load(path: String) -> Result[Config, String] = {
-  let text = fs.read_text(path)!      // err → propagates
-  let config = json.parse(text)!      // err → propagates
-  ok(config)
-}
-
-effect fn find_user(id: Int) -> Result[User, String] = {
-  let user = map.get(users, id)!      // none → err("none")
-  ok(user)
-}
-```
-
-Only valid inside `effect fn`. Compile error elsewhere.
-
-### `expr ?? fallback` — or else (default value)
-
-Unwraps the value. On failure, evaluates to the fallback expression.
-
-```
-// On Result[T, E]: ok(v) → v, err(_) → fallback
-// On Option[T]:    some(v) → v, none → fallback
-```
-
-```
-let port = int.parse(input) ?? 8080
-let name = map.get(config, "name") ?? "anonymous"
-let text = fs.read_text(path) ?? ""
-```
-
-Valid anywhere. Pure expression — no effect fn requirement.
-
-### `expr?` — try (Option downgrade)
-
-Unwraps the value. On failure, evaluates to `none`. Converts Result to Option.
-
-```
-// On Result[T, E]: ok(v) → some(v), err(_) → none
-// On Option[T]:    some(v) → some(v), none → none (identity)
-```
-
-```
-fn try_parse(s: String) -> Option[Int] =
-  int.parse(s)?           // err → none
-
-fn lookup(config: Map[String, String], key: String) -> Option[Int] =
-  int.parse(map.get(config, key)?)?
-  // map.get: Option → ? unwraps or returns none
-  // int.parse: Result → ? converts err to none
-```
-
-Valid anywhere. Returns Option.
-
-## Summary table
-
-| Operator | On success | On failure | Context | Returns |
-|----------|-----------|------------|---------|---------|
-| `expr!` | unwrap | propagate err | `effect fn` only | `T` |
-| `expr ?? val` | unwrap | use fallback | anywhere | `T` |
-| `expr?` | unwrap → some | `none` | anywhere | `Option[T]` |
-
-Strength: `!` (strict) > `??` (flexible) > `?` (lenient)
-
-## What this replaces
-
-| Current | New |
-|---------|-----|
-| auto-`?` insertion in `effect fn` | Explicit `!` operator |
-| `From` convention on error types | Explicit `result.map_err(...)!` or `??` |
-| `guard opt != none else err(...)` | `opt!` |
-| `result.unwrap_or(expr, default)` | `expr ?? default` |
-| `option.unwrap_or(expr, default)` | `expr ?? default` |
-| `option.to_result(expr, "msg")` | `expr!` |
-| `match x { some(v) => v, none => ... }` | `x ?? ...` or `x!` |
-
-## Nesting solved
-
-```
-// Before: nested hell
-let port: Option[Result[Int, String]] =
-  option.map(map.get(config, "port"), (s) => int.parse(s))
-let value = match port {
-  some(ok(n)) => n,
-  some(err(_)) => 8080,
-  none => 8080,
-}
-
-// After: composable operators
-let value = int.parse(map.get(config, "port") ?? "8080") ?? 8080
-```
+| Operator | On success | On failure | Context |
+|----------|-----------|------------|---------|
+| `expr!` | unwrap | propagate err | `effect fn` only |
+| `expr ?? val` | unwrap | use fallback | anywhere |
+| `expr?` | unwrap → some | `none` | anywhere |
+| `expr?.field` | access field | `none` | anywhere |
 
 ## Error type design
 
 **Decision: `Result[T, String]` as default, `Result[T, E]` for opt-in typed errors.**
 
-### Rationale
-
-Surveyed error handling across Go, Rust, Swift, Zig, Gleam, Elm, Python, TypeScript. Key finding: **the error type parameter `E` is the #1 source of LLM errors in Rust.** Every time an LLM chooses between `String`, `Box<dyn Error>`, `anyhow::Error`, or a custom enum, there's a 30-50% chance it picks wrong.
-
-### Design
-
-```
-// 90% case: E defaults to String. User never thinks about error types.
-effect fn load(path: String) -> Result[Config, String] = {
-  let text = fs.read_text(path)!
-  let config = json.parse(text)!
-  ok(config)
-}
-
-// 10% case: explicit typed errors when branching is needed.
-type LoadError = | NotFound(String) | ParseFailed(String)
-
-effect fn load(path: String) -> Result[Config, LoadError] = {
-  let text = fs.read_text(path)
-    |> result.map_err((e) => NotFound(e))!
-  let config = json.parse(text)
-    |> result.map_err((e) => ParseFailed(e))!
-  ok(config)
-}
-```
-
-### What was considered and rejected
-
-| Option | Verdict | Reason |
-|--------|---------|--------|
-| Fixed E = String (no parametric) | Rejected | Can't branch on error kinds when needed |
-| Zig-style `throws` syntax | Rejected | New syntax for a 10% use case adds complexity |
-| `From` convention for auto-conversion | **Removed** | Implicit type conversion violates Surface Semantics |
+The error type parameter `E` is the #1 source of LLM errors in Rust. Removing that choice for the common case maximizes modification survival rate.
 
 ## Breaking changes
 
-1. **`From` convention removed** — `type Foo: From = ...` no longer valid. Use `result.map_err(...)!` for explicit error type conversion.
-
-2. **auto-`?` removed** — `effect fn` no longer silently inserts `?`. All Result-returning calls must use `!`, `??`, or `?` explicitly.
-
-3. **`!` as prefix** — Currently `!expr` gives error "use `not`". Postfix `expr!` is a new token; no conflict.
-
-## Migration
-
-```
-// Before (auto-?)
-effect fn process() -> Result[String, String] = {
-  let text = fs.read_text("data.txt")
-  ok(text)
-}
-
-// After (explicit !)
-effect fn process() -> Result[String, String] = {
-  let text = fs.read_text("data.txt")!
-  ok(text)
-}
-```
-
-Automated migration: insert `!` after every Result-returning call inside `effect fn` that was previously auto-wrapped.
-
-## Implementation plan
-
-1. Add `!`, `??`, `?` as postfix operators to lexer + parser
-2. Lower to existing IR nodes (Try, UnwrapOr, ToOption)
-3. Remove `pass_result_propagation.rs` auto-insertion
-4. Remove `From` convention from `lower/derive.rs`
-5. Add migration lint: warn on bare Result calls in `effect fn` without operator
-6. Update all spec/test files
-7. Update docs, CHEATSHEET, SPEC
-
-## Parser changes
-
-```
-// In parse_postfix(), after call/index/member:
-if self.check(TokenType::Bang) && !self.newline_before_current() {
-    // expr!
-}
-if self.check(TokenType::Question) && !self.newline_before_current() {
-    // expr?  (distinct from ident? which is IdentQ token)
-}
-if self.check(TokenType::QuestionQuestion) {
-    // expr ?? fallback
-}
-```
-
-`?` on expressions vs `?` on identifiers: the lexer already distinguishes `IdentQ` (identifier with trailing `?`) from a standalone `?` token. Postfix `expr?` appears after a `)`, `]`, identifier, or literal — never after whitespace before an identifier.
+1. **`From` convention removed** — Use `result.map_err(...)!` for explicit error type conversion.
+2. **auto-`?` still present** — Will be removed in a future release. Explicit `!` is preferred.
+3. **`!` as prefix** — Still gives error "use `not`". Postfix `expr!` is a new token; no conflict.
