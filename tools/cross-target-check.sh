@@ -1,62 +1,67 @@
 #!/bin/bash
-# Cross-Target CI: Run spec tests on both Rust and TS targets, compare results.
+# Cross-Target CI: Run spec tests on Rust, TS, and WASM targets, compare results.
 # Usage: ./tools/cross-target-check.sh [dir]
-# Requires: deno
+# Requires: deno (for TS), wasmtime (for WASM)
 
-set -euo pipefail
+set -uo pipefail
 
 DIR="${1:-spec/lang}"
-ALMIDE="cargo run --quiet --"
+ALMIDE="${ALMIDE:-./target/release/almide}"
 PASS=0
-FAIL=0
+FAIL_TS=0
+FAIL_WASM=0
 SKIP=0
 ERRORS=""
 TMPDIR=$(mktemp -d)
 
 trap "rm -rf $TMPDIR" EXIT
 
+has_deno=$(command -v deno >/dev/null 2>&1 && echo 1 || echo 0)
+has_wasmtime=$(command -v wasmtime >/dev/null 2>&1 && echo 1 || echo 0)
+
 for f in "$DIR"/*_test.almd; do
     [ -f "$f" ] || continue
     name=$(basename "$f" .almd)
 
     # 1. Run on Rust target
-    rust_out=$($ALMIDE test "$f" 2>/dev/null | grep "^test " || true)
-    if [ -z "$rust_out" ]; then
+    if ! $ALMIDE test "$f" >/dev/null 2>&1; then
         SKIP=$((SKIP + 1))
         continue
     fi
 
-    # 2. Emit TS
-    ts_code=$($ALMIDE "$f" --target ts 2>/dev/null) || true
-    if [ -z "$ts_code" ]; then
-        FAIL=$((FAIL + 1))
-        ERRORS="$ERRORS\n  TS emit failed: $name"
-        continue
+    ok=1
+
+    # 2. TS target
+    if [ "$has_deno" = "1" ]; then
+        if ! $ALMIDE test "$f" --target ts >/dev/null 2>&1; then
+            FAIL_TS=$((FAIL_TS + 1))
+            ts_err=$($ALMIDE test "$f" --target ts 2>&1 | tail -3)
+            ERRORS="$ERRORS\n  TS   failed: $name — $ts_err"
+            ok=0
+        fi
     fi
 
-    # 3. Run TS with Deno
-    ts_file="$TMPDIR/${name}.ts"
-    echo "$ts_code" > "$ts_file"
-    ts_result=$(deno run --allow-all "$ts_file" 2>&1) || true
-
-    # 4. Check TS ran without errors
-    if echo "$ts_result" | grep -qi "error\|Error\|TypeError\|ReferenceError"; then
-        FAIL=$((FAIL + 1))
-        ts_err=$(echo "$ts_result" | grep -i "error" | head -1)
-        ERRORS="$ERRORS\n  TS run failed: $name — $ts_err"
-    else
-        PASS=$((PASS + 1))
+    # 3. WASM target
+    if ! $ALMIDE test "$f" --target wasm >/dev/null 2>&1; then
+        FAIL_WASM=$((FAIL_WASM + 1))
+        wasm_err=$($ALMIDE test "$f" --target wasm 2>&1 | tail -3)
+        ERRORS="$ERRORS\n  WASM failed: $name — $wasm_err"
+        ok=0
     fi
+
+    [ "$ok" = "1" ] && PASS=$((PASS + 1))
 done
 
+total=$((PASS + FAIL_TS + FAIL_WASM + SKIP))
 echo ""
 echo "=== Cross-Target Check: $DIR ==="
-echo "Both OK:        $PASS"
-echo "TS failed:      $FAIL"
+echo "All targets OK: $PASS"
+[ "$has_deno" = "1" ] && echo "TS failed:      $FAIL_TS" || echo "TS:             (skipped — deno not found)"
+echo "WASM failed:    $FAIL_WASM"
 echo "Rust-only skip: $SKIP"
-echo "Total:          $((PASS + FAIL + SKIP))"
+echo "Total files:    $total"
 if [ -n "$ERRORS" ]; then
     echo -e "\nFailures:$ERRORS"
 fi
 echo ""
-[ "$FAIL" -eq 0 ]
+[ "$FAIL_TS" -eq 0 ] && [ "$FAIL_WASM" -eq 0 ]
