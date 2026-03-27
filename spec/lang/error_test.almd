@@ -28,13 +28,13 @@ test "match on err" {
 
 // ── effect fn with auto-? ──
 effect fn parse_int(s: String) -> Result[Int, String] = {
-  let n = int.parse(s);
+  let n = int.parse(s)!;
   ok(n)
 }
 
 effect fn add_parsed(a: String, b: String) -> Result[Int, String] = {
-  let x = parse_int(a);
-  let y = parse_int(b);
+  let x = parse_int(a)!;
+  let y = parse_int(b)!;
   ok(x + y)
 }
 
@@ -59,8 +59,8 @@ effect fn validate_positive(n: Int) -> Result[Int, String] = {
 }
 
 effect fn double_positive(s: String) -> Result[Int, String] = {
-  let n = parse_int(s);
-  let valid = validate_positive(n);
+  let n = parse_int(s)!;
+  let valid = validate_positive(n)!;
   ok(valid * 2)
 }
 
@@ -217,8 +217,8 @@ test "guard else err division" {
 }
 
 effect fn chain_divide(a: Int, b: Int, c: Int) -> Result[Int, String] = {
-  let x = safe_divide(a, b);
-  let y = safe_divide(x, c);
+  let x = safe_divide(a, b)!;
+  let y = safe_divide(x, c)!;
   ok(y)
 }
 
@@ -241,9 +241,9 @@ test "multiple guards in sequence" {
 }
 
 effect fn parse_and_validate(s: String) -> Result[Int, String] = {
-  let n = parse_int(s);
-  let valid = validate_positive(n);
-  let ranged = validate_range(valid, 1, 100);
+  let n = parse_int(s)!;
+  let valid = validate_positive(n)!;
+  let ranged = validate_range(valid, 1, 100)!;
   ok(ranged)
 }
 
@@ -271,7 +271,7 @@ test "result equality" {
 }
 
 effect fn validate_string(s: String) -> Result[String, String] = {
-  let nonempty = require_nonempty(s);
+  let nonempty = require_nonempty(s)!;
   guard string.len(nonempty) <= 10 else err("too long");
   ok(nonempty)
 }
@@ -297,7 +297,7 @@ test "guard with var in while" {
 effect fn try_parse_list(strs: List[String]) -> Result[List[Int], String] = {
   var result: List[Int] = [];
   for s in strs {
-    let n = parse_int(s);
+    let n = parse_int(s)!;
     result = result + [n];
   };
   ok(result)
@@ -319,7 +319,7 @@ test "guard with complex boolean condition" {
 }
 
 effect fn classify(n: Int) -> Result[String, String] = {
-  let valid = validate_positive(n);
+  let valid = validate_positive(n)!;
   let result = if valid > 100 then "big"
   else if valid > 10 then "medium" else "small";
   ok(result)
@@ -345,7 +345,7 @@ test "guard with interpolated error message" {
 effect fn sum_parsed(strs: List[String]) -> Result[Int, String] = {
   var total = 0;
   for s in strs {
-    let n = parse_int(s);
+    let n = parse_int(s)!;
     total = total + n;
   };
   ok(total)

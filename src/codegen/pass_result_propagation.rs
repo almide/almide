@@ -53,15 +53,8 @@ impl NanoPass for ResultPropagationPass {
             if !lifted_fns.is_empty() {
                 func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
             }
-            if func.is_effect && !func.is_test {
-                let returns_result = func.ret_ty.is_result();
-                func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
-                collect_retyped_vars(&func.body, &mut retyped_vars);
-                if !retyped_vars.is_empty() {
-                    func.body = fix_var_types(std::mem::take(&mut func.body), &retyped_vars);
-                    retyped_vars.clear();
-                }
-            } else if func.is_test {
+            // Auto-? insertion disabled — use explicit ! operator instead
+            if func.is_test {
                 if !lifted_fns.is_empty() {
                     func.body = insert_try_for_lifted(std::mem::take(&mut func.body), &lifted_fns);
                 }
@@ -73,15 +66,7 @@ impl NanoPass for ResultPropagationPass {
                 if !lifted_fns.is_empty() {
                     func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
                 }
-                if func.is_effect && !func.is_test {
-                    let returns_result = func.ret_ty.is_result();
-                    func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
-                    collect_retyped_vars(&func.body, &mut retyped_vars);
-                    if !retyped_vars.is_empty() {
-                        func.body = fix_var_types(std::mem::take(&mut func.body), &retyped_vars);
-                        retyped_vars.clear();
-                    }
-                }
+                // Auto-? insertion disabled for modules too
             }
         }
 

@@ -29,7 +29,7 @@ test "float.to_string zero" {
 
 // ── float.parse ──
 effect fn parse_float(s: String) -> Result[Float, String] = {
-  let n = float.parse(s);
+  let n = float.parse(s)!;
   ok(n)
 }
 
