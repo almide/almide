@@ -1,34 +1,35 @@
-# Diagnostic end_col — エラー波線の精度向上
+<!-- description: Track end column in diagnostics for precise error underlines -->
+# Diagnostic end_col — Precise Error Underlines
 
-**優先度:** 低〜中 — 診断品質の仕上げ。セカンダリスパン活性化で主要な改善は完了済み
-**前提:** セカンダリスパン活性化済み（E006/E005/E009 で宣言地点表示）
+**Priority:** Low-Medium — A polish pass for diagnostic quality. Major improvements already completed with secondary span activation
+**Prerequisites:** Secondary spans activated (declaration site display for E006/E005/E009)
 
 ---
 
-## 現状
+## Current State
 
-- `Diagnostic` 構造体に `end_col: Option<usize>` フィールドは存在
-- 全箇所で `None` のまま — populate されていない
-- 結果: エラー箇所のハイライトが `^^^` ではなく `^` 1文字のみ
+- `Diagnostic` struct already has an `end_col: Option<usize>` field
+- All call sites leave it as `None` — never populated
+- Result: error highlights show only a single `^` instead of `^^^`
 
-## 変更が必要な箇所
+## Required Changes
 
-### AST 層
-- `src/ast.rs` の `Span` 構造体に `end_col: usize` を追加
-- lexer がトークンの終了列を記録する必要あり
+### AST Layer
+- Add `end_col: usize` to the `Span` struct in `src/ast.rs`
+- Lexer needs to record the end column of each token
 
-### Parser 層
-- `src/lexer.rs` でトークン生成時に end_col を計算
+### Parser Layer
+- Compute end_col during token generation in `src/lexer.rs`
 
-### Type Checker 層
-- `src/check/mod.rs` の `emit()` で `span.end_col` → `diag.end_col` に設定
+### Type Checker Layer
+- Set `span.end_col` → `diag.end_col` in `emit()` in `src/check/mod.rs`
 
-## 影響範囲
+## Impact Scope
 
-- **AST 全体に波及** — Span を使う全ての箇所が影響を受ける
-- コンパイラの多くの部分で Span を構築しているため、変更量が大きい
-- 機能的には破壊的変更なし（end_col は Optional）
+- **Propagates across the entire AST** — every location that uses Span is affected
+- Many parts of the compiler construct Span, so the change volume is large
+- No functional breaking changes (end_col is Optional)
 
-## 推奨
+## Recommendation
 
-別 PR で実施。セカンダリスパンの活性化で「複数地点の同時表示」は既に動いているため、緊急度は低い。
+Implement in a separate PR. Since secondary span activation already enables "displaying multiple locations simultaneously," urgency is low.

@@ -1,42 +1,43 @@
-# GPU Compute — Matrix型とコンパイラ駆動のGPU実行
+<!-- description: Matrix primitive type with compiler-driven CPU/GPU execution -->
+# GPU Compute — Matrix Type and Compiler-Driven GPU Execution
 
-**優先度:** Phase 3 (Runtime Foundation)
-**前提:** Bytes型完了、WASM export完了、nanopass pipeline完了
-**原則:** ユーザーは普通のAlmideコードを書く。GPUの存在を意識しない。`--target cuda` でGPU、なければCPU。
-**構文制約:** 新しいキーワードなし。`Matrix` プリミティブ型と `grad` 組み込み関数のみ追加。
+**Priority:** Phase 3 (Runtime Foundation)
+**Prerequisites:** Bytes type completed, WASM export completed, nanopass pipeline completed
+**Principle:** Users write ordinary Almide code. They don't think about GPUs. `--target cuda` runs on GPU, otherwise CPU.
+**Syntax constraint:** No new keywords. Only a `Matrix` primitive type and a `grad` built-in function are added.
 
-> 「書くのはAlmide。動くのがCPUかGPUかはコンパイラが決める。」
-
----
-
-## 設計思想
-
-### なぜやるか
-
-Almideのミッション「LLMが最も正確に書ける言語」の最大の未開拓領域がML。LLMがMLコードを書く時の最頻出バグ:
-1. テンソル次元の不一致
-2. デバイス配置ミス (CPU/GPU)
-3. 勾配フロー切断
-
-Almideの型システム + コンパイラ最適化でこれらを消せる。
-
-### 設計原則
-
-1. **新しい概念を足さない** — `Matrix` は `Bytes` と同じプリミティブ。`grad` は `println` と同じ組み込み関数
-2. **演算子で書く** — `x * w` が行列積。`tensor.matmul(x, w)` ではない
-3. **GPUを隠蔽する** — ターゲットフラグでバックエンドが変わる。コードは同一
-4. **既存のRustエコシステムに乗る** — burn/candle が autograd・GPU実行・メモリ管理を持つ。車輪の再発明しない
-5. **nanopass で融合** — `map |> map` の融合と同じ仕組みで element-wise op を fused kernel に
+> "You write Almide. Whether it runs on CPU or GPU is the compiler's decision."
 
 ---
 
-## フェーズ
+## Design Philosophy
 
-### Step 1: Matrix プリミティブ型
+### Why
 
-Bytes型と同じパターン。コンパイラ変更最小。
+The largest untapped area for Almide's mission "the language LLMs can write most accurately" is ML. The most frequent bugs when LLMs write ML code:
+1. Tensor dimension mismatches
+2. Device placement errors (CPU/GPU)
+3. Gradient flow disconnection
 
-**言語側:**
+Almide's type system + compiler optimization can eliminate these.
+
+### Design Principles
+
+1. **Add no new concepts** — `Matrix` is a primitive just like `Bytes`. `grad` is a built-in just like `println`
+2. **Write with operators** — `x * w` is matrix multiplication. Not `tensor.matmul(x, w)`
+3. **Hide the GPU** — The backend changes based on the target flag. Code stays the same
+4. **Ride the existing Rust ecosystem** — burn/candle already provide autograd, GPU execution, and memory management. No reinventing the wheel
+5. **Fuse via nanopass** — Same mechanism as `map |> map` fusion turns element-wise ops into fused kernels
+
+---
+
+## Phases
+
+### Step 1: Matrix Primitive Type
+
+Same pattern as the Bytes type. Minimal compiler changes.
+
+**Language side:**
 ```
 let w = matrix.zeros(512, 1536)
 let x = matrix.randn(32, 512)
@@ -44,49 +45,49 @@ let y = x * w + bias
 let shape = matrix.shape(y)  // → (32, 1536)
 ```
 
-**コンパイラ実装:**
-- [ ] `Ty::Matrix` を `Ty` enum に追加
-- [ ] `TypeConstructorId::Matrix` 登録
-- [ ] パーサ/チェッカーの型解決に `"Matrix" => Ty::Matrix` 追加
+**Compiler implementation:**
+- [ ] Add `Ty::Matrix` to the `Ty` enum
+- [ ] Register `TypeConstructorId::Matrix`
+- [ ] Add `"Matrix" => Ty::Matrix` to parser/checker type resolution
 - [ ] Rust codegen: `ndarray::Array2<f64>` (CPU)
 - [ ] `stdlib/defs/matrix.toml` — zeros, randn, shape, transpose, from_lists, to_lists
-- [ ] `runtime/rs/src/matrix.rs` — ndarray ラッパー
-- [ ] テスト
+- [ ] `runtime/rs/src/matrix.rs` — ndarray wrapper
+- [ ] Tests
 
-**演算子オーバーロード:**
-- [ ] `*` で `(Matrix, Matrix)` → 行列積
-- [ ] `+` `-` で `(Matrix, Matrix)` → element-wise
-- [ ] `*` `/` で `(Matrix, Float)` → スカラー演算
-- [ ] codegen の Binary op 分岐に Matrix パターン追加
+**Operator overloading:**
+- [ ] `*` for `(Matrix, Matrix)` → matrix multiplication
+- [ ] `+` `-` for `(Matrix, Matrix)` → element-wise
+- [ ] `*` `/` for `(Matrix, Float)` → scalar operations
+- [ ] Add Matrix patterns to codegen Binary op dispatch
 
-**検証:** `almide run` でCPU上の行列演算が動く
+**Verification:** Matrix operations run on CPU via `almide run`
 
-### Step 2: GPU バックエンド
+### Step 2: GPU Backend
 
-`--target cuda` で burn/candle に切り替え。ユーザコード変更なし。
+Switch to burn/candle with `--target cuda`. No user code changes.
 
-**codegen 分岐:**
+**codegen dispatch:**
 ```
-Ty::Matrix の codegen →
+Ty::Matrix codegen →
   target == Rust:  ndarray::Array2<f64>      (CPU)
   target == Cuda:  burn::Tensor<CudaBackend, 2>  (GPU)
 ```
 
-**実装:**
-- [ ] `codegen::pass::Target::Cuda` 追加
-- [ ] Rust codegen の Matrix 型レンダリングを target で分岐
-- [ ] `runtime/rs/src/matrix_gpu.rs` — burn ラッパー (matmul, add, transpose, etc.)
-- [ ] `Cargo.toml` テンプレートに burn 依存を追加
-- [ ] `almide build model.almd --target cuda` で GPU バイナリ生成
-- [ ] CUDA 環境でのテスト
+**Implementation:**
+- [ ] Add `codegen::pass::Target::Cuda`
+- [ ] Branch Matrix type rendering in Rust codegen based on target
+- [ ] `runtime/rs/src/matrix_gpu.rs` — burn wrapper (matmul, add, transpose, etc.)
+- [ ] Add burn dependency to `Cargo.toml` template
+- [ ] `almide build model.almd --target cuda` generates GPU binary
+- [ ] Tests in CUDA environment
 
-**検証:** 同じ .almd が CPU と GPU 両方で同じ結果を返す
+**Verification:** Same .almd returns identical results on both CPU and GPU
 
-### Step 3: grad と学習ループ
+### Step 3: grad and Training Loops
 
-`grad(loss, w)` で burn の autodiff に展開。
+`grad(loss, w)` expands to burn's autodiff.
 
-**言語側:**
+**Language side:**
 ```
 fn train_step(x: Matrix, w: Matrix, target: Matrix, lr: Float) -> Matrix =
   let pred = x * w |> leaky_relu(0.5) |> square
@@ -95,21 +96,21 @@ fn train_step(x: Matrix, w: Matrix, target: Matrix, lr: Float) -> Matrix =
   w - lr * dw
 ```
 
-**コンパイラ実装:**
-- [ ] `grad(loss, param)` を組み込み関数として認識
-- [ ] codegen: `loss.backward()` + `grads.get(&param)` に展開 (burn autodiff)
-- [ ] 勾配追跡対象の変数をマーク (burn の `require_grad`)
-- [ ] activation 関数を stdlib に追加: leaky_relu, relu, softmax, sigmoid, tanh
-- [ ] 損失関数を stdlib に追加: cross_entropy, mse
-- [ ] テスト: 小さいMLPの学習が収束する
+**Compiler implementation:**
+- [ ] Recognize `grad(loss, param)` as a built-in function
+- [ ] codegen: expand to `loss.backward()` + `grads.get(&param)` (burn autodiff)
+- [ ] Mark variables tracked for gradients (burn's `require_grad`)
+- [ ] Add activation functions to stdlib: leaky_relu, relu, softmax, sigmoid, tanh
+- [ ] Add loss functions to stdlib: cross_entropy, mse
+- [ ] Test: small MLP training converges
 
-**検証:** XOR問題の学習が動く
+**Verification:** XOR problem training works
 
-### Step 4: nanopass 融合
+### Step 4: Nanopass Fusion
 
-element-wise op 列を 1 kernel に融合。Parameter Golf で直接効く。
+Fuse element-wise op chains into a single kernel. Directly impacts Parameter Golf.
 
-**例:**
+**Example:**
 ```
 x * w |> leaky_relu(0.5) |> square
 // ↓ nanopass rewrite
@@ -118,26 +119,26 @@ fused_elementwise(x * w, [leaky_relu(0.5), square])
 // 1 fused CUDA kernel (3 kernel launches → 1)
 ```
 
-**実装:**
-- [ ] IR パターン: `map(map(x, f), g)` → `map(x, f >> g)` (既存)
-- [ ] element-wise 数値パターン検出 pass
-- [ ] fused kernel の codegen (Triton or CUDA C)
-- [ ] ベンチマーク: 融合 vs 非融合の速度比較
+**Implementation:**
+- [ ] IR pattern: `map(map(x, f), g)` → `map(x, f >> g)` (existing)
+- [ ] Element-wise numeric pattern detection pass
+- [ ] Fused kernel codegen (Triton or CUDA C)
+- [ ] Benchmark: fused vs non-fused speed comparison
 
-**検証:** Parameter Golf ベースラインの forward pass が高速化
+**Verification:** Parameter Golf baseline forward pass is faster
 
-### Step 5 (将来): 型レベル次元チェック
+### Step 5 (Future): Type-Level Dimension Checking
 
 ```
 fn linear(x: Matrix[B, 512], w: Matrix[512, 1536]) -> Matrix[B, 1536] =
   x * w
 ```
 
-コンパイル時に次元不整合を検出。dependent types のサブセット。Phase 3 以降。
+Detect dimension mismatches at compile time. A subset of dependent types. Phase 3 and beyond.
 
 ---
 
-## ターゲットマッピング
+## Target Mapping
 
 ```
 Almide type    Rust (CPU)              CUDA (GPU)              WASM
@@ -146,10 +147,10 @@ Int            i64                     i64                     i64
 Float          f64                     f64                     f64
 String         String                  String                  i32 ptr
 Bytes          Vec<u8>                 Vec<u8>                 i32 ptr
-Matrix         ndarray::Array2<f64>    burn::Tensor<Cuda, 2>   ループ (小規模)
+Matrix         ndarray::Array2<f64>    burn::Tensor<Cuda, 2>   loops (small scale)
 ```
 
-## 依存クレート
+## Dependency Crates
 
 | Step | CPU | GPU |
 |------|-----|-----|
@@ -158,18 +159,18 @@ Matrix         ndarray::Array2<f64>    burn::Tensor<Cuda, 2>   ループ (小規
 | 3 | — | burn-autodiff |
 | 4 | — | burn-fusion or Triton |
 
-## 非ゴール (今は)
+## Non-Goals (For Now)
 
-| 項目 | 理由 |
-|------|------|
-| N次元テンソル | Matrix (2D) で十分。3D以上は将来 |
-| 独自 CUDA kernel | burn/candle のカーネルで十分 |
-| 分散学習 (multi-GPU) | Parameter Golf は 8xH100 だが、まず 1GPU |
-| 独自 autograd | burn に任せる。コンパイラADは将来検討 |
-| TPU/ROCm 対応 | burn が対応すれば自動的に使える |
+| Item | Reason |
+|------|--------|
+| N-dimensional tensors | Matrix (2D) is sufficient. 3D+ is future work |
+| Custom CUDA kernels | burn/candle kernels are sufficient |
+| Distributed training (multi-GPU) | Parameter Golf uses 8xH100, but start with 1 GPU |
+| Custom autograd | Delegate to burn. Compiler AD is future consideration |
+| TPU/ROCm support | Automatically available once burn supports them |
 
 ---
 
-## 一文で
+## In One Sentence
 
-> Matrix型を Bytes と同じプリミティブとして追加し、演算子で行列計算を書き、grad で勾配を取り、コンパイラがターゲットに応じて CPU/GPU コードを吐く。ユーザーは GPU の存在を知らない。
+> Add a Matrix type as a primitive like Bytes, write matrix operations with operators, take gradients with grad, and the compiler emits CPU/GPU code depending on the target. The user doesn't know GPUs exist.

@@ -1,41 +1,43 @@
-# Test Directory Structure Redesign [DONE]
+<!-- description: Reorganize tests into spec/ (lang/stdlib/integration) and tests/ -->
+<!-- done: 2026-03-12 -->
+# Test Directory Structure Redesign
 
-テスト関連がルートに散らばっていた（`lang/`, `stdlib/`, `exercises/`, `tests/`）問題を解決。
+Resolved the problem of test-related files being scattered across root directories (`lang/`, `stdlib/`, `exercises/`, `tests/`).
 
 ## Final Structure
 
 ```
-spec/                  ← Almide 言語テスト（almide test spec/）
-├── lang/              言語機能テスト（式、変数、関数、パターン、型、スコープ、エラー処理）
-├── stdlib/            stdlibモジュールテスト（string, list, map, int, float, math, json, regex, ...）
-└── integration/       マルチファイル・システム統合テスト（generics, modules, extern）
+spec/                  ← Almide language tests (almide test spec/)
+├── lang/              Language feature tests (expressions, variables, functions, patterns, types, scope, error handling)
+├── stdlib/            Stdlib module tests (string, list, map, int, float, math, json, regex, ...)
+└── integration/       Multi-file / system integration tests (generics, modules, extern)
 
-tests/                 ← Rust compiler テスト（cargo test, Cargo 自動検出）
+tests/                 ← Rust compiler tests (cargo test, Cargo auto-discovery)
 ├── lexer_test.rs
 ├── parser_test.rs
 ├── checker_test.rs
 └── ...
 
-stdlib/                ← ソースのみ（テスト混在解消）
+stdlib/                ← Source only (no more mixed-in tests)
 ├── defs/*.toml
 ├── args.almd
-└── (テストなし)
+└── (no tests)
 ```
 
 ## Why `spec/` + `tests/`
 
-- `tests/` は Cargo の慣習。auto-discovery が使え、`[[test]]` 個別指定が不要
-- `spec/` は `tests/` と明確に区別できる命名。`test/` と `tests/` が並ぶ混乱を回避
-- ルートで「テストどこ？」→ Rust なら `tests/`、Almide なら `spec/`
+- `tests/` follows Cargo convention. Auto-discovery works without needing per-file `[[test]]` entries
+- `spec/` is clearly distinct from `tests/`. Avoids the confusion of `test/` and `tests/` side by side
+- At the root, "where are the tests?" — Rust: `tests/`, Almide: `spec/`
 
-## コマンド対応
+## Command Mapping
 
 ```bash
-almide test                    # 全 .almd テスト（再帰検索）
-almide test spec/lang/         # 言語テスト
-almide test spec/stdlib/       # stdlib テスト
-almide test spec/integration/  # 統合テスト
-cargo test                     # Rust compiler テスト
+almide test                    # All .almd tests (recursive search)
+almide test spec/lang/         # Language tests
+almide test spec/stdlib/       # Stdlib tests
+almide test spec/integration/  # Integration tests
+cargo test                     # Rust compiler tests
 ```
 
 ## Migration Log
@@ -45,7 +47,7 @@ cargo test                     # Rust compiler テスト
 | 1 | `lang/*_test.almd` → `spec/lang/` | done |
 | 2 | `stdlib/*_test.almd` → `spec/stdlib/` | done |
 | 3 | `exercises/{generics,mod,extern}-test/` → `spec/integration/` | done |
-| 4 | Rust tests: `tests/` に残す（Cargo auto-discovery） | done |
-| 5 | `Cargo.toml` から `autotests = false` + `[[test]]` 削除 | done |
-| 6 | `CLAUDE.md` テストパス更新 | done |
-| 7 | 空ディレクトリ削除（`lang/`, `test/`） | done |
+| 4 | Rust tests: keep in `tests/` (Cargo auto-discovery) | done |
+| 5 | Remove `autotests = false` + `[[test]]` from `Cargo.toml` | done |
+| 6 | Update test paths in `CLAUDE.md` | done |
+| 7 | Delete empty directories (`lang/`, `test/`) | done |

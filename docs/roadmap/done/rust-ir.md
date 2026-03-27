@@ -1,83 +1,85 @@
-# RustIR: Rust Codegen 中間表現 [ACTIVE]
+<!-- description: Two-stage Rust codegen pipeline via RustIR intermediate repr -->
+<!-- done: 2026-03-15 -->
+# RustIR: Rust Codegen Intermediate Representation
 
-## 動機
+## Motivation
 
-現在の Rust codegen は `IR → 文字列` を1パスで行い、25+ フィールドの Emitter 構造体が状態フラグ（`in_effect`, `in_do_block`, `skip_auto_q` 等）で挙動を切り替える。この設計が以下のバグの根本原因：
+The current Rust codegen performs `IR -> string` in a single pass, with a 25+ field Emitter struct switching behavior via state flags (`in_effect`, `in_do_block`, `skip_auto_q`, etc.). This design is the root cause of the following bugs:
 
-| バグ | 原因 |
-|------|------|
-| do ブロック内 `let` で auto-`?` が効かない | checker と emitter で `?` 挿入判定が分散 |
-| do + guard で unreachable loop | guard → loop 変換と Ok ラップの相互作用 |
-| effect fn 内 for ループで Result 型不一致 | for 式を Ok() で包む判定が文脈依存 |
-| auto-`?` がユーザー fn と stdlib fn で異なる | 2 箇所の独立したロジック |
-| clone 挿入の散在 | ir_expressions, ir_blocks, program に分散 |
+| Bug | Cause |
+|-----|-------|
+| auto-`?` not working for `let` inside do block | `?` insertion logic split between checker and emitter |
+| Unreachable loop with do + guard | Interaction between guard-to-loop conversion and Ok wrapping |
+| Result type mismatch in for loop inside effect fn | Context-dependent decision to wrap for expression in Ok() |
+| auto-`?` behaves differently for user fn vs stdlib fn | Two independent logic paths |
+| Scattered clone insertion | Spread across ir_expressions, ir_blocks, program |
 
-共通パターン: **「文字列を組み立てる時点で、今の状態に応じて条件分岐する」** → 状態の組み合わせが爆発してテストで踏まないパスにバグが潜む。
+Common pattern: **"branching on current state when assembling strings"** -> state combinations explode and bugs hide in paths not covered by tests.
 
-## 設計: 2段パイプライン
+## Design: Two-Stage Pipeline
 
 ```
-現在:  IrProgram → Emitter(状態フラグ山盛り) → String
+Current:  IrProgram → Emitter(overloaded state flags) → String
 
-提案:  IrProgram → [Pass 1: Lower to RustIR] → RustIR → [Pass 2: Render] → String
-                     ↑ ここで全ての判定        ↑ 状態なし、純粋な文字列化
+Proposed: IrProgram → [Pass 1: Lower to RustIR] → RustIR → [Pass 2: Render] → String
+                       ↑ All decisions here         ↑ Stateless, pure stringification
 ```
 
-### Pass 1: IR → RustIR（判定パス）
+### Pass 1: IR -> RustIR (Decision Pass)
 
-全ての codegen 判定をここで行う：
-- auto-`?` 挿入: Result を返す呼び出しに `TryOp` を付ける
-- clone 挿入: borrow 分析 + use-count で `Clone` ノードを付ける
-- Ok ラップ: effect fn の戻り値に `ResultOk` を付ける
-- mut 判定: 代入がある変数に `mutable: true` を付ける
-- 型注釈: 必要な箇所にのみ型を付ける
+All codegen decisions are made here:
+- auto-`?` insertion: attach `TryOp` to calls that return Result
+- clone insertion: attach `Clone` nodes based on borrow analysis + use-count
+- Ok wrapping: attach `ResultOk` to effect fn return values
+- mut determination: set `mutable: true` on variables with assignments
+- type annotations: attach types only where needed
 
-全て **RustIR のデータ構造への変換** として表現。文字列操作なし。状態フラグなし。
+All expressed as **transformations to RustIR data structures**. No string manipulation. No state flags.
 
-### Pass 2: RustIR → String（描画パス）
+### Pass 2: RustIR -> String (Rendering Pass)
 
-RustIR を Rust ソースコードに変換する純粋な関数。判定ロジックゼロ。インデントと構文規則だけ。
+A pure function that converts RustIR to Rust source code. Zero decision logic. Only indentation and syntax rules.
 
-## RustIR の定義
+## RustIR Definition
 
 ```rust
-/// Rust コードの構造を表すデータ型。
-/// 文字列ではなく構造として持つことで、変換・検査・テストが容易になる。
+/// Data types representing the structure of Rust code.
+/// Holding as structure rather than strings makes transformation, inspection, and testing easier.
 
-// ── 式 ──
+// ── Expressions ──
 
 enum RustExpr {
-    // リテラル
+    // Literals
     IntLit(i64),
     FloatLit(f64),
     StringLit(String),
     BoolLit(bool),
     Unit,
 
-    // 変数
+    // Variables
     Var(String),
 
-    // 演算
+    // Operations
     BinOp { op: RustBinOp, left: Box<RustExpr>, right: Box<RustExpr> },
     UnOp { op: RustUnOp, operand: Box<RustExpr> },
 
-    // 呼び出し
+    // Calls
     Call { func: String, args: Vec<RustExpr> },
     MethodCall { receiver: Box<RustExpr>, method: String, args: Vec<RustExpr> },
     MacroCall { name: String, args: Vec<RustExpr> },  // println!, format!, vec!, etc.
 
-    // 制御フロー
+    // Control flow
     If { cond: Box<RustExpr>, then: Box<RustExpr>, else_: Option<Box<RustExpr>> },
     Match { subject: Box<RustExpr>, arms: Vec<RustMatchArm> },
     Block { stmts: Vec<RustStmt>, expr: Option<Box<RustExpr>> },
     For { var: String, iter: Box<RustExpr>, body: Vec<RustStmt> },
     While { cond: Box<RustExpr>, body: Vec<RustStmt> },
-    Loop { body: Vec<RustStmt> },  // guard 用
+    Loop { body: Vec<RustStmt> },  // for guard
     Break,
     Continue,
     Return(Option<Box<RustExpr>>),
 
-    // 所有権・エラー
+    // Ownership / Error handling
     Clone(Box<RustExpr>),              // expr.clone()
     ToOwned(Box<RustExpr>),            // expr.to_owned() / .to_string() / .to_vec()
     Borrow(Box<RustExpr>),             // &expr
@@ -87,45 +89,45 @@ enum RustExpr {
     OptionSome(Box<RustExpr>),         // Some(expr)
     OptionNone,                        // None
 
-    // コレクション
+    // Collections
     Vec(Vec<RustExpr>),                // vec![a, b, c]
     HashMap(Vec<(RustExpr, RustExpr)>), // HashMap::from([(k, v), ...])
     Tuple(Vec<RustExpr>),              // (a, b, c)
 
-    // アクセス
+    // Access
     Field(Box<RustExpr>, String),      // expr.field
     Index(Box<RustExpr>, Box<RustExpr>), // expr[idx]
     TupleIndex(Box<RustExpr>, usize),  // expr.0
 
-    // 構造体
+    // Structs
     StructInit { name: String, fields: Vec<(String, RustExpr)> },
     StructUpdate { base: Box<RustExpr>, fields: Vec<(String, RustExpr)> }, // { ..base, field: val }
 
-    // ラムダ
+    // Lambdas
     Closure { params: Vec<RustParam>, body: Box<RustExpr> },
 
-    // 文字列
+    // Strings
     Format { template: String, args: Vec<RustExpr> },  // format!("...", args)
 
-    // 型キャスト
+    // Type cast
     Cast { expr: Box<RustExpr>, ty: RustType },  // expr as Type
 
     // unsafe
     Unsafe(Box<RustExpr>),
 }
 
-// ── 文 ──
+// ── Statements ──
 
 enum RustStmt {
     Let { name: String, ty: Option<RustType>, mutable: bool, value: RustExpr },
     Assign { target: String, value: RustExpr },
     FieldAssign { target: String, field: String, value: RustExpr },
     IndexAssign { target: String, index: RustExpr, value: RustExpr },
-    Expr(RustExpr),  // 式文（副作用のみ）
+    Expr(RustExpr),  // Expression statement (side effects only)
     Comment(String),
 }
 
-// ── 型 ──
+// ── Types ──
 
 enum RustType {
     I64, F64, Bool, String, Unit,
@@ -134,16 +136,16 @@ enum RustType {
     Option(Box<RustType>),
     Result(Box<RustType>, Box<RustType>),
     Tuple(Vec<RustType>),
-    Named(String),                    // ユーザー定義型
+    Named(String),                    // User-defined type
     Generic(String, Vec<RustType>),   // Type<A, B>
     Ref(Box<RustType>),               // &Type
     RefStr,                           // &str
     Slice(Box<RustType>),             // &[T]
     Fn(Vec<RustType>, Box<RustType>), // impl Fn(A) -> B
-    Infer,                            // _ (型推論に任せる)
+    Infer,                            // _ (left to type inference)
 }
 
-// ── トップレベル ──
+// ── Top-level ──
 
 struct RustFunction {
     name: String,
@@ -194,73 +196,73 @@ struct RustProgram {
     enums: Vec<RustEnum>,
     functions: Vec<RustFunction>,
     impls: Vec<RustImpl>,
-    runtime: String,              // 埋め込みランタイムコード
+    runtime: String,              // Embedded runtime code
 }
 ```
 
-## 移行戦略
+## Migration Strategy
 
-### Phase 1: RustIR 定義 + Render パス
+### Phase 1: RustIR Definition + Render Pass
 
-1. `src/emit_rust/rust_ir.rs` に RustIR のデータ型を定義
-2. `src/emit_rust/render.rs` に RustIR → String の純粋な描画関数を実装
-3. 既存テストで render の正しさを検証（IR → 旧 codegen と IR → RustIR → render の出力を比較）
+1. Define RustIR data types in `src/emit_rust/rust_ir.rs`
+2. Implement pure rendering functions for RustIR -> String in `src/emit_rust/render.rs`
+3. Verify render correctness with existing tests (compare output of IR -> old codegen vs IR -> RustIR -> render)
 
-### Phase 2: Lower パス（段階的移行）
+### Phase 2: Lower Pass (Gradual Migration)
 
-1つずつ既存の `gen_ir_expr` を RustIR 生成に置き換える：
+Replace existing `gen_ir_expr` one by one with RustIR generation:
 
 ```
-Week 1: リテラル、変数、二項演算、単項演算
-Week 2: 関数呼び出し（auto-? をここで統一）
+Week 1: Literals, variables, binary ops, unary ops
+Week 2: Function calls (unify auto-? here)
 Week 3: if/match/block
-Week 4: for/while/do-block/guard（バグの巣窟を一掃）
-Week 5: clone/borrow 挿入（散在ロジックを集約）
-Week 6: トップレベル（関数宣言、型宣言、main ラッパー）
+Week 4: for/while/do-block/guard (clean out the bug nest)
+Week 5: clone/borrow insertion (consolidate scattered logic)
+Week 6: Top-level (function declarations, type declarations, main wrapper)
 ```
 
-各ステップで `almide test` 全通過を確認。
+Verify all `almide test` passes at each step.
 
-### Phase 3: 旧 codegen 削除
+### Phase 3: Delete Old Codegen
 
-全ての IR → RustIR 変換が完了したら：
-- 旧 `Emitter` の `gen_ir_expr` / `gen_ir_stmt` / `gen_ir_block` 等を削除
-- Emitter の 25+ フィールドのうち状態フラグ系を全て除去
-- RefCell/Cell を除去
+Once all IR -> RustIR conversions are complete:
+- Delete old `Emitter`'s `gen_ir_expr` / `gen_ir_stmt` / `gen_ir_block` etc.
+- Remove all state flag fields from Emitter's 25+ fields
+- Remove RefCell/Cell
 
-## 利点
+## Benefits
 
-| 問題 | 現在 | RustIR 後 |
-|------|------|-----------|
-| auto-`?` 挿入 | checker + emitter に散在、状態フラグ依存 | Lower パスの 1 箇所で決定 |
-| clone 挿入 | ir_expressions, ir_blocks, program に散在 | Lower パスの 1 箇所で決定 |
-| Ok ラップ | do-block codegen 内でアドホックに判定 | Lower パスで effect fn の return に ResultOk を付ける |
-| guard 変換 | loop + break + return の文字列結合 | RustIR の Loop + Break + Return ノードとして表現 |
-| テスト | 生成文字列の比較（脆い） | RustIR の構造比較（堅牢） |
-| Emitter 状態 | 25+ フィールド、Cell/RefCell | Lower コンテキスト（少数のフィールド）+ 状態なし Render |
-| IrProgram clone | 丸ごとディープコピー | `&IrProgram` 参照で十分 |
-| 新ターゲット追加 | Emitter を丸ごと複製 | RustIR の代わりに GoIR/CIR を作るだけ |
+| Problem | Current | After RustIR |
+|---------|---------|--------------|
+| auto-`?` insertion | Scattered across checker + emitter, state flag dependent | Decided in 1 place in the Lower pass |
+| clone insertion | Scattered across ir_expressions, ir_blocks, program | Decided in 1 place in the Lower pass |
+| Ok wrapping | Ad-hoc decision in do-block codegen | Attach ResultOk to effect fn return in Lower pass |
+| guard conversion | String concatenation of loop + break + return | Expressed as RustIR Loop + Break + Return nodes |
+| Testing | Comparing generated strings (brittle) | Structural comparison of RustIR (robust) |
+| Emitter state | 25+ fields, Cell/RefCell | Lower context (few fields) + stateless Render |
+| IrProgram clone | Full deep copy | `&IrProgram` reference is sufficient |
+| Adding new targets | Clone entire Emitter | Just create GoIR/CIR instead of RustIR |
 
-## 残すもの（変更不要）
+## What Stays (No Changes Needed)
 
-- `src/emit_rust/borrow.rs` — borrow 分析。IR → RustIR 変換で結果を参照するだけ
-- `src/emit_rust/*_runtime.txt` — 埋め込みランタイム。RustProgram.runtime にそのまま入る
-- `build.rs` + `stdlib/defs/*.toml` — stdlib codegen dispatch。変更不要
-- `src/emit_rust/mod.rs` の `EmitOptions` — オプションは Lower コンテキストに渡す
+- `src/emit_rust/borrow.rs` — borrow analysis. Just referenced during IR -> RustIR conversion
+- `src/emit_rust/*_runtime.txt` — embedded runtime. Goes directly into RustProgram.runtime
+- `build.rs` + `stdlib/defs/*.toml` — stdlib codegen dispatch. No changes needed
+- `EmitOptions` in `src/emit_rust/mod.rs` — options are passed to the Lower context
 
-## TS codegen との関係
+## Relationship to TS Codegen
 
-TS codegen にも同じパターンを適用可能：
+The same pattern can be applied to TS codegen:
 
 ```
 IR → TsIR → String
 ```
 
-ただし TS codegen は Rust ほど複雑ではない（clone/borrow/`?` がない）ので、優先度は低い。Rust 側で RustIR が成功したら同じ設計を適用する。
+However, TS codegen is less complex than Rust (no clone/borrow/`?`), so priority is low. Apply the same design after RustIR succeeds on the Rust side.
 
-## 関連ロードマップ
+## Related Roadmap
 
-- [Architecture Hardening](architecture-hardening.md) — Emitter リファクタ、IrProgram clone 除去（RustIR で解決）
-- [Codegen Correctness](codegen-correctness.md) — auto-? バグ群（RustIR で根本解決）
-- [Clone Reduction Phase 4](clone-reduction.md) — clone 挿入の集約（RustIR の Lower パスで実現）
-- [New Codegen Targets](new-codegen-targets.md) — Go/C/Python ターゲット（同じ 2 段パイプラインで追加）
+- [Architecture Hardening](architecture-hardening.md) — Emitter refactor, IrProgram clone removal (solved by RustIR)
+- [Codegen Correctness](codegen-correctness.md) — auto-? bug cluster (root-cause fixed by RustIR)
+- [Clone Reduction Phase 4](clone-reduction.md) — Consolidation of clone insertion (realized in RustIR Lower pass)
+- [New Codegen Targets](new-codegen-targets.md) — Go/C/Python targets (added via the same 2-stage pipeline)

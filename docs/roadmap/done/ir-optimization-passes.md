@@ -1,10 +1,12 @@
-# IR Optimization Passes [ACTIVE]
+<!-- description: IR-to-IR transform passes applied before codegen for all targets -->
+<!-- done: 2026-03-15 -->
+# IR Optimization Passes
 
-IR → IR 変換パスを codegen の前に挟み、生成コードの品質を向上させる。
+IR-to-IR transform passes inserted before codegen to improve generated code quality.
 
 ## Why
 
-IR redesign (Phase 1-5) により codegen は `&IrProgram` のみを入力とする。つまり IR を変換してから codegen に渡せば、全ターゲット (Rust/TS/JS) に最適化が自動適用される。現在は borrow analysis と use-count のみ。
+With IR redesign (Phase 1-5), codegen takes only `&IrProgram` as input. This means transforming the IR before passing it to codegen automatically applies optimizations to all targets (Rust/TS/JS). Currently only borrow analysis and use-count exist.
 
 ## Passes
 
@@ -13,24 +15,24 @@ IR redesign (Phase 1-5) により codegen は `&IrProgram` のみを入力とす
 | Pass | Effect | Status |
 |------|--------|--------|
 | **Constant folding** | `1 + 2` → `LitInt(3)`, `"a" ++ "b"` → `LitStr("ab")` | ✅ |
-| **Dead code elimination** | 到達不能ブランチ、使用されない let 束縛の除去 | ✅ |
+| **Dead code elimination** | Remove unreachable branches, unused let bindings | ✅ |
 | **Constant propagation** | `let x = 5; x + 1` → `5 + 1` → `6` | future |
 
 ### Tier 2: Medium complexity
 
 | Pass | Effect |
 |------|--------|
-| **Inlining** | 小さな関数 (body が単一式) のインライン展開 |
-| **Common subexpression elimination** | 同一式の重複計算を let 束縛にまとめる |
-| **Loop-invariant code motion** | for/while ループ内の不変式をループ外に移動 |
+| **Inlining** | Inline expansion of small functions (body is a single expression) |
+| **Common subexpression elimination** | Consolidate duplicate computations of identical expressions into let bindings |
+| **Loop-invariant code motion** | Move invariant expressions inside for/while loops to outside the loop |
 
 ### Tier 3: Advanced
 
 | Pass | Effect |
 |------|--------|
-| **Tail call optimization** | 自己再帰末尾呼出 → labeled loop (既存 roadmap と統合可能) |
-| **Escape analysis** | ヒープ割当の回避 (borrow analysis の発展) |
-| **Specialization** | 型引数に基づく関数特殊化 (monomorphization の前段) |
+| **Tail call optimization** | Self-recursive tail call → labeled loop (can merge with existing roadmap) |
+| **Escape analysis** | Avoid heap allocation (evolution of borrow analysis) |
+| **Specialization** | Function specialization based on type arguments (precursor to monomorphization) |
 
 ## Architecture
 
@@ -49,16 +51,16 @@ Lowering → IrProgram
          Codegen (Rust / TS / JS)
 ```
 
-各パスは `fn(ir: &mut IrProgram)` シグネチャ。パスの適用順序は固定。`--opt-level` フラグで制御。
+Each pass has `fn(ir: &mut IrProgram)` signature. Pass application order is fixed. Controlled by `--opt-level` flag.
 
 ## Unlocked by
 
-IR Redesign Phase 5 完了。codegen が IR のみを参照するため、IR 変換が codegen 出力に直接反映される。
+IR Redesign Phase 5 complete. Since codegen only references the IR, IR transforms are directly reflected in codegen output.
 
 ## Affected files
 
 | File | Change |
 |------|--------|
-| `src/opt/` (new) | 最適化パスモジュール |
-| `src/main.rs` | パイプラインにパス挿入 |
-| `src/cli.rs` | `--opt-level` フラグ |
+| `src/opt/` (new) | Optimization pass module |
+| `src/main.rs` | Insert passes into pipeline |
+| `src/cli.rs` | `--opt-level` flag |

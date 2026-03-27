@@ -86,8 +86,22 @@ template = "Ok({inner})"
 [err_expr]
 template = "Err(format!(\"{:?}\", {inner}))"
 
-[unwrap_or_expr]
-template = "{expr}.unwrap_or({default})"
+[[unwrap_expr]]
+template = "({inner})?"
+
+[[unwrap_expr]]
+when_type = "Option"
+template = "({inner}).ok_or(\"none\".to_string())?"
+
+[[unwrap_or_expr]]
+template = "match {inner} {{ Ok(v) => v, Err(_) => {fallback}, }}"
+
+[[unwrap_or_expr]]
+when_type = "Option"
+template = "match {inner} {{ Some(v) => v, None => {fallback}, }}"
+
+[to_option_expr]
+template = "({inner}).ok()"
 
 # ── Match ──
 
@@ -445,3 +459,9 @@ template = "{name}: Clone + PartialEq + PartialOrd"
 
 [generic_bound_full]
 template = "{name}: Clone + std::fmt::Debug + PartialEq + PartialOrd"
+
+[generic_bound_minimal]
+template = "{name}: Clone"
+
+[optional_chain_expr]
+template = "{inner}.as_ref().map(|__v| __v.{field}.clone())"

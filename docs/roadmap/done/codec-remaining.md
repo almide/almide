@@ -1,47 +1,49 @@
-# Codec Remaining [ACTIVE]
+<!-- description: Remaining codec features after Phase 0-2 completion -->
+<!-- done: 2026-03-15 -->
+# Codec Remaining
 
-Phase 0-2 完了。残りの機能。
+Phase 0-2 complete. Remaining features.
 
 ## Done
 
 ### Variant encode (Tagged) ✅
-Unit/Tuple/Record variant → `{"CaseName": payload}` 形式で encode
-Variant decode は stub (err を返す) — full decode は Future
+Unit/Tuple/Record variant → encode in `{"CaseName": payload}` format
+Variant decode is a stub (returns err) — full decode is Future
 
-### json decode パターン ✅
+### json decode pattern ✅
 ```almide
 match json.parse(text) { ok(v) => Person.decode(v), err(e) => err(e) }
 ```
-`json.decode[T](text)` convenience は checker 型引数解決が必要 → Future
+`json.decode[T](text)` convenience requires checker type argument resolution → Future
 
-### value ユーティリティ ✅
-- `value.pick(v, keys)` / `value.omit(v, keys)` — フィールド選択/除外
-- `value.merge(a, b)` — Object 結合
-- `value.to_camel_case(v)` / `value.to_snake_case(v)` — キー名変換
-- `value.rename_keys(v, fn)` — 汎用キー変換 (runtime 内部)
+### value utilities ✅
+- `value.pick(v, keys)` / `value.omit(v, keys)` — field selection/exclusion
+- `value.merge(a, b)` — Object merging
+- `value.to_camel_case(v)` / `value.to_snake_case(v)` — key name conversion
+- `value.rename_keys(v, fn)` — generic key conversion (runtime internal)
 
 ### Naming strategy ✅
 ```almide
 let camel = value.to_camel_case(person.encode())
 let text = json.stringify(camel)  // → {"userName": "Alice"}
 ```
-関数合成で実現。`Codec(snake_case)` 構文は Future の sugar。
+Achieved via function composition. `Codec(snake_case)` syntax is future sugar.
 
 ## Future
 
-旧 TOML → runtime crate 移行は [Stdlib Runtime Architecture](stdlib-self-hosted-redesign.md) のスコープ。Codec 側は TOML で動作中。
+Legacy TOML → runtime crate migration is in the scope of [Stdlib Runtime Architecture](stdlib-self-hosted-redesign.md). Codec side runs on TOML.
 
-### DecodeError 構造化
+### Structured DecodeError
 - `DecodeError { path: List[String], kind: DecodeErrorKind }`
-- error path: `"coord.lon"` 形式
+- error path: `"coord.lon"` format
 
 ### json.validate[T] / json.repair[T]
-- validate: decode せずに問題を列挙
-- repair: 修復しながら decode (Safe/Coercive)
+- validate: enumerate issues without decoding
+- repair: decode while repairing (Safe/Coercive)
 
 ### json.describe[T] — JSON Schema
-- JSON Schema Draft 2020-12 互換
+- JSON Schema Draft 2020-12 compatible
 
-### 他フォーマット
+### Other formats
 - yaml.stringify / yaml.parse
-- toml → Value ベースに移行
+- toml → migrate to Value-based

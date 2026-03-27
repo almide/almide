@@ -1,4 +1,5 @@
-# Research: Modification Survival Rate Paper [ON HOLD]
+<!-- description: Academic paper measuring LLM code modification survival across languages -->
+# Research: Modification Survival Rate Paper
 
 Target: arXiv preprint — *"Designing Programming Languages for LLM Code Modification: Measuring Survival Rate Across Iterative Edits"*
 

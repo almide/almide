@@ -159,6 +159,10 @@ pub enum Expr {
     Hole { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Todo { message: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Try { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Unwrap { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    UnwrapOr { expr: Box<Expr>, fallback: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    ToOption { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    OptionalChain { expr: Box<Expr>, field: Sym, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Await { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Binary { op: Sym, left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Unary { op: Sym, operand: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
@@ -191,7 +195,7 @@ impl Expr {
             | Expr::Block { id, .. } | Expr::Fan { id, .. }
             | Expr::ForIn { id, .. } | Expr::While { id, .. } | Expr::Lambda { id, .. }
             | Expr::Hole { id, .. } | Expr::Todo { id, .. }
-            | Expr::Try { id, .. } | Expr::Await { id, .. }
+            | Expr::Try { id, .. } | Expr::Unwrap { id, .. } | Expr::UnwrapOr { id, .. } | Expr::ToOption { id, .. } | Expr::OptionalChain { id, .. } | Expr::Await { id, .. }
             | Expr::Binary { id, .. } | Expr::Unary { id, .. }
             | Expr::Paren { id, .. } | Expr::Tuple { id, .. }
             | Expr::Range { id, .. } | Expr::Placeholder { id, .. }
@@ -216,7 +220,7 @@ impl Expr {
             | Expr::Block { span, .. } | Expr::Fan { span, .. }
             | Expr::ForIn { span, .. } | Expr::While { span, .. } | Expr::Lambda { span, .. }
             | Expr::Hole { span, .. } | Expr::Todo { span, .. }
-            | Expr::Try { span, .. } | Expr::Await { span, .. }
+            | Expr::Try { span, .. } | Expr::Unwrap { span, .. } | Expr::UnwrapOr { span, .. } | Expr::ToOption { span, .. } | Expr::OptionalChain { span, .. } | Expr::Await { span, .. }
             | Expr::Binary { span, .. } | Expr::Unary { span, .. }
             | Expr::Paren { span, .. } | Expr::Tuple { span, .. }
             | Expr::Range { span, .. } | Expr::Placeholder { span, .. }
@@ -241,7 +245,7 @@ impl Expr {
             | Expr::Block { resolved_type, .. } | Expr::Fan { resolved_type, .. }
             | Expr::ForIn { resolved_type, .. } | Expr::While { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
             | Expr::Hole { resolved_type, .. } | Expr::Todo { resolved_type, .. }
-            | Expr::Try { resolved_type, .. } | Expr::Await { resolved_type, .. }
+            | Expr::Try { resolved_type, .. } | Expr::Unwrap { resolved_type, .. } | Expr::UnwrapOr { resolved_type, .. } | Expr::ToOption { resolved_type, .. } | Expr::OptionalChain { resolved_type, .. } | Expr::Await { resolved_type, .. }
             | Expr::Binary { resolved_type, .. } | Expr::Unary { resolved_type, .. }
             | Expr::Paren { resolved_type, .. } | Expr::Tuple { resolved_type, .. }
             | Expr::Range { resolved_type, .. } | Expr::Placeholder { resolved_type, .. }
@@ -266,7 +270,7 @@ impl Expr {
             | Expr::Block { resolved_type, .. } | Expr::Fan { resolved_type, .. }
             | Expr::ForIn { resolved_type, .. } | Expr::While { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
             | Expr::Hole { resolved_type, .. } | Expr::Todo { resolved_type, .. }
-            | Expr::Try { resolved_type, .. } | Expr::Await { resolved_type, .. }
+            | Expr::Try { resolved_type, .. } | Expr::Unwrap { resolved_type, .. } | Expr::UnwrapOr { resolved_type, .. } | Expr::ToOption { resolved_type, .. } | Expr::OptionalChain { resolved_type, .. } | Expr::Await { resolved_type, .. }
             | Expr::Binary { resolved_type, .. } | Expr::Unary { resolved_type, .. }
             | Expr::Paren { resolved_type, .. } | Expr::Tuple { resolved_type, .. }
             | Expr::Range { resolved_type, .. } | Expr::Placeholder { resolved_type, .. }

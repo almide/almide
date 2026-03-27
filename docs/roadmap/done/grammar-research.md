@@ -1,26 +1,28 @@
-# Grammar Research Infrastructure [ACTIVE]
+<!-- description: A/B testing infrastructure for syntax design using LLM benchmarks -->
+<!-- done: 2026-03-15 -->
+# Grammar Research Infrastructure
 
 ## Vision
 
-Almide の文法設計判断を「勘」ではなく「数字」で回す。
+Drive Almide's grammar design decisions with data, not intuition.
 
-複数の LLM に対して構文バリアントの A/B テストを自動実行し、modification survival rate への影響を定量的に測定する基盤。ツール自体を Almide で実装する（dogfooding）。
+An infrastructure for automatically running A/B tests of syntax variants across multiple LLMs and quantitatively measuring the impact on modification survival rate. The tool itself is implemented in Almide (dogfooding).
 
 ## Problem
 
-現在の文法設計判断は議論と直感に基づいている。例:
+Current grammar design decisions are based on discussion and intuition. For example:
 
-- `fn(x) => expr` vs `(x) => expr` — どちらが LLM に壊されにくいか？
-- `emit expr` vs bare expression — 明示 keyword は survival rate を上げるか？
-- `web.param(req, "id")` vs `req.param("id")` — UFCS は LLM の正答率を上げるか？
+- `fn(x) => expr` vs `(x) => expr` — which is less likely to be broken by LLMs?
+- `emit expr` vs bare expression — does an explicit keyword improve survival rate?
+- `web.param(req, "id")` vs `req.param("id")` — does UFCS improve LLM accuracy?
 
-これらの問いに「実験して数字で答える」仕組みがない。
+There is no mechanism to "answer these questions with experiments and numbers."
 
 ## Core Concept
 
 ```
 Experiment = {
-  hypothesis: "短縮 lambda は modification survival rate を下げない"
+  hypothesis: "Short lambda does not reduce modification survival rate"
   variants: [
     A: { syntax: fn(x) => expr,  corpus: [...tasks...] }
     B: { syntax: (x) => expr,    corpus: [...tasks...] }
@@ -31,34 +33,34 @@ Experiment = {
 }
 ```
 
-1. 同じ意味のコードを各構文バリアントで用意
-2. LLM に修正タスクを与える
-3. compile → test → pass/fail を自動判定
-4. バリアント間の survival rate を比較
-5. 統計的有意差を検定
+1. Prepare semantically identical code in each syntax variant
+2. Give modification tasks to LLMs
+3. Automatically determine compile → test → pass/fail
+4. Compare survival rate between variants
+5. Test for statistical significance
 
 ## Architecture
 
 ```
 grammar-research/
 ├── src/
-│   ├── mod.almd              // エントリーポイント
-│   ├── experiment.almd       // Experiment 定義・実行
-│   ├── variant.almd          // 構文バリアント管理
-│   ├── runner.almd           // LLM 実行 (API 呼び出し)
-│   ├── evaluator.almd        // compile + test 自動評価
-│   ├── stats.almd            // 統計分析・有意差検定
-│   └── report.almd           // 結果レポート生成
+│   ├── mod.almd              // entry point
+│   ├── experiment.almd       // experiment definition & execution
+│   ├── variant.almd          // syntax variant management
+│   ├── runner.almd           // LLM execution (API calls)
+│   ├── evaluator.almd        // automatic compile + test evaluation
+│   ├── stats.almd            // statistical analysis & significance testing
+│   └── report.almd           // report generation
 ├── experiments/
 │   ├── lambda-syntax/        // fn(x) => vs (x) =>
 │   ├── emit-vs-bare/         // emit keyword vs type dispatch
 │   ├── ufcs-external/        // module prefix vs UFCS
-│   ├── builder-keyword/      // keyword あり vs なし
+│   ├── builder-keyword/      // with keyword vs without
 │   └── ...
-├── corpus/                   // タスク定義
-│   ├── tasks.toml            // タスクメタデータ
-│   └── tasks/                // 個別タスク (.almd + spec)
-└── results/                  // 実験結果 (JSON)
+├── corpus/                   // task definitions
+│   ├── tasks.toml            // task metadata
+│   └── tasks/                // individual tasks (.almd + spec)
+└── results/                  // experiment results (JSON)
 ```
 
 ## Data Model
@@ -76,7 +78,7 @@ type Experiment = {
 type Variant = {
   name: String                    // "fn-lambda" / "paren-lambda"
   description: String
-  corpus_dir: String              // 構文バリアント版コーパスのパス
+  corpus_dir: String              // Path to the syntax variant corpus
 }
 
 type ModelConfig = {
@@ -89,10 +91,10 @@ type Provider = | Anthropic | OpenAI | Google
 
 type Task = {
   name: String
-  description: String             // LLM に渡す修正指示
-  base_file: String               // 修正対象のファイル
-  test_file: String               // テストファイル
-  max_attempts: Int               // retry 回数
+  description: String             // Modification instructions passed to LLM
+  base_file: String               // File to be modified
+  test_file: String               // Test file
+  max_attempts: Int               // Retry count
 }
 
 type TrialResult = {
@@ -151,7 +153,7 @@ trials_per_variant = 30
 
 ### 2. Prepare Corpus
 
-同じロジック、異なる構文:
+Same logic, different syntax:
 
 ```almide
 // experiments/lambda-syntax/fn-lambda/map_filter.almd
@@ -165,7 +167,7 @@ let result = [1, 2, 3, 4, 5]
   |> list.map((x) => x * 10)
 ```
 
-タスク: 「`x > 2` を `x > 3` に変更し、`x * 10` を `x * 100` に変更せよ」
+Task: "Change `x > 2` to `x > 3` and `x * 10` to `x * 100`"
 
 ### 3. Run
 
@@ -173,28 +175,28 @@ let result = [1, 2, 3, 4, 5]
 almide run src/mod.almd -- run experiments/lambda-syntax/
 ```
 
-各 variant × model × task × trial を実行。LLM に修正指示 + コードを渡し、返ってきたコードを compile + test。
+Runs each variant x model x task x trial. Passes modification instructions + code to LLM, then compile + test the returned code.
 
 ### 4. Evaluate
 
 ```almide
 // evaluator.almd
 effect fn evaluate(output: String, task: Task) -> TrialResult = {
-  // 1. LLM 出力からコードを抽出
+  // 1. Extract code from LLM output
   let code = extract_code(output)
 
-  // 2. 一時ファイルに書き出し
+  // 2. Write to temporary file
   fs.write(task.base_file, code)
 
-  // 3. almide check (compile)
+  // 3. almide check (compile check)
   let check = process.run("almide", ["check", task.base_file])
   guard check.exit_code == 0 else return trial_result(compiled: false, error: parse_error(check.stderr))
 
-  // 4. almide test (test)
+  // 4. almide test (run tests)
   let test = process.run("almide", ["test", task.test_file])
   guard test.exit_code == 0 else return trial_result(tests_passed: false, error: parse_test_failure(test.stderr))
 
-  // 5. 成功
+  // 5. Success
   trial_result(compiled: true, tests_passed: true)
 }
 ```
@@ -245,95 +247,95 @@ Error breakdown (paren-lambda):
 
 ## Planned Experiments
 
-### Phase 1: 基礎実験
+### Phase 1: Foundational Experiments
 
-| 実験 | Variant A | Variant B | 仮説 |
-|------|-----------|-----------|------|
-| Lambda 構文 | `fn(x) => expr` | `(x) => expr` | 短縮形は survival rate を下げない |
-| Builder insertion | `emit expr` keyword | bare expr (type dispatch) | keyword なしでも survival rate は同等 |
-| UFCS | `web.param(req, "id")` | `req.param("id")` | UFCS は survival rate を上げる |
-| Module prefix | `web.get(...)` | `get(...)` (selective import) | prefix 省略は survival rate を下げない |
+| Experiment | Variant A | Variant B | Hypothesis |
+|------------|-----------|-----------|------------|
+| Lambda syntax | `fn(x) => expr` | `(x) => expr` | Short form does not reduce survival rate |
+| Builder insertion | `emit expr` keyword | bare expr (type dispatch) | Survival rate is equivalent without keyword |
+| UFCS | `web.param(req, "id")` | `req.param("id")` | UFCS improves survival rate |
+| Module prefix | `web.get(...)` | `get(...)` (selective import) | Omitting prefix does not reduce survival rate |
 
-### Phase 2: Template 構文実験
+### Phase 2: Template Syntax Experiments
 
-| 実験 | Variant A | Variant B | 仮説 |
-|------|-----------|-----------|------|
-| Template keyword | `template name(...)` | `fn name(...) -> HtmlDoc` | `template` keyword は survival rate を上げる |
-| HTML tag 認識 | Known tags only | 任意識別子 | Known tags 制限は typo を減らす |
-| Builder block style | `html { div { ... } }` | JSX 風 `<div>...</div>` | Builder block の方が壊れにくい |
+| Experiment | Variant A | Variant B | Hypothesis |
+|------------|-----------|-----------|------------|
+| Template keyword | `template name(...)` | `fn name(...) -> HtmlDoc` | `template` keyword improves survival rate |
+| HTML tag recognition | Known tags only | Arbitrary identifiers | Known tag restriction reduces typos |
+| Builder block style | `html { div { ... } }` | JSX-style `<div>...</div>` | Builder block is less likely to break |
 
-### Phase 3: 言語横断実験
+### Phase 3: Cross-Language Experiments
 
-| 実験 | 内容 |
-|------|------|
-| Almide vs TypeScript | 同じタスクを Almide と TS で書かせ、iterative edit の survival rate を比較 |
-| Almide vs Python | 同上 |
-| Almide vs Go | 同上 |
+| Experiment | Description |
+|------------|-------------|
+| Almide vs TypeScript | Have LLMs write the same task in Almide and TS, compare iterative edit survival rate |
+| Almide vs Python | Same |
+| Almide vs Go | Same |
 
-## Self-Hosting: Almide で実装
+## Self-Hosting: Implemented in Almide
 
-ツール自体を Almide で書く理由:
+Reasons for writing the tool itself in Almide:
 
-1. **Dogfooding** — Almide の実用性を自分で証明
-2. **Template 統合** — レポート生成を `template` で書ける
-3. **Codec 統合** — 実験結果の JSON serialize/deserialize を `deriving Codec` で
-4. **HTTP client** — LLM API 呼び出しに stdlib の `http.request` を使う
-5. **Process module** — `almide check` / `almide test` の実行に `process.run` を使う
+1. **Dogfooding** — prove Almide's practicality firsthand
+2. **Template integration** — write report generation with `template`
+3. **Codec integration** — JSON serialize/deserialize of experiment results with `deriving Codec`
+4. **HTTP client** — use stdlib's `http.request` for LLM API calls
+5. **Process module** — use `process.run` for executing `almide check` / `almide test`
 
-### 実装に必要な Almide 機能
+### Almide Features Required for Implementation
 
-| 機能 | ステータス | 必要度 |
-|------|-----------|--------|
-| HTTP client (`http.request`) | ✅ done | 必須 (LLM API) |
-| JSON parse/stringify | ✅ done | 必須 |
-| File I/O (`fs.read_text`, `fs.write`) | ✅ done | 必須 |
-| Process execution (`process.run`) | ✅ done | 必須 (almide check/test) |
-| `deriving Codec` | active (未実装) | Phase 2 で使う |
-| Template | active (未実装) | レポート生成で使う |
-| CLI args | ✅ done | 必須 |
+| Feature | Status | Necessity |
+|---------|--------|-----------|
+| HTTP client (`http.request`) | ✅ done | Required (LLM API) |
+| JSON parse/stringify | ✅ done | Required |
+| File I/O (`fs.read_text`, `fs.write`) | ✅ done | Required |
+| Process execution (`process.run`) | ✅ done | Required (almide check/test) |
+| `deriving Codec` | active (not yet implemented) | Used in Phase 2 |
+| Template | active (not yet implemented) | Used for report generation |
+| CLI args | ✅ done | Required |
 
-**Phase 1 は今の Almide で実装可能。** Codec / Template は Phase 2 で統合。
+**Phase 1 can be implemented with current Almide.** Codec / Template integration in Phase 2.
 
 ## Implementation Order
 
-### Phase 1: MVP (今の Almide で可能)
+### Phase 1: MVP (possible with current Almide)
 
-- Experiment TOML parser (json.parse ベース、または手動 parse)
-- Single model × single variant の実行ループ
-- almide check + almide test の自動評価
-- CSV / JSON 結果出力
-- 最初の実験: lambda syntax A/B
+- Experiment TOML parser (json.parse-based, or manual parse)
+- Single model x single variant execution loop
+- Automated evaluation via almide check + almide test
+- CSV / JSON result output
+- First experiment: lambda syntax A/B
 
 ### Phase 2: Multi-model + Statistics
 
-- 複数 LLM provider 対応 (Anthropic, OpenAI, Google)
-- 並列実行 (async let)
+- Multiple LLM provider support (Anthropic, OpenAI, Google)
+- Parallel execution (async let)
 - Fisher's exact test / chi-squared test
-- テキストレポート生成
+- Text report generation
 
-### Phase 3: Codec + Template 統合
+### Phase 3: Codec + Template Integration
 
-- `deriving Codec` で実験定義・結果を型安全に
-- `template` でレポート HTML 生成
-- Web UI (web framework で結果閲覧)
+- Type-safe experiment definitions and results with `deriving Codec`
+- HTML report generation with `template`
+- Web UI (view results via web framework)
 
-### Phase 4: CI 統合
+### Phase 4: CI Integration
 
-- 文法変更 PR に対して自動で survival rate 実験を走らせる
-- regression detection: 新構文が survival rate を下げたら warning
+- Automatically run survival rate experiments on grammar change PRs
+- Regression detection: warn if new syntax reduces survival rate
 
 ## Relationship to Existing Research
 
-既存の [Research: Modification Survival Rate Paper](../on-hold/research-modification-survival-rate-paper.md) は **言語間比較** に焦点。本 roadmap は **同一言語内の構文バリアント比較** に焦点。
+The existing [Research: Modification Survival Rate Paper](../on-hold/research-modification-survival-rate-paper.md) focuses on **cross-language comparison**. This roadmap focuses on **syntax variant comparison within the same language**.
 
-両者は補完的:
-- Paper: 「Almide は他言語より modification survival rate が高い」を示す
-- Grammar Research: 「Almide 内のどの構文選択が survival rate に寄与するか」を示す
+The two are complementary:
+- Paper: demonstrates "Almide has higher modification survival rate than other languages"
+- Grammar Research: demonstrates "which syntax choices within Almide contribute to survival rate"
 
-Paper の ablation study セクションは本 roadmap の実験結果で書ける。
+The ablation study section of the paper can be written using the experimental results from this roadmap.
 
 ## Success Criteria
 
-- 文法設計の議論で「実験 X の結果、Variant A の survival rate は Y% で Variant B より Z% 高い」と言える
-- 新構文追加時に A/B 実験を走らせるのが標準プロセスになる
-- Almide の Mission（"the language LLMs can write most accurately"）を数値で裏付けられる
+- In grammar design discussions, we can say "based on experiment X, Variant A has Y% survival rate, Z% higher than Variant B"
+- Running A/B experiments when adding new syntax becomes a standard process
+- Almide's Mission ("the language LLMs can write most accurately") is backed by numbers

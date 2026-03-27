@@ -212,8 +212,14 @@ fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mu
             for s in body { collect_anon_from_stmt(s, named, seen); }
         }
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr } => {
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
+        | IrExprKind::OptionalChain { expr, .. } => {
             collect_anon_from_expr(expr, named, seen);
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            collect_anon_from_expr(expr, named, seen);
+            collect_anon_from_expr(fallback, named, seen);
         }
         IrExprKind::StringInterp { parts } => {
             for p in parts {

@@ -1,4 +1,5 @@
-# Incremental Compilation [ON HOLD]
+<!-- description: Skip redundant rustc invocations by hashing generated Rust source -->
+# Incremental Compilation
 
 ## Problem
 

@@ -1,14 +1,16 @@
-# Borrow/Clone Gaps [ACTIVE]
+<!-- description: Fix cases where Rust codegen fails to insert necessary clones -->
+<!-- done: 2026-03-17 -->
+# Borrow/Clone Gaps
 
-Rust codegen が変数の clone を挿入し損ねるケースを徹底的に潰す。
+Thoroughly eliminate cases where Rust codegen fails to insert necessary variable clones.
 
 ## Root Cause
 
-`use_count` はシンタクティック（IR の Var ノードを数える）で、セマンティック（制御フロー分岐・ループ反復）を考慮しない。clone 挿入ロジックは `use_count > 1 && !is_copy` だが、以下のケースで不足する。
+`use_count` is syntactic (counts Var nodes in the IR) and does not consider semantics (control flow branching, loop iterations). The clone insertion logic `use_count > 1 && !is_copy` is insufficient for the following cases.
 
 ## Known Cases
 
-### Case 1: 変数が関数引数 + 文字列補間で使われる（FIXED: fc2b17f）
+### Case 1: Variable used in both function arguments and string interpolation (FIXED: fc2b17f)
 
 ```almide
 let dir = "output"
@@ -16,9 +18,9 @@ process.exec("mkdir", [dir])     // dir moved
 println("Saved: ${dir}")         // ERROR: use after move
 ```
 
-`use_count = 2` で clone は挿入されるが、生成コードの順序によっては move 後のアクセスになる。
+`use_count = 2` inserts a clone, but depending on generated code order, access may occur after move.
 
-### Case 2: 変数が if/else の片方のブランチで move + 後続で再利用（FIXED: fc2b17f）
+### Case 2: Variable moved in one if/else branch + reused later (FIXED: fc2b17f)
 
 ```almide
 let x = some_list()
@@ -26,7 +28,7 @@ let result = if cond then [] else x   // x moved in else
 let other = x                          // ERROR: x might be moved
 ```
 
-### Case 3: ネスト for-in のイテラブル（FIXED: ae9b64e）
+### Case 3: Nested for-in iterable (FIXED: ae9b64e)
 
 ```almide
 for x in xs {
@@ -34,9 +36,9 @@ for x in xs {
 }
 ```
 
-Fix: for-in iterable が変数なら常に clone。
+Fix: Always clone when for-in iterable is a variable.
 
-### Case 4: match ブランチ間で Result 型と非 Result 型が混在（FIXED: d94da78）
+### Case 4: Result and non-Result types mixed across match branches (FIXED: d94da78)
 
 ```almide
 effect fn dispatch(cmd: String) -> Unit = {
@@ -47,28 +49,28 @@ effect fn dispatch(cmd: String) -> Unit = {
 }
 ```
 
-Fix: `is_result_expr` から `Try` を除外。
+Fix: Exclude `Try` from `is_result_expr`.
 
-## Clone Decision Points（全箇所）
+## Clone Decision Points (all locations)
 
-| 箇所 | ファイル | 行 | 現状ロジック |
+| Location | File | Line | Current Logic |
 |------|---------|-----|-------------|
-| Var 参照 | lower_rust_expr.rs:19-36 | `use_count > 1 && !is_copy && !is_borrowed` |
-| for-in iterable | lower_rust_expr.rs:123-139 | 常に clone（Range, ListLiteral 除く） |
+| Var reference | lower_rust_expr.rs:19-36 | `use_count > 1 && !is_copy && !is_borrowed` |
+| for-in iterable | lower_rust_expr.rs:123-139 | Always clone (except Range, ListLiteral) |
 | Record spread base | lower_rust_expr.rs:257-266 | `!is_single_use_var` |
 | Member access | lower_rust_expr.rs:268-273 | `!is_copy && !is_single_use_var` |
-| String interp | lower_rust_expr.rs:289-305 | Var 参照ルールに委譲 |
+| String interp | lower_rust_expr.rs:289-305 | Delegates to Var reference rules |
 
-### Case 5: Default args の式に型が付かない（FIXED）
+### Case 5: Default arg expressions lack type annotation (FIXED)
 
 ```almide
 fn greet(name: String, prefix: String = "Hello") -> String =
   "${prefix}, ${name}!"
 ```
 
-`[ICE] lower: missing type for expr id=NNN` が出る。テスト自体は pass するが、checker が default 値の式に ExprId → Ty マッピングを生成していない。
+`[ICE] lower: missing type for expr id=NNN` is emitted. Tests themselves pass, but the checker is not generating ExprId → Ty mappings for default value expressions.
 
-### Case 6: 再帰 variant の Box deref（FIXED: next commit）
+### Case 6: Recursive variant Box deref (FIXED: next commit)
 
 ```almide
 type IntList = | Cons(Int, IntList) | Nil
@@ -78,26 +80,26 @@ fn sum(xs: IntList) -> Int = match xs {
 }
 ```
 
-Auto-Box で `IntList` を `Box<IntList>` に変換しているが、パターンマッチで binding された `tail` を関数に渡す際に `*tail` が生成されない。
+Auto-Box converts `IntList` to `Box<IntList>`, but when passing pattern-matched binding `tail` to a function, `*tail` is not generated.
 
-### Case 7: ネスト impl Fn 返却（FIXED）
+### Case 7: Nested impl Fn return (FIXED)
 
 ```almide
 fn curry_add(a: Int) -> (Int) -> (Int) -> Int = (b) => (c) => a + b + c
 ```
 
-Rust は `impl Fn() -> impl Fn()` を関数戻り値に許可しない。`Box<dyn Fn>` にするか、型消去が必要。
+Rust does not allow `impl Fn() -> impl Fn()` as a function return type. Requires `Box<dyn Fn>` or type erasure.
 
-### Case 8: 関数変数を HOF に渡す codegen（FIXED）
+### Case 8: Codegen for passing function variables to HOF (FIXED)
 
 ```almide
 fn transform(xs: List[Int], f: (Int) -> Int, pred: (Int) -> Bool) -> List[Int] =
   xs |> list.map(f) |> list.filter(pred)
 ```
 
-`list.map(xs, f)` で `f` がクロージャとして展開されず、値として渡される。stdlib の TOML テンプレート `|{f.args}| {{ {f.body} }}` が inline lambda 前提で、変数参照に対応していない。
+`list.map(xs, f)` does not expand `f` as a closure; it passes as a value. The stdlib TOML template `|{f.args}| {{ {f.body} }}` assumes inline lambda and does not handle variable references.
 
-### Case 9: closure 内の var mutation（FIXED）
+### Case 9: var mutation inside closure (FIXED)
 
 ```almide
 fn running_sum(xs: List[Int]) -> List[Int] = {
@@ -106,13 +108,13 @@ fn running_sum(xs: List[Int]) -> List[Int] = {
 }
 ```
 
-`Fn` クロージャで `acc` に代入できない。`FnMut` が必要だが、ランタイムの `almide_rt_list_map` は `Fn` を受け取る。
+Cannot assign to `acc` in a `Fn` closure. `FnMut` is needed, but the runtime `almide_rt_list_map` takes `Fn`.
 
 ## Fix Strategy
 
-根本修正: Var 参照の clone 判定を保守的にする。
+Fundamental fix: make clone decisions for Var references more conservative.
 
-**現状**: `use_count > 1 && !is_copy && !is_borrowed_param` → clone
-**修正案**: 非 Copy 型の変数は**常に clone**。single-use 最適化は `use_count == 1` の場合のみ clone をスキップ。
+**Current**: `use_count > 1 && !is_copy && !is_borrowed_param` → clone
+**Proposed**: Non-Copy type variables are **always cloned**. Single-use optimization only skips clone when `use_count == 1`.
 
-これにより不要な clone が増える可能性があるが、Rust コンパイラの最適化パスが不要 clone を除去するので実行時性能への影響は最小限。正しさを優先。
+This may increase unnecessary clones, but Rust compiler optimization passes will eliminate them, keeping runtime performance impact minimal. Correctness takes priority.

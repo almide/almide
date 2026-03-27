@@ -1,21 +1,23 @@
+<!-- description: Compiler structural cleanup including clone/deref IR conversion -->
+<!-- done: 2026-03-18 -->
 # Compiler Architecture Cleanup
 
-**優先度:** Medium — 1.0後でもいいが、やるなら早い方がいい
-**状態:** 5項目
+**Priority:** Medium — can wait until post-1.0, but sooner is better
+**Status:** 5 items
 
-## 項目
+## Items
 
-### ✅ 1. clone/deref IR化 (完了)
+### ✅ 1. clone/deref IR conversion (complete)
 
 - [x] CloneInsertionPass: `Var { id }` → `Clone { Var { id } }` (heap-type variables)
 - [x] BoxDerefPass: `Var { id }` → `Deref { Var { id } }` (box'd pattern bindings)
-- [x] walker から `ann.clone_vars` / `ann.deref_vars` 参照を削除
-- [x] annotations から `clone_vars` / `deref_vars` フィールド削除
+- [x] Remove `ann.clone_vars` / `ann.deref_vars` references from walker
+- [x] Remove `clone_vars` / `deref_vars` fields from annotations
 
-### ✅ 4. walker HashMap allocation 削減 (完了)
+### ✅ 4. Walker HashMap allocation reduction (complete)
 
-- [x] `fill_template` を `&[(&str, &str)]` に変更
-- [x] `render_with()` API 追加
-- [x] 全89箇所の HashMap::new() を render_with に移行
+- [x] Change `fill_template` to `&[(&str, &str)]`
+- [x] Add `render_with()` API
+- [x] Migrate all 89 HashMap::new() occurrences to render_with
 
-### 2, 3, 5 → 個別 roadmap に分離 (post-1.0)
+### 2, 3, 5 → Split into separate roadmaps (post-1.0)

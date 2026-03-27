@@ -1,3 +1,5 @@
+<!-- description: Rejected: while/break/continue/return contradict design philosophy -->
+<!-- done: 2026-03-11 -->
 # Control Flow Extensions [CLOSED]
 
 **Closed**: `while`, `break`, `continue`, `return` contradict the design philosophy.

@@ -1,90 +1,92 @@
-# Compiler Bugs Found by Test Expansion [ACTIVE]
+<!-- description: Seven compiler bugs discovered during test coverage expansion -->
+<!-- done: 2026-03-12 -->
+# Compiler Bugs Found by Test Expansion
 
-テストカバレッジ拡大（806→1501）で発見されたコンパイラバグ7件。テスト側で回避中だが、コンパイラを修正してテストをあるべき姿に戻す。
+7 compiler bugs discovered through test coverage expansion (806→1501). Currently worked around in tests; fix the compiler and restore tests to their intended form.
 
 ## Bugs
 
-### 1. ~~`float.abs()` が Rust で free function `abs(x)` を生成~~
+### 1. ~~`float.abs()` generates free function `abs(x)` in Rust~~
 
-- **実際**: ランタイムに `almide_rt_float_abs()` が存在し正常動作。テスト記述ミス。
+- **Actual**: `almide_rt_float_abs()` exists in the runtime and works correctly. Test description error.
 - **Status**: [x] NOT A BUG
 
-### 2. top-level let + String → `const` 生成で `to_string()` 呼べない
+### 2. top-level let + String → cannot call `to_string()` in generated `const`
 
-- **期待**: `lazy_static` or `static` or `let` で初期化
-- **実際**: `const NAME: String = "hello".to_string()` → `E0015: cannot call non-const method in constants`
-- **場所**: `src/emit_rust/program.rs` TopLet codegen
-- **検出**: lang/top_let_test.almd
-- **修正**: String/非const式 → `static LazyLock<T>` に変更、変数参照時に `(*name).clone()`
+- **Expected**: Initialize with `lazy_static` or `static` or `let`
+- **Actual**: `const NAME: String = "hello".to_string()` → `E0015: cannot call non-const method in constants`
+- **Location**: `src/emit_rust/program.rs` TopLet codegen
+- **Found by**: lang/top_let_test.almd
+- **Fix**: String/non-const expressions → change to `static LazyLock<T>`, use `(*name).clone()` when referencing variables
 - **Status**: [x] DONE
 
-### 3. top-level let + float演算 → 型不一致
+### 3. top-level let + float arithmetic → type mismatch
 
-- **期待**: `const TRIPLE_PI: f64 = PI * 3.0`
-- **実際**: `const TRIPLE_PI: i64 = (PI * 3.0f64)` → `E0308: mismatched types`
-- **場所**: `src/emit_rust/program.rs` TopLet codegen + `ir_expr_contains_float` ヘルパー追加
-- **検出**: lang/top_let_test.almd
-- **修正**: IR式にfloatリテラルが含まれる場合は f64 に推論
+- **Expected**: `const TRIPLE_PI: f64 = PI * 3.0`
+- **Actual**: `const TRIPLE_PI: i64 = (PI * 3.0f64)` → `E0308: mismatched types`
+- **Location**: `src/emit_rust/program.rs` TopLet codegen + added `ir_expr_contains_float` helper
+- **Found by**: lang/top_let_test.almd
+- **Fix**: Infer f64 when IR expression contains float literals
 - **Status**: [x] DONE
 
-### 4. generic variant の型推論ヒント不足
+### 4. Insufficient type inference hints for generic variants
 
-- **期待**: `let e1: Either<String, i64> = Right(5)` のように型注釈生成
-- **実際**: `let e1 = Right(5i64)` → `E0283: type annotations needed for Either<_, i64>`
-- **場所**: `src/types.rs` Ty::Named に型引数追加、`src/emit_rust/ir_blocks.rs` ir_ty_annotation で Named の型引数付きを処理
-- **修正**: Ty::Named(String) → Ty::Named(String, Vec<Ty>) に拡張。lower.rs/check/ で型引数を保存、codegen で `Either<String, i64>` のように型注釈を生成
-- **検出**: lang/type_system_test.almd
+- **Expected**: Generate type annotation like `let e1: Either<String, i64> = Right(5)`
+- **Actual**: `let e1 = Right(5i64)` → `E0283: type annotations needed for Either<_, i64>`
+- **Location**: `src/types.rs` add type args to Ty::Named, `src/emit_rust/ir_blocks.rs` handle Named with type args in ir_ty_annotation
+- **Fix**: Extend Ty::Named(String) → Ty::Named(String, Vec<Ty>). Save type args in lower.rs/check/, generate type annotations like `Either<String, i64>` in codegen
+- **Found by**: lang/type_system_test.almd
 - **Status**: [x] DONE
 
-### 5. generic container の borrow 推論不足
+### 5. Insufficient borrow inference for generic containers
 
-- **期待**: `container_add(c, 1)` で `c` が clone されるか borrow される
-- **実際**: `c` が move されて後続の `assert_eq!(c.label)` で `E0382: borrow of moved value`
-- **場所**: `src/emit_rust/` の borrow analysis（generic record 型パラメータの推論）
-- **検出**: lang/type_system_test.almd
-- **修正**: borrow analysis が既に自動 clone を挿入するよう改善されていた。Bug #4/7 の修正による型情報改善でも解決
+- **Expected**: `c` is cloned or borrowed in `container_add(c, 1)`
+- **Actual**: `c` is moved and subsequent `assert_eq!(c.label)` gives `E0382: borrow of moved value`
+- **Location**: `src/emit_rust/` borrow analysis (generic record type parameter inference)
+- **Found by**: lang/type_system_test.almd
+- **Fix**: Borrow analysis had already been improved to insert automatic clones. Also resolved by type information improvements from Bug #4/7 fix
 - **Status**: [x] DONE
 
-### 6. `map.from_list` クロージャ内の borrow 推論不足
+### 6. Insufficient borrow inference inside `map.from_list` closures
 
-- **期待**: クロージャ引数 `w` が clone される
-- **実際**: `|w| { (w, string.len(&*w)) }` → `w` が move 後に borrow → `E0382`
-- **場所**: `src/emit_rust/` の borrow analysis（クロージャキャプチャ）、`stdlib/defs/map.toml`
-- **修正**: (1) map.from_list の TOML テンプレートに `{f.clone_bindings}` 追加、(2) list.toml の全クロージャ関数に同様の修正、(3) Tuple 式で同一変数が複数回使われる場合に最初の move 位置で .clone() 生成
-- **検出**: lang/edge_cases_test.almd
+- **Expected**: Closure argument `w` is cloned
+- **Actual**: `|w| { (w, string.len(&*w)) }` → `w` borrowed after move → `E0382`
+- **Location**: `src/emit_rust/` borrow analysis (closure capture), `stdlib/defs/map.toml`
+- **Fix**: (1) Add `{f.clone_bindings}` to map.from_list TOML template, (2) Apply same fix to all closure functions in list.toml, (3) Generate .clone() at the first move position when the same variable is used multiple times in a Tuple expression
+- **Found by**: lang/edge_cases_test.almd
 - **Status**: [x] DONE
 
-### 7. named record 型に構造体リテラルが代入できない
+### 7. Cannot assign struct literal to named record type
 
-- **期待**: `type Container = { items: List[T], label: String }` で `{ items: [], label: "x" }` が代入可能
-- **実際**: `cannot assign { items: List[Int], label: String } to Container`
-- **場所**: `src/check/statements.rs` の型チェック、`src/types.rs` の resolve_named
-- **修正**: resolve_named を拡張して型引数を持つ Named 型の解決をサポート。let/var の型チェックで Named → 構造体に解決してから互換性チェック
-- **検出**: lang/type_system_test.almd
+- **Expected**: `{ items: [], label: "x" }` can be assigned to `type Container = { items: List[T], label: String }`
+- **Actual**: `cannot assign { items: List[Int], label: String } to Container`
+- **Location**: `src/check/statements.rs` type checking, `src/types.rs` resolve_named
+- **Fix**: Extend resolve_named to support resolution of Named types with type arguments. Resolve Named → struct in let/var type checking before compatibility check
+- **Found by**: lang/type_system_test.almd
 - **Status**: [x] DONE
 
 ## Priority
 
-**P0（codegen correctness）**: #1, #2, #3 — 正しい Almide コードがコンパイル通らない
-**P1（generics usability）**: #4, #7 — generic 型の基本的な使い方が壊れている
-**P2（borrow refinement）**: #5, #6 — borrow 推論の精度向上
+**P0 (codegen correctness)**: #1, #2, #3 — correct Almide code doesn't compile
+**P1 (generics usability)**: #4, #7 — basic usage of generic types is broken
+**P2 (borrow refinement)**: #5, #6 — borrow inference accuracy improvement
 
 ## Fix → Test Restore Flow
 
-各バグの修正後:
-1. コンパイラを修正
-2. テストを「回避版」から「あるべき姿」に戻す
-3. `cargo test` + `almide test` で全パス確認
-4. このファイルの Status を `[x] DONE` に更新
+After fixing each bug:
+1. Fix the compiler
+2. Restore tests from "workaround version" to "intended form"
+3. Verify all pass with `cargo test` + `almide test`
+4. Update Status to `[x] DONE` in this file
 
-## 修正ログ
+## Fix log
 
 | # | Bug | Fixed | Test Restored | Date |
 |---|-----|-------|---------------|------|
 | 1 | float.abs codegen | N/A (not a bug) | N/A | 2026-03-12 |
 | 2 | top-level let String | done | done | 2026-03-12 |
-| 3 | top-level let float型 | done | done | 2026-03-12 |
-| 4 | generic variant 型注釈 | done | done | 2026-03-12 |
+| 3 | top-level let float type | done | done | 2026-03-12 |
+| 4 | generic variant type annotation | done | done | 2026-03-12 |
 | 5 | generic container borrow | done | done | 2026-03-12 |
 | 6 | map.from_list borrow | done | done | 2026-03-12 |
-| 7 | named record 互換性 | done | done | 2026-03-12 |
+| 7 | named record compatibility | done | done | 2026-03-12 |

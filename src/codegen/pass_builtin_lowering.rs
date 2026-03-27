@@ -232,6 +232,9 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(rewrite_expr(*object)), field,
         },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(rewrite_expr(*expr)), field,
+        },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple, iterable: Box::new(rewrite_expr(*iterable)),
             body: rewrite_stmts(body),
@@ -272,6 +275,12 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             inclusive,
         },
         IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(rewrite_expr(*expr)),
+            fallback: Box::new(rewrite_expr(*fallback)),
+        },
         IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(rewrite_expr(*expr)) },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             exprs: exprs.into_iter().map(rewrite_expr).collect(),

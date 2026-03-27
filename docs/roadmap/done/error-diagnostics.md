@@ -1,4 +1,6 @@
-# Error Diagnostics [DONE]
+<!-- description: LLM-critical diagnostics including lost mutation and type mismatch -->
+<!-- done: 2026-03-11 -->
+# Error Diagnostics
 
 ## Implemented
 

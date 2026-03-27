@@ -1,4 +1,6 @@
-# List Index Read (`xs[i]`) [ACTIVE]
+<!-- description: Add index-based read syntax for lists (xs[i]) -->
+<!-- done: 2026-03-12 -->
+# List Index Read (`xs[i]`)
 
 ## The Problem
 

@@ -1,34 +1,36 @@
+<!-- description: Showcase: REST API server with http.serve, json, and codec -->
+<!-- done: 2026-03-18 -->
 # Showcase 2: Todo API (HTTP API)
 
-**領域:** HTTP API server
-**目的:** REST API。http.serve + json + codec の実用例。
+**Domain:** HTTP API server
+**Purpose:** REST API. Practical example of http.serve + json + codec.
 
-## 仕様
+## Specification
 
 ```
 almide run showcase/todo-api.almd
-# GET  /todos       → 一覧
-# POST /todos       → 作成
-# GET  /todos/:id   → 取得
-# DELETE /todos/:id → 削除
+# GET  /todos       → list all
+# POST /todos       → create
+# GET  /todos/:id   → get one
+# DELETE /todos/:id → delete
 ```
 
-- インメモリストア (Map)
+- In-memory store (Map)
 - JSON request/response
-- effect fn による I/O 分離
+- I/O separation via effect fn
 
-## 使う機能
+## Features Used
 
 - `http.serve`, `http.response`, `http.json`
 - `json.parse`, `json.stringify`
 - `map.get`, `map.set`, `map.remove`
 - `effect fn`
-- `match` (リクエストルーティング)
+- `match` (request routing)
 - `string.starts_with`, `string.split`
 
-## 成功基準
+## Success Criteria
 
-- [ ] Tier 1 (Rust) で動作
-- [ ] curl でCRUD操作可能
-- [ ] 80行以内
-- [ ] README に使い方記載
+- [ ] Works on Tier 1 (Rust)
+- [ ] CRUD operations possible with curl
+- [ ] Under 80 lines
+- [ ] Usage documented in README

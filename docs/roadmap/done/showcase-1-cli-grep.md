@@ -1,31 +1,33 @@
+<!-- description: Showcase: CLI grep tool using fan concurrency and regex -->
+<!-- done: 2026-03-18 -->
 # Showcase 1: almide-grep (CLI Tool)
 
-**領域:** CLI tool
-**目的:** ファイル検索ツール。fan concurrency + effect fn + regex の実用例。
+**Domain:** CLI tool
+**Purpose:** File search tool. Practical example of fan concurrency + effect fn + regex.
 
-## 仕様
+## Specification
 
 ```
 almide run showcase/almide-grep.almd -- "pattern" path/
 ```
 
-- 引数: 検索パターン (regex) + 対象ディレクトリ
-- 再帰的にファイルを走査
-- マッチした行を `ファイル名:行番号: 内容` で出力
-- `fan.map` で並列ファイル読み込み
+- Arguments: search pattern (regex) + target directory
+- Recursively traverse files
+- Output matching lines as `filename:line_number: content`
+- Parallel file reading with `fan.map`
 
-## 使う機能
+## Features Used
 
 - `effect fn` (fs, io)
-- `fan.map` (並列ファイル処理)
+- `fan.map` (parallel file processing)
 - `regex.find_all`
-- `guard` (フィルタリング)
+- `guard` (filtering)
 - `list.flat_map`, `string.lines`, `string.contains`
-- `env.args` (CLI引数)
+- `env.args` (CLI arguments)
 
-## 成功基準
+## Success Criteria
 
-- [x] Tier 1 (Rust) で動作
-- [x] Tier 2 (TS/Deno) で動作
-- [ ] 50行以内
-- [ ] README に使い方記載
+- [x] Works on Tier 1 (Rust)
+- [x] Works on Tier 2 (TS/Deno)
+- [ ] Under 50 lines
+- [ ] Usage documented in README

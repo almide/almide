@@ -1,106 +1,107 @@
+<!-- description: Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy -->
 # The Rumbling — Almide OSS Rewrite Campaign
 
-**Status**: On Hold (Block 0 は言語機能の成熟後)
-**Priority**: Strategic — 言語普及の主軸
-**Prerequisite**: WASM direct emit 完成, stdlib 安定, セルフホスティング Phase 0-1
+**Status**: On Hold (Block 0 after language features mature)
+**Priority**: Strategic — Primary driver of language adoption
+**Prerequisite**: WASM direct emit complete, stdlib stable, self-hosting Phase 0-1
 
-## なぜやるのか
+## Why
 
-言語の普及は「何が書けるか」で決まる。Go は Docker と Kubernetes で勝った。Rust は ripgrep と fd で「速い CLI」のポジションを取った。
+Language adoption is decided by "what can be built with it." Go won with Docker and Kubernetes. Rust claimed the "fast CLI tools" position with ripgrep and fd.
 
-Almide には3つの武器がある:
-1. **WASM バイナリサイズ** — Hello World 4.5KB (自己完結型)
-2. **4ターゲット出力** — 同じソースから Rust / TypeScript / JavaScript / WASM
-3. **LLM 修正生存率** — LLM が最も正確に読み書きできる言語
+Almide has three weapons:
+1. **WASM binary size** — Hello World 4.5KB (self-contained)
+2. **4-target output** — Rust / TypeScript / JavaScript / WASM from the same source
+3. **LLM modification survival rate** — The language LLMs can read and write most accurately
 
-The Rumbling は、ライセンス的に問題のない OSS を Almide で書き直し、これらの武器を実証する計画。
+The Rumbling is a plan to rewrite license-compatible OSS in Almide to demonstrate these weapons.
 
-## 実行原則
+## Execution Principles
 
-- **Block 0 が通らなければ Block 1 以降に進まない** — 自分のツールが書けない言語で他を書き直すのは矛盾
-- **各ブロック内は独立** — どの項目からでも着手可能
-- **1つ完了するたびにポストする** — 単体で記事になるものだけ出す
-- **劣化コピーは出さない** — 機能を絞ってでも、本家より明確に優れている点がある状態で出す
-- **巨大なもの・Almide の強みが活きないものはやらない** — DB、暗号ライブラリ、OS レベルのツールは対象外
+- **Don't proceed past Block 0 unless Block 0 passes** — Rewriting others' tools in a language that can't write its own is a contradiction
+- **Items within each block are independent** — Can start from any item
+- **Post after each completion** — Only ship things that stand as articles on their own
+- **No degraded copies** — Even with reduced features, ship only when clearly superior to the original in some dimension
+- **Skip anything huge or where Almide's strengths don't apply** — Databases, crypto libraries, OS-level tools are out of scope
 
 ---
 
-## Block 0: Dogfood (自分の道具)
+## Block 0: Dogfood (Our Own Tools)
 
-Almide 自身のツールチェーンを Almide で書く。セルフホスティングの入口。
+Write Almide's own toolchain in Almide. The entry point for self-hosting.
 
-| ツール | 証明すること | サイズ感 |
+| Tool | What it proves | Size |
 |---|---|---|
-| `almide fmt` | 文字列処理が実用レベルで書ける | 小 |
-| `almide test` runner | CLI ツールが書ける | 小 |
-| テストフレームワーク | assert/matcher DSL が自然に書ける | 小 |
+| `almide fmt` | String processing works at production level | Small |
+| `almide test` runner | CLI tools can be written | Small |
+| Test framework | assert/matcher DSL can be written naturally | Small |
 
-**ゲート条件**: Block 0 の 3 つが動くまで Block 1 に進まない。
+**Gate condition**: Block 1 does not start until all 3 items in Block 0 are working.
 
 ---
 
-## Block 1: WASM Showcase (4.5KB の証明)
+## Block 1: WASM Showcase (Proving 4.5KB)
 
-WASM バイナリサイズの異常な小ささを見せる。全てブラウザで動くデモ付き。
+Demonstrate the extraordinarily small WASM binary sizes. All with browser-running demos.
 
-| ツール | 既存 | Almide の優位点 |
+| Tool | Existing | Almide's advantage |
 |---|---|---|
-| markdown → HTML | marked.js (50KB min) | WASM 数 KB でブラウザ動作 |
-| JSON formatter / validator | jq (WASM 800KB+) | 桁違いに小さい |
-| TOML parser | toml-rs (crate) | ブラウザで動く WASM 版が存在しない |
-| base64 encode / decode | btoa/atob | 自己完結 WASM |
+| markdown → HTML | marked.js (50KB min) | Runs in browser at a few KB WASM |
+| JSON formatter / validator | jq (WASM 800KB+) | Orders of magnitude smaller |
+| TOML parser | toml-rs (crate) | No browser-running WASM version exists |
+| base64 encode / decode | btoa/atob | Self-contained WASM |
 
-**成功基準**: 「このページで動いている WASM は X KB です」と言えること。
+**Success criteria**: Being able to say "the WASM running on this page is X KB."
 
 ---
 
-## Block 2: Multi-Target Showcase (1ソース4ターゲット)
+## Block 2: Multi-Target Showcase (1 Source, 4 Targets)
 
-同じコードから Rust crate + npm package + WASM module が出ることを見せる。npm と crates.io に実際に publish する。
+Show that the same code outputs a Rust crate + npm package + WASM module. Actually publish to npm and crates.io.
 
-| ライブラリ | 用途 | 配布形態 |
+| Library | Purpose | Distribution |
 |---|---|---|
-| slug 生成 | URL スラッグ | npm + crate + WASM |
-| semver パーサー | バージョン比較 | npm + crate + WASM |
-| color 変換 | hex / rgb / hsl | npm + crate + WASM |
-| uuid v4 | ID 生成 | npm + crate + WASM |
+| Slug generation | URL slugs | npm + crate + WASM |
+| Semver parser | Version comparison | npm + crate + WASM |
+| Color conversion | hex / rgb / hsl | npm + crate + WASM |
+| uuid v4 | ID generation | npm + crate + WASM |
 
-**成功基準**: 「Almide で書かれたライブラリを知らずに使っている」状態を作る。
+**Success criteria**: Create a state where "people are using an Almide-written library without knowing it."
 
 ---
 
-## Block 3: LLM Modification Showcase (修正生存率の証明)
+## Block 3: LLM Modification Showcase (Proving Survival Rate)
 
-LLM が正確に修正できることを示す。各ツールに「LLM に X を頼んだら壊れずに直った」デモを付ける。
+Demonstrate that LLMs can modify code accurately. Each tool comes with a demo showing "asked LLM to do X and it worked without breaking."
 
-| CLI | 既存 | Almide の強み |
+| CLI | Existing | Almide's strength |
 |---|---|---|
-| http クライアント | httpie, curlie | LLM が全容を把握してヘッダー追加等を壊れずに修正 |
-| file watcher | watchexec | シンプルで LLM が全容を把握できるサイズ |
-| env 管理 | direnv 簡易版 | 設定ファイルの読み書き |
-| task runner | just 簡易版 | TOML パース + プロセス実行 |
+| HTTP client | httpie, curlie | LLM grasps the full codebase and adds headers without breaking |
+| File watcher | watchexec | Simple enough for LLM to grasp the full codebase |
+| Env management | direnv lite | Config file reading/writing |
+| Task runner | just lite | TOML parsing + process execution |
 
-**成功基準**: 修正生存率の計測データが出せること。
+**Success criteria**: Being able to produce measured modification survival rate data.
 
 ---
 
-## Block 4: Platform (エコシステム)
+## Block 4: Platform (Ecosystem)
 
-Block 0-3 で信用が溜まった後。
+After credibility is built from Block 0-3.
 
-| プロジェクト | 既存 | 意味 |
+| Project | Existing | Significance |
 |---|---|---|
-| パッケージレジストリ | crates.io / npm | Almide エコシステムの基盤 |
-| Playground | Rust Playground | ブラウザで WASM コンパイラが動く (セルフホスティングの帰結) |
-| LSP server | — | 開発体験の本格化 |
+| Package registry | crates.io / npm | Foundation of the Almide ecosystem |
+| Playground | Rust Playground | WASM compiler runs in browser (consequence of self-hosting) |
+| LSP server | — | Serious developer experience |
 
 ---
 
-## やらないもの
+## Not Doing
 
-| 対象 | 理由 |
+| Target | Reason |
 |---|---|
-| DB エンジン | Almide の強みが活きない。低レベル I/O が必要 |
-| 暗号ライブラリ | 安全性の証明が言語の成熟度を超えている |
-| OS レベルのツール | syscall 直叩きが必要。Almide の抽象レベルと合わない |
-| 巨大フレームワーク | 工数に見合わない。小さくて速いものを大量に |
+| DB engine | Almide's strengths don't apply. Requires low-level I/O |
+| Crypto library | Safety proofs exceed language maturity |
+| OS-level tools | Requires direct syscalls. Doesn't match Almide's abstraction level |
+| Massive frameworks | Not worth the effort. Ship many small, fast things instead |

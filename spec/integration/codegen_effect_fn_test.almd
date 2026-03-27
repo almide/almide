@@ -3,7 +3,7 @@
 // ── Effect fn calling multiple effect fns in sequence ──
 
 effect fn parse_int_strict(s: String) -> Result[Int, String] = {
-  let n = int.parse(s)
+  let n = int.parse(s)!
   ok(n)
 }
 
@@ -18,9 +18,9 @@ effect fn validate_positive(n: Int) -> Result[Int, String] = {
 }
 
 effect fn parse_positive_even(s: String) -> Result[Int, String] = {
-  let n = parse_int_strict(s)
-  let n = validate_positive(n)
-  let n = validate_even(n)
+  let n = parse_int_strict(s)!
+  let n = validate_positive(n)!
+  let n = validate_even(n)!
   ok(n)
 }
 
@@ -53,7 +53,7 @@ effect fn find_first_even(xs: List[String]) -> Result[Int, String] = {
       some(v) => v,
       none => "",
     }
-    let n = parse_int_strict(s)
+    let n = parse_int_strict(s)!
     guard n % 2 != 0 else ok(n)
     i = i + 1
   }
@@ -71,7 +71,7 @@ test "effect fn with loop no even found" {
 // ── Effect fn with if-else returning Result ──
 
 effect fn classify_number(s: String) -> Result[String, String] = {
-  let n = parse_int_strict(s)
+  let n = parse_int_strict(s)!
   let label = if n > 100 then "large"
     else if n > 10 then "medium"
     else if n > 0 then "small"
@@ -89,7 +89,7 @@ test "effect fn with conditional classification" {
 // ── Effect fn with match on intermediate result ──
 
 effect fn process_item(item: String) -> Result[String, String] = {
-  let n = parse_int_strict(item)
+  let n = parse_int_strict(item)!
   let category = match n {
     _ if n < 0 => "negative",
     0 => "zero",
@@ -111,7 +111,7 @@ test "effect fn with match on unwrapped value" {
 effect fn sum_strings(strs: List[String]) -> Result[Int, String] = {
   var total = 0
   for s in strs {
-    let n = parse_int_strict(s)
+    let n = parse_int_strict(s)!
     total = total + n
   }
   ok(total)
@@ -130,8 +130,8 @@ test "effect fn loop accumulation empty" {
 effect fn sum_positive_strings(strs: List[String]) -> Result[Int, String] = {
   var total = 0
   for s in strs {
-    let n = parse_int_strict(s)
-    let _ = validate_positive(n)
+    let n = parse_int_strict(s)!
+    let _ = validate_positive(n)!
     total = total + n
   }
   ok(total)

@@ -1,4 +1,6 @@
-# Top-Level Let [DONE]
+<!-- description: Allow let bindings at module scope for constant values -->
+<!-- done: 2026-03-12 -->
+# Top-Level Let
 
 ## The Problem
 

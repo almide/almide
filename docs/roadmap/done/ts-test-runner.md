@@ -1,15 +1,17 @@
-# TypeScript Test Runner [DONE]
+<!-- description: almide test --target ts command with Deno/Node support -->
+<!-- done: 2026-03-25 -->
+# TypeScript Test Runner
 
-**完了日:** 2026-03-25
+**Completed:** 2026-03-25
 
-## 実装内容
+## Implementation
 
-`almide test --target ts` コマンドを追加。TypeScript ターゲットのテスト実行が可能に。
+Added the `almide test --target ts` command. TypeScript target test execution is now possible.
 
-### 変更点
-- `src/cli/commands.rs` に `cmd_test_ts()` を追加（229 行）
-- `src/main.rs` に `--target ts`/`--target typescript` ディスパッチ追加
-- Deno 優先、Node.js フォールバック
-- `// ts:skip` マーカーでファイル単位スキップ対応
-- codegen パニックは SKIP として報告
-- 型エラーはソースコンテキスト付きで表示
+### Changes
+- Added `cmd_test_ts()` to `src/cli/commands.rs` (229 lines)
+- Added `--target ts`/`--target typescript` dispatch to `src/main.rs`
+- Deno preferred, Node.js fallback
+- `// ts:skip` marker for per-file skip support
+- Codegen panics reported as SKIP
+- Type errors displayed with source context

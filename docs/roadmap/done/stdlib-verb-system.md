@@ -1,64 +1,66 @@
-# Stdlib API Surface Reform [ACTIVE]
+<!-- description: Unified verb system across all stdlib container types -->
+<!-- done: 2026-03-18 -->
+# Stdlib API Surface Reform
 
 ## Vision
 
-stdlib の全コンテナ型で同じ動詞が同じ意味を持ち、LLM が1つの動詞を学べば全型に適用できる状態を作る。
+Create a state where the same verb has the same meaning across all stdlib container types, so an LLM learning one verb can apply it to all types.
 
 ---
 
 ## Design Principles
 
-1. **`map` は橋** — List/Map/Option/Result 全てで使える
-2. **引数順は data-first** — UFCS と `|>` パイプの両方で自然
-3. **述語は `?` なし** — 戻り値が Bool なら型から自明
-4. **変換は `to_`、構築は `from_`** — `parse` は `from_string` に統一
-5. **1つの正解** — 同じことをする2つの関数は作らない
-6. **方向は `_start` / `_end`** — left/right ではなく start/end
+1. **`map` is the bridge** — usable across List/Map/Option/Result
+2. **Argument order is data-first** — natural for both UFCS and `|>` pipe
+3. **Predicates have no `?`** — Bool return type is obvious from the type
+4. **Conversion is `to_`, construction is `from_`** — `parse` unified to `from_string`
+5. **One right answer** — do not create two functions that do the same thing
+6. **Direction is `_start` / `_end`** — not left/right but start/end
 
 ---
 
 ## Implementation Status
 
-### ✅ Step 1: `?` suffix 全廃止 (完了)
+### ✅ Step 1: Complete removal of `?` suffix (done)
 
-24 関数のリネーム。全て適用済み、CI green。
+Renamed 24 functions. All applied, CI green.
 
-### ✅ Step 2: 冗長な重複を統一 (大部分完了)
+### ✅ Step 2: Unify redundant duplicates (mostly done)
 
-| 変更 | 状態 |
+| Change | Status |
 |---|---|
-| `and_then` → `flat_map` | ✅ 削除済 |
-| `map_values` → `map.map` | ✅ 統一済 |
-| `char_at` → `string.get` | ✅ 統一済 |
-| `string.to_int` → 削除 | ✅ 削除済 |
-| `string.to_float` → 削除 | ✅ 削除済 |
-| `int.parse` → `int.from_string` | 🔲 新名追加が必要 |
-| `float.parse` → `float.from_string` | 🔲 新名追加が必要 |
-| `uuid.parse` → `uuid.from_string` | 🔲 新名追加が必要 |
+| `and_then` -> `flat_map` | ✅ Removed |
+| `map_values` -> `map.map` | ✅ Unified |
+| `char_at` -> `string.get` | ✅ Unified |
+| `string.to_int` -> removed | ✅ Removed |
+| `string.to_float` -> removed | ✅ Removed |
+| `int.parse` → `int.from_string` | 🔲 New name addition needed |
+| `float.parse` → `float.from_string` | 🔲 New name addition needed |
+| `uuid.parse` → `uuid.from_string` | 🔲 New name addition needed |
 
-Note: `json.parse` は業界標準のため維持（`json.from_string` も別途存在）。
+Note: `json.parse` maintained as industry standard (`json.from_string` also exists separately).
 
-### 🔲 Step 3: Map の動詞追加
+### 🔲 Step 3: Add verbs for Map
 
-Map を「コンテナとして一人前」にする。
+Make Map "a first-class container."
 
-| 関数 | 状態 | 説明 |
+| Function | Status | Description |
 |---|---|---|
-| `map.map` | ✅ | 各(K,V)ペアを変換 |
-| `map.filter` | ✅ | 述語に合うペアを残す |
-| `map.fold` | 🔲 | 初期値あり累積 |
-| `map.any` | 🔲 | 1つでも合うか |
-| `map.all` | 🔲 | 全て合うか |
-| `map.count` | 🔲 | 述語に合う要素数 |
-| `map.each` | 🔲 | 各ペアに副作用 |
-| `map.find` | 🔲 | 述語で最初の一致 |
-| `map.update` | 🔲 | キーの値を関数で更新 |
+| `map.map` | ✅ | Transform each (K,V) pair |
+| `map.filter` | ✅ | Keep pairs matching predicate |
+| `map.fold` | 🔲 | Accumulate with initial value |
+| `map.any` | 🔲 | Does any match? |
+| `map.all` | 🔲 | Do all match? |
+| `map.count` | 🔲 | Count elements matching predicate |
+| `map.each` | 🔲 | Side effect on each pair |
+| `map.find` | 🔲 | First match by predicate |
+| `map.update` | 🔲 | Update key's value with function |
 
-### 🔲 Step 4: String のスライス動詞追加
+### 🔲 Step 4: Add slice verbs for String
 
-String と List のスライス操作を対称にする。
+Make String and List slice operations symmetric.
 
-| 関数 | 状態 |
+| Function | Status |
 |---|---|
 | `string.first` | 🔲 |
 | `string.last` | 🔲 |
@@ -67,11 +69,11 @@ String と List のスライス操作を対称にする。
 | `string.drop` | 🔲 |
 | `string.drop_end` | 🔲 |
 
-### 🔲 Step 5: Option モジュール新設
+### 🔲 Step 5: New Option module
 
-現在 Option 操作は分散している。独立モジュールに集約。
+Currently Option operations are scattered. Consolidate into an independent module.
 
-| 関数 | 状態 |
+| Function | Status |
 |---|---|
 | `option.map` | 🔲 |
 | `option.flat_map` | 🔲 |
@@ -85,9 +87,9 @@ String と List のスライス操作を対称にする。
 | `option.zip` | 🔲 |
 | `option.or_else` | 🔲 |
 
-### 🔲 Step 6: List の欠落補完
+### 🔲 Step 6: Fill List gaps
 
-| 関数 | 状態 |
+| Function | Status |
 |---|---|
 | `list.unique_by` | 🔲 |
 | `list.shuffle` | 🔲 |
@@ -95,15 +97,15 @@ String と List のスライス操作を対称にする。
 | `list.take_end` | 🔲 |
 | `list.drop_end` | 🔲 |
 
-### ✅ Step 7: 旧名削除 (完了)
+### ✅ Step 7: Delete old names (done)
 
-- `map.from_entries` 削除 → `map.from_list` に統一 (spec準拠)
-- `parse` は維持 (spec原則3: `parse` = fallible解釈。`from_string` はスコープ外)
-- `option.to_list` 追加 (spec準拠)
+- `map.from_entries` removed -> unified to `map.from_list` (spec-compliant)
+- `parse` maintained (spec principle 3: `parse` = fallible interpretation. `from_string` is out of scope)
+- `option.to_list` added (spec-compliant)
 
 ---
 
-## Verb Taxonomy (設計確定)
+## Verb Taxonomy (design finalized)
 
 ### Transform: map, flat_map, filter, filter_map, flatten
 ### Aggregate: fold, reduce, scan, sum, product, min, max, count
@@ -122,27 +124,27 @@ String と List のスライス操作を対称にする。
 
 ## Success Criteria
 
-- [x] 述語に `?` suffix が1つもない
-- [x] `and_then` → `flat_map` 統一
-- [x] `map_values` → `map.map` 統一
-- [ ] 全コンテナ型（List, Map, Option, Result）で `map` が使える
-- [ ] 全コンテナ型で `flat_map` が使える
-- [ ] 全コレクション型（List, Map）で `filter`, `fold`, `any`, `all`, `each` が使える
-- [ ] Option モジュールが存在する
-- [ ] `parse` → `from_string` 新名追加完了
+- [x] No `?` suffix on any predicate
+- [x] `and_then` -> `flat_map` unified
+- [x] `map_values` -> `map.map` unified
+- [ ] `map` usable across all container types (List, Map, Option, Result)
+- [ ] `flat_map` usable across all container types
+- [ ] `filter`, `fold`, `any`, `all`, `each` usable across all collection types (List, Map)
+- [ ] Option module exists
+- [ ] `parse` -> `from_string` new name addition complete
 
 ## Implementation Notes
 
-### from_string 追加方針
-TOML 関数名は変えない。新エントリ `[from_string]` を追加し、同じ runtime 関数を呼ぶ。旧名 `[parse]` も維持。arg_transforms テーブルに両方登録される。
+### from_string addition approach
+Do not change TOML function names. Add a new entry `[from_string]` that calls the same runtime function. Keep old name `[parse]` too. Both registered in the arg_transforms table.
 
-### 作業量見積
-- Step 2 残り: 3 関数追加 (TOML + runtime共有)
-- Step 3: 7 関数追加 (TOML + Rust runtime + TS runtime)
-- Step 4: 6 関数追加
-- Step 5: 11 関数追加 (新 TOML ファイル)
-- Step 6: 5 関数追加
-- 合計: 32 関数追加
+### Effort estimate
+- Step 2 remaining: 3 functions added (TOML + shared runtime)
+- Step 3: 7 functions added (TOML + Rust runtime + TS runtime)
+- Step 4: 6 functions added
+- Step 5: 11 functions added (new TOML file)
+- Step 6: 5 functions added
+- Total: 32 functions added
 
 ## Files
 ```

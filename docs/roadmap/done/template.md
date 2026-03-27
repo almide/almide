@@ -1,50 +1,52 @@
-# Result Builder [ACTIVE]
+<!-- description: Swift-style result builder DSL for structured data construction -->
+<!-- done: 2026-03-18 -->
+# Result Builder
 
 ## Vision
 
-Swift の Result Builder と同じ思想の **汎用 builder 機構** を Almide に導入する。`builder` は言語コアの機能であり、Html / Text / Csv / Prompt は全て builder のインスタンス（stdlib）。HTML 要素は builder 内の特殊構文ではなく、**普通の関数**。
+Introduce a **general-purpose builder mechanism** into Almide, following the same philosophy as Swift's Result Builder. `builder` is a language core feature; Html / Text / Csv / Prompt are all builder instances (stdlib). HTML elements are not special syntax within the builder — they are **ordinary functions**.
 
 ```
-builder（言語コア）
+builder (language core)
 ├── builder Html { ... }     ← stdlib
-│   ├── fn div(...)          ← 普通の関数（TOML 生成）
-│   ├── fn h1(...)           ← 普通の関数（TOML 生成）
-│   └── fn a(...)            ← 普通の関数（TOML 生成）
+│   ├── fn div(...)          ← ordinary function (TOML-generated)
+│   ├── fn h1(...)           ← ordinary function (TOML-generated)
+│   └── fn a(...)            ← ordinary function (TOML-generated)
 ├── builder Text { ... }     ← stdlib
-├── builder Csv { ... }      ← ユーザー定義可能
-└── builder Prompt { ... }   ← 将来
+├── builder Csv { ... }      ← user-definable
+└── builder Prompt { ... }   ← future
 ```
 
 ---
 
 ## Design Principles
 
-1. **builder は汎用言語機構** — Html 専用ではない。ユーザーが独自の builder を定義できる
-2. **要素は普通の関数** — HTML タグ名は特殊構文ではない。`div`, `h1` は stdlib の関数
-3. **builder 推論** — 関数パラメータの型が builder の Output 型なら、trailing block に自動で builder 変換を適用
-4. **lift は宣言的ルール** — オーバーロードを使わず、型→Node の変換ルールを builder 定義内に列挙
-5. **template は convenience** — `template` キーワードは「この関数は document を返す」という意図の明示。内部的には `fn` の一種
-6. **keyword は 2 つだけ追加** — `builder`（定義用）と `template`（宣言用）
+1. **builder is a general-purpose language mechanism** — not Html-specific. Users can define their own builders
+2. **Elements are ordinary functions** — HTML tag names are not special syntax. `div`, `h1` are stdlib functions
+3. **builder inference** — when a function parameter's type is a builder's Output type, automatically apply builder transformation to trailing blocks
+4. **lift is a declarative rule** — instead of overloading, enumerate type→Node conversion rules within the builder definition
+5. **template is convenience** — the `template` keyword explicitly declares "this function returns a document". Internally a variant of `fn`
+6. **Only 2 keywords added** — `builder` (for definition) and `template` (for declaration)
 
 ---
 
-## 1. `builder` 宣言
+## 1. `builder` Declaration
 
-### 構文
+### Syntax
 
 ```almide
 builder Html {
   type Node = HtmlNode
   type Output = HtmlFrag
 
-  // lift ルール — 型ごとの Node への変換
+  // lift rules — type-to-Node conversion
   lift String => text_node(escape_html(value))
   lift Int => text_node(int.to_string(value))
   lift Float => text_node(float.to_string(value))
   lift Bool => text_node(bool.to_string(value))
   lift HtmlFrag => embed(value)
 
-  // combinator 関数
+  // combinator functions
   fn block(items: List[HtmlNode]) -> HtmlFrag = fragment(items)
   fn optional(node: Option[HtmlNode]) -> HtmlNode =
     match node { some(n) => n, none => empty_node() }
@@ -52,52 +54,52 @@ builder Html {
 }
 ```
 
-### 必須メンバ
+### Required Members
 
-| メンバ | 役割 | Swift 相当 |
-|--------|------|-----------|
-| `type Node` | 中間表現の型 | `Component` |
-| `type Output` | builder ブロック全体の返り値型 | `FinalResult` |
-| `lift T => expr` | 式を Node に変換するルール（1 つ以上） | `buildExpression` |
-| `fn block(List[Node]) -> Output` | 複数の Node を Output に結合 | `buildBlock` |
+| Member | Role | Swift Equivalent |
+|--------|------|-----------------|
+| `type Node` | Intermediate representation type | `Component` |
+| `type Output` | Return type of the entire builder block | `FinalResult` |
+| `lift T => expr` | Rule to convert an expression to a Node (one or more) | `buildExpression` |
+| `fn block(List[Node]) -> Output` | Combine multiple Nodes into Output | `buildBlock` |
 
-### オプショナルメンバ
+### Optional Members
 
-| メンバ | 役割 | Swift 相当 | 未定義時 |
-|--------|------|-----------|---------|
-| `fn optional(Option[Node]) -> Node` | else なし `if` の処理 | `buildOptional` | else なし `if` はコンパイルエラー |
-| `fn array(List[Node]) -> Node` | `for` ループの処理 | `buildArray` | `for` はコンパイルエラー |
+| Member | Role | Swift Equivalent | When Undefined |
+|--------|------|-----------------|----------------|
+| `fn optional(Option[Node]) -> Node` | Handle `if` without else | `buildOptional` | `if` without else is a compile error |
+| `fn array(List[Node]) -> Node` | Handle `for` loops | `buildArray` | `for` is a compile error |
 
-`buildEither(first/second)` は導入しない。Almide は variant + match があるので、if/else の各ブランチは同じ型の Node を返せば `block` で処理できる。
+`buildEither(first/second)` is not introduced. Since Almide has variants + match, if/else branches can return the same Node type and be handled by `block`.
 
-### builder の制約
+### Builder Constraints
 
-- builder 定義はトップレベルのみ（関数内に定義不可）
-- `type Output` は builder ごとにユニーク（1 つの Output 型に複数の builder を紐づけることはできない）
-- `lift` ルールは重複不可（同じ型に 2 つの lift を定義するとコンパイルエラー）
-- builder は値ではない（変数に代入したり関数に渡したりできない）
+- Builder definitions are top-level only (cannot define inside functions)
+- `type Output` is unique per builder (cannot associate multiple builders with one Output type)
+- `lift` rules cannot be duplicated (defining two lifts for the same type is a compile error)
+- Builders are not values (cannot be assigned to variables or passed to functions)
 
 ---
 
-## 2. コンパイラ変換規則
+## 2. Compiler Transformation Rules
 
-builder ブロック `BuilderName { ... }` 内の各構文を、builder のメソッド呼び出しに変換する。
+Transform each construct inside a builder block `BuilderName { ... }` into builder method calls.
 
-### 式文 → lift
+### Expression Statement → lift
 
 ```almide
-// ユーザーが書く
+// User writes
 Html { "Hello" }
 
-// コンパイラが変換
+// Compiler transforms to
 Html.block([Html.lift_String("Hello")])
-// つまり
+// i.e.
 Html.block([text_node(escape_html("Hello"))])
 ```
 
-式の型を見て、対応する `lift` ルールを選択。マッチする `lift` がなければコンパイルエラー。
+Selects the corresponding `lift` rule based on the expression's type. Compile error if no matching `lift`.
 
-### 複数の式 → block
+### Multiple Expressions → block
 
 ```almide
 Html {
@@ -106,7 +108,7 @@ Html {
   sidebar(user)
 }
 
-// 変換
+// Transforms to
 Html.block([
   Html.lift_String("Hello"),
   Html.lift_String(user.name),
@@ -114,19 +116,19 @@ Html.block([
 ])
 ```
 
-各式を `lift` で Node に変換し、全体を `block` で結合。
+Each expression is converted to a Node via `lift`, then combined with `block`.
 
-### if/else → optional または自然な分岐
+### if/else → optional or natural branching
 
 ```almide
-// else なし → optional
+// No else → optional
 Html {
   if show_title {
     h1 { "Title" }
   }
 }
 
-// 変換
+// Transforms to
 Html.block([
   Html.optional(
     if show_title { some(Html.lift_HtmlFrag(h1(...))) }
@@ -136,7 +138,7 @@ Html.block([
 ```
 
 ```almide
-// else あり → 両ブランチを lift して block に入れる
+// With else → lift both branches and put in block
 Html {
   if is_admin {
     admin_badge()
@@ -145,7 +147,7 @@ Html {
   }
 }
 
-// 変換 — if/else は普通の式。結果の型が Node なら lift 不要
+// Transforms — if/else is a regular expression. No lift needed if result type is Node
 Html.block([
   if is_admin {
     Html.lift_HtmlFrag(admin_badge())
@@ -164,7 +166,7 @@ Html {
   }
 }
 
-// 変換
+// Transforms to
 Html.block([
   Html.array(
     items |> list.map((item) =>
@@ -174,7 +176,7 @@ Html.block([
 ])
 ```
 
-### match → 普通の式
+### match → regular expression
 
 ```almide
 Html {
@@ -185,7 +187,7 @@ Html {
   }
 }
 
-// 変換 — match はそのまま。各ブランチの結果を lift
+// Transforms — match stays as-is. Each branch's result is lifted
 Html.block([
   match user.role {
     Admin => Html.lift_HtmlFrag(admin_panel(user)),
@@ -195,7 +197,7 @@ Html.block([
 ])
 ```
 
-### let → 変換しない
+### let → no transformation
 
 ```almide
 Html {
@@ -205,50 +207,50 @@ Html {
   }
 }
 
-// let はそのまま。後続の式が変換対象
+// let stays as-is. Subsequent expressions are transformation targets
 let filtered = items |> list.filter((x) => x.active)
 Html.block([
   Html.array(filtered |> list.map((item) => ...))
 ])
 ```
 
-### 変換まとめ
+### Transformation Summary
 
-| ユーザーが書く | コンパイラが生成 |
-|--------------|----------------|
-| 式（型 T） | `Builder.lift_T(expr)` |
+| User Writes | Compiler Generates |
+|-------------|-------------------|
+| Expression (type T) | `Builder.lift_T(expr)` |
 | `{ item1; item2; ... }` | `Builder.block([v1, v2, ...])` |
-| `if cond { ... }` (else なし) | `Builder.optional(if cond { some(v) } else { none })` |
+| `if cond { ... }` (no else) | `Builder.optional(if cond { some(v) } else { none })` |
 | `if cond { ... } else { ... }` | `if cond { lift(v1) } else { lift(v2) }` |
 | `for x in xs { ... }` | `Builder.array(xs \|> list.map((x) => ...))` |
 | `match expr { ... }` | `match expr { pat => lift(v), ... }` |
-| `let x = expr` | そのまま（変換しない） |
+| `let x = expr` | As-is (no transformation) |
 
-### builder ブロック内で使えないもの
+### Not Allowed Inside Builder Blocks
 
-- `var`（mutable binding）
-- 代入（`=`, `.field =`, `[i] =`）
+- `var` (mutable binding)
+- Assignment (`=`, `.field =`, `[i] =`)
 - `while`
 - `guard`
-- `return`（Swift と同じ — 結果は暗黙的に収集）
+- `return` (same as Swift — results are implicitly collected)
 
 ---
 
-## 3. Builder 推論と Trailing Block
+## 3. Builder Inference and Trailing Block
 
-### Builder 推論
+### Builder Inference
 
-関数パラメータの型が builder の `Output` 型のとき、引数として渡される `{ }` ブロックに自動で builder 変換を適用する。
+When a function parameter's type is a builder's `Output` type, automatically apply builder transformation to `{ }` blocks passed as arguments.
 
 ```almide
-// div の定義
+// Definition of div
 fn div(class: String = "", children: HtmlFrag) -> HtmlNode
 
-// HtmlFrag は Html.Output
-// だから children に渡す { } に Html builder が自動適用される
+// HtmlFrag is Html.Output
+// So Html builder is automatically applied to { } passed to children
 ```
 
-コンパイラは `Output → Builder` のレジストリを保持する:
+The compiler maintains an `Output → Builder` registry:
 
 ```
 HtmlFrag → Html
@@ -256,65 +258,65 @@ TextFrag → Text
 CsvDoc   → Csv
 ```
 
-制約: 1 つの Output 型に紐づく builder は最大 1 つ。
+Constraint: at most one builder per Output type.
 
-### Trailing Block 構文
+### Trailing Block Syntax
 
-**関数呼び出しの最後の引数が builder の Output 型のとき、trailing `{ }` で渡せる。**
+**When the last argument of a function call is a builder's Output type, it can be passed via trailing `{ }`.**
 
 ```almide
-// 以下は全て等価
+// The following are all equivalent
 div(class: "card", children = Html { p { "hello" } })
-div(class: "card") { p { "hello" } }      // ← trailing block（推奨）
+div(class: "card") { p { "hello" } }      // ← trailing block (recommended)
 
-// 属性なしの場合
+// Without attributes
 div(children = Html { p { "hello" } })
-div { p { "hello" } }                     // ← trailing block（推奨）
+div { p { "hello" } }                     // ← trailing block (recommended)
 ```
 
-**パーサルール:**
+**Parser rules:**
 
 ```
 CallExpr ::= Expr '(' ArgList? ')' TrailingBlock?
 TrailingBlock ::= '{' BuilderItem* '}'
 ```
 
-trailing block がある場合:
-1. 呼び出し先関数のシグネチャを解決
-2. 最後のパラメータの型が builder の Output 型か確認
-3. Output 型に対応する builder を特定
-4. `{ }` 内を builder 変換し、最後のパラメータとして渡す
+When a trailing block is present:
+1. Resolve the called function's signature
+2. Check if the last parameter's type is a builder's Output type
+3. Identify the builder corresponding to the Output type
+4. Apply builder transformation to `{ }` contents and pass as the last parameter
 
-trailing block のない `{ }` がブロック式か builder block かの曖昧性:
-- 関数呼び出しの直後 → trailing block
-- `BuilderName { }` の形 → builder block
-- それ以外 → 通常のブロック式
+Ambiguity between `{ }` without trailing block being a block expression or builder block:
+- Immediately after function call → trailing block
+- In the form `BuilderName { }` → builder block
+- Otherwise → regular block expression
 
-### Trailing Block のネスト
+### Trailing Block Nesting
 
-この仕組みにより HTML のような自然なネストが書ける:
+This mechanism enables natural nesting like HTML:
 
 ```almide
-Html {                                    // ← Html builder 明示
-  div(class: "card") {                    // ← trailing block, Html 推論
-    h2 { "Title" }                        // ← trailing block, Html 推論
-    p { "Content" }                       // ← trailing block, Html 推論
-    ul {                                  // ← trailing block, Html 推論
+Html {                                    // ← Html builder explicit
+  div(class: "card") {                    // ← trailing block, Html inferred
+    h2 { "Title" }                        // ← trailing block, Html inferred
+    p { "Content" }                       // ← trailing block, Html inferred
+    ul {                                  // ← trailing block, Html inferred
       for item in items {
-        li { item.name }                  // ← trailing block, Html 推論
+        li { item.name }                  // ← trailing block, Html inferred
       }
     }
   }
 }
 ```
 
-最上位だけ `Html { }` を書けば、以降の関数呼び出しは trailing block + builder 推論で自動変換。`Html { }` のネストが不要。
+Only the top level requires `Html { }`. All subsequent function calls are automatically transformed via trailing block + builder inference. No nested `Html { }` needed.
 
 ---
 
-## 4. `template` キーワード
+## 4. `template` Keyword
 
-`fn` を置き換える宣言キーワード。「この関数は document を組み立てる」という意図の明示。
+A declaration keyword that replaces `fn`. Explicitly communicates the intent "this function assembles a document".
 
 ```almide
 template invoice_email(inv: Invoice) -> HtmlDoc = Html {
@@ -328,7 +330,7 @@ template invoice_email(inv: Invoice) -> HtmlDoc = Html {
 
 ### Semantic Model
 
-内部的には `Fn` の一種:
+Internally a variant of `Fn`:
 
 ```rust
 pub enum FnKind {
@@ -339,17 +341,17 @@ pub enum FnKind {
 }
 ```
 
-### template の制約
+### Template Constraints
 
-- **pure のみ** — `effect template` は不許可
-- **戻り値型は Doc 型のみ** — `HtmlDoc`, `TextDoc` 等
-- **body は自由** — builder block に限らず、`if` / `match` で異なる Doc を返せる
+- **Pure only** — `effect template` is not allowed
+- **Return type must be a Doc type** — `HtmlDoc`, `TextDoc`, etc.
+- **Body is unrestricted** — not limited to builder blocks; can return different Docs via `if` / `match`
 
 ```almide
-// ✅ 直接 builder
+// ✅ Direct builder
 template page(user: User) -> HtmlDoc = Html { body { ... } }
 
-// ✅ 条件分岐
+// ✅ Conditional branching
 template page(user: User) -> HtmlDoc =
   if user.is_admin { admin_page(user) }
   else { normal_page(user) }
@@ -363,12 +365,12 @@ effect template bad() -> HtmlDoc = Html { ... }
 
 ### template vs fn
 
-| 宣言 | 用途 | 戻り値型の制約 |
-|------|------|--------------|
-| `template` | 完全な document の entry point | Doc 型のみ |
-| `fn` | fragment / helper / 任意の関数 | 制約なし |
+| Declaration | Use Case | Return Type Constraint |
+|-------------|----------|----------------------|
+| `template` | Entry point for a complete document | Doc types only |
+| `fn` | fragment / helper / any function | No constraint |
 
-`fn` が builder の Output 型を返すことは許可:
+`fn` is allowed to return a builder's Output type:
 
 ```almide
 fn sidebar(user: User) -> HtmlFrag = Html {
@@ -378,9 +380,9 @@ fn sidebar(user: User) -> HtmlFrag = Html {
 
 ---
 
-## 5. Html Builder（stdlib）
+## 5. Html Builder (stdlib)
 
-### Builder 定義
+### Builder Definition
 
 ```almide
 builder Html {
@@ -400,41 +402,41 @@ builder Html {
 }
 ```
 
-### HtmlDoc と HtmlFrag
+### HtmlDoc and HtmlFrag
 
 ```
-HtmlDoc  — 完全な HTML document（<html> ルート）
-HtmlFrag — HTML fragment（要素 or ノードリスト）
+HtmlDoc  — Complete HTML document (<html> root)
+HtmlFrag — HTML fragment (element or node list)
 ```
 
-- `HtmlFrag` は `Html.Output`
-- `HtmlDoc` は `HtmlFrag` を `render` で完全な文書に変換したもの
-- `HtmlFrag` は他の `HtmlFrag` に差し込める（lift ルールで処理）
-- `HtmlDoc` は差し込めない（lift ルールなし → コンパイルエラー）
+- `HtmlFrag` is `Html.Output`
+- `HtmlDoc` is `HtmlFrag` converted to a complete document via `render`
+- `HtmlFrag` can be inserted into other `HtmlFrag` (handled by lift rules)
+- `HtmlDoc` cannot be inserted (no lift rule → compile error)
 
-`HtmlDoc` への変換:
+Conversion to `HtmlDoc`:
 
 ```almide
-fn to_doc(frag: HtmlFrag) -> HtmlDoc     // frag を完全な HTML document にラップ
-fn render(doc: HtmlDoc) -> String         // 文字列にシリアライズ
-fn render_frag(frag: HtmlFrag) -> String  // fragment だけシリアライズ
+fn to_doc(frag: HtmlFrag) -> HtmlDoc     // wrap frag into a complete HTML document
+fn render(doc: HtmlDoc) -> String         // serialize to string
+fn render_frag(frag: HtmlFrag) -> String  // serialize fragment only
 ```
 
 ---
 
-## 6. HTML 要素 — 普通の関数
+## 6. HTML Elements — Ordinary Functions
 
-### 設計
+### Design
 
-HTML 要素は **stdlib の関数** として定義。builder 機構の知識を持たない。
+HTML elements are defined as **stdlib functions**. They have no knowledge of the builder mechanism.
 
-各要素関数は:
-- 要素固有の named attributes（デフォルト値付き）
-- global attributes（全要素共通、デフォルト値付き）
-- `children: HtmlFrag`（最後のパラメータ、trailing block で渡される）
+Each element function has:
+- Element-specific named attributes (with default values)
+- Global attributes (shared across all elements, with default values)
+- `children: HtmlFrag` (last parameter, passed via trailing block)
 
 ```almide
-// 生成される関数シグネチャの例
+// Examples of generated function signatures
 
 // Block elements
 fn div(id: String = "", class: String = "", hidden: Bool = false,
@@ -451,7 +453,7 @@ fn a(href: String = "", target: String = "", rel: String = "",
      id: String = "", class: String = "",
      children: HtmlFrag) -> HtmlNode
 
-// Images (void element — children なし)
+// Images (void element — no children)
 fn img(src: String, alt: String = "",
        width: Int = 0, height: Int = 0,
        id: String = "", class: String = "") -> HtmlNode
@@ -473,23 +475,23 @@ fn td(colspan: Int = 1, children: HtmlFrag) -> HtmlNode
 fn th(colspan: Int = 1, children: HtmlFrag) -> HtmlNode
 ```
 
-### 使い方
+### Usage
 
 ```almide
 Html {
   div(class: "card") {                      // named arg + trailing block
-    h1 { "Hello" }                          // trailing block のみ
+    h1 { "Hello" }                          // trailing block only
     p(class: "subtitle") { "Welcome" }
     a(href: "/home", class: "btn") { "Go" }
-    img(src: "/photo.jpg", alt: "Photo")    // void element, trailing block なし
+    img(src: "/photo.jpg", alt: "Photo")    // void element, no trailing block
     input(type_: "text", placeholder: "Search...")
   }
 }
 ```
 
-### コンポーネント — 同じパターン
+### Components — Same Pattern
 
-ユーザー定義コンポーネントも `children: HtmlFrag` を最後のパラメータにすれば trailing block が使える:
+User-defined components can also use trailing blocks by placing `children: HtmlFrag` as the last parameter:
 
 ```almide
 fn card(title: String, children: HtmlFrag) -> HtmlNode = Html {
@@ -503,7 +505,7 @@ fn badge(text: String, color: String) -> HtmlNode = Html {
   span(class: "badge badge-${color}") { text }
 } |> to_node
 
-// 使い方 — HTML 要素と同じ構文
+// Usage — same syntax as HTML elements
 Html {
   card(title: "Profile") {
     p { user.name }
@@ -512,18 +514,18 @@ Html {
 }
 ```
 
-### Void Element の扱い
+### Void Element Handling
 
-`img`, `input`, `br`, `hr`, `meta`, `link` 等は `children` パラメータを持たない:
+`img`, `input`, `br`, `hr`, `meta`, `link`, etc. do not have a `children` parameter:
 
 ```almide
-fn img(src: String, alt: String = "") -> HtmlNode          // children なし
-fn br() -> HtmlNode                                         // 引数なし
+fn img(src: String, alt: String = "") -> HtmlNode          // no children
+fn br() -> HtmlNode                                         // no arguments
 fn input(type_: String = "text", name: String = "") -> HtmlNode
 fn meta(charset: String = "", name: String = "", content: String = "") -> HtmlNode
 ```
 
-trailing block を渡すとコンパイルエラー:
+Passing a trailing block produces a compile error:
 
 ```
 error: img does not accept children
@@ -537,14 +539,14 @@ error: img does not accept children
 
 ---
 
-## 7. HTML 要素 — TOML 駆動生成
+## 7. HTML Elements — TOML-Driven Generation
 
-### TOML 定義
+### TOML Definition
 
 ```toml
 # stdlib/defs/html_elements.toml
 
-# Global attributes（全要素に付与）
+# Global attributes (applied to all elements)
 [global]
 attrs = [
   { name = "id",       type = "String", default = "\"\"" },
@@ -555,7 +557,7 @@ attrs = [
   { name = "lang",     type = "String", default = "\"\"" },
 ]
 
-# data-* / aria-* は特殊処理（Phase 2）
+# data-* / aria-* handled separately (Phase 2)
 
 # --- Block elements ---
 
@@ -831,9 +833,9 @@ elements = ["script", "style", "iframe", "object", "embed"]
 reason = "security: use typed alternatives"
 ```
 
-### build.rs による生成
+### Generation via build.rs
 
-`build.rs` が `html_elements.toml` を読み、以下を生成:
+`build.rs` reads `html_elements.toml` and generates:
 
 ```rust
 // src/generated/html_elements.rs — DO NOT EDIT
@@ -860,14 +862,14 @@ pub fn is_banned(name: &str) -> Option<&'static str> { ... }
 pub fn suggest_element(typo: &str) -> Option<&'static str> { ... }
 ```
 
-生成されるもの:
-- **型チェッカー用**: 各要素関数のシグネチャ情報（パラメータ名、型、デフォルト値）
-- **codegen 用**: 要素名 → HTML タグ名のマッピング（`type_` → `type`）
-- **診断用**: typo 候補、banned element チェック
+What gets generated:
+- **For the type checker**: signature information for each element function (parameter names, types, default values)
+- **For codegen**: element name → HTML tag name mapping (`type_` → `type`)
+- **For diagnostics**: typo suggestions, banned element checks
 
 ---
 
-## 8. Text Builder（stdlib）
+## 8. Text Builder (stdlib)
 
 ```almide
 builder Text {
@@ -884,12 +886,12 @@ builder Text {
   fn array(nodes: List[TextNode]) -> TextNode = join_node(nodes)
 }
 
-// Text 専用の関数
-fn line(children: TextFrag) -> TextNode      // 1 行（末尾改行）
-fn blank() -> TextNode                       // 空行
-fn indent(level: Int = 1, children: TextFrag) -> TextNode  // インデント
+// Text-specific functions
+fn line(children: TextFrag) -> TextNode      // One line (trailing newline)
+fn blank() -> TextNode                       // Empty line
+fn indent(level: Int = 1, children: TextFrag) -> TextNode  // Indentation
 
-// 使い方
+// Usage
 template receipt(x: Receipt) -> TextDoc = Text {
   line { "Receipt #${x.id}" }
   line { "Customer: ${x.customer_name}" }
@@ -904,17 +906,17 @@ template receipt(x: Receipt) -> TextDoc = Text {
 
 ---
 
-## 9. AST 表現
+## 9. AST Representation
 
-builder 機構は汎用なので、AST は Html/Text を区別しない。
+Since the builder mechanism is general-purpose, the AST does not distinguish between Html/Text.
 
 ```rust
-// Expr に追加
+// Added to Expr
 pub enum Expr {
-    // ... 既存 ...
+    // ... existing ...
 
     /// BuilderName { items }
-    /// 明示的な builder ブロック
+    /// Explicit builder block
     BuilderBlock {
         builder_name: String,              // "Html", "Text", "Csv", ...
         items: Vec<BuilderItem>,
@@ -922,9 +924,9 @@ pub enum Expr {
     },
 }
 
-/// Builder ブロック内のアイテム
+/// Items inside a builder block
 pub enum BuilderItem {
-    /// 式（lift 対象）
+    /// Expression (lift target)
     Expr {
         expr: Expr,
         #[serde(skip)] span: Option<Span>,
@@ -949,7 +951,7 @@ pub enum BuilderItem {
         arms: Vec<BuilderMatchArm>,
         #[serde(skip)] span: Option<Span>,
     },
-    /// let 束縛（変換しない）
+    /// let binding (no transformation)
     Let {
         pattern: Pattern,
         value: Expr,
@@ -964,15 +966,15 @@ pub struct BuilderMatchArm {
 }
 ```
 
-旧設計との違い:
-- `BuilderItem::Element` 削除 — 要素は普通の関数呼び出し（`BuilderItem::Expr` に含まれる）
-- `BuilderItem::Text` 削除 — 文字列リテラルも `BuilderItem::Expr` に統合
-- `BuilderItem::Line` / `BuilderItem::Blank` 削除 — `line()`, `blank()` は普通の関数
-- `HtmlBuilder` / `TextBuilder` の区別削除 — 汎用 `BuilderBlock` に統一
+Differences from the old design:
+- Removed `BuilderItem::Element` — elements are ordinary function calls (included in `BuilderItem::Expr`)
+- Removed `BuilderItem::Text` — string literals are also unified into `BuilderItem::Expr`
+- Removed `BuilderItem::Line` / `BuilderItem::Blank` — `line()`, `blank()` are ordinary functions
+- Removed `HtmlBuilder` / `TextBuilder` distinction — unified into generic `BuilderBlock`
 
-### Trailing Block の AST
+### Trailing Block AST
 
-trailing block 付きの関数呼び出しは、パーサが最後の引数として挿入:
+Function calls with trailing blocks have them inserted by the parser as the last argument:
 
 ```almide
 div(class: "card") { p { "hello" } }
@@ -984,8 +986,8 @@ Expr::Call {
     target: "div",
     args: [
         NamedArg("class", Expr::Lit("card")),
-        // trailing block は最後の引数として挿入
-        // この時点では BuilderBlock ではなく TrailingBlock
+        // trailing block is inserted as the last argument
+        // At this point it's TrailingBlock, not BuilderBlock
         Expr::TrailingBlock {
             items: [
                 BuilderItem::Expr { expr: Call("p", [TrailingBlock { ... }]) }
@@ -995,34 +997,34 @@ Expr::Call {
 }
 ```
 
-チェッカーが `div` のシグネチャを解決し、最後のパラメータ `children: HtmlFrag` の型から builder を特定して変換を適用。
+The checker resolves `div`'s signature, identifies the builder from the last parameter `children: HtmlFrag`'s type, and applies the transformation.
 
 ---
 
-## 10. IR 表現
+## 10. IR Representation
 
-IR では builder 変換が完了し、lift が解決済み。
+In the IR, builder transformation is complete and lifts are resolved.
 
 ```rust
 pub enum IrExprKind {
-    // ... 既存 ...
+    // ... existing ...
 
-    /// Builder の block 呼び出し（変換済み）
+    /// Builder's block call (transformed)
     BuilderBlock {
-        builder: BuilderRef,          // どの builder か
-        items: Vec<IrBuilderNode>,    // lift 済みのノード列
+        builder: BuilderRef,          // which builder
+        items: Vec<IrBuilderNode>,    // sequence of lifted nodes
     },
 }
 
-/// IR builder node — lift 解決済み
+/// IR builder node — lifts resolved
 pub enum IrBuilderNode {
-    /// lift 済みの式 → Node
+    /// Lifted expression → Node
     Lifted {
-        lift_rule: LiftRuleRef,       // どの lift ルールで変換したか
-        expr: IrExpr,                 // 元の式
+        lift_rule: LiftRuleRef,       // which lift rule was used
+        expr: IrExpr,                 // original expression
         span: Option<Span>,
     },
-    /// if (else なし) → optional
+    /// if (no else) → optional
     Optional {
         cond: IrExpr,
         then_node: Box<IrBuilderNode>,
@@ -1035,12 +1037,12 @@ pub enum IrBuilderNode {
         body: Box<IrBuilderNode>,
         span: Option<Span>,
     },
-    /// if/else, match → 普通の条件式（結果が Node 型）
+    /// if/else, match → regular conditional expression (result is Node type)
     Conditional {
-        expr: IrExpr,                 // if/match 式（結果が Node）
+        expr: IrExpr,                 // if/match expression (result is Node)
         span: Option<Span>,
     },
-    /// let 束縛
+    /// let binding
     Let {
         var: VarId,
         value: IrExpr,
@@ -1051,48 +1053,48 @@ pub enum IrBuilderNode {
 
 ---
 
-## 11. 型チェック
+## 11. Type Checking
 
-### builder 解決
+### Builder Resolution
 
-1. `BuilderBlock { builder_name: "Html", items }` を見つける
-2. `Html` builder の定義を lookup
-3. 各 `BuilderItem::Expr` の型を推論
-4. 型に対応する `lift` ルールを検索
-5. マッチしなければコンパイルエラー
-6. 全 item を lift → `block` の引数型と一致するか検証
+1. Find `BuilderBlock { builder_name: "Html", items }`
+2. Look up the `Html` builder definition
+3. Infer the type of each `BuilderItem::Expr`
+4. Search for a `lift` rule matching the type
+5. Compile error if no match
+6. Lift all items → verify they match the `block` argument type
 
-### trailing block 解決
+### Trailing Block Resolution
 
-1. `CallExpr` に `TrailingBlock` が付いている
-2. 呼び出し先関数の最後のパラメータ型を取得
-3. その型が builder の Output 型か registry で確認
-4. 一致すれば builder を特定し、`TrailingBlock` を `BuilderBlock` に変換
-5. 一致しなければエラー: `trailing block requires a builder output type`
+1. `CallExpr` has a `TrailingBlock` attached
+2. Get the called function's last parameter type
+3. Check in the registry if that type is a builder's Output type
+4. If it matches, identify the builder and convert `TrailingBlock` to `BuilderBlock`
+5. If no match, error: `trailing block requires a builder output type`
 
-### lift ルールの型チェック
+### Lift Rule Type Checking
 
 ```
-// builder Html の lift ルール
+// lift rule for builder Html
 lift String => text_node(escape_html(value))
 
-// コンパイラの検証:
-// 1. `value` は `String` 型で束縛される
-// 2. `text_node(escape_html(value))` の型が `HtmlNode` (= Html.Node) か検証
-// 3. 不一致ならエラー
+// Compiler verification:
+// 1. `value` is bound with type `String`
+// 2. Verify that the type of `text_node(escape_html(value))` is `HtmlNode` (= Html.Node)
+// 3. Error if mismatch
 ```
 
-### エラーメッセージ
+### Error Messages
 
-| 状況 | メッセージ |
-|------|-----------|
-| lift ルールなし | `cannot insert User in Html builder; no lift rule for type User. Use a field like user.name (String), or write a function that returns HtmlFrag` |
-| Doc を差し込み | `cannot insert HtmlDoc in Html builder; HtmlDoc is a complete document. Use a function that returns HtmlFrag instead` |
-| void に trailing block | `img does not accept children; img is a void element, remove the { } block` |
-| trailing block 型不一致 | `trailing block requires a builder output type; parameter 'x' has type Int, which is not a builder output` |
-| 不明な builder | `unknown builder 'Foo'; did you mean 'Html'?` |
-| optional 未定義 | `cannot use 'if' without 'else' in Csv builder; Csv does not define 'optional'. Add an else branch, or define fn optional in the builder` |
-| array 未定義 | `cannot use 'for' in Csv builder; Csv does not define 'array'. Define fn array in the builder` |
+| Situation | Message |
+|-----------|---------|
+| No lift rule | `cannot insert User in Html builder; no lift rule for type User. Use a field like user.name (String), or write a function that returns HtmlFrag` |
+| Inserting Doc | `cannot insert HtmlDoc in Html builder; HtmlDoc is a complete document. Use a function that returns HtmlFrag instead` |
+| Trailing block on void | `img does not accept children; img is a void element, remove the { } block` |
+| Trailing block type mismatch | `trailing block requires a builder output type; parameter 'x' has type Int, which is not a builder output` |
+| Unknown builder | `unknown builder 'Foo'; did you mean 'Html'?` |
+| optional undefined | `cannot use 'if' without 'else' in Csv builder; Csv does not define 'optional'. Add an else branch, or define fn optional in the builder` |
+| array undefined | `cannot use 'for' in Csv builder; Csv does not define 'array'. Define fn array in the builder` |
 | banned element | `function 'script' is banned in html context (security); use typed alternatives` |
 
 ---
@@ -1101,13 +1103,13 @@ lift String => text_node(escape_html(value))
 
 ### Rust codegen
 
-builder ブロックは **ノードツリーの構築コード** に変換:
+Builder blocks are transformed into **node tree construction code**:
 
 ```rust
 // Almide:
 // Html { div(class: "card") { h1 { "Hello" } } }
 
-// 生成される Rust:
+// Generated Rust:
 {
     let __b0 = almide_html_text_node(&almide_html_escape("Hello"));
     let __b1 = almide_html_element("h1", vec![], vec![__b0]);
@@ -1121,7 +1123,7 @@ builder ブロックは **ノードツリーの構築コード** に変換:
 ### TS codegen
 
 ```typescript
-// 生成される TypeScript:
+// Generated TypeScript:
 (() => {
     const __b0 = __almd_html.text(__almd_html.escape("Hello"));
     const __b1 = __almd_html.el("h1", {}, [__b0]);
@@ -1130,7 +1132,7 @@ builder ブロックは **ノードツリーの構築コード** に変換:
 })()
 ```
 
-### render 関数
+### render Function
 
 ```rust
 // Rust runtime
@@ -1162,7 +1164,7 @@ fn render_node(node: &HtmlNode, out: &mut String) {
             }
         }
         HtmlNode::Text(s) => {
-            // すでに escape 済み（lift 時に escape_html 適用）
+            // Already escaped (escape_html applied during lift)
             out.push_str(s);
         }
         HtmlNode::Fragment(children) => {
@@ -1177,7 +1179,7 @@ fn render_node(node: &HtmlNode, out: &mut String) {
 
 ---
 
-## 13. Runtime 型
+## 13. Runtime Types
 
 ### Rust
 
@@ -1248,22 +1250,22 @@ const __almd_html = {
 
 ## 14. Keywords
 
-### 予約語として追加
+### Added as Reserved Words
 
-| keyword | 理由 |
-|---------|------|
-| `builder` | builder 定義のためのキーワード |
-| `template` | document entry point の宣言（`fn` の variant） |
+| Keyword | Reason |
+|---------|--------|
+| `builder` | Keyword for builder definitions |
+| `template` | Declaration of document entry points (variant of `fn`) |
 
-### 予約語にしないもの
+### NOT Reserved Words
 
-| 識別子 | 理由 |
-|--------|------|
-| `lift` | builder 定義内でのみ意味を持つ |
-| `Html`, `Text`, `Csv` | builder 名は普通の識別子 |
-| HTML タグ名 | 普通の関数。builder と無関係 |
+| Identifier | Reason |
+|------------|--------|
+| `lift` | Only meaningful inside builder definitions |
+| `Html`, `Text`, `Csv` | Builder names are ordinary identifiers |
+| HTML tag names | Ordinary functions. Unrelated to builder |
 
-**追加する予約語は `builder` と `template` の 2 つ。**
+**Only 2 reserved words are added: `builder` and `template`.**
 
 ---
 
@@ -1469,7 +1471,7 @@ export fn render_email(name: String, age: Int) -> String =
 ```
 
 ```python
-# Python から呼ぶ
+# Call from Python
 from almide_lib import render_email
 html = render_email("Alice", 30)
 send_email(to=addr, body=html)
@@ -1481,52 +1483,52 @@ send_email(to=addr, body=html)
 
 ### Phase 1: Builder Core
 
-言語コアに `builder` 機構を追加:
+Add `builder` mechanism to language core:
 
-- [ ] `builder` keyword + parser（builder 定義の parse）
-- [ ] `template` keyword + parser（FnKind::Template）
-- [ ] `BuilderBlock` AST node（汎用）
-- [ ] Trailing block parser（`fn(args) { items }` → 最後の引数に挿入）
-- [ ] Builder registry（Output 型 → Builder のマッピング）
-- [ ] Builder 推論（trailing block の Output 型から builder を特定）
-- [ ] `lift` ルール resolution（式の型 → lift ルール検索 → Node 変換）
-- [ ] `block` / `optional` / `array` への変換（IR 生成）
-- [ ] builder 内の `if` / `for` / `match` / `let` 変換
-- [ ] builder ブロック内の制約チェック（var/assign/while 禁止）
-- [ ] 診断（lift ルールなし、optional 未定義で if 使用、等）
+- [ ] `builder` keyword + parser (parse builder definitions)
+- [ ] `template` keyword + parser (FnKind::Template)
+- [ ] `BuilderBlock` AST node (generic)
+- [ ] Trailing block parser (`fn(args) { items }` → insert as last argument)
+- [ ] Builder registry (Output type → Builder mapping)
+- [ ] Builder inference (identify builder from trailing block's Output type)
+- [ ] `lift` rule resolution (expression type → lift rule lookup → Node conversion)
+- [ ] Transformation to `block` / `optional` / `array` (IR generation)
+- [ ] `if` / `for` / `match` / `let` transformation inside builders
+- [ ] Constraint checking inside builder blocks (var/assign/while prohibited)
+- [ ] Diagnostics (no lift rule, using if when optional is undefined, etc.)
 
 ### Phase 2: Html Builder
 
-stdlib に Html builder を追加:
+Add Html builder to stdlib:
 
-- [ ] `builder Html` 定義（lift ルール + block/optional/array）
-- [ ] `html_elements.toml` + `build.rs` 生成
-- [ ] HTML 要素関数（div, h1, p, a, img, ... — TOML から ~70 関数生成）
-- [ ] Global attributes（id, class, hidden, ...）
-- [ ] Element-specific attributes（href, src, alt, ...）
-- [ ] Void element 処理（img, input, br — trailing block 禁止）
-- [ ] `HtmlNode` / `HtmlFrag` / `HtmlDoc` 型
+- [ ] `builder Html` definition (lift rules + block/optional/array)
+- [ ] `html_elements.toml` + `build.rs` generation
+- [ ] HTML element functions (div, h1, p, a, img, ... — ~70 functions generated from TOML)
+- [ ] Global attributes (id, class, hidden, ...)
+- [ ] Element-specific attributes (href, src, alt, ...)
+- [ ] Void element handling (img, input, br — trailing block prohibited)
+- [ ] `HtmlNode` / `HtmlFrag` / `HtmlDoc` types
 - [ ] `render(HtmlDoc) -> String` / `render_frag(HtmlFrag) -> String`
 - [ ] Context-aware HTML escaping（`escape_html`）
-- [ ] Banned element チェック（script, style, iframe）
-- [ ] Rust runtime 実装（`core_runtime.txt` に追加）
-- [ ] TS runtime 実装（`emit_ts_runtime` に追加）
-- [ ] HTML 要素 typo 診断（`diiv` → `did you mean div?`）
+- [ ] Banned element checks (script, style, iframe)
+- [ ] Rust runtime implementation (add to `core_runtime.txt`)
+- [ ] TS runtime implementation (add to `emit_ts_runtime`)
+- [ ] HTML element typo diagnostics (`diiv` → `did you mean div?`)
 
 ### Phase 3: Text Builder + Ergonomics
 
-- [ ] `builder Text` 定義
-- [ ] `line()`, `blank()`, `indent()` 関数
-- [ ] `TextNode` / `TextFrag` / `TextDoc` 型
+- [ ] `builder Text` definition
+- [ ] `line()`, `blank()`, `indent()` functions
+- [ ] `TextNode` / `TextFrag` / `TextDoc` types
 - [ ] `render(TextDoc) -> String`
-- [ ] `data-*` / `aria-*` 属性サポート
-- [ ] `TrustedHtml` 型と raw 挿入 API
+- [ ] `data-*` / `aria-*` attribute support
+- [ ] `TrustedHtml` type and raw insertion API
 
 ### Phase 4: Prompt Builder + Advanced
 
-- [ ] `builder Prompt` 定義
-- [ ] `PromptDoc` 型 / system/user/context ノード
-- [ ] Codec 統合（`expect T using Json`）
+- [ ] `builder Prompt` definition
+- [ ] `PromptDoc` type / system/user/context nodes
+- [ ] Codec integration (`expect T using Json`)
 - [ ] Custom element support（`element("my-widget") { ... }`）
 - [ ] Source map（rendered → template source）
 
@@ -1534,45 +1536,45 @@ stdlib に Html builder を追加:
 
 ## Key Design Decisions
 
-### なぜ汎用 builder か（旧設計との違い）
+### Why a General-Purpose Builder (Differences from Old Design)
 
-旧設計は `html {}` / `text {}` を特殊構文として parser に組み込んでいた。新設計は Swift Result Builder に倣い、**言語レベルの汎用変換機構** として実装する。
+The old design embedded `html {}` / `text {}` as special syntax in the parser. The new design follows Swift's Result Builder approach, implementing it as a **language-level general-purpose transformation mechanism**.
 
-| | 旧設計 | 新設計 |
+| | Old Design | New Design |
 |---|---|---|
-| HTML タグ | builder 内の contextual keyword | 普通の関数 |
-| Element vs Expr の曖昧性 | lookahead で解消 | 存在しない（全部関数呼び出し） |
-| 新しい builder の追加 | コンパイラ変更が必要 | ユーザーが `builder` で定義可能 |
-| `html {}` の認識 | parser が contextual に認識 | `Html { }` は builder ブロック |
-| known tags チェック | parser レベル | 型チェッカーレベル（関数の存在チェック） |
+| HTML tags | Contextual keywords inside builder | Ordinary functions |
+| Element vs Expr ambiguity | Resolved via lookahead | Doesn't exist (everything is function calls) |
+| Adding new builders | Requires compiler changes | Users can define with `builder` |
+| Recognizing `html {}` | Parser recognizes contextually | `Html { }` is a builder block |
+| Known tags check | Parser level | Type checker level (function existence check) |
 
-### なぜ `buildEither` を導入しないか
+### Why Not Introduce `buildEither`
 
-Swift の `buildEither(first/second)` は、if/else の各ブランチが異なる型を返せるようにするためにバイナリツリーを構築する。Almide はこれを導入しない:
+Swift's `buildEither(first/second)` builds a binary tree so that if/else branches can return different types. Almide doesn't introduce this:
 
-- Almide の variant + match は Swift より強力で、分岐の型統一を自然に扱える
-- `buildEither` のバイナリツリーは型が複雑になり、LLM が理解しにくい
-- if/else の各ブランチは同じ Node 型を返す制約で十分
+- Almide's variant + match is more powerful than Swift's and handles branch type unification naturally
+- `buildEither`'s binary tree makes types complex and hard for LLMs to understand
+- The constraint that if/else branches return the same Node type is sufficient
 
-### trailing block の曖昧性解消
+### Trailing Block Ambiguity Resolution
 
-`f { ... }` が「関数 f にブロック式を渡す」か「関数 f に trailing builder block を渡す」かは、f のシグネチャで決まる:
+Whether `f { ... }` is "passing a block expression to function f" or "passing a trailing builder block to function f" is determined by f's signature:
 
-- f の最後のパラメータ型が builder の Output 型 → trailing builder block
-- それ以外 → 通常のブロック式（既存動作を維持）
+- f's last parameter type is a builder's Output type → trailing builder block
+- Otherwise → regular block expression (preserves existing behavior)
 
-既存コードの破壊はない（現在 builder Output 型を持つ関数は存在しない）。
+No existing code is broken (no functions currently have builder Output types).
 
-### `lift` をオーバーロードではなく宣言的ルールにする理由
+### Why `lift` Uses Declarative Rules Instead of Overloading
 
-Almide にはオーバーロードがない。`lift` を関数にすると同名で異なるシグネチャの関数が必要になる。代わりに builder 定義内の `lift T => expr` 構文で型→変換の対応を宣言的に書く。コンパイラがこのルールを参照して型ごとのコードを生成する。
+Almide has no overloading. Making `lift` a function would require same-named functions with different signatures. Instead, the `lift T => expr` syntax within builder definitions declaratively maps types to conversions. The compiler references these rules to generate code for each type.
 
 ## Supersedes
 
-旧 template.md（Typed Document Builder）を全面置換。`builder` 汎用機構の導入により、以下が不要になった:
+Fully replaces the old template.md (Typed Document Builder). The introduction of the generic `builder` mechanism makes the following unnecessary:
 
-- `BuilderItem::Element` AST（要素は関数呼び出しに統合）
-- `BuilderItem::Text` / `Line` / `Blank`（関数に統合）
-- `HtmlBuilder` / `TextBuilder` の AST 区別（汎用 `BuilderBlock` に統一）
-- Element vs Expr の曖昧性解消ロジック（不要）
-- `html_schema.toml` の tag/attr validation（関数シグネチャ + 型チェックで代替）
+- `BuilderItem::Element` AST (elements unified into function calls)
+- `BuilderItem::Text` / `Line` / `Blank` (unified into functions)
+- `HtmlBuilder` / `TextBuilder` AST distinction (unified into generic `BuilderBlock`)
+- Element vs Expr ambiguity resolution logic (unnecessary)
+- `html_schema.toml` tag/attr validation (replaced by function signatures + type checking)

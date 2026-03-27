@@ -1,3 +1,5 @@
+<!-- description: Cross-target test coverage status (Rust/WASM/TS) -->
+<!-- done: 2026-03-24 -->
 # Test Coverage
 
 **Current**: 129 test files, 2,042 .almd test blocks (Rust target). All 129 pass on WASM target too.

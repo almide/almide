@@ -315,7 +315,8 @@ fn try_hoist_expr(
                 try_hoist_expr(v, loop_defined, vt, hoisted, efns);
             }
         }
-        IrExprKind::Member { object, .. } => {
+        IrExprKind::Member { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => {
             try_hoist_expr(object, loop_defined, vt, hoisted, efns);
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
@@ -415,8 +416,13 @@ fn has_control_flow(expr: &IrExpr) -> bool {
         }
         IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
         | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } => {
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        | IrExprKind::OptionalChain { expr: e, .. } => {
             has_control_flow(e)
+        }
+        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
+            has_control_flow(e) || has_control_flow(f)
         }
         _ => false,
     }
@@ -493,7 +499,8 @@ fn has_effect_call(expr: &IrExpr, efns: &HashSet<Sym>) -> bool {
         IrExprKind::SpreadRecord { base, fields } => {
             has_effect_call(base, efns) || fields.iter().any(|(_, v)| has_effect_call(v, efns))
         }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => {
             has_effect_call(object, efns)
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
@@ -501,10 +508,14 @@ fn has_effect_call(expr: &IrExpr, efns: &HashSet<Sym>) -> bool {
         }
         IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr }
         | IrExprKind::ResultErr { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
         | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
             has_effect_call(expr, efns)
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            has_effect_call(expr, efns) || has_effect_call(fallback, efns)
         }
         IrExprKind::StringInterp { parts } => {
             parts.iter().any(|p| matches!(p, IrStringPart::Expr { expr } if has_effect_call(expr, efns)))
@@ -583,7 +594,8 @@ fn refs_are_outside_loop(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
             refs_are_outside_loop(base, loop_defined)
                 && fields.iter().all(|(_, v)| refs_are_outside_loop(v, loop_defined))
         }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => {
             refs_are_outside_loop(object, loop_defined)
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
@@ -592,10 +604,15 @@ fn refs_are_outside_loop(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
         }
         IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr }
         | IrExprKind::ResultErr { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
         | IrExprKind::ToVec { expr } => {
             refs_are_outside_loop(expr, loop_defined)
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            refs_are_outside_loop(expr, loop_defined)
+                && refs_are_outside_loop(fallback, loop_defined)
         }
         IrExprKind::StringInterp { parts } => {
             parts.iter().all(|p| match p {

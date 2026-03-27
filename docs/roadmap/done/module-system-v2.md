@@ -1,4 +1,6 @@
-# Module System v2 [DONE]
+<!-- description: File-based module system with visibility controls and mod.almd -->
+<!-- done: 2026-03-13 -->
+# Module System v2
 
 ### Design Principles
 
@@ -76,11 +78,11 @@ mylib/src/
 ```almide
 import mylib
 
-mylib.fuga()       // mod.almd の fn fuga
-mylib.hello()      // mod.almd の fn hello
-mylib.a.fuga()     // a.almd の fn fuga (no conflict — different namespace)
-mylib.a.bar()      // a.almd の fn bar
-mylib.b.greet()    // b.almd の fn greet
+mylib.fuga()       // fn fuga from mod.almd
+mylib.hello()      // fn hello from mod.almd
+mylib.a.fuga()     // fn fuga from a.almd (no conflict — different namespace)
+mylib.a.bar()      // fn bar from a.almd
+mylib.b.greet()    // fn greet from b.almd
 ```
 
 `mod.almd` defines the package's top-level namespace. Other files are sub-namespaces accessed via `pkg.file.func()`.

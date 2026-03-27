@@ -1,173 +1,175 @@
-# Language Test Suite [DONE]
+<!-- description: Systematic language feature test suite for regression detection -->
+<!-- done: 2026-03-11 -->
+# Language Test Suite
 
-Almide の言語機能を体系的にテストするスイート。`lang/` に配置。
+A systematic test suite for Almide language features. Located in `lang/`.
 
 ## Goal
 
-コンパイラ変更時のリグレッション検知。全機能を網羅するテストがあれば、安心してリファクタできる。
+Regression detection when modifying the compiler. With tests covering all features, refactoring can be done with confidence.
 
 ## Structure
 
-カテゴリごとに1ファイル。各ファイルは `test "..." { assert_eq(...) }` で構成。
+One file per category. Each file consists of `test "..." { assert_eq(...) }` blocks.
 
 ```
 exercises/lang-test/
-  expr_test.almd           基本式（算術、比較、論理、文字列）
-  control_flow_test.almd   制御フロー（if, match, for, do/guard）
-  data_types_test.almd     データ型（record, tuple, variant, Option, Result）
-  function_test.almd       関数（純粋fn, effect fn, lambda, 再帰, UFCS）
-  variable_test.almd       変数（let, var, 代入, index assign, field assign）
-  pattern_test.almd        パターンマッチ（リテラル, コンストラクタ, ガード, ネスト）
-  operator_test.almd       演算子（++, |>, ==, !=, 比較, ビット演算）
-  type_system_test.almd    型（type alias, generics, newtype, variant）
-  error_test.almd          エラー処理（ok/err, effect fn, auto-?, do block）
-  string_test.almd         文字列（interpolation, heredoc, エスケープ）
-  scope_test.almd          スコープ（シャドウイング, クロージャ, ネストブロック）
-  edge_cases_test.almd     エッジケース（空コレクション, 大きな数, 境界値）
+  expr_test.almd           Basic expressions (arithmetic, comparison, logic, string)
+  control_flow_test.almd   Control flow (if, match, for, do/guard)
+  data_types_test.almd     Data types (record, tuple, variant, Option, Result)
+  function_test.almd       Functions (pure fn, effect fn, lambda, recursion, UFCS)
+  variable_test.almd       Variables (let, var, assignment, index assign, field assign)
+  pattern_test.almd        Pattern matching (literal, constructor, guard, nested)
+  operator_test.almd       Operators (++, |>, ==, !=, comparison, bitwise)
+  type_system_test.almd    Types (type alias, generics, newtype, variant)
+  error_test.almd          Error handling (ok/err, effect fn, auto-?, do block)
+  string_test.almd         Strings (interpolation, heredoc, escapes)
+  scope_test.almd          Scope (shadowing, closure, nested blocks)
+  edge_cases_test.almd     Edge cases (empty collections, large numbers, boundary values)
 ```
 
 ## Categories
 
-### 1. expr_test — 基本式
-- [ ] 整数四則演算（+, -, *, /, %）
-- [ ] 浮動小数点演算
-- [ ] 演算子優先順位（`2 + 3 * 4 == 14`）
-- [ ] 単項マイナス（`-x`）
-- [ ] 比較演算子（<, >, <=, >=, ==, !=）Int/String/Bool
-- [ ] 論理演算子（and, or, not）
-- [ ] 短絡評価（and/or）
-- [ ] 文字列結合（++）
-- [ ] リスト結合（++）
-- [ ] 括弧によるグルーピング
+### 1. expr_test — Basic Expressions
+- [ ] Integer arithmetic (+, -, *, /, %)
+- [ ] Floating-point arithmetic
+- [ ] Operator precedence (`2 + 3 * 4 == 14`)
+- [ ] Unary minus (`-x`)
+- [ ] Comparison operators (<, >, <=, >=, ==, !=) Int/String/Bool
+- [ ] Logical operators (and, or, not)
+- [ ] Short-circuit evaluation (and/or)
+- [ ] String concatenation (++)
+- [ ] List concatenation (++)
+- [ ] Parenthetical grouping
 
-### 2. control_flow_test — 制御フロー
-- [ ] if/then/else（値を返す）
-- [ ] ネストしたif
-- [ ] if/then/else with ブロック
-- [ ] match with リテラルパターン（Int, String, Bool）
-- [ ] match with Option（some/none）
-- [ ] match with Result（ok/err）
-- [ ] match with wildcard（_）
-- [ ] match with ガード条件
-- [ ] for...in リスト
-- [ ] for...in with タプル分解（enumerate, zip）
-- [ ] for...in with var 蓄積
-- [ ] do { guard } ループ
-- [ ] do block 内のguard else break
-- [ ] ネストしたfor/do
+### 2. control_flow_test — Control Flow
+- [ ] if/then/else (returns value)
+- [ ] Nested if
+- [ ] if/then/else with block
+- [ ] match with literal patterns (Int, String, Bool)
+- [ ] match with Option (some/none)
+- [ ] match with Result (ok/err)
+- [ ] match with wildcard (_)
+- [ ] match with guard conditions
+- [ ] for...in list
+- [ ] for...in with tuple destructuring (enumerate, zip)
+- [ ] for...in with var accumulation
+- [ ] do { guard } loop
+- [ ] guard else break inside do block
+- [ ] Nested for/do
 
-### 3. data_types_test — データ型
-- [ ] レコードリテラル・フィールドアクセス
-- [ ] ネストしたレコード
-- [ ] レコードスプレッド（{ ...base, field: v }）
-- [ ] タプルリテラル・インデックスアクセス（.0, .1）
-- [ ] タプル分解（let (a, b) = ...）
-- [ ] variant型の定義と構築
-- [ ] variant with ゼロ引数・タプル・レコードペイロード
-- [ ] Option[T]の生成と分解
-- [ ] Result[T, E]の生成と分解
-- [ ] List[T]の基本操作
-- [ ] Map[K, V]の基本操作
+### 3. data_types_test — Data Types
+- [ ] Record literal and field access
+- [ ] Nested records
+- [ ] Record spread ({ ...base, field: v })
+- [ ] Tuple literal and index access (.0, .1)
+- [ ] Tuple destructuring (let (a, b) = ...)
+- [ ] Variant type definition and construction
+- [ ] Variant with zero args, tuple, and record payloads
+- [ ] Option[T] creation and decomposition
+- [ ] Result[T, E] creation and decomposition
+- [ ] List[T] basic operations
+- [ ] Map[K, V] basic operations
 
-### 4. function_test — 関数
-- [ ] 単純な関数定義と呼び出し
-- [ ] 複数引数
-- [ ] 引数なし関数
-- [ ] 再帰（factorial, fibonacci）
-- [ ] 相互再帰
-- [ ] 高階関数（関数を引数に取る）
-- [ ] 関数を返す関数
-- [ ] lambda（fn(x) => expr）
-- [ ] lambda with ブロック本体
-- [ ] lambda in map/filter/fold
-- [ ] クロージャ（外側変数のキャプチャ）
-- [ ] UFCS（`x.f(y)` == `f(x, y)`）
-- [ ] UFCSチェイン（`x.f().g()`）
+### 4. function_test — Functions
+- [ ] Simple function definition and call
+- [ ] Multiple arguments
+- [ ] No-argument functions
+- [ ] Recursion (factorial, fibonacci)
+- [ ] Mutual recursion
+- [ ] Higher-order functions (function as argument)
+- [ ] Functions returning functions
+- [ ] Lambda (fn(x) => expr)
+- [ ] Lambda with block body
+- [ ] Lambda in map/filter/fold
+- [ ] Closure (capturing outer variables)
+- [ ] UFCS (`x.f(y)` == `f(x, y)`)
+- [ ] UFCS chaining (`x.f().g()`)
 
-### 5. variable_test — 変数
-- [ ] let（不変束縛）
-- [ ] let with 型注釈
-- [ ] var（可変束縛）と再代入
-- [ ] index assign（xs[i] = v）
-- [ ] field assign（r.f = v）
-- [ ] var in for ループ
-- [ ] let シャドウイング（同名の再束縛）
+### 5. variable_test — Variables
+- [ ] let (immutable binding)
+- [ ] let with type annotation
+- [ ] var (mutable binding) and reassignment
+- [ ] index assign (xs[i] = v)
+- [ ] field assign (r.f = v)
+- [ ] var in for loop
+- [ ] let shadowing (rebinding with same name)
 
-### 6. pattern_test — パターンマッチ
-- [ ] リテラルパターン（Int, String, Bool）
-- [ ] 識別子パターン（束縛）
-- [ ] ワイルドカード（_）
-- [ ] some(x) / none パターン
-- [ ] ok(x) / err(e) パターン
-- [ ] コンストラクタパターン（ユーザー定義variant）
-- [ ] タプルパターン（(a, b)）
-- [ ] レコードパターン（{ field1, field2 }）
-- [ ] ネストパターン（some((a, b))）
-- [ ] ガード付きパターン（pattern if condition）
+### 6. pattern_test — Pattern Matching
+- [ ] Literal patterns (Int, String, Bool)
+- [ ] Identifier patterns (binding)
+- [ ] Wildcard (_)
+- [ ] some(x) / none patterns
+- [ ] ok(x) / err(e) patterns
+- [ ] Constructor patterns (user-defined variant)
+- [ ] Tuple patterns ((a, b))
+- [ ] Record patterns ({ field1, field2 })
+- [ ] Nested patterns (some((a, b)))
+- [ ] Guarded patterns (pattern if condition)
 
-### 7. operator_test — 演算子
-- [ ] ++ 文字列結合
-- [ ] ++ リスト結合
-- [ ] |> パイプ演算子
-- [ ] |> チェイン
-- [ ] == / != 深い等値性（リスト、レコード）
-- [ ] ^ べき乗
-- [ ] ビット演算（int.band, int.bor, int.bxor, int.bshl, int.bshr, int.bnot）
+### 7. operator_test — Operators
+- [ ] ++ string concatenation
+- [ ] ++ list concatenation
+- [ ] |> pipe operator
+- [ ] |> chaining
+- [ ] == / != deep equality (lists, records)
+- [ ] ^ exponentiation
+- [ ] Bitwise operations (int.band, int.bor, int.bxor, int.bshl, int.bshr, int.bnot)
 
-### 8. type_system_test — 型システム
-- [ ] type alias（基本型）
-- [ ] type alias（ジェネリック型）
-- [ ] variant型の定義
-- [ ] variant with 複数コンストラクタ
-- [ ] ジェネリックvariant
-- [ ] newtype（deriving付き）
-- [ ] ジェネリックレコード型
+### 8. type_system_test — Type System
+- [ ] type alias (basic types)
+- [ ] type alias (generic types)
+- [ ] Variant type definition
+- [ ] Variant with multiple constructors
+- [ ] Generic variant
+- [ ] Newtype (with deriving)
+- [ ] Generic record type
 
-### 9. error_test — エラー処理
-- [ ] ok(value) / err(error) の構築
+### 9. error_test — Error Handling
+- [ ] ok(value) / err(error) construction
 - [ ] match on Result
-- [ ] effect fn 内のauto-?（エラー伝播）
-- [ ] do block 内のResult自動アンラップ
+- [ ] auto-? inside effect fn (error propagation)
+- [ ] Automatic Result unwrap inside do block
 - [ ] guard else err(...)
-- [ ] effect fn chain（複数のfallible操作）
+- [ ] effect fn chain (multiple fallible operations)
 
-### 10. string_test — 文字列
-- [ ] 文字列補間（${expr}）
-- [ ] 補間内の式（${x + 1}）
-- [ ] 補間内の関数呼び出し（${f(x)}）
-- [ ] heredoc（"""..."""）
-- [ ] heredocのインデント除去
-- [ ] エスケープシーケンス（\n, \t, \\, \"）
+### 10. string_test — Strings
+- [ ] String interpolation (${expr})
+- [ ] Expression inside interpolation (${x + 1})
+- [ ] Function call inside interpolation (${f(x)})
+- [ ] Heredoc ("""...""")
+- [ ] Heredoc indent stripping
+- [ ] Escape sequences (\n, \t, \\, \")
 
-### 11. scope_test — スコープ
-- [ ] ブロックスコープ
-- [ ] ネストブロックでのシャドウイング
-- [ ] for ループ変数のスコープ
-- [ ] match arm 内の束縛のスコープ
-- [ ] クロージャの変数キャプチャ
+### 11. scope_test — Scope
+- [ ] Block scope
+- [ ] Shadowing in nested blocks
+- [ ] for loop variable scope
+- [ ] Scope of bindings inside match arms
+- [ ] Closure variable capture
 
-### 12. edge_cases_test — エッジケース
-- [ ] 空リスト操作（len, get, map, filter）
-- [ ] 空文字列操作
-- [ ] 空マップ操作
-- [ ] list.get 範囲外 → none
-- [ ] 0除算
-- [ ] 大きな整数
-- [ ] ネストした複合型（List[List[Int]], Map[String, List[Int]]）
+### 12. edge_cases_test — Edge Cases
+- [ ] Empty list operations (len, get, map, filter)
+- [ ] Empty string operations
+- [ ] Empty map operations
+- [ ] list.get out of bounds → none
+- [ ] Division by zero
+- [ ] Large integers
+- [ ] Nested compound types (List[List[Int]], Map[String, List[Int]])
 
 ## Implementation Order
 
-1. expr_test + control_flow_test（基盤）
-2. data_types_test + variable_test（データ）
-3. function_test + pattern_test（関数とパターン）
-4. operator_test + type_system_test（演算子と型）
-5. error_test + string_test（エラーと文字列）
-6. scope_test + edge_cases_test（スコープとエッジ）
+1. expr_test + control_flow_test (foundation)
+2. data_types_test + variable_test (data)
+3. function_test + pattern_test (functions and patterns)
+4. operator_test + type_system_test (operators and types)
+5. error_test + string_test (errors and strings)
+6. scope_test + edge_cases_test (scope and edge cases)
 
 ## Principles
 
-- 1テスト = 1つの振る舞いを検証
-- テスト名は検証内容を英語で簡潔に
-- assert_eq を基本に、assert は条件チェックのみ
-- 各ファイルは独立して `almide test file.almd` で実行可能
-- CI で全ファイル実行
+- 1 test = verify 1 behavior
+- Test names concisely describe what is verified in English
+- Use assert_eq as the default, assert only for condition checks
+- Each file can be run independently with `almide test file.almd`
+- Run all files in CI

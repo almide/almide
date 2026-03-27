@@ -59,8 +59,17 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
             }
         }
 
-        // Inside fan: strip Try nodes (spawn closures return raw Result)
+        // Inside fan: strip Try/Unwrap/ToOption nodes (spawn closures return raw Result)
         IrExprKind::Try { expr: inner } if inside_fan => {
+            return rewrite_expr(*inner, true);
+        }
+        IrExprKind::Unwrap { expr: inner } if inside_fan => {
+            return rewrite_expr(*inner, true);
+        }
+        IrExprKind::ToOption { expr: inner } if inside_fan => {
+            return rewrite_expr(*inner, true);
+        }
+        IrExprKind::UnwrapOr { expr: inner, .. } if inside_fan => {
             return rewrite_expr(*inner, true);
         }
 
@@ -110,6 +119,16 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
         IrExprKind::Try { expr: inner } => IrExprKind::Try {
             expr: Box::new(rewrite_expr(*inner, inside_fan)),
         },
+        IrExprKind::Unwrap { expr: inner } => IrExprKind::Unwrap {
+            expr: Box::new(rewrite_expr(*inner, inside_fan)),
+        },
+        IrExprKind::ToOption { expr: inner } => IrExprKind::ToOption {
+            expr: Box::new(rewrite_expr(*inner, inside_fan)),
+        },
+        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(rewrite_expr(*inner, inside_fan)),
+            fallback: Box::new(rewrite_expr(*fallback, inside_fan)),
+        },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| rewrite_expr(e, inside_fan)).collect(),
         },
@@ -118,6 +137,9 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
         },
         IrExprKind::Record { name, fields } => IrExprKind::Record {
             name, fields: fields.into_iter().map(|(n, v)| (n, rewrite_expr(v, inside_fan))).collect(),
+        },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(rewrite_expr(*expr, inside_fan)), field,
         },
         // Leaf nodes: pass through
         other => other,
@@ -166,7 +188,10 @@ fn rewrite_target(target: CallTarget, inside_fan: bool) -> CallTarget {
 /// Strip top-level Try wrapper (fan spawn closures return raw Result).
 fn strip_try_top(expr: IrExpr) -> IrExpr {
     match expr.kind {
-        IrExprKind::Try { expr: inner } => *inner,
+        IrExprKind::Try { expr: inner }
+        | IrExprKind::Unwrap { expr: inner }
+        | IrExprKind::ToOption { expr: inner } => *inner,
+        IrExprKind::UnwrapOr { expr: inner, .. } => *inner,
         _ => expr,
     }
 }

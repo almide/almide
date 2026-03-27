@@ -1,19 +1,20 @@
-# Web Framework [ON HOLD]
+<!-- description: First-party Hono-like web framework with template and Codec integration -->
+# Web Framework
 
 ## Vision
 
-Almide の first-party web framework。Hono 相当の DX を Almide の思想で実現する。
+Almide's first-party web framework. Achieves Hono-equivalent DX with Almide's philosophy.
 
-stdlib の `http` primitive の上に乗る薄いレイヤー。external library として提供するが、template / Codec との統合は Almide ならでは。
+A thin layer on top of stdlib's `http` primitives. Provided as an external library, but template / Codec integration is uniquely Almide.
 
 ## Design Principles
 
-1. **Immutable** — mutable context なし。`Request -> Response` の pure な変換
-2. **Pipe chain で組む** — Almide の自然な合成手段
-3. **Template 統合** — `HtmlDoc` をそのまま返せる
-4. **Codec 統合** — `deriving Codec` で request/response の JSON を型安全に
-5. **Multi-target** — Rust / TS 両方で動く
-6. **薄い** — routing + middleware + response builder。それ以上は入れない
+1. **Immutable** — No mutable context. Pure transformation of `Request -> Response`
+2. **Composed via pipe chains** — Almide's natural composition mechanism
+3. **Template integration** — Return `HtmlDoc` directly
+4. **Codec integration** — Type-safe request/response JSON via `deriving Codec`
+5. **Multi-target** — Works on both Rust / TS
+6. **Thin** — Routing + middleware + response builder. Nothing more
 
 ## API Design
 
@@ -69,9 +70,9 @@ let app = web.new()
   })
 ```
 
-`web.html(HtmlDoc) -> Response` は内部で `render(doc)` して `Content-Type: text/html` を付ける。
+`web.html(HtmlDoc) -> Response` internally calls `render(doc)` and sets `Content-Type: text/html`.
 
-### Codec Integration (deriving Codec 実装後)
+### Codec Integration (after deriving Codec implementation)
 
 ```almide
 type CreateUser = { name: String, email: String } deriving Codec
@@ -87,7 +88,7 @@ let app = web.new()
 
 ### Middleware
 
-関数合成。`Handler -> Handler`。
+Function composition. `Handler -> Handler`.
 
 ```almide
 fn logger(next: web.Handler) -> web.Handler =
@@ -187,28 +188,28 @@ web.on_error       : (App, fn(String, Request) -> Response) -> App
 web.on_not_found   : (App, fn(Request) -> Response) -> App
 ```
 
-## Hono との比較
+## Comparison with Hono
 
-| 観点 | Hono | Almide web |
-|------|------|-----------|
+| Aspect | Hono | Almide web |
+|--------|------|-----------|
 | Context | mutable `c` object | immutable `req` → `Response` |
-| Middleware | `c.next()` onion model | `Handler -> Handler` 関数合成 |
+| Middleware | `c.next()` onion model | `Handler -> Handler` function composition |
 | Response | `c.text()`, `c.json()` | `web.text()`, `web.json()` (pure fn) |
 | HTML | `c.html(string)` | `web.html(HtmlDoc)` — typed document |
-| JSON | object literal | `deriving Codec` で型安全 |
+| JSON | object literal | Type-safe via `deriving Codec` |
 | Routing | `.get("/path", handler)` | `\|> web.get("/path", handler)` |
 | Method access | `c.req.param()` | `req.param()` (UFCS) |
 
-## DX Gap: 何が揃えば Hono 同等か
+## DX Gap: What's Needed to Match Hono
 
-| 優先度 | 機能 | roadmap | 効果 |
-|--------|------|---------|------|
-| **1** | `deriving Codec` | codec-and-json.md Phase 2 | JSON の冗長性が消える |
-| **2** | UFCS for external libs | ufcs-external.md | `req.param("id")` が書ける |
-| **3** | Lambda 短縮構文 | syntax-sugar.md | `fn(req) =>` → 短縮形 |
-| **4** | Default params | syntax-sugar.md | `web.json(data)` で status 省略 |
+| Priority | Feature | Roadmap | Effect |
+|----------|---------|---------|--------|
+| **1** | `deriving Codec` | codec-and-json.md Phase 2 | Eliminates JSON verbosity |
+| **2** | UFCS for external libs | ufcs-external.md | Enables `req.param("id")` |
+| **3** | Lambda shorthand syntax | syntax-sugar.md | `fn(req) =>` → shorthand |
+| **4** | Default params | syntax-sugar.md | Omit status in `web.json(data)` |
 
-全部揃った場合:
+With all of the above:
 
 ```almide
 let app = web.new()
@@ -223,13 +224,13 @@ let app = web.new()
   })
 ```
 
-## merjs (Zig) から学ぶべきパターン
+## Patterns to Learn from merjs (Zig)
 
-[merjs](https://github.com/justrach/merjs) は Next.js 相当をZig単一バイナリ（260KB）で実現。以下のパターンはAlmideに取り込む価値がある:
+[merjs](https://github.com/justrach/merjs) achieves a Next.js equivalent in a single Zig binary (260KB). The following patterns are worth adopting for Almide:
 
-### ファイルベースルーティング
+### File-Based Routing
 
-ディレクトリ構造からルートテーブルを自動生成。
+Auto-generate route tables from directory structure.
 
 ```
 app/
@@ -242,7 +243,7 @@ api/
   users.almd          → /api/users (JSON API)
 ```
 
-Almideではコンパイラ拡張として実現可能 — `almide build --web app/` がディレクトリを走査してルートテーブルをIRレベルで生成。別途codegenバイナリ不要。
+Achievable as a compiler extension in Almide — `almide build --web app/` scans the directory and generates route tables at the IR level. No separate codegen binary needed.
 
 ### HTML DSL
 
@@ -254,34 +255,34 @@ fn page(user: User) -> Html =
   ])
 ```
 
-Props を型チェック時に検証。`Html` 型をレスポンスに直接返せる。
+Props are verified at type check time. `Html` type can be returned directly as response.
 
-### ストリーミングSSR
+### Streaming SSR
 
 ```almide
 effect fn render_stream(req: Request, w: Writer) -> Result[Unit, String] = {
   w.write(shell_head(meta))
   w.flush()
-  let data = fetch_data(req.param("id"))  // 非同期データ取得中にシェルを先行送信
+  let data = fetch_data(req.param("id"))  // Send shell ahead while fetching data asynchronously
   w.write(render_body(data))
   w.write(shell_tail())
   ok(())
 }
 ```
 
-chunked transfer encoding でシェルを先行送信、データ到着後に本体を流す。
+Send shell ahead via chunked transfer encoding, stream the body after data arrives.
 
-### マルチターゲットデプロイ
+### Multi-Target Deployment
 
-Almideの既存3ターゲットと対応:
+Maps to Almide's existing 3 targets:
 
-| デプロイ先 | ターゲット | 備考 |
-|-----------|-----------|------|
-| VPS / コンテナ | `--target rust` | スタンドアロンバイナリ |
+| Deploy target | Target | Notes |
+|---------------|--------|-------|
+| VPS / container | `--target rust` | Standalone binary |
 | Cloudflare Workers | `--target wasm` | WASI + edge deploy |
-| Deno Deploy / Bun | `--target ts` | Node互換ランタイム |
+| Deno Deploy / Bun | `--target ts` | Node-compatible runtime |
 
-同一の `.almd` ソースから3つのデプロイ形態を出し分ける。これはmerjs（native + WASM の2ターゲット）より優位。
+Three deployment forms from the same `.almd` source. This is an advantage over merjs (2 targets: native + WASM).
 
 ## Depends On
 
@@ -290,22 +291,22 @@ Almideの既存3ターゲットと対応:
 - `deriving Codec` (active — for `web.json` with typed records)
 - UFCS for external libs (active — for `req.param`)
 - Package system (on-hold — for distribution as external lib)
-- ディレクトリ走査 (self-hosting roadmap と共通)
-- Writer 抽象 / trait (ストリーミングSSRに必須)
-- セッション / HMAC (crypto stdlib 追加)
+- Directory traversal (shared with self-hosting roadmap)
+- Writer abstraction / trait (required for streaming SSR)
+- Session / HMAC (crypto stdlib addition)
 
 ## Implementation Order
 
-1. **Phase 1**: Routing + Response builders + `web.serve` (http.serve の wrapper)
+1. **Phase 1**: Routing + Response builders + `web.serve` (wrapper for http.serve)
 2. **Phase 2**: Middleware (`web.use`) + route groups (`web.mount`)
 3. **Phase 3**: Template integration (`web.html`) + HTML DSL
 4. **Phase 4**: Codec integration (`req.body_json[T]`, `web.json(record)`)
-5. **Phase 5**: ファイルベースルーティング (コンパイラ拡張)
-6. **Phase 6**: ストリーミングSSR + マルチターゲットデプロイ
+5. **Phase 5**: File-based routing (compiler extension)
+6. **Phase 6**: Streaming SSR + multi-target deployment
 
 ## Position
 
-- **Not stdlib** — framework の opinions は stdlib に入れない
-- **First-party external lib** — Almide が公式で出す
-- Go の `net/http` (stdlib) に対する Echo/Gin (外部) と同じ関係
-- **Self-hosting roadmap と前提機能を共有** — Web framework 開発が言語機能を鍛える dogfooding になる
+- **Not stdlib** — Framework opinions don't belong in stdlib
+- **First-party external lib** — Officially published by Almide
+- Same relationship as Echo/Gin (external) to Go's `net/http` (stdlib)
+- **Shares prerequisite features with self-hosting roadmap** — Web framework development serves as dogfooding that strengthens language features

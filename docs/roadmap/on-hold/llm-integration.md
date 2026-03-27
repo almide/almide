@@ -1,53 +1,54 @@
-# LLM Integration [ON HOLD]
+<!-- description: Built-in LLM commands for library generation, auto-fix, and code explanation -->
+# LLM Integration
 
 ## Thesis
 
-「LLMが最も正確に書ける言語」のコンパイラに LLM を組み込む。LLMが書いて、LLMが直して、LLMがライブラリを生やす — このループがコンパイラ1つで回る。
+Embed LLMs into the compiler of "the language LLMs can write most accurately." LLMs write, LLMs fix, LLMs grow libraries — this loop runs with a single compiler.
 
 ## Subcommands
 
-### `almide forge` — ライブラリ生成
+### `almide forge` — Library generation
 
-テーマと参考実装を指定すると、Almide ライブラリを設計・実装・テスト・公開まで自動で行う。
+Specify a theme and reference implementations, and it automatically designs, implements, tests, and publishes an Almide library.
 
 ```bash
 almide forge csv --ref python:csv,rust:csv,go:encoding/csv
 ```
 
-1. 参考ライブラリの API を分析（ドキュメント or ソース）
-2. Almide らしい API を設計（UFCS、effect fn、Result/Option、命名規約）
-3. 実装 + テスト生成
-4. `almide test` で全パス確認
-5. GitHub リポジトリ作成 + push
+1. Analyze reference library APIs (documentation or source)
+2. Design Almide-idiomatic API (UFCS, effect fn, Result/Option, naming conventions)
+3. Implementation + test generation
+4. Verify all tests pass with `almide test`
+5. Create GitHub repository + push
 
-**Why:** エコシステムのブートストラップ。1つ1つ手で書くより、LLM に量産させて人間がレビューする方が速い。
+**Why:** Bootstrapping the ecosystem. Having LLMs mass-produce and humans review is faster than writing each library by hand.
 
-### `almide fix` — 自己修復
+### `almide fix` — Self-repair
 
-コンパイルエラーを LLM に渡して自動修正。
+Pass compile errors to LLM for automatic fix.
 
 ```bash
 almide fix app.almd
 ```
 
-1. `almide check` でエラー収集
-2. ソースコード + エラー診断を LLM に送信
-3. 修正案を適用
-4. 再度 `almide check` でパス確認
-5. diff を表示して承認待ち（`--yes` でスキップ可）
+1. Collect errors with `almide check`
+2. Send source code + error diagnostics to LLM
+3. Apply the proposed fix
+4. Verify pass with `almide check` again
+5. Show diff and wait for approval (`--yes` to skip)
 
-**Why:** エラーリカバリの延長線。コンパイラが「こう直せ」と言うだけでなく、実際に直す。
+**Why:** An extension of error recovery. The compiler doesn't just say "fix it like this" — it actually fixes it.
 
-### `almide explain` — コード説明
+### `almide explain` — Code explanation
 
 ```bash
 almide explain app.almd
 almide explain app.almd --fn parse_config
 ```
 
-ソースコードの説明をMarkdownで生成。関数単位でも指定可能。
+Generate Markdown explanations of source code. Can specify individual functions.
 
-**Why:** ドキュメント生成の自動化。LLM が書いたコードを LLM が説明する。
+**Why:** Automated documentation generation. LLMs explain code that LLMs wrote.
 
 ## Configuration
 
@@ -59,58 +60,58 @@ model = "claude-sonnet-4-20250514"
 # api_key is read from ANTHROPIC_API_KEY / OPENAI_API_KEY env var
 ```
 
-- `--no-ai` フラグで全 AI 機能を無効化（オフラインコンパイラとして動作）
-- API キーは環境変数から読む（toml にハードコードしない）
-- AI 機能はコンパイラ本体のコードパスに影響しない（別モジュール）
+- `--no-ai` flag disables all AI features (operates as offline compiler)
+- API key is read from environment variables (not hardcoded in toml)
+- AI features do not affect the compiler core code paths (separate module)
 
 ## Scope Boundary
 
-**入れる（Almide コードに関することだけ）:**
-- forge: ライブラリ生成
-- fix: コンパイルエラー自動修正
-- explain: コード説明
+**Include (only things related to Almide code):**
+- forge: Library generation
+- fix: Automatic compile error fixing
+- explain: Code explanation
 
-**入れない（汎用エージェントにはしない）:**
-- チャット UI
-- 任意のタスク実行
-- Almide 以外のファイル操作
+**Exclude (not a general-purpose agent):**
+- Chat UI
+- Arbitrary task execution
+- File operations outside Almide
 
 ## Implementation Plan
 
 ### Phase 1: `almide fix`
-- [ ] HTTP クライアント追加（`ureq` or `reqwest`）
-- [ ] `[ai]` config 読み込み
-- [ ] `almide check` → エラー + ソース → LLM API → 修正 diff → 適用
-- [ ] `--yes` / `--dry-run` フラグ
+- [ ] Add HTTP client (`ureq` or `reqwest`)
+- [ ] `[ai]` config loading
+- [ ] `almide check` → errors + source → LLM API → fix diff → apply
+- [ ] `--yes` / `--dry-run` flags
 
 ### Phase 2: `almide forge`
-- [ ] `--ref` パーサー（`language:package` 形式）
-- [ ] 参考ライブラリの API 分析プロンプト設計
-- [ ] Almide API 設計 → 実装 → テスト生成パイプライン
-- [ ] `gh repo create` + push 統合
+- [ ] `--ref` parser (`language:package` format)
+- [ ] Prompt design for reference library API analysis
+- [ ] Almide API design → implementation → test generation pipeline
+- [ ] `gh repo create` + push integration
 
-### Phase 3: `almide pilot` — パス最適化 (Constrained Decoding)
+### Phase 3: `almide pilot` — Path optimization (Constrained Decoding)
 
-LLM のトークン生成をコンパイラがリアルタイムでガイドする。生成中の各トークンをパーサー/型チェッカーで検証し、不正なトークンを即座に却下・修正候補を返す。
+The compiler guides LLM token generation in real time. Each token during generation is verified by the parser/type checker, and invalid tokens are immediately rejected with correction candidates returned.
 
 ```
-LLM → トークン生成 → almide parser (incremental) → 有効？
-                                                      ├─ Yes → accept, 次へ
-                                                      └─ No  → 有効な継続候補を返す → LLM が再選択
+LLM → token generation → almide parser (incremental) → valid?
+                                                          ├─ Yes → accept, next
+                                                          └─ No  → return valid continuation candidates → LLM re-selects
 ```
 
-- [ ] インクリメンタルパーサー API（部分入力から「次に有効なトークン集合」を返す）
-- [ ] 型チェッカーのストリーミングモード（部分AST上で型推論を走らせる）
-- [ ] `almide pilot serve` — LSP-like JSON-RPC サーバーとして起動、外部 LLM から呼び出し可能
-- [ ] speculation buffer: 不正トークンを backtrack し、有効な継続をヒントとして返す
-- [ ] ベンチマーク: constrained decoding あり/なしでのコンパイル成功率・生成速度比較
+- [ ] Incremental parser API (returns "set of valid next tokens" from partial input)
+- [ ] Streaming mode for type checker (run type inference on partial AST)
+- [ ] `almide pilot serve` — Launch as LSP-like JSON-RPC server, callable from external LLMs
+- [ ] Speculation buffer: backtrack invalid tokens and return valid continuations as hints
+- [ ] Benchmark: compare compile success rate and generation speed with/without constrained decoding
 
-**Why:** `almide fix` は「書いた後に直す」。pilot は「書く瞬間に正しくする」。MoonBit が先行実装しているが、Almide のシンプルな文法と型システムなら実装コストは低い。マルチターゲット（Rust + TS）の型情報を使えるのは Almide 固有の強み。
+**Why:** `almide fix` is "fix after writing." pilot is "make it correct at the moment of writing." MoonBit has a prior implementation, but Almide's simple grammar and type system make implementation cost low. Being able to use multi-target (Rust + TS) type information is a strength unique to Almide.
 
 ### Phase 4: `almide explain`
-- [ ] 関数単位の説明生成
-- [ ] Markdown 出力
+- [ ] Per-function explanation generation
+- [ ] Markdown output
 
 ## Differentiator
 
-Rust, Go, TypeScript — どのコンパイラにも LLM は入っていない。しかしそれは「人間が書く言語」だから。Almide は LLM が書く言語。コンパイラ側に LLM がいるのは自然な帰結であり、Almide だけの強み。
+Rust, Go, TypeScript — none of their compilers have LLMs built in. But that's because they are "languages humans write." Almide is a language LLMs write. Having an LLM on the compiler side is a natural consequence and a strength unique to Almide.

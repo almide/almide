@@ -98,7 +98,8 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         }
 
         // ── Access ──
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => {
             v.visit_expr(object);
         }
         IrExprKind::IndexAccess { object, index } => {
@@ -125,11 +126,16 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         // ── Wrappers (single child) ──
         IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
         | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
         | IrExprKind::Await { expr: e }
         | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
         | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
         | IrExprKind::ToVec { expr: e } => {
             v.visit_expr(e);
+        }
+        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
+            v.visit_expr(e);
+            v.visit_expr(f);
         }
         IrExprKind::RustMacro { args, .. } => {
             for a in args { v.visit_expr(a); }

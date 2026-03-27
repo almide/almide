@@ -562,4 +562,18 @@ impl Ty {
     pub fn is_set(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::Set, _)) }
     /// Check if this is a function type.
     pub fn is_fn(&self) -> bool { matches!(self, Ty::Fn { .. }) }
+    /// Extract the inner type T from Option[T]. Returns None if not an Option.
+    pub fn option_inner(&self) -> Option<Ty> {
+        match self {
+            Ty::Applied(TypeConstructorId::Option, args) if !args.is_empty() => Some(args[0].clone()),
+            _ => None,
+        }
+    }
+    /// Extract the Ok type T from Result[T, E]. Returns None if not a Result.
+    pub fn result_ok_ty(&self) -> Option<Ty> {
+        match self {
+            Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => Some(args[0].clone()),
+            _ => None,
+        }
+    }
 }

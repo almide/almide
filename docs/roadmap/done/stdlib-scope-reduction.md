@@ -1,33 +1,35 @@
-# Stdlib Scope Reduction — 完了
+<!-- description: Move uuid, crypto, toml, compress, term out of stdlib to packages -->
+<!-- done: 2026-03-20 -->
+# Stdlib Scope Reduction — Complete
 
-**優先度:** 1.0前 — 凍結前に外に出すものを決める
-**リサーチ:** [stdlib-module-matrix.md](../../research/stdlib-module-matrix.md)
+**Priority:** Before 1.0 — decide what to move out before freezing
+**Research:** [stdlib-module-matrix.md](../../research/stdlib-module-matrix.md)
 
-## 削除候補 (stdlib → first-party package)
+## Removal Candidates (stdlib -> first-party package)
 
-他言語の1.0 stdlibとの比較に基づく判断。
+Based on comparison with 1.0 stdlibs of other languages.
 
-| Module | 現在 | 根拠 | 対応 |
-|--------|------|------|------|
-| **uuid** | TOML 6関数 | Gleam/Elm/Rust/Kotlin/MoonBit/Elixir **全てstdlib外** | 削除。`crypto.random_hex` で代替可 |
-| **crypto** | TOML 4関数 | Rust/Kotlin/MoonBit/Elixir全てstdlib外。Go のみ含む | 削除。薄すぎて凍結リスク |
-| **toml** | .almd 14関数 | **全言語がstdlib外** | first-party packageに |
-| **compress** | .almd 4関数 | Go以外全てstdlib外。4関数では中途半端 | first-party packageに |
-| **term** | .almd 21関数 | **全言語がstdlib外**。TS targetで動作不可 | first-party packageに |
+| Module | Current | Rationale | Action |
+|--------|---------|-----------|--------|
+| **uuid** | TOML 6 functions | Gleam/Elm/Rust/Kotlin/MoonBit/Elixir **all outside stdlib** | Remove. `crypto.random_hex` can substitute |
+| **crypto** | TOML 4 functions | Rust/Kotlin/MoonBit/Elixir all outside stdlib. Only Go includes it | Remove. Too thin, freeze risk |
+| **toml** | .almd 14 functions | **All languages have it outside stdlib** | Move to first-party package |
+| **compress** | .almd 4 functions | All except Go have it outside stdlib. 4 functions is half-baked | Move to first-party package |
+| **term** | .almd 21 functions | **All languages have it outside stdlib**. Does not work on TS target | Move to first-party package |
 
-## 判断基準
+## Decision Criteria
 
-1. **他言語の1.0 stdlibに含まれているか** — 半数以上が含めていないならstdlib外
-2. **multi-target で動作するか** — Rust + TS 両方で意味があるか
-3. **凍結リスク** — API が成熟してないまま凍結すると Go の log 問題になる
-4. **代替手段** — stdlib 内の他モジュールで代替可能か
+1. **Included in other languages' 1.0 stdlib?** — If more than half exclude it, keep it outside stdlib
+2. **Works multi-target?** — Must be meaningful for both Rust + TS
+3. **Freeze risk** — Freezing an immature API leads to Go's log problem
+4. **Alternatives** — Can other modules in stdlib substitute?
 
-## 完了
+## Completed
 
-- [x] uuid 削除 — TOML定義、ランタイム (Rust/TS/JS) 全て除去済み
-- [x] crypto 削除 — TOML定義、ランタイム (Rust/TS/JS) 全て除去済み
-- [x] toml, compress, term を bundled stdlib から除去済み
-- [x] STDLIB_MODULES, PRELUDE_MODULES から除外済み（uuid/crypto は含まれていない）
-- [x] FROZEN_API.md 更新済み
-- [x] SPEC.md 更新済み（モジュール一覧からuuid/crypto/toml/compress/term除去）
-- [x] STDLIB-SPEC.md 更新済み（crypto/uuid セクション削除、モジュールインデックス更新）
+- [x] uuid removed — TOML definitions, runtime (Rust/TS/JS) all removed
+- [x] crypto removed — TOML definitions, runtime (Rust/TS/JS) all removed
+- [x] toml, compress, term removed from bundled stdlib
+- [x] Excluded from STDLIB_MODULES, PRELUDE_MODULES (uuid/crypto were not included)
+- [x] FROZEN_API.md updated
+- [x] SPEC.md updated (uuid/crypto/toml/compress/term removed from module list)
+- [x] STDLIB-SPEC.md updated (crypto/uuid sections deleted, module index updated)

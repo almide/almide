@@ -1,20 +1,22 @@
-# HKT Foundation — 完了
+<!-- description: Higher-kinded type foundation - all phases complete -->
+<!-- done: 2026-03-20 -->
+# HKT Foundation — Complete
 
-**全 Phase 完了。** このドキュメントはアーカイブ待ち。
+**All phases complete.** This document is awaiting archival.
 
-→ 完了記録: [done/hkt-foundation-phase1.md](../done/hkt-foundation-phase1.md)
+→ Completion record: [done/hkt-foundation-phase1.md](../done/hkt-foundation-phase1.md)
 
-## 完了内容
+## Completed
 
-- [x] **Phase 1:** Ty ヘルパー + TypeConstructor/Kind/AlgebraicLaw 基盤
-- [x] **Phase 2:** 代数法則テーブル (全 6 法則)
-- [x] **Phase 3:** Stream Fusion — 全 6 代数法則の IR rewrite
-- [x] **Phase 4:** Ty::Applied 統一 — List/Option/Result/Map 削除、23 ファイル移行
+- [x] **Phase 1:** Ty helpers + TypeConstructor/Kind/AlgebraicLaw foundation
+- [x] **Phase 2:** Algebraic law table (all 6 laws)
+- [x] **Phase 3:** Stream Fusion — IR rewrite for all 6 algebraic laws
+- [x] **Phase 4:** Ty::Applied unification — removed List/Option/Result/Map, migrated 23 files
 
-## Stream Fusion — 全 6 法則 ✅
+## Stream Fusion — All 6 Laws ✅
 
-| 法則 | 変換 |
-|------|------|
+| Law | Transformation |
+|-----|----------------|
 | FunctorComposition | `map(map(x,f),g)` → `map(x, f>>g)` |
 | FunctorIdentity | `map(x, id)` → `x` |
 | FilterComposition | `filter(filter(x,p),q)` → `filter(x, p&&q)` |
@@ -22,7 +24,7 @@
 | MapFilterFusion | `filter(map(x,f),p)` → `filter_map(x, ...)` |
 | MonadAssociativity | `flat_map(flat_map(x,f),g)` → `flat_map(x, f>>=g)` |
 
-## 後続 (on-hold, 2.x)
+## Follow-up (on-hold, 2.x)
 
-- [Effect Type Integration](../on-hold/effect-type-integration.md) — FnType に EffectSet を持たせる
-- [Trait System](../on-hold/trait-system.md) — HKT 基盤上の Protocol/Interface
+- [Effect Type Integration](../on-hold/effect-type-integration.md) — Add EffectSet to FnType
+- [Trait System](../on-hold/trait-system.md) — Protocol/Interface on the HKT foundation

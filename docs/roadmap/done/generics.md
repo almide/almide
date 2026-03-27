@@ -1,4 +1,6 @@
-# Generics [DONE]
+<!-- description: Generic functions, records, variants, and recursive generics -->
+<!-- done: 2026-03-11 -->
+# Generics
 
 ## Status: Phase 1 Complete + Recursive Variants
 

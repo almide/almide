@@ -1,3 +1,5 @@
+<!-- description: Codegen bugs and runtime gaps found while writing 400+ test blocks -->
+<!-- done: 2026-03-20 -->
 # Compiler Bugs and Gaps — Status
 
 Discovered while writing 400+ new test blocks across 32 test files (v0.8.4).

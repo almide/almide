@@ -53,15 +53,8 @@ impl NanoPass for ResultPropagationPass {
             if !lifted_fns.is_empty() {
                 func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
             }
-            if func.is_effect && !func.is_test {
-                let returns_result = func.ret_ty.is_result();
-                func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
-                collect_retyped_vars(&func.body, &mut retyped_vars);
-                if !retyped_vars.is_empty() {
-                    func.body = fix_var_types(std::mem::take(&mut func.body), &retyped_vars);
-                    retyped_vars.clear();
-                }
-            } else if func.is_test {
+            // Auto-? insertion disabled — use explicit ! operator instead
+            if func.is_test {
                 if !lifted_fns.is_empty() {
                     func.body = insert_try_for_lifted(std::mem::take(&mut func.body), &lifted_fns);
                 }
@@ -73,15 +66,7 @@ impl NanoPass for ResultPropagationPass {
                 if !lifted_fns.is_empty() {
                     func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
                 }
-                if func.is_effect && !func.is_test {
-                    let returns_result = func.ret_ty.is_result();
-                    func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
-                    collect_retyped_vars(&func.body, &mut retyped_vars);
-                    if !retyped_vars.is_empty() {
-                        func.body = fix_var_types(std::mem::take(&mut func.body), &retyped_vars);
-                        retyped_vars.clear();
-                    }
-                }
+                // Auto-? insertion disabled for modules too
             }
         }
 
@@ -186,6 +171,16 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
         },
         IrExprKind::Try { expr: inner } => IrExprKind::Try {
             expr: Box::new(update_call_types(*inner, lifted)),
+        },
+        IrExprKind::Unwrap { expr: inner } => IrExprKind::Unwrap {
+            expr: Box::new(update_call_types(*inner, lifted)),
+        },
+        IrExprKind::ToOption { expr: inner } => IrExprKind::ToOption {
+            expr: Box::new(update_call_types(*inner, lifted)),
+        },
+        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(update_call_types(*inner, lifted)),
+            fallback: Box::new(update_call_types(*fallback, lifted)),
         },
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
@@ -444,6 +439,10 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
             object: Box::new(insert_try(*object, false)),
             field,
         },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(insert_try(*expr, false)),
+            field,
+        },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple,
             iterable: Box::new(insert_try(*iterable, false)),
@@ -692,6 +691,16 @@ fn fix_var_types(expr: IrExpr, map: &HashMap<u32, Ty>) -> IrExpr {
         IrExprKind::Try { expr: inner } => IrExprKind::Try {
             expr: Box::new(fix_var_types(*inner, map)),
         },
+        IrExprKind::Unwrap { expr: inner } => IrExprKind::Unwrap {
+            expr: Box::new(fix_var_types(*inner, map)),
+        },
+        IrExprKind::ToOption { expr: inner } => IrExprKind::ToOption {
+            expr: Box::new(fix_var_types(*inner, map)),
+        },
+        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(fix_var_types(*inner, map)),
+            fallback: Box::new(fix_var_types(*fallback, map)),
+        },
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
                 IrStringPart::Expr { expr } => IrStringPart::Expr { expr: fix_var_types(expr, map) },
@@ -714,6 +723,10 @@ fn fix_var_types(expr: IrExpr, map: &HashMap<u32, Ty>) -> IrExpr {
         },
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(fix_var_types(*object, map)),
+            field,
+        },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(fix_var_types(*expr, map)),
             field,
         },
         IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {

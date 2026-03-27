@@ -1,29 +1,31 @@
-# UFCS for External Libraries [ACTIVE]
+<!-- description: Extend UFCS resolution to external library functions -->
+<!-- done: 2026-03-18 -->
+# UFCS for External Libraries
 
 ## Problem
 
-UFCS は現在 stdlib にハードコードされている（`src/stdlib.rs` の `resolve_ufcs_candidates`）。外部ライブラリの関数は module prefix なしでは呼べない。
+UFCS is currently hardcoded to stdlib (`resolve_ufcs_candidates` in `src/stdlib.rs`). External library functions cannot be called without a module prefix.
 
 ```almide
-// 今: module prefix 必須
+// Current: module prefix required
 web.param(req, "id")
 web.add_header(res, "X-Custom", "value")
 
-// 欲しい: UFCS で method 風
+// Desired: method-style via UFCS
 req.param("id")
 res.add_header("X-Custom", "value")
 ```
 
-web framework のような API で DX を大きく損なうポイント。Hono の `c.req.param('id')` に対して `web.param(req, "id")` は冗長。
+This significantly hurts DX for APIs like web frameworks. Compared to Hono's `c.req.param('id')`, `web.param(req, "id")` is verbose.
 
 ## Design
 
-### 基本ルール
+### Basic Rules
 
-外部ライブラリの関数が以下の条件を満たすとき、UFCS 対象になる:
+External library functions become UFCS candidates when they meet these conditions:
 
-1. 第一引数が named type（record / variant）
-2. 関数が第一引数の型と同じモジュール内で定義されている
+1. The first argument is a named type (record / variant)
+2. The function is defined in the same module as the first argument's type
 
 ```almide
 // web/mod.almd
@@ -32,55 +34,55 @@ type Request = { method: String, path: String, headers: Map[String, String], bod
 fn param(req: Request, name: String) -> String = ...
 fn query(req: Request, name: String) -> Option[String] = ...
 
-// 呼び出し側
+// Call site
 import web
 
-// 両方 OK
-web.param(req, "id")     // 明示的
+// Both OK
+web.param(req, "id")     // Explicit
 req.param("id")           // UFCS
 ```
 
-### 解決方式
+### Resolution Strategy
 
-**Type-directed resolution**: receiver の型が分かっている場合、その型が定義されたモジュールの関数を探す。
+**Type-directed resolution**: when the receiver's type is known, search for functions in the module where that type is defined.
 
 ```
 req.param("id")
-  → req の型は web.Request
-  → web module に param(Request, String) がある
-  → web.param(req, "id") に解決
+  → req's type is web.Request
+  → web module has param(Request, String)
+  → resolves to web.param(req, "id")
 ```
 
-これは今の stdlib UFCS（`resolve_ufcs_by_type`）の自然な拡張。stdlib のハードコードを、型定義元モジュールの自動探索に一般化するだけ。
+This is a natural extension of the current stdlib UFCS (`resolve_ufcs_by_type`). It simply generalizes the stdlib hardcoding to automatic lookup of the type's defining module.
 
-### UFCS 対象にならないもの
+### Not UFCS Candidates
 
-- 第一引数が primitive 型（`String`, `Int` 等）の外部関数 → stdlib と衝突しうる
-- 第一引数が open record / anonymous record → 型定義元モジュールが存在しない
-- 異なるモジュールで同名関数が第一引数の型をまたぐ場合 → 曖昧性エラー
+- External functions whose first argument is a primitive type (`String`, `Int`, etc.) → could conflict with stdlib
+- First argument is an open record / anonymous record → no defining module exists
+- Same-named functions across different modules whose first argument types overlap → ambiguity error
 
-### stdlib との優先順位
+### Priority Relative to stdlib
 
-1. stdlib の UFCS 候補を先に探す
-2. 見つからなければ、receiver の型定義元モジュールを探す
-3. 両方で見つかった場合 → コンパイルエラー（曖昧性）
+1. Search stdlib UFCS candidates first
+2. If not found, search the receiver type's defining module
+3. If found in both → compile error (ambiguity)
 
 ## Implementation
 
 ### Phase 1: Type-directed module lookup
 
-- checker が UFCS 呼び出しを解決するとき、receiver の型が named type なら型定義元モジュールを探す
-- `resolve_ufcs_by_type` を拡張し、stdlib 以外のモジュールも探索対象にする
-- 型定義元モジュールの関数シグネチャを import なしで参照可能にする（auto-import of associated functions）
+- When the checker resolves a UFCS call, if the receiver type is a named type, search its defining module
+- Extend `resolve_ufcs_by_type` to search modules beyond stdlib
+- Make function signatures from the type's defining module accessible without explicit import (auto-import of associated functions)
 
 ### Phase 2: Conflict detection
 
-- stdlib と外部モジュールで同名関数が UFCS 候補になった場合のエラーメッセージ
-- 明示的な module prefix で曖昧性を解消できることを hint に表示
+- Error message when same-named functions in stdlib and external modules both become UFCS candidates
+- Show hint that explicit module prefix can resolve the ambiguity
 
 ## Motivation
 
-Web framework DX に直結:
+Directly impacts web framework DX:
 
 ```almide
 // before
@@ -96,5 +98,5 @@ let res = web.json(data).add_header("X-Request-Id", req_id)
 
 ## Depends On
 
-- Module system がモジュール内の型定義を追跡できること（既に実装済み）
-- Named type の定義元モジュール情報が checker から参照可能なこと
+- Module system can track type definitions within modules (already implemented)
+- Named type's defining module information is accessible from the checker

@@ -1,4 +1,6 @@
-# Tuple & Record [DONE]
+<!-- description: Named record construction and tuple index access -->
+<!-- done: 2026-03-11 -->
+# Tuple & Record
 
 ### Named Record Construction ✅ Implemented
 

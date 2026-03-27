@@ -1,4 +1,6 @@
-# Direct WASM Emission [ACTIVE]
+<!-- description: Direct WASM binary emission with linear memory and WASI imports -->
+<!-- done: 2026-03-24 -->
+# Direct WASM Emission
 
 ## Status: 129/129 tests passing (100%), WASI imports operational
 
@@ -57,7 +59,7 @@ src/codegen/emit_wasm/
 
 ## Next Steps
 
-1. **StreamFusion対応** — 現在WASM pipelineから除外。emitterがfused IR（map+filter融合等）を処理できるようにすればパフォーマンス向上
+1. **StreamFusion support** — currently excluded from WASM pipeline. Performance improvement if emitter can handle fused IR (map+filter fusion etc.)
 2. **fd_read** — stdin for interactive programs
 3. **args_get / environ_get** — CLI args and env vars
 4. **File I/O** — path_open/fd_read/fd_write/fd_close/fd_seek
@@ -70,7 +72,7 @@ src/codegen/emit_wasm/
 - [x] Codec auto-derive
 - [x] Dead Code Elimination (DCE)
 
-## Binary Size (DCE後)
+## Binary Size (after DCE)
 
 | Program | Binary Size |
 |---------|------------:|
@@ -80,4 +82,4 @@ src/codegen/emit_wasm/
 | Closure | 1,443 B |
 | Variant | 1,777 B |
 
-アロケータ・文字列処理・ランタイム全部入りの自己完結バイナリ。
+Self-contained binaries including allocator, string processing, and full runtime.

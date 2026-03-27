@@ -1,91 +1,93 @@
-# TS Edge-Native Deployment [ON HOLD]
+<!-- description: Native TS output for edge runtimes (Workers, Deno Deploy, Vercel) -->
+<!-- done: 2026-03-18 -->
+# TS Edge-Native Deployment
 
 ## Thesis
 
-Almide の `--target ts` 出力は **素の TypeScript/JavaScript** であり、V8 が直接実行する。WASM を経由しない。これにより Cloudflare Workers, Deno Deploy, Vercel Edge Functions 等のエッジランタイムで、WASM ベースの言語（Rust→WASM, Go→WASM, MoonBit）が抱える問題を根本的に回避できる。
+Almide's `--target ts` output is **plain TypeScript/JavaScript** that V8 executes directly. No WASM involved. This fundamentally avoids the problems that WASM-based languages (Rust→WASM, Go→WASM, MoonBit) face on edge runtimes like Cloudflare Workers, Deno Deploy, and Vercel Edge Functions.
 
 ```
 Rust → WASM → V8 (WASM instantiate 5-50ms, no JIT, FFI overhead)
 Almide → TS → V8 (JS parse <1ms, full JIT, native ecosystem)
 ```
 
-**これは「Almide はエッジで最速の非-JS 言語」になれる可能性を意味する。**
+**This means Almide has the potential to become the fastest non-JS language on the edge.**
 
 ## Why This Matters
 
-### WASM on Edge の現実的な問題
+### Real-world Problems with WASM on Edge
 
-| 問題 | 原因 | Almide→TS での状況 |
-|------|------|-------------------|
-| コールドスタート遅延 | WASM instantiate + メモリ確保 (5-50ms) | JS パース <1ms。問題なし |
-| JIT 最適化なし | WASM は AOT、V8 の TurboFan が効かない | フル JIT 最適化対象 |
-| JS エコシステム断絶 | WASM↔JS 間の FFI オーバーヘッド | ネイティブ JS。npm パッケージ直接利用可能 |
-| バンドルサイズ | WASM バイナリ 数百KB〜MB | 45-100KB (改善余地あり) |
-| デバッグ困難 | WASM のスタックトレースは不透明 | 生成 TS は可読。ソースマップも原理的に可能 |
+| Problem | Cause | Almide→TS Situation |
+|---------|-------|---------------------|
+| Cold start latency | WASM instantiate + memory allocation (5-50ms) | JS parse <1ms. No issue |
+| No JIT optimization | WASM is AOT; V8's TurboFan doesn't apply | Full JIT optimization target |
+| JS ecosystem disconnect | FFI overhead between WASM↔JS | Native JS. npm packages directly usable |
+| Bundle size | WASM binaries hundreds of KB to MB | 45-100KB (room for improvement) |
+| Difficult debugging | WASM stack traces are opaque | Generated TS is readable. Source maps are theoretically possible |
 
-### Almide が持つ構造的優位性
+### Almide's Structural Advantages
 
-1. **型チェッカーが全型情報を持っている** — emitter は型に基づいて最適なコードを選択できる
-2. **マルチターゲット** — 同じコードが `--target rust` でネイティブバイナリにもなる。サーバーは Rust、エッジは TS、という使い分けが 1 言語で完結する
-3. **出力は改善可能** — ランタイムのオーバーヘッドはアーキテクチャの制約ではなく、emitter 最適化の問題。型情報があるので後からいくらでも絞れる
+1. **The type checker has full type information** — the emitter can choose optimal code based on types
+2. **Multi-target** — the same code can also become a native binary via `--target rust`. Server in Rust, edge in TS — one language covers both
+3. **Output is improvable** — runtime overhead is an emitter optimization issue, not an architectural constraint. Since type information is available, it can always be tightened later
 
 ## Current State
 
-### 動くもの
+### What Works
 
-- `--target ts` で Deno 向け TypeScript を出力 (動作中)
-- `--target npm` で npm パッケージを出力 (動作中、モジュール選択的読み込み)
+- `--target ts` outputs TypeScript for Deno (working)
+- `--target npm` outputs npm packages (working, selective module loading)
 - Result erasure: `ok(x)` → `x`, `err(e)` → `throw` (TS-idiomatic)
-- stdlib 22 モジュール (string, list, map, json, http, fs, crypto, etc.)
+- 22 stdlib modules (string, list, map, json, http, fs, crypto, etc.)
 
-### 最適化余地
+### Optimization Opportunities
 
-型チェッカーが型を知っているので、emitter 側で以下が可能:
+Since the type checker knows the types, the following optimizations are possible in the emitter:
 
-| 現状 | 最適化後 | 条件 |
-|------|---------|------|
-| `__deep_eq(a, b)` | `a === b` | 両辺がプリミティブ型 (Int, String, Bool) |
-| `__bigop("%", n, 3)` | `n % 3` | 両辺が Int かつ BigInt 不要な範囲 |
-| `__bigop("+", a, b)` | `a + b` | 同上 |
-| `__div(a, b)` | `Math.trunc(a / b)` or `a / b` | Int 除算 or Float 除算が型で判明 |
-| `__concat(a, b)` | `a + b` | 両辺が String |
-| stdlib 全モジュール埋め込み | 使用モジュールのみ | `--target ts` でも npm 同様の tree-shake |
+| Current | After Optimization | Condition |
+|---------|--------------------|-----------|
+| `__deep_eq(a, b)` | `a === b` | Both sides are primitive types (Int, String, Bool) |
+| `__bigop("%", n, 3)` | `n % 3` | Both sides are Int and within non-BigInt range |
+| `__bigop("+", a, b)` | `a + b` | Same as above |
+| `__div(a, b)` | `Math.trunc(a / b)` or `a / b` | Int division or Float division determined by type |
+| `__concat(a, b)` | `a + b` | Both sides are String |
+| All stdlib modules embedded | Only used modules | Tree-shake for `--target ts` like npm |
 
-**これらは全て emitter の変更で済む。言語仕様やランタイムの変更は不要。**
+**All of these require only emitter changes. No language spec or runtime changes needed.**
 
 ## Edge Platform Compatibility
 
-| Platform | Runtime | Almide→TS の互換性 |
-|----------|---------|-------------------|
-| Cloudflare Workers | V8 isolate | 完全互換。スクリプトサイズ上限 Free 1MB / Paid 10MB → 余裕 |
-| Deno Deploy | Deno (V8) | `--target ts` がそのまま動く。現在のメインターゲット |
-| Vercel Edge Functions | V8 (Edge Runtime) | ESM 互換。npm target で対応可能 |
-| AWS Lambda@Edge | Node.js | `--target npm` で対応 |
-| Fastly Compute | WASM のみ | 非対応 (WASM target が必要) |
+| Platform | Runtime | Almide→TS Compatibility |
+|----------|---------|------------------------|
+| Cloudflare Workers | V8 isolate | Fully compatible. Script size limit Free 1MB / Paid 10MB → plenty of headroom |
+| Deno Deploy | Deno (V8) | `--target ts` works as-is. Current primary target |
+| Vercel Edge Functions | V8 (Edge Runtime) | ESM compatible. Supported via npm target |
+| AWS Lambda@Edge | Node.js | Supported via `--target npm` |
+| Fastly Compute | WASM only | Not supported (requires WASM target) |
 
 ## What Needs to Happen
 
-### Phase 1: TS 出力の軽量化 (emitter 最適化)
+### Phase 1: Lightweight TS Output (Emitter Optimization)
 
-型情報に基づくヘルパー関数の除去。上記「最適化余地」の表を実装する。
+Eliminate helper functions based on type information. Implement the "Optimization Opportunities" table above.
 
-- [ ] プリミティブ型の `==`/`!=` → `===`/`!==` 直接出力
-- [ ] プリミティブ型の算術演算 → 直接出力 (BigInt ディスパッチ除去)
-- [ ] `--target ts` での未使用 stdlib モジュール除去 (npm 同様の tree-shake)
-- [ ] 計測: 最適化前後のバンドルサイズ・実行速度比較
+- [ ] Primitive type `==`/`!=` → direct `===`/`!==` output
+- [ ] Primitive type arithmetic → direct output (remove BigInt dispatch)
+- [ ] Remove unused stdlib modules in `--target ts` (tree-shake like npm)
+- [ ] Benchmark: compare bundle size and execution speed before/after optimization
 
-### Phase 2: Platform / Target 分離
+### Phase 2: Platform / Target Separation
 
-→ **[platform-target-separation.md](platform-target-separation.md)** に独立。
+→ Extracted to **[platform-target-separation.md](platform-target-separation.md)**.
 
-`--target` (出力言語) と `--platform` (API 可用性) を分離し、`@extern` にプラットフォーム階層を導入する。エッジで使える/使えない stdlib がコンパイル時に確定する。
+Separate `--target` (output language) from `--platform` (API availability), and introduce platform tiers to `@extern`. Which stdlib functions are available on edge is determined at compile time.
 
-### Phase 3: Edge 向けエントリポイント
+### Phase 3: Edge Entry Points
 
-HTTP ハンドラのパターンを Almide で自然に書けるようにする。
+Enable natural patterns for writing HTTP handlers in Almide.
 
 ```almide
-// Cloudflare Workers 向けの最小例
+// Minimal example for Cloudflare Workers
 effect fn handle(req: Request) -> Response =
   match req.method {
     "GET" => Response.text("Hello from Almide"),
@@ -93,31 +95,31 @@ effect fn handle(req: Request) -> Response =
   }
 ```
 
-- [ ] `Request`/`Response` 型の定義 (Web standard Fetch API 準拠 — `@extern(js-web, ...)`)
-- [ ] `export default { fetch: handle }` 形式の出力
-- [ ] Cloudflare Workers / Deno Deploy / Vercel Edge 向けのエントリポイントテンプレート
+- [ ] Define `Request`/`Response` types (compliant with Web standard Fetch API -- `@extern(js-web, ...)`)
+- [ ] Output in `export default { fetch: handle }` format
+- [ ] Entry point templates for Cloudflare Workers / Deno Deploy / Vercel Edge
 
-### Phase 4: ベンチマーク & 実証
+### Phase 4: Benchmarks & Validation
 
-「WASM より速い」を数値で証明する。
+Prove "faster than WASM" with numbers.
 
-- [ ] Cloudflare Workers 上で同一ロジックの cold start 比較: Almide→TS vs Rust→WASM
-- [ ] 実行速度比較: JSON parse/serialize, HTTP routing, string processing
-- [ ] バンドルサイズ比較
+- [ ] Cold start comparison on Cloudflare Workers with identical logic: Almide→TS vs Rust→WASM
+- [ ] Execution speed comparison: JSON parse/serialize, HTTP routing, string processing
+- [ ] Bundle size comparison
 
 ## Relationship to Other Roadmap Items
 
-- **almide-ui.md**: Almide 製リアクティブ UI フレームワーク。TS edge-native の emitter 最適化 + builder 機構の上に構築される。このドキュメントの Phase 1 が Almide UI の性能基盤
-- **emit-wasm-direct.md**: WASM 直接出力とは独立。TS edge-native は WASM を使わないことが価値
-- **cross-target-semantics.md**: TS 出力の正確性はこのドキュメントの前提。P0 の修正は必須
-- **Result Builder (template.md)**: HTML builder + TS edge 出力 = Almide で書いた Web アプリをエッジで動かす完全なストーリーになる
+- **almide-ui.md**: Almide's reactive UI framework. Built on TS edge-native emitter optimization + builder mechanism. Phase 1 of this document is the performance foundation for Almide UI
+- **emit-wasm-direct.md**: Independent of WASM direct output. The value of TS edge-native is not using WASM
+- **cross-target-semantics.md**: TS output correctness is a prerequisite for this document. P0 fixes are essential
+- **Result Builder (template.md)**: HTML builder + TS edge output = the complete story of running Almide web apps on the edge
 
 ## Why ON HOLD
 
-現時点では emitter 最適化 (Phase 1) が先決。言語コアの安定化と既存テストの充実が優先。ただし:
+At this point, emitter optimization (Phase 1) takes priority. Language core stabilization and expanding existing tests come first. However:
 
-- **アーキテクチャ上のブロッカーはゼロ** — 必要なものは全て emitter 側の改善
-- **型チェッカーが型情報を持っている** — 最適化に必要な基盤は既にある
-- **`--target ts` は既に動いている** — ゼロからではない
+- **Zero architectural blockers** — everything needed is emitter-side improvements
+- **The type checker already has type information** — the foundation for optimization already exists
+- **`--target ts` is already working** — not starting from zero
 
-確度は高い。タイミングの問題。
+High confidence. Just a matter of timing.

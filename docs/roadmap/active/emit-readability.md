@@ -1,90 +1,91 @@
-# Emit Readability [ACTIVE]
+<!-- description: Improve readability of generated Rust and TypeScript output -->
+# Emit Readability
 
-**優先度:** Medium — LLM が修正する生成コードの品質に直結
-**前提:** codegen v3 (TOML template walker) 完了済み
-**目標:** `--target rust` / `--target ts` の出力コードを人間・LLM が読みやすい形に改善する
+**Priority:** Medium — Directly affects the quality of generated code that LLMs modify
+**Prerequisites:** codegen v3 (TOML template walker) completed
+**Goal:** Improve readability of `--target rust` / `--target ts` output for both humans and LLMs
 
-> 「生成コードの可読性は modification survival rate に直結する。」
+> "Generated code readability directly impacts modification survival rate."
 
 ---
 
 ## Why
 
-Almide の mission は "LLM が最も正確に書ける言語"。`--target rust/ts` で emit されるコードを LLM が読み・修正するケースがある (デバッグ、統合、学習)。現状の emit は正しいが、以下の点で可読性に改善余地がある:
+Almide's mission is "the language LLMs can write most accurately." There are cases where LLMs read and modify code emitted via `--target rust/ts` (debugging, integration, learning). The current emit output is correct, but there is room for readability improvement:
 
-- ソースの構造 (空行、論理ブロック) が失われる
-- 変数名は保持されるが、コメントは保持されない
-- 生成コードのフォーマットが機械的で、意図が読みにくい場合がある
+- Source structure (blank lines, logical blocks) is lost
+- Variable names are preserved, but comments are not
+- Generated code formatting is mechanical, sometimes obscuring intent
 
-可読性の高い生成コードは:
-1. LLM がコンテキストを掴みやすく、修正精度が上がる
-2. 人間がデバッグしやすい
-3. 生成コードの「ソースマップ」として機能する
+Highly readable generated code:
+1. Makes it easier for LLMs to grasp context, improving modification accuracy
+2. Is easier for humans to debug
+3. Functions as a "source map" of the generated code
 
 ---
 
 ## Design
 
-### 保持対象
+### What to Preserve
 
-| 要素 | 現状 | 目標 |
+| Element | Current | Goal |
 |---|---|---|
-| 変数名 | ✅ 保持 | 維持 |
-| 関数名 | ✅ 保持 | 維持 |
-| 空行 (論理ブロック区切り) | ❌ 除去 | ソースの空行を emit に反映 |
-| doc コメント | ❌ 除去 | `/// ...` / `/** ... */` として emit |
-| インラインコメント | ❌ 除去 | 将来検討 |
-| ソースの関数順序 | ✅ 保持 | 維持 |
-| import 順序 | △ 機械的 | 論理グループ化 |
+| Variable names | ✅ Preserved | Maintain |
+| Function names | ✅ Preserved | Maintain |
+| Blank lines (logical block separators) | ❌ Removed | Reflect source blank lines in emit output |
+| Doc comments | ❌ Removed | Emit as `/// ...` / `/** ... */` |
+| Inline comments | ❌ Removed | Future consideration |
+| Source function order | ✅ Preserved | Maintain |
+| Import order | △ Mechanical | Logical grouping |
 
-### 非目標
+### Non-Goals
 
-- ソースコメントの完全保持 (コンパイラ内部コメントは emit しない)
-- emit コードの手書き品質との完全一致 (あくまで「読みやすい機械出力」)
+- Complete preservation of source comments (internal compiler comments are not emitted)
+- Exact match with hand-written code quality (aim for "readable machine output")
 
 ---
 
 ## Phases
 
-### Phase 1: 空行の保持
+### Phase 1: Blank Line Preservation
 
-- [ ] Parser: 空行位置を AST/IR に記録 (`blank_lines_before: u32`)
-- [ ] IR: `IrStmt` に空行アノテーション追加
-- [ ] Walker: 空行アノテーションに基づいて emit 時に空行挿入
-- [ ] テスト: ソースの論理ブロック構造が emit に反映されることを確認
+- [ ] Parser: record blank line positions in AST/IR (`blank_lines_before: u32`)
+- [ ] IR: add blank line annotation to `IrStmt`
+- [ ] Walker: insert blank lines during emit based on blank line annotations
+- [ ] Test: verify that source logical block structure is reflected in emit output
 
-### Phase 2: doc コメントの保持
+### Phase 2: Doc Comment Preservation
 
-- [ ] Parser: doc コメント (`/// ...`) を AST に記録
-- [ ] IR: 関数・型定義に doc コメントフィールド追加
-- [ ] Rust emit: `/// ...` として出力
-- [ ] TS emit: `/** ... */` として出力
-- [ ] WASM: コメントは emit しない (バイナリなので)
+- [ ] Parser: record doc comments (`/// ...`) in AST
+- [ ] IR: add doc comment field to function/type definitions
+- [ ] Rust emit: output as `/// ...`
+- [ ] TS emit: output as `/** ... */`
+- [ ] WASM: don't emit comments (binary format)
 
-### Phase 3: import のグループ化
+### Phase 3: Import Grouping
 
-- [ ] Rust emit: `use std::` / `use crate::` / 外部 crate でグループ化 + 空行
-- [ ] TS emit: stdlib / local module でグループ化
-- [ ] 論理的な順序 (stdlib → external → local)
+- [ ] Rust emit: group by `use std::` / `use crate::` / external crates + blank lines
+- [ ] TS emit: group by stdlib / local modules
+- [ ] Logical ordering (stdlib → external → local)
 
-### Phase 4: フォーマット品質
+### Phase 4: Formatting Quality
 
-- [ ] 長い式の改行ルール改善 (builder chain, 長い引数リスト)
-- [ ] match/when の腕の整列
-- [ ] emit 後に `rustfmt` / `prettier` を通さなくても読めるレベルを目標
+- [ ] Improve line break rules for long expressions (builder chains, long argument lists)
+- [ ] Alignment of match/when arms
+- [ ] Target readability level where `rustfmt` / `prettier` aren't needed to read the output
 
 ---
 
 ## Implementation Notes
 
-- 空行保持は Parser → IR → Walker の全段を通すため、変更範囲が広い
-- doc コメントは IR に `Option<String>` を追加する軽量な変更
-- TOML テンプレートに空行・コメントのプレースホルダーを追加
+- Blank line preservation passes through Parser → IR → Walker, so the change scope is wide
+- Doc comments are a lightweight change — adding `Option<String>` to IR
+- Add blank line / comment placeholders to TOML templates
 
 ---
 
 ## Success Criteria
 
-- `almide app.almd --target rust` の出力がソースの論理構造を保持
-- doc コメントが Rust/TS 出力に反映される
-- emit 出力を LLM に渡して「この関数は何をしているか」を問うた時の正答率が向上 (定性評価)
+- `almide app.almd --target rust` output preserves the logical structure of the source
+- Doc comments are reflected in Rust/TS output
+- Improved accuracy when asking an LLM "what does this function do" given emit output (qualitative evaluation)

@@ -1,3 +1,5 @@
+<!-- description: Type inference for higher-order functions returning closures -->
+<!-- done: 2026-03-16 -->
 # Higher-Order Function Type Inference
 
 **Test:** `spec/lang/function_test.almd`

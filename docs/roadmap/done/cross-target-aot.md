@@ -1,27 +1,29 @@
+<!-- description: AOT cross-compilation producing multiple target artifacts in one build -->
+<!-- done: 2026-03-18 -->
 # Cross-Target AOT Compilation [PLANNED]
 
 ## Motivation
 
-Almide は既に複数の emit ターゲット（Rust / TS / JS / 将来 WASM）を持ち、`@extern` でターゲット別の実装を宣言的に切り替えられる。この構造を活かし、`almide build` 一発で複数ターゲットの成果物を同時に生成する AOT クロスコンパイルシステムを構築する。
+Almide already has multiple emit targets (Rust / TS / JS / future WASM) and can declaratively switch target-specific implementations via `@extern`. Leveraging this structure, build an AOT cross-compilation system that generates artifacts for multiple targets simultaneously with a single `almide build`.
 
-## 現状の土台
+## Existing foundation
 
-Almide のコンパイルパイプラインは既にクロスターゲット対応の構造:
+Almide's compilation pipeline already has cross-target-ready structure:
 
 ```
 Source (.almd)
   → Lexer → Parser → AST
-  → Checker → IR (共通)
+  → Checker → IR (shared)
   → emit_rust/  (native CLI / cargo crate)
-  → emit_ts/    (TS/JS / npm パッケージ)
-  → emit_wasm/  (将来: WASM 直接出力 + JS グルー)
+  → emit_ts/    (TS/JS / npm package)
+  → emit_wasm/  (future: direct WASM output + JS glue)
 ```
 
-- チェッカー・IR は全ターゲット共通
-- `@extern(rs, ...)` / `@extern(ts, ...)` でターゲット別の実装を言語レベルでサポート
-- ターゲット固有のコードは emit レイヤーに閉じている
+- Checker and IR are common across all targets
+- `@extern(rs, ...)` / `@extern(ts, ...)` support target-specific implementations at the language level
+- Target-specific code is confined to the emit layer
 
-## ゴール
+## Goal
 
 ```bash
 almide build --target all
@@ -29,87 +31,87 @@ almide build --target all
 
 ```
 dist/
-├── native/     Rust → バイナリ (macOS / Linux / Windows)
-├── web/        WASM + JS グルー (ブラウザ向け)
-├── npm/        JS パッケージ (npm publish 可能)
-└── deno/       TS モジュール (Deno / Bun 向け)
+├── native/     Rust → binary (macOS / Linux / Windows)
+├── web/        WASM + JS glue (for browsers)
+├── npm/        JS package (npm publishable)
+└── deno/       TS module (for Deno / Bun)
 ```
 
-## 他言語との比較
+## Comparison with other languages
 
-| 言語/フレームワーク | クロスターゲット戦略 | Almide との違い |
+| Language/Framework | Cross-target strategy | Difference from Almide |
 |---|---|---|
-| **Kotlin Multiplatform** | `commonMain` → JVM / iOS / JS / WASM | `expect`/`actual` でターゲット分岐。Almide の `@extern` と同じ設計思想 |
-| **Rust** | `#[cfg(target)]` + cross-compile | 条件コンパイルは強力だが、JS/TS ターゲットはない |
-| **Go** | `GOOS`/`GOARCH` でクロスコンパイル | ネイティブのみ。Web ターゲットは TinyGo 経由 |
-| **Dart (Flutter)** | AOT (iOS/Android) + JIT (dev) | プラットフォームチャネルで分岐。言語レベルではない |
-| **Zig** | `comptime` + ターゲット判定 | ゼロコスト抽象化。ただし Web ターゲットは限定的 |
+| **Kotlin Multiplatform** | `commonMain` → JVM / iOS / JS / WASM | Target branching via `expect`/`actual`. Same design philosophy as Almide's `@extern` |
+| **Rust** | `#[cfg(target)]` + cross-compile | Conditional compilation is powerful, but no JS/TS targets |
+| **Go** | Cross-compile via `GOOS`/`GOARCH` | Native only. Web targets via TinyGo |
+| **Dart (Flutter)** | AOT (iOS/Android) + JIT (dev) | Platform channel branching. Not at the language level |
+| **Zig** | `comptime` + target detection | Zero-cost abstraction. But web targets are limited |
 
-**Almide の優位性**: `@extern` が言語の第一級機能であるため、ターゲット分岐がアドホックな条件分岐ではなく、型安全かつ宣言的。さらに、ネイティブ (Rust) と Web (TS/JS/WASM) の両方を一級ターゲットとして持つ言語は稀。
+**Almide's advantage**: Since `@extern` is a first-class language feature, target branching is type-safe and declarative rather than ad-hoc conditional branching. Furthermore, few languages have both native (Rust) and web (TS/JS/WASM) as first-class targets.
 
 ## Implementation Phases
 
-### Phase 1: `almide build --target` の拡張
+### Phase 1: Extend `almide build --target`
 
-- [ ] `--target all` で全ターゲットを順次ビルド
-- [ ] `--target native,npm` のようなカンマ区切り複数指定
-- [ ] `almide.toml` の `[build]` セクションでデフォルトターゲットを設定
+- [ ] `--target all` to sequentially build all targets
+- [ ] Comma-separated multiple targets like `--target native,npm`
+- [ ] Set default targets in `almide.toml` `[build]` section
 
 ```toml
 [build]
 targets = ["native", "npm"]
 ```
 
-### Phase 2: ターゲット別最適化
+### Phase 2: Target-specific optimizations
 
-各ターゲットに特化した最適化パスを IR → emit 間に挿入:
+Insert target-specific optimization passes between IR → emit:
 
-| ターゲット | 最適化 |
-|-----------|--------|
-| Rust (native) | borrow analysis、ライフタイム推論、ゼロコピー最適化 |
-| TS/JS (web) | tree shaking、minification-friendly な命名 |
-| WASM (direct) | サイズ最適化、線形メモリレイアウト最適化 |
-| npm (package) | 使用 stdlib のみバンドル、ESM/CJS デュアル出力 |
+| Target | Optimizations |
+|--------|---------------|
+| Rust (native) | borrow analysis, lifetime inference, zero-copy optimization |
+| TS/JS (web) | tree shaking, minification-friendly naming |
+| WASM (direct) | size optimization, linear memory layout optimization |
+| npm (package) | bundle only used stdlib, ESM/CJS dual output |
 
-### Phase 3: 成果物パッケージング
+### Phase 3: Artifact packaging
 
-- [ ] `dist/` ディレクトリへの統一出力
-- [ ] npm: `package.json` 自動生成（既に `emit_npm_package` で部分実装済み）
-- [ ] WASM: `.wasm` + `.js` グルーの同梱（emit-wasm-direct.md 参照）
-- [ ] native: ターゲットトリプル別バイナリ（`x86_64-apple-darwin` 等）
+- [ ] Unified output to `dist/` directory
+- [ ] npm: auto-generate `package.json` (partially implemented in `emit_npm_package`)
+- [ ] WASM: bundle `.wasm` + `.js` glue (see emit-wasm-direct.md)
+- [ ] native: per-target-triple binaries (`x86_64-apple-darwin` etc.)
 
-### Phase 4: CI/CD 統合
+### Phase 4: CI/CD integration
 
 ```yaml
-# GitHub Actions で全ターゲットビルド
+# Build all targets with GitHub Actions
 - run: almide build --target all
 - uses: actions/upload-artifact@v4
   with:
     path: dist/
 ```
 
-- [ ] `almide publish` コマンドで npm + crates.io + GitHub Release を一括公開
-- [ ] GitHub Actions テンプレート提供
+- [ ] `almide publish` command for bulk publishing to npm + crates.io + GitHub Release
+- [ ] Provide GitHub Actions template
 
-## @extern とクロスターゲットの関係
+## Relationship between @extern and cross-target
 
-`@extern` はこのシステムの中核。ターゲット分岐を型安全に宣言する:
+`@extern` is the core of this system. Declares target branching in a type-safe way:
 
 ```almide
-// ネイティブは OS API、Web は fetch API を使う
+// Native uses OS API, Web uses fetch API
 @extern(rs, "reqwest", "get")
 @extern(ts, "fetch_wrapper", "get")
 fn http_get(url: String) -> Result[String, String]
 
-// 共通ロジックはそのまま全ターゲットで使える
+// Common logic works on all targets as-is
 fn parse_response(body: String) -> Data =
   json.parse(body) |> unwrap_or(default_data())
 ```
 
-クロスターゲットの難しさは「どこでターゲット分岐するか」だが、Almide では `@extern` 境界が明確なので、共通コードとターゲット固有コードの切り分けがコンパイラレベルで保証される。
+The difficulty of cross-target is "where to branch by target," but in Almide, the `@extern` boundary is clear, so the separation between common code and target-specific code is guaranteed at the compiler level.
 
-## 依存関係
+## Dependencies
 
-- emit-wasm-direct.md: WASM ターゲットが Phase 3 以降の前提
-- package-registry.md: `almide publish` は registry が必要
-- stdlib-architecture-3-layer-design.md: platform 分離がクロスターゲットの安全性を担保
+- emit-wasm-direct.md: WASM target is a prerequisite from Phase 3 onward
+- package-registry.md: `almide publish` requires a registry
+- stdlib-architecture-3-layer-design.md: platform separation ensures cross-target safety

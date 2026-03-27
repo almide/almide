@@ -1,10 +1,12 @@
-# ストリーミング — WebSocket, SSE, Stream
+<!-- description: WebSocket, SSE, and streaming data support -->
+<!-- done: 2026-03-19 -->
+# Streaming — WebSocket, SSE, Stream
 
-## 概要
+## Overview
 
-リアルタイム通信とストリーミングデータ処理のサポート。
+Support for real-time communication and streaming data processing.
 
-## スコープ
+## Scope
 
 ### WebSocket
 
@@ -28,9 +30,9 @@ effect fn stream_updates() -> Unit = {
 }
 ```
 
-### Stream と for...in の統合
+### Stream and for...in integration
 
-既存の `for...in` が Stream を認識し、到着順にイテレーション。
+Existing `for...in` recognizes Stream and iterates in arrival order.
 
 ```almide
 effect fn process_stream(url: String) -> Unit = {
@@ -40,13 +42,13 @@ effect fn process_stream(url: String) -> Unit = {
 }
 ```
 
-## 実装方針
+## Implementation Approach
 
 ### Rust
 
 - WebSocket: `tungstenite` (sync) or `tokio-tungstenite` (async backend)
-- SSE: HTTP chunked response のパース
-- Stream trait: `Iterator` ベース (sync) or `futures::Stream` (async)
+- SSE: Parsing HTTP chunked responses
+- Stream trait: `Iterator`-based (sync) or `futures::Stream` (async)
 
 ### TS
 
@@ -54,7 +56,7 @@ effect fn process_stream(url: String) -> Unit = {
 - SSE: `EventSource` API / `ReadableStream`
 - Stream: `AsyncIterator`
 
-## stdlib モジュール
+## stdlib Module
 
 ```toml
 # stdlib/defs/websocket.toml
@@ -79,12 +81,12 @@ return = "Result[Unit, String]"
 effect = true
 ```
 
-## 前提条件
+## Prerequisites
 
-- async backend (on-hold/async-backend.md) — sync WebSocket は可能だが実用的でない
-- Stream 型の型システムへの導入
-- `for...in` の Stream 対応
+- async backend (on-hold/async-backend.md) — sync WebSocket is possible but impractical
+- Introduction of Stream type to the type system
+- Stream support for `for...in`
 
-## 優先度
+## Priority
 
-低。リアルタイムアプリケーション開発が必要になってから。
+Low. When real-time application development becomes necessary.

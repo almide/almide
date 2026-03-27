@@ -1,3 +1,5 @@
+<!-- description: Tooling roadmap (LSP, REPL, doc gen, bench) split to active -->
+<!-- done: 2026-03-18 -->
 # Tooling [ON HOLD — items split to active]
 
 Most items from this roadmap have been promoted to dedicated active roadmaps:

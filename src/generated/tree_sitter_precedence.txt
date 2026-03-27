@@ -2,7 +2,7 @@
 // Tree-sitter precedence rules:
 
 // pipe: prec.left(1, ...)
-// operators: |>
+// operators: |>, >>
 
 // or: prec.left(2, ...)
 // operators: or
@@ -10,7 +10,7 @@
 // and: prec.left(3, ...)
 // operators: and
 
-// comparison: prec.left(4, ...)
+// comparison: prec(4, ...)
 // operators: ==, !=, <, >, <=, >=
 
 // range: prec(5, ...)
@@ -20,8 +20,11 @@
 // operators: +, -, ++
 
 // multiplicative: prec.left(7, ...)
-// operators: *, /, %, ^
+// operators: *, /, %
 
-// unary: prec.right(8, ...)
+// power: prec.right(8, ...)
+// operators: ^
+
+// unary: prec.right(9, ...)
 // operators: -, not
 

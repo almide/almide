@@ -1,3 +1,5 @@
+<!-- description: UFCS and almide init improvements for LLM-assisted development -->
+<!-- done: 2026-03-14 -->
 # LLM Developer Experience [DONE / MERGED]
 
 > UFCS: done. Remaining items (`almide init` config) merged into [LLM Integration](../active/llm-integration.md).

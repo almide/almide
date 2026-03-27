@@ -18,12 +18,9 @@ type Name = Case1(Type) | Case2(Type)                // inline variant (no leadi
 type Handler = (String) -> String                    // function type alias
 ```
 
-### deriving
+### Conventions
 ```
-type ConfigError =
-  | Io(IoError)
-  | Parse(ParseError)
-  deriving From            // auto-generates impl From for each case
+type Color: Eq, Repr = Red | Green | Blue   // convention after type name with :
 ```
 
 ### Built-in types
@@ -53,14 +50,11 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 ```
 
 ## Built-in Protocols
-Eq and Hash are automatic (compiler-derived from type structure). No `deriving` needed.
-`deriving From` is the only explicit deriving directive (for error type conversions).
+Eq and Hash are automatic (compiler-derived from type structure). No annotation needed.
+`From` is the only explicit convention (for error type conversions), specified with `:` after the type name.
 ```
 // Eq: all value types support == (except Fn)
 let same = color_a == color_b  // just works
-
-// From: opt-in for error conversions
-type AppError = | Io(IoError) | Parse(ParseError) deriving From
 ```
 ### Protocols (user-defined conventions)
 ```
@@ -358,8 +352,7 @@ import json
 
 type AppError =
   | NotFound(String)
-  | Io(IoError)
-  deriving From
+  | Io(String)
 
 effect fn greet(name: String) -> Result[Unit, AppError] = {
   guard string.len(name) > 0 else err(NotFound("empty name"))

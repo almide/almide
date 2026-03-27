@@ -1,47 +1,49 @@
-# Codegen v3: 変換の完全分類
+<!-- description: Complete classification of codegen transforms by context depth -->
+<!-- done: 2026-03-18 -->
+# Codegen v3: Transform Classification
 
-Codegen がやっている全変換を、必要な文脈の深さで 3 段階に分類する。
+Classify all codegen transforms into 3 levels by the depth of context they require.
 
 ```mermaid
-pie title 変換の分類 (実装複雑度ベース)
-    "Template (型情報付き)" : 55
-    "Local Pass (スコープ文脈)" : 20
-    "Global Pass (プログラム全体)" : 25
+pie title Transform classification (by implementation complexity)
+    "Template (with type info)" : 55
+    "Local Pass (scope context)" : 20
+    "Global Pass (whole program)" : 25
 ```
 
-## 分類基準
+## Classification criteria
 
-| レベル | 必要な情報 | 実装方式 |
-|--------|-----------|---------|
-| **Template** | ノードの種類 + 型情報のみ | TOML + 型タグ |
-| **Local Pass** | 周囲のスコープ情報 (effect fn 内か、ループ内か等) | 小さな Nanopass |
-| **Global Pass** | プログラム全体の情報 (全型定義、使用箇所分析等) | 解析 + 変換 Pass |
+| Level | Required information | Implementation |
+|-------|---------------------|----------------|
+| **Template** | Node kind + type info only | TOML + type tags |
+| **Local Pass** | Surrounding scope info (inside effect fn, inside loop, etc.) | Small Nanopass |
+| **Global Pass** | Whole-program info (all type definitions, usage analysis, etc.) | Analysis + transform Pass |
 
 ---
 
-## Level 1: Template（TOML で宣言可能）— ~55%
+## Level 1: Template (declarable in TOML) — ~55%
 
-ノードの種類と型情報だけで変換先が決まる。文脈不要。
+The transform target is determined solely by node kind and type info. No context needed.
 
-### 構文フォーマット
+### Syntax formatting
 
-| 変換 | Rust | TypeScript | Python | Go |
+| Transform | Rust | TypeScript | Python | Go |
 |------|------|-----------|--------|-----|
 | if/else | `if {c} {{ {t} }} else {{ {e} }}` | `if ({c}) {{ {t} }} else {{ {e} }}` | `if {c}:\n  {t}\nelse:\n  {e}` | `if {c} {{ {t} }} else {{ {e} }}` |
 | match | `match {s} {{ {arms} }}` | IIFE + if/else chain | if/elif chain | switch |
-| fn 宣言 | `fn {n}({p}) -> {r} {{ {b} }}` | `function {n}({p}): {r} {{ {b} }}` | `def {n}({p}) -> {r}:` | `func {n}({p}) {r} {{ {b} }}` |
-| let 束縛 | `let {n}: {t} = {v};` | `const {n}: {t} = {v};` | `{n}: {t} = {v}` | `{n} := {v}` |
-| var 束縛 | `let mut {n}: {t} = {v};` | `let {n}: {t} = {v};` | `{n}: {t} = {v}` | `var {n} {t} = {v}` |
-| for ループ | `for {v} in {iter} {{ {b} }}` | `for (const {v} of {iter}) {{ {b} }}` | `for {v} in {iter}:` | `for _, {v} := range {iter} {{ {b} }}` |
-| while ループ | `while {c} {{ {b} }}` | `while ({c}) {{ {b} }}` | `while {c}:` | `for {c} {{ {b} }}` |
-| 関数呼び出し | `{f}({a})` | `{f}({a})` | `{f}({a})` | `{f}({a})` |
-| フィールドアクセス | `{e}.{f}` | `{e}.{f}` | `{e}.{f}` | `{e}.{f}` |
-| レコードリテラル | `{T} {{ {fields} }}` | `{{ {fields} }}` | `{T}({fields})` | `{T}{{ {fields} }}` |
-| リストリテラル | `vec![{elems}]` | `[{elems}]` | `[{elems}]` | `[]{T}{{ {elems} }}` |
+| fn decl | `fn {n}({p}) -> {r} {{ {b} }}` | `function {n}({p}): {r} {{ {b} }}` | `def {n}({p}) -> {r}:` | `func {n}({p}) {r} {{ {b} }}` |
+| let binding | `let {n}: {t} = {v};` | `const {n}: {t} = {v};` | `{n}: {t} = {v}` | `{n} := {v}` |
+| var binding | `let mut {n}: {t} = {v};` | `let {n}: {t} = {v};` | `{n}: {t} = {v}` | `var {n} {t} = {v}` |
+| for loop | `for {v} in {iter} {{ {b} }}` | `for (const {v} of {iter}) {{ {b} }}` | `for {v} in {iter}:` | `for _, {v} := range {iter} {{ {b} }}` |
+| while loop | `while {c} {{ {b} }}` | `while ({c}) {{ {b} }}` | `while {c}:` | `for {c} {{ {b} }}` |
+| function call | `{f}({a})` | `{f}({a})` | `{f}({a})` | `{f}({a})` |
+| field access | `{e}.{f}` | `{e}.{f}` | `{e}.{f}` | `{e}.{f}` |
+| record literal | `{T} {{ {fields} }}` | `{{ {fields} }}` | `{T}({fields})` | `{T}{{ {fields} }}` |
+| list literal | `vec![{elems}]` | `[{elems}]` | `[{elems}]` | `[]{T}{{ {elems} }}` |
 
-### 型マッピング
+### Type mapping
 
-| Almide 型 | Rust | TypeScript | Python | Go |
+| Almide type | Rust | TypeScript | Python | Go |
 |-----------|------|-----------|--------|-----|
 | `Int` | `i64` | `number` | `int` | `int64` |
 | `Float` | `f64` | `number` | `float` | `float64` |
@@ -53,24 +55,24 @@ pie title 変換の分類 (実装複雑度ベース)
 | `Result[T,E]` | `Result<T,E>` | `{ok,value}\|{ok,error}` | `T` (raise) | `(T, error)` |
 | `Unit` | `()` | `void` | `None` | ` ` |
 
-### 式の変換（型タグで分岐可能）
+### Expression transforms (can branch on type tags)
 
-| 変換 | 条件 | Rust | TS |
+| Transform | Condition | Rust | TS |
 |------|------|------|-----|
-| `some(x)` | 常に | `Some({x})` | `{x}` |
-| `none` | 型が既知 | `None::<{T}>` | `null` |
-| `none` | 型が不明 | `None` | `null` |
-| `ok(x)` | 常に | `Ok({x})` | `{{ ok: true, value: {x} }}` |
-| `err(x)` | 常に | `Err({x}.to_string())` | `{{ ok: false, error: {x} }}` |
-| `a == b` | 常に | `almide_eq!({a}, {b})` | `__deep_eq({a}, {b})` |
-| `a != b` | 常に | `almide_ne!({a}, {b})` | `!__deep_eq({a}, {b})` |
+| `some(x)` | always | `Some({x})` | `{x}` |
+| `none` | type known | `None::<{T}>` | `null` |
+| `none` | type unknown | `None` | `null` |
+| `ok(x)` | always | `Ok({x})` | `{{ ok: true, value: {x} }}` |
+| `err(x)` | always | `Err({x}.to_string())` | `{{ ok: false, error: {x} }}` |
+| `a == b` | always | `almide_eq!({a}, {b})` | `__deep_eq({a}, {b})` |
+| `a != b` | always | `almide_ne!({a}, {b})` | `!__deep_eq({a}, {b})` |
 | `a ++ b` | String | `format!("{{}}{{}}", {a}, {b})` | `{a} + {b}` |
 | `a ++ b` | List | `AlmideConcat::concat({a}, {b})` | `[...{a}, ...{b}]` |
 | `a ** b` | Int | `{a}.pow({b} as u32)` | `{a} ** {b}` |
 | `a ** b` | Float | `{a}.powf({b})` | `{a} ** {b}` |
-| 文字列補間 | 常に | `format!("{fmt}", {args})` | `` `{template}` `` |
+| string interp | always | `format!("{fmt}", {args})` | `` `{template}` `` |
 
-**テンプレートに型タグを持たせる:**
+**Give templates type tags:**
 
 ```toml
 [concat]
@@ -79,26 +81,26 @@ rust.template = "format!(\"{{}}{{}}\", {left}, {right})"
 rust.when_type = "List"
 rust.template = "AlmideConcat::concat({left}, {right})"
 
-ts.template = "{left} + {right}"   # TS は型によらず同じ
+ts.template = "{left} + {right}"   # TS is the same regardless of type
 ```
 
 ---
 
-## Level 2: Local Pass（スコープ文脈が必要）— ~20%
+## Level 2: Local Pass (requires scope context) — ~20%
 
-ノード単体では決まらず、「今どの関数の中にいるか」「ループ内か」等の局所的な文脈が必要。
+Cannot be determined from a single node; requires local context like "which function are we inside?" or "are we in a loop?"
 
-| # | 変換 | 必要な文脈 | target | 説明 |
-|---|------|-----------|--------|------|
-| 1 | **auto-? 挿入** | effect fn 内かどうか | Rust | Result 返却の呼び出しに `?` を付加 |
-| 2 | **effect fn return wrap** | fn が effect かどうか | Rust | 戻り値を `Ok(...)` で包む |
-| 3 | **match subject の auto-? 剥がし** | match の subject が Result 型か | Rust | `?` 挿入後に match で分解する場合は `?` を外す |
-| 4 | **match subject の .as_str()** | subject が String 型 + literal pattern | Rust | `match s.as_str() { "a" => ... }` |
-| 5 | **top-level let → LazyLock** | let が top-level かどうか | Rust | `static X: LazyLock<T> = ...` |
-| 6 | **TS Result erasure の文脈** | match で Result を分解中か | TS | match 内では erasure しない |
-| 7 | **ループ内変数の所有権** | for/while ループ内か | Rust | ループ変数の clone 戦略 |
+| # | Transform | Required context | target | Description |
+|---|-----------|-----------------|--------|-------------|
+| 1 | **auto-? insertion** | whether inside effect fn | Rust | Append `?` to Result-returning calls |
+| 2 | **effect fn return wrap** | whether fn is effect | Rust | Wrap return value in `Ok(...)` |
+| 3 | **match subject auto-? stripping** | whether match subject is Result type | Rust | Remove `?` when deconstructing with match after insertion |
+| 4 | **match subject .as_str()** | subject is String type + literal pattern | Rust | `match s.as_str() { "a" => ... }` |
+| 5 | **top-level let → LazyLock** | whether let is top-level | Rust | `static X: LazyLock<T> = ...` |
+| 6 | **TS Result erasure context** | whether deconstructing Result in match | TS | Don't erase inside match |
+| 7 | **Loop variable ownership** | whether inside for/while loop | Rust | Clone strategy for loop variables |
 
-**実装方式:** 各 Pass は IR を走査し、スコープスタック（`[GlobalScope, FnScope(effect=true), LoopScope]`）を持つ。ノードを訪問するたびにスタックを参照して変換を決定。
+**Implementation:** Each Pass walks the IR with a scope stack (`[GlobalScope, FnScope(effect=true), LoopScope]`). Consults the stack at each node visit to determine transforms.
 
 ```rust
 struct ScopeContext {
@@ -108,10 +110,10 @@ struct ScopeContext {
     match_subject_ty: Option<Ty>,
 }
 
-// 例: auto-? Pass
+// Example: auto-? Pass
 fn rewrite_call(call: &IrExpr, ctx: &ScopeContext) -> IrExpr {
     if ctx.in_effect_fn && call.ty.is_result() {
-        IrExpr::try_wrap(call)  // ? を付加
+        IrExpr::try_wrap(call)  // append ?
     } else {
         call.clone()
     }
@@ -120,27 +122,27 @@ fn rewrite_call(call: &IrExpr, ctx: &ScopeContext) -> IrExpr {
 
 ---
 
-## Level 3: Global Pass（プログラム全体の解析が必要）— ~25%
+## Level 3: Global Pass (requires whole-program analysis) — ~25%
 
-1 つの関数だけ見ても決まらない。プログラム全体の型グラフ、使用箇所、依存関係の解析が必要。
+Cannot be determined from a single function. Requires analysis of the entire program's type graph, usage sites, and dependencies.
 
-| # | 変換 | 必要な解析 | target | 説明 |
-|---|------|-----------|--------|------|
-| 1 | **Borrow analysis** | 全関数の引数の使用パターン | Rust | パラメータを `&T` にするか `T` にするか |
-| 2 | **Clone 挿入** | 変数の使用回数カウント (use-count) | Rust | 2 回以上使う変数に `.clone()` |
-| 3 | **再帰型 Box 化** | 型グラフの循環検出 | Rust | `enum Tree { Node(Box<Tree>, Box<Tree>), Leaf }` |
-| 4 | **Anonymous record 構造体生成** | 全プログラム中の record 形状を収集 | Rust | `struct AlmdRec_age_name { age: i64, name: String }` |
-| 5 | **Fan/並行処理 lowering** | 各ブランチの型 + キャプチャ変数 | 全 target | `fan { a, b }` → thread spawn + join / Promise.all |
-| 6 | **Monomorphization** | ジェネリクスの全インスタンス化箇所 | Rust | `fn foo<T>` → `fn foo_i64`, `fn foo_string` |
-| 7 | **Dead code elimination** | 全プログラムの call graph | 全 target | 使われていない関数を除去 |
-| 8 | **Import 解決** | モジュール依存グラフ | 全 target | target 別の import 文生成 |
+| # | Transform | Required analysis | target | Description |
+|---|-----------|------------------|--------|-------------|
+| 1 | **Borrow analysis** | Usage patterns of all function arguments | Rust | Whether to emit parameter as `&T` or `T` |
+| 2 | **Clone insertion** | Variable use count (use-count) | Rust | `.clone()` for variables used 2+ times |
+| 3 | **Recursive type Box wrapping** | Cycle detection in type graph | Rust | `enum Tree { Node(Box<Tree>, Box<Tree>), Leaf }` |
+| 4 | **Anonymous record struct generation** | Collect record shapes across entire program | Rust | `struct AlmdRec_age_name { age: i64, name: String }` |
+| 5 | **Fan/concurrency lowering** | Type + captured variables of each branch | all targets | `fan { a, b }` → thread spawn + join / Promise.all |
+| 6 | **Monomorphization** | All instantiation sites for generics | Rust | `fn foo<T>` → `fn foo_i64`, `fn foo_string` |
+| 7 | **Dead code elimination** | Call graph of entire program | all targets | Remove unused functions |
+| 8 | **Import resolution** | Module dependency graph | all targets | Generate target-specific import statements |
 
-**実装方式:** 各 Pass は IR 全体を受け取り、解析フェーズ（収集）→ 変換フェーズ（書き換え）の 2 段構成。
+**Implementation:** Each Pass receives the entire IR and has a 2-stage structure: analysis phase (collection) → transform phase (rewriting).
 
 ```rust
-// 例: Borrow analysis Pass
+// Example: Borrow analysis Pass
 fn analyze(program: &IrProgram) -> BorrowInfo {
-    // Phase 1: 全関数のパラメータ使用パターンを収集
+    // Phase 1: Collect parameter usage patterns for all functions
     let mut info = BorrowInfo::new();
     for func in &program.functions {
         for param in &func.params {
@@ -151,39 +153,39 @@ fn analyze(program: &IrProgram) -> BorrowInfo {
 }
 
 fn rewrite(program: &IrProgram, info: &BorrowInfo) -> IrProgram {
-    // Phase 2: 収集結果に基づいてパラメータ型を &T に変更
+    // Phase 2: Change parameter types to &T based on collection results
     // ...
 }
 ```
 
 ---
 
-## Target 別の Pass 構成
+## Pass composition by target
 
 ```mermaid
 flowchart LR
-    subgraph Shared["共通 Pass"]
+    subgraph Shared["Shared Passes"]
         DCE["Dead Code\nElimination"]
-        IMPORT["Import\n解決"]
+        IMPORT["Import\nResolution"]
     end
 
-    subgraph RustOnly["Rust 固有"]
+    subgraph RustOnly["Rust-specific"]
         BORROW["Borrow\nAnalysis"]
-        CLONE["Clone\n挿入"]
-        BOX["再帰型\nBox 化"]
-        ANON["AnonRecord\n構造体生成"]
-        AUTOTRY["auto-?\n挿入"]
-        LAZY["LazyLock\n変換"]
+        CLONE["Clone\nInsertion"]
+        BOX["Recursive Type\nBox Wrapping"]
+        ANON["AnonRecord\nStruct Gen"]
+        AUTOTRY["auto-?\nInsertion"]
+        LAZY["LazyLock\nConversion"]
         ASSTR["match\n.as_str()"]
     end
 
-    subgraph TSOnly["TS 固有"]
+    subgraph TSOnly["TS-specific"]
         OPTERASE["Option\nErasure"]
         RESWRAP["Result\nWrapping"]
-        ASYNC["async/await\n変換"]
+        ASYNC["async/await\nConversion"]
     end
 
-    subgraph GoOnly["Go 固有 (将来)"]
+    subgraph GoOnly["Go-specific (future)"]
         ERRTUPLE["Result →\n(val, err)"]
         GOROUTINE["fan →\ngoroutine"]
         IFACE["generics →\ninterface"]
@@ -198,23 +200,23 @@ flowchart LR
 
 ---
 
-## まとめ: 実装比率
+## Summary: Implementation ratios
 
-| レベル | 変換数 | 実装量 (推定) | 方式 |
-|--------|-------|-------------|------|
-| Template (TOML) | ~25 種 | ~100-150 行/target | 宣言的。型タグで分岐 |
-| Local Pass | ~7 種 | ~300 行/target | 小 Nanopass。スコープスタック |
-| Global Pass | ~8 種 | ~500 行 (共通+target固有) | 解析→変換の 2 段構成 |
+| Level | Transform count | Estimated size | Approach |
+|-------|----------------|----------------|----------|
+| Template (TOML) | ~25 types | ~100-150 lines/target | Declarative. Branch on type tags |
+| Local Pass | ~7 types | ~300 lines/target | Small Nanopass. Scope stack |
+| Global Pass | ~8 types | ~500 lines (shared+target-specific) | 2-stage: analysis → transform |
 
-**Target 追加の実コスト:**
+**Actual cost of adding a target:**
 
-| target | Template | Local Pass | Global Pass | Runtime | 合計 |
+| target | Template | Local Pass | Global Pass | Runtime | Total |
 |--------|----------|-----------|-------------|---------|------|
-| Rust (現行) | 150 行 | 300 行 | 500 行 | 既存 | ~950 行 |
-| TypeScript (現行) | 120 行 | 150 行 | 200 行 | 既存 | ~470 行 |
-| Go (将来) | 130 行 | 200 行 | 300 行 | ~200 行 | ~830 行 |
-| Python (将来) | 100 行 | 100 行 | 150 行 | ~200 行 | ~550 行 |
+| Rust (current) | 150 lines | 300 lines | 500 lines | existing | ~950 lines |
+| TypeScript (current) | 120 lines | 150 lines | 200 lines | existing | ~470 lines |
+| Go (future) | 130 lines | 200 lines | 300 lines | ~200 lines | ~830 lines |
+| Python (future) | 100 lines | 100 lines | 150 lines | ~200 lines | ~550 lines |
 
-現行 ~1500 行/target → **v3 で ~500-950 行/target。40-65% 削減。**
+Current ~1500 lines/target → **v3 ~500-950 lines/target. 40-65% reduction.**
 
-Python のような GC 言語は所有権解析が不要なので最も軽い。Rust は所有権があるので最も重い。
+GC languages like Python don't need ownership analysis, making them lightest. Rust has ownership, making it heaviest.

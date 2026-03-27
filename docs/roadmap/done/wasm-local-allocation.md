@@ -1,20 +1,22 @@
-# WASM Local Allocation 再設計
+<!-- description: Redesign WASM function local allocation and scratch layout -->
+<!-- done: 2026-03-23 -->
+# WASM Local Allocation Redesign
 
-## Status: 設計段階
+## Status: Design Phase
 
-## 現状の問題
+## Current Problems
 
-### アーキテクチャ
+### Architecture
 
 ```
 WASM function local layout:
 [params...][bind locals...][i64 scratch × N][i32 scratch × N]
                             ^match_i64_base  ^match_i32_base
 
-N = count_scratch_depth(body) — IRを静的走査して最大scratch使用数を推定
+N = count_scratch_depth(body) — statically scans IR to estimate maximum scratch usage
 ```
 
-stdlib関数の実装は `match_i32_base + match_depth` から始まる連続したscratch localを使う:
+Stdlib function implementations use contiguous scratch locals starting from `match_i32_base + match_depth`:
 
 ```rust
 let s = self.match_i32_base + self.match_depth;
@@ -22,78 +24,78 @@ let s = self.match_i32_base + self.match_depth;
 wasm!(self.func, { local_get(s); ... local_get(s + 3); ... });
 ```
 
-ネストした呼び出しは `match_depth += N` でオフセットを進めて衝突を回避する。
+Nested calls advance the offset with `match_depth += N` to avoid collisions.
 
-### 問題点
+### Problems
 
-1. **count_scratch_depth は IR 段階で関数名を知らない**
-   - `IrExprKind::Call` に対して一律4を返す
-   - 実際には list.unique_by は s+0〜s+5 (6個)、list.sort_by は s+0〜s+7 (7個) 使う
-   - 4では溢れ、8にすると全関数のlocal総数が膨張して他が壊れる
+1. **count_scratch_depth doesn't know function names at IR stage**
+   - Returns a flat 4 for every `IrExprKind::Call`
+   - In practice, list.unique_by uses s+0 through s+5 (6 slots), list.sort_by uses s+0 through s+7 (7 slots)
+   - 4 overflows, but 8 inflates total locals for all functions and breaks other things
 
-2. **i32/i64の2系統が必要**
-   - f64値を一時保存するときi64 localに入れられない（型不一致）
-   - 現状float.roundでmem[0..8]にf64を退避している（汚い）
+2. **Two separate systems needed for i32/i64**
+   - f64 values can't be stored in i64 locals (type mismatch)
+   - Currently float.round evacuates f64 to mem[0..8] (ugly)
 
-3. **match_depth の管理が散在**
-   - stdlib関数内で `match_depth += N` する箇所が30+あり、漏れや二重カウントのバグ源
-   - OptionSome/ResultOk等でも `match_depth += 1` が必要で、見落としやすい
+3. **match_depth management is scattered**
+   - 30+ places in stdlib functions do `match_depth += N`, a source of omission and double-counting bugs
+   - OptionSome/ResultOk also require `match_depth += 1`, easy to overlook
 
-4. **mem[] scratch との併用**
-   - 一部関数は mem[0], mem[4], mem[8] にも一時値を保存
-   - local scratch と mem[] scratch が混在し、どこで何を使うか一貫性がない
-   - ネストした呼び出しで mem[] が上書きされるバグの温床
+4. **Mixed use with mem[] scratch**
+   - Some functions also store temporary values in mem[0], mem[4], mem[8]
+   - Local scratch and mem[] scratch are mixed with no consistency
+   - Source of bugs where nested calls overwrite mem[]
 
-## 理想系: Scratch Allocator
+## Ideal: Scratch Allocator
 
-### 設計方針
+### Design Approach
 
-**scratch local を「名前付きスロット」として管理する allocator を導入。emit 時に必要な分だけ動的に確保し、不要になったら解放。関数コンパイル後に最大同時使用数から local 宣言を生成する。**
+**Introduce an allocator that manages scratch locals as "named slots". Dynamically allocate during emit as needed, release when no longer needed. After function compilation, generate local declarations from the maximum simultaneous usage count.**
 
-### アーキテクチャ
+### Architecture
 
 ```rust
 struct ScratchAllocator {
-    // 型ごとの使用中スロット
+    // In-use slots per type
     i32_slots: Vec<bool>,  // true = in use
     i64_slots: Vec<bool>,
     f64_slots: Vec<bool>,
 
-    // 確保された最大数（local宣言用）
+    // Maximum allocated count (for local declarations)
     i32_max: u32,
     i64_max: u32,
     f64_max: u32,
 
-    // base indices（関数コンパイル後に確定）
+    // Base indices (determined after function compilation)
     i32_base: u32,
     i64_base: u32,
     f64_base: u32,
 }
 
 impl ScratchAllocator {
-    /// スロットを確保。未使用スロットがあれば再利用、なければ新規追加
+    /// Allocate a slot. Reuses an unused slot if available, otherwise adds a new one
     fn alloc_i32(&mut self) -> u32 { ... }
     fn alloc_i64(&mut self) -> u32 { ... }
     fn alloc_f64(&mut self) -> u32 { ... }
 
-    /// スロットを解放（再利用可能にする）
+    /// Free a slot (makes it reusable)
     fn free_i32(&mut self, idx: u32) { ... }
     fn free_i64(&mut self, idx: u32) { ... }
     fn free_f64(&mut self, idx: u32) { ... }
 
-    /// RAII guard: スコープ終了時に自動解放
+    /// RAII guard: automatically freed at scope exit
     fn scoped_i32(&mut self) -> ScratchGuard<'_> { ... }
 }
 ```
 
-### 使用例
+### Usage Example
 
 ```rust
-// Before (現状)
+// Before (current)
 let s = self.match_i32_base + self.match_depth;
 wasm!(self.func, { local_get(s); ... local_get(s + 3); });
 
-// After (理想系)
+// After (ideal)
 let list_ptr = self.scratch.alloc_i32();
 let idx = self.scratch.alloc_i32();
 let result = self.scratch.alloc_i32();
@@ -103,34 +105,34 @@ self.scratch.free_i32(idx);
 self.scratch.free_i32(result);
 ```
 
-### 利点
+### Benefits
 
-1. **count_scratch_depth が不要になる** — allocatorが最大同時使用数を自動追跡
-2. **型ごとに独立** — i32/i64/f64 を混在して安全に使える
-3. **ネスト管理が不要** — match_depth の手動管理がなくなる
-4. **mem[] scratch を廃止** — 全てlocal scratch で統一
-5. **バグ検出** — 解放忘れや二重解放を検出可能
+1. **count_scratch_depth becomes unnecessary** — the allocator automatically tracks maximum simultaneous usage
+2. **Independent per type** — i32/i64/f64 can be safely mixed
+3. **No nesting management** — manual match_depth management eliminated
+4. **Eliminates mem[] scratch** — everything unified under local scratch
+5. **Bug detection** — can detect forgotten frees and double frees
 
-### 移行戦略
+### Migration Strategy
 
-完全移行は大きすぎるので段階的に:
+Full migration is too large, so incremental:
 
-#### Phase 0: 2パス方式への移行（前提条件）
+#### Phase 0: Migrate to Two-Pass Approach (Prerequisite)
 
-現状: count_scratch_depth (IRスキャン) → local宣言 → emit (1パス)
+Current: count_scratch_depth (IR scan) → local declarations → emit (1 pass)
 
-理想: emit (1パス) → allocatorが最大数を記録 → local宣言を後付け
+Ideal: emit (1 pass) → allocator records maximum count → local declarations added retroactively
 
-WASM binary formatは関数先頭にlocal宣言が必要。2つのアプローチ:
-- **A. Placeholder + Patch**: 仮のlocal宣言で emit → 実際の使用数でバイナリを書き換え
-- **B. 2パスコンパイル**: 1パス目で scratch 使用数を収集、2パス目で emit
-- **C. wasm-encoder の後付けlocal**: `Function::new()` の後に local を追加できるか調査
+WASM binary format requires local declarations at the function start. Two approaches:
+- **A. Placeholder + Patch**: emit with provisional local declarations → rewrite binary with actual usage count
+- **B. Two-pass compilation**: first pass collects scratch usage count, second pass does actual emit
+- **C. wasm-encoder retroactive locals**: investigate if locals can be added after `Function::new()`
 
-実際にはwasm-encoderの`Function::new(locals)`は最初に呼ぶ必要がある。**B案**が現実的: 1パス目はdry-runでscratch allocationだけ記録し、2パス目で実際にemit。ただしコンパイル時間が2倍。
+In practice, wasm-encoder's `Function::new(locals)` must be called first. **Option B** is realistic: first pass is a dry-run recording only scratch allocation, second pass does actual emit. However, compile time doubles.
 
-**妥協案**: count_scratch_depthを改良して「関数名ごとの使用数テーブル」を返す。IRのCall nodeから関数名を取得できるので、テーブル引きで正確な数を返せる。
+**Compromise**: improve count_scratch_depth to return a "per-function-name usage table". Since function names can be extracted from IR Call nodes, table lookup yields accurate counts.
 
-#### Phase 1: count_scratch_depth の関数名ベース化
+#### Phase 1: Function-Name-Based count_scratch_depth
 
 ```rust
 fn stdlib_scratch_depth(module: &str, func: &str) -> u32 {
@@ -146,46 +148,46 @@ fn stdlib_scratch_depth(module: &str, func: &str) -> u32 {
 }
 ```
 
-CallTarget::Module と CallTarget::Method から関数名を取得し、テーブル引きで正確な depth を返す。
+Extract function names from CallTarget::Module and CallTarget::Method, and return accurate depth via table lookup.
 
-**工数**: ~50行の変更。count_scratch_depth の Call ケースを修正するだけ。
-**効果**: local out of bounds エラーを根絶。
+**Effort**: ~50 lines of changes. Just fix the Call case in count_scratch_depth.
+**Effect**: Eliminates local out of bounds errors.
 
-#### Phase 2: mem[] scratch の廃止
+#### Phase 2: Eliminate mem[] scratch
 
-mem[0], mem[4], mem[8] への一時値保存を全てlocal scratchに置換。
+Replace all temporary value storage in mem[0], mem[4], mem[8] with local scratch.
 
-対象: calls_list_closure.rs, calls_list_closure2.rs, calls_map.rs, calls_option.rs 等で `i32_const(0); ... i32_store(0)` パターンを使っている箇所。
+Target: places using `i32_const(0); ... i32_store(0)` patterns in calls_list_closure.rs, calls_list_closure2.rs, calls_map.rs, calls_option.rs, etc.
 
-**工数**: 各関数を個別に書き換え。~20関数、各10-30行の変更。
-**効果**: ネストした呼び出しでのmem[]上書きバグを根絶。
+**Effort**: rewrite each function individually. ~20 functions, 10-30 lines of changes each.
+**Effect**: Eliminates mem[] overwrite bugs in nested calls.
 
-#### Phase 3: ScratchAllocator 導入
+#### Phase 3: Introduce ScratchAllocator
 
-FuncCompilerにScratchAllocatorを追加。既存の `match_i32_base + match_depth` パターンを段階的に置換。
+Add ScratchAllocator to FuncCompiler. Incrementally replace the existing `match_i32_base + match_depth` pattern.
 
-**工数**: allocator本体 ~100行 + 各stdlib関数の書き換え ~500行。
-**効果**: match_depth管理の完全廃止。
+**Effort**: allocator core ~100 lines + stdlib function rewrites ~500 lines.
+**Effect**: Complete elimination of match_depth management.
 
-#### Phase 4: f64 scratch 追加
+#### Phase 4: Add f64 scratch
 
-ScratchAllocatorにf64スロットを追加。float.round等で使っている mem[] f64退避を置換。
+Add f64 slots to ScratchAllocator. Replace mem[] f64 evacuation used in float.round, etc.
 
-**工数**: ~30行。
-**効果**: float操作のmem[]依存を解消。
+**Effort**: ~30 lines.
+**Effect**: Eliminates mem[] dependency for float operations.
 
-## 推奨: Phase 1 を即実行
+## Recommendation: Execute Phase 1 Immediately
 
-Phase 1 (関数名ベース count_scratch_depth) は最小工数で最大効果。残りのlocal out of boundsエラー2件を即座に解消できる。
+Phase 1 (function-name-based count_scratch_depth) has minimum effort for maximum impact. Immediately resolves the remaining 2 local out of bounds errors.
 
-Phase 2以降は中長期の改善として、必要に応じて着手。
+Phase 2 and beyond are medium-to-long-term improvements, to be started as needed.
 
-## 関連ファイル
+## Related Files
 
-| ファイル | 役割 |
-|---|---|
+| File | Role |
+|------|------|
 | `src/codegen/emit_wasm/mod.rs:310-320` | FuncCompiler struct (match_i32_base, match_depth) |
-| `src/codegen/emit_wasm/functions.rs:42-50` | 関数コンパイル時のlocal allocation |
-| `src/codegen/emit_wasm/closures.rs:200-215` | lambda コンパイル時のlocal allocation |
+| `src/codegen/emit_wasm/functions.rs:42-50` | Local allocation during function compilation |
+| `src/codegen/emit_wasm/closures.rs:200-215` | Local allocation during lambda compilation |
 | `src/codegen/emit_wasm/statements.rs:240-280` | count_scratch_depth |
-| `src/codegen/emit_wasm/calls_list_closure*.rs` | stdlib関数 (scratch消費元) |
+| `src/codegen/emit_wasm/calls_list_closure*.rs` | Stdlib functions (scratch consumers) |

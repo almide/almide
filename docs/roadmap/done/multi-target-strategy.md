@@ -1,53 +1,55 @@
-# Multi-Target Strategy [ACTIVE]
+<!-- description: Strategy for adding new codegen targets with minimal cost -->
+<!-- done: 2026-03-18 -->
+# Multi-Target Strategy
 
 ## Vision
 
-Almide のマルチターゲット設計が新しいターゲット言語の追加コストを最小化する構造になっていることを活かし、ターゲット言語の拡充戦略を定める。
+Leverage the fact that Almide's multi-target design minimizes the cost of adding new target languages, and define a strategy for expanding target language support.
 
 ---
 
-## 設計の強み: なぜ新ターゲットが安く追加できるか
+## Design Strength: Why New Targets Are Cheap to Add
 
-新ターゲットを足すときにやることは3つだけ:
+Adding a new target requires only three things:
 
-1. **`runtime/{lang}/core.{ext}` を書く** — Result, Option の表現、例外の捕捉、型の変換規則（glue）
-2. **`emit_{lang}/` をコンパイラに追加する** — IR → ターゲット言語ソースの codegen（一番大きい仕事）
-3. **`stdlib/*/extern.{ext}` を追加する** — プラットフォーム依存モジュールだけ。純粋 Almide モジュールは何もしなくていい
+1. **Write `runtime/{lang}/core.{ext}`** — Result, Option representation, exception catching, type conversion rules (glue)
+2. **Add `emit_{lang}/` to the compiler** — IR to target language source codegen (the largest task)
+3. **Add `stdlib/*/extern.{ext}`** — platform-dependent modules only. Pure Almide modules need nothing
 
-**pure-first の効果**: 純粋モジュールが多いほど、新ターゲット追加コストが下がる。hash (189行), csv (70行), url (220行), path, encoding, args — これらは extern ファイルを書かずにコンパイラの .almd → ターゲット言語変換だけで動く。
+**Pure-first effect**: The more pure modules there are, the lower the cost of adding a new target. hash (189 lines), csv (70 lines), url (220 lines), path, encoding, args — these work with just the compiler's .almd to target language conversion, no extern files needed.
 
 ---
 
-## ターゲット一覧
+## Target List
 
-### Tier 1: 現行（実装済み）
+### Tier 1: Current (Implemented)
 
-| ターゲット | 用途 | 状態 |
+| Target | Use Case | Status |
 |---|---|---|
-| **rust** | ネイティブバイナリ、WASM、性能重視 | ✅ 実装済み |
-| **typescript** | Deno 実行、型付きソース出力 | ✅ 実装済み |
-| **javascript** | Node/ブラウザ実行、TS の型なし版 | ✅ 実装済み |
-| **wasm** | Rust 経由で .wasm 生成 | ✅ 実装済み（基本） |
+| **rust** | Native binaries, WASM, performance-critical | ✅ Implemented |
+| **typescript** | Deno execution, typed source output | ✅ Implemented |
+| **javascript** | Node/browser execution, untyped version of TS | ✅ Implemented |
+| **wasm** | .wasm generation via Rust | ✅ Implemented (basic) |
 
-### Tier 2: 高優先度候補
+### Tier 2: High Priority Candidates
 
-| ターゲット | 動機 | Almide との相性 | extern コスト |
+| Target | Motivation | Compatibility with Almide | Extern Cost |
 |---|---|---|---|
-| **python** | 巨大エコシステムへの埋め込み。pip install できる Almide ライブラリ | 高。動的型だが Result は dataclass/NamedTuple で表現可能。asyncio で async 対応 | 中。fs/http/json/regex は Python 標準ライブラリが充実 |
-| **go** | サーバーサイドエコシステム。Go プロジェクトへの埋め込み | 高。型システムがシンプルで IR からの変換が現実的。error は Result に近い | 中。os/net/http は Go 標準が充実 |
+| **python** | Embedding into a massive ecosystem. Almide libraries installable via pip | High. Dynamic types, but Result representable with dataclass/NamedTuple. asyncio for async | Medium. fs/http/json/regex well covered by Python stdlib |
+| **go** | Server-side ecosystem. Embedding into Go projects | High. Simple type system makes IR translation realistic. error is close to Result | Medium. os/net/http well covered by Go stdlib |
 
-### Tier 3: 将来候補
+### Tier 3: Future Candidates
 
-| ターゲット | 動機 | Almide との相性 | 備考 |
+| Target | Motivation | Compatibility with Almide | Notes |
 |---|---|---|---|
-| **kotlin** | Android + JVM サーバー | 高。Result, sealed class があり型表現と相性良い | JVM バイトコード vs Kotlin ソースの選択がある |
-| **swift** | iOS/macOS ネイティブ | 高。async/await の設計を Swift から借りているので変換先として自然 | Apple プラットフォーム限定の需要 |
-| **ruby** | Rails エコシステムへの埋め込み | 中。動的型。Struct で Result 表現可能 | エコシステムの async が未成熟 |
-| **c** | 組み込み、レガシーシステム連携 | 低〜中。pure 関数はほぼそのまま落とせるが、GC なし環境で List/String が難しい | メモリ管理戦略が必要 |
+| **kotlin** | Android + JVM server | High. Result, sealed class provide good type expression compatibility | Choice between JVM bytecode vs Kotlin source |
+| **swift** | iOS/macOS native | High. async/await design borrowed from Swift, making it a natural target | Demand limited to Apple platforms |
+| **ruby** | Embedding into the Rails ecosystem | Medium. Dynamic types. Result expressible via Struct | Ecosystem async is immature |
+| **c** | Embedded systems, legacy system integration | Low-Medium. Pure functions map almost directly, but List/String are hard without GC | Memory management strategy required |
 
 ---
 
-## 各ターゲットの glue + extern 例
+## Glue + Extern Examples for Each Target
 
 ### Python
 
@@ -165,77 +167,77 @@ func catchToResult<T>(_ f: () throws -> T) -> AlmResult<T, String> {
 
 ---
 
-## 新ターゲット追加の作業量見積もり
+## Effort Estimate for Adding a New Target
 
-| 作業 | 行数目安 | 備考 |
+| Task | Estimated Lines | Notes |
 |---|---|---|
-| `runtime/{lang}/core.{ext}` | ~50行 | glue は薄い（Rule 7） |
-| `emit_{lang}/` codegen | ~2000-4000行 | IR → ソースの変換。一番大きい |
-| `stdlib/*/extern.{ext}` × ~10モジュール | ~500行 | プラットフォーム依存のみ |
-| **純粋モジュール** | **0行** | **コンパイラが .almd → ターゲットに変換** |
-| テスト | ~500行 | conformance test + extern test |
-| **合計** | **~3000-5000行** | |
+| `runtime/{lang}/core.{ext}` | ~50 lines | Glue is thin (Rule 7) |
+| `emit_{lang}/` codegen | ~2000-4000 lines | IR to source conversion. The largest task |
+| `stdlib/*/extern.{ext}` x ~10 modules | ~500 lines | Platform-dependent only |
+| **Pure modules** | **0 lines** | **Compiler converts .almd to target** |
+| Tests | ~500 lines | conformance test + extern test |
+| **Total** | **~3000-5000 lines** | |
 
-比較: 現行の Rust codegen は `emit_rust/` に ~3000行、TS codegen は `emit_ts/` に ~2000行。
+For comparison: current Rust codegen is ~3000 lines in `emit_rust/`, TS codegen is ~2000 lines in `emit_ts/`.
 
 ---
 
-## 優先度の判断基準
+## Criteria for Prioritization
 
-新ターゲットを追加する動機は3つに分類できる:
+Motivations for adding new targets fall into three categories:
 
-| 動機 | 例 | 判断基準 |
+| Motivation | Example | Decision Criteria |
 |---|---|---|
-| **実行環境** | ネイティブ、ブラウザ、エッジ | その環境でしか動かせないか |
-| **エコシステム統合** | Python/Go/Kotlin のプロジェクトに埋め込み | pip/go get/gradle で配布できるか |
-| **ソース出力 (inspect)** | 生成コードを読みたい | `almide emit --lang X` で十分 |
+| **Execution environment** | Native, browser, edge | Can it only run in that environment? |
+| **Ecosystem integration** | Embedding into Python/Go/Kotlin projects | Can it be distributed via pip/go get/gradle? |
+| **Source output (inspect)** | Want to read generated code | `almide emit --lang X` is sufficient |
 
-**Rule 6 の確認**: コンパイラはデプロイ先を知らない。ターゲットは「言語/ランタイム」であって「プラットフォーム」ではない。
+**Rule 6 check**: The compiler does not know the deployment target. Targets are "language/runtime", not "platform".
 
 ---
 
-## ロードマップ
+## Roadmap
 
-### Phase 0: 現行ターゲットの完成（CLI-First）
+### Phase 0: Complete Current Targets (CLI-First)
 
-Rust + TS/JS で CLI ツールが完全に書ける状態にする。@extern + glue + Result 統一。ここが全ターゲットの基盤。
+Reach a state where CLI tools can be fully written in Rust + TS/JS. @extern + glue + Result unification. This is the foundation for all targets.
 
-### Phase 1: Python ターゲット
+### Phase 1: Python Target
 
 - `runtime/py/core.py` — glue
-- `emit_py/` — IR → Python codegen
+- `emit_py/` — IR to Python codegen
 - `stdlib/*/extern.py` — fs, io, env, process, http, json, regex
-- `almide build app.almd --target py` → `.py` ファイル出力
-- `almide emit app.almd --lang py` → Python ソース inspect
-- 目標: `pip install` 可能なパッケージとして配布
+- `almide build app.almd --target py` — output `.py` files
+- `almide emit app.almd --lang py` — Python source inspect
+- Goal: distribute as a `pip install`-able package
 
-### Phase 2: Go ターゲット
+### Phase 2: Go Target
 
 - `runtime/go/core.go` — glue
-- `emit_go/` — IR → Go codegen
+- `emit_go/` — IR to Go codegen
 - `stdlib/*/extern.go` — os, net/http, encoding/json, regexp
-- `almide build app.almd --target go` → `.go` ファイル出力
-- Go のジェネリクス (1.18+) を活用
+- `almide build app.almd --target go` — output `.go` files
+- Leverage Go generics (1.18+)
 
-### Phase 3: Kotlin / Swift（需要に応じて）
+### Phase 3: Kotlin / Swift (On Demand)
 
-- モバイル/デスクトップへの展開が見えたとき
-- sealed class (Kotlin) / enum (Swift) で Result が自然に表現できる
-- async/await も両言語にネイティブにある
+- When mobile/desktop expansion becomes viable
+- Result naturally expressed with sealed class (Kotlin) / enum (Swift)
+- async/await is native to both languages
 
-### Phase 4: C（需要に応じて）
+### Phase 4: C (On Demand)
 
-- 組み込み/レガシー連携
-- pure 関数は落とせるが、List/String のメモリ管理戦略が必要
-- arena allocator or reference counting の判断が要る
+- Embedded systems / legacy integration
+- Pure functions can be translated, but List/String memory management strategy is needed
+- Requires deciding between arena allocator or reference counting
 
 ---
 
 ## Dependencies
 
-- [Runtime Architecture Reform](stdlib-self-hosted-redesign.md) — @extern + glue の基盤
-- [CLI-First](cli-first.md) — Phase 0（現行ターゲットの完成）
+- [Runtime Architecture Reform](stdlib-self-hosted-redesign.md) — Foundation for @extern + glue
+- [CLI-First](cli-first.md) — Phase 0 (completing current targets)
 
 ## Related
 
-- [New Codegen Targets](new-codegen-targets.md) — 既存の codegen ターゲット roadmap（あれば）
+- [New Codegen Targets](new-codegen-targets.md) — Existing codegen target roadmap (if any)

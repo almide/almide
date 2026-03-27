@@ -1,15 +1,17 @@
-# Stdlib Self-Hosting [DONE]
+<!-- description: Write stdlib in Almide for automatic multi-target support -->
+<!-- done: 2026-03-11 -->
+# Stdlib Self-Hosting
 
 As of v0.2.1, all stdlib functions have been extracted from inline codegen to separated runtime files (see [Stdlib runtime extraction](#stdlib-runtime-extraction-completed-in-v021)). Type signatures remain in `stdlib.rs` and dispatch logic in `calls.rs`. The next goal: **Almide writes its own stdlib in Almide**, achieving automatic multi-target support with zero compiler changes.
 
 ### Why self-hosting matters
 
 ```
-extern "rust" で書く → Rustでしか動かない
-Almideで書く         → Rust/TS 両方に自動出力される
+Write with extern "rust" -> only works in Rust
+Write in Almide          -> automatically outputs to both Rust/TS
 ```
 
-Almideの設計原則は「同じコードが複数ターゲットに出力される」こと。stdlibもこの原則に従うべき。`extern` は最終手段であり、主戦略は **Almideの表現力を上げてstdlibをAlmideで書く**。
+Almide's design principle is "the same code outputs to multiple targets." The stdlib should follow this principle too. `extern` is a last resort, and the main strategy is **increasing Almide's expressiveness to write stdlib in Almide**.
 
 ### Architecture: Two-Layer Stdlib
 
@@ -154,11 +156,11 @@ fn sha256(data: String) -> String = {
 
 ### Phase 2: Migrate & Extend Stdlib via .almd
 
-方針: **既存のstring/list/map等はRustのまま残す**（既にRust/TS両方で動いており、HOFはラムダインライン最適化がある）。移行は **丸ごと置き換えられるモジュール** と **新規追加** に集中する。
+Approach: **Keep existing string/list/map etc. in Rust** (already working for both Rust/TS, and HOFs have lambda inline optimization). Focus migration on **modules that can be entirely replaced** and **new additions**.
 
-#### 2a. path モジュール ✅ 完了
+#### 2a. path module ✅ Complete
 
-全5関数を `stdlib/path.almd` に移行。コンパイラの `STDLIB_MODULES` から除外済み。
+All 5 functions migrated to `stdlib/path.almd`. Removed from compiler's `STDLIB_MODULES`.
 
 | Function | Almide implementation |
 |----------|----------------------|
@@ -168,11 +170,11 @@ fn sha256(data: String) -> String = {
 | `extension` | `split(".")` on basename → last part |
 | `is_absolute?` | `starts_with?(p, "/")` |
 
-#### 2b. time モジュール ✅ 完了
+#### 2b. time module ✅ Complete
 
-全12関数を `stdlib/time.almd` に完全移行。`STDLIB_MODULES` から除外済み。
-`now/millis/sleep` は `env.unix_timestamp/env.millis/env.sleep_ms` プリミティブのラッパー。
-残り9関数（year/month/day/hour/minute/second/weekday/to_iso/from_parts）は純粋なAlmide実装（Hinnant日付算術）。
+All 12 functions fully migrated to `stdlib/time.almd`. Removed from `STDLIB_MODULES`.
+`now/millis/sleep` are wrappers around `env.unix_timestamp/env.millis/env.sleep_ms` primitives.
+Remaining 9 functions (year/month/day/hour/minute/second/weekday/to_iso/from_parts) are pure Almide implementations (Hinnant date arithmetic).
 
 | Function | Almide implementation |
 |----------|----------------------|
@@ -186,7 +188,7 @@ fn sha256(data: String) -> String = {
 | `to_iso` | decompose + string formatting |
 | `from_parts` | reverse date arithmetic |
 
-#### 2c. 新規モジュール（コンパイラ変更ゼロで追加）
+#### 2c. New modules (added with zero compiler changes)
 
 | Module | Functions | Needs bitwise? | Priority |
 |--------|-----------|---------------|----------|
@@ -195,11 +197,11 @@ fn sha256(data: String) -> String = {
 | `term` | `color`, `bold`, `dim`, `reset`, `strip` | No | ✅ Done |
 | `csv` | `parse`, `parse_with_header`, `stringify` | No | Planned (external package) |
 
-#### 2d. Phase 6 の新規関数を .almd で追加
+#### 2d. Add Phase 6 new functions via .almd
 
-Phase 6 で追加予定の派生関数は、コンパイラに追加せず `.almd` で実装する。ただし既存のハードコードモジュール (string/list/map) に関数を追加するには **ハイブリッドresolver** が必要（ハードコード + bundled .almd のマージ）。
+Derived functions planned for Phase 6 will be implemented in `.almd` instead of adding to the compiler. However, adding functions to existing hardcoded modules (string/list/map) requires a **hybrid resolver** (merging hardcoded + bundled .almd).
 
-候補:
+Candidates:
 - `list.filter_map`, `list.group_by`, `list.take_while`, `list.drop_while`
 - `list.count`, `list.partition`, `list.reduce`
 - `map.map_values`, `map.filter`, `map.from_entries`

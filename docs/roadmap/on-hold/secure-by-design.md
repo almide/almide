@@ -1,45 +1,46 @@
-# Secure by Design [ON HOLD]
+<!-- description: Five-layer security model making web vulnerabilities compile-time errors -->
+# Secure by Design
 
 ## Thesis
 
-Almide は Rust がメモリ安全であるのと同じ意味で **Web 安全** な言語になる。「気をつけて書けば安全」ではなく「普通に書いたら安全。意図的に壊そうとしない限り壊れない」。
+Almide will become **web-safe** in the same way Rust is memory-safe. Not "safe if you're careful," but "safe by default. Won't break unless you intentionally try to break it."
 
 ```
-Rust:  unsafe を書かなければメモリ安全
-Almide: @extern を書かなければ Web 安全
+Rust:  Memory-safe unless you write unsafe
+Almide: Web-safe unless you write @extern
 ```
 
 ## Security Model
 
-Almide のセキュリティは 5 層で構成される。各層が独立に機能し、全層が揃うと supply chain 含めた構造的安全性が成立する。
+Almide's security consists of 5 layers. Each layer functions independently, and when all layers are in place, structural safety including supply chain is established.
 
-### Layer 1: Effect Isolation — pure fn は I/O 不可能
+### Layer 1: Effect Isolation — pure fn cannot perform I/O
 
 ```almide
-fn parse(s: String) -> Value = ...          // pure。I/O 不可能
-effect fn load(path: String) -> String = ... // I/O 可能
+fn parse(s: String) -> Value = ...          // pure. I/O impossible
+effect fn load(path: String) -> String = ... // I/O possible
 ```
 
-- `fn` は `effect fn` を呼べない。コンパイラが検証
-- pure fn は外界に一切アクセスできない。データ窃取も外部通信も型エラー
-- **セキュリティ上の意味**: パッケージが pure fn しか export してなければ、そのパッケージは原理的に無害
+- `fn` cannot call `effect fn`. Verified by the compiler
+- Pure fn cannot access the outside world at all. Data exfiltration and external communication are type errors
+- **Security implication**: If a package only exports pure fn, that package is harmless by definition
 
-**Status: ✅ 言語に実装済み。** effect system は動いている。
+**Status: ✅ Implemented in the language.** Effect system is working.
 
-### Layer 2: Single Bridge — @extern が外界との唯一の接点
+### Layer 2: Single Bridge — @extern is the only contact point with the outside world
 
 ```almide
 @extern(platform: web, "fetch")
 effect fn fetch(url: String) -> Response
 ```
 
-- ネイティブ API を呼ぶ唯一の方法が `@extern`
-- `eval()`, `require()`, dynamic `import()` は言語に存在しない
-- **セキュリティ上の意味**: コードベース内の `@extern` を grep すれば、外界との全接点が列挙できる
+- The only way to call native APIs is `@extern`
+- `eval()`, `require()`, dynamic `import()` do not exist in the language
+- **Security implication**: grep for `@extern` in the codebase and all contact points with the outside world are enumerated
 
-**Status: ✅ @extern は実装済み。** ❌ platform タグは未実装 (→ platform-target-separation.md)。
+**Status: ✅ @extern is implemented.** ❌ platform tags are not implemented (→ platform-target-separation.md).
 
-### Layer 3: Opaque Types — 危険な出力の構築手段を限定
+### Layer 3: Opaque Types — Restrict the means of constructing dangerous output
 
 ```almide
 type SafeHtml = opaque String
@@ -47,56 +48,56 @@ type SafeSql  = opaque String
 type SafePath = opaque String
 ```
 
-- `opaque` 型は外部から直接構築できない
-- `SafeHtml` を作る唯一の方法が builder (auto-escape 付き)
-- `SafeSql` を作る唯一の方法がパラメタライズドクエリ関数
-- stdlib の I/O API が opaque 型のみ受け付ける: `Response.html(body: SafeHtml)`
-- **セキュリティ上の意味**: XSS, SQL injection, command injection, path traversal が型エラーになる
+- `opaque` types cannot be constructed directly from outside
+- The only way to create `SafeHtml` is through a builder (with auto-escape)
+- The only way to create `SafeSql` is through parameterized query functions
+- stdlib I/O APIs only accept opaque types: `Response.html(body: SafeHtml)`
+- **Security implication**: XSS, SQL injection, command injection, and path traversal become type errors
 
 ```almide
-// コンパイルエラー: Response.html は SafeHtml を要求、String は渡せない
+// Compile error: Response.html requires SafeHtml, cannot pass String
 let html = "<p>" ++ user_input ++ "</p>"
 Response.html(html)  // ← type error: expected SafeHtml, got String
 
-// OK: builder が自動 escape
+// OK: builder auto-escapes
 let doc = Html { p { user_input } }
-Response.html(doc |> render)  // ← SafeHtml が返る
+Response.html(doc |> render)  // ← returns SafeHtml
 ```
 
-**Status: ❌ opaque 型は未実装。** 言語機能として parser + checker + codegen への追加が必要。
+**Status: ❌ Opaque types are not implemented.** Requires addition to parser + checker + codegen as a language feature.
 
-### Layer 4: Capability Inference — パッケージの権限をコンパイラが推論
+### Layer 4: Capability Inference — Compiler infers package permissions
 
-コンパイラが関数の呼び出しグラフを辿り、各関数が推移的にどの `@extern` に到達するかを追跡する。
+The compiler traces the function call graph, tracking which `@extern` each function transitively reaches.
 
 ```
-json-parser パッケージ
-├── parse()      → fn (pure) → @extern なし
-├── stringify()  → fn (pure) → @extern なし
-└── 推論結果: capabilities = [] (pure)
+json-parser package
+├── parse()      → fn (pure) → no @extern
+├── stringify()  → fn (pure) → no @extern
+└── Inferred: capabilities = [] (pure)
 
-http-client パッケージ
+http-client package
 ├── get()        → effect fn → fetch → @extern(platform: web, "fetch")
 ├── post()       → effect fn → fetch → @extern(platform: web, "fetch")
-└── 推論結果: capabilities = [network]
+└── Inferred: capabilities = [network]
 
-sketchy-logger パッケージ
+sketchy-logger package
 ├── log()        → effect fn → write_file → @extern(platform: node, "fs", ...)
 ├── report()     → effect fn → http.post → @extern(platform: web, "fetch")
-└── 推論結果: capabilities = [fs, network] ⚠️
+└── Inferred: capabilities = [fs, network] ⚠️
 ```
 
-利用側で capability を制限:
+Restrict capabilities on the consumer side:
 
 ```toml
 # almide.toml
 [dependencies.json-parser]
 version = "1.0"
-capabilities = []              # pure のみ許可
+capabilities = []              # Only pure allowed
 
 [dependencies.sketchy-logger]
 version = "1.0"
-capabilities = ["fs"]          # fs のみ許可、network は不許可
+capabilities = ["fs"]          # Only fs allowed, network denied
 ```
 
 ```
@@ -108,13 +109,13 @@ error: sketchy-logger requires capability "network", but only ["fs"] granted
    = hint: add "network" to capabilities, or use a different package
 ```
 
-**Status: ❌ 未実装。** 必要なもの:
-- @extern の platform タグ (→ platform-target-separation.md)
-- コンパイラの capability 推論パス (effect 伝播の延長)
-- almide.toml の capabilities フィールド
-- 推移的 capability 検証と診断メッセージ
+**Status: ❌ Not implemented.** Required:
+- @extern platform tags (→ platform-target-separation.md)
+- Compiler capability inference pass (extension of effect propagation)
+- capabilities field in almide.toml
+- Transitive capability verification and diagnostic messages
 
-### Layer 5: Supply Chain Integrity — パッケージの改ざん検出
+### Layer 5: Supply Chain Integrity — Package tampering detection
 
 ```toml
 [dependencies.http-client]
@@ -123,9 +124,9 @@ hash = "sha256:a1b2c3d4e5f6..."
 capabilities = ["network"]
 ```
 
-- パッケージはソースの content hash で固定
-- 同じバージョンでもハッシュが変われば**コンパイルエラー**
-- capability の変化も検出: v2.0 で pure だったパッケージが v2.1 で network を要求 → 明示的な承認が必要
+- Packages are pinned by source content hash
+- Even the same version with a different hash results in **compile error**
+- Capability changes are also detected: a package that was pure in v2.0 requesting network in v2.1 → explicit approval required
 
 ```
 warning: http-client 2.0 → 2.1 adds new capability "fs"
@@ -135,131 +136,131 @@ warning: http-client 2.0 → 2.1 adds new capability "fs"
    = hint: add "fs" to capabilities, or pin to version 2.0
 ```
 
-**Status: ❌ 未実装。** パッケージレジストリ自体が未構築 (→ package-registry.md)。
+**Status: ❌ Not implemented.** The package registry itself is not yet built (→ package-registry.md).
 
 ## Attack Surface Elimination
 
-全 5 層が揃ったとき、各攻撃がどの層で止まるか:
+When all 5 layers are in place, which layer stops each attack:
 
-| 攻撃 | Layer 1 | Layer 2 | Layer 3 | Layer 4 | Layer 5 |
+| Attack | Layer 1 | Layer 2 | Layer 3 | Layer 4 | Layer 5 |
 |---|---|---|---|---|---|
-| XSS (文字列注入) | | | **opaque SafeHtml** | | |
+| XSS (string injection) | | | **opaque SafeHtml** | | |
 | SQL injection | | | **opaque SafeSql** | | |
 | Command injection | | | **opaque SafeCmd** | | |
 | Path traversal | | | **opaque SafePath** | | |
-| パッケージがデータ窃取 | **effect 隔離** | **@extern 限定** | | **capability 検出** | |
-| install 時コード実行 | | **eval なし** | | | **hash 検証** |
-| 依存の依存が汚染 | | | | **推移的追跡** | **hash 検証** |
-| prototype pollution | **immutable** | **prototype なし** | | | |
-| eval injection | | **eval なし** | | | |
-| バージョン上書き攻撃 | | | | | **content hash** |
-| typosquatting | | | | **capability 不一致** | **hash 検証** |
+| Package data exfiltration | **effect isolation** | **@extern only** | | **capability detection** | |
+| Install-time code execution | | **no eval** | | | **hash verification** |
+| Transitive dependency poisoning | | | | **transitive tracking** | **hash verification** |
+| Prototype pollution | **immutable** | **no prototype** | | | |
+| Eval injection | | **no eval** | | | |
+| Version overwrite attack | | | | | **content hash** |
+| Typosquatting | | | | **capability mismatch** | **hash verification** |
 
-**1 つの攻撃が複数の層で止まる = defense in depth。**
+**A single attack stopped by multiple layers = defense in depth.**
 
 ## Implementation Order
 
-依存関係に基づく実装順序:
+Implementation order based on dependencies:
 
 ```
-Phase 1: opaque 型
-  ← 言語機能の追加。parser + checker + codegen
-  ← SafeHtml, SafeSql, SafePath の基盤
-  ← builder の lift が SafeHtml を返すようにする
-  ← これだけで XSS/SQLi/Command injection が型エラーになる
+Phase 1: opaque types
+  ← Language feature addition. parser + checker + codegen
+  ← Foundation for SafeHtml, SafeSql, SafePath
+  ← Make builder lift return SafeHtml
+  ← This alone makes XSS/SQLi/Command injection type errors
 
-Phase 2: @extern platform タグ
+Phase 2: @extern platform tags
   ← platform-target-separation.md
-  ← @extern(platform: web, ...) / @extern(platform: node, ...) 等
-  ← capability 推論の前提
+  ← @extern(platform: web, ...) / @extern(platform: node, ...) etc.
+  ← Prerequisite for capability inference
 
-Phase 3: capability 推論
-  ← Phase 2 の上に構築
-  ← コンパイラが @extern の推移的到達を追跡
-  ← パッケージごとの capability を自動算出
-  ← almide.toml の capabilities フィールド
-  ← これで supply chain の capability 検証が動く
+Phase 3: capability inference
+  ← Built on Phase 2
+  ← Compiler tracks transitive @extern reachability
+  ← Auto-compute capabilities per package
+  ← capabilities field in almide.toml
+  ← This enables supply chain capability verification
 
 Phase 4: supply chain integrity
   ← package-registry.md
-  ← content-addressed hash
-  ← capability 変化の検出
-  ← @extern 使用制限ポリシー
+  ← Content-addressed hash
+  ← Capability change detection
+  ← @extern usage restriction policy
 ```
 
-**Phase 1 だけで XSS/SQLi/Command injection/Path traversal が型エラーになる。** 最大のインパクトが最小の実装コストで得られる。
+**Phase 1 alone makes XSS/SQLi/Command injection/Path traversal type errors.** Maximum impact at minimum implementation cost.
 
-Phase 2-3 で supply chain security が加わる。Phase 4 はインフラ (レジストリ) 依存。
+Phase 2-3 adds supply chain security. Phase 4 depends on infrastructure (registry).
 
 ## Prerequisites
 
-| Phase | 依存する roadmap item | 理由 |
+| Phase | Dependent roadmap item | Reason |
 |---|---|---|
-| Phase 1 | なし (言語本体の追加) | opaque は独立した型システム拡張 |
-| Phase 2 | platform-target-separation.md | @extern の platform タグ |
-| Phase 3 | Phase 2 + effect system (既存) | capability = platform タグの推移的推論 |
-| Phase 4 | package-registry.md | content hash にはレジストリが必要 |
+| Phase 1 | None (language core addition) | opaque is an independent type system extension |
+| Phase 2 | platform-target-separation.md | @extern platform tags |
+| Phase 3 | Phase 2 + effect system (existing) | capability = transitive inference of platform tags |
+| Phase 4 | package-registry.md | Content hash requires a registry |
 
 ## What Already Works (Layer 0)
 
-これらは既に言語に焼き付いており、変更不要:
+These are already baked into the language and require no changes:
 
-- ✅ `fn` は I/O 不可能 (effect system)
-- ✅ `@extern` が唯一の FFI bridge
-- ✅ `eval()` / dynamic import が存在しない
-- ✅ prototype chain が存在しない
-- ✅ immutable by default
-- ✅ 静的型で全コードパスが見える
-- ✅ パッケージは .almd ソースファイル (install 時コード実行なし)
+- ✅ `fn` cannot do I/O (effect system)
+- ✅ `@extern` is the only FFI bridge
+- ✅ `eval()` / dynamic import do not exist
+- ✅ Prototype chain does not exist
+- ✅ Immutable by default
+- ✅ Static types make all code paths visible
+- ✅ Packages are .almd source files (no install-time code execution)
 
-**この Layer 0 が最も重要であり、最も変更が困難な部分。** Almide はこれを既に持っている。npm/Node.js がこれを後から得ることは不可能 (`require()` が全権限を持つ設計が根本にある)。
+**This Layer 0 is the most important and hardest to change.** Almide already has it. It's impossible for npm/Node.js to gain this retroactively (`require()` having full permissions is fundamental to their design).
 
 ## Design Principle
 
-**「安全でないコードを書けなくする」のではなく「普通に書くと安全になる」。**
+**Not "make it impossible to write unsafe code" but "writing normally results in safe code."**
 
-- builder で HTML を書く → 自動 escape (安全)
-- `sql()` で SQL を書く → 自動パラメタライズ (安全)
-- パッケージを使う → capability が自動推論される (安全)
-- `@extern` を書く → ここだけが「意図的に安全の外に出る」行為
+- Write HTML with builder → auto-escape (safe)
+- Write SQL with `sql()` → auto-parameterize (safe)
+- Use a package → capabilities are auto-inferred (safe)
+- Write `@extern` → this is the only act of "intentionally stepping outside safety"
 
-Rust で `unsafe` は「ここから先は自分が責任を持つ」マーカー。Almide で `@extern` も同じ。**言語のデフォルトが安全で、危険は明示的。**
+In Rust, `unsafe` is a marker for "from here on, I take responsibility." In Almide, `@extern` is the same. **The language default is safe, and danger is explicit.**
 
 ## Why ON HOLD
 
-Phase 1 (opaque 型) は言語コアの安定化後に着手可能。Phase 2 以降は platform-target-separation.md とパッケージレジストリに依存。
+Phase 1 (opaque types) can begin after language core stabilization. Phase 2 onward depends on platform-target-separation.md and package registry.
 
-ただし:
+However:
 
-- **Layer 0 は既に完成している** — 最も重要で変更困難な部分
-- **Phase 1 (opaque) だけで XSS/SQLi/Path traversal が型エラーになる** — 最小投資で最大効果
-- **全体の設計に未解決の研究課題がない** — 既知の技術の組み合わせ
+- **Layer 0 is already complete** — The most important and hardest-to-change part
+- **Phase 1 (opaque) alone makes XSS/SQLi/Path traversal type errors** — Maximum effect at minimum investment
+- **No unresolved research questions in the overall design** — A combination of known techniques
 
-Rust がメモリ安全を言語の性質にしたように、Almide が Web 安全を言語の性質にする。技術的には可能。順序の問題。
+Just as Rust made memory safety a property of the language, Almide will make web safety a property of the language. Technically possible. It's a matter of sequencing.
 
-## Coverage — 全 Phase 完了後に何が解決し、何が残るか
+## Coverage — What Gets Resolved After All Phases, What Remains
 
-### 構造的にゼロになるもの (言語が保証)
+### Structurally Eliminated (Language Guarantees)
 
-| カテゴリ | 解決度 | メカニズム |
+| Category | Resolution | Mechanism |
 |---|---|---|
-| インジェクション系 (XSS, SQLi, CMDi) | **100%** | opaque 型。危険な sink に String を渡せない。型エラー |
-| Path traversal | **100%** | opaque SafePath。構築時にバリデーション強制 |
-| prototype pollution | **100%** | prototype chain が言語に存在しない |
-| eval injection | **100%** | eval / dynamic import が言語に存在しない |
-| install 時コード実行 | **100%** | パッケージは .almd ソースファイル。実行フックが存在しない |
-| supply chain (悪意あるパッケージ) | **95%** | capability 推論でコンパイル時検出。ただし許可した capability 内での悪用は残る |
-| バージョン上書き / typosquatting | **100%** | content-addressed hash。ハッシュ不一致でコンパイルエラー |
+| Injection attacks (XSS, SQLi, CMDi) | **100%** | opaque types. Cannot pass String to dangerous sinks. Type error |
+| Path traversal | **100%** | opaque SafePath. Validation forced at construction |
+| Prototype pollution | **100%** | Prototype chain does not exist in the language |
+| Eval injection | **100%** | eval / dynamic import do not exist in the language |
+| Install-time code execution | **100%** | Packages are .almd source files. No execution hooks exist |
+| Supply chain (malicious packages) | **95%** | Compile-time detection via capability inference. Abuse within granted capabilities remains |
+| Version overwrite / typosquatting | **100%** | Content-addressed hash. Hash mismatch causes compile error |
 
-### 構造的に解決しないもの (どの言語でも残る)
+### Structurally Unresolvable (Remains in Any Language)
 
-| カテゴリ | 解決度 | 理由 |
+| Category | Resolution | Reason |
 |---|---|---|
-| ロジックバグ (認可漏れ、IDOR 等) | **0%** | 「この操作を許可すべきか」はビジネスロジック。型で表現不能 |
-| 検証関数の中身の正しさ | **0%** | opaque 型の構築手段は制限できるが、その構築関数自体の正しさは人間の責任 |
-| サイドチャネル / タイミング攻撃 | **0%** | 実行時間の均一性はコンパイラの保証範囲外 |
-| SSRF (完全な防止) | **部分的** | SafeUrl 型 + allowlist で軽減できるが、allowlist 自体の正しさは人間の責任 |
+| Logic bugs (authorization gaps, IDOR, etc.) | **0%** | "Should this operation be allowed" is business logic. Cannot be expressed in types |
+| Correctness of validation function internals | **0%** | Construction methods for opaque types can be restricted, but the correctness of those construction functions is human responsibility |
+| Side-channel / timing attacks | **0%** | Execution time uniformity is outside compiler guarantees |
+| SSRF (complete prevention) | **Partial** | Can be mitigated with SafeUrl type + allowlist, but allowlist correctness is human responsibility |
 
-### 意味
+### Implication
 
-**OWASP Top 10 の過半数が構造的にゼロになる。** 残るのは「どの言語で書いても残る問題」のみ。Almide で書いたら気にしなくていい問題と、どの言語で書いても気にすべき問題が明確に分かれる。
+**The majority of OWASP Top 10 becomes structurally zero.** What remains are "problems that persist regardless of language." A clear separation between problems you don't need to worry about when writing in Almide and problems you must worry about in any language.

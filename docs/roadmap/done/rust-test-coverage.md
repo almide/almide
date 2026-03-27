@@ -1,4 +1,6 @@
-# Rust Compiler Test Coverage [ACTIVE]
+<!-- description: Rust-side unit/integration test coverage targets (600+ cases) -->
+<!-- done: 2026-03-12 -->
+# Rust Compiler Test Coverage
 
 Rust-side unit/integration tests (`cargo test`). Separate from `.almd` language tests.
 

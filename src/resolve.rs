@@ -122,6 +122,16 @@ pub fn resolve_imports_with_deps(
         }
     }
 
+    // Auto-load bundled stdlib modules that have Tier 1 (auto-import) behavior.
+    // These are written in Almide but available without explicit `import`.
+    for name in stdlib::AUTO_IMPORT_BUNDLED {
+        if !loaded_names.contains(*name) {
+            if let Some(source) = stdlib::get_bundled_source(name) {
+                load_bundled_module(name, source, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+            }
+        }
+    }
+
     Ok(ResolvedModules { modules: loaded })
 }
 

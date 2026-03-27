@@ -1,4 +1,6 @@
-# Stdlib Gaps [DONE]
+<!-- description: Reduce AI-generated boilerplate via new stdlib functions -->
+<!-- done: 2026-03-11 -->
+# Stdlib Gaps
 
 ## Goal
 Reduce boilerplate in AI-generated code, improving LOC, token count, and generation time.

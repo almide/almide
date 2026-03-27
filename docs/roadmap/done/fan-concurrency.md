@@ -1,19 +1,21 @@
-# Fan Concurrency — Almide 非同期統合設計 [ACTIVE]
+<!-- description: Unified async/concurrency design using effect fn and fan syntax -->
+<!-- done: 2026-03-17 -->
+# Fan Concurrency
 
-> **`effect fn` が非同期の境界。`fan` が並行の構文。async/await は書かない。**
+> **`effect fn` is the async boundary. `fan` is the concurrency syntax. You never write async/await.**
 
-本ドキュメントは以下を統合し、Almide の非同期・並行処理の唯一の設計仕様とする:
-- structured-concurrency.md（`async let` / `await` 設計 → `fan` に置換）
-- platform-async.md（`parallel` ブロック設計 → `fan` に置換、透過的 async 思想は継承）
-- http モジュールの非同期対応
+This document unifies the following into Almide's single specification for async and concurrency:
+- structured-concurrency.md (`async let` / `await` design → replaced by `fan`)
+- platform-async.md (`parallel` block design → replaced by `fan`, transparent async philosophy inherited)
+- HTTP module async support
 
 ---
 
-## 1. 設計原則
+## 1. Design Principles
 
-### 1.1 透過的 async
+### 1.1 Transparent Async
 
-ユーザーは `async` / `await` / `Promise` / `Future` を一切書かない。
+Users never write `async` / `await` / `Promise` / `Future`.
 
 ```almide
 effect fn get_user(id: String) -> User = {
@@ -22,56 +24,56 @@ effect fn get_user(id: String) -> User = {
 }
 ```
 
-このコードから各ターゲットに自動変換される:
+This code is automatically translated to each target:
 
-| ターゲット | 生成コード | ランタイム |
-|-----------|-----------|-----------|
+| Target | Generated Code | Runtime |
+|--------|---------------|---------|
 | `almide run` (native) | `async fn` + `.await` | tokio |
 | `--target ts` | `async function` + `await` | fetch |
 | `--target js` | `async function` + `await` | fetch |
 | `--target wasm` (browser) | `async function` + `await` | fetch API |
 | `--target wasm` (WASI) | `async fn` | wasi-http |
-| `--target py` (将来) | `async def` + `await` | asyncio |
-| `--target go` (将来) | 通常関数 | goroutine |
-| `--target rb` (将来) | 通常メソッド | Thread / Fiber |
-| `--target c` (将来) | 通常関数 | pthread |
+| `--target py` (future) | `async def` + `await` | asyncio |
+| `--target go` (future) | normal function | goroutine |
+| `--target rb` (future) | normal method | Thread / Fiber |
+| `--target c` (future) | normal function | pthread |
 
-### 1.2 関数カラーリングの解消
+### 1.2 Eliminating Function Coloring
 
 ```
-pure fn       → sync（副作用なし）
-effect fn     → async（I/O、副作用あり）
+pure fn       → sync (no side effects)
+effect fn     → async (I/O, side effects)
 ```
 
-- `effect fn` は自動的に async になる。`async fn` キーワードは不要
-- `effect fn` 内から `effect fn` を呼ぶと、コンパイラが `.await` を自動挿入
-- `pure fn` から `effect fn` を呼ぶ → コンパイルエラー（既存の制約）
-- `main` → async エントリポイント（`#[tokio::main]` / top-level await）
+- `effect fn` automatically becomes async. No `async fn` keyword needed
+- Calling an `effect fn` from within an `effect fn` causes the compiler to auto-insert `.await`
+- Calling an `effect fn` from a `pure fn` → compile error (existing constraint)
+- `main` → async entry point (`#[tokio::main]` / top-level await)
 
-### 1.3 LLM 最適化
+### 1.3 LLM Optimization
 
-LLM コーディングエージェントが async/await で失敗するパターンを構造的に不可能にする。
+Structurally eliminates patterns where LLM coding agents fail with async/await.
 
-| LLM が犯すミス | Almide での対処 |
-|----------------|----------------|
-| `await` 忘れ → Promise が変数に入る | `await` が存在しない。コンパイラ自動挿入 |
-| 直列にすべきところを並列に | fan 内では他の式の結果を参照できない |
-| 並列にすべきところを直列に | fan に入れるだけで並列になる |
-| task を作って join を忘れる | タスクハンドルが露出しない |
-| `async` / `await` の配置ミス | そもそもキーワードが存在しない |
+| Mistake LLMs make | Almide's solution |
+|--------------------|-------------------|
+| Forgetting `await` → Promise stored in variable | `await` doesn't exist. Compiler auto-inserts |
+| Parallelizing what should be sequential | Cannot reference other expressions' results inside fan |
+| Sequentializing what should be parallel | Just put it in `fan { }` for parallelism |
+| Creating a task and forgetting to join | Task handles are never exposed |
+| Misplacing `async` / `await` | Keywords don't exist in the first place |
 
-判断分岐は1つだけ: **「この2つの処理は依存関係があるか？」**
+There is only one decision point: **"Do these two operations have a dependency?"**
 
-- ある → `let` を2行書く（直列）
-- ない → `fan { }` に入れる（並列）
+- Yes → write two `let` lines (sequential)
+- No → put them in `fan { }` (parallel)
 
 ---
 
-## 2. `fan` — 並行処理の統一構文
+## 2. `fan` — Unified Concurrency Syntax
 
-### 2.1 `fan { }` — 静的 fan-out/fan-in
+### 2.1 `fan { }` — Static Fan-Out/Fan-In
 
-固定個数の独立 effect を同時開始し、全完了を待つ。
+Starts a fixed number of independent effects simultaneously and waits for all to complete.
 
 ```almide
 effect fn dashboard(id: String) -> Dashboard = {
@@ -83,9 +85,9 @@ effect fn dashboard(id: String) -> Dashboard = {
 }
 ```
 
-### 2.2 `fan.map(xs, f)` — 動的 fan-out/fan-in
+### 2.2 `fan.map(xs, f)` — Dynamic Fan-Out/Fan-In
 
-コレクションの各要素に対して effect を並行実行し、結果をリストで返す。
+Executes effects concurrently for each element in a collection and returns results as a list.
 
 ```almide
 effect fn fetch_all(ids: List[String]) -> List[User] = {
@@ -93,9 +95,9 @@ effect fn fetch_all(ids: List[String]) -> List[User] = {
 }
 ```
 
-### 2.3 `fan.race(thunks)` — 最速1つだけ
+### 2.3 `fan.race(thunks)` — Fastest One Only
 
-thunk（遅延実行の関数）群を同時開始し、最初に完了した結果を返す。残りはキャンセル。
+Starts all thunks (lazily-evaluated functions) simultaneously and returns the result of the first to complete. The rest are cancelled.
 
 ```almide
 effect fn fast_fetch(id: String) -> String = {
@@ -106,169 +108,169 @@ effect fn fast_fetch(id: String) -> String = {
 }
 ```
 
-### 2.4 段階的な依存グラフ
+### 2.4 Staged Dependency Graph
 
-`fan` の連鎖で依存グラフがコードの上下関係にそのまま現れる。
+Chaining `fan` blocks makes the dependency graph directly visible in the top-to-bottom code structure.
 
 ```almide
 effect fn full_dashboard(user_id: String) -> Dashboard = {
-  // 第1段: 互いに独立な2つを並行
+  // Stage 1: two independent operations in parallel
   let (user, location) = fan {
     fetch_user(user_id)
     geo.current_location()
   }
 
-  // 第2段: 第1段の結果に依存する3つを並行
+  // Stage 2: three operations depending on Stage 1 results, in parallel
   let (weather, posts, recs) = fan {
     fetch_weather(location.city)
     fetch_posts(user.id)
     fetch_recommendations(user.id, location.country)
   }
 
-  // 第3段: 直列（書き込みは順序が要る）
+  // Stage 3: sequential (writes require ordering)
   fs.mkdir_p(folder)
   fs.write(path, render(user, weather, posts))
 }
 ```
 
 ```
-第1段:  [fetch_user]  [get_location]     <- fan（並行）
-              |              |
-第2段:  [fetch_posts] [fetch_weather] [fetch_recs]  <- fan（並行）
-              |              |             |
-第3段:  [write file]                       <- let（直列）
+Stage 1:  [fetch_user]  [get_location]     <- fan (parallel)
+                |              |
+Stage 2:  [fetch_posts] [fetch_weather] [fetch_recs]  <- fan (parallel)
+                |              |             |
+Stage 3:  [write file]                       <- let (sequential)
 ```
 
 ---
 
-## 3. 意味論
+## 3. Semantics
 
 ### 3.1 `fan { e1; e2; ...; en }`
 
-- **型**: `(T1, T2, ..., Tn)` — 各式の **成功値** の型のタプル
-- **実行**: 全式を同時開始、全完了待ち
-- **結果順**: 記述順（実行完了順ではない）
-- **Result 伝播**: 式が `Result[T, E]` を返す場合、成功値 `T` がタプルに入る。`Err` なら fan 全体が effect failure + 残りキャンセル
-- **構文制限**: 式のみ。`let` / `var` / `for` / `match` は禁止
-- **外部変数**: 外のスコープの `let` 束縛は読取可能。`var` のキャプチャは禁止（データ競合防止）
-- **文位置**: 代入なしの `fan { ... }` は許可。結果は `Unit` に潰す
+- **Type**: `(T1, T2, ..., Tn)` — a tuple of the **success value** types of each expression
+- **Execution**: all expressions start simultaneously, waits for all to complete
+- **Result order**: declaration order (not completion order)
+- **Result propagation**: if an expression returns `Result[T, E]`, the success value `T` goes into the tuple. If `Err`, the entire fan becomes an effect failure + remaining expressions are cancelled
+- **Syntax restriction**: expressions only. `let` / `var` / `for` / `match` are prohibited
+- **External variables**: `let` bindings from outer scope are readable. `var` capture is prohibited (data race prevention)
+- **Statement position**: `fan { ... }` without assignment is allowed. Result is collapsed to `Unit`
 
 ### 3.2 `fan.map(xs, f)`
 
-- **型**: `List[T]` — `f` の **成功値** の型のリスト
-- **実行**: 各要素に `f` を並行適用
-- **結果順**: 入力順（実行完了順ではない）
-- **Result 伝播**: `f` が `Result[T, E]` を返す場合、`Err` が出たら全体 failure + 残りキャンセル
-- **将来拡張**: `fan.map(xs, limit: 16, f)` で並行数制限
+- **Type**: `List[T]` — a list of the **success value** type of `f`
+- **Execution**: applies `f` to each element concurrently
+- **Result order**: input order (not completion order)
+- **Result propagation**: if `f` returns `Result[T, E]`, on `Err` the whole operation fails + remaining are cancelled
+- **Future extension**: `fan.map(xs, limit: 16, f)` for concurrency limiting
 
 ### 3.3 `fan.race(thunks)`
 
-- **型**: `T` — thunk の戻り型
-- **引数**: `List[Fn[] -> T]` — thunk のリスト
-- **実行**: 全 thunk を同時開始
-- **結果**: **最初に完了したもの**（成功でも失敗でも）
-- **残り**: キャンセル
-- **空リスト**: コンパイルエラー
+- **Type**: `T` — the return type of the thunks
+- **Arguments**: `List[Fn[] -> T]` — a list of thunks
+- **Execution**: all thunks start simultaneously
+- **Result**: **the first to complete** (whether success or failure)
+- **Remaining**: cancelled
+- **Empty list**: compile error
 
-### 3.4 thunk が必要な理由
+### 3.4 Why Thunks Are Needed
 
-`fan.race` は関数（構文ではない）なので、引数は通常の評価ルールで先に評価される。`fn() { ... }` で包むことで `fan.race` が開始タイミングを管理できる。`fan { }` は構文なのでコンパイラが制御でき、thunk 不要。
+`fan.race` is a function (not syntax), so arguments are evaluated eagerly by normal evaluation rules. Wrapping in `fn() { ... }` lets `fan.race` control when execution starts. `fan { }` is syntax, so the compiler controls it and thunks are unnecessary.
 
-### 3.5 Result 伝播の設計根拠
+### 3.5 Design Rationale for Result Propagation
 
-**fan は Result を自動 unwrap する。** `Err` が返ったら fan 全体が failure。
+**fan auto-unwraps Results.** If `Err` is returned, the entire fan fails.
 
 ```almide
 let (user, posts) = fan {
-  fetch_user(id)    // Result[User, String] → 成功なら User
-  fetch_posts(id)   // Result[List[Post], String] → 成功なら List[Post]
+  fetch_user(id)    // Result[User, String] → User on success
+  fetch_posts(id)   // Result[List[Post], String] → List[Post] on success
 }
 // user: User, posts: List[Post]
-// どちらかが Err なら fan 全体が effect failure、残りはキャンセル
+// If either returns Err, the entire fan becomes an effect failure, remaining are cancelled
 ```
 
-理由:
+Rationale:
 
-1. **effect fn の自動 `?` と同じ意味論**。一貫性がある
-2. **全ターゲットの native 挙動と一致**。`Promise.all` は reject 伝播、`tokio::try_join!` は Err 伝播、`asyncio.gather` は例外伝播
-3. **LLM にとって最もシンプル**。fan に入れたら成功値が出てくる、失敗したら fan ごと倒れる
-4. **Almide には effect failure と Result Err の区別がない**。唯一のエラーチャネルが `Result`
+1. **Same semantics as effect fn's auto-`?`**. Consistent.
+2. **Matches native behavior across all targets**. `Promise.all` propagates reject, `tokio::try_join!` propagates Err, `asyncio.gather` propagates exceptions
+3. **Simplest mental model for LLMs**. Put it in fan and success values come out; on failure the entire fan fails
+4. **Almide has no distinction between effect failure and Result Err**. The only error channel is `Result`
 
-検討したが採用しなかった案:
-- **道 A** (effect failure と Result を別物に): 第2エラーチャネルが必要。設計が複雑化
-- **道 B** (Err でもキャンセルしない): 「1つ失敗したら残り無駄」のケースで非効率
+Alternatives considered but rejected:
+- **Path A** (treat effect failure and Result as separate): requires a second error channel. Design becomes complex
+- **Path B** (don't cancel on Err): inefficient for cases where "if one fails, the rest are useless"
 
-### 3.6 effect 制約
+### 3.6 Effect Constraint
 
-- `fan { }` は `effect fn` 内でのみ使用可能
-- `fan.map` / `fan.race` も effect
-- pure fn 内で fan → コンパイルエラー
-
----
-
-## 4. `fan` の言語上の位置づけ
-
-- `fan` は**予約語**（`let fan = 123` は不可）
-- `fan { }` は**特別構文**（ブロックではなく clause list）
-- `fan.map` / `fan.race` は **compiler-known namespace**
-- ユーザー定義の `fan` モジュールは不可
+- `fan { }` can only be used inside `effect fn`
+- `fan.map` / `fan.race` are also effects
+- fan inside pure fn → compile error
 
 ---
 
-## 5. 既存機能との相互作用
+## 4. `fan`'s Position in the Language
 
-| 機能 | 影響 |
-|------|------|
-| `effect fn` | async 化。構文変更なし |
-| `do` ブロック | 同じ動作。auto-`?` も健在 |
-| `guard` | async コンテキスト内で動作 |
-| `for...in` | 逐次イテレーション。各ステップで await |
-| Result / Option | 変更なし。`?` 伝播も健在 |
-| パイプ `\|>` | effect fn の場合、各ステップで await |
-| UFCS | `x.method()` が effect fn なら await |
-| Lambda | effect fn の lambda も可。fan 内でキャプチャ可 |
-| `fan` | 新規。`effect fn` 内のみ |
+- `fan` is a **reserved word** (`let fan = 123` is not allowed)
+- `fan { }` is **special syntax** (a clause list, not a block)
+- `fan.map` / `fan.race` are a **compiler-known namespace**
+- User-defined `fan` modules are not allowed
 
 ---
 
-## 6. Node Promise 表現力との対応
+## 5. Interaction with Existing Features
 
-| Node.js | Almide | 挙動 |
-|---------|--------|------|
-| `Promise.all()` | `fan { }` / `fan.map` | 全成功 or 最初の失敗で reject |
-| `Promise.race()` | `fan.race` | 最初の完了（成功でも失敗でも） |
-| `Promise.any()` | `fan.any`（将来） | 最初の成功。全失敗なら AggregateError |
-| `Promise.allSettled()` | `fan.settle`（将来） | 全結果回収（失敗も含む） |
-
-fan ファミリー全体:
-
-| API | 挙動 | 返り値 | 初版 |
-|-----|------|--------|------|
-| `fan { }` | 全部やって全部待つ（静的） | タプル | Yes |
-| `fan.map` | 全部やって全部待つ（動的） | リスト | Yes |
-| `fan.race` | 全部やって最速を取る | 単一値 | Yes |
-| `fan.any` | 最初の成功を取る | 単一値 | 後で |
-| `fan.settle` | 全結果を取る（失敗含む） | リスト | 後で |
-| `fan.timeout` | タイムアウト付き実行 | 単一値 | 後で |
+| Feature | Impact |
+|---------|--------|
+| `effect fn` | Becomes async. No syntax change |
+| `do` block | Same behavior. auto-`?` still works |
+| `guard` | Works inside async context |
+| `for...in` | Sequential iteration. await at each step |
+| Result / Option | No change. `?` propagation still works |
+| Pipe `\|>` | For effect fn, await at each step |
+| UFCS | `x.method()` awaits if effect fn |
+| Lambda | effect fn lambdas allowed. Can capture inside fan |
+| `fan` | New. Only inside `effect fn` |
 
 ---
 
-## 7. HTTP モジュールとの統合
+## 6. Node Promise Expressiveness Mapping
 
-### 7.1 現在の状態
+| Node.js | Almide | Behavior |
+|---------|--------|----------|
+| `Promise.all()` | `fan { }` / `fan.map` | All succeed or reject on first failure |
+| `Promise.race()` | `fan.race` | First to complete (success or failure) |
+| `Promise.any()` | `fan.any` (future) | First success. AggregateError if all fail |
+| `Promise.allSettled()` | `fan.settle` (future) | Collect all results (including failures) |
 
-- HTTP クライアント関数（`http.get`, `http.post` 等）は `effect = true`
-- Rust: `std::net::TcpStream` による同期ブロッキング I/O
-- TS: `await fetch(...)` による非同期 I/O
-- `http.serve` ハンドラは純粋コンテキスト（effect fn を呼べない）
+Full fan family:
 
-### 7.2 fan 統合後の姿
+| API | Behavior | Return value | Initial release |
+|-----|----------|-------------|-----------------|
+| `fan { }` | Run all, wait for all (static) | Tuple | Yes |
+| `fan.map` | Run all, wait for all (dynamic) | List | Yes |
+| `fan.race` | Run all, take the fastest | Single value | Yes |
+| `fan.any` | Take the first success | Single value | Later |
+| `fan.settle` | Collect all results (including failures) | List | Later |
+| `fan.timeout` | Execute with timeout | Single value | Later |
 
-**クライアント**: effect fn として自動 async 化。変更なし。
+---
+
+## 7. Integration with HTTP Module
+
+### 7.1 Current State
+
+- HTTP client functions (`http.get`, `http.post`, etc.) have `effect = true`
+- Rust: synchronous blocking I/O via `std::net::TcpStream`
+- TS: async I/O via `await fetch(...)`
+- `http.serve` handler is a pure context (cannot call effect fn)
+
+### 7.2 After Fan Integration
+
+**Client**: automatically becomes async as effect fn. No change needed.
 
 ```almide
 effect fn load_data() -> (User, List[Post]) = {
-  // fan で並行リクエスト
+  // concurrent requests via fan
   let (user, posts) = fan {
     http.get_json("/users/1")
     http.get_json("/posts?user=1")
@@ -277,13 +279,13 @@ effect fn load_data() -> (User, List[Post]) = {
 }
 ```
 
-**サーバー**: ハンドラを effect fn 化（各リクエストを独立タスクとして処理）。
+**Server**: make handlers into effect fn (process each request as an independent task).
 
 ```almide
-// 将来: ハンドラが effect コンテキストになる
+// Future: handler becomes an effect context
 effect fn handle(req: Request) -> Response = {
   let id = http.req_path(req)
-  // ハンドラ内で他の effect fn を呼べるようになる
+  // Can now call other effect fn from within handlers
   let (user, prefs) = fan {
     fetch_user(id)
     fetch_preferences(id)
@@ -296,31 +298,31 @@ effect fn main() -> Unit = {
 }
 ```
 
-### 7.3 HTTP 非同期の移行ステップ
+### 7.3 HTTP Async Migration Steps
 
-| 段階 | Rust | TS |
-|------|------|----|
-| 現在 | `std::net` 同期 I/O | `await fetch()` |
-| Phase 0 | tokio + `reqwest` 非同期 I/O | 変更なし |
-| Phase 1 | `http.serve` → `tokio::spawn` per request | 変更なし |
-| 将来 | connection pooling, graceful shutdown | 変更なし |
+| Stage | Rust | TS |
+|-------|------|----|
+| Current | `std::net` sync I/O | `await fetch()` |
+| Phase 0 | tokio + `reqwest` async I/O | No change |
+| Phase 1 | `http.serve` → `tokio::spawn` per request | No change |
+| Future | connection pooling, graceful shutdown | No change |
 
 ---
 
-## 8. Codegen 詳細
+## 8. Codegen Details
 
-### 8.1 `effect fn` の codegen
+### 8.1 `effect fn` Codegen
 
-| ターゲット | `effect fn` | I/O 呼び出し | エントリポイント |
-|-----------|-------------|-------------|----------------|
-| Rust | `async fn -> Result<T, String>` | `.await` 自動挿入 | `#[tokio::main]` |
-| TS/JS | `async function` | `await` 自動挿入 | top-level await |
-| Python | `async def` | `await` 自動挿入 | `asyncio.run()` |
-| Go | 通常関数 | 同期呼び出し | `func main()` |
-| Ruby | 通常メソッド | 同期呼び出し | 通常実行 |
-| C | 通常関数 | 同期呼び出し | `int main()` |
+| Target | `effect fn` | I/O calls | Entry point |
+|--------|-------------|-----------|-------------|
+| Rust | `async fn -> Result<T, String>` | `.await` auto-inserted | `#[tokio::main]` |
+| TS/JS | `async function` | `await` auto-inserted | top-level await |
+| Python | `async def` | `await` auto-inserted | `asyncio.run()` |
+| Go | normal function | synchronous call | `func main()` |
+| Ruby | normal method | synchronous call | normal execution |
+| C | normal function | synchronous call | `int main()` |
 
-非 I/O の effect fn（乱数生成、タイムスタンプ等）も async codegen になる。オーバーヘッドは軽微。モデルのシンプルさを優先。
+Non-I/O effect fn (random number generation, timestamps, etc.) also get async codegen. Overhead is minimal. Simplicity of the model takes priority.
 
 ### 8.2 `fan { fetch_a(); fetch_b() }`
 
@@ -383,8 +385,8 @@ pthread_join(t2, &r2);
 
 ### 8.3 `fan.map(xs, f)`
 
-| ターゲット | 生成コード |
-|-----------|-----------|
+| Target | Generated Code |
+|--------|---------------|
 | TS | `await Promise.all(xs.map(x => f(x)))` |
 | Rust | `futures::future::try_join_all(xs.iter().map(\|x\| f(x))).await?` |
 | Python | `await asyncio.gather(*[f(x) for x in xs])` |
@@ -394,8 +396,8 @@ pthread_join(t2, &r2);
 
 ### 8.4 `fan.race(thunks)`
 
-| ターゲット | 生成コード |
-|-----------|-----------|
+| Target | Generated Code |
+|--------|---------------|
 | TS | `await Promise.race(thunks.map(f => f()))` |
 | Rust | `tokio::select! { v = f1() => v, v = f2() => v }` |
 | Python | `asyncio.wait(..., return_when=FIRST_COMPLETED)` + cancel pending |
@@ -405,14 +407,14 @@ pthread_join(t2, &r2);
 
 ---
 
-## 9. ターゲット別設計判断
+## 9. Per-Target Design Decisions
 
 ### 9.1 Rust: tokio
 
-**判断: tokio をデフォルト executor とする。**
+**Decision: use tokio as the default executor.**
 
 ```rust
-// 現在の almide_block_on (busy-wait — 廃止)
+// Current almide_block_on (busy-wait — to be removed)
 fn almide_block_on<F: std::future::Future>(future: F) -> F::Output {
     let waker = unsafe { Waker::from_raw(dummy_raw_waker()) };
     let mut cx = Context::from_waker(&waker);
@@ -425,18 +427,18 @@ fn almide_block_on<F: std::future::Future>(future: F) -> F::Output {
     }
 }
 
-// 置換後
+// Replacement
 #[tokio::main]
 async fn main() -> Result<(), String> { ... }
 ```
 
-- `Send` 制約回避: `tokio::task::LocalSet` を使用（シングルスレッド executor）
+- `Send` constraint avoidance: use `tokio::task::LocalSet` (single-threaded executor)
 - `fan { }`: `tokio::try_join!` — fail-fast
 - `fan.map`: `futures::future::try_join_all`
 - `fan.race`: `tokio::select!`
-- HTTP client: `std::net` → `reqwest`（async http client）に移行
+- HTTP client: migrate from `std::net` to `reqwest` (async http client)
 
-生成 `Cargo.toml` への追加:
+Additions to generated `Cargo.toml`:
 ```toml
 [dependencies]
 tokio = { version = "1", features = ["rt", "time", "macros"] }
@@ -444,241 +446,241 @@ reqwest = { version = "0.12", features = ["json"] }
 futures = "0.3"
 ```
 
-バイナリサイズ増: ~数百 KB。WASM ターゲットでは tokio を使わない（別パス）。
+Binary size increase: ~a few hundred KB. WASM target does not use tokio (separate path).
 
 ### 9.2 TypeScript / JavaScript
 
-**判断: native async/await をそのまま使う。**
+**Decision: use native async/await directly.**
 
 - `effect fn` → `async function`
-- effect fn 呼び出し → `await`
+- effect fn calls → `await`
 - `fan { }` → `Promise.all([...])`
 - `fan.race` → `Promise.race([...])`
-- キャンセルは **best-effort**（JS の制約。`Promise.race` は loser を abort しない）
-- 追加依存: なし（`fetch` と `Promise` は built-in）
+- Cancellation is **best-effort** (JS limitation. `Promise.race` does not abort losers)
+- Additional dependencies: none (`fetch` and `Promise` are built-in)
 
 ### 9.3 WASM
 
-**判断: JSPI ベース。Phase 0 では逐次実行 fallback。**
+**Decision: JSPI-based. Sequential execution fallback in Phase 0.**
 
-| WASM 仕様 | フェーズ | Almide への影響 |
-|-----------|---------|----------------|
-| **JSPI** (JS Promise Integration) | Phase 4（標準化済） | 最重要。WASM↔JS Promise 自動ブリッジ。Chrome 137+, Firefox 139+ |
-| **Asyncify** (Binaryen) | 利用可能 | JSPI 非対応環境のフォールバック。コードサイズ +50% |
-| **Threads + SharedArrayBuffer** | 標準化済 | Phase 0 では不要 |
-| **Stack Switching** | Phase 3 | 将来: WASM 内 cooperative scheduling |
+| WASM Spec | Phase | Impact on Almide |
+|-----------|-------|-----------------|
+| **JSPI** (JS Promise Integration) | Phase 4 (standardized) | Most important. Automatic WASM↔JS Promise bridge. Chrome 137+, Firefox 139+ |
+| **Asyncify** (Binaryen) | Available | Fallback for environments without JSPI support. Code size +50% |
+| **Threads + SharedArrayBuffer** | Standardized | Not needed for Phase 0 |
+| **Stack Switching** | Phase 3 | Future: cooperative scheduling within WASM |
 
-核心的洞察: **WASM の「並行」はすべてシングルスレッド上の協調的マルチタスク。** 真の並列は存在しない。これは Almide に好都合 — データ競合の問題が発生しない。
+Key insight: **All WASM "concurrency" is cooperative multitasking on a single thread.** True parallelism does not exist. This works in Almide's favor — no data race issues.
 
-Phase 0: `fan { }` は WASM で逐次実行に degradation（正しいが遅い。デッドロックしない、結果は同じ）。
-Phase 1: JSPI + `Promise.all` で JS 側に委譲し、真の並行を実現。
+Phase 0: `fan { }` degrades to sequential execution on WASM (correct but slow. No deadlocks, same results).
+Phase 1: Delegate to JS side via JSPI + `Promise.all` for true concurrency.
 
-### 9.4 他言語の WASM async 対応（参考調査）
+### 9.4 WASM Async Support in Other Languages (Reference Survey)
 
-| 言語 | WASM async | 制約 |
-|------|-----------|------|
-| Rust | wasm-bindgen-futures | Future↔Promise ブリッジ。シングルスレッド |
-| SwiftWasm | 2つの executor | cooperative (CLI) / JS event loop (browser) |
-| AssemblyScript | 未対応 | Stack Switching 待ち |
-| Kotlin/Wasm | Beta | GC proposal 必須 |
-| Gleam | JS ターゲットのみ | concurrency はライブラリ層 |
+| Language | WASM async | Constraints |
+|----------|-----------|-------------|
+| Rust | wasm-bindgen-futures | Future↔Promise bridge. Single-threaded |
+| SwiftWasm | Two executors | cooperative (CLI) / JS event loop (browser) |
+| AssemblyScript | Not supported | Waiting for Stack Switching |
+| Kotlin/Wasm | Beta | GC proposal required |
+| Gleam | JS target only | concurrency is at the library layer |
 
-### 9.5 Python / Go / Ruby / C（将来ターゲット）
+### 9.5 Python / Go / Ruby / C (Future Targets)
 
-| ターゲット | effect fn | fan | 依存 |
-|-----------|-----------|-----|------|
+| Target | effect fn | fan | Dependencies |
+|--------|-----------|-----|-------------|
 | Python | `async def` + `await` | `asyncio.gather` / `asyncio.wait` | asyncio (stdlib) |
-| Go | 通常関数 | goroutine + WaitGroup / channel | なし |
-| Ruby | 通常メソッド | Thread / Async gem | なし |
-| C | 通常関数 | pthread | pthread (POSIX) |
+| Go | normal function | goroutine + WaitGroup / channel | none |
+| Ruby | normal method | Thread / Async gem | none |
+| C | normal function | pthread | pthread (POSIX) |
 
 ---
 
-## 10. 型システム設計判断
+## 10. Type System Design Decisions
 
-### 10.1 `Future[T]` は型システムに入れない
+### 10.1 `Future[T]` Is Not Exposed in the Type System
 
-**判断: 入れない。暗黙的に扱う。**
+**Decision: not exposed. Handled implicitly.**
 
-- `effect fn foo() -> Int` の戻り型は `Int`（`Future[Int]` ではない）
-- コンパイラが内部的に async を追跡
-- `Future[T]` を露出させると LLM が `Future[Future[T]]` で混乱する
+- The return type of `effect fn foo() -> Int` is `Int` (not `Future[Int]`)
+- The compiler tracks async internally
+- Exposing `Future[T]` would cause LLMs to get confused with `Future[Future[T]]`
 
-### 10.2 Duration リテラルは入れない
+### 10.2 No Duration Literals
 
-**判断: Int（ミリ秒）で表現。**
+**Decision: represent as Int (milliseconds).**
 
 ```almide
 fan.timeout(5000, fn() { http.get(url) })
 env.sleep_ms(100)
 ```
 
-Duration 型は将来 stdlib で定義可能。Vocabulary Economy の原則。
+A Duration type can be defined in stdlib in the future. Vocabulary Economy principle.
 
-### 10.3 `var` キャプチャの禁止
+### 10.3 Prohibition of `var` Capture
 
 ```almide
 var count = 0
 let (a, b) = fan {
-  do { count = count + 1; fetch_a() }   // <- コンパイルエラー
+  do { count = count + 1; fetch_a() }   // <- compile error
   fetch_b()
 }
 ```
 
-fan 内から親スコープの `var` は変更不可。`let` の読み取りのみ許可。データ競合を構造的に防ぐ。
+Parent scope `var` cannot be modified from inside fan. Only `let` reads are allowed. Structurally prevents data races.
 
 ---
 
-## 11. 現在の実装状況
+## 11. Current Implementation Status
 
-### 11.1 実装済み
+### 11.1 Implemented
 
-- `async fn` / `await` のパース（AST: `Decl::Fn { async: Some(bool) }`, `Expr::Await`）
-- 型チェック: `async fn` は `effect fn` と同等扱い
+- Parsing of `async fn` / `await` (AST: `Decl::Fn { async: Some(bool) }`, `Expr::Await`)
+- Type checking: `async fn` treated as equivalent to `effect fn`
 - IR: `IrExprKind::Await`, `IrFunction { is_async }`
-- Rust codegen: `async fn` → Rust `async fn`、`await` → `almide_block_on(expr)`
-- TS codegen: `async fn` → TS `async function`、`await` → `await expr`
-- HTTP stdlib: 22 クライアント/サーバー関数実装済み（Rust: `std::net` 同期 I/O）
-- **`fan { }` 基盤実装完了** (2026-03-16):
-  - Lexer: `fan` 予約語
+- Rust codegen: `async fn` → Rust `async fn`, `await` → `almide_block_on(expr)`
+- TS codegen: `async fn` → TS `async function`, `await` → `await expr`
+- HTTP stdlib: 22 client/server functions implemented (Rust: `std::net` sync I/O)
+- **`fan { }` foundation implementation complete** (2026-03-16):
+  - Lexer: `fan` reserved word
   - AST: `Expr::Fan { exprs }`
-  - Parser: `fan { expr; expr; ... }` パース
-  - Checker: effect fn 内のみ許可、Result auto-unwrap、型はタプル
+  - Parser: `fan { expr; expr; ... }` parsing
+  - Checker: only allowed inside effect fn, Result auto-unwrap, type is tuple
   - IR: `IrExprKind::Fan { exprs }`
-  - Rust codegen: `std::thread::scope` + `spawn` per expr（tokio 不要）
+  - Rust codegen: `std::thread::scope` + `spawn` per expr (no tokio needed)
   - TS codegen: `await Promise.all([...])`
-  - Formatter: `fan { }` 対応
-  - E2E 動作確認済み (`examples/fan_demo.almd`)
+  - Formatter: `fan { }` support
+  - E2E verified (`examples/fan_demo.almd`)
 - **Effect isolation (Layer 1 security)** (2026-03-16):
-  - pure fn → effect fn 呼び出しをコンパイルエラーに
-  - fan block も pure fn 内ではエラー
+  - Calling effect fn from pure fn is now a compile error
+  - fan block inside pure fn is also an error
 
-### 11.2 既知の問題
+### 11.2 Known Issues
 
-1. **`almide_block_on` が busy-wait**: dummy waker + `yield_now` ループ。CPU 浪費、真の async I/O 不動作
-2. **`Future[T]` 型がない**: 型システムは `Result` で代用。`await` の型チェック不完全
-3. **async テストがゼロ**: async 関連テストファイル未作成
-4. **`http.serve` ハンドラが純粋コンテキスト**: effect fn を呼べない
-5. ~~**fan 未実装の制約**~~: `var` キャプチャ禁止チェック済み
+1. **`almide_block_on` is busy-wait**: dummy waker + `yield_now` loop. Wastes CPU, true async I/O doesn't work
+2. **No `Future[T]` type**: type system uses `Result` as substitute. `await` type checking is incomplete
+3. **Zero async tests**: no async-related test files created
+4. **`http.serve` handler is pure context**: cannot call effect fn
+5. ~~**fan unimplemented constraints**~~: `var` capture prohibition check is done
 
 ---
 
-## 12. 実装フェーズ
+## 12. Implementation Phases
 
-### Phase 0: `fan { }` 基盤 — sync/thread backend
+### Phase 0: `fan { }` Foundation — sync/thread backend
 
-**設計方針変更**: tokio 非依存。`effect fn` は同期のまま。`fan` は `std::thread::scope` で並行化。
+**Design policy change**: no tokio dependency. `effect fn` stays synchronous. `fan` parallelizes via `std::thread::scope`.
 
-**パーサー**:
-- [x] `fan` を予約語に追加
+**Parser**:
+- [x] Add `fan` as reserved word
 - [x] `fan { expr; expr; ... }` → `Expr::Fan { exprs: Vec<Expr> }`
-- [x] fan 内の `let` / `var` / `for` / `while` → パースエラー
+- [x] `let` / `var` / `for` / `while` inside fan → parse error
 
-**型チェッカー**:
-- [x] `fan { e1; ...; en }` の型 → `(T1, ..., Tn)`（Result 自動 unwrap）
-- [x] effect fn 内のみ許可
-- [ ] 各式間で変数非共有を検証
-- [x] 外部 `var` キャプチャ禁止
+**Type checker**:
+- [x] Type of `fan { e1; ...; en }` → `(T1, ..., Tn)` (Result auto-unwrap)
+- [x] Only allowed inside effect fn
+- [ ] Verify no variable sharing between expressions
+- [x] Prohibit external `var` capture
 
 **IR**:
-- [x] `IrExprKind::Fan { exprs: Vec<IrExpr> }` 追加
+- [x] Add `IrExprKind::Fan { exprs: Vec<IrExpr> }`
 
 **Rust codegen**:
-- [x] `std::thread::scope` + `spawn` per expr に変換
+- [x] Transform to `std::thread::scope` + `spawn` per expr
 
 **TS codegen**:
-- [x] `await Promise.all([e1, e2, ...])` に変換
+- [x] Transform to `await Promise.all([e1, e2, ...])`
 
-**フォーマッター**:
-- [x] `fan { }` のフォーマット対応
+**Formatter**:
+- [x] Format support for `fan { }`
 
-**テスト**:
-- [x] Rust unit テスト（checker_test.rs — fan in pure fn / fan in effect fn）
-- [x] E2E 動作確認（`examples/fan_demo.almd` — `almide run` で実行成功）
-- [x] spec テスト (`spec/lang/fan_test.almd` — 5 pass)
+**Tests**:
+- [x] Rust unit tests (checker_test.rs — fan in pure fn / fan in effect fn)
+- [x] E2E verification (`examples/fan_demo.almd` — `almide run` execution success)
+- [x] spec tests (`spec/lang/fan_test.almd` — 5 pass)
 
-### Phase 1: async backend (将来)
+### Phase 1: async backend (future)
 
-tokio は backend の1実装として後から追加。言語仕様は runtime 非依存。
+tokio to be added later as one backend implementation. Language spec is runtime-agnostic.
 
 - [ ] `effect fn` → Rust `async fn` codegen (opt-in backend)
 - [ ] `fan` → `tokio::try_join!` (async backend)
-- [ ] runtime trait 経由で spawn/join/sleep を抽象化
+- [ ] Abstract spawn/join/sleep via runtime trait
 
 ### Phase 2: `fan.map` ✅
 
-- [x] `fan.map(xs, f)` を compiler-known 関数として登録
-- [x] 型: `(List[A], Fn(A) -> B) -> List[B]`（Result auto-unwrap）
+- [x] Register `fan.map(xs, f)` as compiler-known function
+- [x] Type: `(List[A], Fn(A) -> B) -> List[B]` (Result auto-unwrap)
 - [x] Rust: `std::thread::scope` + `spawn` per item
 - [x] TS: `await Promise.all(xs.map(f))`
-- [x] テスト (`spec/lang/fan_map_test.almd` — 4 pass)
+- [x] Tests (`spec/lang/fan_map_test.almd` — 4 pass)
 
 ### Phase 3: `fan.race` ✅
 
-- [x] `fan.race(thunks)` を compiler-known 関数として登録
-- [x] 型: `(List[Fn() -> T]) -> T`（Result auto-unwrap）
-- [x] Rust: `std::thread::scope` + `mpsc::channel`（最初の完了値を取得）
+- [x] Register `fan.race(thunks)` as compiler-known function
+- [x] Type: `(List[Fn() -> T]) -> T` (Result auto-unwrap)
+- [x] Rust: `std::thread::scope` + `mpsc::channel` (get first completed value)
 - [x] TS: `await Promise.race(thunks.map(f => f()))`
-- [x] テスト (`spec/lang/fan_race_test.almd` — 2 pass)
+- [x] Tests (`spec/lang/fan_race_test.almd` — 2 pass)
 
-### Phase 4: サーバー非同期
+### Phase 4: Server Async
 
-- [ ] `http.serve` ハンドラを effect コンテキスト化
-- [ ] Rust: 各リクエストを `tokio::spawn` で独立タスク化
+- [ ] Make `http.serve` handler an effect context
+- [ ] Rust: make each request an independent task via `tokio::spawn`
 - [ ] connection pooling
 - [ ] graceful shutdown
-- [ ] テスト
+- [ ] Tests
 
-### Phase 5: 拡張 ✅ (主要 API 完了)
+### Phase 5: Extensions ✅ (major APIs complete)
 
-- [x] `fan.any` — 最初の成功を返す。`Promise.any` 相当 (Rust: `mpsc::channel`, TS: `Promise.any`)
-- [x] `fan.settle` — 全結果を返す。`Promise.allSettled` 相当 (Rust: thread + collect, TS: `Promise.allSettled`)
-- [x] `fan.timeout(ms, thunk)` — タイムアウト付き実行 (Rust: deadline loop, TS: `Promise.race` + setTimeout)
-- [x] テスト (`spec/lang/fan_ext_test.almd` — 4 pass)
-- [ ] `fan.map(xs, limit: n, f)` — 並行数制限（将来）
-- [ ] `env.sleep_ms` → `fan.sleep` に移動検討（将来）
+- [x] `fan.any` — returns first success. Equivalent to `Promise.any` (Rust: `mpsc::channel`, TS: `Promise.any`)
+- [x] `fan.settle` — returns all results. Equivalent to `Promise.allSettled` (Rust: thread + collect, TS: `Promise.allSettled`)
+- [x] `fan.timeout(ms, thunk)` — execute with timeout (Rust: deadline loop, TS: `Promise.race` + setTimeout)
+- [x] Tests (`spec/lang/fan_ext_test.almd` — 4 pass)
+- [ ] `fan.map(xs, limit: n, f)` — concurrency limit (future)
+- [ ] Consider moving `env.sleep_ms` to `fan.sleep` (future)
 
-### Phase 6 (将来): ストリーミング
+### Phase 6 (future): Streaming
 
-- [ ] `websocket` モジュール（connect, send, receive, close）
+- [ ] `websocket` module (connect, send, receive, close)
 - [ ] `http.stream` for SSE
 - [ ] Rust: `tokio-tungstenite` / `reqwest` streaming
 - [ ] TS: `WebSocket` API / `ReadableStream`
-- [ ] `for item in stream { }` — 既存の `for...in` が Stream を認識
+- [ ] `for item in stream { }` — existing `for...in` recognizes Stream
 
 ---
 
-## 13. この設計が置換するもの
+## 13. What This Design Replaces
 
-| 旧設計 | fan での対応 |
-|--------|------------|
-| `async fn` (structured-concurrency) | 不要。`effect fn` がそのまま async |
-| `await expr` (structured-concurrency) | 不要。コンパイラが自動挿入 |
-| `async let` (structured-concurrency) | `fan { }` に置換 |
-| `parallel { }` (platform-async) | `fan { }` に置換 |
-| `race()` stdlib | `fan.race` に統合 |
-| `timeout()` stdlib | `fan.timeout`（将来） |
-| `sleep()` stdlib | `env.sleep_ms` のまま / 将来 `fan.sleep` |
+| Previous Design | Fan Replacement |
+|----------------|-----------------|
+| `async fn` (structured-concurrency) | Not needed. `effect fn` is async as-is |
+| `await expr` (structured-concurrency) | Not needed. Compiler auto-inserts |
+| `async let` (structured-concurrency) | Replaced by `fan { }` |
+| `parallel { }` (platform-async) | Replaced by `fan { }` |
+| `race()` stdlib | Merged into `fan.race` |
+| `timeout()` stdlib | `fan.timeout` (future) |
+| `sleep()` stdlib | Remains as `env.sleep_ms` / future `fan.sleep` |
 
-## 14. 追加しないもの
+## 14. What We Are Not Adding
 
-| 機能 | 理由 |
-|------|------|
-| `async` キーワード | 不要 — `effect fn` で代替 |
-| `await` キーワード | 不要 — コンパイラ自動挿入 |
-| `Future[T]` / `Promise` 型 | 内部のみ — ユーザーは `Result[T, E]` |
-| 手動タスク spawn | `fan` を使う |
-| チャネル / メッセージパッシング | supervision-and-actors.md に延期 |
-| アクターモデル | supervision-and-actors.md に延期 |
+| Feature | Reason |
+|---------|--------|
+| `async` keyword | Not needed — `effect fn` is the replacement |
+| `await` keyword | Not needed — compiler auto-inserts |
+| `Future[T]` / `Promise` type | Internal only — users see `Result[T, E]` |
+| Manual task spawn | Use `fan` |
+| Channels / message passing | Deferred to supervision-and-actors.md |
+| Actor model | Deferred to supervision-and-actors.md |
 
-## キーワード追加
+## Keyword Addition
 
-| キーワード | 用途 |
-|-----------|------|
-| `fan` | 並行処理ブロック + 名前空間（唯一の追加） |
+| Keyword | Purpose |
+|---------|---------|
+| `fan` | Concurrency block + namespace (the only addition) |
 
 ---
 
 ## Status
 
-設計統合完了。実装は Phase 0（非同期基盤）から開始。
+Design unification complete. Implementation starts from Phase 0 (async foundation).

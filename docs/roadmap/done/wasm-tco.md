@@ -1,34 +1,36 @@
+<!-- description: Tail call optimization for WASM target to prevent stack overflow -->
+<!-- done: 2026-03-23 -->
 # WASM Tail Call Optimization
 
-## Status: 未実装 — deep recursion (100K+) で stack overflow
+## Status: Not implemented — stack overflow on deep recursion (100K+)
 
-## 現状
+## Current State
 
-Almide の TCO 戦略はターゲット依存:
+Almide's TCO strategy is target-dependent:
 
-| Target | TCO 方式 | 状態 |
-|---|---|---|
-| Rust | LLVM が自動変換 | 動作する |
-| TS/JS | V8/JSC JIT が最適化 | 動作する |
-| **WASM** | **なし** | **stack overflow** |
+| Target | TCO Strategy | Status |
+|--------|-------------|--------|
+| Rust | LLVM auto-transforms | Works |
+| TS/JS | V8/JSC JIT optimizes | Works |
+| **WASM** | **None** | **stack overflow** |
 
-WASM codegen は全ての再帰呼び出しに `call` 命令を使用。コンパイラ側にもランタイム側にも TCO がないため、深い再帰でスタックを使い果たす。
+WASM codegen uses `call` instructions for all recursive calls. Neither the compiler nor the runtime has TCO, so deep recursion exhausts the stack.
 
 ```
-// sum_to(100000, 0) → 100,000 フレーム → stack overflow
+// sum_to(100000, 0) → 100,000 frames → stack overflow
 fn sum_to(n, acc) = if n <= 0 then acc else sum_to(n - 1, acc + n)
 ```
 
-## 影響するテスト
+## Affected Tests
 
 - `spec/lang/tco_test.almd` — "tco deep recursion" (sum_to 100K)
-- 間接的に deep recursion を使うテスト全般
+- All tests that indirectly use deep recursion
 
-## 選択肢
+## Options
 
-### A. コンパイラ IR パスで tail call → loop 変換（推奨）
+### A. Compiler IR pass: tail call → loop transformation (recommended)
 
-自己再帰の tail call を loop + 引数再代入に変換する IR パス。
+An IR pass that converts self-recursive tail calls into loop + argument reassignment.
 
 ```
 // Before (IR)
@@ -48,76 +50,76 @@ fn sum_to(n, acc) {
 }
 ```
 
-**利点**:
-- 全ターゲット（Rust/TS/JS/WASM）で一貫して動作
-- ランタイム依存なし
-- WASM proposal の実装状況に左右されない
+**Advantages**:
+- Works consistently across all targets (Rust/TS/JS/WASM)
+- No runtime dependency
+- Not affected by WASM proposal implementation status
 
-**検出ルール**: 関数末尾の `Call { target: Named(self_name) }` で、引数が全て self の params と対応
+**Detection rule**: `Call { target: Named(self_name) }` at function tail, where all arguments correspond to self's params
 
-**実装箇所**: `src/codegen/` にナノパスとして追加。mono の後、codegen の前。
+**Implementation location**: Add as a nanopass in `src/codegen/`. After mono, before codegen.
 
-**対応パターン**:
-1. **直接自己再帰** (Phase 1): `fn f(...) { ... f(...) }` — 最も一般的
-2. **if/match 分岐の tail position** (Phase 1): `if cond { base } else { f(...) }`
-3. **相互再帰** (Phase 2): `fn f() { g() }; fn g() { f() }` — trampoline が必要
-4. **CPS 変換** (Phase 3): 一般的な tail call — 難度高
+**Supported patterns**:
+1. **Direct self-recursion** (Phase 1): `fn f(...) { ... f(...) }` — most common
+2. **if/match branch tail position** (Phase 1): `if cond { base } else { f(...) }`
+3. **Mutual recursion** (Phase 2): `fn f() { g() }; fn g() { f() }` — requires trampoline
+4. **CPS transformation** (Phase 3): general tail calls — high difficulty
 
-### B. WASM return_call 命令の使用
+### B. Using WASM return_call Instructions
 
-WASM Tail Call proposal の `return_call` / `return_call_indirect` 命令を使う。
+Use `return_call` / `return_call_indirect` instructions from the WASM Tail Call proposal.
 
-**利点**: 相互再帰も含めて全てのtail callに対応
-**欠点**:
-- wasmtime: `--wasm tail-call` フラグが必要（デフォルトOFF）
-- ブラウザ: Chrome のみ実験的サポート、Firefox/Safari 未対応
-- wasm-encoder クレートの対応確認が必要
-- ポータビリティ喪失
+**Advantages**: Handles all tail calls including mutual recursion
+**Disadvantages**:
+- wasmtime: requires `--wasm tail-call` flag (off by default)
+- Browsers: experimental support in Chrome only, Firefox/Safari unsupported
+- Need to verify wasm-encoder crate support
+- Loss of portability
 
-### C. Trampoline パターン
+### C. Trampoline Pattern
 
-再帰呼び出しを「次の呼び出し情報を返す」形に変換し、ドライバーループで回す。
+Convert recursive calls to "return next call info" form and run in a driver loop.
 
 ```wasm
-;; 各関数は "Continue(args)" か "Done(result)" を返す
-;; ドライバーがループで Continue を処理
+;; Each function returns "Continue(args)" or "Done(result)"
+;; The driver processes Continue in a loop
 ```
 
-**利点**: 相互再帰にも対応
-**欠点**: 全呼び出しにオーバーヘッド（ヒープ割り当て）、複雑
+**Advantages**: Handles mutual recursion
+**Disadvantages**: Overhead on all calls (heap allocation), complex
 
-## 推奨実装計画
+## Recommended Implementation Plan
 
-### Phase 1: 自己再帰 tail call → loop（最優先）
+### Phase 1: Self-Recursive Tail Call → Loop (Top Priority)
 
-1. **Tail position 検出器**: `is_tail_position(expr, fn_name) -> bool`
-   - 関数body末尾の Call
-   - if/match の各分岐末尾の Call
-   - do ブロック末尾の Call
+1. **Tail position detector**: `is_tail_position(expr, fn_name) -> bool`
+   - Call at the end of function body
+   - Call at the end of each if/match branch
+   - Call at the end of do block
 
-2. **ループ書き換えパス**: `pass_tco.rs`
-   - 対象: 自分自身を tail position で呼ぶ関数
-   - 変換: body 全体を `loop { ... }` で包み、tail call を引数更新 + `continue` に置換
-   - IR ノード: 既存の `Loop` + `Continue` + `Assign` を活用
+2. **Loop rewrite pass**: `pass_tco.rs`
+   - Target: functions that call themselves in tail position
+   - Transform: wrap entire body in `loop { ... }`, replace tail calls with argument updates + `continue`
+   - IR nodes: use existing `Loop` + `Continue` + `Assign`
 
-3. **テスト**:
-   - `tco_test.almd` の全テストが WASM で pass
-   - Rust ターゲットの既存テストが regression しない
+3. **Tests**:
+   - All tests in `tco_test.almd` pass on WASM
+   - Existing tests on Rust target do not regress
 
-### Phase 2: return_call 対応（optional）
+### Phase 2: return_call Support (Optional)
 
-wasmtime のデフォルトサポート待ち。対応したら wasm-encoder の `return_call` を使って相互再帰もカバー。
+Waiting for wasmtime default support. Once available, use wasm-encoder's `return_call` to also cover mutual recursion.
 
-## 作業量見積もり
+## Effort Estimate
 
-- Phase 1 tail position 検出: IR ウォーク、1ファイル ~150行
-- Phase 1 loop 変換: IR 書き換え、1ファイル ~200行
-- Phase 1 テスト: 既存テストで検証
-- 合計: ~350行の新規コード、1-2セッション
+- Phase 1 tail position detection: IR walk, 1 file ~150 lines
+- Phase 1 loop transformation: IR rewrite, 1 file ~200 lines
+- Phase 1 tests: verify with existing tests
+- Total: ~350 lines of new code, 1-2 sessions
 
-## 関連ファイル
+## Related Files
 
-- `src/codegen/target.rs` — codegen パイプライン定義
-- `src/codegen/emit_wasm/calls.rs:128-137` — `call` 命令の emit
-- `src/ir/mod.rs:218` — `Call` IR ノード
-- `spec/lang/tco_test.almd` — TCO テスト
+- `src/codegen/target.rs` — codegen pipeline definition
+- `src/codegen/emit_wasm/calls.rs:128-137` — emit of `call` instructions
+- `src/ir/mod.rs:218` — `Call` IR node
+- `spec/lang/tco_test.almd` — TCO tests

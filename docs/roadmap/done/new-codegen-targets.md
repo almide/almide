@@ -1,10 +1,12 @@
-# New Codegen Targets [ACTIVE]
+<!-- description: Candidate new codegen targets (Go, Python, C, Swift, Kotlin) -->
+<!-- done: 2026-03-18 -->
+# New Codegen Targets
 
-IR redesign 完了により、新ターゲット追加のコストが大幅低下。`&IrProgram` を受け取って文字列を返すだけで新バックエンドが書ける。
+With the IR redesign complete, the cost of adding new targets has dropped significantly. A new backend only needs to accept `&IrProgram` and return a string.
 
 ## Why
 
-Almide は「LLM が最も正確に書ける言語」。ターゲットが増えれば、LLM が Almide で書いたコードをより多くの環境で実行できる。IR が正規化されているため、各ターゲットは AST の複雑さを理解する必要がない。
+Almide is "the language LLMs can write most accurately." More targets mean LLM-written Almide code can run in more environments. Since the IR is normalized, each target does not need to understand the complexity of the AST.
 
 ## Candidate targets
 
@@ -12,27 +14,27 @@ Almide は「LLM が最も正確に書ける言語」。ターゲットが増え
 
 | Target | Output | Use case |
 |--------|--------|----------|
-| **Go** | `.go` | Cloud-native CLI、サーバーサイド。GC あり、goroutine |
-| **Python** | `.py` | ML/データサイエンス、スクリプティング。最大のエコシステム |
+| **Go** | `.go` | Cloud-native CLI, server-side. GC, goroutine |
+| **Python** | `.py` | ML/data science, scripting. Largest ecosystem |
 
 ### Priority 2: Strategic
 
 | Target | Output | Use case |
 |--------|--------|----------|
-| **C** | `.c` | 組み込み、最大移植性、FFI ブリッジ |
-| **Swift** | `.swift` | iOS/macOS ネイティブアプリ |
-| **Kotlin** | `.kt` | Android、JVM サーバーサイド |
+| **C** | `.c` | Embedded systems, maximum portability, FFI bridge |
+| **Swift** | `.swift` | iOS/macOS native apps |
+| **Kotlin** | `.kt` | Android, JVM server-side |
 
 ### Priority 3: Experimental
 
 | Target | Output | Use case |
 |--------|--------|----------|
-| **Zig** | `.zig` | Rust 代替、WASM、C interop |
-| **Lua** | `.lua` | ゲームエンジン組み込み (Roblox, Neovim) |
+| **Zig** | `.zig` | Rust alternative, WASM, C interop |
+| **Lua** | `.lua` | Game engine embedding (Roblox, Neovim) |
 
 ## Implementation pattern
 
-各ターゲットは同一パターンで実装:
+Each target is implemented using the same pattern:
 
 ```rust
 // src/emit_go/mod.rs
@@ -43,18 +45,18 @@ pub fn emit(ir: &IrProgram) -> String {
 }
 ```
 
-IR の主要ノードに対する変換:
+Transformations for the main IR nodes:
 
-| IR Node | 各ターゲットの仕事 |
-|---------|-------------------|
-| `IrExprKind::BinOp { op: AddInt }` | `+` (全言語共通) |
-| `IrExprKind::Call { target: Module }` | stdlib マッピング (言語固有) |
-| `IrTypeDeclKind::Variant` | tagged union / sealed class / enum (言語固有) |
-| `IrExprKind::Match` | switch / match / when (言語固有) |
-| `IrFunction { is_effect: true }` | Result / Exception / error return (言語固有) |
+| IR Node | Each Target's Responsibility |
+|---------|------------------------------|
+| `IrExprKind::BinOp { op: AddInt }` | `+` (common across all languages) |
+| `IrExprKind::Call { target: Module }` | stdlib mapping (language-specific) |
+| `IrTypeDeclKind::Variant` | tagged union / sealed class / enum (language-specific) |
+| `IrExprKind::Match` | switch / match / when (language-specific) |
+| `IrFunction { is_effect: true }` | Result / Exception / error return (language-specific) |
 
-推定規模: 1 ターゲットあたり 500-1000 行 (Rust emitter は ~1200 行、TS は ~800 行)。
+Estimated size: 500-1000 lines per target (Rust emitter is ~1200 lines, TS is ~800 lines).
 
 ## Unlocked by
 
-IR Redesign Phase 5 完了。codegen の入力が `&IrProgram` に統一されたため、新ターゲットは AST を理解する必要がない。
+IR Redesign Phase 5 complete. Codegen input is unified to `&IrProgram`, so new targets do not need to understand the AST.

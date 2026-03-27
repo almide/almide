@@ -1,27 +1,29 @@
-# Runtime Layout Unification [ACTIVE]
+<!-- description: Unify Rust and TS runtime file layout and management -->
+<!-- done: 2026-03-17 -->
+# Runtime Layout Unification
 
 ## Problem
 
-Rust と TypeScript のランタイムが別々の場所・別々の形式で管理されている。
+Rust and TypeScript runtimes are managed in separate locations with separate formats.
 
 ```
-現状:
-  runtime/rust/src/*.rs        Rust ランタイム（素の .rs、include_str! で埋め込み）
-  src/emit_ts_runtime/*.rs     TS ランタイム（Rust const 文字列として TS コードを保持）
+Current:
+  runtime/rust/src/*.rs        Rust runtime (plain .rs, embedded via include_str!)
+  src/emit_ts_runtime/*.rs     TS runtime (TS code held as Rust const string literals)
 ```
 
-- TS 側は `.rs` ファイル内に TS コードが文字列リテラルで埋め込まれている
-- IDE のシンタックスハイライト・補完が効かない
-- テストが書けない（文字列なので）
-- Rust/TS で構造が非対称
+- TS side has TS code embedded as string literals inside `.rs` files
+- IDE syntax highlighting and completion do not work
+- Cannot write tests (since it is a string)
+- Asymmetric structure between Rust/TS
 
 ## Goal
 
 ```
 runtime/
-├── rust/src/*.rs       Rust ランタイム（現状維持）
+├── rust/src/*.rs       Rust runtime (no changes)
 └── ts/
-    ├── string.ts       TS ランタイム（素の .ts）
+    ├── string.ts       TS runtime (plain .ts)
     ├── list.ts
     ├── map.ts
     ├── int.ts
@@ -34,24 +36,24 @@ runtime/
     └── ...
 ```
 
-- 両ターゲットが `runtime/{lang}/` 以下に統一
-- TS ランタイムが素の `.ts` ファイルになり、IDE サポート・単体テストが可能
-- コンパイラは `include_str!("../../runtime/ts/string.ts")` で読み込み
+- Both targets unified under `runtime/{lang}/`
+- TS runtime becomes plain `.ts` files, enabling IDE support and unit testing
+- Compiler reads via `include_str!("../../runtime/ts/string.ts")`
 
 ## Migration Steps
 
-1. `src/emit_ts_runtime/core.rs` の各 `const MOD_*_TS: &str = r#"..."#` を `runtime/ts/*.ts` に切り出し
-2. `src/emit_ts_runtime/collections.rs` 同様
-3. `src/emit_ts_runtime/data.rs` 同様
-4. `src/emit_ts_runtime/io.rs` 同様
-5. `src/emit_ts_runtime/net.rs` 同様
-6. `src/emit_ts_runtime/mod.rs` を修正: `include_str!("../../runtime/ts/*.ts")` で読み込み
-7. `src/emit_ts_runtime/*.rs` の Rust const 定義を削除
-8. `src/emit_ts_runtime/` 配下は `mod.rs`（ランタイム結合ロジック）のみ残す
-9. Cross-Target CI で TS/JS テストが通ることを確認
+1. Extract each `const MOD_*_TS: &str = r#"..."#` from `src/emit_ts_runtime/core.rs` into `runtime/ts/*.ts`
+2. Same for `src/emit_ts_runtime/collections.rs`
+3. Same for `src/emit_ts_runtime/data.rs`
+4. Same for `src/emit_ts_runtime/io.rs`
+5. Same for `src/emit_ts_runtime/net.rs`
+6. Modify `src/emit_ts_runtime/mod.rs`: read via `include_str!("../../runtime/ts/*.ts")`
+7. Delete Rust const definitions from `src/emit_ts_runtime/*.rs`
+8. Keep only `mod.rs` (runtime assembly logic) under `src/emit_ts_runtime/`
+9. Verify TS/JS tests pass in Cross-Target CI
 
 ## Notes
 
-- Rust 側は `runtime/rust/src/` で既に正しい構造。変更不要
-- TS ファイルに切り出す際、`r#"..."#` のエスケープを解除するだけ（コード自体は同じ）
-- Deno で `runtime/ts/` の単体テストを書けるようになる（将来）
+- Rust side already has the correct structure in `runtime/rust/src/`. No changes needed
+- When extracting to TS files, just unescape `r#"..."#` (the code itself is the same)
+- Enables writing unit tests for `runtime/ts/` with Deno (future)

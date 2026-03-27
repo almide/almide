@@ -1,82 +1,83 @@
+<!-- description: Multi-layer platform vision with pluggable renderer and host bindings -->
 # Almide Platform Architecture Vision
 
-**優先度:** post-1.0 (2.x)
-**リサーチ:** Flutter/RN New Architectureの教訓
+**Priority:** post-1.0 (2.x)
+**Research:** Lessons from Flutter/RN New Architecture
 
-## ビジョン
+## Vision
 
-Almideを「app runtime **にもなる** 汎用言語」として設計する。
-CLI/server/scriptingの実用性を維持しつつ、app runtime層を追加レイヤーとして乗せる。
-言語が先、プラットフォームは後。Kotlinの軌跡（JVM → Android → Multiplatform → Server）と同じ方向。
+Design Almide as a general-purpose language that **can also serve as** an app runtime.
+Maintain CLI/server/scripting practicality while adding an app runtime layer on top.
+Language first, platform second. The same trajectory as Kotlin (JVM → Android → Multiplatform → Server).
 
 ```
 [Almide Language + DSL]
         ↓
-[Typed IR / Nanopass Compiler]       ← 完成済み
+[Typed IR / Nanopass Compiler]       ← complete
         ↓
-[Reactive Runtime + Effects]         ← effect fn + fan (基礎あり)
+[Reactive Runtime + Effects]         ← effect fn + fan (foundation exists)
         ↓
-[Domain Core / Sync / Persistence]   ← 未着手
+[Domain Core / Sync / Persistence]   ← not started
         ↓
-[Host Bindings via IDL + Codegen]    ← stdlib TOML (原型あり)
+[Host Bindings via IDL + Codegen]    ← stdlib TOML (prototype exists)
         ↓
-[Pluggable Renderer]                 ← 未着手
+[Pluggable Renderer]                 ← not started
         ↓
 [iOS / Android / Web / Desktop]
 ```
 
-## 5層アーキテクチャ
+## 5-Layer Architecture
 
 ### Layer 1: Language Kernel ✅
-- メモリ管理 (borrow/clone analysis)
-- 並行実行 (fan)
-- エフェクト分離 (effect fn)
-- capability permission (effect isolation Layer 1)
+- Memory management (borrow/clone analysis)
+- Concurrent execution (fan)
+- Effect isolation (effect fn)
+- Capability permission (effect isolation Layer 1)
 
 ### Layer 2: Typed Host Boundary (1.x)
-- 現在: stdlib TOML + build.rs codegen
-- 目標: IDL/schema-first, codegen-first host bindings
-- ゼロコピー境界、同期/非同期明示
+- Current: stdlib TOML + build.rs codegen
+- Goal: IDL/schema-first, codegen-first host bindings
+- Zero-copy boundary, explicit sync/async
 
 ### Layer 3: Core Domain Runtime (2.x)
-- state machine
-- offline-first data graph
-- sync engine (CRDT/merge)
-- cache/persistence abstraction
+- State machine
+- Offline-first data graph
+- Sync engine (CRDT/merge)
+- Cache/persistence abstraction
 
 ### Layer 4: Pluggable Renderer (2.x)
-- Native widget renderer (OS親和)
-- Custom scene renderer (Flutter的一貫性)
-- Hybrid renderer (画面単位切替)
+- Native widget renderer (OS-native)
+- Custom scene renderer (Flutter-style consistency)
+- Hybrid renderer (per-screen switching)
 
 ### Layer 5: Evolution Layer (1.x-)
-- edition system ✅
+- Edition system ✅
 - ABI versioning
-- module-level migration
-- schema versioning
+- Module-level migration
+- Schema versioning
 
-## Almideが既に持っている優位性
+## Advantages Almide Already Has
 
-| 要素 | 状態 |
+| Element | Status |
 |---|---|
-| Typed IR + Nanopass compiler | ✅ 完成 |
-| Multi-target codegen (Rust/TS) | ✅ 完成 |
+| Typed IR + Nanopass compiler | ✅ Complete |
+| Multi-target codegen (Rust/TS) | ✅ Complete |
 | Effect isolation | ✅ Layer 1 |
 | Fan concurrency | ✅ thread + Promise |
 | Package management | ✅ almide.lock |
 | Edition system | ✅ 2026 |
 | Template-driven target extension | ✅ TOML + pass |
 
-## 次のステップ (1.x で着手可能)
+## Next Steps (Can Start in 1.x)
 
-1. **Capability declarations** — effect fn の permission model 拡張
-2. **IDL for host bindings** — stdlib TOML → 汎用IDL への進化
-3. **Hot module replacement** — signed + ABI checked module swap
-4. **Devtools** — reactive graph inspector, host call profiler
+1. **Capability declarations** — Extend effect fn permission model
+2. **IDL for host bindings** — Evolve stdlib TOML → general-purpose IDL
+3. **Hot module replacement** — Signed + ABI checked module swap
+4. **Devtools** — Reactive graph inspector, host call profiler
 
-## 設計原則
+## Design Principles
 
-1. **UIを中核にしない** — 実行モデル + 型付き境界 + データ同期が中核
-2. **ブリッジではなくFFI的宣言境界** — schema-first / codegen-first
-3. **描画とホスト統合を分離** — Renderer と Host API は別レイヤー
-4. **フレームワークではなく "OS for apps"** — runtime + package + permission + diagnostics + devtools
+1. **UI is not the core** — Execution model + typed boundary + data sync are the core
+2. **Declarative FFI boundary, not bridges** — schema-first / codegen-first
+3. **Separate rendering from host integration** — Renderer and Host API are different layers
+4. **"OS for apps", not a framework** — runtime + package + permission + diagnostics + devtools

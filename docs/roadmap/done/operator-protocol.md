@@ -1,53 +1,55 @@
-# Operator Protocol [ACTIVE]
+<!-- description: Convention-based operator dispatch (==, repr, sort, hash) -->
+<!-- done: 2026-03-15 -->
+# Operator Protocol
 
-Convention 宣言に基づく演算子・言語機能のディスパッチ。
-Derive Conventions Phase 1-2 (convention 宣言 + method resolution) の上に構築。
+Operator and language feature dispatch based on convention declarations.
+Built on top of Derive Conventions Phase 1-2 (convention declaration + method resolution).
 
 ## Scope
 
-| 状況 | 変換 | 前提 |
+| Situation | Transformation | Prerequisite |
 |------|------|------|
 | `a == b` where a: Dog | `Dog.eq(a, b)` | `type Dog: Eq` |
 | `"${d}"` where d: Dog | `Dog.repr(d)` | `type Dog: Repr` |
-| `list.sort(dogs)` | `Dog.ord` を comparator に | `type Dog: Ord` |
-| `map[dog]` | `Dog.hash(dog)` をキーに | `type Dog: Hash` |
+| `list.sort(dogs)` | `Dog.ord` as comparator | `type Dog: Ord` |
+| `map[dog]` | `Dog.hash(dog)` as key | `type Dog: Hash` |
 
 ## Implementation
 
 ### `==` / `!=` dispatch
-- checker: `a == b` で `a` の型が `deriving Eq` を持つとき、`Dog.eq(a, b)` が存在すれば使用
-- 現状 `almide_eq!` マクロで全型に `==` が動くので、**カスタム eq が定義されている場合のみディスパッチ**
-- codegen: `almide_eq!(a, b)` → `Dog_eq(a.clone(), b.clone())` に切り替え
+- checker: when `a == b` and `a`'s type has `deriving Eq`, use `Dog.eq(a, b)` if it exists
+- Currently `almide_eq!` macro makes `==` work for all types, so **dispatch only when a custom eq is defined**
+- codegen: switch from `almide_eq!(a, b)` to `Dog_eq(a.clone(), b.clone())`
 
 ### String interpolation dispatch
-- lower: `"${d}"` の string interp で `d` の型が `deriving Repr` → `Dog.repr(d)` を挿入
-- 現状 `format!("{:?}", d)` (Debug) で出力 → custom repr があれば `format!("{}", Dog_repr(d))` に
+- lower: when `"${d}"` string interp and `d`'s type has `deriving Repr`, insert `Dog.repr(d)`
+- Currently outputs with `format!("{:?}", d)` (Debug); if custom repr exists, switch to `format!("{}", Dog_repr(d))`
 
 ### Sort dispatch
-- stdlib `list.sort` の comparator 引数に `Dog.ord` を自動挿入
-- codegen で `dogs.sort_by(|a, b| Dog_ord(a, b))` を生成
+- Auto-insert `Dog.ord` as the comparator argument for stdlib `list.sort`
+- codegen generates `dogs.sort_by(|a, b| Dog_ord(a, b))`
 
 ## Priority
-String interpolation > `==` dispatch > sort。auto-derive (下記) が先に必要かもしれない。
+String interpolation > `==` dispatch > sort. Auto-derive (below) may need to come first.
 
 ---
 
 # Auto Derive
 
-Convention 関数が未定義の場合、コンパイラが自動生成。
+When a convention function is undefined, the compiler auto-generates it.
 
-| Convention | Auto-derive 内容 |
-|-----------|-----------------|
-| `Eq` | 全フィールドの `==` で比較 |
-| `Repr` | `"TypeName { field1: value1, ... }"` 形式 |
-| `Ord` | フィールド順に辞書順比較 |
-| `Hash` | 全フィールドの hash を combine |
+| Convention | Auto-derive Content |
+|-----------|---------------------|
+| `Eq` | Compare all fields with `==` |
+| `Repr` | `"TypeName { field1: value1, ... }"` format |
+| `Ord` | Lexicographic comparison in field order |
+| `Hash` | Combine hash of all fields |
 
 ## Implementation
-- IR lowering パスで、`deriving Eq` だが `Dog.eq` が未定義の場合に `IrFunction` を自動生成
-- field 一覧は `IrTypeDecl` から取得
-- Rust codegen は既に `#[derive(PartialEq)]` を出しているので、auto-derive は Rust ターゲットでは不要
-- TS/IR interpreter では必要
+- In the IR lowering pass, auto-generate `IrFunction` when `deriving Eq` but `Dog.eq` is undefined
+- Field list obtained from `IrTypeDecl`
+- Rust codegen already emits `#[derive(PartialEq)]`, so auto-derive is unnecessary for the Rust target
+- Needed for TS/IR interpreter
 
 ## Files
 ```

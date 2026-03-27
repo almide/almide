@@ -1,41 +1,42 @@
-# Effect Type Integration — FnType に EffectSet を持たせる
+<!-- description: Embed EffectSet into FnType for type-level effect tracking -->
+# Effect Type Integration — Embed EffectSet in FnType
 
-**優先度:** 2.x
-**前提:** Effect System Phase 1-2 完了、HKT Foundation Phase 1-4 完了
-**構文制約:** ユーザー構文に一切にじませない。`effect fn` が唯一のマーカー。
+**Priority:** 2.x
+**Prerequisites:** Effect System Phase 1-2 complete, HKT Foundation Phase 1-4 complete
+**Syntax constraint:** Never leaks into user syntax. `effect fn` is the only marker.
 
-## 概要
+## Overview
 
-現在 Effect 推論結果は `IrProgram.effect_map` (HashMap) に格納されている。
-これを型レベルに昇格し、`FnType` の一部として EffectSet を持たせる。
+Currently, Effect inference results are stored in `IrProgram.effect_map` (HashMap).
+Promote this to the type level, embedding EffectSet as part of `FnType`.
 
-## 現状
+## Current State
 
 ```rust
-// IrProgram に外付け
+// External to IrProgram
 pub effect_map: EffectMap,  // HashMap<String, FunctionEffects>
 ```
 
-## 目標
+## Goal
 
 ```rust
-// FnType の一部として
+// As part of FnType
 struct FnType {
     params: Vec<Ty>,
     ret: Ty,
-    effects: EffectSet,  // {IO, Net, ...} — コンパイラが自動推論
+    effects: EffectSet,  // {IO, Net, ...} — automatically inferred by compiler
 }
 ```
 
-## メリット
+## Benefits
 
-- 型チェッカーが effect を型の一部として制約に使える
-- 「この関数は {Net} しか使わない」を型レベルで保証
-- Trait system と統合した際に effect-polymorphic な抽象が可能 (内部的に)
-- almide check --effects の精度が型推論と連動
+- Type checker can use effects as part of types for constraint checking
+- Type-level guarantee that "this function only uses {Net}"
+- Enables effect-polymorphic abstractions when integrated with the trait system (internally)
+- Accuracy of almide check --effects is linked to type inference
 
-## 構文への影響
+## Impact on Syntax
 
-**なし。** ユーザーは引き続き `fn` / `effect fn` だけ書く。
-Effect の粒度 (IO/Net/Env 等) は型システムの内部情報。
-`effect fn[IO]` のような構文は **導入しない**。
+**None.** Users continue writing only `fn` / `effect fn`.
+Effect granularity (IO/Net/Env, etc.) is internal type system information.
+Syntax like `effect fn[IO]` is **not introduced**.

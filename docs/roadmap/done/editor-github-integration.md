@@ -1,4 +1,6 @@
-# Editor & GitHub Integration [ON HOLD]
+<!-- description: TextMate grammar, VS Code extension, and Chrome syntax highlighting -->
+<!-- done: 2026-03-18 -->
+# Editor & GitHub Integration
 
 ### TextMate Grammar + Editor Extensions
 

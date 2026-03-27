@@ -1,4 +1,6 @@
-# --emit-ir: IR JSON Export [ACTIVE]
+<!-- description: Export typed IR as JSON via --emit-ir flag -->
+<!-- done: 2026-03-15 -->
+# --emit-ir: IR JSON Export
 
 ## Summary
 

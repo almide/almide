@@ -1,33 +1,35 @@
-# Remove `do` Block [DONE]
+<!-- description: Complete removal of do block from the language -->
+<!-- done: 2026-03-24 -->
+# Remove `do` Block
 
-**完了**: 2026-03-24
+**Completed**: 2026-03-24
 
-`do` ブロックを言語から完全に撤廃した。
+Completely removed `do` blocks from the language.
 
-## 実施内容
+## Changes Made
 
-### Phase 1: .almd ファイル移行 (66箇所)
-- `effect fn ... = do { }` → `= { }` (16箇所)
-- `do { guard COND else break }` → `while COND { }` (35箇所)
-- `do { guard ... else ok(val)/err(val) }` → `while` + tail expression (15箇所)
+### Phase 1: .almd file migration (66 locations)
+- `effect fn ... = do { }` -> `= { }` (16 locations)
+- `do { guard COND else break }` -> `while COND { }` (35 locations)
+- `do { guard ... else ok(val)/err(val) }` -> `while` + tail expression (15 locations)
 
-### Phase 2: コンパイラ除去
-- `Expr::DoBlock` を AST から削除
-- `IrExprKind::DoBlock` を IR から削除
-- Parser: `do` キーワードを reject + migration hint
-- 46ファイル変更、-349行
+### Phase 2: Compiler removal
+- Removed `Expr::DoBlock` from AST
+- Removed `IrExprKind::DoBlock` from IR
+- Parser: reject `do` keyword + migration hint
+- 46 files changed, -349 lines
 
-### Phase 3: ドキュメント + リネーム
-- `do_guard_test.almd` → `guard_test.almd`
-- `do_block_pure_test.almd` → `while_loop_test.almd`
-- `codegen_do_block_test.almd` → `codegen_loop_guard_test.almd`
+### Phase 3: Documentation + Rename
+- `do_guard_test.almd` -> `guard_test.almd`
+- `do_block_pure_test.almd` -> `while_loop_test.almd`
+- `codegen_do_block_test.almd` -> `codegen_loop_guard_test.almd`
 
-### バグ修正
-- StreamFusion の `inline_single_use_collection_lets` が Guard stmt 内の変数参照を substitute していなかったバグを発見・修正
+### Bug Fix
+- Discovered and fixed a bug where StreamFusion's `inline_single_use_collection_lets` was not substituting variable references inside Guard stmts
 
-## 結果
+## Results
 
-- ループ構文: `for` + `while` の2つに統一
-- `guard` 文は `while` / `for` 内で引き続き有効
-- `try` ブロックは不導入（`effect fn` の auto-? で十分）
-- 159/159 テスト通過
+- Loop syntax: unified to two forms: `for` + `while`
+- `guard` statements remain valid inside `while` / `for`
+- `try` blocks not introduced (`effect fn` auto-? is sufficient)
+- 159/159 tests passing

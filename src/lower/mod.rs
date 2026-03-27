@@ -241,6 +241,10 @@ impl<'a> LowerCtx<'a> {
 // ── Public API ──────────────────────────────────────────────────
 
 pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprId, Ty>, env: &TypeEnv) -> IrProgram {
+    lower_program_with_prefix(prog, expr_types, env, None)
+}
+
+fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprId, Ty>, env: &TypeEnv, module_prefix: Option<&str>) -> IrProgram {
     let mut ctx = LowerCtx::new(expr_types, env);
 
     // Collect type conventions (deriving Eq, Repr, etc.)
@@ -271,13 +275,13 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
     for decl in &prog.decls {
         match decl {
             ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, visibility, .. } => {
-                let f = lower_fn(&mut ctx, name, params, body, effect, r#async, span, generics, extern_attrs, visibility, None);
+                let f = lower_fn(&mut ctx, name, params, body, effect, r#async, span, generics, extern_attrs, visibility, module_prefix);
                 functions.push(f);
             }
             // Extern fn without body: include in IR with Hole body (codegen emits `use` import)
             ast::Decl::Fn { name, params, body: None, effect, r#async, span, generics, extern_attrs, visibility, .. } if !extern_attrs.is_empty() => {
                 let hole_body = ast::Expr::Hole { id: ast::ExprId(0), span: span.clone(), resolved_type: None };
-                let f = lower_fn(&mut ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, visibility, None);
+                let f = lower_fn(&mut ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, visibility, module_prefix);
                 functions.push(f);
             }
             ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {
@@ -416,7 +420,7 @@ pub fn lower_module(
     env: &TypeEnv,
     versioned_name: Option<String>,
 ) -> IrModule {
-    let ir_prog = lower_program(prog, expr_types, env);
+    let ir_prog = lower_program_with_prefix(prog, expr_types, env, Some(name));
     IrModule {
         name: sym(name),
         versioned_name: versioned_name.map(|v| sym(&v)),
@@ -434,7 +438,7 @@ fn lower_fn(
     name: &str, params: &[ast::Param], body: &ast::Expr,
     effect: &Option<bool>, r#async: &Option<bool>, span: &Option<ast::Span>,
     generics: &Option<Vec<ast::GenericParam>>, extern_attrs: &[ast::ExternAttr],
-    visibility: &ast::Visibility, _module_prefix: Option<&str>,
+    visibility: &ast::Visibility, module_prefix: Option<&str>,
 ) -> IrFunction {
     ctx.push_scope();
 
@@ -461,10 +465,18 @@ fn lower_fn(
         });
     }
 
-    let ret_ty = if let Some(sig) = ctx.env.functions.get(&sym(name)) {
-        sig.ret.clone()
-    } else {
-        ctx.expr_ty(body)
+    let ret_ty = {
+        // For module functions, look up the module-prefixed name first (e.g., "option.unwrap_or")
+        // to avoid picking up a user function with the same bare name.
+        let prefixed = module_prefix.map(|p| format!("{}.{}", p, name));
+        let sig = prefixed.as_ref()
+            .and_then(|pn| ctx.env.functions.get(&sym(pn)))
+            .or_else(|| ctx.env.functions.get(&sym(name)));
+        if let Some(sig) = sig {
+            sig.ret.clone()
+        } else {
+            ctx.expr_ty(body)
+        }
     };
 
     let ir_body = lower_expr(ctx, body);

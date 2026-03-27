@@ -1,4 +1,6 @@
-# Benchmark Report: LLM Code Generation Cost by Language [ON HOLD]
+<!-- description: Benchmark comparing LLM code generation cost across 16 languages -->
+<!-- done: 2026-03-25 -->
+# Benchmark Report: LLM Code Generation Cost by Language
 
 ## Goal
 

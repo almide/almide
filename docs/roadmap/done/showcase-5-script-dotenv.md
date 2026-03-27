@@ -1,20 +1,22 @@
+<!-- description: Showcase: dotenv file loader and missing-key checker -->
+<!-- done: 2026-03-18 -->
 # Showcase 5: dotenv Loader (Script)
 
-**領域:** Script / 設定管理
-**目的:** .env ファイル読み込み + 環境変数チェック。option + guard の実用例。
+**Domain:** Script / configuration management
+**Purpose:** .env file loading + environment variable checking. Practical example of option + guard.
 
-## 仕様
+## Specification
 
 ```
 almide run showcase/dotenv-check.almd -- .env .env.example
 ```
 
-- `.env` ファイルをパースして key=value の Map に
-- `.env.example` と比較して不足キーを報告
-- コメント (`#`) と空行をスキップ
-- `guard` で早期リターン
+- Parse `.env` file into a key=value Map
+- Compare with `.env.example` and report missing keys
+- Skip comments (`#`) and blank lines
+- Early return with `guard`
 
-## 使う機能
+## Features Used
 
 - `fs.read_text`, `string.lines`, `string.split`
 - `map.set`, `map.contains`, `map.keys`
@@ -23,9 +25,9 @@ almide run showcase/dotenv-check.almd -- .env .env.example
 - `list.filter`, `list.each`
 - `string.trim`, `string.starts_with`
 
-## 成功基準
+## Success Criteria
 
-- [ ] Tier 1 (Rust) で動作
-- [ ] Tier 2 (TS/Deno) で動作
-- [ ] 40行以内
-- [ ] README に使い方記載
+- [ ] Works on Tier 1 (Rust)
+- [ ] Works on Tier 2 (TS/Deno)
+- [ ] Under 40 lines
+- [ ] Usage documented in README

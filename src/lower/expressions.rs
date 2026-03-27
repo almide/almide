@@ -395,6 +395,29 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             ctx.mk(IrExprKind::Await { expr: Box::new(inner) }, ty, span)
         }
 
+        // expr! — keep as Unwrap (distinct from auto-? Try)
+        ast::Expr::Unwrap { expr, .. } => {
+            let inner = lower_expr(ctx, expr);
+            ctx.mk(IrExprKind::Unwrap { expr: Box::new(inner) }, ty, span)
+        }
+        // expr ?? fallback — lower to match: ok(v)/some(v) → v, else → fallback
+        ast::Expr::UnwrapOr { expr, fallback, .. } => {
+            let inner = lower_expr(ctx, expr);
+            let fb = lower_expr(ctx, fallback);
+            // For now, use a dedicated UnwrapOr node if it exists, otherwise fallback to Call
+            ctx.mk(IrExprKind::UnwrapOr { expr: Box::new(inner), fallback: Box::new(fb) }, ty, span)
+        }
+        // expr? — lower to ToOption
+        ast::Expr::ToOption { expr, .. } => {
+            let inner = lower_expr(ctx, expr);
+            ctx.mk(IrExprKind::ToOption { expr: Box::new(inner) }, ty, span)
+        }
+        // expr?.field — keep as IR node for target-specific rendering
+        ast::Expr::OptionalChain { expr: inner_expr, field, .. } => {
+            let inner = lower_expr(ctx, inner_expr);
+            ctx.mk(IrExprKind::OptionalChain { expr: Box::new(inner), field: *field }, ty, span)
+        }
+
         // ── Misc ──
         ast::Expr::Paren { expr, .. } => lower_expr(ctx, expr),
         ast::Expr::Hole { .. } => ctx.mk(IrExprKind::Hole, ty, span),

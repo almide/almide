@@ -1,25 +1,27 @@
-# サーバー非同期 — http.serve effect 化
+<!-- description: Make http.serve handler an effect context for I/O calls -->
+<!-- done: 2026-03-18 -->
+# Server Async — http.serve Effect Integration
 
-## 概要
+## Overview
 
-`http.serve` のハンドラを effect コンテキスト化し、ハンドラ内から effect fn を呼べるようにする。
+Make the `http.serve` handler an effect context so that effect fn can be called from within the handler.
 
-## 現状の問題
+## Current Problem
 
 ```almide
-// 現在: ハンドラは pure コンテキスト — effect fn を呼べない
+// Current: handler is pure context — cannot call effect fn
 effect fn main() -> Unit = {
   http.serve(3000, (req) => {
-    // ここで fs.read_text() や http.get() を呼ぶとコンパイルエラー
+    // Calling fs.read_text() or http.get() here causes a compile error
     http.json(200, "hello")
   })
 }
 ```
 
-## 目標
+## Goal
 
 ```almide
-// ハンドラが effect fn になる
+// Handler becomes effect fn
 effect fn handle(req: Request) -> Response = {
   let (user, prefs) = fan {
     fetch_user(http.req_path(req))
@@ -33,15 +35,15 @@ effect fn main() -> Unit = {
 }
 ```
 
-## 実装方針
+## Implementation Approach
 
 ### Rust (thread backend)
 
-- 各リクエストを `std::thread::spawn` で独立スレッド化
-- ハンドラは通常の `fn(Request) -> Result<Response, String>` として呼ぶ
-- スレッドプールで同時接続数を制限
+- Spawn each request as an independent thread via `std::thread::spawn`
+- Call handler as a normal `fn(Request) -> Result<Response, String>`
+- Limit concurrent connections with a thread pool
 
-### Rust (async backend — 将来)
+### Rust (async backend — future)
 
 - `tokio::spawn` per request
 - connection pooling
@@ -49,15 +51,15 @@ effect fn main() -> Unit = {
 
 ### TS
 
-- Express / Hono ベースのサーバー
-- ハンドラは `async function`
-- 変更なし（TS は既に async）
+- Express / Hono based server
+- Handler is `async function`
+- No changes needed (TS is already async)
 
-## 前提条件
+## Prerequisites
 
-- async backend (on-hold/async-backend.md) の実装
-- または thread backend でのハンドラ effect 化（先行実装可能）
+- Implementation of async backend (on-hold/async-backend.md)
+- Or handler effect-ification on thread backend (can be implemented first)
 
-## 優先度
+## Priority
 
-中。Web アプリケーション開発に必要だが、CLI ツール中心の現段階では不要。
+Medium. Required for web application development, but unnecessary at the current CLI-tool-focused stage.

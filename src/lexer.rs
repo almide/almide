@@ -46,6 +46,9 @@ pub enum TokenType {
     AmpAmp,    // &&
     PipePipe,  // ||
     Underscore,
+    Question,         // ?
+    QuestionDot,      // ?.
+    QuestionQuestion, // ??
     DotDot,    // ..
     DotDotEq,  // ..=
     DotDotDot, // ...
@@ -491,6 +494,8 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
         ('|', Some('>'), _) => (TokenType::PipeArrow, "|>", 2),
         ('&', Some('&'), _) => (TokenType::AmpAmp, "&&", 2),
         ('|', Some('|'), _) => (TokenType::PipePipe, "||", 2),
+        ('?', Some('?'), _) => (TokenType::QuestionQuestion, "??", 2),
+        ('?', Some('.'), _) => (TokenType::QuestionDot, "?.", 2),
         ('.', Some('.'), _) => (TokenType::DotDot, "..", 2),
         // Single-char
         ('(', _, _) => (TokenType::LParen, "(", 1),
@@ -515,6 +520,7 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
         ('%', _, _) => (TokenType::Percent, "%", 1),
         ('|', _, _) => (TokenType::Pipe, "|", 1),
         ('^', _, _) => (TokenType::Caret, "^", 1),
+        ('?', _, _) => (TokenType::Question, "?", 1),
         ('_', _, _) => (TokenType::Underscore, "_", 1),
         ('@', _, _) => (TokenType::At, "@", 1),
         _ => (TokenType::EOF, "", 1), // skip unknown char

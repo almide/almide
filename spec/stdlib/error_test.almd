@@ -14,7 +14,7 @@ test "effect fn returns err" {
 }
 
 effect fn chain_ops(x: Int) -> Result[String, String] = {
-  let n = safe_divide(x, 2);
+  let n = safe_divide(x, 2)!;
   ok(int.to_string(n))
 }
 
@@ -54,7 +54,7 @@ test "guard else ok pattern" {
 }
 
 effect fn parse_positive(s: String) -> Result[Int, String] = {
-  let v = int.parse(s);
+  let v = int.parse(s)!;
   guard v > 0 else err("not positive");
   ok(v)
 }

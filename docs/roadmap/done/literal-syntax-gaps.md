@@ -1,4 +1,6 @@
-# Literal Syntax Gaps [DONE]
+<!-- description: Cross-language comparison of numeric and collection literal syntax -->
+<!-- done: 2026-03-11 -->
+# Literal Syntax Gaps
 
 All items implemented as of v0.4.7.
 

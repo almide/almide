@@ -1,4 +1,6 @@
-# Type System Extensions [ACTIVE]
+<!-- description: Type system extensions (generics migration, inference improvements) -->
+<!-- done: 2026-03-15 -->
+# Type System Extensions
 
 The type system is Almide's primary lever for surpassing other AI-targeted languages. The goal: **catch more errors at compile time without making the language harder for LLMs to write.** Every feature below follows one rule — the compiler gets smarter, the syntax stays simple.
 
@@ -51,8 +53,8 @@ map.entries : [K, V](Map[K, V]) -> List[(K, V)]
 
 | Function | Current | What's needed |
 |----------|---------|---------------|
-| `map.new()` → `Map[Unknown, Unknown]` | 引数なし、型情報ゼロ | **型注釈構文** (`let m: Map[String, Int] = map.new()`) でコンテキストから推論 |
-| `list.flatten()` input `List[Unknown]` | ネストされたリストの内側の型が不明 | **ネスト型制約** (`List[List[A]] → List[A]`) で入力型を制約 |
+| `map.new()` → `Map[Unknown, Unknown]` | No arguments, zero type information | **Type annotation syntax** (`let m: Map[String, Int] = map.new()`) to infer from context |
+| `list.flatten()` input `List[Unknown]` | Inner type of nested list is unknown | **Nested type constraint** (`List[List[A]] → List[A]`) to constrain the input type |
 
 These are not solvable by the current TypeVar/unification approach — each requires a separate language feature. They are low priority because the Rust backend catches all type errors in these positions.
 

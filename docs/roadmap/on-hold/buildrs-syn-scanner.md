@@ -1,22 +1,23 @@
-# build.rs Runtime Scanner 堅牢化
+<!-- description: Replace regex-based runtime scanner with syn crate for robust parsing -->
+# build.rs Runtime Scanner Hardening
 
-**優先度:** post-1.0
-**見積:** ±200行, 中。ビルド時間とのトレードオフ。
+**Priority:** post-1.0
+**Estimate:** ±200 lines, medium. Trade-off with build time.
 
-## 現状
+## Current State
 
-正規表現で `runtime/rs/src/*.rs` の関数シグネチャをパース。壊れやすいが動いてる。
+Parses function signatures from `runtime/rs/src/*.rs` using regex. Fragile but working.
 
-## 理想
+## Ideal
 
-`syn` crate で正確にパース。
+Parse accurately using the `syn` crate.
 
-## タスク
+## Tasks
 
-- [ ] syn crate 導入 (build-dependencies)
-- [ ] 関数シグネチャ抽出を AST ベースに
-- [ ] ビルド時間への影響測定
+- [ ] Introduce syn crate (build-dependencies)
+- [ ] Switch function signature extraction to AST-based
+- [ ] Measure build time impact
 
-## 判断
+## Verdict
 
-壊れてからでいい。syn は重い（ビルド時間 +5-10秒）。
+Can wait until it breaks. syn is heavy (build time +5-10s).

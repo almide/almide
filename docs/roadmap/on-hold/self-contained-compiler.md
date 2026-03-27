@@ -1,92 +1,93 @@
-# Self-Contained Compiler: Remove rustc Dependency [ACTIVE]
+<!-- description: Emit LLVM IR directly to eliminate rustc dependency for end users -->
+# Self-Contained Compiler: Remove rustc Dependency
 
-**目標**: `almide build` が rustc を必要としない。Go のように自己完結したコンパイラ。
+**Goal**: `almide build` does not require rustc. A self-contained compiler like Go.
 
 ```
-現在:  almide build → Rust ソース生成 → rustc → LLVM → binary (rustc 必須)
-目標:  almide build → LLVM IR 生成 → LLVM → binary (rustc 不要)
+Current:  almide build → Rust source generation → rustc → LLVM → binary (rustc required)
+Goal:     almide build → LLVM IR generation → LLVM → binary (rustc not required)
 ```
 
 ---
 
-## Stage 1: ユーザーが rustc 不要
+## Stage 1: Users Don't Need rustc
 
-Almide コンパイラ自体は Rust で書かれたまま。ビルド時に Rust ランタイムを LLVM bitcode に焼き込み、ユーザーのコンパイル時には rustc を呼ばない。
+The Almide compiler itself remains written in Rust. At build time, the Rust runtime is baked into LLVM bitcode, and rustc is not called during user compilation.
 
 ### Architecture
 
 ```
-Almide ビルド時 (cargo build):
+Almide build time (cargo build):
   runtime/rs/src/*.rs → rustc --emit=llvm-bc → runtime.bc → embed in almide binary
 
-ユーザーのコンパイル時 (almide build):
+User compile time (almide build):
   .almd → Almide IR → (nanopass pipeline) → LLVM IR
   LLVM IR + embedded runtime.bc → llvm-link → opt → llc → binary
 ```
 
-### 実装ステップ
+### Implementation Steps
 
-| Step | 内容 | 依存 |
-|------|------|------|
-| 1. LLVM IR emitter | Almide IR → LLVM IR テキスト（基本型: Int, Float, Bool, if/for/call） | inkwell crate |
-| 2. Runtime bitcode | `build.rs` で `rustc --emit=llvm-bc` してランタイムを bitcode 化 | 既存 runtime/ |
-| 3. Bitcode 埋め込み | `include_bytes!` でランタイム bitcode を Almide バイナリに内蔵 | Step 2 |
-| 4. LLVM リンク + 最適化 | inkwell で bitcode 結合 → opt → 実行可能バイナリ生成 | Steps 1-3 |
-| 5. Stdlib dispatch | TOML テンプレート → LLVM IR call 生成（`almide_rt_*` 関数への call） | Step 1 |
-| 6. Rust ターゲットとの共存 | `--backend llvm` / `--backend rust` で選択可能に | Step 4 |
+| Step | Content | Dependency |
+|------|---------|------------|
+| 1. LLVM IR emitter | Almide IR → LLVM IR text (basic types: Int, Float, Bool, if/for/call) | inkwell crate |
+| 2. Runtime bitcode | `build.rs` runs `rustc --emit=llvm-bc` to compile runtime to bitcode | Existing runtime/ |
+| 3. Bitcode embedding | Embed runtime bitcode in Almide binary via `include_bytes!` | Step 2 |
+| 4. LLVM link + optimization | Combine bitcode with inkwell → opt → generate executable binary | Steps 1-3 |
+| 5. Stdlib dispatch | TOML template → LLVM IR call generation (calls to `almide_rt_*` functions) | Step 1 |
+| 6. Coexistence with Rust target | Selectable via `--backend llvm` / `--backend rust` | Step 4 |
 
-### 技術的課題
+### Technical Challenges
 
-- **型の ABI**: String (`{ ptr, len, cap }`), Vec, HashMap の LLVM レベル表現。ランタイムが Rust で書かれているので ABI は Rust ABI → bitcode に含まれる
-- **ジェネリクス**: `Vec<i64>` と `Vec<String>` で monomorphized された別の関数が必要。ランタイム側で主要な型のインスタンスを事前生成するか、ユーザーコード側で生成
-- **Drop / デストラクタ**: LLVM IR レベルで適切なタイミングで drop を呼ぶ必要がある
-- **LLVM バージョン**: inkwell が依存する LLVM バージョンと、ユーザー環境の互換性
+- **Type ABI**: LLVM-level representation of String (`{ ptr, len, cap }`), Vec, HashMap. Since the runtime is written in Rust, the ABI is Rust ABI → included in bitcode
+- **Generics**: `Vec<i64>` and `Vec<String>` need separate monomorphized functions. Either pre-generate instances for major types on the runtime side, or generate on the user code side
+- **Drop / destructors**: Need to call drop at appropriate times at the LLVM IR level
+- **LLVM version**: Compatibility between the LLVM version inkwell depends on and the user's environment
 
-### 見積もり
+### Estimates
 
-- プロトタイプ（Int/Float + 四則演算 + if/for）: 2-3 週間
-- 基本動作（String/List/Map + stdlib 主要関数）: 1-2 ヶ月
-- 本番品質（全 stdlib + エラーハンドリング + テスト）: 3-4 ヶ月
+- Prototype (Int/Float + arithmetic + if/for): 2-3 weeks
+- Basic operation (String/List/Map + major stdlib functions): 1-2 months
+- Production quality (full stdlib + error handling + tests): 3-4 months
 
-### 得られるもの
+### What We Get
 
-| メリット | 効果 |
-|---------|------|
-| **ユーザー体験** | `cargo install almide` だけで完結。rustc インストール不要 |
-| **コンパイル速度** | rustc フロントエンド (50-70% of compile time) をスキップ |
-| **LLVM アノテーション** | pure → `readonly`/`willreturn`、immutable → `noalias` を直接付与 |
-| **配布サイズ** | Almide 単体で配布可能（rustc + cargo 不要） |
-
----
-
-## Stage 2: Almide 自体を Almide で書く (Self-Hosting)
-
-コンパイラ自体を Almide で書き直す。Rust 依存を完全に除去。
-
-### 前提条件
-
-- Stage 1 完了（LLVM 直接出力が動く）
-- Almide の言語機能が十分成熟（ジェネリクス、trait/protocol、ファイルI/O、文字列処理）
-- 十分なテストカバレッジ（コンパイラの正しさを保証）
-
-### 段階的移行
-
-1. **lexer.rs → lexer.almd**: 文字列処理中心、依存が少ない
-2. **parser/ → parser/**: 再帰下降、データ構造操作
-3. **check/ → check/**: 型推論、最も複雑
-4. **lower/ → lower/**: IR 変換
-5. **codegen/ → codegen/**: LLVM IR 生成
-6. **ブートストラップ**: 古い Almide コンパイラで新しい Almide コンパイラをコンパイル
-
-### 見積もり
-
-- 1-2 年（Stage 1 完了後）
-- 言語の安定化が先決
+| Benefit | Effect |
+|---------|--------|
+| **User experience** | Just `cargo install almide` is enough. No rustc installation needed |
+| **Compile speed** | Skip rustc frontend (50-70% of compile time) |
+| **LLVM annotations** | Directly attach pure → `readonly`/`willreturn`, immutable → `noalias` |
+| **Distribution size** | Almide distributable standalone (no rustc + cargo needed) |
 
 ---
 
-## 優先度
+## Stage 2: Write Almide Itself in Almide (Self-Hosting)
+
+Rewrite the compiler itself in Almide. Completely remove Rust dependency.
+
+### Prerequisites
+
+- Stage 1 complete (LLVM direct output works)
+- Almide language features sufficiently mature (generics, trait/protocol, file I/O, string processing)
+- Sufficient test coverage (guaranteeing compiler correctness)
+
+### Incremental Migration
+
+1. **lexer.rs → lexer.almd**: String processing focused, few dependencies
+2. **parser/ → parser/**: Recursive descent, data structure manipulation
+3. **check/ → check/**: Type inference, most complex
+4. **lower/ → lower/**: IR transformation
+5. **codegen/ → codegen/**: LLVM IR generation
+6. **Bootstrap**: Compile new Almide compiler with old Almide compiler
+
+### Estimates
+
+- 1-2 years (after Stage 1 completion)
+- Language stabilization comes first
+
+---
+
+## Priority
 
 Stage 1 >> Stage 2
 
-Stage 1 はユーザー体験とコンパイル速度に直結。Stage 2 は技術的達成だが実用上の優先度は低い。
+Stage 1 directly impacts user experience and compile speed. Stage 2 is a technical achievement but lower practical priority.

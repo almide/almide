@@ -1,11 +1,13 @@
-# C. 品質向上
+<!-- description: Quality improvements (error line numbers, heredoc tracking) -->
+<!-- done: 2026-03-17 -->
+# Quality Improvements
 
-## 1. エラーメッセージの行番号 ✅
+## 1. Error Message Line Numbers ✅
 
-`emit()` メソッドで全 checker diagnostic に自動 span 付与。22 箇所を修正。
+Automatic span attachment to all checker diagnostics via the `emit()` method. 22 locations fixed.
 
-## 2. Heredoc の行番号追跡
+## 2. Heredoc Line Number Tracking
 
-**状態:** `lex_heredoc` 内で `\n` を消費するが lexer の `line` カウンタを更新しない
-**修正:** `lex_heredoc` が消費した改行数を返すか、lexer の main loop で `pos` の変化から行番号を再計算
-**見積り:** 1-2時間
+**Status:** `lex_heredoc` consumes `\n` but does not update the lexer's `line` counter
+**Fix:** Either have `lex_heredoc` return the number of consumed newlines, or recalculate line numbers from `pos` changes in the lexer's main loop
+**Estimate:** 1-2 hours

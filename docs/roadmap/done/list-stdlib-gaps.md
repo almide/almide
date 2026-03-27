@@ -1,3 +1,5 @@
+<!-- description: Cross-language comparison of missing list module operations -->
+<!-- done: 2026-03-11 -->
 # List Stdlib Gaps
 
 Almide's `list` module compared against 7 languages. All operations are immutable (return new list).

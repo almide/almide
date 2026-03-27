@@ -1,41 +1,42 @@
-# IR Optimization Tier 2 [ON HOLD]
+<!-- description: CSE and inlining passes for cross-target IR optimization -->
+# IR Optimization Tier 2
 
-**優先度:** Medium — 全ターゲットに自動適用される最適化
-**前提:** Tier 1 (constant folding, DCE) 完了済み、nanopass パイプライン確立済み
-**目標:** IR レベルの最適化パスを拡充し、生成コードの品質を rustc/V8 に頼らず向上させる
+**Priority:** Medium — Optimizations automatically applied to all targets
+**Prerequisites:** Tier 1 (constant folding, DCE) complete, nanopass pipeline established
+**Goal:** Expand IR-level optimization passes to improve generated code quality without relying on rustc/V8
 
-> 「IR が賢ければ、全ターゲットが賢くなる。」
+> "If the IR is smart, all targets become smart."
 
 ---
 
 ## Why
 
-Tier 1 (constant folding, DCE) は完了済み。しかし IR レベルで解決すべき最適化がまだある:
+Tier 1 (constant folding, DCE) is complete. However, there are optimizations that still need to be solved at the IR level:
 
-- 同一部分式の重複計算
-- 使用回数 1 の小関数がコールオーバーヘッドを持つ
-- エスケープしないオブジェクトのヒープ割当
-- 高コスト演算の低コスト置換
+- Redundant computation of identical subexpressions
+- Small functions used only once still carry call overhead
+- Heap allocation for objects that don't escape
+- High-cost operations that can be replaced with low-cost alternatives
 
-IR で解決すれば Rust/TS/WASM 全ターゲットに恩恵がある。特に WASM は rustc の最適化を経由しないため、IR 最適化の効果が直接出る。
+Solving these at the IR level benefits all targets: Rust/TS/WASM. WASM especially, since it doesn't go through rustc optimization — IR optimization effects are direct.
 
 ---
 
 ## Passes
 
-### ✅ 完了済み
+### ✅ Completed
 
-| Pass | ファイル | 概要 |
-|------|----------|------|
-| LICM | `pass_licm.rs` | ループ不変式の巻き上げ。effect fn 呼び出しは対象外 |
-| StreamFusion | `pass_stream_fusion.rs` | map/filter/fold チェーンの融合。中間リスト除去 |
-| Auto Parallel | `pass_auto_parallel.rs` | 純粋ラムダの自動並列化 (Rust ターゲット) |
+| Pass | File | Summary |
+|------|------|---------|
+| LICM | `pass_licm.rs` | Loop-invariant code motion. effect fn calls excluded |
+| StreamFusion | `pass_stream_fusion.rs` | Fusion of map/filter/fold chains. Intermediate list elimination |
+| Auto Parallel | `pass_auto_parallel.rs` | Automatic parallelization of pure lambdas (Rust target) |
 
-### 未実装
+### Not Yet Implemented
 
 ### Pass 1: Common Subexpression Elimination (CSE)
 
-同一式の重複計算を let 束縛にまとめる。
+Consolidate redundant computations of identical expressions into let bindings.
 
 ```almd
 // Before
@@ -48,31 +49,31 @@ let a = __cse_0 * 2
 let b = __cse_0 * 3
 ```
 
-**判定基準:** 式が純粋 (effect なし) かつ構造的に同一。
+**Criteria:** Expression is pure (no effects) and structurally identical.
 
 ### Pass 2: Simple Inlining
 
-使用回数 1 かつ本体が単一式の関数をインライン展開。
+Inline functions with use-count 1 and single-expression body.
 
 ```almd
 fn double(x: Int) -> Int { x * 2 }
 let y = double(5)
-// → let y = 5 * 2 → 10 (constant folding と連鎖)
+// → let y = 5 * 2 → 10 (chains with constant folding)
 ```
 
-**制約:**
-- 本体が 1 式のみ
-- 再帰でない
-- 使用回数 ≤ 閾値 (初期値: 1)
+**Constraints:**
+- Body is a single expression only
+- Not recursive
+- Use-count ≤ threshold (initial value: 1)
 
-### Pass 3: Strength Reduction (将来)
+### Pass 3: Strength Reduction (Future)
 
-高コスト演算を低コスト演算に置換。
+Replace high-cost operations with low-cost alternatives.
 
 ```
-x * 2      → x << 1      (整数)
-x / 4      → x >> 2      (正の整数)
-x % 2 == 0 → x & 1 == 0  (整数)
+x * 2      → x << 1      (integer)
+x / 4      → x >> 2      (positive integer)
+x % 2 == 0 → x & 1 == 0  (integer)
 ```
 
 ---
@@ -84,20 +85,20 @@ Lower → IR
          │
          ▼
     ┌─────────────────────────┐
-    │ Tier 1 (完了)            │
+    │ Tier 1 (done)             │
     │  ├── ConstFoldPass       │
     │  └── DCEPass             │
     ├─────────────────────────┤
-    │ Tier 1.5 (完了)          │
+    │ Tier 1.5 (done)          │
     │  ├── LICMPass            │
     │  ├── StreamFusionPass    │
     │  └── AutoParallelPass    │
     ├─────────────────────────┤
-    │ Tier 2 (本ロードマップ)    │
+    │ Tier 2 (this roadmap)    │
     │  ├── CSEPass             │
     │  └── InlinePass          │
     ├─────────────────────────┤
-    │ Tier 3 (将来)            │
+    │ Tier 3 (future)          │
     │  └── StrengthReduction   │
     └─────────────────────────┘
          │
@@ -105,7 +106,7 @@ Lower → IR
     mono() → nanopass → codegen
 ```
 
-全パスは `NanoPass` trait を実装し、既存パイプラインに挿入。
+All passes implement the `NanoPass` trait and are inserted into the existing pipeline.
 
 ---
 
@@ -113,21 +114,21 @@ Lower → IR
 
 ### Phase 1: CSE
 
-- [ ] `CSEPass` 実装 (式の構造的等価判定 + 束縛挿入)
-- [ ] 純粋性判定 (effect fn 呼び出しを含む式は対象外)
-- [ ] テスト: stdlib 呼び出しの重複除去
+- [ ] Implement `CSEPass` (structural equality check + binding insertion)
+- [ ] Purity check (expressions containing effect fn calls are excluded)
+- [ ] Tests: deduplication of stdlib calls
 
 ### Phase 2: Inlining
 
-- [ ] `InlinePass` 実装 (使用回数 + 本体サイズ判定)
-- [ ] constant folding との連鎖テスト
-- [ ] コードサイズ膨張の監視 (WASM バイナリサイズ回帰テスト)
+- [ ] Implement `InlinePass` (use-count + body size check)
+- [ ] Chaining test with constant folding
+- [ ] Monitor code size bloat (WASM binary size regression test)
 
 ---
 
 ## Success Criteria
 
-- CSE, Inline の 2 パスが nanopass パイプラインに統合
-- WASM バイナリサイズが回帰しない (DCE とのバランス)
-- 既存テスト全通過を維持
-- ベンチマーク (Mandelbrot 等) で measurable な改善
+- CSE and Inline passes integrated into the nanopass pipeline
+- WASM binary size does not regress (balanced with DCE)
+- All existing tests continue to pass
+- Measurable improvement on benchmarks (Mandelbrot, etc.)

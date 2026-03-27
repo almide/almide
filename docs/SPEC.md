@@ -71,7 +71,7 @@ IntLiteral       ::= [0-9]+ | "0x" [0-9a-fA-F]+     // decimal or hex
 FloatLiteral     ::= [0-9]+ "." [0-9]+ ([eE] [+-]? [0-9]+)?
 StringLiteral    ::= '"' (char | "\n" | "\t" | "\r" | "\\" | "\"" | "\$")* '"'
 InterpolatedStr  ::= '"' (char | "${" Expr "}")* '"'
-SingleQuoteStr   ::= "'" (char | "\'" | "\\")* "'"   // escapes, interpolation via ${expr}
+SingleQuoteStr   ::= "'" (char | "\'" | "\\" | "\n" | "\t" | "\r")* "'"   // escapes only, no interpolation
 HeredocStr       ::= '"""' ... '"""'                   // multiline, indent-stripped
 RawHeredocStr    ::= 'r"""' ... '"""'                  // no escapes, no interpolation
 RawStr           ::= 'r"' ... '"'                      // no escapes, no interpolation
@@ -80,7 +80,7 @@ BoolLiteral      ::= "true" | "false"
 
 There is **no** null literal. Absence is represented by `none` (a constructor of `Option[T]`).
 
-Double-quote strings support interpolation via `${expr}` and backslash escapes. Single-quote strings also support interpolation and the escape sequences `\'`, `\\`, `\n`, `\t`, `\r`. Raw strings and raw heredocs support neither interpolation nor escapes.
+Double-quote strings support interpolation via `${expr}` and backslash escapes. Single-quote strings support escape sequences (`\'`, `\\`, `\n`, `\t`, `\r`) but **no interpolation**. Raw strings and raw heredocs support neither interpolation nor escapes.
 
 Heredoc strings strip leading whitespace based on minimum indent of non-empty lines. The first line (if blank after `"""`) and the last line (if whitespace-only before `"""`) are dropped.
 
@@ -95,14 +95,14 @@ Numeric literals support `_` as a visual separator (e.g., `1_000_000`).
 
 Block comments nest: `/* outer /* inner */ still outer */` is valid.
 
-### 1.5 Keywords (42)
+### 1.5 Keywords (35)
 
 ```
-module  import  type    trait   impl    for     in      fn
-let     var     if      then    else    match   ok      err
-some    none    todo    unsafe  true    false
-not     and     or      strict  pub     effect  deriving test
-guard   break   continue while  local   mod
+module  import  type    protocol impl    for     in      fn
+let     var     if      then     else    match   ok      err
+some    none    todo    true     false
+not     and     or      strict   pub     effect  test
+guard   break   continue while   local   mod
 fan
 ```
 
@@ -310,26 +310,20 @@ Inline variant (without leading `|`):
 type Direction = North | South | East | West
 ```
 
-### 5.4 deriving
+### 5.4 Conventions
 
 ```
-DerivingClause ::= "deriving" TypeName
+ConventionClause ::= ":" TypeName ("," TypeName)*
 ```
 
-Automatically derives `From` trait implementations for variant types:
+Convention names are specified after the type name with `:`, before `=`:
 
 ```
-type ConfigError =
-  | Io(IoError)
-  | Parse(ParseError)
-  | Decode(DecodeError)
-  deriving From
-
-// Equivalent to:
-// impl From[IoError] for ConfigError { fn from(e: IoError) -> ConfigError = Io(e) }
-// impl From[ParseError] for ConfigError { fn from(e: ParseError) -> ConfigError = Parse(e) }
-// impl From[DecodeError] for ConfigError { fn from(e: DecodeError) -> ConfigError = Decode(e) }
+type Color: Eq, Repr =
+  | Red | Green | Blue
 ```
+
+Available conventions: `Eq`, `Repr`, `Ord`, `Hash`, `Codec`. `Eq` and `Hash` are automatic for all value types and do not need to be declared.
 
 ### 5.5 Protocols
 
@@ -434,8 +428,8 @@ impl Iterable[T] for List[T] {
 
 ### 6.3 Built-in Protocols
 
-- **Eq** and **Hash** are compiler-derived automatically from type structure. No `deriving` needed.
-- `deriving From` is the only explicit deriving directive (for error type conversions).
+- **Eq** and **Hash** are compiler-derived automatically from type structure. No annotation needed.
+- Conventions are specified with `:` after the type name: `type Color: Eq, Repr = ...`
 
 ---
 
@@ -903,22 +897,46 @@ In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equal
 
 Exceptions **do not exist**. There is no `throw`/`catch`.
 
-### 12.2 Auto Error Propagation
+### 12.2 Unwrap Operators
 
-Inside `effect fn`, expressions returning `Result[T, E]` are automatically unwrapped. If the expression returns an error, it propagates to the enclosing function immediately.
-
-### 12.3 Error Conversion with deriving From
+Three postfix operators for explicit error handling on `Result[T, E]` and `Option[T]`:
 
 ```
-type AppError =
-  | Io(IoError)
-  | Parse(ParseError)
-  deriving From
+expr!          // unwrap — propagate err on failure (effect fn only)
+expr ?? val    // unwrap or — use fallback on failure
+expr?          // to option — convert Result to Option (err → none)
+```
 
-effect fn load(path: String) -> Result[Config, AppError] = {
-  let text = fs.read_text(path)    // IoError -> AppError via From (auto-propagated)
-  let raw = json.parse(text)       // ParseError -> AppError via From (auto-propagated)
-  decode[Config](raw)
+```
+effect fn load(path: String) -> Result[Config, String] = {
+  let text = fs.read_text(path)!       // err → propagates
+  let config = json.parse(text)!       // err → propagates
+  ok(config)
+}
+
+let port = int.parse(input) ?? 8080    // err → use 8080
+let name = map.get(config, "key") ?? "default"  // none → use "default"
+```
+
+### 12.3 Typed Error Variants
+
+For branching on error kinds, use a variant type as the error parameter:
+
+```
+type LoadError = | NotFound(String) | ParseFailed(String)
+
+effect fn load(path: String) -> Result[Config, LoadError] = {
+  let text = fs.read_text(path)
+    |> result.map_err((e) => NotFound(e))!
+  let config = json.parse(text)
+    |> result.map_err((e) => ParseFailed(e))!
+  ok(config)
+}
+
+match load("app.toml") {
+  ok(config) => use(config),
+  err(NotFound(path)) => create_default(),
+  err(ParseFailed(msg)) => println("Bad config: ${msg}"),
 }
 ```
 
@@ -1414,9 +1432,8 @@ type Config = {
 }
 
 type ConfigError =
-  | Io(IoError)
-  | Parse(ParseError)
-  deriving From
+  | Io(String)
+  | Parse(String)
 
 fn default_config(root: String) -> Config =
   { root: root, bare: false, description: "" }

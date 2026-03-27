@@ -1,10 +1,12 @@
-# Unused Variable Warnings [ACTIVE]
+<!-- description: Warn on unused variables and imports, suppressible with _ prefix -->
+<!-- done: 2026-03-15 -->
+# Unused Variable Warnings
 
 ## Summary
-未使用の変数・インポートに対して warning を出す。`_` プレフィックスで抑制可能。
+Warn on unused variables and imports. Suppressible with `_` prefix.
 
 ## Current State
-checker v3 は型エラーのみ報告。未使用変数の warning は実装されていない。
+Checker v3 only reports type errors. Unused variable warnings are not implemented.
 
 ## Goal
 ```
@@ -16,18 +18,18 @@ warning: unused variable 'x'
 ## Design
 
 ### Detection
-IR の use-count（`ir.rs` の `compute_use_counts`）を利用。`use_count == 0` かつ `_` プレフィックスなしの変数を警告。
+Uses IR use-count (`compute_use_counts` in `ir.rs`). Warns on variables with `use_count == 0` that don't have a `_` prefix.
 
 ### Scope
-- `let` / `var` バインディング
-- 関数パラメータは除外（API 互換性のため）
-- パターンバインディング（`let (a, b) = ...` の `b` が未使用）
-- `_` プレフィックスは抑制
+- `let` / `var` bindings
+- Function parameters excluded (for API compatibility)
+- Pattern bindings (e.g., `b` unused in `let (a, b) = ...`)
+- `_` prefix suppresses the warning
 
 ### Implementation
-- `src/ir.rs` — `collect_unused_var_warnings()` を復活（以前存在した）
-- `src/main.rs` / `src/cli.rs` — warning 出力を追加
-- テスト: 未使用変数で warning が出ることを検証
+- `src/ir.rs` — revive `collect_unused_var_warnings()` (previously existed)
+- `src/main.rs` / `src/cli.rs` — add warning output
+- Tests: verify that unused variables produce warnings
 
 ## Files
 ```

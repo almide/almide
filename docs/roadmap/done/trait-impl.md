@@ -1,6 +1,8 @@
-# Built-in Protocols [ON HOLD]
+<!-- description: Built-in protocols (Eq, Hash, Repr, From) with automatic derivation -->
+<!-- done: 2026-03-18 -->
+# Built-in Protocols
 
-> **Note**: Eq, Hash は実装済み。Repr は残件。型システム全体の設計は [Type System Extensions](../active/type-system.md) に移行しており、container protocols (Mappable, Chainable 等) や `deriving` による conformance はそちらを参照のこと。本文書は Eq/Hash/Repr の built-in protocol に限定した初期設計を記録したものである。
+> **Note**: Eq and Hash are implemented. Repr is still pending. The overall type system design has moved to [Type System Extensions](../active/type-system.md), which covers container protocols (Mappable, Chainable, etc.) and `deriving`-based conformance. This document records the initial design limited to the Eq/Hash/Repr built-in protocols.
 
 ## Design Principle
 

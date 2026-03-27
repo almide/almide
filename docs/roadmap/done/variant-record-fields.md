@@ -1,4 +1,6 @@
-# Variant Record Fields [DONE]
+<!-- description: Named fields for enum variants (like Rust struct variants) -->
+<!-- done: 2026-03-12 -->
+# Variant Record Fields
 
 Allow enum variants to carry named fields (like Rust's struct variants), instead of only positional arguments.
 

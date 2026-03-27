@@ -1,17 +1,18 @@
+<!-- description: Go codegen target via TOML templates and Go-specific nanopass passes -->
 # Go Target
 
-**優先度:** post-1.0
-**前提:** Codegen v3 アーキテクチャ完成済み (is_rust()=0, TOML+pass方式)
+**Priority:** post-1.0
+**Prerequisites:** Codegen v3 architecture complete (is_rust()=0, TOML+pass approach)
 
-## 作業内容
+## Work Items
 
-1. `codegen/templates/go.toml` — Go構文テンプレート
+1. `codegen/templates/go.toml` — Go syntax templates
 2. Go-specific passes:
-   - `ResultToTuplePass` — Result → (T, error) 変換
+   - `ResultToTuplePass` — Result → (T, error) conversion
    - `GoroutineLoweringPass` — fan → goroutine + channel
 3. `runtime/go/` — Go runtime functions
-4. CI: cross-target Go テスト
+4. CI: cross-target Go tests
 
-## 見積り
+## Estimate
 
-アーキテクチャは準備完了。TOML 1ファイル + pass 2-3個で対応可能。
+Architecture is ready. Can be handled with 1 TOML file + 2-3 passes.

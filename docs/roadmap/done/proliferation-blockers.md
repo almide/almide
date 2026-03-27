@@ -1,4 +1,6 @@
-# Proliferation Blockers [DONE]
+<!-- description: Compiler bugs that blocked LLM module generation (all resolved) -->
+<!-- done: 2026-03-11 -->
+# Proliferation Blockers
 
 Issues discovered during the first `almide proliferate` run (csv module). These were compiler-level problems that reduced LLM success rate and required workarounds in generated code.
 

@@ -1,36 +1,37 @@
+<!-- done: 2026-03-16 -->
 # Let-Polymorphism (Algorithm W)
 
-## 現状
+## Current State
 
 ```almide
 let f = (x) => x        // f : fn(?0) -> ?0 (monomorphic)
-let a = f(1)            // ?0 = Int に固定
-let b = f("hello")      // エラー: ?0 は既に Int
+let a = f(1)            // ?0 fixed to Int
+let b = f("hello")      // error: ?0 is already Int
 ```
 
-Almide は型スキーム (∀α. τ) を持たない。let バインディングは monomorphic。
+Almide has no type scheme (∀α. τ). let bindings are monomorphic.
 
-## 目標
+## Goal
 
 ```almide
 let f = (x) => x        // f : ∀T. T -> T (polymorphic)
-let a = f(1)            // T=Int に instantiate → a: Int
-let b = f("hello")      // T=String に instantiate → b: String
+let a = f(1)            // instantiate T=Int → a: Int
+let b = f("hello")      // instantiate T=String → b: String
 ```
 
-## 今日の修正で確認済みの基盤
+## Foundation Verified in Today's Fix
 
-| 基盤 | 状態 |
-|------|------|
-| `InferTy::Var` + `TyVarId` | ✅ 動作中 |
-| `unify_infer` (構造的 unification) | ✅ Named 引数含む |
-| `resolve_inference_vars` | ✅ Named 再帰処理あり |
-| `from_ty` の TypeVar → Var 変換 | ✅ |
+| Foundation | Status |
+|-----------|--------|
+| `InferTy::Var` + `TyVarId` | ✅ Working |
+| `unify_infer` (structural unification) | ✅ Including Named arguments |
+| `resolve_inference_vars` | ✅ With Named recursive processing |
+| TypeVar → Var conversion in `from_ty` | ✅ |
 | eager constraint solving | ✅ |
 
-## 追加する3つの機能
+## Three Features to Add
 
-### 1. TypeScheme 型
+### 1. TypeScheme Type
 
 ```rust
 pub enum TypeScheme {
@@ -39,7 +40,7 @@ pub enum TypeScheme {
 }
 ```
 
-### 2. Generalize (let バインディング後)
+### 2. Generalize (after let binding)
 
 ```rust
 fn generalize(ty: &Ty, env_vars: &HashSet<TyVarId>) -> TypeScheme {
@@ -50,9 +51,9 @@ fn generalize(ty: &Ty, env_vars: &HashSet<TyVarId>) -> TypeScheme {
 }
 ```
 
-`check_stmt` の `Let` ケースで、値を推論した後に generalize を呼ぶ。
+In the `Let` case of `check_stmt`, call generalize after inferring the value.
 
-### 3. Instantiate (変数参照時)
+### 3. Instantiate (at variable reference)
 
 ```rust
 fn instantiate(scheme: &TypeScheme) -> InferTy {
@@ -68,20 +69,20 @@ fn instantiate(scheme: &TypeScheme) -> InferTy {
 }
 ```
 
-`infer_expr` の `Ident` ケースで、変数を lookup した後に instantiate を呼ぶ。
+In the `Ident` case of `infer_expr`, call instantiate after looking up the variable.
 
-## 変更ファイル
+## Changed Files
 
-- `src/check/types.rs` — `TypeScheme` enum 追加
+- `src/check/types.rs` — add `TypeScheme` enum
 - `src/check/mod.rs` — `generalize`, `instantiate`, `find_free_vars`
-- `src/check/infer.rs` — `Ident` で instantiate, `Let` で generalize
-- `src/types/env.rs` — `TypeEnv` の scopes を `HashMap<String, TypeScheme>` に
+- `src/check/infer.rs` — instantiate at `Ident`, generalize at `Let`
+- `src/types/env.rs` — change `TypeEnv` scopes to `HashMap<String, TypeScheme>`
 
-## 影響範囲
+## Impact Scope
 
-今の明示的 generics (`fn id[T](x: T) -> T`) はそのまま動く。
-let-polymorphism は**追加機能**。既存テストは壊れない。
+Existing explicit generics (`fn id[T](x: T) -> T`) continue to work as-is.
+Let-polymorphism is an **additive feature**. Existing tests will not break.
 
-## 見積り
+## Estimate
 
-3-5日。TAPL Ch.22 の Algorithm W をそのまま実装。
+3-5 days. Direct implementation of Algorithm W from TAPL Ch.22.

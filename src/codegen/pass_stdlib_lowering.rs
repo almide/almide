@@ -68,6 +68,23 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
 
     let kind = match expr.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
+            // Bundled .almd modules (e.g., option) are compiled as regular modules.
+            // Don't rewrite their calls to runtime functions — leave as Module calls.
+            if crate::stdlib::get_bundled_source(&module).is_some()
+                && !crate::stdlib::is_stdlib_module(&module)
+            {
+                let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
+                return IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Module { module, func },
+                        args,
+                        type_args,
+                    },
+                    ty,
+                    span,
+                };
+            }
+
             // Recurse into args first (fan auto-try is handled by FanLoweringPass)
             let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
 
@@ -210,6 +227,9 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(rewrite_expr(*object)), field,
         },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(rewrite_expr(*expr)), field,
+        },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple,
             iterable: Box::new(rewrite_expr(*iterable)),
@@ -226,6 +246,12 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             }).collect(),
         },
         IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(rewrite_expr(*expr)),
+            fallback: Box::new(rewrite_expr(*fallback)),
+        },
         IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
             entries: entries.into_iter().map(|(k, v)| (rewrite_expr(k), rewrite_expr(v))).collect(),
         },
@@ -419,8 +445,17 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
         IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
         IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
         IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
+        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)),
+            fallback: Box::new(resolve_unresolved_ufcs(*fallback, siblings)),
+        },
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(resolve_unresolved_ufcs(*object, siblings)), field,
+        },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)), field,
         },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             exprs: exprs.into_iter().map(|e| resolve_unresolved_ufcs(e, siblings)).collect(),
@@ -709,6 +744,12 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
         IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
         IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
         IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
+        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)),
+            fallback: Box::new(prefix_intra_module_calls(*fallback, mod_name, siblings)),
+        },
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
                 IrStringPart::Expr { expr } => IrStringPart::Expr { expr: prefix_intra_module_calls(expr, mod_name, siblings) },
@@ -717,6 +758,9 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
         },
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(prefix_intra_module_calls(*object, mod_name, siblings)), field,
+        },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)), field,
         },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             exprs: exprs.into_iter().map(|e| prefix_intra_module_calls(e, mod_name, siblings)).collect(),

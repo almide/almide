@@ -1,4 +1,6 @@
-# Compiler Hardening [DONE]
+<!-- description: Eliminate all panics and unhandled edge cases in the compiler -->
+<!-- done: 2026-03-11 -->
+# Compiler Hardening
 
 Eliminate all panics and unhandled edge cases. Other languages never crash on invalid input — Almide shouldn't either.
 

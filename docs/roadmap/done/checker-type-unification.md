@@ -1,22 +1,24 @@
-# Checker InferTy/Ty 統一
+<!-- description: Unify InferTy and Ty representations in the type checker -->
+<!-- done: 2026-03-18 -->
+# Checker InferTy/Ty Unification
 
-**優先度:** post-1.0 (1.x)
-**見積:** ±1000行, 大。型システム根幹。
+**Priority:** post-1.0 (1.x)
+**Estimate:** ~1000 lines, large. Core type system change.
 
-## 現状
+## Current State
 
-型推論中は `InferTy` (unification variable付き), 確定後は `Ty`。毎回変換コスト。
+During type inference, `InferTy` (with unification variables) is used; after resolution, `Ty`. Conversion cost on every transition.
 
-## 理想
+## Ideal
 
-unified type で推論と確定を同じ型で表現。solutions テーブル管理の簡素化。
+Express inference and resolution with a unified type. Simplify solutions table management.
 
-## タスク
+## Tasks
 
-- [ ] `InferTy` と `Ty` の統一型設計
-- [ ] 変換コスト削減
-- [ ] solutions テーブル管理の簡素化
+- [ ] Design unified type combining `InferTy` and `Ty`
+- [ ] Reduce conversion cost
+- [ ] Simplify solutions table management
 
-## 判断
+## Decision
 
-型システム根幹の変更。慎重に設計してから実施。1.0 後推奨。
+Core type system change. Design carefully before implementing. Recommended for post-1.0.

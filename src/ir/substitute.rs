@@ -100,6 +100,10 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             kind: IrExprKind::Member { object: Box::new(sub(object)), field: field.clone() },
             ty: expr.ty.clone(), span: expr.span,
         },
+        IrExprKind::OptionalChain { expr: inner, field } => IrExpr {
+            kind: IrExprKind::OptionalChain { expr: Box::new(sub(inner)), field: field.clone() },
+            ty: expr.ty.clone(), span: expr.span,
+        },
         IrExprKind::TupleIndex { object, index } => IrExpr {
             kind: IrExprKind::TupleIndex { object: Box::new(sub(object)), index: *index },
             ty: expr.ty.clone(), span: expr.span,
@@ -132,6 +136,18 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
         },
         IrExprKind::Try { expr: inner } => IrExpr {
             kind: IrExprKind::Try { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span,
+        },
+        IrExprKind::Unwrap { expr: inner } => IrExpr {
+            kind: IrExprKind::Unwrap { expr: Box::new(sub(inner)) },
+            ty: expr.ty.clone(), span: expr.span,
+        },
+        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExpr {
+            kind: IrExprKind::UnwrapOr { expr: Box::new(sub(inner)), fallback: Box::new(sub(fallback)) },
+            ty: expr.ty.clone(), span: expr.span,
+        },
+        IrExprKind::ToOption { expr: inner } => IrExpr {
+            kind: IrExprKind::ToOption { expr: Box::new(sub(inner)) },
             ty: expr.ty.clone(), span: expr.span,
         },
         IrExprKind::Await { expr: inner } => IrExpr {

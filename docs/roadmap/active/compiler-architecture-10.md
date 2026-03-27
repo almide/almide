@@ -1,101 +1,102 @@
-# Compiler Architecture: All 10s [ACTIVE]
+<!-- description: Achieve 10/10 on every compiler architecture quality metric -->
+# Compiler Architecture: All 10s
 
-**目標**: コンパイラアーキテクチャ全項目 10/10
-**現状**: 105/110 — 残り: テスト 9→10、Codegen統合 9→10
-**スコープ**: WASM codegen を含む全コンパイラ基盤
+**Goal**: 10/10 on every compiler architecture metric
+**Current**: 105/110 — Remaining: Tests 9→10, Codegen Integration 9→10
+**Scope**: Entire compiler infrastructure including WASM codegen
 
 ---
 
-## スコアカード
+## Scorecard
 
-| 領域 | 開始時 | 現在 | 目標 | 状態 |
-|------|--------|------|------|------|
-| パイプライン設計 | 7 | **10** | 10 | ✅ |
-| パーサー | 9 | **10** | 10 | ✅ proptest fuzzing 導入済 |
-| 型チェッカー | 7 | **10** | 10 | ✅ |
-| IR 設計 | 9 | **10** | 10 | ✅ |
+| Area | Start | Current | Target | Status |
+|------|-------|---------|--------|--------|
+| Pipeline Design | 7 | **10** | 10 | ✅ |
+| Parser | 9 | **10** | 10 | ✅ proptest fuzzing introduced |
+| Type Checker | 7 | **10** | 10 | ✅ |
+| IR Design | 9 | **10** | 10 | ✅ |
 | Nanopass | 8 | **10** | 10 | ✅ |
-| モノモーフィゼーション | 7 | **10** | 10 | ✅ |
-| エラー診断 | 9 | **10** | 10 | ✅ |
-| コード品質 | 7 | **10** | 10 | ✅ String interning (Sym型, lasso), Ty/FnSig/TypeEnv 全層 Sym化 |
-| テスト | 8 | **9** | 10 | ✅ fuzzing, 167/167 WASM全通過, TypeVar regression 6件追加, 並列実行 (2:30→16s)。残: nanopass ユニットテスト |
-| ビルドシステム | 7 | **10** | 10 | ✅ build.rs分割, per-file キャッシュ + 並列テスト実行 |
-| Codegen統合 | 5 | **9** | 10 | ✅ WASM result.collect/partition/collect_map 実装。残: stdlib dispatch一元化 |
+| Monomorphization | 7 | **10** | 10 | ✅ |
+| Error Diagnostics | 9 | **10** | 10 | ✅ |
+| Code Quality | 7 | **10** | 10 | ✅ String interning (Sym type, lasso), Sym throughout Ty/FnSig/TypeEnv |
+| Tests | 8 | **9** | 10 | ✅ fuzzing, 167/167 WASM all pass, TypeVar regression 6 cases added, parallel execution (2:30→16s). Remaining: nanopass unit tests |
+| Build System | 7 | **10** | 10 | ✅ build.rs split, per-file cache + parallel test execution |
+| Codegen Integration | 5 | **9** | 10 | ✅ WASM result.collect/partition/collect_map implemented. Remaining: stdlib dispatch unification |
 
-**合計: 64/100 → 105/110**
+**Total: 64/100 → 105/110**
 
 ---
 
-## Done (完了済み)
+## Done (Completed)
 
-### Phase 1: パイプライン統合 ✅
+### Phase 1: Pipeline Integration ✅
 
-- [x] Target::Wasm + Pipeline統合
-- [x] パス依存宣言
+- [x] Target::Wasm + Pipeline integration
+- [x] Pass dependency declarations
 - [x] E003 --explain
-- [x] BoxDeref パイプライン統合
+- [x] BoxDeref pipeline integration
 
-### Phase 2: 型チェッカー分割 ✅
+### Phase 2: Type Checker Split ✅
 
-- [x] mod.rs 分割 — 850行 → 4モジュール
-- [x] calls.rs 分割 — 588行 → 3モジュール
+- [x] mod.rs split — 850 lines → 4 modules
+- [x] calls.rs split — 588 lines → 3 modules
 
-### Phase 3: モノモーフィゼーション ✅
+### Phase 3: Monomorphization ✅
 
-- [x] ファイル分割 — 1296行 → 6モジュール
-- [x] 直接構築 (PR#93)
-- [x] 増分インスタンス発見 (PR#93)
-- [x] 収束検出 (PR#91)
+- [x] File split — 1296 lines → 6 modules
+- [x] Direct construction (PR#93)
+- [x] Incremental instance discovery (PR#93)
+- [x] Convergence detection (PR#91)
 
-### Phase 4: Nanopass + Walker 分割 ✅
+### Phase 4: Nanopass + Walker Split ✅
 
-- [x] stream fusion 分割 — 1199行 → 5モジュール
-- [x] walker 分割 — 1667行 → 6モジュール
-- [x] Codegen 出口の統一 (PR#92)
+- [x] Stream fusion split — 1199 lines → 5 modules
+- [x] Walker split — 1667 lines → 6 modules
+- [x] Codegen exit unification (PR#92)
 
-### Phase 5: コード品質 ✅
+### Phase 5: Code Quality ✅
 
-- [x] **5.1 String Interning** — `Sym` 型 (lasso ThreadedRodeo), Copy + O(1) equality。Ty/FnSig/ProtocolDef/TypeEnv/VariantCase 全層を Sym 化。build.rs stdlib_sigs 生成も対応。33ファイル変更。
-- [x] **5.3 Clone 削減 (基盤)** — Sym は Copy なので名前フィールドの clone が全て消滅。Ty の map_children 内の n.clone() → *n に。
+- [x] **5.1 String Interning** — `Sym` type (lasso ThreadedRodeo), Copy + O(1) equality. Sym throughout Ty/FnSig/ProtocolDef/TypeEnv/VariantCase. build.rs stdlib_sigs generation updated. 33 files changed.
+- [x] **5.3 Clone Reduction (Foundation)** — Sym is Copy so all name field clones are eliminated. n.clone() → *n in Ty's map_children.
 
-### Phase 5b: テスト・ビルド基盤 ✅
+### Phase 5b: Test and Build Infrastructure ✅
 
-- [x] **Proptest fuzzing** — lexer/parser/checker × arbitrary/structured = 6ターゲット、各10,000ケース
-- [x] **テスト全通過** — 159/159 .almd テスト、CI グリーン
-- [x] **テスト並列化** — compile_to_binary + per-file hash cache + thread pool 実行 (2:30 → 16s)
-- [x] **WASM result.collect/partition/collect_map** — CI WASM テスト全通過
-- [x] **TypeVar ICE ガード** — lower後 + mono後の2層ガード、inference TypeVar 全解決
-- [x] **TypeVar regression テスト** — 6パターン: chained fold, none/err比較, generic variant, recursive variant, closure field access
-
----
-
-## Remaining (残り 5pt)
-
-### テスト 9→10 (残り 1pt)
-
-#### Nanopass ユニットテスト
-
-各パスの入力 IR → 出力 IR 変換テスト。15パス × 2-5ケース = 40-50テスト。
-
-**工数**: M (4-5日)
-
-### Codegen統合 9→10 (残り 1pt)
-
-#### Stdlib dispatch 一元化
-
-TOML に wasm_handler/wasm_rt を追加し、build.rs が WASM dispatch table を自動生成。手動の match arm を排除。
-
-**工数**: M (1-2週間)
+- [x] **Proptest fuzzing** — lexer/parser/checker × arbitrary/structured = 6 targets, 10,000 cases each
+- [x] **All tests pass** — 159/159 .almd tests, CI green
+- [x] **Test parallelization** — compile_to_binary + per-file hash cache + thread pool execution (2:30 → 16s)
+- [x] **WASM result.collect/partition/collect_map** — CI WASM tests all pass
+- [x] **TypeVar ICE guard** — 2-layer guard after lower + after mono, all inference TypeVars resolved
+- [x] **TypeVar regression tests** — 6 patterns: chained fold, none/err comparison, generic variant, recursive variant, closure field access
 
 ---
 
-## 不要になった項目
+## Remaining (5pt left)
 
-- ~~Phase 6.5 Parser Fuzzing~~ → Phase 5b で proptest 導入済
-- ~~Phase 7 xtask 移行~~ → build.rs は3モジュール分割済で十分。xtask の追加価値が薄い
-- ~~Phase 5.2 Clone 削減 (Rc\<Ty\>)~~ → Sym 導入で名前 clone が消え、主要ホットスポットは解消。Rc\<Ty\> は費用対効果が低い
+### Tests 9→10 (1pt remaining)
+
+#### Nanopass Unit Tests
+
+Input IR → output IR transformation tests for each pass. 15 passes × 2-5 cases = 40-50 tests.
+
+**Effort**: M (4-5 days)
+
+### Codegen Integration 9→10 (1pt remaining)
+
+#### Stdlib Dispatch Unification
+
+Add wasm_handler/wasm_rt to TOML and have build.rs auto-generate the WASM dispatch table. Eliminate manual match arms.
+
+**Effort**: M (1-2 weeks)
 
 ---
 
-**残り工数見積もり**: 2-3 週間
-**完了時スコア**: 110/110
+## Items No Longer Needed
+
+- ~~Phase 6.5 Parser Fuzzing~~ → proptest introduced in Phase 5b
+- ~~Phase 7 xtask migration~~ → build.rs is already split into 3 modules, sufficient. xtask adds little value
+- ~~Phase 5.2 Clone Reduction (Rc\<Ty\>)~~ → Sym introduction eliminated name clones, resolving the main hotspots. Rc\<Ty\> has poor cost-benefit ratio
+
+---
+
+**Estimated remaining effort**: 2-3 weeks
+**Score on completion**: 110/110

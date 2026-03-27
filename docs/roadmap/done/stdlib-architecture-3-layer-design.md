@@ -1,88 +1,90 @@
-# Stdlib Architecture: 3-Layer Design [ON HOLD]
+<!-- description: Three-layer stdlib design (core/platform/external) for WASM parity -->
+<!-- done: 2026-03-18 -->
+# Stdlib Architecture: 3-Layer Design
 
-Almide の stdlib を 3 層に分離する。WASM を一級市民として扱い、pure な計算と OS 依存を明確に分ける。
+Separate Almide's stdlib into 3 layers. Treat WASM as a first-class citizen and clearly separate pure computation from OS dependencies.
 
-参考にした言語:
-- **MoonBit**: core (pure) / x (platform) の 2 層。WASM-first。JSON は core に含む
-- **Gleam**: stdlib (target-independent) / gleam_erlang / gleam_javascript の分離
-- **Rust**: core / alloc / std の 3 層。WASM で使えない関数はコンパイルエラー
-- **Zig**: comptime でターゲット判定。未使用コード自動削除
+Languages referenced:
+- **MoonBit**: 2 layers of core (pure) / x (platform). WASM-first. JSON included in core
+- **Gleam**: Separation of stdlib (target-independent) / gleam_erlang / gleam_javascript
+- **Rust**: 3 layers of core / alloc / std. Functions unavailable in WASM cause compile errors
+- **Zig**: Target detection via comptime. Automatic dead code elimination
 
-### Layer 1: core（全ターゲット、WASM OK）
+### Layer 1: core (all targets, WASM OK)
 
-auto-import または `import xxx` で使える。pure な計算のみ。OS 依存なし。
+Available via auto-import or `import xxx`. Pure computation only. No OS dependencies.
 
 | Module | Status | Notes |
 |--------|--------|-------|
-| `string` | ✅ runtime (`core_runtime.txt`) | 文字列操作 (30 functions) |
-| `list` | ✅ runtime (`collection_runtime.txt`) | リスト操作、HOF (lambda含む全関数) |
-| `int` | ✅ runtime (`core_runtime.txt`) | 数値変換、ビット演算 (22 functions) |
-| `float` | ✅ runtime (`core_runtime.txt`) | 数値変換 (9 functions) |
-| `map` | ✅ runtime (`collection_runtime.txt`) | ハッシュマップ (lambda含む全関数) |
-| `math` | ✅ runtime (`core_runtime.txt`) | 数学関数 (12 functions) |
-| `json` | ✅ runtime (`json_runtime.txt`) | パース・シリアライズ。WASM interop の共通言語 |
-| `regex` | ✅ runtime (`regex_runtime.txt`) | 正規表現 |
-| `path` | bundled .almd | パス操作（pure 文字列処理） |
-| `time` | ✅ runtime (`time_runtime.txt`) | 日付分解（year/month/day 等。now/sleep は platform） |
-| `args` | bundled .almd | 引数パース（env.args() は platform 経由で注入） |
+| `string` | ✅ runtime (`core_runtime.txt`) | String operations (30 functions) |
+| `list` | ✅ runtime (`collection_runtime.txt`) | List operations, HOF (all functions including lambda) |
+| `int` | ✅ runtime (`core_runtime.txt`) | Numeric conversion, bitwise operations (22 functions) |
+| `float` | ✅ runtime (`core_runtime.txt`) | Numeric conversion (9 functions) |
+| `map` | ✅ runtime (`collection_runtime.txt`) | HashMap (all functions including lambda) |
+| `math` | ✅ runtime (`core_runtime.txt`) | Math functions (12 functions) |
+| `json` | ✅ runtime (`json_runtime.txt`) | Parse/serialize. Common language for WASM interop |
+| `regex` | ✅ runtime (`regex_runtime.txt`) | Regular expressions |
+| `path` | bundled .almd | Path operations (pure string processing) |
+| `time` | ✅ runtime (`time_runtime.txt`) | Date decomposition (year/month/day etc. now/sleep are platform) |
+| `args` | bundled .almd | Argument parsing (env.args() injected via platform) |
 | `encoding` | bundled .almd | base64, hex, url_encode/decode |
 
-### Layer 2: platform（native only）
+### Layer 2: platform (native only)
 
-`import platform.fs` 等で明示的に import する。WASM ターゲットで import すると**コンパイルエラー**。
+Explicitly import via `import platform.fs` etc. Importing on WASM target causes a **compile error**.
 
 | Module | Status | Notes |
 |--------|--------|-------|
-| `fs` | ✅ runtime (`platform_runtime.txt`) | ファイル I/O (14 functions) |
-| `process` | ✅ runtime (`platform_runtime.txt`) | 外部コマンド実行 (4 functions) |
+| `fs` | ✅ runtime (`platform_runtime.txt`) | File I/O (14 functions) |
+| `process` | ✅ runtime (`platform_runtime.txt`) | External command execution (4 functions) |
 | `io` | ✅ runtime (`platform_runtime.txt`) | stdin/stdout (3 functions) |
-| `env` | ✅ runtime (`platform_runtime.txt`) | 環境変数、args、unix_timestamp、millis、sleep_ms (7 functions) |
-| `http` | ✅ runtime (`http_runtime.txt`) | HTTP サーバー/クライアント |
-| `random` | ✅ runtime (`platform_runtime.txt`) | OS エントロピーベースの乱数 (4 functions) |
+| `env` | ✅ runtime (`platform_runtime.txt`) | Environment variables, args, unix_timestamp, millis, sleep_ms (7 functions) |
+| `http` | ✅ runtime (`http_runtime.txt`) | HTTP server/client |
+| `random` | ✅ runtime (`platform_runtime.txt`) | OS entropy-based random (4 functions) |
 
-### Layer 3: x（公式拡張パッケージ）
+### Layer 3: x (Official Extension Packages)
 
-`almide.toml` に依存追加して使う。公式メンテナンスだが stdlib とは独立してバージョン管理。
+Used by adding dependencies in `almide.toml`. Officially maintained but versioned independently from stdlib.
 
 | Package | Status | Notes |
 |---------|--------|-------|
-| `encoding` | ✅ implemented (bundled .almd) → 分離予定 | hex, base64, url_encode/decode |
+| `encoding` | ✅ implemented (bundled .almd) -> planned separation | hex, base64, url_encode/decode |
 | `hash` | ✅ implemented (bundled .almd) | SHA-256, SHA-1, MD5 — pure Almide |
 | `crypto` | planned | encryption |
-| `csv` | planned (external package) | CSV parse/stringify — `almide/csv` |
+| `csv` | planned (external package) | CSV parse/stringify -- `almide/csv` |
 | `term` | ✅ implemented (bundled .almd) | ANSI colors, terminal formatting |
 
 ### Playground Stdlib Support
 
-Playground (WASM) で bundled .almd モジュールを利用可能にする。
+Enable bundled .almd modules in Playground (WASM).
 
-- `stdlib::get_bundled_source()` で取得 → パース → `emit_with_modules` の modules 引数に渡す
-- ブラウザ互換のもの（csv, encoding, hash, path）のみバンドル対象
-- args は `env.args()` 依存で不可、time は `env.unix_timestamp()` 等が未対応、term はブラウザで無意味
-- Phase B の platform namespace 導入後に再検討（platform 依存を import した bundled module がコンパイルエラーになれば安全に全モジュールバンドル可能）
+- Retrieve via `stdlib::get_bundled_source()` -> parse -> pass to `emit_with_modules` modules argument
+- Only browser-compatible ones (csv, encoding, hash, path) are bundle targets
+- args depends on `env.args()` and is not available; time has unsupported `env.unix_timestamp()` etc.; term is meaningless in browser
+- Revisit after Phase B platform namespace introduction (if bundled modules importing platform dependencies cause compile errors, all modules can be safely bundled)
 
 ### Implementation Steps
 
-#### Phase A: WASM コンパイルエラー ✅
-- [x] checker: WASM ターゲット時に platform モジュールの import を検出してエラー
-- [x] `--target wasm` 時に checker にターゲット情報を渡す仕組み
+#### Phase A: WASM Compile Error ✅
+- [x] checker: detect platform module imports on WASM target and error
+- [x] mechanism to pass target information to checker when `--target wasm`
 
-#### Phase B: platform namespace 導入
-- [ ] `import platform.fs` 構文の設計
-- [ ] 既存の `import fs` からの移行パス（deprecation warning → エラー）
-- [ ] platform モジュールの resolver 実装
+#### Phase B: Introduce platform namespace
+- [ ] Design `import platform.fs` syntax
+- [ ] Migration path from existing `import fs` (deprecation warning -> error)
+- [ ] Implement platform module resolver
 
-#### Phase C: x パッケージ分離
-- [ ] encoding を `almide/encoding` リポジトリに分離
-- [ ] パッケージマネージャ経由で利用可能に
-- [ ] hash, csv, term を x パッケージとして新規作成
+#### Phase C: Separate x packages
+- [ ] Separate encoding into `almide/encoding` repository
+- [ ] Make available via package manager
+- [ ] Create hash, csv, term as new x packages
 
 ### Extern / FFI Design ✅ (implemented in v0.2.1)
 
-Gleam の `@external` パターンを参考に、Almide 版の extern を実装。
+Implemented Almide's version of extern, referencing Gleam's `@external` pattern.
 
 **Design decisions:**
-- Syntax: `@extern(target, "module", "function")` attribute — target は `rs`/`ts`
+- Syntax: `@extern(target, "module", "function")` attribute — target is `rs`/`ts`
 - Specification: module + function name (not file paths)
 - Type mapping: trust-based (compiler trusts the declared signature)
 - Body = fallback: if a body exists, it's used for targets without `@extern`

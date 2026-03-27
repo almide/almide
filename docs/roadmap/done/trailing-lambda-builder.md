@@ -1,3 +1,5 @@
+<!-- description: Trailing lambda / builder DSL exploration (rejected) -->
+<!-- done: 2026-03-14 -->
 # Trailing Lambda / Builder DSL [WON'T DO]
 
 Explore Kotlin-style trailing lambda or builder patterns for structured data construction.

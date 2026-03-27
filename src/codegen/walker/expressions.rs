@@ -422,11 +422,45 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| "{ ...spread }".into())
         }
 
-        // ── Try / Await ──
+        // ── Try / Await / Unwrap / ToOption ──
         IrExprKind::Try { expr: inner } => {
             let s = render_expr(ctx, inner);
             ctx.templates.render_with("try_expr", None, &[], &[("inner", s.as_str())])
                 .unwrap_or_else(|| "try(...)".into())
+        }
+        IrExprKind::Unwrap { expr: inner } => {
+            let s = render_expr(ctx, inner);
+            let when_type = if inner.ty.is_option() { Some("Option") } else { None };
+            ctx.templates.render_with("unwrap_expr", when_type, &[], &[("inner", s.as_str())])
+                .unwrap_or_else(|| {
+                    if inner.ty.is_option() {
+                        // Fallback for targets without Option unwrap template (e.g. TS)
+                        format!("((__v) => {{ if (__v === null) throw new Error('unwrap on none'); return __v; }})({})", s)
+                    } else {
+                        format!("({})?", s)
+                    }
+                })
+        }
+        IrExprKind::UnwrapOr { expr: inner, fallback } => {
+            let s = render_expr(ctx, inner);
+            let f = render_expr(ctx, fallback);
+            let when_type = if inner.ty.is_option() { Some("Option") } else { None };
+            ctx.templates.render_with("unwrap_or_expr", when_type, &[], &[("inner", s.as_str()), ("fallback", f.as_str())])
+                .unwrap_or_else(|| format!("{}.unwrap_or({})", s, f))
+        }
+        IrExprKind::ToOption { expr: inner } => {
+            if inner.ty.is_option() {
+                render_expr(ctx, inner)
+            } else {
+                let s = render_expr(ctx, inner);
+                ctx.templates.render_with("to_option_expr", None, &[], &[("inner", s.as_str())])
+                    .unwrap_or_else(|| format!("({}).ok()", s))
+            }
+        }
+        IrExprKind::OptionalChain { expr: inner, field } => {
+            let s = render_expr(ctx, inner);
+            ctx.templates.render_with("optional_chain_expr", None, &[], &[("inner", s.as_str()), ("field", field)])
+                .unwrap_or_else(|| format!("{}.as_ref().map(|__v| __v.{}.clone())", s, field))
         }
         IrExprKind::Await { expr: inner } => {
             let s = render_expr(ctx, inner);
