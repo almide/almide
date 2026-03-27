@@ -86,8 +86,12 @@ template = "Ok({inner})"
 [err_expr]
 template = "Err(format!(\"{:?}\", {inner}))"
 
-[unwrap_expr]
+[[unwrap_expr]]
 template = "({inner})?"
+
+[[unwrap_expr]]
+when_type = "Option"
+template = "({inner}).ok_or(\"none\".to_string())?"
 
 [[unwrap_or_expr]]
 template = "match {inner} {{ Ok(v) => v, Err(_) => {fallback}, }}"

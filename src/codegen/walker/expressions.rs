@@ -430,7 +430,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         IrExprKind::Unwrap { expr: inner } => {
             let s = render_expr(ctx, inner);
-            ctx.templates.render_with("unwrap_expr", None, &[], &[("inner", s.as_str())])
+            let when_type = if inner.ty.is_option() { Some("Option") } else { None };
+            ctx.templates.render_with("unwrap_expr", when_type, &[], &[("inner", s.as_str())])
                 .unwrap_or_else(|| format!("({})?", s))
         }
         IrExprKind::UnwrapOr { expr: inner, fallback } => {

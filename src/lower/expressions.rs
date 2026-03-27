@@ -395,10 +395,10 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             ctx.mk(IrExprKind::Await { expr: Box::new(inner) }, ty, span)
         }
 
-        // expr! — lower to Try (same semantics as ?)
+        // expr! — keep as Unwrap (distinct from auto-? Try)
         ast::Expr::Unwrap { expr, .. } => {
             let inner = lower_expr(ctx, expr);
-            ctx.mk(IrExprKind::Try { expr: Box::new(inner) }, ty, span)
+            ctx.mk(IrExprKind::Unwrap { expr: Box::new(inner) }, ty, span)
         }
         // expr ?? fallback — lower to match: ok(v)/some(v) → v, else → fallback
         ast::Expr::UnwrapOr { expr, fallback, .. } => {
