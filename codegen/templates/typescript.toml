@@ -65,8 +65,6 @@ template = "{{ ok: true, value: {inner} }}"
 [err_expr]
 template = "{{ ok: false, error: {inner} }}"
 
-[unwrap_or_expr]
-template = "__almd_unwrap_or({expr}, {default})"
 
 # ── Match ──
 # TS has no native match — emit as IIFE with if/else chain
