@@ -452,6 +452,12 @@ impl FuncCompiler<'_> {
                     _ if module == "fs" => {
                         self.emit_fs_call(func, args);
                     }
+                    _ if module == "io" => {
+                        self.emit_io_call(func, args);
+                    }
+                    _ if module == "process" => {
+                        self.emit_process_call(func, args);
+                    }
                     _ if module == "log" => {
                         self.emit_log_call(func, args);
                     }
@@ -2496,6 +2502,2082 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
+            }
+            "read_bytes" => {
+                // fs.read_bytes(path) -> Result[List[Int], String]
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let fd_out_ptr = self.scratch.alloc_i32();
+                let opened_fd = self.scratch.alloc_i32();
+                let stat_buf = self.scratch.alloc_i32();
+                let file_size = self.scratch.alloc_i32();
+                let data_buf = self.scratch.alloc_i32();
+                let iov_ptr = self.scratch.alloc_i32();
+                let nread_ptr = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let list_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+                let counter = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                });
+
+                // Strip leading '/'
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                // path_open for reading
+                wasm!(self.func, {
+                    i32_const(3); i32_const(0);
+                    local_get(path_ptr); local_get(path_len);
+                    i32_const(0); i64_const(6); i64_const(0); i32_const(0);
+                    local_get(fd_out_ptr);
+                    call(self.emitter.rt.path_open);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_const(0); i32_ne;
+                    if_i32;
+                });
+                let err_msg = self.emitter.intern_string("file not found");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+
+                // stat for file size
+                wasm!(self.func, {
+                    local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
+                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    local_get(opened_fd); local_get(stat_buf);
+                    call(self.emitter.rt.fd_filestat_get); drop;
+                    local_get(stat_buf); i32_const(32); i32_add; i32_load(0); local_set(file_size);
+                });
+
+                // Read raw bytes
+                wasm!(self.func, {
+                    local_get(file_size); call(self.emitter.rt.alloc); local_set(data_buf);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    local_get(iov_ptr); local_get(data_buf); i32_store(0);
+                    local_get(iov_ptr); local_get(file_size); i32_store(4);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nread_ptr);
+                    call(self.emitter.rt.fd_read); drop;
+                    local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
+                    local_get(nread_ptr); i32_load(0); local_set(file_size);
+                });
+
+                // Build List[Int]: [count:i32][i64 * count]
+                wasm!(self.func, {
+                    local_get(file_size); i32_const(8); i32_mul; i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(list_ptr);
+                    local_get(list_ptr); local_get(file_size); i32_store(0);
+                });
+
+                // Copy each byte as i64
+                wasm!(self.func, {
+                    i32_const(0); local_set(counter);
+                    block_empty; loop_empty;
+                    local_get(counter); local_get(file_size); i32_ge_u; br_if(1);
+                    local_get(list_ptr); i32_const(4); i32_add;
+                    local_get(counter); i32_const(8); i32_mul; i32_add;
+                    local_get(data_buf); local_get(counter); i32_add; i32_load8_u(0);
+                    i64_extend_i32_u;
+                    i64_store(0);
+                    local_get(counter); i32_const(1); i32_add; local_set(counter);
+                    br(0);
+                    end; end;
+                });
+
+                // ok(list_ptr)
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); local_get(list_ptr); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(counter);
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(list_ptr);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(nread_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(data_buf);
+                self.scratch.free_i32(file_size);
+                self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(opened_fd);
+                self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "write_bytes" => {
+                // fs.write_bytes(path, bytes: List[Int]) -> Result[Unit, String]
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let list_ptr = self.scratch.alloc_i32();
+                let fd_out_ptr = self.scratch.alloc_i32();
+                let opened_fd = self.scratch.alloc_i32();
+                let iov_ptr = self.scratch.alloc_i32();
+                let nwritten_ptr = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+                let byte_buf = self.scratch.alloc_i32();
+                let count = self.scratch.alloc_i32();
+                let counter = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { local_set(list_ptr); });
+
+                // Convert List[Int] (i64 elements) to byte buffer
+                wasm!(self.func, {
+                    local_get(list_ptr); i32_load(0); local_set(count);
+                    local_get(count); call(self.emitter.rt.alloc); local_set(byte_buf);
+                    i32_const(0); local_set(counter);
+                    block_empty; loop_empty;
+                    local_get(counter); local_get(count); i32_ge_u; br_if(1);
+                    local_get(byte_buf); local_get(counter); i32_add;
+                    local_get(list_ptr); i32_const(4); i32_add;
+                    local_get(counter); i32_const(8); i32_mul; i32_add;
+                    i64_load(0); i32_wrap_i64;
+                    i32_store8(0);
+                    local_get(counter); i32_const(1); i32_add; local_set(counter);
+                    br(0);
+                    end; end;
+                });
+
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                });
+
+                // Strip leading '/'
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                // path_open for writing (O_CREAT|O_TRUNC=9)
+                wasm!(self.func, {
+                    i32_const(3); i32_const(0);
+                    local_get(path_ptr); local_get(path_len);
+                    i32_const(9); i64_const(64); i64_const(0); i32_const(0);
+                    local_get(fd_out_ptr);
+                    call(self.emitter.rt.path_open);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_const(0); i32_ne;
+                    if_i32;
+                });
+                let err_msg = self.emitter.intern_string("failed to open file for writing");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+
+                wasm!(self.func, {
+                    local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    local_get(iov_ptr); local_get(byte_buf); i32_store(0);
+                    local_get(iov_ptr); local_get(count); i32_store(4);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nwritten_ptr);
+                    local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nwritten_ptr);
+                    call(self.emitter.rt.fd_write); drop;
+                    local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
+                });
+
+                // ok(unit)
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(0); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(counter);
+                self.scratch.free_i32(count);
+                self.scratch.free_i32(byte_buf);
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(nwritten_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(opened_fd);
+                self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(list_ptr);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "append" => {
+                // fs.append(path, content) -> Result[Unit, String]
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let content_str = self.scratch.alloc_i32();
+                let fd_out_ptr = self.scratch.alloc_i32();
+                let opened_fd = self.scratch.alloc_i32();
+                let iov_ptr = self.scratch.alloc_i32();
+                let nwritten_ptr = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { local_set(content_str); });
+
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                });
+
+                // Strip leading '/'
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                // path_open: oflags=O_CREAT(1), rights=fd_write(64), fdflags=APPEND(1)
+                wasm!(self.func, {
+                    i32_const(3); i32_const(0);
+                    local_get(path_ptr); local_get(path_len);
+                    i32_const(1);
+                    i64_const(64); i64_const(0);
+                    i32_const(1);
+                    local_get(fd_out_ptr);
+                    call(self.emitter.rt.path_open);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_const(0); i32_ne;
+                    if_i32;
+                });
+                let err_msg = self.emitter.intern_string("failed to open file for appending");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+
+                wasm!(self.func, {
+                    local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    local_get(iov_ptr); local_get(content_str); i32_const(4); i32_add; i32_store(0);
+                    local_get(iov_ptr); local_get(content_str); i32_load(0); i32_store(4);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nwritten_ptr);
+                    local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nwritten_ptr);
+                    call(self.emitter.rt.fd_write); drop;
+                    local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
+                });
+
+                // ok(unit)
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(0); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(nwritten_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(opened_fd);
+                self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(content_str);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "mkdir_p" => {
+                // fs.mkdir_p(path) -> Result[Unit, String]
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                // Strip leading '/'
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                // Iterative mkdir_p: create each prefix segment
+                let seg_end = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(0); local_set(seg_end);
+                    block_empty; loop_empty;
+                    local_get(seg_end); local_get(path_len); i32_ge_u; br_if(1);
+                    // Advance seg_end past current char
+                    local_get(seg_end); i32_const(1); i32_add; local_set(seg_end);
+                    // Skip to next '/' or end of path
+                    block_empty; loop_empty;
+                    local_get(seg_end); local_get(path_len); i32_ge_u; br_if(1);
+                    local_get(path_ptr); local_get(seg_end); i32_add; i32_load8_u(0);
+                    i32_const(47); i32_eq; br_if(1);
+                    local_get(seg_end); i32_const(1); i32_add; local_set(seg_end);
+                    br(0);
+                    end; end;
+                    // Try creating directory for path[0..seg_end]
+                    i32_const(3);
+                    local_get(path_ptr);
+                    local_get(seg_end);
+                    call(self.emitter.rt.path_create_directory);
+                    drop;
+                    br(0);
+                    end; end;
+                });
+                self.scratch.free_i32(seg_end);
+
+                // Final attempt: create the full path and check error
+                wasm!(self.func, {
+                    i32_const(3);
+                    local_get(path_ptr);
+                    local_get(path_len);
+                    call(self.emitter.rt.path_create_directory);
+                    local_set(errno);
+                });
+
+                // errno==0 or errno==20 (EEXIST) -> ok
+                wasm!(self.func, {
+                    local_get(errno); i32_eqz;
+                    local_get(errno); i32_const(20); i32_eq;
+                    i32_or;
+                    if_i32;
+                });
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(0); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+                let err_msg = self.emitter.intern_string("failed to create directory");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "read_lines" => {
+                // fs.read_lines(path) -> Result[List[String], String]
+                // Call read_text internally, then split by '\n' using string.lines
+                self.emit_fs_call_inner_read_text(args);
+                let res = self.scratch.alloc_i32();
+                let tag = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    local_set(res);
+                    local_get(res); i32_load(0); local_set(tag);
+                    local_get(tag); i32_eqz;
+                    if_i32;
+                });
+                // ok path: split the string by '\n'
+                let text_ptr = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    local_get(res); i32_const(4); i32_add; i32_load(0); local_set(text_ptr);
+                    local_get(text_ptr);
+                    call(self.emitter.rt.string.lines);
+                });
+                let result_ptr = self.scratch.alloc_i32();
+                let list_val = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    local_set(list_val);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); local_get(list_val); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                    local_get(res);
+                    end;
+                });
+
+                self.scratch.free_i32(list_val);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(text_ptr);
+                self.scratch.free_i32(tag);
+                self.scratch.free_i32(res);
+            }
+            "list_dir" => {
+                // fs.list_dir(path) -> Result[List[String], String]
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let fd_out_ptr = self.scratch.alloc_i32();
+                let opened_fd = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+                let dir_buf = self.scratch.alloc_i32();
+                let bufused_ptr = self.scratch.alloc_i32();
+                let bufused = self.scratch.alloc_i32();
+                let offset = self.scratch.alloc_i32();
+                let list_ptr = self.scratch.alloc_i32();
+                let list_count = self.scratch.alloc_i32();
+                let entry_name_len = self.scratch.alloc_i32();
+                let str_ptr = self.scratch.alloc_i32();
+                let counter = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                });
+
+                // Strip leading '/'
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                // path_open for directory: dirflags=1(symlink follow), oflags=O_DIRECTORY(2)
+                // rights = fd_readdir(0x4000)
+                wasm!(self.func, {
+                    i32_const(3); i32_const(1);
+                    local_get(path_ptr); local_get(path_len);
+                    i32_const(2);
+                    i64_const(0x4000);
+                    i64_const(0);
+                    i32_const(0);
+                    local_get(fd_out_ptr);
+                    call(self.emitter.rt.path_open);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_const(0); i32_ne;
+                    if_i32;
+                });
+                let err_msg = self.emitter.intern_string("failed to open directory");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+
+                wasm!(self.func, {
+                    local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
+                });
+
+                // Allocate readdir buffer (4KB) and bufused output
+                wasm!(self.func, {
+                    i32_const(4096); call(self.emitter.rt.alloc); local_set(dir_buf);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(bufused_ptr);
+                });
+
+                // fd_readdir(fd, buf, buf_len, cookie=0, bufused_ptr)
+                wasm!(self.func, {
+                    local_get(opened_fd);
+                    local_get(dir_buf);
+                    i32_const(4096);
+                    i64_const(0);
+                    local_get(bufused_ptr);
+                    call(self.emitter.rt.fd_readdir);
+                    drop;
+                    local_get(bufused_ptr); i32_load(0); local_set(bufused);
+                    local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
+                });
+
+                // First pass: count entries (skipping "." and "..")
+                // WASI dirent: d_next(8) + d_ino(8) + d_namlen(4) + d_type(4) = 24 bytes header
+                wasm!(self.func, {
+                    i32_const(0); local_set(offset);
+                    i32_const(0); local_set(list_count);
+                    block_empty; loop_empty;
+                    local_get(offset); i32_const(24); i32_add;
+                    local_get(bufused); i32_gt_u; br_if(1);
+                    local_get(dir_buf); local_get(offset); i32_add; i32_const(16); i32_add;
+                    i32_load(0); local_set(entry_name_len);
+                });
+                // Check for "." (namlen==1 && name[0]=='.')
+                wasm!(self.func, {
+                    local_get(entry_name_len); i32_const(1); i32_eq;
+                    if_empty;
+                      local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
+                      i32_load8_u(0); i32_const(46); i32_eq;
+                      if_empty;
+                      else_;
+                        local_get(list_count); i32_const(1); i32_add; local_set(list_count);
+                      end;
+                    else_;
+                });
+                // Check for ".." (namlen==2 && name[0]=='.' && name[1]=='.')
+                wasm!(self.func, {
+                      local_get(entry_name_len); i32_const(2); i32_eq;
+                      if_empty;
+                        local_get(list_count); i32_const(1); i32_add; local_set(list_count);
+                      else_;
+                        local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
+                        i32_load8_u(0); i32_const(46); i32_eq;
+                        local_get(dir_buf); local_get(offset); i32_add; i32_const(25); i32_add;
+                        i32_load8_u(0); i32_const(46); i32_eq;
+                        i32_and;
+                        i32_eqz;
+                        if_empty;
+                        else_;
+                          local_get(list_count); i32_const(1); i32_add; local_set(list_count);
+                        end;
+                      end;
+                    end;
+                });
+                // Advance offset
+                wasm!(self.func, {
+                    local_get(offset); i32_const(24); i32_add; local_get(entry_name_len); i32_add;
+                    local_set(offset);
+                    br(0);
+                    end; end;
+                });
+
+                // Allocate List[String]: [count:i32][ptr:i32 * count]
+                wasm!(self.func, {
+                    local_get(list_count); i32_const(4); i32_mul; i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(list_ptr);
+                    local_get(list_ptr); local_get(list_count); i32_store(0);
+                });
+
+                // Second pass: build string entries
+                let copy_i = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(0); local_set(offset);
+                    i32_const(0); local_set(counter);
+                    block_empty; loop_empty;
+                    local_get(offset); i32_const(24); i32_add;
+                    local_get(bufused); i32_gt_u; br_if(1);
+                    local_get(dir_buf); local_get(offset); i32_add; i32_const(16); i32_add;
+                    i32_load(0); local_set(entry_name_len);
+                });
+
+                // Skip "."
+                wasm!(self.func, {
+                    local_get(entry_name_len); i32_const(1); i32_eq;
+                    if_empty;
+                      local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
+                      i32_load8_u(0); i32_const(46); i32_eq;
+                      if_empty;
+                      else_;
+                });
+                // Not ".": build entry
+                self.emit_fs_list_dir_build_entry(copy_i, entry_name_len, str_ptr, dir_buf, offset, list_ptr, counter);
+                wasm!(self.func, {
+                      end;
+                    else_;
+                });
+
+                // namlen != 1: check ".."
+                wasm!(self.func, {
+                      local_get(entry_name_len); i32_const(2); i32_eq;
+                      if_empty;
+                });
+                // namlen != 2: build entry
+                self.emit_fs_list_dir_build_entry(copy_i, entry_name_len, str_ptr, dir_buf, offset, list_ptr, counter);
+                wasm!(self.func, {
+                      else_;
+                        local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
+                        i32_load8_u(0); i32_const(46); i32_eq;
+                        local_get(dir_buf); local_get(offset); i32_add; i32_const(25); i32_add;
+                        i32_load8_u(0); i32_const(46); i32_eq;
+                        i32_and;
+                        i32_eqz;
+                        if_empty;
+                });
+                // Not "..": build entry
+                self.emit_fs_list_dir_build_entry(copy_i, entry_name_len, str_ptr, dir_buf, offset, list_ptr, counter);
+                wasm!(self.func, {
+                        end;
+                      end;
+                    end;
+                });
+
+                // Advance offset
+                wasm!(self.func, {
+                    local_get(offset); i32_const(24); i32_add; local_get(entry_name_len); i32_add;
+                    local_set(offset);
+                    br(0);
+                    end; end;
+                });
+                self.scratch.free_i32(copy_i);
+
+                // Update list count
+                wasm!(self.func, {
+                    local_get(list_ptr); local_get(counter); i32_store(0);
+                });
+
+                // ok(list_ptr)
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); local_get(list_ptr); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(counter);
+                self.scratch.free_i32(str_ptr);
+                self.scratch.free_i32(entry_name_len);
+                self.scratch.free_i32(list_count);
+                self.scratch.free_i32(list_ptr);
+                self.scratch.free_i32(offset);
+                self.scratch.free_i32(bufused);
+                self.scratch.free_i32(bufused_ptr);
+                self.scratch.free_i32(dir_buf);
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(opened_fd);
+                self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "is_dir" => {
+                // fs.is_dir(path) -> Bool  (filetype 3 = directory)
+                self.emit_fs_filetype_check(args, 3);
+            }
+            "is_file" => {
+                // fs.is_file(path) -> Bool  (filetype 4 = regular file)
+                self.emit_fs_filetype_check(args, 4);
+            }
+            "is_symlink" => {
+                // fs.is_symlink(path) -> Bool  (filetype 7 = symbolic_link)
+                // Use flags=0 (do NOT follow symlinks)
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let stat_buf = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                wasm!(self.func, {
+                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    // flags=0: do NOT follow symlinks
+                    i32_const(3); i32_const(0);
+                    local_get(path_ptr); local_get(path_len);
+                    local_get(stat_buf);
+                    call(self.emitter.rt.path_filestat_get);
+                    local_set(errno);
+                    local_get(errno); i32_const(0); i32_ne;
+                    if_i32;
+                      i32_const(0);
+                    else_;
+                      local_get(stat_buf); i32_const(16); i32_add; i32_load8_u(0);
+                      i32_const(7); i32_eq;
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "copy" => {
+                // fs.copy(src, dst) -> Result[Unit, String]
+                // Read source file bytes, write to destination
+                let src_str = self.scratch.alloc_i32();
+                let src_ptr = self.scratch.alloc_i32();
+                let src_len = self.scratch.alloc_i32();
+                let dst_str = self.scratch.alloc_i32();
+                let dst_ptr = self.scratch.alloc_i32();
+                let dst_len = self.scratch.alloc_i32();
+                let fd_out_ptr = self.scratch.alloc_i32();
+                let opened_fd = self.scratch.alloc_i32();
+                let stat_buf = self.scratch.alloc_i32();
+                let file_size = self.scratch.alloc_i32();
+                let data_buf = self.scratch.alloc_i32();
+                let iov_ptr = self.scratch.alloc_i32();
+                let nrw_ptr = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(src_str);
+                    local_get(src_str); i32_const(4); i32_add; local_set(src_ptr);
+                    local_get(src_str); i32_load(0); local_set(src_len);
+                });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(dst_str);
+                    local_get(dst_str); i32_const(4); i32_add; local_set(dst_ptr);
+                    local_get(dst_str); i32_load(0); local_set(dst_len);
+                });
+
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                });
+
+                // Strip leading '/' from src
+                wasm!(self.func, {
+                    local_get(src_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(src_ptr); i32_const(1); i32_add; local_set(src_ptr);
+                      local_get(src_len); i32_const(1); i32_sub; local_set(src_len);
+                    end;
+                });
+
+                // Open source for reading
+                wasm!(self.func, {
+                    i32_const(3); i32_const(0);
+                    local_get(src_ptr); local_get(src_len);
+                    i32_const(0); i64_const(6); i64_const(0); i32_const(0);
+                    local_get(fd_out_ptr);
+                    call(self.emitter.rt.path_open);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_const(0); i32_ne;
+                    if_i32;
+                });
+                let err_msg = self.emitter.intern_string("failed to open source file");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+
+                // Read source content
+                wasm!(self.func, {
+                    local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
+                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    local_get(opened_fd); local_get(stat_buf);
+                    call(self.emitter.rt.fd_filestat_get); drop;
+                    local_get(stat_buf); i32_const(32); i32_add; i32_load(0); local_set(file_size);
+                    local_get(file_size); call(self.emitter.rt.alloc); local_set(data_buf);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    local_get(iov_ptr); local_get(data_buf); i32_store(0);
+                    local_get(iov_ptr); local_get(file_size); i32_store(4);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nrw_ptr);
+                    local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nrw_ptr);
+                    call(self.emitter.rt.fd_read); drop;
+                    local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
+                    local_get(nrw_ptr); i32_load(0); local_set(file_size);
+                });
+
+                // Strip leading '/' from dst
+                wasm!(self.func, {
+                    local_get(dst_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(dst_ptr); i32_const(1); i32_add; local_set(dst_ptr);
+                      local_get(dst_len); i32_const(1); i32_sub; local_set(dst_len);
+                    end;
+                });
+
+                // Open dst for writing
+                wasm!(self.func, {
+                    i32_const(3); i32_const(0);
+                    local_get(dst_ptr); local_get(dst_len);
+                    i32_const(9); i64_const(64); i64_const(0); i32_const(0);
+                    local_get(fd_out_ptr);
+                    call(self.emitter.rt.path_open);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_const(0); i32_ne;
+                    if_i32;
+                });
+                let err_msg2 = self.emitter.intern_string("failed to open destination file");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg2 as i32); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+
+                // Write data to dst
+                wasm!(self.func, {
+                    local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
+                    local_get(iov_ptr); local_get(data_buf); i32_store(0);
+                    local_get(iov_ptr); local_get(file_size); i32_store(4);
+                    local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nrw_ptr);
+                    call(self.emitter.rt.fd_write); drop;
+                    local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
+                });
+
+                // ok(unit) -- close nested if blocks
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(0); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(nrw_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(data_buf);
+                self.scratch.free_i32(file_size);
+                self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(opened_fd);
+                self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(dst_len);
+                self.scratch.free_i32(dst_ptr);
+                self.scratch.free_i32(dst_str);
+                self.scratch.free_i32(src_len);
+                self.scratch.free_i32(src_ptr);
+                self.scratch.free_i32(src_str);
+            }
+            "rename" => {
+                // fs.rename(src, dst) -> Result[Unit, String]
+                let src_str = self.scratch.alloc_i32();
+                let src_ptr = self.scratch.alloc_i32();
+                let src_len = self.scratch.alloc_i32();
+                let dst_str = self.scratch.alloc_i32();
+                let dst_ptr = self.scratch.alloc_i32();
+                let dst_len = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(src_str);
+                    local_get(src_str); i32_const(4); i32_add; local_set(src_ptr);
+                    local_get(src_str); i32_load(0); local_set(src_len);
+                });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(dst_str);
+                    local_get(dst_str); i32_const(4); i32_add; local_set(dst_ptr);
+                    local_get(dst_str); i32_load(0); local_set(dst_len);
+                });
+
+                // Strip leading '/' from src and dst
+                wasm!(self.func, {
+                    local_get(src_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(src_ptr); i32_const(1); i32_add; local_set(src_ptr);
+                      local_get(src_len); i32_const(1); i32_sub; local_set(src_len);
+                    end;
+                    local_get(dst_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(dst_ptr); i32_const(1); i32_add; local_set(dst_ptr);
+                      local_get(dst_len); i32_const(1); i32_sub; local_set(dst_len);
+                    end;
+                });
+
+                // path_rename(old_fd=3, old_path, old_len, new_fd=3, new_path, new_len)
+                wasm!(self.func, {
+                    i32_const(3);
+                    local_get(src_ptr); local_get(src_len);
+                    i32_const(3);
+                    local_get(dst_ptr); local_get(dst_len);
+                    call(self.emitter.rt.path_rename);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_eqz;
+                    if_i32;
+                });
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(0); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+                let err_msg = self.emitter.intern_string("failed to rename");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(dst_len);
+                self.scratch.free_i32(dst_ptr);
+                self.scratch.free_i32(dst_str);
+                self.scratch.free_i32(src_len);
+                self.scratch.free_i32(src_ptr);
+                self.scratch.free_i32(src_str);
+            }
+            "remove" => {
+                // fs.remove(path) -> Result[Unit, String]
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                wasm!(self.func, {
+                    i32_const(3);
+                    local_get(path_ptr); local_get(path_len);
+                    call(self.emitter.rt.path_unlink_file);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_eqz;
+                    if_i32;
+                });
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(0); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+                let err_msg = self.emitter.intern_string("failed to remove file");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "remove_all" => {
+                // fs.remove_all(path) -> Result[Unit, String]
+                // Try unlink (file), then rmdir (empty dir)
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                // Try path_unlink_file first
+                wasm!(self.func, {
+                    i32_const(3);
+                    local_get(path_ptr); local_get(path_len);
+                    call(self.emitter.rt.path_unlink_file);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_eqz;
+                    if_i32;
+                });
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(0); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+
+                // Try path_remove_directory
+                wasm!(self.func, {
+                    i32_const(3);
+                    local_get(path_ptr); local_get(path_len);
+                    call(self.emitter.rt.path_remove_directory);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_eqz;
+                    if_i32;
+                });
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(0); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+                let err_msg = self.emitter.intern_string("failed to remove path");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "file_size" => {
+                // fs.file_size(path) -> Result[Int, String]
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let stat_buf = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                wasm!(self.func, {
+                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(3); i32_const(1);
+                    local_get(path_ptr); local_get(path_len);
+                    local_get(stat_buf);
+                    call(self.emitter.rt.path_filestat_get);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_eqz;
+                    if_i32;
+                });
+                // ok: file size at offset 32 as i64
+                // Result[Int, String] = [tag:i32][padding:i32][i64] = 16 bytes
+                wasm!(self.func, {
+                    i32_const(16); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(8); i32_add;
+                    local_get(stat_buf); i32_const(32); i32_add; i64_load(0);
+                    i64_store(0);
+                    local_get(result_ptr);
+                    else_;
+                });
+                let err_msg = self.emitter.intern_string("file not found");
+                wasm!(self.func, {
+                    i32_const(16); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(8); i32_add;
+                    i32_const(err_msg as i32); i64_extend_i32_u; i64_store(0);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "modified_at" => {
+                // fs.modified_at(path) -> Result[Int, String]
+                // mtim at offset 40 (u64, nanoseconds) -> seconds
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let stat_buf = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                wasm!(self.func, {
+                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(3); i32_const(1);
+                    local_get(path_ptr); local_get(path_len);
+                    local_get(stat_buf);
+                    call(self.emitter.rt.path_filestat_get);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_eqz;
+                    if_i32;
+                });
+                wasm!(self.func, {
+                    i32_const(16); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); i32_const(8); i32_add;
+                    local_get(stat_buf); i32_const(40); i32_add; i64_load(0);
+                    i64_const(1000000000); i64_div_u;
+                    i64_store(0);
+                    local_get(result_ptr);
+                    else_;
+                });
+                let err_msg = self.emitter.intern_string("file not found");
+                wasm!(self.func, {
+                    i32_const(16); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(8); i32_add;
+                    i32_const(err_msg as i32); i64_extend_i32_u; i64_store(0);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "stat" => {
+                // fs.stat(path) -> Result[{size: Int, is_dir: Bool, is_file: Bool, modified: Int}, String]
+                let path_str = self.scratch.alloc_i32();
+                let path_ptr = self.scratch.alloc_i32();
+                let path_len = self.scratch.alloc_i32();
+                let stat_buf = self.scratch.alloc_i32();
+                let result_ptr = self.scratch.alloc_i32();
+                let rec_ptr = self.scratch.alloc_i32();
+                let errno = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(path_str);
+                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+                    local_get(path_str); i32_load(0); local_set(path_len);
+                });
+
+                wasm!(self.func, {
+                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+                    if_empty;
+                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+                    end;
+                });
+
+                wasm!(self.func, {
+                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(3); i32_const(1);
+                    local_get(path_ptr); local_get(path_len);
+                    local_get(stat_buf);
+                    call(self.emitter.rt.path_filestat_get);
+                    local_set(errno);
+                });
+
+                wasm!(self.func, {
+                    local_get(errno); i32_eqz;
+                    if_i32;
+                });
+
+                // Record: [size:i64(8)][is_dir:i32(4)][is_file:i32(4)][modified:i64(8)] = 24 bytes
+                wasm!(self.func, {
+                    i32_const(24); call(self.emitter.rt.alloc); local_set(rec_ptr);
+                    // size at stat offset 32
+                    local_get(rec_ptr);
+                    local_get(stat_buf); i32_const(32); i32_add; i64_load(0);
+                    i64_store(0);
+                    // is_dir: filetype at offset 16 == 3
+                    local_get(rec_ptr); i32_const(8); i32_add;
+                    local_get(stat_buf); i32_const(16); i32_add; i32_load8_u(0);
+                    i32_const(3); i32_eq;
+                    i32_store(0);
+                    // is_file: filetype at offset 16 == 4
+                    local_get(rec_ptr); i32_const(12); i32_add;
+                    local_get(stat_buf); i32_const(16); i32_add; i32_load8_u(0);
+                    i32_const(4); i32_eq;
+                    i32_store(0);
+                    // modified: mtim at stat offset 40, nanoseconds -> seconds
+                    local_get(rec_ptr); i32_const(16); i32_add;
+                    local_get(stat_buf); i32_const(40); i32_add; i64_load(0);
+                    i64_const(1000000000); i64_div_u;
+                    i64_store(0);
+                });
+
+                // ok(rec_ptr)
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(0); i32_store(0);
+                    local_get(result_ptr); local_get(rec_ptr); i32_store(4);
+                    local_get(result_ptr);
+                    else_;
+                });
+                let err_msg = self.emitter.intern_string("file not found");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                    end;
+                });
+
+                self.scratch.free_i32(errno);
+                self.scratch.free_i32(rec_ptr);
+                self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(path_len);
+                self.scratch.free_i32(path_ptr);
+                self.scratch.free_i32(path_str);
+            }
+            "walk" | "glob" | "create_temp_file" | "create_temp_dir" => {
+                // These require recursive dir traversal (walk), glob pattern matching (glob),
+                // or OS temp dir + random naming (create_temp_*) which are infeasible in pure WASI.
+                for arg in args { self.emit_expr(arg); if super::values::ty_to_valtype(&arg.ty).is_some() { wasm!(self.func, { drop; }); } }
+                let result_ptr = self.scratch.alloc_i32();
+                let err_msg = self.emitter.intern_string("not supported in WASM");
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+                    local_get(result_ptr); i32_const(1); i32_store(0);
+                    local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+                    local_get(result_ptr);
+                });
+                self.scratch.free_i32(result_ptr);
+            }
+            "temp_dir" => {
+                // fs.temp_dir() -> String: return "/tmp"
+                let s = self.emitter.intern_string("/tmp");
+                wasm!(self.func, { i32_const(s as i32); });
+            }
+            _ => {
+                self.emit_stub_call(args);
+            }
+        }
+    }
+
+    /// Helper: check path filetype against expected value. Used by is_dir, is_file.
+    fn emit_fs_filetype_check(&mut self, args: &[IrExpr], expected_filetype: i32) {
+        let path_str = self.scratch.alloc_i32();
+        let path_ptr = self.scratch.alloc_i32();
+        let path_len = self.scratch.alloc_i32();
+        let stat_buf = self.scratch.alloc_i32();
+        let errno = self.scratch.alloc_i32();
+
+        self.emit_expr(&args[0]);
+        wasm!(self.func, {
+            local_set(path_str);
+            local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+            local_get(path_str); i32_load(0); local_set(path_len);
+        });
+
+        // Strip leading '/'
+        wasm!(self.func, {
+            local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+            if_empty;
+              local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+              local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+            end;
+        });
+
+        wasm!(self.func, {
+            i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+            // flags=1 (follow symlinks) for is_dir/is_file
+            i32_const(3); i32_const(1);
+            local_get(path_ptr); local_get(path_len);
+            local_get(stat_buf);
+            call(self.emitter.rt.path_filestat_get);
+            local_set(errno);
+            local_get(errno); i32_const(0); i32_ne;
+            if_i32;
+              i32_const(0);
+            else_;
+              // filetype at stat offset 16
+              local_get(stat_buf); i32_const(16); i32_add; i32_load8_u(0);
+              i32_const(expected_filetype);
+              i32_eq;
+            end;
+        });
+
+        self.scratch.free_i32(errno);
+        self.scratch.free_i32(stat_buf);
+        self.scratch.free_i32(path_len);
+        self.scratch.free_i32(path_ptr);
+        self.scratch.free_i32(path_str);
+    }
+
+    /// Helper for list_dir: build a string entry from dirent name and store into list.
+    fn emit_fs_list_dir_build_entry(
+        &mut self,
+        copy_i: u32, entry_name_len: u32, str_ptr: u32,
+        dir_buf: u32, offset: u32, list_ptr: u32, counter: u32,
+    ) {
+        wasm!(self.func, {
+            local_get(entry_name_len); i32_const(4); i32_add;
+            call(self.emitter.rt.alloc); local_set(str_ptr);
+            local_get(str_ptr); local_get(entry_name_len); i32_store(0);
+            // Copy name bytes
+            i32_const(0); local_set(copy_i);
+            block_empty; loop_empty;
+            local_get(copy_i); local_get(entry_name_len); i32_ge_u; br_if(1);
+            local_get(str_ptr); i32_const(4); i32_add; local_get(copy_i); i32_add;
+            local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
+            local_get(copy_i); i32_add; i32_load8_u(0);
+            i32_store8(0);
+            local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+            br(0);
+            end; end;
+            // Store in list
+            local_get(list_ptr); i32_const(4); i32_add;
+            local_get(counter); i32_const(4); i32_mul; i32_add;
+            local_get(str_ptr); i32_store(0);
+            local_get(counter); i32_const(1); i32_add; local_set(counter);
+        });
+    }
+
+    /// Helper: emit read_text logic, leaving Result[String, String] on stack.
+    fn emit_fs_call_inner_read_text(&mut self, args: &[IrExpr]) {
+        let path_str = self.scratch.alloc_i32();
+        let path_ptr = self.scratch.alloc_i32();
+        let path_len = self.scratch.alloc_i32();
+        let fd_out_ptr = self.scratch.alloc_i32();
+        let opened_fd = self.scratch.alloc_i32();
+        let stat_buf = self.scratch.alloc_i32();
+        let file_size = self.scratch.alloc_i32();
+        let data_buf = self.scratch.alloc_i32();
+        let iov_ptr = self.scratch.alloc_i32();
+        let nread_ptr = self.scratch.alloc_i32();
+        let result_ptr = self.scratch.alloc_i32();
+        let str_ptr = self.scratch.alloc_i32();
+        let errno = self.scratch.alloc_i32();
+
+        self.emit_expr(&args[0]);
+        wasm!(self.func, {
+            local_set(path_str);
+            local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
+            local_get(path_str); i32_load(0); local_set(path_len);
+        });
+
+        wasm!(self.func, {
+            i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+        });
+
+        wasm!(self.func, {
+            local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
+            if_empty;
+              local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
+              local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
+            end;
+        });
+
+        wasm!(self.func, {
+            i32_const(3); i32_const(0);
+            local_get(path_ptr); local_get(path_len);
+            i32_const(0); i64_const(6); i64_const(0); i32_const(0);
+            local_get(fd_out_ptr);
+            call(self.emitter.rt.path_open);
+            local_set(errno);
+        });
+
+        wasm!(self.func, {
+            local_get(errno); i32_const(0); i32_ne;
+            if_i32;
+        });
+        let err_msg = self.emitter.intern_string("file not found");
+        wasm!(self.func, {
+            i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+            local_get(result_ptr); i32_const(1); i32_store(0);
+            local_get(result_ptr); i32_const(err_msg as i32); i32_store(4);
+            local_get(result_ptr);
+            else_;
+        });
+
+        wasm!(self.func, {
+            local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
+            i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+            local_get(opened_fd); local_get(stat_buf);
+            call(self.emitter.rt.fd_filestat_get); drop;
+            local_get(stat_buf); i32_const(32); i32_add; i32_load(0); local_set(file_size);
+            local_get(file_size); call(self.emitter.rt.alloc); local_set(data_buf);
+            i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+            local_get(iov_ptr); local_get(data_buf); i32_store(0);
+            local_get(iov_ptr); local_get(file_size); i32_store(4);
+            i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+            local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nread_ptr);
+            call(self.emitter.rt.fd_read); drop;
+            local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
+            local_get(nread_ptr); i32_load(0); local_set(file_size);
+        });
+
+        wasm!(self.func, {
+            local_get(file_size); i32_const(4); i32_add;
+            call(self.emitter.rt.alloc); local_set(str_ptr);
+            local_get(str_ptr); local_get(file_size); i32_store(0);
+        });
+
+        let counter = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            i32_const(0); local_set(counter);
+            block_empty; loop_empty;
+            local_get(counter); local_get(file_size); i32_ge_u; br_if(1);
+            local_get(str_ptr); i32_const(4); i32_add; local_get(counter); i32_add;
+            local_get(data_buf); local_get(counter); i32_add;
+            i32_load8_u(0);
+            i32_store8(0);
+            local_get(counter); i32_const(1); i32_add; local_set(counter);
+            br(0);
+            end; end;
+        });
+        self.scratch.free_i32(counter);
+
+        wasm!(self.func, {
+            i32_const(8); call(self.emitter.rt.alloc); local_set(result_ptr);
+            local_get(result_ptr); i32_const(0); i32_store(0);
+            local_get(result_ptr); local_get(str_ptr); i32_store(4);
+            local_get(result_ptr);
+            end;
+        });
+
+        self.scratch.free_i32(errno);
+        self.scratch.free_i32(str_ptr);
+        self.scratch.free_i32(result_ptr);
+        self.scratch.free_i32(nread_ptr);
+        self.scratch.free_i32(iov_ptr);
+        self.scratch.free_i32(data_buf);
+        self.scratch.free_i32(file_size);
+        self.scratch.free_i32(stat_buf);
+        self.scratch.free_i32(opened_fd);
+        self.scratch.free_i32(fd_out_ptr);
+        self.scratch.free_i32(path_len);
+        self.scratch.free_i32(path_ptr);
+        self.scratch.free_i32(path_str);
+    }
+
+    /// io module: print, read_line, read_all
+    fn emit_io_call(&mut self, func: &str, args: &[IrExpr]) {
+        match func {
+            "print" => {
+                // io.print(s: String) -> Unit
+                // Same as println but WITHOUT the trailing newline.
+                let s = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(s);
+                    // iov[0].buf = s + 4 (skip length prefix)
+                    i32_const(0);
+                    local_get(s); i32_const(4); i32_add;
+                    i32_store(0);
+                    // iov[0].len = *s (load length)
+                    i32_const(4);
+                    local_get(s); i32_load(0);
+                    i32_store(0);
+                    // fd_write(stdout=1, iovs=0, iovs_len=1, nwritten=8)
+                    i32_const(1); i32_const(0); i32_const(1); i32_const(8);
+                    call(self.emitter.rt.fd_write);
+                    drop;
+                });
+                self.scratch.free_i32(s);
+            }
+            "read_line" => {
+                // io.read_line() -> String
+                // Read one byte at a time from stdin (fd=0) until '\n' or EOF.
+                // Accumulate into a heap buffer, then build an Almide string.
+                let buf = self.scratch.alloc_i32();       // growing buffer ptr
+                let capacity = self.scratch.alloc_i32();  // current capacity
+                let len = self.scratch.alloc_i32();       // bytes read so far
+                let iov_ptr = self.scratch.alloc_i32();   // iov struct for fd_read
+                let nread_ptr = self.scratch.alloc_i32(); // nread output
+                let byte_buf = self.scratch.alloc_i32();  // 1-byte read target
+                let nread_val = self.scratch.alloc_i32(); // loaded nread value
+                let byte_val = self.scratch.alloc_i32();  // loaded byte value
+                let new_buf = self.scratch.alloc_i32();   // for realloc copy
+                let copy_i = self.scratch.alloc_i32();    // copy loop counter
+                let result = self.scratch.alloc_i32();    // final string ptr
+
+                // Initial capacity = 256
+                wasm!(self.func, {
+                    i32_const(256); call(self.emitter.rt.alloc); local_set(buf);
+                    i32_const(256); local_set(capacity);
+                    i32_const(0); local_set(len);
+                    // Allocate iov (8 bytes) and nread (4 bytes) and byte_buf (1 byte)
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    i32_const(1); call(self.emitter.rt.alloc); local_set(byte_buf);
+                });
+
+                // Main read loop
+                wasm!(self.func, {
+                    block_empty; loop_empty;
+                });
+
+                // Grow buffer if full: len >= capacity
+                wasm!(self.func, {
+                    local_get(len); local_get(capacity); i32_ge_u;
+                    if_empty;
+                      // Double capacity
+                      local_get(capacity); i32_const(2); i32_mul; local_set(capacity);
+                      local_get(capacity); call(self.emitter.rt.alloc); local_set(new_buf);
+                      // Copy old data
+                      i32_const(0); local_set(copy_i);
+                      block_empty; loop_empty;
+                        local_get(copy_i); local_get(len); i32_ge_u; br_if(1);
+                        local_get(new_buf); local_get(copy_i); i32_add;
+                        local_get(buf); local_get(copy_i); i32_add; i32_load8_u(0);
+                        i32_store8(0);
+                        local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                        br(0);
+                      end; end;
+                      local_get(new_buf); local_set(buf);
+                    end;
+                });
+
+                // Set up iov to read 1 byte into byte_buf
+                wasm!(self.func, {
+                    local_get(iov_ptr); local_get(byte_buf); i32_store(0);
+                    local_get(iov_ptr); i32_const(1); i32_store(4);
+                    // fd_read(stdin=0, iov_ptr, 1, nread_ptr)
+                    i32_const(0);
+                    local_get(iov_ptr);
+                    i32_const(1);
+                    local_get(nread_ptr);
+                    call(self.emitter.rt.fd_read);
+                    drop;
+                });
+
+                // Check nread: if 0, EOF → break
+                wasm!(self.func, {
+                    local_get(nread_ptr); i32_load(0); local_set(nread_val);
+                    local_get(nread_val); i32_eqz;
+                    br_if(1); // break outer block
+                });
+
+                // Load byte, check for '\n'
+                wasm!(self.func, {
+                    local_get(byte_buf); i32_load8_u(0); local_set(byte_val);
+                    local_get(byte_val); i32_const(10); i32_eq; // '\n'
+                    br_if(1); // break outer block (don't include '\n' in result)
+                });
+
+                // Append byte to buffer
+                wasm!(self.func, {
+                    local_get(buf); local_get(len); i32_add;
+                    local_get(byte_val);
+                    i32_store8(0);
+                    local_get(len); i32_const(1); i32_add; local_set(len);
+                    br(0); // continue loop
+                    end; end; // end loop, end block
+                });
+
+                // Build Almide string [len:i32][data:u8...]
+                wasm!(self.func, {
+                    local_get(len); i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(result);
+                    local_get(result); local_get(len); i32_store(0);
+                    // Copy buf[0..len] to result+4
+                    i32_const(0); local_set(copy_i);
+                    block_empty; loop_empty;
+                      local_get(copy_i); local_get(len); i32_ge_u; br_if(1);
+                      local_get(result); i32_const(4); i32_add; local_get(copy_i); i32_add;
+                      local_get(buf); local_get(copy_i); i32_add; i32_load8_u(0);
+                      i32_store8(0);
+                      local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                      br(0);
+                    end; end;
+                    local_get(result);
+                });
+
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(copy_i);
+                self.scratch.free_i32(new_buf);
+                self.scratch.free_i32(byte_val);
+                self.scratch.free_i32(nread_val);
+                self.scratch.free_i32(byte_buf);
+                self.scratch.free_i32(nread_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(capacity);
+                self.scratch.free_i32(buf);
+            }
+            "read_all" => {
+                // io.read_all() -> String
+                // Read all bytes from stdin (fd=0) until EOF.
+                // Strategy: read in chunks of 4096 bytes, grow buffer as needed.
+                let buf = self.scratch.alloc_i32();
+                let capacity = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let iov_ptr = self.scratch.alloc_i32();
+                let nread_ptr = self.scratch.alloc_i32();
+                let nread_val = self.scratch.alloc_i32();
+                let new_buf = self.scratch.alloc_i32();
+                let copy_i = self.scratch.alloc_i32();
+                let chunk_buf = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+
+                // Initial capacity = 4096
+                wasm!(self.func, {
+                    i32_const(4096); call(self.emitter.rt.alloc); local_set(buf);
+                    i32_const(4096); local_set(capacity);
+                    i32_const(0); local_set(len);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                });
+
+                // Read loop
+                wasm!(self.func, {
+                    block_empty; loop_empty;
+                });
+
+                // Ensure we have room for at least 4096 bytes
+                wasm!(self.func, {
+                    local_get(capacity); local_get(len); i32_sub;
+                    i32_const(4096); i32_lt_u;
+                    if_empty;
+                      // Double capacity
+                      local_get(capacity); i32_const(2); i32_mul; local_set(capacity);
+                      local_get(capacity); call(self.emitter.rt.alloc); local_set(new_buf);
+                      // Copy old data
+                      i32_const(0); local_set(copy_i);
+                      block_empty; loop_empty;
+                        local_get(copy_i); local_get(len); i32_ge_u; br_if(1);
+                        local_get(new_buf); local_get(copy_i); i32_add;
+                        local_get(buf); local_get(copy_i); i32_add; i32_load8_u(0);
+                        i32_store8(0);
+                        local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                        br(0);
+                      end; end;
+                      local_get(new_buf); local_set(buf);
+                    end;
+                });
+
+                // Read chunk into buf+len, up to (capacity - len) bytes
+                wasm!(self.func, {
+                    local_get(iov_ptr); local_get(buf); local_get(len); i32_add; i32_store(0);
+                    local_get(iov_ptr); local_get(capacity); local_get(len); i32_sub; i32_store(4);
+                    // fd_read(stdin=0, iov_ptr, 1, nread_ptr)
+                    i32_const(0);
+                    local_get(iov_ptr);
+                    i32_const(1);
+                    local_get(nread_ptr);
+                    call(self.emitter.rt.fd_read);
+                    drop;
+                });
+
+                // Check nread: if 0, EOF → break
+                wasm!(self.func, {
+                    local_get(nread_ptr); i32_load(0); local_set(nread_val);
+                    local_get(nread_val); i32_eqz;
+                    br_if(1);
+                    // Advance len
+                    local_get(len); local_get(nread_val); i32_add; local_set(len);
+                    br(0);
+                    end; end; // end loop, end block
+                });
+
+                // Build Almide string [len:i32][data:u8...]
+                wasm!(self.func, {
+                    local_get(len); i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(result);
+                    local_get(result); local_get(len); i32_store(0);
+                    // Copy buf[0..len] to result+4
+                    i32_const(0); local_set(copy_i);
+                    block_empty; loop_empty;
+                      local_get(copy_i); local_get(len); i32_ge_u; br_if(1);
+                      local_get(result); i32_const(4); i32_add; local_get(copy_i); i32_add;
+                      local_get(buf); local_get(copy_i); i32_add; i32_load8_u(0);
+                      i32_store8(0);
+                      local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                      br(0);
+                    end; end;
+                    local_get(result);
+                });
+
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(chunk_buf);
+                self.scratch.free_i32(copy_i);
+                self.scratch.free_i32(new_buf);
+                self.scratch.free_i32(nread_val);
+                self.scratch.free_i32(nread_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(capacity);
+                self.scratch.free_i32(buf);
+            }
+            _ => {
+                self.emit_stub_call(args);
+            }
+        }
+    }
+
+    /// process module: exit, stdin_lines
+    fn emit_process_call(&mut self, func: &str, args: &[IrExpr]) {
+        match func {
+            "exit" => {
+                // process.exit(code: Int) -> Unit
+                // Emit code arg (i64), wrap to i32, call proc_exit
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    i32_wrap_i64;
+                    call(self.emitter.rt.proc_exit);
+                });
+            }
+            "stdin_lines" => {
+                // process.stdin_lines() -> List[String]
+                // Strategy: read all stdin, then split by '\n'.
+                // 1. Read all stdin into a raw buffer (same logic as io.read_all)
+                // 2. Split by '\n', building a list of Almide strings
+                let buf = self.scratch.alloc_i32();
+                let capacity = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let iov_ptr = self.scratch.alloc_i32();
+                let nread_ptr = self.scratch.alloc_i32();
+                let nread_val = self.scratch.alloc_i32();
+                let new_buf = self.scratch.alloc_i32();
+                let copy_i = self.scratch.alloc_i32();
+                let scan_i = self.scratch.alloc_i32();
+                let line_start = self.scratch.alloc_i32();
+                let line_len = self.scratch.alloc_i32();
+                let line_ptr = self.scratch.alloc_i32();
+                let list_ptr = self.scratch.alloc_i32();
+                let list_cap = self.scratch.alloc_i32();
+                let list_count = self.scratch.alloc_i32();
+                let new_list = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+
+                // --- Phase 1: read all stdin ---
+                wasm!(self.func, {
+                    i32_const(4096); call(self.emitter.rt.alloc); local_set(buf);
+                    i32_const(4096); local_set(capacity);
+                    i32_const(0); local_set(len);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                });
+
+                wasm!(self.func, {
+                    block_empty; loop_empty;
+                });
+
+                // Grow if needed
+                wasm!(self.func, {
+                    local_get(capacity); local_get(len); i32_sub;
+                    i32_const(4096); i32_lt_u;
+                    if_empty;
+                      local_get(capacity); i32_const(2); i32_mul; local_set(capacity);
+                      local_get(capacity); call(self.emitter.rt.alloc); local_set(new_buf);
+                      i32_const(0); local_set(copy_i);
+                      block_empty; loop_empty;
+                        local_get(copy_i); local_get(len); i32_ge_u; br_if(1);
+                        local_get(new_buf); local_get(copy_i); i32_add;
+                        local_get(buf); local_get(copy_i); i32_add; i32_load8_u(0);
+                        i32_store8(0);
+                        local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                        br(0);
+                      end; end;
+                      local_get(new_buf); local_set(buf);
+                    end;
+                });
+
+                // Read chunk
+                wasm!(self.func, {
+                    local_get(iov_ptr); local_get(buf); local_get(len); i32_add; i32_store(0);
+                    local_get(iov_ptr); local_get(capacity); local_get(len); i32_sub; i32_store(4);
+                    i32_const(0);
+                    local_get(iov_ptr);
+                    i32_const(1);
+                    local_get(nread_ptr);
+                    call(self.emitter.rt.fd_read);
+                    drop;
+                });
+
+                wasm!(self.func, {
+                    local_get(nread_ptr); i32_load(0); local_set(nread_val);
+                    local_get(nread_val); i32_eqz;
+                    br_if(1);
+                    local_get(len); local_get(nread_val); i32_add; local_set(len);
+                    br(0);
+                    end; end;
+                });
+
+                // --- Phase 2: split buf[0..len] by '\n' into List[String] ---
+                // List layout: [count:i32][elem0:i32][elem1:i32]...
+                // Each elem is a ptr to Almide String [len:i32][data:u8...]
+                // We'll build with a growable array of i32 pointers.
+                wasm!(self.func, {
+                    // Initial list capacity: 64 elements (i32 ptrs)
+                    i32_const(64); local_set(list_cap);
+                    local_get(list_cap); i32_const(4); i32_mul;
+                    call(self.emitter.rt.alloc); local_set(list_ptr);
+                    i32_const(0); local_set(list_count);
+                    i32_const(0); local_set(scan_i);
+                    i32_const(0); local_set(line_start);
+                });
+
+                // Scan loop: iterate through buf looking for '\n'
+                wasm!(self.func, {
+                    block_empty; loop_empty;
+                      local_get(scan_i); local_get(len); i32_ge_u;
+                      br_if(1);
+                });
+
+                // Check if buf[scan_i] == '\n'
+                wasm!(self.func, {
+                      local_get(buf); local_get(scan_i); i32_add; i32_load8_u(0);
+                      i32_const(10); i32_eq;
+                      if_empty;
+                });
+
+                // Found '\n': build string from line_start..scan_i
+                wasm!(self.func, {
+                        local_get(scan_i); local_get(line_start); i32_sub; local_set(line_len);
+                        // Allocate Almide string
+                        local_get(line_len); i32_const(4); i32_add;
+                        call(self.emitter.rt.alloc); local_set(line_ptr);
+                        local_get(line_ptr); local_get(line_len); i32_store(0);
+                        // Copy line data
+                        i32_const(0); local_set(copy_i);
+                        block_empty; loop_empty;
+                          local_get(copy_i); local_get(line_len); i32_ge_u; br_if(1);
+                          local_get(line_ptr); i32_const(4); i32_add; local_get(copy_i); i32_add;
+                          local_get(buf); local_get(line_start); i32_add; local_get(copy_i); i32_add;
+                          i32_load8_u(0);
+                          i32_store8(0);
+                          local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                          br(0);
+                        end; end;
+                });
+
+                // Grow list if needed
+                wasm!(self.func, {
+                        local_get(list_count); local_get(list_cap); i32_ge_u;
+                        if_empty;
+                          local_get(list_cap); i32_const(2); i32_mul; local_set(list_cap);
+                          local_get(list_cap); i32_const(4); i32_mul;
+                          call(self.emitter.rt.alloc); local_set(new_list);
+                          // Copy old list ptrs
+                          i32_const(0); local_set(copy_i);
+                          block_empty; loop_empty;
+                            local_get(copy_i); local_get(list_count); i32_ge_u; br_if(1);
+                            local_get(new_list); local_get(copy_i); i32_const(4); i32_mul; i32_add;
+                            local_get(list_ptr); local_get(copy_i); i32_const(4); i32_mul; i32_add;
+                            i32_load(0);
+                            i32_store(0);
+                            local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                            br(0);
+                          end; end;
+                          local_get(new_list); local_set(list_ptr);
+                        end;
+                });
+
+                // Append line_ptr to list
+                wasm!(self.func, {
+                        local_get(list_ptr); local_get(list_count); i32_const(4); i32_mul; i32_add;
+                        local_get(line_ptr); i32_store(0);
+                        local_get(list_count); i32_const(1); i32_add; local_set(list_count);
+                        // line_start = scan_i + 1
+                        local_get(scan_i); i32_const(1); i32_add; local_set(line_start);
+                      end; // end if '\n'
+                });
+
+                // Advance scan_i
+                wasm!(self.func, {
+                      local_get(scan_i); i32_const(1); i32_add; local_set(scan_i);
+                      br(0);
+                    end; end; // end loop, end block
+                });
+
+                // Handle last line (if no trailing '\n')
+                wasm!(self.func, {
+                    local_get(line_start); local_get(len); i32_lt_u;
+                    if_empty;
+                      local_get(len); local_get(line_start); i32_sub; local_set(line_len);
+                      local_get(line_len); i32_const(4); i32_add;
+                      call(self.emitter.rt.alloc); local_set(line_ptr);
+                      local_get(line_ptr); local_get(line_len); i32_store(0);
+                      i32_const(0); local_set(copy_i);
+                      block_empty; loop_empty;
+                        local_get(copy_i); local_get(line_len); i32_ge_u; br_if(1);
+                        local_get(line_ptr); i32_const(4); i32_add; local_get(copy_i); i32_add;
+                        local_get(buf); local_get(line_start); i32_add; local_get(copy_i); i32_add;
+                        i32_load8_u(0);
+                        i32_store8(0);
+                        local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                        br(0);
+                      end; end;
+                });
+
+                // Grow list if needed for last line
+                wasm!(self.func, {
+                      local_get(list_count); local_get(list_cap); i32_ge_u;
+                      if_empty;
+                        local_get(list_cap); i32_const(2); i32_mul; local_set(list_cap);
+                        local_get(list_cap); i32_const(4); i32_mul;
+                        call(self.emitter.rt.alloc); local_set(new_list);
+                        i32_const(0); local_set(copy_i);
+                        block_empty; loop_empty;
+                          local_get(copy_i); local_get(list_count); i32_ge_u; br_if(1);
+                          local_get(new_list); local_get(copy_i); i32_const(4); i32_mul; i32_add;
+                          local_get(list_ptr); local_get(copy_i); i32_const(4); i32_mul; i32_add;
+                          i32_load(0);
+                          i32_store(0);
+                          local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                          br(0);
+                        end; end;
+                        local_get(new_list); local_set(list_ptr);
+                      end;
+                      // Append last line
+                      local_get(list_ptr); local_get(list_count); i32_const(4); i32_mul; i32_add;
+                      local_get(line_ptr); i32_store(0);
+                      local_get(list_count); i32_const(1); i32_add; local_set(list_count);
+                    end; // end if line_start < len
+                });
+
+                // Build final Almide List: [count:i32][elem0:i32][elem1:i32]...
+                // elem_size = 4 (i32 pointer)
+                wasm!(self.func, {
+                    local_get(list_count); i32_const(4); i32_mul; i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(result);
+                    local_get(result); local_get(list_count); i32_store(0);
+                    // Copy list_ptr[0..list_count] to result+4
+                    i32_const(0); local_set(copy_i);
+                    block_empty; loop_empty;
+                      local_get(copy_i); local_get(list_count); i32_ge_u; br_if(1);
+                      local_get(result); i32_const(4); i32_add;
+                      local_get(copy_i); i32_const(4); i32_mul; i32_add;
+                      local_get(list_ptr); local_get(copy_i); i32_const(4); i32_mul; i32_add;
+                      i32_load(0);
+                      i32_store(0);
+                      local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                      br(0);
+                    end; end;
+                    local_get(result);
+                });
+
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(new_list);
+                self.scratch.free_i32(list_count);
+                self.scratch.free_i32(list_cap);
+                self.scratch.free_i32(list_ptr);
+                self.scratch.free_i32(line_ptr);
+                self.scratch.free_i32(line_len);
+                self.scratch.free_i32(line_start);
+                self.scratch.free_i32(scan_i);
+                self.scratch.free_i32(copy_i);
+                self.scratch.free_i32(new_buf);
+                self.scratch.free_i32(nread_val);
+                self.scratch.free_i32(nread_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(capacity);
+                self.scratch.free_i32(buf);
             }
             _ => {
                 self.emit_stub_call(args);

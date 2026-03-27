@@ -151,6 +151,11 @@ pub struct RuntimeFuncs {
     pub fd_seek: u32,
     pub fd_filestat_get: u32,
     pub path_filestat_get: u32,
+    pub path_create_directory: u32,
+    pub path_rename: u32,
+    pub path_unlink_file: u32,
+    pub path_remove_directory: u32,
+    pub fd_readdir: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -294,6 +299,11 @@ impl WasmEmitter {
                 fd_seek: 0,
                 fd_filestat_get: 0,
                 path_filestat_get: 0,
+                path_create_directory: 0,
+                path_rename: 0,
+                path_unlink_file: 0,
+                path_remove_directory: 0,
+                fd_readdir: 0,
             },
             heap_ptr_global: 0,
             top_let_globals: HashMap::new(),
@@ -521,6 +531,61 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         module: "wasi_snapshot_preview1".to_string(),
         name: "path_filestat_get".to_string(),
         type_idx: path_filestat_get_type_idx,
+    });
+
+    // Import path_create_directory
+    let path_create_directory_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "path_create_directory".to_string(),
+        type_idx: path_create_directory_type_idx,
+    });
+
+    // Import path_rename
+    let path_rename_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "path_rename".to_string(),
+        type_idx: path_rename_type_idx,
+    });
+
+    // Import path_unlink_file
+    let path_unlink_file_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "path_unlink_file".to_string(),
+        type_idx: path_unlink_file_type_idx,
+    });
+
+    // Import path_remove_directory
+    let path_remove_directory_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "path_remove_directory".to_string(),
+        type_idx: path_remove_directory_type_idx,
+    });
+
+    // Import fd_readdir
+    let fd_readdir_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32, ValType::I64, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_readdir".to_string(),
+        type_idx: fd_readdir_type_idx,
     });
 
     // Register type declarations (record and variant field layouts)
