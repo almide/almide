@@ -11,4 +11,11 @@ const __almd_datetime = {
   minute(ts: number): number { return new Date(ts * 1000).getUTCMinutes(); },
   second(ts: number): number { return new Date(ts * 1000).getUTCSeconds(); },
   weekday(ts: number): string { const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]; return days[new Date(ts * 1000).getUTCDay()]; },
+  add_days(ts: number, n: number): number { return ts + n * 86400; },
+  add_hours(ts: number, n: number): number { return ts + n * 3600; },
+  add_minutes(ts: number, n: number): number { return ts + n * 60; },
+  add_seconds(ts: number, n: number): number { return ts + n; },
+  diff_seconds(a: number, b: number): number { return a - b; },
+  is_before(a: number, b: number): boolean { return a < b; },
+  is_after(a: number, b: number): boolean { return a > b; },
 };
