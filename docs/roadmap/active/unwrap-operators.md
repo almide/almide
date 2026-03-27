@@ -120,6 +120,44 @@ let value = match port {
 let value = int.parse(map.get(config, "port") ?? "8080") ?? 8080
 ```
 
+## Error type design
+
+**Decision: `Result[T, String]` as default, `Result[T, E]` for opt-in typed errors.**
+
+### Rationale
+
+Surveyed error handling across Go, Rust, Swift, Zig, Gleam, Elm, Python, TypeScript. Key finding: **the error type parameter `E` is the #1 source of LLM errors in Rust.** Every time an LLM chooses between `String`, `Box<dyn Error>`, `anyhow::Error`, or a custom enum, there's a 30-50% chance it picks wrong.
+
+### Design
+
+```
+// 90% case: E defaults to String. User never thinks about error types.
+effect fn load(path: String) -> Result[Config, String] = {
+  let text = fs.read_text(path)!
+  let config = json.parse(text)!
+  ok(config)
+}
+
+// 10% case: explicit typed errors when branching is needed.
+type LoadError = | NotFound(String) | ParseFailed(String)
+
+effect fn load(path: String) -> Result[Config, LoadError] = {
+  let text = fs.read_text(path)
+    |> result.map_err((e) => NotFound(e))!
+  let config = json.parse(text)
+    |> result.map_err((e) => ParseFailed(e))!
+  ok(config)
+}
+```
+
+### What was considered and rejected
+
+| Option | Verdict | Reason |
+|--------|---------|--------|
+| Fixed E = String (no parametric) | Rejected | Can't branch on error kinds when needed |
+| Zig-style `throws` syntax | Rejected | New syntax for a 10% use case adds complexity |
+| `From` convention for auto-conversion | **Removed** | Implicit type conversion violates Surface Semantics |
+
 ## Breaking changes
 
 1. **`From` convention removed** — `type Foo: From = ...` no longer valid. Replace `: From` with explicit `map_err` + `!`.
