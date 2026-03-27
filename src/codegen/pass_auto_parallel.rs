@@ -204,7 +204,8 @@ fn is_pure_expr(
         }
 
         // Access
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => {
             is_pure_expr(object, local_vars, effect_fns, mutable_vars)
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
@@ -452,6 +453,10 @@ fn rewrite_expr(
         IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(rewrite_expr(*object, effect_fns, mutable_vars)),
+            field,
+        },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)),
             field,
         },
         IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {

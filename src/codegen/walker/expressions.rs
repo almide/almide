@@ -457,6 +457,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     .unwrap_or_else(|| format!("({}).ok()", s))
             }
         }
+        IrExprKind::OptionalChain { expr: inner, field } => {
+            let s = render_expr(ctx, inner);
+            ctx.templates.render_with("optional_chain_expr", None, &[], &[("inner", s.as_str()), ("field", field)])
+                .unwrap_or_else(|| format!("{}.as_ref().map(|__v| __v.{}.clone())", s, field))
+        }
         IrExprKind::Await { expr: inner } => {
             let s = render_expr(ctx, inner);
             ctx.templates.render_with("await_expr", None, &[], &[("inner", s.as_str())])

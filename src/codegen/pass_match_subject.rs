@@ -69,7 +69,8 @@ fn rewrite_expr(expr: &mut IrExpr) {
         }
         IrExprKind::MapLiteral { entries } => { for (k, v) in entries { rewrite_expr(k); rewrite_expr(v); } }
         IrExprKind::Range { start, end, .. } => { rewrite_expr(start); rewrite_expr(end); }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => rewrite_expr(object),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => rewrite_expr(object),
         IrExprKind::IndexAccess { object, index } => { rewrite_expr(object); rewrite_expr(index); }
         IrExprKind::MapAccess { object, key } => { rewrite_expr(object); rewrite_expr(key); }
         IrExprKind::Lambda { body, .. } => rewrite_expr(body),

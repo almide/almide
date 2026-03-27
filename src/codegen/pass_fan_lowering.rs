@@ -138,6 +138,9 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
         IrExprKind::Record { name, fields } => IrExprKind::Record {
             name, fields: fields.into_iter().map(|(n, v)| (n, rewrite_expr(v, inside_fan))).collect(),
         },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(rewrite_expr(*expr, inside_fan)), field,
+        },
         // Leaf nodes: pass through
         other => other,
     };

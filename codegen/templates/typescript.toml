@@ -424,3 +424,6 @@ template = "({inner} ?? {fallback})"
 
 [to_option_expr]
 template = "{inner}"
+
+[optional_chain_expr]
+template = "{inner}?.{field} ?? null"

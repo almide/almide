@@ -100,6 +100,10 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             kind: IrExprKind::Member { object: Box::new(sub(object)), field: field.clone() },
             ty: expr.ty.clone(), span: expr.span,
         },
+        IrExprKind::OptionalChain { expr: inner, field } => IrExpr {
+            kind: IrExprKind::OptionalChain { expr: Box::new(sub(inner)), field: field.clone() },
+            ty: expr.ty.clone(), span: expr.span,
+        },
         IrExprKind::TupleIndex { object, index } => IrExpr {
             kind: IrExprKind::TupleIndex { object: Box::new(sub(object)), index: *index },
             ty: expr.ty.clone(), span: expr.span,

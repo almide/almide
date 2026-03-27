@@ -103,6 +103,9 @@ fn transform_children(
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(rec!(*object)), field,
         },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(rec!(*expr)), field,
+        },
         IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
             object: Box::new(rec!(*object)), index,
         },

@@ -325,7 +325,8 @@ fn collect_effects_inner(expr: &IrExpr, effects: &mut HashSet<Effect>) {
         IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr }
         | IrExprKind::ResultErr { expr } | IrExprKind::Try { expr }
         | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Member { object: expr, .. } | IrExprKind::Borrow { expr, .. }
+        | IrExprKind::Member { object: expr, .. } | IrExprKind::OptionalChain { expr, .. }
+        | IrExprKind::Borrow { expr, .. }
         | IrExprKind::ToVec { expr } | IrExprKind::Clone { expr }
         | IrExprKind::Deref { expr } => {
             collect_effects_inner(expr, effects);

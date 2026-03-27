@@ -591,6 +591,48 @@ impl FuncCompiler<'_> {
                 self.emit_map_call("get", &fake_args);
             }
 
+            // ── Optional chaining: expr?.field → None if expr is None, else Some(expr.field) ──
+            IrExprKind::OptionalChain { expr: inner, field } => {
+                // inner is Option<RecordType> (ptr: 0=None, nonzero=Some)
+                self.emit_expr(inner);
+                let scratch = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    local_set(scratch);
+                    local_get(scratch);
+                    i32_eqz;
+                    if_i32;
+                    // None path → propagate None (ptr=0)
+                    i32_const(0);
+                    else_;
+                });
+                // Some path: scratch points to the inner record. Load field, wrap as Some.
+                // Resolve inner Option's payload type to find field offset.
+                let payload_ty = inner.ty.option_inner().unwrap_or_else(|| inner.ty.clone());
+                let fields = self.extract_record_fields(&payload_ty);
+                let tag_offset = self.variant_tag_offset(&payload_ty);
+                if let Some((field_offset, field_ty)) = values::field_offset(&fields, field) {
+                    let total_offset = tag_offset + field_offset;
+                    let field_size = values::byte_size(&field_ty);
+                    if field_size > 0 {
+                        // Allocate Some wrapper, store field value
+                        wasm!(self.func, { i32_const(field_size as i32); call(self.emitter.rt.alloc); });
+                        let some_ptr = self.scratch.alloc_i32();
+                        wasm!(self.func, { local_tee(some_ptr); local_get(scratch); });
+                        self.emit_load_at(&field_ty, total_offset);
+                        self.emit_store_at(&field_ty, 0);
+                        wasm!(self.func, { local_get(some_ptr); });
+                        self.scratch.free_i32(some_ptr);
+                    } else {
+                        // Unit field → Some is just a non-zero ptr
+                        wasm!(self.func, { i32_const(1); });
+                    }
+                } else {
+                    wasm!(self.func, { unreachable; });
+                }
+                wasm!(self.func, { end; });
+                self.scratch.free_i32(scratch);
+            }
+
             // ── Codegen-specific nodes (pass-through or ignore) ──
             IrExprKind::Clone { expr: inner } | IrExprKind::Deref { expr: inner } => {
                 self.emit_expr(inner);

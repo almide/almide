@@ -261,6 +261,8 @@ pub enum IrExprKind {
     UnwrapOr { expr: Box<IrExpr>, fallback: Box<IrExpr> },
     /// expr? — convert Result to Option (identity for Option)
     ToOption { expr: Box<IrExpr> },
+    /// expr?.field — optional chaining
+    OptionalChain { expr: Box<IrExpr>, field: Sym },
     Await { expr: Box<IrExpr> },
 
     // ── Codegen-specific (inserted by Nanopass passes) ──

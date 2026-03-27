@@ -412,38 +412,10 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let inner = lower_expr(ctx, expr);
             ctx.mk(IrExprKind::ToOption { expr: Box::new(inner) }, ty, span)
         }
-        // expr?.field — desugar to match expr { some(x) => some(x.field), none => none }
+        // expr?.field — keep as IR node for target-specific rendering
         ast::Expr::OptionalChain { expr: inner_expr, field, .. } => {
             let inner = lower_expr(ctx, inner_expr);
-            // Get the inner type of Option[T]
-            // ty is Option[FieldType], inner's type is Option[RecordType]
-            // Get RecordType from inner's lowered type
-            let inner_ty = inner.ty.option_inner().unwrap_or(Ty::Unknown);
-            let field_ty = match &inner_ty {
-                Ty::Record { fields } | Ty::OpenRecord { fields } =>
-                    fields.iter().find(|(n, _)| n == field).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown),
-                _ => ty.option_inner().unwrap_or(Ty::Unknown),
-            };
-            let var = ctx.define_var("__chain", inner_ty.clone(), crate::ir::Mutability::Let, span);
-            let var_expr = ctx.mk(IrExprKind::Var { id: var }, inner_ty.clone(), span);
-            let member = ctx.mk(IrExprKind::Member { object: Box::new(var_expr), field: *field }, field_ty.clone(), span);
-            let some_body = ctx.mk(IrExprKind::OptionSome { expr: Box::new(member) }, ty.clone(), span);
-            let none_body = ctx.mk(IrExprKind::OptionNone, ty.clone(), span);
-            ctx.mk(IrExprKind::Match {
-                subject: Box::new(inner),
-                arms: vec![
-                    crate::ir::IrMatchArm {
-                        pattern: crate::ir::IrPattern::Some { inner: Box::new(crate::ir::IrPattern::Bind { var, ty: inner_ty }) },
-                        guard: None,
-                        body: some_body,
-                    },
-                    crate::ir::IrMatchArm {
-                        pattern: crate::ir::IrPattern::None,
-                        guard: None,
-                        body: none_body,
-                    },
-                ],
-            }, ty, span)
+            ctx.mk(IrExprKind::OptionalChain { expr: Box::new(inner), field: *field }, ty, span)
         }
 
         // ── Misc ──

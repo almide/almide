@@ -98,7 +98,8 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         }
 
         // ── Access ──
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => {
             v.visit_expr(object);
         }
         IrExprKind::IndexAccess { object, index } => {

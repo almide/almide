@@ -128,6 +128,9 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(insert_clones(*object, clone_ids)), field,
         },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(insert_clones(*expr, clone_ids)), field,
+        },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple, iterable: Box::new(insert_clones(*iterable, clone_ids)),
             body: insert_clone_stmts(body, clone_ids),

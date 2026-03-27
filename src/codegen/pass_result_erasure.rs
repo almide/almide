@@ -149,6 +149,9 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(erase_expr(*object)), field,
         },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(erase_expr(*expr)), field,
+        },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple, iterable: Box::new(erase_expr(*iterable)),
             body: erase_stmts(body),

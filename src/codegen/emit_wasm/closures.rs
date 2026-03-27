@@ -595,7 +595,8 @@ pub(super) fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
             collect_var_refs(fallback, vars);
         }
         IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. }
-        | IrExprKind::TupleIndex { object, .. } => {
+        | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => {
             collect_var_refs(object, vars);
         }
         IrExprKind::StringInterp { parts } => {

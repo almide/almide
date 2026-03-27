@@ -454,6 +454,10 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
             object: Box::new(insert_try(*object, false)),
             field,
         },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(insert_try(*expr, false)),
+            field,
+        },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple,
             iterable: Box::new(insert_try(*iterable, false)),
@@ -734,6 +738,10 @@ fn fix_var_types(expr: IrExpr, map: &HashMap<u32, Ty>) -> IrExpr {
         },
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(fix_var_types(*object, map)),
+            field,
+        },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(fix_var_types(*expr, map)),
             field,
         },
         IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {

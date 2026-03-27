@@ -360,7 +360,8 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
         }
         IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr } => {
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
+        | IrExprKind::OptionalChain { expr, .. } => {
             scan_expr(expr, locals, vt);
         }
         IrExprKind::UnwrapOr { expr, fallback } => {

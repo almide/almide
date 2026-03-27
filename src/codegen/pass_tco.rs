@@ -205,7 +205,8 @@ fn scan_non_tail(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
             let has = scan_non_tail(expr, fn_name).0 || scan_non_tail(fallback, fn_name).0;
             (has, !has)
         }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => {
             scan_non_tail(object, fn_name)
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {

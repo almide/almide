@@ -85,7 +85,8 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
             count_uses_in_expr(start, table);
             count_uses_in_expr(end, table);
         }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => {
             count_uses_in_expr(object, table);
         }
         IrExprKind::IndexAccess { object, index } => {
@@ -247,7 +248,8 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
             bump_vars_in_expr(expr, locals, table);
             bump_vars_in_expr(fallback, locals, table);
         }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => bump_vars_in_expr(object, locals, table),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => bump_vars_in_expr(object, locals, table),
         IrExprKind::IndexAccess { object, index } => {
             bump_vars_in_expr(object, locals, table);
             bump_vars_in_expr(index, locals, table);

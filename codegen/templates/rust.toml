@@ -462,3 +462,6 @@ template = "{name}: Clone + std::fmt::Debug + PartialEq + PartialOrd"
 
 [generic_bound_minimal]
 template = "{name}: Clone"
+
+[optional_chain_expr]
+template = "{inner}.as_ref().map(|__v| __v.{field}.clone())"
