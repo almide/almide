@@ -459,9 +459,8 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(scratch);
             }
 
-            // ── Unwrap (panic on err/none) ──
+            // ── Unwrap (propagate err on failure — same as Try) ──
             IrExprKind::Unwrap { expr: inner } => {
-                // Same as Try but unreachable instead of return on error
                 self.emit_expr(inner);
                 let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
@@ -471,7 +470,8 @@ impl FuncCompiler<'_> {
                     i32_const(0);
                     i32_ne;
                     if_empty;
-                    unreachable;
+                    local_get(scratch);
+                    return_;
                     end;
                 });
                 if !matches!(&expr.ty, Ty::Unit) {
