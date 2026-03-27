@@ -1,3 +1,4 @@
+<!-- description: Rejected: direct function reference passing deemed not worth complexity -->
 # Function Reference Passing [WON'T DO]
 
 > Verbose form (`fn(x) => f(x)`) is always correct and LLM-friendly. Not worth the complexity.

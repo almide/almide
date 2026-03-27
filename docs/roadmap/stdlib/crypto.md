@@ -1,3 +1,4 @@
+<!-- description: Cryptographic functions (HMAC, encryption, signing, secure random) -->
 # stdlib: crypto [Tier 2]
 
 暗号機能。Almide は現在 `hash` モジュール（bundled .almd, SHA/MD5 のみ）を持つが、HMAC・暗号化・署名・安全な乱数がない。

@@ -1,4 +1,5 @@
-# Checker InferTy/Ty 統一
+<!-- description: Unify InferTy and Ty representations in the type checker -->
+# Checker InferTy/Ty Unification
 
 **優先度:** post-1.0 (1.x)
 **見積:** ±1000行, 大。型システム根幹。

@@ -1,3 +1,4 @@
+<!-- description: Static verification that pure functions cannot perform I/O -->
 # Effect Isolation (Security Layer 1)
 
 pure fn は I/O 不可能。コンパイラが静的に検証。

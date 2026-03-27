@@ -1,4 +1,5 @@
-# Showcase 3: CSV→JSON Pipeline (Data Processing)
+<!-- description: Showcase: CSV-to-JSON data pipeline with list HOFs and pipes -->
+# Showcase 3: CSV to JSON Pipeline (Data Processing)
 
 **領域:** Data processing
 **目的:** CSV読み込み → 変換 → JSON出力。list高階関数 + pipe の実用例。

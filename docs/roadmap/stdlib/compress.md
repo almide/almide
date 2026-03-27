@@ -1,3 +1,4 @@
+<!-- description: Compression/decompression module (gzip, zstd, deflate) -->
 # stdlib: compress [Tier 3]
 
 圧縮・展開。ファイル操作やネットワーク通信で必要。

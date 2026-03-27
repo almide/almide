@@ -1,3 +1,4 @@
+<!-- description: TextMate grammar, VS Code extension, and Chrome syntax highlighting -->
 # Editor & GitHub Integration [ON HOLD]
 
 ### TextMate Grammar + Editor Extensions

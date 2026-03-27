@@ -1,3 +1,4 @@
+<!-- description: A/B testing infrastructure for syntax design using LLM benchmarks -->
 # Grammar Research Infrastructure [ACTIVE]
 
 ## Vision

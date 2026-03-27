@@ -1,3 +1,4 @@
+<!-- description: Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy -->
 # The Rumbling — Almide OSS Rewrite Campaign
 
 **Status**: On Hold (Block 0 は言語機能の成熟後)

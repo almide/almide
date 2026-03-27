@@ -1,3 +1,4 @@
+<!-- description: CSE and inlining passes for cross-target IR optimization -->
 # IR Optimization Tier 2 [ON HOLD]
 
 **優先度:** Medium — 全ターゲットに自動適用される最適化

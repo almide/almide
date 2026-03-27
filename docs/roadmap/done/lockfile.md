@@ -1,3 +1,4 @@
+<!-- description: Dependency lockfile with git-based resolution and reproducible builds -->
 # almide.lock [DONE — 1.0 Phase III]
 
 ## 実装済み

@@ -1,3 +1,4 @@
+<!-- description: LLM generates typed IR as JSON directly, bypassing parser errors -->
 # LLM → IR Direct Generation [ON HOLD]
 
 LLM がテキストではなく型付き IR (JSON) を直接生成し、パーサーエラーをゼロにする。

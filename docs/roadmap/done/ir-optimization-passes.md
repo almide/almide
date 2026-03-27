@@ -1,6 +1,7 @@
+<!-- description: IR-to-IR transform passes applied before codegen for all targets -->
 # IR Optimization Passes [ACTIVE]
 
-IR → IR 変換パスを codegen の前に挟み、生成コードの品質を向上させる。
+IR-to-IR transform passes inserted before codegen to improve generated code quality.
 
 ## Why
 

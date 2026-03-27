@@ -1,4 +1,5 @@
-# サーバー非同期 — http.serve effect 化
+<!-- description: Make http.serve handler an effect context for I/O calls -->
+# Server Async — http.serve Effect Integration
 
 ## 概要
 

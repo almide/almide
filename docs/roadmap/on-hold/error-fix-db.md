@@ -1,3 +1,4 @@
+<!-- description: Structured error-to-fix mapping for LLM auto-repair of compiler errors -->
 # Error-Fix Database [ON HOLD]
 
 Structured mapping from every compiler error to fix suggestions with before/after code examples. Enables LLM auto-repair (target: 70%+ repair rate).

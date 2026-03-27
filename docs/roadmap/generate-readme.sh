@@ -1,25 +1,18 @@
 #!/bin/bash
 # Auto-generate roadmap/README.md from directory structure.
+# Each .md file should have a comment at line 1: <!-- description: ... -->
+# Falls back to the first H1 title if no description is found.
 # Run: bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
 extract_title() {
-  head -5 "$1" 2>/dev/null | grep '^# ' | head -1 | sed 's/^# //'
+  head -10 "$1" 2>/dev/null | grep '^# ' | head -1 | sed 's/^# //'
 }
 
-# First non-empty, non-heading, non-blockquote line (truncated)
 extract_desc() {
-  python3 -c "
-import sys
-for line in open('$1'):
-    line = line.strip()
-    if not line or line.startswith('#') or line.startswith('>') or line.startswith('|') or line.startswith('-') or line.startswith('\`\`\`'):
-        continue
-    print(line[:100])
-    break
-" 2>/dev/null || echo ""
+  head -3 "$1" 2>/dev/null | grep '<!-- description:' | sed 's/.*<!-- description: //; s/ -->//' || echo ""
 }
 
 section() {
@@ -42,10 +35,9 @@ section() {
   echo "| Item | Description |"
   echo "|------|-------------|"
   for f in "${files[@]}"; do
-    local title
+    local title desc
     title=$(extract_title "$f")
     [ -z "$title" ] && title=$(basename "$f" .md)
-    local desc
     desc=$(extract_desc "$f")
     echo "| [$title]($f) | $desc |"
   done
@@ -69,4 +61,3 @@ HEADER
 section "active" "Active"
 section "on-hold" "On Hold"
 section "done" "Done"
-section "stdlib" "Stdlib"

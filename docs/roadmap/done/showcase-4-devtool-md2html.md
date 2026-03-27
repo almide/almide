@@ -1,4 +1,5 @@
-# Showcase 4: Markdown→HTML (DevTool)
+<!-- description: Showcase: Markdown-to-HTML converter using variant types and match -->
+# Showcase 4: Markdown to HTML (DevTool)
 
 **領域:** DevTool / テキスト変換
 **目的:** Markdown→HTML変換。variant型 + exhaustive match の実用例。

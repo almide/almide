@@ -1,4 +1,5 @@
-# CLI-First: Almide で CLI ツールを快適に書ける状態を作る [ACTIVE]
+<!-- description: Enable comfortable CLI tool authoring with run, build, and WASM targets -->
+# CLI-First [ACTIVE]
 
 ## Vision
 

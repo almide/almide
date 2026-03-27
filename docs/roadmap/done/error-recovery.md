@@ -1,3 +1,4 @@
+<!-- description: Report all errors at once instead of stopping at the first one -->
 # Error Recovery [DONE]
 
 ## Why This Is Critical

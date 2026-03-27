@@ -1,3 +1,4 @@
+<!-- description: Improve readability of generated Rust and TypeScript output -->
 # Emit Readability [ACTIVE]
 
 **優先度:** Medium — LLM が修正する生成コードの品質に直結

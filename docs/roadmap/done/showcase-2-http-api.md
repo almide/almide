@@ -1,3 +1,4 @@
+<!-- description: Showcase: REST API server with http.serve, json, and codec -->
 # Showcase 2: Todo API (HTTP API)
 
 **領域:** HTTP API server

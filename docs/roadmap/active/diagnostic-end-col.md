@@ -1,4 +1,5 @@
-# Diagnostic end_col — エラー波線の精度向上
+<!-- description: Track end column in diagnostics for precise error underlines -->
+# Diagnostic end_col — Precise Error Underlines
 
 **優先度:** 低〜中 — 診断品質の仕上げ。セカンダリスパン活性化で主要な改善は完了済み
 **前提:** セカンダリスパン活性化済み（E006/E005/E009 で宣言地点表示）

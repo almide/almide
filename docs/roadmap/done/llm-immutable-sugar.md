@@ -1,3 +1,4 @@
+<!-- description: Language-level sugar for immutable collection mutations -->
 # LLM Immutable Sugar [ON HOLD]
 
 Language-level sugar for immutable collection mutations. Split from llm-immutable-patterns.md Tier 3.

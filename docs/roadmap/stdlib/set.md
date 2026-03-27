@@ -1,3 +1,4 @@
+<!-- description: Set data structure with union, intersection, and difference ops -->
 # stdlib: set [Tier 2]
 
 集合型。Python, Rust, JS 全てにある基本データ構造。Almide にはない。

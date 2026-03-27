@@ -1,4 +1,5 @@
-# stdlib: http (拡充) [Tier 1]
+<!-- description: Expand http module with headers, timeouts, and response builder -->
+# stdlib: http (Expansion) [Tier 1]
 
 現在 8 関数（GET/POST/PUT/DELETE + サーバー基本）。ヘッダ操作・ステータス・レスポンスビルダーが足りない。
 

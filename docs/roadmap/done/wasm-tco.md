@@ -1,3 +1,4 @@
+<!-- description: Tail call optimization for WASM target to prevent stack overflow -->
 # WASM Tail Call Optimization
 
 ## Status: 未実装 — deep recursion (100K+) で stack overflow

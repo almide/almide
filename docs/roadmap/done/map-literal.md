@@ -1,3 +1,4 @@
+<!-- description: Map literal syntax with Swift-style [:] empty map notation -->
 # Map Literal Syntax
 
 ## Goal

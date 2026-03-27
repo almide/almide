@@ -1,4 +1,5 @@
-# build.rs Runtime Scanner 堅牢化
+<!-- description: Replace regex-based runtime scanner with syn crate for robust parsing -->
+# build.rs Runtime Scanner Hardening
 
 **優先度:** post-1.0
 **見積:** ±200行, 中。ビルド時間とのトレードオフ。

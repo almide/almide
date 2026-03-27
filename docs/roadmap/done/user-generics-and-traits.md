@@ -1,3 +1,4 @@
+<!-- description: User-defined generics and protocol system for custom types -->
 # User Generics & Protocol System
 
 **優先度:** 1.x

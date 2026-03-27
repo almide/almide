@@ -1,3 +1,4 @@
+<!-- description: Visual diagnostic improvements: ANSI colors, multi-line spans -->
 # Error Diagnostics — Visual Improvements [ACTIVE]
 
 Tier 2+ items split from the original error-diagnostics roadmap. These improve human developer experience but don't affect LLM survival rate.

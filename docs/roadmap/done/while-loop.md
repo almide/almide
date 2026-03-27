@@ -1,3 +1,4 @@
+<!-- description: Dedicated while loop syntax replacing do-block guard pattern -->
 # While Loop [DONE]
 
 ## The Problem

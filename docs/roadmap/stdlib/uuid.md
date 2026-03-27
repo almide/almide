@@ -1,3 +1,4 @@
+<!-- description: UUID generation (v4/v5), parsing, and validation -->
 # stdlib: uuid [Tier 2]
 
 UUID の生成・パース・フォーマット。小さいが頻出するモジュール。

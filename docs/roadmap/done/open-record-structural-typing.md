@@ -1,4 +1,5 @@
-# Open Record / Row Polymorphism — 実装ガイド
+<!-- description: Open record / row polymorphism implementation for structural typing -->
+# Open Record / Row Polymorphism — Implementation Guide
 
 **テスト:** `spec/lang/open_record_test.almd`
 **ステータス:** 16 rustc エラー, 0 checker エラー

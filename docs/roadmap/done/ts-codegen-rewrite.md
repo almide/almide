@@ -1,3 +1,4 @@
+<!-- description: Rewrite TS codegen to two-stage pipeline (IR to TsIR to String) -->
 # TS/JS Codegen Rewrite [ACTIVE]
 
 ## Summary

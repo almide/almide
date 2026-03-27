@@ -1,3 +1,4 @@
+<!-- description: Test utilities (assert_throws, assert_contains, approx equality) -->
 # stdlib: test [Tier 3]
 
 テストユーティリティ。現在 `assert`, `assert_eq`, `assert_ne` のみ。

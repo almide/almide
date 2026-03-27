@@ -1,3 +1,4 @@
+<!-- description: Effect inference engine with 7 categories and checker integration -->
 # Effect System — Phase 1-2
 
 **完了日:** 2026-03-19

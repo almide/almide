@@ -1,4 +1,5 @@
-# stdlib: fs (拡充) [Tier 1]
+<!-- description: Expand fs module with recursive dirs, walk, glob, and temp files -->
+# stdlib: fs (Expansion) [Tier 1]
 
 現在 19 関数。基本的な read/write/exists はあるが、ディレクトリ操作・メタデータ・temp が足りない。
 

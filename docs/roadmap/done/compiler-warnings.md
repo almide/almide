@@ -1,3 +1,4 @@
+<!-- description: Warning infrastructure for code quality issues like unused variables -->
 # Compiler Warnings [ACTIVE]
 
 Infrastructure for emitting warnings (distinct from errors) for code quality issues. Currently the compiler has errors and hints but no formal warning system.

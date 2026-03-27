@@ -1,3 +1,4 @@
+<!-- description: Typed intermediate representation between checker and emitters -->
 # Typed IR [ACTIVE]
 
 ## The Problem

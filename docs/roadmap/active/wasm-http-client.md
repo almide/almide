@@ -1,3 +1,4 @@
+<!-- description: HTTP client support for the WASM target via WASI or host imports -->
 # WASM HTTP Client
 
 **優先度:** 中 — V8 Isolate 環境での実用性に直結するが、WASI の制約で短期解決が難しい

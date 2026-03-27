@@ -1,3 +1,4 @@
+<!-- description: TOML parsing and generation for config files -->
 # stdlib: toml [Tier 2]
 
 TOML パース/生成。設定ファイルの標準フォーマット。Almide 自身も `almide.toml` を使う。

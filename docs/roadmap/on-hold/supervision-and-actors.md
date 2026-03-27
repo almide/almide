@@ -1,3 +1,4 @@
+<!-- description: Erlang-style actors, supervisors, and typed channels as stdlib modules -->
 # Supervision & Actors [ON HOLD]
 
 ## Overview

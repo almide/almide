@@ -1,3 +1,4 @@
+<!-- description: Interactive read-eval-print loop with persistent state across inputs -->
 # REPL [ON HOLD]
 
 Interactive Read-Eval-Print Loop for Almide. Split from [tooling.md](../on-hold/tooling.md).

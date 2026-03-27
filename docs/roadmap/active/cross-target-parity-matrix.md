@@ -1,3 +1,4 @@
+<!-- description: Automated verification that Rust, TS, and WASM produce identical output -->
 # Cross-Target Parity Matrix [ACTIVE]
 
 **優先度:** High — WASM 対応進行中の今が最適タイミング

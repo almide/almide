@@ -1,3 +1,4 @@
+<!-- description: TOML-driven declarative stdlib codegen replacing manual match arms -->
 # Declarative Stdlib Codegen [DONE]
 
 Inspired by React Native's TurboModules architecture: define stdlib once in a declarative format, auto-generate type signatures, UFCS mappings, and per-target codegen.

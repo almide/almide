@@ -1,4 +1,5 @@
-# B. 実用化に必要なもの
+<!-- description: Production readiness checklist (11 stdlib runtimes, CI, packaging) -->
+# Production Readiness Requirements
 
 ## 1. 11 stdlib ランタイム未実装
 

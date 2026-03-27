@@ -1,4 +1,5 @@
-# Stdlib Scope Reduction — 完了
+<!-- description: Move uuid, crypto, toml, compress, term out of stdlib to packages -->
+# Stdlib Scope Reduction — Complete
 
 **優先度:** 1.0前 — 凍結前に外に出すものを決める
 **リサーチ:** [stdlib-module-matrix.md](../../research/stdlib-module-matrix.md)

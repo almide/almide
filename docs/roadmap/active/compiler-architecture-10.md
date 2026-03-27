@@ -1,3 +1,4 @@
+<!-- description: Achieve 10/10 on every compiler architecture quality metric -->
 # Compiler Architecture: All 10s [ACTIVE]
 
 **目標**: コンパイラアーキテクチャ全項目 10/10

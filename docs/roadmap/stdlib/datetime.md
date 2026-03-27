@@ -1,3 +1,4 @@
+<!-- description: Date/time parsing, formatting, timezone, and arithmetic -->
 # stdlib: datetime [Tier 1]
 
 日時操作。これがないと実用的なアプリケーションが書けない。現在 `time` モジュール（bundled .almd）に基本的な Duration/Timestamp があるが、日時パース・フォーマット・タイムゾーン・比較がない。

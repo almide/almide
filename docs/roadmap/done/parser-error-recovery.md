@@ -1,3 +1,4 @@
+<!-- description: Continue parsing after syntax errors to report multiple diagnostics -->
 # Parser Error Recovery [ACTIVE]
 
 ## Summary

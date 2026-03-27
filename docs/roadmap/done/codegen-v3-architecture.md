@@ -1,4 +1,5 @@
-# Codegen v3: 三層アーキテクチャ
+<!-- description: Three-layer codegen architecture for multi-target extensibility -->
+# Codegen v3: Three-Layer Architecture
 
 **優先度:** High — 1.0 後の target 拡張（Go, Python）の前提条件
 **状態:** Phase 4 完了、Phase 5 進行中

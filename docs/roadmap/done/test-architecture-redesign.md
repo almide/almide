@@ -1,3 +1,4 @@
+<!-- description: Separate effect permission from Result auto-unwrap in test infra -->
 # Test Architecture Redesign
 
 > Status: On Hold (Compiler Internals)

@@ -1,4 +1,5 @@
-# Rainbow Bridge — 外部コードを Almide パッケージにする [ON HOLD]
+<!-- description: Wrap external Rust/TS/Python code as native Almide packages via @extern -->
+# Rainbow Bridge — Wrap External Code as Almide Packages [ON HOLD]
 
 ## Thesis
 

@@ -1,3 +1,4 @@
+<!-- description: YAML parsing and generation -->
 # stdlib: yaml [Tier 2]
 
 YAML パース/生成。設定ファイル・CI 定義で広く使われる。

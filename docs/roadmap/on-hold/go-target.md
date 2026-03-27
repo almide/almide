@@ -1,3 +1,4 @@
+<!-- description: Go codegen target via TOML templates and Go-specific nanopass passes -->
 # Go Target
 
 **優先度:** post-1.0

@@ -1,3 +1,4 @@
+<!-- description: Convention-based operator dispatch (==, repr, sort, hash) -->
 # Operator Protocol [ACTIVE]
 
 Convention 宣言に基づく演算子・言語機能のディスパッチ。

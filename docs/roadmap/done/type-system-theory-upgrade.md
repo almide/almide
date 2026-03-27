@@ -1,3 +1,4 @@
+<!-- description: Hindley-Milner integration plan (type schemes, let-polymorphism) -->
 # Type System Theory Upgrade — HM Integration Plan
 
 ## Current State: What Almide Has

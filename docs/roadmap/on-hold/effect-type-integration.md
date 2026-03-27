@@ -1,4 +1,5 @@
-# Effect Type Integration — FnType に EffectSet を持たせる
+<!-- description: Embed EffectSet into FnType for type-level effect tracking -->
+# Effect Type Integration — Embed EffectSet in FnType
 
 **優先度:** 2.x
 **前提:** Effect System Phase 1-2 完了、HKT Foundation Phase 1-4 完了

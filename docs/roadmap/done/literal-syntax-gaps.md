@@ -1,3 +1,4 @@
+<!-- description: Cross-language comparison of numeric and collection literal syntax -->
 # Literal Syntax Gaps [DONE]
 
 All items implemented as of v0.4.7.

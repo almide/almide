@@ -1,4 +1,5 @@
-# HKT Foundation — 完了
+<!-- description: Higher-kinded type foundation - all phases complete -->
+# HKT Foundation — Complete
 
 **全 Phase 完了。** このドキュメントはアーカイブ待ち。
 

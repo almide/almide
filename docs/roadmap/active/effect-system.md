@@ -1,3 +1,4 @@
+<!-- description: Auto-inferred effect capabilities with package-level permissions -->
 # Effect System — Auto-Inferred Capabilities
 
 **優先度:** 1.x (情報表示) → 2.x (制限適用)

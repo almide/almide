@@ -1,3 +1,4 @@
+<!-- description: WebSocket client/server for real-time communication -->
 # stdlib: websocket [Tier 3]
 
 WebSocket クライアント/サーバー。リアルタイム通信の基盤。

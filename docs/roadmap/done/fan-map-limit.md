@@ -1,4 +1,5 @@
-# fan.map 並行数制限 (limit)
+<!-- description: Add concurrency limit parameter to fan.map -->
+# fan.map Concurrency Limit
 
 ## 概要
 

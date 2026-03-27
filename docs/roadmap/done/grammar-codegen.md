@@ -1,3 +1,4 @@
+<!-- description: Unify grammar definitions into a single source of truth -->
 # Grammar Codegen: Single Source of Truth [ACTIVE] [P1]
 
 ## Problem

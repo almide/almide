@@ -1,4 +1,5 @@
-# Almide Runtime — 地球上最高の性能を目指すコンパイラ
+<!-- description: Runtime design targeting best-in-class compiler performance -->
+# Almide Runtime
 
 > Do not win by being safe. Win by reaching the ideal.
 

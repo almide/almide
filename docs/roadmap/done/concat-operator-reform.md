@@ -1,3 +1,4 @@
+<!-- description: Reform ++ concatenation operator for strings and lists -->
 # Concatenation Operator Reform
 
 **優先度:** High — 1.0 前の breaking change 候補

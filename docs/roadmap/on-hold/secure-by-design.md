@@ -1,3 +1,4 @@
+<!-- description: Five-layer security model making web vulnerabilities compile-time errors -->
 # Secure by Design [ON HOLD]
 
 ## Thesis

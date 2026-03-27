@@ -1,3 +1,4 @@
+<!-- description: MIME type detection from file extensions -->
 # stdlib: mime [Tier 3]
 
 MIME タイプ判定。Go, Python, Deno に存在。ファイルアップロード、HTTP レスポンス、コンテンツ判定で使う。

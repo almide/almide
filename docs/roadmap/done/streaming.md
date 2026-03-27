@@ -1,4 +1,5 @@
-# ストリーミング — WebSocket, SSE, Stream
+<!-- description: WebSocket, SSE, and streaming data support -->
+# Streaming — WebSocket, SSE, Stream
 
 ## 概要
 

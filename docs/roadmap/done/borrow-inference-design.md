@@ -1,3 +1,4 @@
+<!-- description: Detailed design for borrow inference to reduce unnecessary clones -->
 # Borrow Inference — Detailed Design [COMPLETE]
 
 All phases implemented. See `src/emit_rust/borrow.rs` for the analysis and `src/emit_rust/program.rs` for codegen integration.

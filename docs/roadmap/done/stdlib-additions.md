@@ -1,4 +1,5 @@
-# Stdlib Additions — 完了
+<!-- description: Stdlib module additions (set expanded to 20 functions) -->
+# Stdlib Additions — Complete
 
 **優先度:** 1.x — 1.0後に段階的追加
 **リサーチ:** [stdlib-module-matrix.md](../../research/stdlib-module-matrix.md)

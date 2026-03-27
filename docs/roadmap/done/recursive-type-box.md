@@ -1,3 +1,4 @@
+<!-- description: Auto-insert Box for recursive type members in Rust codegen -->
 # Recursive Type Box Insertion
 
 **Test:** `spec/lang/eq_protocol_test.almd`

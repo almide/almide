@@ -1,3 +1,4 @@
+<!-- description: Fix ok(value) being lost in guard expressions within effect do-blocks -->
 # Guard `ok(value)` Value Loss in Effect Do-Block
 
 **Test:** `spec/lang/error_test.almd`

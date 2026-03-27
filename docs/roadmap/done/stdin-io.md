@@ -1,3 +1,4 @@
+<!-- description: stdin reading and interactive I/O via io module -->
 # stdin / Interactive I/O [DONE]
 
 ### API

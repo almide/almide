@@ -1,3 +1,4 @@
+<!-- description: Index of stdlib module roadmaps with tier classification -->
 # Stdlib Module References
 
 モジュールごとの他言語比較と Almide への追加候補。

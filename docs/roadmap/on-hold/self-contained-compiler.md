@@ -1,3 +1,4 @@
+<!-- description: Emit LLVM IR directly to eliminate rustc dependency for end users -->
 # Self-Contained Compiler: Remove rustc Dependency [ACTIVE]
 
 **目標**: `almide build` が rustc を必要としない。Go のように自己完結したコンパイラ。

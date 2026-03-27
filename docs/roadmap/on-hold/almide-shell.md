@@ -1,3 +1,4 @@
+<!-- description: Interactive shell replacing Bash/Zsh with type-safe LLM-friendly syntax -->
 # Almide Shell
 
 An interactive shell that replaces Bash/Zsh — combining Almide's type system, Result-based error handling, and LLM-friendly syntax with OS-level process execution.

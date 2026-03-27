@@ -1,4 +1,5 @@
-# Stdlib in Almide: 統一ライブラリアーキテクチャ [ACTIVE]
+<!-- description: Rewrite stdlib in Almide with a 3-layer architecture -->
+# Stdlib in Almide: Unified Library Architecture [ACTIVE]
 
 **目標**: stdlib を Almide で書き直し、userlib と同じ仕組みにする。全ライブラリが 3 層構造で動く。
 **現状**: 381 関数 × 2 ターゲット（Rust/TS）を手書きで維持。新ターゲット追加コストが極大。

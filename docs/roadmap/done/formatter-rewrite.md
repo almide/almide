@@ -1,3 +1,4 @@
+<!-- description: Ground-up rewrite of the 890-line source formatter -->
 # Formatter Rewrite [ACTIVE]
 
 ## Summary

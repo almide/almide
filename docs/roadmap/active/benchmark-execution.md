@@ -1,3 +1,4 @@
+<!-- description: LLM accuracy benchmarks comparing Almide, Python, and MoonBit -->
 # LLM Benchmark Execution
 
 **優先度:** 高 — Almide の存在意義「LLM が最も正確に書ける言語」の実証

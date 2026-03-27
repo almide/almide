@@ -1,3 +1,4 @@
+<!-- description: Safe SQL execution with parameterized queries -->
 # stdlib: sql [Tier 3]
 
 データベースアクセス。パラメタライズドクエリ中心の安全な SQL 実行。

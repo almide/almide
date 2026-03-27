@@ -1,4 +1,5 @@
-# Unwrap operators: `!` `??` `?`
+<!-- description: Postfix !, ??, and ? operators for explicit Result/Option unwrapping -->
+# Unwrap Operators: `!` `??` `?`
 
 Three postfix operators that unify Result and Option handling. Replaces auto-`?` insertion, `From` convention, and most explicit match/guard patterns for error handling.
 

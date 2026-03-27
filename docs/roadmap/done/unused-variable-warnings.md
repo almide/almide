@@ -1,3 +1,4 @@
+<!-- description: Warn on unused variables and imports, suppressible with _ prefix -->
 # Unused Variable Warnings [ACTIVE]
 
 ## Summary

@@ -1,3 +1,4 @@
+<!-- description: Allow let bindings at module scope for constant values -->
 # Top-Level Let [DONE]
 
 ## The Problem

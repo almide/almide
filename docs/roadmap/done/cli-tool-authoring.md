@@ -1,3 +1,4 @@
+<!-- description: Fix issues discovered while implementing CLI tool benchmarks -->
 # CLI Tool Authoring Issues [DONE]
 
 Issues discovered while implementing the miniconf benchmark in Almide. Both fixed.

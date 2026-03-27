@@ -1,3 +1,4 @@
+<!-- description: Structured error codes (E001-E010) and JSON diagnostic output -->
 # Error Codes + JSON Output [DONE — 1.0 Phase II]
 
 ## 実装済み

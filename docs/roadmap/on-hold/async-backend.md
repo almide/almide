@@ -1,3 +1,4 @@
+<!-- description: Optional tokio-based async backend for high-concurrency workloads -->
 # Async Backend — tokio opt-in
 
 ## 概要

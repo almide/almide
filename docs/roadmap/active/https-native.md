@@ -1,3 +1,4 @@
+<!-- description: Native HTTPS support via rustls across all targets -->
 # HTTPS Native Support [ACTIVE]
 
 **目標**: `http.get("https://...")` が全ターゲットで動く

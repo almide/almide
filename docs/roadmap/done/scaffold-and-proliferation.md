@@ -1,3 +1,4 @@
+<!-- description: Scaffold command and LLM module proliferation pipeline -->
 # almide scaffold & Module Proliferation Pipeline [MERGED]
 
 > Merged into [LLM Integration](../active/llm-integration.md) as `almide forge`.

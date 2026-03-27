@@ -1,4 +1,5 @@
-# A. すぐ効果が出る磨き
+<!-- description: Quick-win polish items (ICE warnings, integration tests, TS E2E) -->
+# Quick-Win Polish Items
 
 ## 1. ICE 警告の除去
 

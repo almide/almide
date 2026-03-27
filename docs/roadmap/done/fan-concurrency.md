@@ -1,4 +1,5 @@
-# Fan Concurrency — Almide 非同期統合設計 [ACTIVE]
+<!-- description: Unified async/concurrency design using effect fn and fan syntax -->
+# Fan Concurrency [ACTIVE]
 
 > **`effect fn` が非同期の境界。`fan` が並行の構文。async/await は書かない。**
 

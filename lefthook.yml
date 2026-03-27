@@ -1,7 +1,7 @@
 pre-commit:
   commands:
     roadmap-readme:
-      glob: "docs/roadmap/{active,on-hold,done,stdlib}/*.md"
+      glob: "docs/roadmap/{active,on-hold,done}/*.md"
       run: bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md && git add docs/roadmap/README.md
 
 commit-msg:

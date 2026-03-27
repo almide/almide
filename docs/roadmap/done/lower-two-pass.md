@@ -1,4 +1,5 @@
-# Lower 2パス分離
+<!-- description: Separate AST-to-IR lowering from use-count analysis into two passes -->
+# Lower Two-Pass Separation
 
 **優先度:** post-1.0
 **見積:** ±500行, 大

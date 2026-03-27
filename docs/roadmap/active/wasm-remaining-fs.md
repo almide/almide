@@ -1,3 +1,4 @@
+<!-- description: Implement remaining filesystem operations for the WASM target -->
 # WASM Remaining FS Operations
 
 **優先度:** 中 — read_text/write/exists は実装済み。残りは実用上の必要に応じて追加

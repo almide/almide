@@ -1,3 +1,4 @@
+<!-- description: Swift-style result builder DSL for structured data construction -->
 # Result Builder [ACTIVE]
 
 ## Vision

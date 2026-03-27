@@ -1,7 +1,8 @@
+<!-- description: Constant folding, dead code elimination, and basic inlining passes -->
 # IR Optimization Passes [ACTIVE]
 
 ## Summary
-IR → IR の最適化パスを追加。定数畳み込み、デッドコード除去 (DCE)、簡易インライニング。
+IR-to-IR optimization passes: constant folding, DCE, and basic inlining.
 
 ## Current State
 IR に最適化パスがない。生成された Rust コードは rustc が最適化するが、IR レベルの最適化で不要な clone やアロケーションを削減できる。

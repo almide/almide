@@ -1,3 +1,4 @@
+<!-- description: Low-level TCP/UDP networking and DNS lookup -->
 # stdlib: net (TCP/UDP) [Tier 3]
 
 低レベルネットワーキング。Go, Python, Rust に標準で存在。

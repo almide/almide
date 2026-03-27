@@ -1,3 +1,4 @@
+<!-- description: AOT cross-compilation producing multiple target artifacts in one build -->
 # Cross-Target AOT Compilation [PLANNED]
 
 ## Motivation

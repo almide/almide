@@ -1,3 +1,4 @@
+<!-- description: Function monomorphization for generic structural bounds in Rust codegen -->
 # Monomorphization [ACTIVE]
 
 Generic structural bounds (`T: { name: String, .. }`) の Rust codegen に必要な、関数のモノモーフィゼーション基盤。

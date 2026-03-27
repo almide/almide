@@ -1,3 +1,4 @@
+<!-- description: Backward compatibility policy, edition system, and API freeze -->
 # Stability Contract [DONE — 1.0 Phase II]
 
 > Go 1 compatibility promise: "every Go program that compiles today compiles forever."

@@ -1,3 +1,4 @@
+<!-- description: Named fields for enum variants (like Rust struct variants) -->
 # Variant Record Fields [DONE]
 
 Allow enum variants to carry named fields (like Rust's struct variants), instead of only positional arguments.

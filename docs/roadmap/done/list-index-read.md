@@ -1,3 +1,4 @@
+<!-- description: Add index-based read syntax for lists (xs[i]) -->
 # List Index Read (`xs[i]`) [ACTIVE]
 
 ## The Problem

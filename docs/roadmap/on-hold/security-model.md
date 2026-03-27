@@ -1,3 +1,4 @@
+<!-- description: Package boundary, runtime sandbox, and supply chain integrity layers -->
 # Security Model — Layer 3–5
 
 Almide のセキュリティは 5 層で構成される。

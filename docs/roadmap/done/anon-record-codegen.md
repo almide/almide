@@ -1,4 +1,5 @@
-# Anonymous Record Codegen 修正
+<!-- description: Fix Rust codegen emitting invalid type for anonymous records -->
+# Anonymous Record Codegen Fix
 
 **優先度:** High — Grammar Lab 実験で全タスクの 30% が影響
 **見積り:** 1–2日

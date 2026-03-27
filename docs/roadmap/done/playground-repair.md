@@ -1,3 +1,4 @@
+<!-- description: Playground AI-powered error repair and type checker integration -->
 # Playground Repair Turn [DONE]
 
 ## Vision

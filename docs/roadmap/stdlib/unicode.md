@@ -1,3 +1,4 @@
+<!-- description: Unicode character classification and case conversion -->
 # stdlib: unicode [Tier 3]
 
 Unicode 文字分類。Go, Python, Rust に標準で存在。

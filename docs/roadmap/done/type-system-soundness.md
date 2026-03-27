@@ -1,3 +1,4 @@
+<!-- description: Type system soundness fixes (Unknown propagation, unification, occurs) -->
 # Type System Soundness [ACTIVE]
 
 ## Summary

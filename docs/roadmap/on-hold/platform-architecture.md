@@ -1,3 +1,4 @@
+<!-- description: Multi-layer platform vision with pluggable renderer and host bindings -->
 # Almide Platform Architecture Vision
 
 **優先度:** post-1.0 (2.x)

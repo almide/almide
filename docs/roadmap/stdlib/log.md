@@ -1,3 +1,4 @@
+<!-- description: Structured logging with levels and key-value context -->
 # stdlib: log [Tier 3]
 
 構造化ログ。アプリケーション開発の基盤。

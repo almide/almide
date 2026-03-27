@@ -1,3 +1,4 @@
+<!-- description: CSV parsing and generation with header support -->
 # stdlib: csv [Tier 2]
 
 CSV パース/生成。データ処理の基本フォーマット。

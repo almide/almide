@@ -1,3 +1,4 @@
+<!-- description: Three-layer stdlib design (core/platform/external) for WASM parity -->
 # Stdlib Architecture: 3-Layer Design [ON HOLD]
 
 Almide の stdlib を 3 層に分離する。WASM を一級市民として扱い、pure な計算と OS 依存を明確に分ける。

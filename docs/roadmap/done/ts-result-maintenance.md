@@ -1,4 +1,5 @@
-# TS Target: Result 維持 (Erasure → Object)
+<!-- description: Replace TS Result erasure (throw/catch) with Result objects -->
+# TS Target: Result Maintenance (Erasure to Object)
 
 ## 現状
 

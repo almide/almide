@@ -1,4 +1,5 @@
-# WASM Local Allocation 再設計
+<!-- description: Redesign WASM function local allocation and scratch layout -->
+# WASM Local Allocation Redesign
 
 ## Status: 設計段階
 

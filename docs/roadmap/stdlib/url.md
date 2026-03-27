@@ -1,3 +1,4 @@
+<!-- description: URL parsing, construction, and query parameter manipulation -->
 # stdlib: url [Tier 2]
 
 URL のパース・構築・クエリパラメータ操作。現在 Almide にはない。

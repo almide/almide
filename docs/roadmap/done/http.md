@@ -1,3 +1,4 @@
+<!-- description: HTTP server and client module with multithreading support -->
 # HTTP Module [DONE]
 
 ## Implemented

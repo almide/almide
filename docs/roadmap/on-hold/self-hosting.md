@@ -1,3 +1,4 @@
+<!-- description: Rewrite the compiler in Almide for a self-contained 350KB WASM toolchain -->
 # Self-Hosting: Autonomous Bootstrap Compiler
 
 **Status**: On Hold (Phase 3+ prerequisite)

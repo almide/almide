@@ -1,3 +1,4 @@
+<!-- description: Fix structural weaknesses in compiler architecture -->
 # Architecture Hardening [ACTIVE]
 
 コンパイラの構造的脆弱性の修正。言語の成長・新機能追加に伴い必ず踏む地雷を事前に除去する。

@@ -1,3 +1,4 @@
+<!-- description: All 22 stdlib modules / 355 functions runtime implementation complete -->
 # Runtime Gaps — Complete
 
 全 22 モジュール / 355 関数のランタイム実装完了 (100%)。

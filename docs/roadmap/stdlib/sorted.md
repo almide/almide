@@ -1,3 +1,4 @@
+<!-- description: Sorted collections (binary search, heap, deque) -->
 # stdlib: sorted collections [Tier 3]
 
 ソート済みデータ構造。Go/Python/Rust/Deno 全てに何らかの形で存在。

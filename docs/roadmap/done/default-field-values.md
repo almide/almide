@@ -1,3 +1,4 @@
+<!-- description: Default values for record fields to eliminate sentinel value patterns -->
 # Default Field Values [DONE]
 
 ## The Problem

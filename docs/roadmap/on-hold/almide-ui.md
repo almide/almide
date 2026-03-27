@@ -1,3 +1,4 @@
+<!-- description: SolidJS-like reactive UI framework built as a pure Almide library -->
 # Almide UI — Reactive Web Framework as Almide Library [ON HOLD]
 
 ## Thesis

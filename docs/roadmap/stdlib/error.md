@@ -1,3 +1,4 @@
+<!-- description: Structured error types with wrapping, chaining, and context -->
 # stdlib: error [Tier 1]
 
 構造化エラー型。現在 Almide の `Result[T, E]` のエラー型は常に `String`。エラーの分類・チェーン・コンテキスト付加ができない。

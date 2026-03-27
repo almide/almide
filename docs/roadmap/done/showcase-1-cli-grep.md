@@ -1,3 +1,4 @@
+<!-- description: Showcase: CLI grep tool using fan concurrency and regex -->
 # Showcase 1: almide-grep (CLI Tool)
 
 **領域:** CLI tool

@@ -1,4 +1,5 @@
-# D. 設計的な債務
+<!-- description: Design debt including partial TOML dispatch and anonymous records -->
+# Design Debt
 
 ## 1. gen_generated_call の部分接続
 

@@ -1,4 +1,5 @@
-# GPU Compute — Matrix型とコンパイラ駆動のGPU実行
+<!-- description: Matrix primitive type with compiler-driven CPU/GPU execution -->
+# GPU Compute — Matrix Type and Compiler-Driven GPU Execution
 
 **優先度:** Phase 3 (Runtime Foundation)
 **前提:** Bytes型完了、WASM export完了、nanopass pipeline完了

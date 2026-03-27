@@ -1,3 +1,4 @@
+<!-- description: Export Almide code as native-speed libraries callable from any language -->
 # Rainbow FFI Gate [ON HOLD]
 
 ## Thesis

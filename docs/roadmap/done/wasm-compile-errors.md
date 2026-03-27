@@ -1,4 +1,5 @@
-# WASM Compile Error 根絶ロードマップ
+<!-- description: WASM compile error elimination (type mismatches, lambda issues) -->
+# WASM Compile Error Elimination Roadmap
 
 ## Status: 10件 (109/182 passed)
 

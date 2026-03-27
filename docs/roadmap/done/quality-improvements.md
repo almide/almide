@@ -1,4 +1,5 @@
-# C. 品質向上
+<!-- description: Quality improvements (error line numbers, heredoc tracking) -->
+# Quality Improvements
 
 ## 1. エラーメッセージの行番号 ✅
 

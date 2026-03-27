@@ -1,3 +1,4 @@
+<!-- description: HTML parsing, CSS selectors, and text extraction -->
 # stdlib: html [Tier 2]
 
 HTML パース・クエリ・テキスト抽出。スクレイピング、テスト、テンプレート出力検証に使う。

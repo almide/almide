@@ -1,3 +1,4 @@
+<!-- description: Compile-time preconditions and type invariants via where clauses -->
 # Compile-Time Contracts [ON HOLD]
 
 **優先度:** 2.x — 型システム安定後

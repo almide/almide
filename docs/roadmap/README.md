@@ -10,19 +10,19 @@
 
 | Item | Description |
 |------|-------------|
-| [LLM Benchmark Execution](active/benchmark-execution.md) | **優先度:** 高 — Almide の存在意義「LLM が最も正確に書ける言語」の実証 |
-| [Compiler Architecture: All 10s [ACTIVE]](active/compiler-architecture-10.md) | **目標**: コンパイラアーキテクチャ全項目 10/10 |
-| [Cross-Target Parity Matrix [ACTIVE]](active/cross-target-parity-matrix.md) | **優先度:** High — WASM 対応進行中の今が最適タイミング |
-| [Diagnostic end_col — エラー波線の精度向上](active/diagnostic-end-col.md) | **優先度:** 低〜中 — 診断品質の仕上げ。セカンダリスパン活性化で主要な改善は完了済み |
-| [Effect System — Auto-Inferred Capabilities](active/effect-system.md) | **優先度:** 1.x (情報表示) → 2.x (制限適用) |
-| [Emit Readability [ACTIVE]](active/emit-readability.md) | **優先度:** Medium — LLM が修正する生成コードの品質に直結 |
-| [GPU Compute — Matrix型とコンパイラ駆動のGPU実行](active/gpu-compute.md) | **優先度:** Phase 3 (Runtime Foundation) |
-| [HTTPS Native Support [ACTIVE]](active/https-native.md) | **目標**: `http.get("https://...")` が全ターゲットで動く |
-| [Purity Exploitation — fn/effect fn 区別の活用](active/purity-exploitation.md) | **優先度:** Medium — 構文追加ゼロで性能・表現力・実用性を向上 |
-| [Stdlib in Almide: 統一ライブラリアーキテクチャ [ACTIVE]](active/stdlib-in-almide.md) | **目標**: stdlib を Almide で書き直し、userlib と同じ仕組みにする。全ライブラリが 3 層構造で動く。 |
-| [Unwrap operators: `!` `??` `?`](active/unwrap-operators.md) | Three postfix operators that unify Result and Option handling. Replaces auto-`?` insertion, `From` c |
-| [WASM HTTP Client](active/wasm-http-client.md) | **優先度:** 中 — V8 Isolate 環境での実用性に直結するが、WASI の制約で短期解決が難しい |
-| [WASM Remaining FS Operations](active/wasm-remaining-fs.md) | **優先度:** 中 — read_text/write/exists は実装済み。残りは実用上の必要に応じて追加 |
+| [LLM Benchmark Execution](active/benchmark-execution.md) | LLM accuracy benchmarks comparing Almide, Python, and MoonBit |
+| [Compiler Architecture: All 10s [ACTIVE]](active/compiler-architecture-10.md) | Achieve 10/10 on every compiler architecture quality metric |
+| [Cross-Target Parity Matrix [ACTIVE]](active/cross-target-parity-matrix.md) | Automated verification that Rust, TS, and WASM produce identical output |
+| [Diagnostic end_col — Precise Error Underlines](active/diagnostic-end-col.md) | Track end column in diagnostics for precise error underlines |
+| [Effect System — Auto-Inferred Capabilities](active/effect-system.md) | Auto-inferred effect capabilities with package-level permissions |
+| [Emit Readability [ACTIVE]](active/emit-readability.md) | Improve readability of generated Rust and TypeScript output |
+| [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](active/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
+| [HTTPS Native Support [ACTIVE]](active/https-native.md) | Native HTTPS support via rustls across all targets |
+| [Purity Exploitation — Leveraging fn/effect fn Distinction](active/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
+| [Stdlib in Almide: Unified Library Architecture [ACTIVE]](active/stdlib-in-almide.md) | Rewrite stdlib in Almide with a 3-layer architecture |
+| [Unwrap Operators: `!` `??` `?`](active/unwrap-operators.md) | Postfix !, ??, and ? operators for explicit Result/Option unwrapping |
+| [WASM HTTP Client](active/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
+| [WASM Remaining FS Operations](active/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
 
 ## On Hold
 
@@ -30,34 +30,34 @@
 
 | Item | Description |
 |------|-------------|
-| [Almide Shell](on-hold/almide-shell.md) | An interactive shell that replaces Bash/Zsh — combining Almide's type system, Result-based error han |
-| [Almide UI — Reactive Web Framework as Almide Library [ON HOLD]](on-hold/almide-ui.md) | Almide で書かれた SolidJS ライクなリアクティブ UI フレームワークを **Almide のライブラリとして** 構築する。コンパイラにフレームワーク固有の最適化パスを追加しない。コン |
-| [Async Backend — tokio opt-in](on-hold/async-backend.md) | 現在の sync/thread backend に加え、async backend を追加する。tokio は言語仕様に混ぜず、backend の1実装として提供。 |
-| [build.rs Runtime Scanner 堅牢化](on-hold/buildrs-syn-scanner.md) | **優先度:** post-1.0 |
-| [Compile-Time Contracts [ON HOLD]](on-hold/compile-time-contracts.md) | **優先度:** 2.x — 型システム安定後 |
-| [Effect Type Integration — FnType に EffectSet を持たせる](on-hold/effect-type-integration.md) | **優先度:** 2.x |
-| [Error-Fix Database [ON HOLD]](on-hold/error-fix-db.md) | Structured mapping from every compiler error to fix suggestions with before/after code examples. Ena |
-| [Go Target](on-hold/go-target.md) | **優先度:** post-1.0 |
-| [Incremental Compilation [ON HOLD]](on-hold/incremental-compilation.md) | Every `almide run` / `almide build` performs the full pipeline from scratch: |
-| [IR Interpreter [ON HOLD]](on-hold/ir-interpreter.md) | IR を直接実行するインタプリタ。codegen → rustc を経由せずに即時実行。 |
-| [IR Optimization Tier 2 [ON HOLD]](on-hold/ir-optimization-tier2.md) | **優先度:** Medium — 全ターゲットに自動適用される最適化 |
-| [LLM Integration [ON HOLD]](on-hold/llm-integration.md) | 「LLMが最も正確に書ける言語」のコンパイラに LLM を組み込む。LLMが書いて、LLMが直して、LLMがライブラリを生やす — このループがコンパイラ1つで回る。 |
-| [LLM → IR Direct Generation [ON HOLD]](on-hold/llm-ir-generation.md) | LLM がテキストではなく型付き IR (JSON) を直接生成し、パーサーエラーをゼロにする。 |
-| [LSP Server [ON HOLD]](on-hold/lsp.md) | Language Server Protocol implementation for editor integration. Split from [tooling.md](../on-hold/t |
-| [Package Registry [ON HOLD]](on-hold/package-registry.md) | Pin exact commit hashes for reproducible builds: |
-| [Performance Research: Path to World #1 [ON-HOLD]](on-hold/performance-research.md) | **Research thesis**: High-level semantic information preserved through the compilation pipeline enab |
-| [Almide Platform Architecture Vision](on-hold/platform-architecture.md) | **優先度:** post-1.0 (2.x) |
-| [Rainbow Bridge — 外部コードを Almide パッケージにする [ON HOLD]](on-hold/rainbow-bridge.md) | Rust crate、npm パッケージ、Python ライブラリ等の外部コードを Almide パッケージとしてラップし、ユーザーには **普通の Almide ライブラリにしか見えない** 形で提 |
-| [Rainbow FFI Gate [ON HOLD]](on-hold/rainbow-gate.md) | Almide で書いたコードを、どの言語からでもネイティブ速度で呼べるライブラリとして出力する。トランスパイラではなく **ライブラリコンパイラ**。 |
-| [REPL [ON HOLD]](on-hold/repl.md) | Interactive Read-Eval-Print Loop for Almide. Split from [tooling.md](../on-hold/tooling.md). |
-| [Research: Modification Survival Rate Paper [ON HOLD]](on-hold/research-modification-survival-rate-paper.md) | Target: arXiv preprint — *"Designing Programming Languages for LLM Code Modification: Measuring Surv |
-| [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | **Status**: On Hold (Block 0 は言語機能の成熟後) |
-| [Secure by Design [ON HOLD]](on-hold/secure-by-design.md) | Almide は Rust がメモリ安全であるのと同じ意味で **Web 安全** な言語になる。「気をつけて書けば安全」ではなく「普通に書いたら安全。意図的に壊そうとしない限り壊れない」。 |
-| [Security Model — Layer 3–5](on-hold/security-model.md) | Almide のセキュリティは 5 層で構成される。 |
-| [Self-Contained Compiler: Remove rustc Dependency [ACTIVE]](on-hold/self-contained-compiler.md) | **目標**: `almide build` が rustc を必要としない。Go のように自己完結したコンパイラ。 |
-| [Self-Hosting: Autonomous Bootstrap Compiler](on-hold/self-hosting.md) | **Status**: On Hold (Phase 3+ prerequisite) |
-| [Supervision & Actors [ON HOLD]](on-hold/supervision-and-actors.md) | Layer 3 of Almide's async model. Provides long-lived concurrent processes, typed message passing, an |
-| [Web Framework [ON HOLD]](on-hold/web-framework.md) | Almide の first-party web framework。Hono 相当の DX を Almide の思想で実現する。 |
+| [Almide Shell](on-hold/almide-shell.md) | Interactive shell replacing Bash/Zsh with type-safe LLM-friendly syntax |
+| [Almide UI — Reactive Web Framework as Almide Library [ON HOLD]](on-hold/almide-ui.md) | SolidJS-like reactive UI framework built as a pure Almide library |
+| [Async Backend — tokio opt-in](on-hold/async-backend.md) | Optional tokio-based async backend for high-concurrency workloads |
+| [build.rs Runtime Scanner Hardening](on-hold/buildrs-syn-scanner.md) | Replace regex-based runtime scanner with syn crate for robust parsing |
+| [Compile-Time Contracts [ON HOLD]](on-hold/compile-time-contracts.md) | Compile-time preconditions and type invariants via where clauses |
+| [Effect Type Integration — Embed EffectSet in FnType](on-hold/effect-type-integration.md) | Embed EffectSet into FnType for type-level effect tracking |
+| [Error-Fix Database [ON HOLD]](on-hold/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
+| [Go Target](on-hold/go-target.md) | Go codegen target via TOML templates and Go-specific nanopass passes |
+| [Incremental Compilation [ON HOLD]](on-hold/incremental-compilation.md) | Skip redundant rustc invocations by hashing generated Rust source |
+| [IR Interpreter [ON HOLD]](on-hold/ir-interpreter.md) | Direct IR execution for instant REPL, playground, and fast test runs |
+| [IR Optimization Tier 2 [ON HOLD]](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
+| [LLM Integration [ON HOLD]](on-hold/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
+| [LLM → IR Direct Generation [ON HOLD]](on-hold/llm-ir-generation.md) | LLM generates typed IR as JSON directly, bypassing parser errors |
+| [LSP Server [ON HOLD]](on-hold/lsp.md) | Language Server Protocol for editor completion, diagnostics, and navigation |
+| [Package Registry [ON HOLD]](on-hold/package-registry.md) | Lock file, semver resolution, and central package registry |
+| [Performance Research: Path to World #1 [ON-HOLD]](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
+| [Almide Platform Architecture Vision](on-hold/platform-architecture.md) | Multi-layer platform vision with pluggable renderer and host bindings |
+| [Rainbow Bridge — Wrap External Code as Almide Packages [ON HOLD]](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
+| [Rainbow FFI Gate [ON HOLD]](on-hold/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
+| [REPL [ON HOLD]](on-hold/repl.md) | Interactive read-eval-print loop with persistent state across inputs |
+| [Research: Modification Survival Rate Paper [ON HOLD]](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
+| [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy |
+| [Secure by Design [ON HOLD]](on-hold/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
+| [Security Model — Layer 3–5](on-hold/security-model.md) | Package boundary, runtime sandbox, and supply chain integrity layers |
+| [Self-Contained Compiler: Remove rustc Dependency [ACTIVE]](on-hold/self-contained-compiler.md) | Emit LLVM IR directly to eliminate rustc dependency for end users |
+| [Self-Hosting: Autonomous Bootstrap Compiler](on-hold/self-hosting.md) | Rewrite the compiler in Almide for a self-contained 350KB WASM toolchain |
+| [Supervision & Actors [ON HOLD]](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
+| [Web Framework [ON HOLD]](on-hold/web-framework.md) | First-party Hono-like web framework with template and Codec integration |
 
 ## Done
 
@@ -68,193 +68,164 @@
 
 | Item | Description |
 |------|-------------|
-| [2026 Ergonomics Roadmap](done/2026-ergonomics.md) | Self-tooling (Chrome extension, TextMate generator, Playground modules) で発見された |
-| [Almide Runtime — 地球上最高の性能を目指すコンパイラ](done/almide-runtime.md) | 既存の言語は汎用性の代償を払っている。Almide は制約が強い。それが武器になる: |
-| [Anonymous Record Codegen 修正](done/anon-record-codegen.md) | **優先度:** High — Grammar Lab 実験で全タスクの 30% が影響 |
-| [Architecture Hardening [ACTIVE]](done/architecture-hardening.md) | コンパイラの構造的脆弱性の修正。言語の成長・新機能追加に伴い必ず踏む地雷を事前に除去する。 |
-| [Benchmark Report: LLM Code Generation Cost by Language [ON HOLD]](done/benchmark-report.md) | Publish a credible benchmark report showing that Almide achieves the lowest LLM code generation cost |
-| [Borrow/Clone Gaps [ACTIVE]](done/borrow-clone-gaps.md) | Rust codegen が変数の clone を挿入し損ねるケースを徹底的に潰す。 |
-| [Borrow Inference — Detailed Design [COMPLETE]](done/borrow-inference-design.md) | All phases implemented. See `src/emit_rust/borrow.rs` for the analysis and `src/emit_rust/program.rs |
-| [Checker InferTy/Ty 統一](done/checker-type-unification.md) | **優先度:** post-1.0 (1.x) |
-| [CLI-First: Almide で CLI ツールを快適に書ける状態を作る [ACTIVE]](done/cli-first.md) | Almide で実用的な CLI ツールを書き、開発時は `almide run` で即実行、配布時は `almide build` で単一ネイティブバイナリを生成できる。同じコードが TS パスでも |
-| [CLI Tool Authoring Issues [DONE]](done/cli-tool-authoring.md) | Issues discovered while implementing the miniconf benchmark in Almide. Both fixed. |
-| [Clone Reduction Phase 4 [ACTIVE]](done/clone-reduction.md) | Phases 0-3 (done in [codegen-optimization](../done/codegen-optimization.md)) established single-use  |
-| [Codec Advanced [ACTIVE]](done/codec-advanced.md) | Codec 基盤 (encode/decode/Value/JSON roundtrip) は完成。高度な機能。 |
-| [Codec Protocol & JSON [ACTIVE]](done/codec-and-json.md) | Trustworthy structured data boundaries for humans, programs, and models. |
-| [Codec Implementation Plan [ACTIVE]](done/codec-implementation.md) | Layer 1: Codec (コンパイラ)     T ←→ Value |
-| [Codec Remaining [ACTIVE]](done/codec-remaining.md) | Phase 0-2 完了。残りの機能。 |
-| [Codec Test Specification [ACTIVE]](done/codec-test-spec.md) | Swift Codable / Serde / Kotlin serialization / Jackson の知見に基づくテストケース集。 |
-| [Codegen Correctness Fixes [DONE]](done/codegen-correctness.md) | 生成コードの正確性に関わる問題の修正。 |
-| [Codegen Optimization [IN PROGRESS]](done/codegen-optimization.md) | Almide generates Rust code that is near-identical in performance to hand-written Rust for numeric wo |
-| [Codegen Refinement [ACTIVE]](done/codegen-refinement.md) | Small, independent optimizations that improve generated Rust code quality. Each is low-difficulty an |
-| [Codegen v3: 三層アーキテクチャ](done/codegen-v3-architecture.md) | **優先度:** High — 1.0 後の target 拡張（Go, Python）の前提条件 |
-| [Codegen v3: 変換の完全分類](done/codegen-v3-transform-classification.md) | Codegen がやっている全変換を、必要な文脈の深さで 3 段階に分類する。 |
-| [Compiler Architecture Cleanup](done/compiler-architecture-cleanup.md) | **優先度:** Medium — 1.0後でもいいが、やるなら早い方がいい |
-| [Compiler Bugs Found by Test Expansion [ACTIVE]](done/compiler-bugs-from-tests.md) | テストカバレッジ拡大（806→1501）で発見されたコンパイラバグ7件。テスト側で回避中だが、コンパイラを修正してテストをあるべき姿に戻す。 |
-| [Compiler Bugs and Gaps — Status](done/compiler-bugs.md) | Discovered while writing 400+ new test blocks across 32 test files (v0.8.4). |
-| [Compiler Hardening [DONE]](done/compiler-hardening.md) | Eliminate all panics and unhandled edge cases. Other languages never crash on invalid input — Almide |
-| [Compiler Warnings [ACTIVE]](done/compiler-warnings.md) | Infrastructure for emitting warnings (distinct from errors) for code quality issues. Currently the c |
-| [Concatenation Operator Reform](done/concat-operator-reform.md) | **優先度:** High — 1.0 前の breaking change 候補 |
-| [Control Flow Extensions [CLOSED]](done/control-flow.md) | **Closed**: `while`, `break`, `continue`, `return` contradict the design philosophy. |
-| [Cross-Platform Support [DONE]](done/cross-platform.md) | Almide is a write-once language — platform differences are the compiler's problem, never the user's. |
-| [Cross-Target AOT Compilation [PLANNED]](done/cross-target-aot.md) | Almide は既に複数の emit ターゲット（Rust / TS / JS / 将来 WASM）を持ち、`@extern` でターゲット別の実装を宣言的に切り替えられる。この構造を活かし、`alm |
-| [Cross-Target CI [DONE]](done/cross-target-ci.md) | 全テストを Rust ターゲットと TS ターゲットの両方で実行し、出力が一致することを自動検証する。 |
-| [Cross-Target Semantics [ACTIVE]](done/cross-target-semantics.md) | 同じ `.almd` が Rust と TS で異なる結果を出すケースの修正。Almide の「同じコードが両方で動く」前提を保証する。 |
-| [Default Field Values [DONE]](done/default-field-values.md) | Self-tooling exposed three design smells that share a single root cause: |
-| [Derive Conventions [DONE]](done/derive-conventions.md) | trait/typeclass を導入せず、固定 convention + コロン構文で polymorphism を実現する。 |
-| [D. 設計的な債務](done/design-debt.md) | **状態:** TOML テンプレート dispatch が list/string/map/int/float/math/result/option のみ接続。残りのモジュール (fs, http, |
-| [Diagnostic Secondary Spans [DONE]](done/diagnostic-secondary-spans.md) | **完了日:** 2026-03-25 |
-| [Editor & GitHub Integration [ON HOLD]](done/editor-github-integration.md) | Repository: [almide/almide-editors](https://github.com/almide/almide-editors) |
-| [Effect fn Result Wrapping [DONE]](done/effect-fn-result-wrapping.md) | **優先度:** 1.0 blocker |
-| [Effect Isolation (Security Layer 1)](done/effect-isolation.md) | pure fn は I/O 不可能。コンパイラが静的に検証。 |
-| [Effect System — Phase 1-2](done/effect-system-phase1-2.md) | **完了日:** 2026-03-19 |
-| [--emit-ir: IR JSON Export [ACTIVE]](done/emit-ir.md) | Add `--emit-ir` flag to output the typed IR as JSON, complementing the existing `--emit-ast`. |
-| [Direct WASM Emission [ACTIVE]](done/emit-wasm-direct.md) | src/codegen/emit_wasm/ |
-| [Eq Protocol [DONE]](done/eq-protocol.md) | Automatic `==` / `!=` for all value types. No `deriving` needed. |
-| [Error Codes + JSON Output [DONE — 1.0 Phase II]](done/error-codes-json.md) |  |
-| [Error Diagnostics — Visual Improvements [ACTIVE]](done/error-diagnostics-visual.md) | Tier 2+ items split from the original error-diagnostics roadmap. These improve human developer exper |
-| [Error Diagnostics [DONE]](done/error-diagnostics.md) | warning: return value of list.set() is unused |
-| [Error Recovery [DONE]](done/error-recovery.md) | LLMはコードを1箇所ずつ直すのではなく、**全エラーを一括で見て一発で直す**のが最も効率的。現状の「最初の1エラーで止まる」挙動は、LLMとの対話ループを不必要に増やしている。 |
-| [Exercise Suite v0.6.0](done/exercises-v060.md) | **Compiler bugs found & fixed during Tier 4:** |
-| [Exhaustiveness Check → Hard Error [ACTIVE]](done/exhaustiveness-check.md) | Pattern matching exhaustiveness is checked but only emits **warnings**, not errors. Non-exhaustive ` |
-| [Fan Concurrency — Almide 非同期統合設計 [ACTIVE]](done/fan-concurrency.md) | 本ドキュメントは以下を統合し、Almide の非同期・並行処理の唯一の設計仕様とする: |
-| [fan.map 並行数制限 (limit)](done/fan-map-limit.md) | `fan.map(xs, limit: n, f)` — 同時実行数の上限付き fan.map。 |
-| [Formatter Rewrite [ACTIVE]](done/formatter-rewrite.md) | `src/fmt.rs` (890行) を 0 から書き直し。旧コードは lambda 構文更新済みだが、全体設計が古い。 |
-| [Function Reference Passing [WON'T DO]](done/function-reference-passing.md) | Make passing named functions as arguments seamless, eliminating unnecessary closure wrappers. |
-| [Generic Variant Type Instantiation](done/generic-variant-instantiation.md) | **テスト:** `spec/lang/type_system_test.almd` |
-| [Generics [DONE]](done/generics.md) | Generic functions, generic record types, generic variant types, call-site type arguments, and recurs |
-| [Grammar Codegen: Single Source of Truth [ACTIVE] [P1]](done/grammar-codegen.md) | Almideの文法が3箇所に分散している: |
-| [Grammar Research Infrastructure [ACTIVE]](done/grammar-research.md) | Almide の文法設計判断を「勘」ではなく「数字」で回す。 |
-| [Guard `ok(value)` Value Loss in Effect Do-Block](done/guard-ok-value-loss.md) | **Test:** `spec/lang/error_test.almd` |
-| [Higher-Order Function Type Inference](done/higher-order-fn-inference.md) | **Test:** `spec/lang/function_test.almd` |
-| [Hint System Architecture [ACTIVE] [P0]](done/hint-system.md) | Almideの差別化は「LLMが全エラーを見て一発で直せる」こと。そのためにはエラーメッセージが**原因**を指す必要がある。現状、親切処理（ヒント、typo検出、missing comma等）がパー |
-| [HKT Foundation — Phase 1-4 + Stream Fusion 全 6 法則](done/hkt-foundation-phase1.md) | **完了日:** 2026-03-19 |
-| [HKT Foundation — 完了](done/hkt-foundation.md) | **全 Phase 完了。** このドキュメントはアーカイブ待ち。 |
-| [HTTP Module [DONE]](done/http.md) |  |
-| [`import self` — Package Entry Point Access [DONE]](done/import-self-entry.md) | `main.almd` から同パッケージの `mod.almd`（ライブラリエントリーポイント）の pub 関数にアクセスできない。 |
-| [IR Optimization Passes [ACTIVE]](done/ir-optimization-passes.md) | IR → IR 変換パスを codegen の前に挟み、生成コードの品質を向上させる。 |
-| [IR Optimization Passes [ACTIVE]](done/ir-optimization.md) | IR → IR の最適化パスを追加。定数畳み込み、デッドコード除去 (DCE)、簡易インライニング。 |
-| [Codegen IR Redesign [DONE]](done/ir-redesign.md) | Self-contained typed IR — codegen が AST を一切参照せず、IR のみで完全なコード生成を行う。Phase 1〜5 全完了。 |
-| [IR Verification & Self-Describing IR [ACTIVE]](done/ir-verification.md) | Debug-only integrity checks + IR self-description improvements. Verification runs after optimization |
-| [JSON Builder API [SUPERSEDED]](done/json-builder-api.md) | The current `json.from_string`, `json.from_int`, etc. API is verbose for constructing JSON objects: |
-| [Bidirectional Type Inference for Lambda Parameters [DONE]](done/lambda-type-inference.md) | **Status**: 実装完了 (commit 002180d, 2026-03-14)。checker の two-pass 推論 + lowerer への型伝搬を実装。 |
-| [Language Test Suite [DONE]](done/language-test-suite.md) | Almide の言語機能を体系的にテストするスイート。`lang/` に配置。 |
-| [Let-Polymorphism (Algorithm W)](done/let-polymorphism.md) | let f = (x) => x        // f : fn(?0) -> ?0 (monomorphic) |
-| [List Index Read (`xs[i]`) [ACTIVE]](done/list-index-read.md) | Almide supports index-based **write** (`xs[i] = value`) but not index-based **read** (`xs[i]`). Read |
-| [List Stdlib Gaps](done/list-stdlib-gaps.md) | Almide's `list` module compared against 7 languages. All operations are immutable (return new list). |
-| [Literal Syntax Gaps [DONE]](done/literal-syntax-gaps.md) | All items implemented as of v0.4.7. |
-| [LLM Developer Experience [DONE / MERGED]](done/llm-developer-experience.md) | Currently `almide init` always generates a `CLAUDE.md` file for AI-assisted development. |
-| [LLM × Immutable Data Structures [ACTIVE]](done/llm-immutable-patterns.md) | LLMs trained on Python/JS/Go default to mutable algorithms. Almide's immutable lists cause systemati |
-| [LLM Immutable Sugar [ON HOLD]](done/llm-immutable-sugar.md) | Language-level sugar for immutable collection mutations. Split from llm-immutable-patterns.md Tier 3 |
-| [almide.lock [DONE — 1.0 Phase III]](done/lockfile.md) |  |
-| [Lower 2パス分離](done/lower-two-pass.md) | **優先度:** post-1.0 |
-| [Map Literal Syntax](done/map-literal.md) | Add Map literal syntax to the language, enabling bidirectional type inference for empty Maps. |
-| [Module System v2 [DONE]](done/module-system-v2.md) | myapp/ (application)               mylib/ (library) |
-| [Monomorphization [ACTIVE]](done/monomorphization.md) | Generic structural bounds (`T: { name: String, .. }`) の Rust codegen に必要な、関数のモノモーフィゼーション基盤。 |
-| [Multi-Target Strategy [ACTIVE]](done/multi-target-strategy.md) | Almide のマルチターゲット設計が新しいターゲット言語の追加コストを最小化する構造になっていることを活かし、ターゲット言語の拡充戦略を定める。 |
-| [New Codegen Targets [ACTIVE]](done/new-codegen-targets.md) | IR redesign 完了により、新ターゲット追加のコストが大幅低下。`&IrProgram` を受け取って文字列を返すだけで新バックエンドが書ける。 |
-| [npm Package Target [DONE]](done/npm-package-target-target-npm.md) | Compile Almide code into a publish-ready npm package. Write libraries in Almide and distribute them  |
-| [Open Record / Row Polymorphism — 実装ガイド](done/open-record-structural-typing.md) | **テスト:** `spec/lang/open_record_test.almd` |
-| [Operator Protocol [ACTIVE]](done/operator-protocol.md) | Convention 宣言に基づく演算子・言語機能のディスパッチ。 |
-| [Parser Error Recovery [ACTIVE]](done/parser-error-recovery.md) | 1 つのシンタックスエラーでパースが停止する現状を改善。複数エラーを報告し、エラー後もパースを継続する。 |
-| [Platform / Target Separation [ON HOLD]](done/platform-target-separation.md) | `--target` に出力形式とプラットフォームの 2 つの意味が混在している。これを分離する。 |
-| [Playground Repair Turn [DONE]](done/playground-repair.md) | ユーザーがPlaygroundでコードを書いて Run → エラー → 「Fix with AI」→ LLMがエラーを読んで修正 → ユーザーが修正過程を見る。 |
-| [A. すぐ効果が出る磨き](done/polish-immediate.md) | **状態:** `[ICE] lower: missing type for expr id=N` が毎回 stderr に出る |
-| [B. 実用化に必要なもの](done/production-ready.md) | **状態:** 以下のモジュールが `runtime/rust/src/` に存在しない |
-| [Proliferation Blockers [DONE]](done/proliferation-blockers.md) | Issues discovered during the first `almide proliferate` run (csv module). These were compiler-level  |
-| [C. 品質向上](done/quality-improvements.md) | `emit()` メソッドで全 checker diagnostic に自動 span 付与。22 箇所を修正。 |
-| [Recursive Type Box Insertion](done/recursive-type-box.md) | **Test:** `spec/lang/eq_protocol_test.almd` |
-| [Remove `do` Block [DONE]](done/remove-do-block.md) | **完了**: 2026-03-24 |
-| [Runtime Gaps — Complete](done/runtime-gaps.md) | 全 22 モジュール / 355 関数のランタイム実装完了 (100%)。 |
-| [Runtime Layout Unification [ACTIVE]](done/runtime-layout.md) | Rust と TypeScript のランタイムが別々の場所・別々の形式で管理されている。 |
-| [RustIR: Rust Codegen 中間表現 [ACTIVE]](done/rust-ir.md) | 現在の Rust codegen は `IR → 文字列` を1パスで行い、25+ フィールドの Emitter 構造体が状態フラグ（`in_effect`, `in_do_block`, `skip |
-| [Rust Compiler Test Coverage [ACTIVE]](done/rust-test-coverage.md) | Rust-side unit/integration tests (`cargo test`). Separate from `.almd` language tests. |
-| [almide scaffold & Module Proliferation Pipeline [MERGED]](done/scaffold-and-proliferation.md) | Infrastructure for mass-producing Almide modules. Enables LLMs to autonomously generate, verify, and |
-| [Self-Tooling: Editor Tools Written in Almide [DONE]](done/self-tooling.md) | Demonstrate that Almide's entire editor ecosystem can be written in Almide itself, produced by AI fr |
-| [サーバー非同期 — http.serve effect 化](done/server-async.md) | `http.serve` のハンドラを effect コンテキスト化し、ハンドラ内から effect fn を呼べるようにする。 |
-| [Showcase 1: almide-grep (CLI Tool)](done/showcase-1-cli-grep.md) | **領域:** CLI tool |
-| [Showcase 2: Todo API (HTTP API)](done/showcase-2-http-api.md) | **領域:** HTTP API server |
-| [Showcase 3: CSV→JSON Pipeline (Data Processing)](done/showcase-3-data-pipeline.md) | **領域:** Data processing |
-| [Showcase 4: Markdown→HTML (DevTool)](done/showcase-4-devtool-md2html.md) | **領域:** DevTool / テキスト変換 |
-| [Showcase 5: dotenv Loader (Script)](done/showcase-5-script-dotenv.md) | **領域:** Script / 設定管理 |
-| [Stability Contract [DONE — 1.0 Phase II]](done/stability-contract.md) |  |
-| [stdin / Interactive I/O [DONE]](done/stdin-io.md) | import io |
-| [Stdlib Additions — 完了](done/stdlib-additions.md) | **優先度:** 1.x — 1.0後に段階的追加 |
-| [Stdlib Architecture: 3-Layer Design [ON HOLD]](done/stdlib-architecture-3-layer-design.md) | Almide の stdlib を 3 層に分離する。WASM を一級市民として扱い、pure な計算と OS 依存を明確に分ける。 |
-| [Declarative Stdlib Codegen [DONE]](done/stdlib-codegen.md) | Inspired by React Native's TurboModules architecture: define stdlib once in a declarative format, au |
-| [Stdlib Completeness [DONE]](done/stdlib-completeness.md) | Fill gaps that make Almide less capable than Python/Go for everyday tasks. |
-| [Stdlib Gaps [DONE]](done/stdlib-gaps.md) | Reduce boilerplate in AI-generated code, improving LOC, token count, and generation time. |
-| [Stdlib Import Control [DONE]](done/stdlib-import-control.md) | **優先度:** 1.0 |
-| [Stdlib Scope Reduction — 完了](done/stdlib-scope-reduction.md) | **優先度:** 1.0前 — 凍結前に外に出すものを決める |
-| [Stdlib Runtime Architecture Reform [ACTIVE]](done/stdlib-self-hosted-redesign.md) | stdlib は `.almd` を中心に定義される。純粋ロジックは Almide 自身で実装される。ホスト依存機能だけ `@extern` でターゲット実装を持つ。ネイティブ実装は本物の Rust/ |
-| [Stdlib Self-Hosting [DONE]](done/stdlib-self-hosting.md) | As of v0.2.1, all stdlib functions have been extracted from inline codegen to separated runtime file |
-| [Stdlib Strategy [ACTIVE]](done/stdlib-strategy.md) | 普及には「書きたいものがすぐ書ける」stdlib の厚みが必要。現在 15 モジュール 266 関数。主要言語と比較すると： |
-| [Stdlib API Surface Reform [ACTIVE]](done/stdlib-verb-system.md) | stdlib の全コンテナ型で同じ動詞が同じ意味を持ち、LLM が1つの動詞を学べば全型に適用できる状態を作る。 |
-| [ストリーミング — WebSocket, SSE, Stream](done/streaming.md) | リアルタイム通信とストリーミングデータ処理のサポート。 |
-| [String Handling [DONE]](done/string-handling.md) | Multi-line strings with `"""..."""` syntax. |
-| [Structured Concurrency [ACTIVE]](done/structured-concurrency.md) | Non-goals: novel concurrency syntax, implicit parallelism, actor primitives in the language. Almide' |
-| [Syntax Sugar [ACTIVE]](done/syntax-sugar.md) | let xs = 0..10        // [0, 1, 2, ..., 9] |
-| [Tail Call Optimization [ACTIVE]](done/tail-call-optimization.md) | Self-recursive tail calls → labeled loop transformation in Rust codegen. |
-| [Result Builder [ACTIVE]](done/template.md) | Swift の Result Builder と同じ思想の **汎用 builder 機構** を Almide に導入する。`builder` は言語コアの機能であり、Html / Text / C |
-| [Test Architecture Redesign](done/test-architecture-redesign.md) | Test infrastructure is complex because `in_effect` conflates two orthogonal concerns: |
-| [Test Coverage](done/test-coverage-v2.md) | **Current**: 129 test files, 2,042 .almd test blocks (Rust target). All 129 pass on WASM target too. |
-| [Language Test Coverage (`almide test`) [ACTIVE]](done/test-coverage.md) | `.almd` language-level tests. Separate from Rust compiler tests (`cargo test`, see [rust-test-covera |
-| [Test Directory Structure Redesign [DONE]](done/test-directory-structure.md) | テスト関連がルートに散らばっていた（`lang/`, `stdlib/`, `exercises/`, `tests/`）問題を解決。 |
-| [Tooling [ON HOLD — items split to active]](done/tooling.md) | Most items from this roadmap have been promoted to dedicated active roadmaps: |
-| [Top-Level Let [DONE]](done/top-level-let.md) | Constant values require zero-argument functions as a workaround: |
-| [Trailing Lambda / Builder DSL [WON'T DO]](done/trailing-lambda-builder.md) | Explore Kotlin-style trailing lambda or builder patterns for structured data construction. |
-| [Built-in Protocols [ON HOLD]](done/trait-impl.md) | **All protocols are automatic.** The compiler determines protocol support from the type structure. N |
-| [TS/JS Codegen Rewrite [ACTIVE]](done/ts-codegen-rewrite.md) | `src/emit_ts/` を書き直し。Rust codegen と同じ 2 段パイプライン (IR → TsIR → String) に統一。 |
-| [TS Edge-Native Deployment [ON HOLD]](done/ts-edge-native.md) | Almide の `--target ts` 出力は **素の TypeScript/JavaScript** であり、V8 が直接実行する。WASM を経由しない。これにより Cloudflare  |
-| [TS Target: Result 維持 (Erasure → Object)](done/ts-result-maintenance.md) | // 現在 (erasure): effect fn → throw/catch |
-| [TypeScript Test Runner [DONE]](done/ts-test-runner.md) | **完了日:** 2026-03-25 |
-| [Tuple & Record [DONE]](done/tuple-record.md) | type Point = {x: Int, y: Int} |
-| [Type System Soundness [ACTIVE]](done/type-system-soundness.md) | 型システムの健全性を B+ → A+ に引き上げる。Critical 3 + High 4 + Medium 3 + P1 4 = 14 修正完了。 |
-| [Type System Theory Upgrade — HM Integration Plan](done/type-system-theory-upgrade.md) | Almide's checker is **constraint-based without type schemes** — a pragmatic simplification of Hindle |
-| [Type System Extensions [ACTIVE]](done/type-system.md) | The type system is Almide's primary lever for surpassing other AI-targeted languages. The goal: **ca |
-| [Typed IR [ACTIVE]](done/typed-ir.md) | Almide's codegen goes directly from AST to target language strings. This causes: |
-| [UFCS for External Libraries [ACTIVE]](done/ufcs-external.md) | UFCS は現在 stdlib にハードコードされている（`src/stdlib.rs` の `resolve_ufcs_candidates`）。外部ライブラリの関数は module prefix  |
-| [UFCS Type Resolution for Ambiguous Methods [DONE]](done/ufcs-type-resolution.md) | Ambiguous UFCS methods (`len`, `join`, `contains`, `slice`, `reverse`, `index_of`, `count`) fail whe |
-| [Unused Variable Warnings [ACTIVE]](done/unused-variable-warnings.md) | 未使用の変数・インポートに対して warning を出す。`_` プレフィックスで抑制可能。 |
-| [User Generics & Protocol System](done/user-generics-and-traits.md) | **優先度:** 1.x |
-| [Variant Record Fields [DONE]](done/variant-record-fields.md) | Allow enum variants to carry named fields (like Rust's struct variants), instead of only positional  |
-| [WASM Compile Error 根絶ロードマップ](done/wasm-compile-errors.md) | **症状**: `expected i32, found i64` or `expected i64, found i32` |
-| [WASM Filesystem I/O [DONE]](done/wasm-fs-io.md) | **完了日:** 2026-03-25 |
-| [WASM Local Allocation 再設計](done/wasm-local-allocation.md) | WASM function local layout: |
-| [WASM Remaining 3 Failures — Root Cause Analysis & Fix Plan](done/wasm-remaining-3.md) | **Symptom**: `values remaining on stack at end of block` in func 73 (fold closure) |
-| [WASM Runtime Traps [ACTIVE]](done/wasm-runtime-traps.md) | basic protocol method, basic protocol satisfaction, builder pattern via protocol, |
-| [WASM Tail Call Optimization](done/wasm-tco.md) | Almide の TCO 戦略はターゲット依存: |
-| [WASM Validation Fixes](done/wasm-validation-fixes.md) | generic 関数 `fn either_map_right[A, B, C](e: Either[A, B], f: (B) -> C) -> Either[A, C]` で: |
-| [While Loop [DONE]](done/while-loop.md) | Almide has no dedicated conditional loop syntax. The current workaround uses `do` blocks with guards |
+| [2026 Ergonomics Roadmap](done/2026-ergonomics.md) | Ergonomics issues found via self-tooling, evaluated against design principles |
+| [Almide Runtime](done/almide-runtime.md) | Runtime design targeting best-in-class compiler performance |
+| [Anonymous Record Codegen Fix](done/anon-record-codegen.md) | Fix Rust codegen emitting invalid type for anonymous records |
+| [Architecture Hardening [ACTIVE]](done/architecture-hardening.md) | Fix structural weaknesses in compiler architecture |
+| [Benchmark Report: LLM Code Generation Cost by Language [ON HOLD]](done/benchmark-report.md) | Benchmark comparing LLM code generation cost across 16 languages |
+| [Borrow/Clone Gaps [ACTIVE]](done/borrow-clone-gaps.md) | Fix cases where Rust codegen fails to insert necessary clones |
+| [Borrow Inference — Detailed Design [COMPLETE]](done/borrow-inference-design.md) | Detailed design for borrow inference to reduce unnecessary clones |
+| [Checker InferTy/Ty Unification](done/checker-type-unification.md) | Unify InferTy and Ty representations in the type checker |
+| [CLI-First [ACTIVE]](done/cli-first.md) | Enable comfortable CLI tool authoring with run, build, and WASM targets |
+| [CLI Tool Authoring Issues [DONE]](done/cli-tool-authoring.md) | Fix issues discovered while implementing CLI tool benchmarks |
+| [Clone Reduction Phase 4 [ACTIVE]](done/clone-reduction.md) | Phase 4 clone reduction targeting field-level borrow analysis |
+| [Codec Advanced [ACTIVE]](done/codec-advanced.md) | Advanced codec features: structured errors, validation, schema |
+| [Codec Protocol & JSON [ACTIVE]](done/codec-and-json.md) | Format-agnostic codec protocol with JSON as first implementation |
+| [Codec Implementation Plan [ACTIVE]](done/codec-implementation.md) | Three-layer codec implementation: compiler, format library, user code |
+| [Codec Remaining [ACTIVE]](done/codec-remaining.md) | Remaining codec features after Phase 0-2 completion |
+| [Codec Test Specification [ACTIVE]](done/codec-test-spec.md) | Test case specification for codec based on Serde/Codable/Jackson patterns |
+| [Codegen Correctness Fixes [DONE]](done/codegen-correctness.md) | Fix correctness issues in generated code (auto-unwrap, range, guard) |
+| [Codegen Optimization [IN PROGRESS]](done/codegen-optimization.md) | Reduce clone overhead for heap types without exposing ownership |
+| [Codegen Refinement [ACTIVE]](done/codegen-refinement.md) | Small independent optimizations improving generated Rust code quality |
+| [Codegen v3: Three-Layer Architecture](done/codegen-v3-architecture.md) | Three-layer codegen architecture for multi-target extensibility |
+| [Codegen v3: Transform Classification](done/codegen-v3-transform-classification.md) | Complete classification of codegen transforms by context depth |
+| [Compiler Architecture Cleanup](done/compiler-architecture-cleanup.md) | Compiler structural cleanup including clone/deref IR conversion |
+| [Compiler Bugs Found by Test Expansion [ACTIVE]](done/compiler-bugs-from-tests.md) | Seven compiler bugs discovered during test coverage expansion |
+| [Compiler Bugs and Gaps — Status](done/compiler-bugs.md) | Codegen bugs and runtime gaps found while writing 400+ test blocks |
+| [Compiler Hardening [DONE]](done/compiler-hardening.md) | Eliminate all panics and unhandled edge cases in the compiler |
+| [Compiler Warnings [ACTIVE]](done/compiler-warnings.md) | Warning infrastructure for code quality issues like unused variables |
+| [Concatenation Operator Reform](done/concat-operator-reform.md) | Reform ++ concatenation operator for strings and lists |
+| [Control Flow Extensions [CLOSED]](done/control-flow.md) | Rejected: while/break/continue/return contradict design philosophy |
+| [Cross-Platform Support [DONE]](done/cross-platform.md) | Write-once cross-platform support with transparent OS differences |
+| [Cross-Target AOT Compilation [PLANNED]](done/cross-target-aot.md) | AOT cross-compilation producing multiple target artifacts in one build |
+| [Cross-Target CI [DONE]](done/cross-target-ci.md) | Run all tests on both Rust and TS targets, verify output match |
+| [Cross-Target Semantics [ACTIVE]](done/cross-target-semantics.md) | Fix cases where same .almd produces different results on Rust vs TS |
+| [Default Field Values [DONE]](done/default-field-values.md) | Default values for record fields to eliminate sentinel value patterns |
+| [Derive Conventions [DONE]](done/derive-conventions.md) | Fixed conventions with colon syntax for polymorphism without traits |
+| [Design Debt](done/design-debt.md) | Design debt including partial TOML dispatch and anonymous records |
+| [Diagnostic Secondary Spans [DONE]](done/diagnostic-secondary-spans.md) | Activate secondary spans showing declaration sites in error messages |
+| [Editor & GitHub Integration [ON HOLD]](done/editor-github-integration.md) | TextMate grammar, VS Code extension, and Chrome syntax highlighting |
+| [Effect fn Result Wrapping [DONE]](done/effect-fn-result-wrapping.md) | Fix effect fn Rust codegen to wrap return type in Result |
+| [Effect Isolation (Security Layer 1)](done/effect-isolation.md) | Static verification that pure functions cannot perform I/O |
+| [Effect System — Phase 1-2](done/effect-system-phase1-2.md) | Effect inference engine with 7 categories and checker integration |
+| [--emit-ir: IR JSON Export [ACTIVE]](done/emit-ir.md) | Export typed IR as JSON via --emit-ir flag |
+| [Direct WASM Emission [ACTIVE]](done/emit-wasm-direct.md) | Direct WASM binary emission with linear memory and WASI imports |
+| [Eq Protocol [DONE]](done/eq-protocol.md) | Automatic deep equality for all value types without deriving |
+| [Error Codes + JSON Output [DONE — 1.0 Phase II]](done/error-codes-json.md) | Structured error codes (E001-E010) and JSON diagnostic output |
+| [Error Diagnostics — Visual Improvements [ACTIVE]](done/error-diagnostics-visual.md) | Visual diagnostic improvements: ANSI colors, multi-line spans |
+| [Error Diagnostics [DONE]](done/error-diagnostics.md) | LLM-critical diagnostics including lost mutation and type mismatch |
+| [Error Recovery [DONE]](done/error-recovery.md) | Report all errors at once instead of stopping at the first one |
+| [Exercise Suite v0.6.0](done/exercises-v060.md) | Exercise suite with 20 exercises and 230 tests for LLM benchmarking |
+| [Exhaustiveness Check — Hard Error [ACTIVE]](done/exhaustiveness-check.md) | Promote pattern match exhaustiveness from warning to hard error |
+| [Fan Concurrency [ACTIVE]](done/fan-concurrency.md) | Unified async/concurrency design using effect fn and fan syntax |
+| [fan.map Concurrency Limit](done/fan-map-limit.md) | Add concurrency limit parameter to fan.map |
+| [Formatter Rewrite [ACTIVE]](done/formatter-rewrite.md) | Ground-up rewrite of the 890-line source formatter |
+| [Function Reference Passing [WON'T DO]](done/function-reference-passing.md) | Rejected: direct function reference passing deemed not worth complexity |
+| [Generic Variant Type Instantiation](done/generic-variant-instantiation.md) | Fix type instantiation for generic variant constructors like Nothing |
+| [Generics [DONE]](done/generics.md) | Generic functions, records, variants, and recursive generics |
+| [Grammar Codegen: Single Source of Truth [ACTIVE] [P1]](done/grammar-codegen.md) | Unify grammar definitions into a single source of truth |
+| [Grammar Research Infrastructure [ACTIVE]](done/grammar-research.md) | A/B testing infrastructure for syntax design using LLM benchmarks |
+| [Guard `ok(value)` Value Loss in Effect Do-Block](done/guard-ok-value-loss.md) | Fix ok(value) being lost in guard expressions within effect do-blocks |
+| [Higher-Order Function Type Inference](done/higher-order-fn-inference.md) | Type inference for higher-order functions returning closures |
+| [Hint System Architecture [ACTIVE] [P0]](done/hint-system.md) | Decouple hint generation from parser into a dedicated system |
+| [HKT Foundation — Phase 1-4 + Stream Fusion (All 6 Laws)](done/hkt-foundation-phase1.md) | HKT foundation phases 1-4 with type constructors and algebraic laws |
+| [HKT Foundation — Complete](done/hkt-foundation.md) | Higher-kinded type foundation - all phases complete |
+| [HTTP Module [DONE]](done/http.md) | HTTP server and client module with multithreading support |
+| [`import self` — Package Entry Point Access [DONE]](done/import-self-entry.md) | Allow main.almd to access pub functions from same-package mod.almd |
+| [IR Optimization Passes [ACTIVE]](done/ir-optimization-passes.md) | IR-to-IR transform passes applied before codegen for all targets |
+| [IR Optimization Passes [ACTIVE]](done/ir-optimization.md) | Constant folding, dead code elimination, and basic inlining passes |
+| [Codegen IR Redesign [DONE]](done/ir-redesign.md) | Self-contained typed IR so codegen never references AST |
+| [IR Verification & Self-Describing IR [ACTIVE]](done/ir-verification.md) | Debug-time IR integrity checks and self-describing IR nodes |
+| [JSON Builder API [SUPERSEDED]](done/json-builder-api.md) | Superseded JSON builder API, replaced by Codec Protocol |
+| [Bidirectional Type Inference for Lambda Parameters [DONE]](done/lambda-type-inference.md) | Bidirectional type inference for lambda parameters via two-pass checker |
+| [Language Test Suite [DONE]](done/language-test-suite.md) | Systematic language feature test suite for regression detection |
+| [Let-Polymorphism (Algorithm W)](done/let-polymorphism.md) |  |
+| [List Index Read (`xs[i]`) [ACTIVE]](done/list-index-read.md) | Add index-based read syntax for lists (xs[i]) |
+| [List Stdlib Gaps](done/list-stdlib-gaps.md) | Cross-language comparison of missing list module operations |
+| [Literal Syntax Gaps [DONE]](done/literal-syntax-gaps.md) | Cross-language comparison of numeric and collection literal syntax |
+| [LLM Developer Experience [DONE / MERGED]](done/llm-developer-experience.md) | UFCS and almide init improvements for LLM-assisted development |
+| [LLM and Immutable Data Structures [ACTIVE]](done/llm-immutable-patterns.md) | Mitigations for LLM failures with immutable data patterns |
+| [LLM Immutable Sugar [ON HOLD]](done/llm-immutable-sugar.md) | Language-level sugar for immutable collection mutations |
+| [almide.lock [DONE — 1.0 Phase III]](done/lockfile.md) | Dependency lockfile with git-based resolution and reproducible builds |
+| [Lower Two-Pass Separation](done/lower-two-pass.md) | Separate AST-to-IR lowering from use-count analysis into two passes |
+| [Map Literal Syntax](done/map-literal.md) | Map literal syntax with Swift-style [:] empty map notation |
+| [Module System v2 [DONE]](done/module-system-v2.md) | File-based module system with visibility controls and mod.almd |
+| [Monomorphization [ACTIVE]](done/monomorphization.md) | Function monomorphization for generic structural bounds in Rust codegen |
+| [Multi-Target Strategy [ACTIVE]](done/multi-target-strategy.md) | Strategy for adding new codegen targets with minimal cost |
+| [New Codegen Targets [ACTIVE]](done/new-codegen-targets.md) | Candidate new codegen targets (Go, Python, C, Swift, Kotlin) |
+| [npm Package Target [DONE]](done/npm-package-target-target-npm.md) | Compile Almide to publish-ready npm packages via --target npm |
+| [Open Record / Row Polymorphism — Implementation Guide](done/open-record-structural-typing.md) | Open record / row polymorphism implementation for structural typing |
+| [Operator Protocol [ACTIVE]](done/operator-protocol.md) | Convention-based operator dispatch (==, repr, sort, hash) |
+| [Parser Error Recovery [ACTIVE]](done/parser-error-recovery.md) | Continue parsing after syntax errors to report multiple diagnostics |
+| [Platform / Target Separation [ON HOLD]](done/platform-target-separation.md) | Separate --target (output language) from --platform (runtime env) |
+| [Playground Repair Turn [DONE]](done/playground-repair.md) | Playground AI-powered error repair and type checker integration |
+| [Quick-Win Polish Items](done/polish-immediate.md) | Quick-win polish items (ICE warnings, integration tests, TS E2E) |
+| [Production Readiness Requirements](done/production-ready.md) | Production readiness checklist (11 stdlib runtimes, CI, packaging) |
+| [Proliferation Blockers [DONE]](done/proliferation-blockers.md) | Compiler bugs that blocked LLM module generation (all resolved) |
+| [Quality Improvements](done/quality-improvements.md) | Quality improvements (error line numbers, heredoc tracking) |
+| [Recursive Type Box Insertion](done/recursive-type-box.md) | Auto-insert Box for recursive type members in Rust codegen |
+| [Remove `do` Block [DONE]](done/remove-do-block.md) | Complete removal of do block from the language |
+| [Runtime Gaps — Complete](done/runtime-gaps.md) | All 22 stdlib modules / 355 functions runtime implementation complete |
+| [Runtime Layout Unification [ACTIVE]](done/runtime-layout.md) | Unify Rust and TS runtime file layout and management |
+| [RustIR: Rust Codegen Intermediate Representation [ACTIVE]](done/rust-ir.md) | Two-stage Rust codegen pipeline via RustIR intermediate repr |
+| [Rust Compiler Test Coverage [ACTIVE]](done/rust-test-coverage.md) | Rust-side unit/integration test coverage targets (600+ cases) |
+| [almide scaffold & Module Proliferation Pipeline [MERGED]](done/scaffold-and-proliferation.md) | Scaffold command and LLM module proliferation pipeline |
+| [Self-Tooling: Editor Tools Written in Almide [DONE]](done/self-tooling.md) | Editor tools (tree-sitter grammar, TextMate) written in Almide |
+| [Server Async — http.serve Effect Integration](done/server-async.md) | Make http.serve handler an effect context for I/O calls |
+| [Showcase 1: almide-grep (CLI Tool)](done/showcase-1-cli-grep.md) | Showcase: CLI grep tool using fan concurrency and regex |
+| [Showcase 2: Todo API (HTTP API)](done/showcase-2-http-api.md) | Showcase: REST API server with http.serve, json, and codec |
+| [Showcase 3: CSV to JSON Pipeline (Data Processing)](done/showcase-3-data-pipeline.md) | Showcase: CSV-to-JSON data pipeline with list HOFs and pipes |
+| [Showcase 4: Markdown to HTML (DevTool)](done/showcase-4-devtool-md2html.md) | Showcase: Markdown-to-HTML converter using variant types and match |
+| [Showcase 5: dotenv Loader (Script)](done/showcase-5-script-dotenv.md) | Showcase: dotenv file loader and missing-key checker |
+| [Stability Contract [DONE — 1.0 Phase II]](done/stability-contract.md) | Backward compatibility policy, edition system, and API freeze |
+| [stdin / Interactive I/O [DONE]](done/stdin-io.md) | stdin reading and interactive I/O via io module |
+| [Stdlib Additions — Complete](done/stdlib-additions.md) | Stdlib module additions (set expanded to 20 functions) |
+| [Stdlib Architecture: 3-Layer Design [ON HOLD]](done/stdlib-architecture-3-layer-design.md) | Three-layer stdlib design (core/platform/external) for WASM parity |
+| [Declarative Stdlib Codegen [DONE]](done/stdlib-codegen.md) | TOML-driven declarative stdlib codegen replacing manual match arms |
+| [Stdlib Completeness [DONE]](done/stdlib-completeness.md) | Fill stdlib gaps in int, string, list, and map modules |
+| [Stdlib Gaps [DONE]](done/stdlib-gaps.md) | Reduce AI-generated boilerplate via new stdlib functions |
+| [Stdlib Import Control [DONE]](done/stdlib-import-control.md) | Three-tier import visibility for stdlib modules |
+| [Stdlib Scope Reduction — Complete](done/stdlib-scope-reduction.md) | Move uuid, crypto, toml, compress, term out of stdlib to packages |
+| [Stdlib Runtime Architecture Reform [ACTIVE]](done/stdlib-self-hosted-redesign.md) | Self-hosted stdlib with .almd-first design and @extern for host deps |
+| [Stdlib Self-Hosting [DONE]](done/stdlib-self-hosting.md) | Write stdlib in Almide for automatic multi-target support |
+| [Stdlib Strategy [ACTIVE]](done/stdlib-strategy.md) | Stdlib expansion strategy via Rust ecosystem wrapping |
+| [Stdlib API Surface Reform [ACTIVE]](done/stdlib-verb-system.md) | Unified verb system across all stdlib container types |
+| [Streaming — WebSocket, SSE, Stream](done/streaming.md) | WebSocket, SSE, and streaming data support |
+| [String Handling [DONE]](done/string-handling.md) | Heredoc multi-line strings and raw string literals |
+| [Structured Concurrency [ACTIVE]](done/structured-concurrency.md) | Async model with async fn, await, and async let constructs |
+| [Syntax Sugar [ACTIVE]](done/syntax-sugar.md) | Syntax sugar (ranges, exhaustiveness check, lambda shorthand) |
+| [Tail Call Optimization [ACTIVE]](done/tail-call-optimization.md) | Self-recursive tail call to labeled loop transformation |
+| [Result Builder [ACTIVE]](done/template.md) | Swift-style result builder DSL for structured data construction |
+| [Test Architecture Redesign](done/test-architecture-redesign.md) | Separate effect permission from Result auto-unwrap in test infra |
+| [Test Coverage](done/test-coverage-v2.md) | Cross-target test coverage status (Rust/WASM/TS) |
+| [Language Test Coverage (`almide test`) [ACTIVE]](done/test-coverage.md) | Almide language-level test coverage targets (1500+ cases) |
+| [Test Directory Structure Redesign [DONE]](done/test-directory-structure.md) | Reorganize tests into spec/ (lang/stdlib/integration) and tests/ |
+| [Tooling [ON HOLD — items split to active]](done/tooling.md) | Tooling roadmap (LSP, REPL, doc gen, bench) split to active |
+| [Top-Level Let [DONE]](done/top-level-let.md) | Allow let bindings at module scope for constant values |
+| [Trailing Lambda / Builder DSL [WON'T DO]](done/trailing-lambda-builder.md) | Trailing lambda / builder DSL exploration (rejected) |
+| [Built-in Protocols [ON HOLD]](done/trait-impl.md) | Built-in protocols (Eq, Hash, Repr, From) with automatic derivation |
+| [TS/JS Codegen Rewrite [ACTIVE]](done/ts-codegen-rewrite.md) | Rewrite TS codegen to two-stage pipeline (IR to TsIR to String) |
+| [TS Edge-Native Deployment [ON HOLD]](done/ts-edge-native.md) | Native TS output for edge runtimes (Workers, Deno Deploy, Vercel) |
+| [TS Target: Result Maintenance (Erasure to Object)](done/ts-result-maintenance.md) | Replace TS Result erasure (throw/catch) with Result objects |
+| [TypeScript Test Runner [DONE]](done/ts-test-runner.md) | almide test --target ts command with Deno/Node support |
+| [Tuple & Record [DONE]](done/tuple-record.md) | Named record construction and tuple index access |
+| [Type System Soundness [ACTIVE]](done/type-system-soundness.md) | Type system soundness fixes (Unknown propagation, unification, occurs) |
+| [Type System Theory Upgrade — HM Integration Plan](done/type-system-theory-upgrade.md) | Hindley-Milner integration plan (type schemes, let-polymorphism) |
+| [Type System Extensions [ACTIVE]](done/type-system.md) | Type system extensions (generics migration, inference improvements) |
+| [Typed IR [ACTIVE]](done/typed-ir.md) | Typed intermediate representation between checker and emitters |
+| [UFCS for External Libraries [ACTIVE]](done/ufcs-external.md) | Extend UFCS resolution to external library functions |
+| [UFCS Type Resolution for Ambiguous Methods [DONE]](done/ufcs-type-resolution.md) | Fix UFCS resolution for ambiguous methods on complex expressions |
+| [Unused Variable Warnings [ACTIVE]](done/unused-variable-warnings.md) | Warn on unused variables and imports, suppressible with _ prefix |
+| [User Generics & Protocol System](done/user-generics-and-traits.md) | User-defined generics and protocol system for custom types |
+| [Variant Record Fields [DONE]](done/variant-record-fields.md) | Named fields for enum variants (like Rust struct variants) |
+| [WASM Compile Error Elimination Roadmap](done/wasm-compile-errors.md) | WASM compile error elimination (type mismatches, lambda issues) |
+| [WASM Filesystem I/O [DONE]](done/wasm-fs-io.md) | WASI-based filesystem I/O for WASM target |
+| [WASM Local Allocation Redesign](done/wasm-local-allocation.md) | Redesign WASM function local allocation and scratch layout |
+| [WASM Remaining 3 Failures — Root Cause Analysis & Fix Plan](done/wasm-remaining-3.md) | Root cause analysis of last 3 WASM test failures |
+| [WASM Runtime Traps [ACTIVE]](done/wasm-runtime-traps.md) | Fix 44 WASM runtime traps (protocols, maps, closures, strings) |
+| [WASM Tail Call Optimization](done/wasm-tco.md) | Tail call optimization for WASM target to prevent stack overflow |
+| [WASM Validation Fixes](done/wasm-validation-fixes.md) | Fix WASM validation errors from union-find generic instantiation |
+| [While Loop [DONE]](done/while-loop.md) | Dedicated while loop syntax replacing do-block guard pattern |
 
 </details>
-
-## Stdlib
-
-22 items
-
-| Item | Description |
-|------|-------------|
-| [stdlib: compress [Tier 3]](stdlib/compress.md) | 圧縮・展開。ファイル操作やネットワーク通信で必要。 |
-| [stdlib: crypto [Tier 2]](stdlib/crypto.md) | 暗号機能。Almide は現在 `hash` モジュール（bundled .almd, SHA/MD5 のみ）を持つが、HMAC・暗号化・署名・安全な乱数がない。 |
-| [stdlib: csv [Tier 2]](stdlib/csv.md) | CSV パース/生成。データ処理の基本フォーマット。 |
-| [stdlib: datetime [Tier 1]](stdlib/datetime.md) | 日時操作。これがないと実用的なアプリケーションが書けない。現在 `time` モジュール（bundled .almd）に基本的な Duration/Timestamp があるが、日時パース・フォーマッ |
-| [stdlib: error [Tier 1]](stdlib/error.md) | 構造化エラー型。現在 Almide の `Result[T, E]` のエラー型は常に `String`。エラーの分類・チェーン・コンテキスト付加ができない。 |
-| [stdlib: fs (拡充) [Tier 1]](stdlib/fs.md) | 現在 19 関数。基本的な read/write/exists はあるが、ディレクトリ操作・メタデータ・temp が足りない。 |
-| [stdlib: html [Tier 2]](stdlib/html.md) | HTML パース・クエリ・テキスト抽出。スクレイピング、テスト、テンプレート出力検証に使う。 |
-| [stdlib: http (拡充) [Tier 1]](stdlib/http-expansion.md) | 現在 8 関数（GET/POST/PUT/DELETE + サーバー基本）。ヘッダ操作・ステータス・レスポンスビルダーが足りない。 |
-| [stdlib: log [Tier 3]](stdlib/log.md) | 構造化ログ。アプリケーション開発の基盤。 |
-| [stdlib: mime [Tier 3]](stdlib/mime.md) | MIME タイプ判定。Go, Python, Deno に存在。ファイルアップロード、HTTP レスポンス、コンテンツ判定で使う。 |
-| [stdlib: net (TCP/UDP) [Tier 3]](stdlib/net.md) | 低レベルネットワーキング。Go, Python, Rust に標準で存在。 |
-| [Stdlib Module References](stdlib/README.md) | モジュールごとの他言語比較と Almide への追加候補。 |
-| [stdlib: set [Tier 2]](stdlib/set.md) | 集合型。Python, Rust, JS 全てにある基本データ構造。Almide にはない。 |
-| [stdlib: sorted collections [Tier 3]](stdlib/sorted.md) | ソート済みデータ構造。Go/Python/Rust/Deno 全てに何らかの形で存在。 |
-| [stdlib: sql [Tier 3]](stdlib/sql.md) | データベースアクセス。パラメタライズドクエリ中心の安全な SQL 実行。 |
-| [stdlib: test [Tier 3]](stdlib/test.md) | テストユーティリティ。現在 `assert`, `assert_eq`, `assert_ne` のみ。 |
-| [stdlib: toml [Tier 2]](stdlib/toml.md) | TOML パース/生成。設定ファイルの標準フォーマット。Almide 自身も `almide.toml` を使う。 |
-| [stdlib: unicode [Tier 3]](stdlib/unicode.md) | Unicode 文字分類。Go, Python, Rust に標準で存在。 |
-| [stdlib: url [Tier 2]](stdlib/url.md) | URL のパース・構築・クエリパラメータ操作。現在 Almide にはない。 |
-| [stdlib: uuid [Tier 2]](stdlib/uuid.md) | UUID の生成・パース・フォーマット。小さいが頻出するモジュール。 |
-| [stdlib: websocket [Tier 3]](stdlib/websocket.md) | WebSocket クライアント/サーバー。リアルタイム通信の基盤。 |
-| [stdlib: yaml [Tier 2]](stdlib/yaml.md) | YAML パース/生成。設定ファイル・CI 定義で広く使われる。 |
 
