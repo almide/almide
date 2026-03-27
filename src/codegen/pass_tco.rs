@@ -195,10 +195,15 @@ fn scan_non_tail(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
         }
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
         | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
             scan_non_tail(expr, fn_name)
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            let has = scan_non_tail(expr, fn_name).0 || scan_non_tail(fallback, fn_name).0;
+            (has, !has)
         }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
             scan_non_tail(object, fn_name)

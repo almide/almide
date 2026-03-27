@@ -78,8 +78,14 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
         }
         // none → keep as OptionNone (template renders as null)
         IrExprKind::OptionNone => IrExprKind::OptionNone,
-        // try(expr) → expr (no ? operator in TS)
-        IrExprKind::Try { expr: inner } => {
+        // try(expr) / unwrap(expr) / to_option(expr) → expr (no ? operator in TS)
+        IrExprKind::Try { expr: inner }
+        | IrExprKind::Unwrap { expr: inner }
+        | IrExprKind::ToOption { expr: inner } => {
+            return erase_expr(*inner);
+        }
+        // unwrap_or(expr, fallback) → expr (fallback erased in TS)
+        IrExprKind::UnwrapOr { expr: inner, .. } => {
             return erase_expr(*inner);
         }
 

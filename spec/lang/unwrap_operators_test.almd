@@ -1,0 +1,40 @@
+
+// ── expr! — unwrap with propagation ──
+
+effect fn parse_must(s: String) -> Result[Int, String] = {
+  let n = int.parse(s)!
+  ok(n)
+}
+
+test "bang unwrap ok" {
+  assert_eq(parse_must("42"), ok(42))
+}
+
+test "bang unwrap err propagates" {
+  let r = parse_must("bad")
+  assert(result.is_err(r))
+}
+
+// ── expr ?? fallback ──
+
+test "double_question result ok" {
+  let v = int.parse("42") ?? 0
+  assert_eq(v, 42)
+}
+
+test "double_question result err uses fallback" {
+  let v = int.parse("bad") ?? 99
+  assert_eq(v, 99)
+}
+
+test "double_question option some" {
+  let xs = [10, 20]
+  let v = list.first(xs) ?? 0
+  assert_eq(v, 10)
+}
+
+test "double_question option none uses fallback" {
+  let xs: List[Int] = []
+  let v = list.first(xs) ?? 42
+  assert_eq(v, 42)
+}

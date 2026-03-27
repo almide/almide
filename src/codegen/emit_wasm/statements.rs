@@ -256,8 +256,13 @@ fn infer_bind_type(expr: &IrExpr) -> Ty {
                 BinOp::ConcatList => Ty::Unknown,
             }
         }
-        // Try: unwrap inner type
-        IrExprKind::Try { expr: inner } => {
+        // Try/Unwrap/ToOption: unwrap inner type
+        IrExprKind::Try { expr: inner }
+        | IrExprKind::Unwrap { expr: inner }
+        | IrExprKind::ToOption { expr: inner } => {
+            infer_bind_type(inner)
+        }
+        IrExprKind::UnwrapOr { expr: inner, .. } => {
             infer_bind_type(inner)
         }
         // Call: infer return type from module+func name
@@ -354,8 +359,13 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
             }
         }
         IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Try { expr } => {
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr } => {
             scan_expr(expr, locals, vt);
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            scan_expr(expr, locals, vt);
+            scan_expr(fallback, locals, vt);
         }
         IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
             for (_, e) in fields { scan_expr(e, locals, vt); }
@@ -385,7 +395,9 @@ fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
         IrStmtKind::Bind { var, ty, value, .. } => {
             // Resolve bind type.
             // For Try(Call(...)) (effect fn unwrap), use the Result's inner type, not Result itself.
-            let effective_ty = if let IrExprKind::Try { expr: inner } = &value.kind {
+            let effective_ty = if let IrExprKind::Try { expr: inner }
+                | IrExprKind::Unwrap { expr: inner }
+                | IrExprKind::ToOption { expr: inner } = &value.kind {
                 if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) = &value.ty {
                     args.first().cloned().unwrap_or(value.ty.clone())
                 } else if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) = &inner.ty {

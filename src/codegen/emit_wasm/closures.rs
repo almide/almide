@@ -586,8 +586,13 @@ pub(super) fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
             for (_, e) in fields { collect_var_refs(e, vars); }
         }
         IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Try { expr } => {
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr } => {
             collect_var_refs(expr, vars);
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            collect_var_refs(expr, vars);
+            collect_var_refs(fallback, vars);
         }
         IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. }
         | IrExprKind::TupleIndex { object, .. } => {

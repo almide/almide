@@ -459,6 +459,60 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(scratch);
             }
 
+            // ── Unwrap (panic on err/none) ──
+            IrExprKind::Unwrap { expr: inner } => {
+                // Same as Try but unreachable instead of return on error
+                self.emit_expr(inner);
+                let scratch = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    local_set(scratch);
+                    local_get(scratch);
+                    i32_load(0);
+                    i32_const(0);
+                    i32_ne;
+                    if_empty;
+                    unreachable;
+                    end;
+                });
+                if !matches!(&expr.ty, Ty::Unit) {
+                    wasm!(self.func, { local_get(scratch); });
+                    self.emit_load_at(&expr.ty, 4);
+                }
+                self.scratch.free_i32(scratch);
+            }
+
+            // ── UnwrapOr (fallback on err/none) ──
+            IrExprKind::UnwrapOr { expr: inner, fallback } => {
+                // Evaluate inner Result/Option ptr
+                self.emit_expr(inner);
+                let scratch = self.scratch.alloc_i32();
+                let vt = values::ty_to_valtype(&expr.ty).unwrap_or(ValType::I32);
+                match vt {
+                    ValType::I64 => {
+                        wasm!(self.func, { local_set(scratch); local_get(scratch); i32_load(0); i32_eqz; if_i64; local_get(scratch); i64_load(4); else_; });
+                        self.emit_expr(fallback);
+                        wasm!(self.func, { end; });
+                    }
+                    ValType::F64 => {
+                        wasm!(self.func, { local_set(scratch); local_get(scratch); i32_load(0); i32_eqz; if_f64; local_get(scratch); f64_load(4); else_; });
+                        self.emit_expr(fallback);
+                        wasm!(self.func, { end; });
+                    }
+                    _ => {
+                        wasm!(self.func, { local_set(scratch); local_get(scratch); i32_load(0); i32_eqz; if_i32; local_get(scratch); i32_load(4); else_; });
+                        self.emit_expr(fallback);
+                        wasm!(self.func, { end; });
+                    }
+                }
+                self.scratch.free_i32(scratch);
+            }
+
+            // ── ToOption (Result → Option) ──
+            IrExprKind::ToOption { expr: inner } => {
+                // Result and Option share the same tag layout; just re-emit inner
+                self.emit_expr(inner);
+            }
+
             // ── Map index access: m[key] → Option[V] ──
             IrExprKind::MapAccess { object, key } => {
                 let fake_args = vec![(**object).clone(), (**key).clone()];

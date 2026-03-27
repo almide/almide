@@ -418,3 +418,14 @@ template = "{name}"
 
 [generic_bound_full]
 template = "{name}"
+
+# ── Unwrap operators ──
+
+[unwrap_expr]
+template = "{inner}"
+
+[unwrap_or_expr]
+template = "({inner} ?? {fallback})"
+
+[to_option_expr]
+template = "{inner}"

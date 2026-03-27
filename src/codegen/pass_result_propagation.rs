@@ -187,6 +187,16 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
         IrExprKind::Try { expr: inner } => IrExprKind::Try {
             expr: Box::new(update_call_types(*inner, lifted)),
         },
+        IrExprKind::Unwrap { expr: inner } => IrExprKind::Unwrap {
+            expr: Box::new(update_call_types(*inner, lifted)),
+        },
+        IrExprKind::ToOption { expr: inner } => IrExprKind::ToOption {
+            expr: Box::new(update_call_types(*inner, lifted)),
+        },
+        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(update_call_types(*inner, lifted)),
+            fallback: Box::new(update_call_types(*fallback, lifted)),
+        },
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
                 IrStringPart::Expr { expr } => IrStringPart::Expr { expr: update_call_types(expr, lifted) },
@@ -691,6 +701,16 @@ fn fix_var_types(expr: IrExpr, map: &HashMap<u32, Ty>) -> IrExpr {
         },
         IrExprKind::Try { expr: inner } => IrExprKind::Try {
             expr: Box::new(fix_var_types(*inner, map)),
+        },
+        IrExprKind::Unwrap { expr: inner } => IrExprKind::Unwrap {
+            expr: Box::new(fix_var_types(*inner, map)),
+        },
+        IrExprKind::ToOption { expr: inner } => IrExprKind::ToOption {
+            expr: Box::new(fix_var_types(*inner, map)),
+        },
+        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(fix_var_types(*inner, map)),
+            fallback: Box::new(fix_var_types(*fallback, map)),
         },
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {

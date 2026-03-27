@@ -59,7 +59,8 @@ fn needs_clone(ty: &Ty) -> bool {
         Ty::String | Ty::Applied(_, _) |
         Ty::Record { .. } | Ty::OpenRecord { .. } |
         Ty::Named(_, _) |
-        Ty::Variant { .. } | Ty::Fn { .. }
+        Ty::Variant { .. } | Ty::Fn { .. } |
+        Ty::TypeVar(_)
     )
 }
 
@@ -145,6 +146,12 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(insert_clones(*expr, clone_ids)) },
         IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(insert_clones(*expr, clone_ids)) },
         IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(insert_clones(*expr, clone_ids)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(insert_clones(*expr, clone_ids)) },
+        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(insert_clones(*expr, clone_ids)),
+            fallback: Box::new(insert_clones(*fallback, clone_ids)),
+        },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(insert_clones(*expr, clone_ids)) },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             exprs: exprs.into_iter().map(|e| insert_clones(e, clone_ids)).collect(),
         },

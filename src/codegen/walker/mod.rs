@@ -39,11 +39,13 @@ pub struct RenderContext<'a> {
     pub auto_unwrap: bool,
     pub ann: CodegenAnnotations,
     pub type_aliases: std::collections::HashMap<crate::intern::Sym, crate::types::Ty>,
+    /// Use minimal generic bounds (Clone only) for bundled .almd module functions.
+    pub minimal_generic_bounds: bool,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), minimal_generic_bounds: false }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -93,6 +95,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         auto_unwrap: func.is_effect && !func.is_test,
         ann: ctx.ann.clone(),
         type_aliases: ctx.type_aliases.clone(),
+        minimal_generic_bounds: ctx.minimal_generic_bounds,
     };
 
     // Extern fn: emit import/use via template
@@ -168,8 +171,9 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         if generics.is_empty() {
             String::new()
         } else {
+            let bound_template = if fn_ctx.minimal_generic_bounds { "generic_bound_minimal" } else { "generic_bound_full" };
             let params = generics.iter().map(|g| {
-                ctx.templates.render_with("generic_bound_full", None, &[], &[("name", g.name.as_str())])
+                ctx.templates.render_with(bound_template, None, &[], &[("name", g.name.as_str())])
                     .unwrap_or_else(|| g.name.to_string())
             }).collect::<Vec<_>>().join(", ");
             format!("<{}>", params)
@@ -235,6 +239,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         auto_unwrap: ctx.auto_unwrap,
         ann: ctx.ann.clone(),
         type_aliases,
+        minimal_generic_bounds: false,
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
@@ -316,6 +321,9 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 
     // Imported modules: render their type decls and functions
     for module in &program.modules {
+        // Bundled .almd modules use minimal generic bounds (Clone only)
+        // because their functions don't require PartialEq/PartialOrd/Debug.
+        let is_bundled = crate::stdlib::get_bundled_source(&module.name).is_some();
         let mod_ctx = RenderContext {
             templates: ctx.templates,
             var_table: &module.var_table,
@@ -324,6 +332,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             auto_unwrap: false,
             ann: ctx.ann.clone(),
             type_aliases: ctx.type_aliases.clone(),
+            minimal_generic_bounds: is_bundled,
         };
         // Module type decls
         for td in &module.type_decls {

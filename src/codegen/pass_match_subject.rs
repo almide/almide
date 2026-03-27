@@ -86,9 +86,11 @@ fn rewrite_expr(expr: &mut IrExpr) {
         }
         IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
         | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
         | IrExprKind::Await { expr: e } | IrExprKind::Clone { expr: e }
         | IrExprKind::Deref { expr: e } | IrExprKind::Borrow { expr: e, .. }
         | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => rewrite_expr(e),
+        IrExprKind::UnwrapOr { expr: e, fallback: f } => { rewrite_expr(e); rewrite_expr(f); }
         IrExprKind::RustMacro { args, .. } => { for a in args { rewrite_expr(a); } }
         // Match — handled below after recursion
         IrExprKind::Match { subject, arms } => {
