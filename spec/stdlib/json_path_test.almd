@@ -1,0 +1,185 @@
+import json
+
+// ── json.root / json.field / json.index constructors ──
+
+test "json.root creates path" {
+  let p = json.root();
+  let obj = json.object([("a", json.from_int(1))]);
+  let v = json.get_path(obj, p);
+  // root path returns the entire object
+  assert_eq(option.is_some(v), true)
+}
+
+test "json.field creates field path" {
+  let obj = json.object([("name", json.from_string("Alice"))]);
+  let p = json.field(json.root(), "name");
+  let v = json.get_path(obj, p);
+  assert_eq(option.is_some(v), true);
+  match v {
+    some(val) => assert_eq(json.as_string(val), some("Alice")),
+    none => assert(false, "should find name"),
+  }
+}
+
+test "json.field missing key returns none" {
+  let obj = json.object([("name", json.from_string("Alice"))]);
+  let p = json.field(json.root(), "age");
+  let v = json.get_path(obj, p);
+  assert_eq(option.is_none(v), true)
+}
+
+test "json.field nested path" {
+  let inner = json.object([("x", json.from_int(42))]);
+  let outer = json.object([("data", inner)]);
+  let p = json.field(json.field(json.root(), "data"), "x");
+  let v = json.get_path(outer, p);
+  assert_eq(option.is_some(v), true);
+  match v {
+    some(val) => assert_eq(json.as_int(val), some(42)),
+    none => assert(false, "should find nested value"),
+  }
+}
+
+test "json.index on array" {
+  let arr = json.array([json.from_string("a"), json.from_string("b"), json.from_string("c")]);
+  let p = json.index(json.root(), 1);
+  let v = json.get_path(arr, p);
+  assert_eq(option.is_some(v), true);
+  match v {
+    some(val) => assert_eq(json.as_string(val), some("b")),
+    none => assert(false, "should find index"),
+  }
+}
+
+test "json.index out of bounds" {
+  let arr = json.array([json.from_int(1)]);
+  let p = json.index(json.root(), 5);
+  let v = json.get_path(arr, p);
+  assert_eq(option.is_none(v), true)
+}
+
+test "json.field then index" {
+  let obj = json.object([("items", json.array([json.from_int(10), json.from_int(20)]))]);
+  let p = json.index(json.field(json.root(), "items"), 0);
+  let v = json.get_path(obj, p);
+  assert_eq(option.is_some(v), true);
+  match v {
+    some(val) => assert_eq(json.as_int(val), some(10)),
+    none => assert(false, "should find nested array element"),
+  }
+}
+
+// ── json.set_path ──
+
+test "json.set_path simple field" {
+  let obj = json.object([("name", json.from_string("Alice"))]);
+  let p = json.field(json.root(), "name");
+  match json.set_path(obj, p, json.from_string("Bob")) {
+    ok(result) => {
+      let name = json.get(result, "name");
+      match name {
+        some(v) => assert_eq(json.as_string(v), some("Bob")),
+        none => assert(false, "should have name"),
+      }
+    },
+    err(e) => assert(false, e),
+  }
+}
+
+test "json.set_path nested field" {
+  let inner = json.object([("x", json.from_int(1))]);
+  let outer = json.object([("data", inner)]);
+  let p = json.field(json.field(json.root(), "data"), "x");
+  match json.set_path(outer, p, json.from_int(99)) {
+    ok(result) => {
+      let data = json.get(result, "data");
+      assert_eq(option.is_some(data), true);
+      match data {
+        some(d) => {
+          let x = json.get(d, "x");
+          match x {
+            some(v) => assert_eq(json.as_int(v), some(99)),
+            none => assert(false, "missing x"),
+          }
+        },
+        none => assert(false, "missing data"),
+      }
+    },
+    err(e) => assert(false, e),
+  }
+}
+
+test "json.set_path on array index" {
+  let arr = json.array([json.from_int(1), json.from_int(2), json.from_int(3)]);
+  let p = json.index(json.root(), 1);
+  match json.set_path(arr, p, json.from_int(99)) {
+    ok(result) => {
+      let items = json.as_array(result);
+      assert_eq(option.is_some(items), true)
+    },
+    err(e) => assert(false, e),
+  }
+}
+
+test "json.set_path adds new key" {
+  let obj = json.object([("a", json.from_int(1))]);
+  let p = json.field(json.root(), "b");
+  match json.set_path(obj, p, json.from_int(2)) {
+    ok(result) => {
+      let ks = json.keys(result);
+      assert_eq(list.len(ks), 2);
+      assert_eq(list.contains(ks, "b"), true)
+    },
+    err(e) => assert(false, e),
+  }
+}
+
+// ── json.remove_path ──
+
+test "json.remove_path field" {
+  let obj = json.object([("a", json.from_int(1)), ("b", json.from_int(2))]);
+  let p = json.field(json.root(), "a");
+  let result = json.remove_path(obj, p);
+  let ks = json.keys(result);
+  assert_eq(list.len(ks), 1);
+  assert_eq(list.contains(ks, "b"), true);
+  assert_eq(list.contains(ks, "a"), false)
+}
+
+test "json.remove_path nested field" {
+  let inner = json.object([("x", json.from_int(1)), ("y", json.from_int(2))]);
+  let outer = json.object([("data", inner)]);
+  let p = json.field(json.field(json.root(), "data"), "x");
+  let result = json.remove_path(outer, p);
+  let data = json.get(result, "data");
+  assert_eq(option.is_some(data), true);
+  match data {
+    some(d) => {
+      let ks = json.keys(d);
+      assert_eq(list.len(ks), 1);
+      assert_eq(list.contains(ks, "y"), true);
+      assert_eq(list.contains(ks, "x"), false)
+    },
+    none => assert(false, "missing data"),
+  }
+}
+
+test "json.remove_path array element" {
+  let arr = json.array([json.from_int(1), json.from_int(2), json.from_int(3)]);
+  let p = json.index(json.root(), 1);
+  let result = json.remove_path(arr, p);
+  let items = json.as_array(result);
+  match items {
+    some(xs) => assert_eq(list.len(xs), 2),
+    none => assert(false, "should be array"),
+  }
+}
+
+test "json.remove_path missing key is noop" {
+  let obj = json.object([("a", json.from_int(1))]);
+  let p = json.field(json.root(), "z");
+  let result = json.remove_path(obj, p);
+  let ks = json.keys(result);
+  assert_eq(list.len(ks), 1);
+  assert_eq(list.contains(ks, "a"), true)
+}

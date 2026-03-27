@@ -246,6 +246,78 @@ impl FuncCompiler<'_> {
                 let nl = self.emitter.intern_string("\n");
                 wasm!(self.func, { i32_const(nl as i32); call(self.emitter.rt.concat_str); });
             }
+            // ── JsonPath constructors ──
+            "root" => {
+                // json.root() → JpRoot: alloc [tag:i32=0], 4 bytes
+                let ptr = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(0); i32_store(0); // tag = 0 (root)
+                    local_get(ptr);
+                });
+                self.scratch.free_i32(ptr);
+            }
+            "field" => {
+                // json.field(path, name) → JpField: alloc [tag:i32=1][parent:i32][name:i32], 12 bytes
+                let parent = self.scratch.alloc_i32();
+                let name = self.scratch.alloc_i32();
+                let ptr = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(parent); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(name);
+                    i32_const(12); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(1); i32_store(0);  // tag = 1 (field)
+                    local_get(ptr); local_get(parent); i32_store(4);  // parent ptr
+                    local_get(ptr); local_get(name); i32_store(8);    // field name str
+                    local_get(ptr);
+                });
+                self.scratch.free_i32(ptr);
+                self.scratch.free_i32(name);
+                self.scratch.free_i32(parent);
+            }
+            "index" => {
+                // json.index(path, i) → JpIndex: alloc [tag:i32=2][parent:i32][idx:i32], 12 bytes
+                // Note: the index arg is i64 in Almide but we truncate to i32 for WASM indexing
+                let parent = self.scratch.alloc_i32();
+                let idx = self.scratch.alloc_i32();
+                let ptr = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(parent); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(idx);
+                    i32_const(12); call(self.emitter.rt.alloc); local_set(ptr);
+                    local_get(ptr); i32_const(2); i32_store(0);  // tag = 2 (index)
+                    local_get(ptr); local_get(parent); i32_store(4);  // parent ptr
+                    local_get(ptr); local_get(idx); i32_store(8);     // array index
+                    local_get(ptr);
+                });
+                self.scratch.free_i32(ptr);
+                self.scratch.free_i32(idx);
+                self.scratch.free_i32(parent);
+            }
+            // ── JsonPath operations ──
+            "get_path" => {
+                // json.get_path(j, path) → Option[Value]
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { call(self.emitter.rt.json_get_path); });
+            }
+            "set_path" => {
+                // json.set_path(j, path, value) → Result[Value, String]
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                self.emit_expr(&args[2]);
+                wasm!(self.func, { call(self.emitter.rt.json_set_path); });
+            }
+            "remove_path" => {
+                // json.remove_path(j, path) → Value
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { call(self.emitter.rt.json_remove_path); });
+            }
             _ => {
                 self.emit_stub_call(args);
             }

@@ -92,6 +92,115 @@ impl FuncCompiler<'_> {
                             end;
                         });
                     }
+                    "assert_throws" => {
+                        // assert_throws(f, expected_msg) — call f(), expect err containing msg
+                        // f is a closure returning Result (i32 ptr). tag==0 ok → trap (expected throw).
+                        // tag!=0 err → check err string contains expected msg, trap if not.
+                        let closure = self.scratch.alloc_i32();
+                        let res = self.scratch.alloc_i32();
+                        self.emit_expr(&args[0]);
+                        wasm!(self.func, { local_set(closure); });
+                        // Call closure: (env) → i32 (Result ptr)
+                        wasm!(self.func, {
+                            local_get(closure); i32_load(4); // env
+                            local_get(closure); i32_load(0); // table_idx
+                        });
+                        {
+                            let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+                            wasm!(self.func, { call_indirect(ti, 0); });
+                        }
+                        wasm!(self.func, { local_set(res); });
+                        // tag==0 (ok) means no throw → trap
+                        wasm!(self.func, {
+                            local_get(res); i32_load(0); i32_eqz;
+                            if_empty;
+                            unreachable;
+                            end;
+                        });
+                        // tag!=0 (err): check err string contains expected msg
+                        wasm!(self.func, { local_get(res); i32_load(4); }); // err string ptr
+                        self.emit_expr(&args[1]); // expected msg
+                        wasm!(self.func, {
+                            call(self.emitter.rt.string.contains);
+                            i32_eqz;
+                            if_empty;
+                            unreachable;
+                            end;
+                        });
+                        self.scratch.free_i32(res);
+                        self.scratch.free_i32(closure);
+                    }
+                    "assert_contains" => {
+                        // assert_contains(haystack, needle) — trap if haystack does not contain needle
+                        self.emit_expr(&args[0]);
+                        self.emit_expr(&args[1]);
+                        wasm!(self.func, {
+                            call(self.emitter.rt.string.contains);
+                            i32_eqz;
+                            if_empty;
+                            unreachable;
+                            end;
+                        });
+                    }
+                    "assert_approx" => {
+                        // assert_approx(a, b, tolerance) — trap if |a - b| >= tolerance
+                        self.emit_expr(&args[0]);
+                        self.emit_expr(&args[1]);
+                        wasm!(self.func, { f64_sub; f64_abs; });
+                        self.emit_expr(&args[2]);
+                        wasm!(self.func, {
+                            f64_ge;
+                            if_empty;
+                            unreachable;
+                            end;
+                        });
+                    }
+                    "assert_gt" => {
+                        // assert_gt(a, b) — trap if a <= b
+                        self.emit_expr(&args[0]);
+                        self.emit_expr(&args[1]);
+                        wasm!(self.func, {
+                            i64_gt_s;
+                            i32_eqz;
+                            if_empty;
+                            unreachable;
+                            end;
+                        });
+                    }
+                    "assert_lt" => {
+                        // assert_lt(a, b) — trap if a >= b
+                        self.emit_expr(&args[0]);
+                        self.emit_expr(&args[1]);
+                        wasm!(self.func, {
+                            i64_lt_s;
+                            i32_eqz;
+                            if_empty;
+                            unreachable;
+                            end;
+                        });
+                    }
+                    "assert_some" => {
+                        // assert_some(opt) — trap if Option is none (ptr == 0)
+                        self.emit_expr(&args[0]);
+                        wasm!(self.func, {
+                            i32_eqz;
+                            if_empty;
+                            unreachable;
+                            end;
+                        });
+                    }
+                    "assert_ok" => {
+                        // assert_ok(result) — trap if Result is err (tag != 0)
+                        self.emit_expr(&args[0]);
+                        wasm!(self.func, {
+                            i32_load(0);
+                            i32_const(0);
+                            i32_ne;
+                            if_empty;
+                            unreachable;
+                            end;
+                        });
+                    }
                     // Codec runtime value constructors (auto-derived)
                     "almide_rt_value_null" => {
                         self.emit_value_call("null", args);
@@ -342,6 +451,14 @@ impl FuncCompiler<'_> {
                     }
                     _ if module == "fs" => {
                         self.emit_fs_call(func, args);
+                    }
+                    _ if module == "log" => {
+                        self.emit_log_call(func, args);
+                    }
+                    _ if module == "testing" => {
+                        // Delegate to Named handler: testing.assert_gt → "assert_gt"
+                        let target = CallTarget::Named { name: (*func).into() };
+                        self.emit_call(&target, args, _ret_ty);
                     }
                     _ => {
                         // Try Type.method dispatch (protocol implementations, e.g. Val.double)
@@ -969,6 +1086,70 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Log module: structured logging to stderr via WASI fd_write(2, ...).
+    /// Simple variants: `[LEVEL] msg\n`
+    /// _with variants:  `[LEVEL] msg data\n`
+    fn emit_log_call(&mut self, func: &str, args: &[IrExpr]) {
+        let prefix = match func {
+            "debug" | "debug_with" => "[DEBUG] ",
+            "info"  | "info_with"  => "[INFO] ",
+            "warn"  | "warn_with"  => "[WARN] ",
+            "error" | "error_with" => "[ERROR] ",
+            _ => {
+                self.emit_stub_call(args);
+                return;
+            }
+        };
+        let prefix_ptr = self.emitter.intern_string(prefix);
+
+        // Build the full message string on the heap:
+        //   simple: prefix + msg
+        //   _with:  prefix + msg + " " + data
+        wasm!(self.func, { i32_const(prefix_ptr as i32); });
+        self.emit_expr(&args[0]); // msg: String
+        wasm!(self.func, { call(self.emitter.rt.concat_str); });
+
+        if func.ends_with("_with") {
+            let space = self.emitter.intern_string(" ");
+            wasm!(self.func, { i32_const(space as i32); call(self.emitter.rt.concat_str); });
+            self.emit_expr(&args[1]); // data: String
+            wasm!(self.func, { call(self.emitter.rt.concat_str); });
+        }
+
+        // Write the concatenated string to stderr (fd=2).
+        // String layout: [len:i32][data:u8...], pointer is on the stack.
+        let s = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            local_set(s);
+            // iov[0].buf = s + 4 (skip length prefix)
+            i32_const(0);
+            local_get(s); i32_const(4); i32_add;
+            i32_store(0);
+            // iov[0].len = *s (load length)
+            i32_const(4);
+            local_get(s); i32_load(0);
+            i32_store(0);
+            // fd_write(stderr=2, iovs=0, iovs_len=1, nwritten=8)
+            i32_const(2); i32_const(0); i32_const(1); i32_const(8);
+            call(self.emitter.rt.fd_write);
+            drop;
+        });
+        self.scratch.free_i32(s);
+
+        // Write newline
+        wasm!(self.func, {
+            i32_const(0);
+            i32_const(super::NEWLINE_OFFSET as i32);
+            i32_store(0);
+            i32_const(4);
+            i32_const(1);
+            i32_store(0);
+            i32_const(2); i32_const(0); i32_const(1); i32_const(8);
+            call(self.emitter.rt.fd_write);
+            drop;
+        });
+    }
+
     /// Random module: PRNG-based random number generation.
     /// Uses xorshift64 state stored at linear memory address 0 (8 bytes).
     pub(super) fn emit_random_call(&mut self, func: &str, args: &[IrExpr]) {
@@ -1361,6 +1542,34 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { i64_const(3600); i64_mul; i64_add; });
+            }
+            "add_minutes" => {
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i64_const(60); i64_mul; i64_add; });
+            }
+            "add_seconds" => {
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i64_add; });
+            }
+            "from_unix" | "to_unix" => {
+                self.emit_expr(&args[0]);
+            }
+            "diff_seconds" => {
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i64_sub; });
+            }
+            "is_before" => {
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i64_lt_s; });
+            }
+            "is_after" => {
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i64_gt_s; });
             }
             "diff_days" => {
                 self.emit_expr(&args[0]);

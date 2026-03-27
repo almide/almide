@@ -24,6 +24,7 @@ const MOD_RESULT: &str = include_str!("../../runtime/ts/result.ts");
 const MOD_SET: &str = include_str!("../../runtime/ts/set.ts");
 const MOD_STRING: &str = include_str!("../../runtime/ts/string.ts");
 const MOD_TESTING: &str = include_str!("../../runtime/ts/testing.ts");
+const MOD_VALUE: &str = include_str!("../../runtime/ts/value.ts");
 const HELPERS: &str = include_str!("../../runtime/ts/helpers.ts");
 
 const PREAMBLE: &str = "// ---- Almide Runtime ----\n";
@@ -59,6 +60,7 @@ pub static ALL_MODULES: &[RuntimeModule] = &[
     RuntimeModule { name: "set", source: MOD_SET },
     RuntimeModule { name: "string", source: MOD_STRING },
     RuntimeModule { name: "testing", source: MOD_TESTING },
+    RuntimeModule { name: "value", source: MOD_VALUE },
 ];
 
 pub fn full_runtime() -> String {
