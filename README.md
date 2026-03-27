@@ -171,7 +171,7 @@ almide app.almd --emit-ir        # Emit typed IR as JSON
   <img src="./docs/assets/benchmark.png" alt="MiniGit Benchmark: Almide vs 15 languages" width="720">
 </p>
 
-Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Claude Code implements a mini version control system from a spec, with multiple trials per language.
+Tested with the MiniGit benchmark — Claude Code implements a mini version control system from a spec, with multiple trials per language.
 
 | Language | Total Time | Avg Cost | Pass Rate |
 |----------|-----------|----------|-----------|
@@ -183,7 +183,7 @@ Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Cla
 | **Almide (no warmup)** | **239.1s** | **$1.13** | **20/20** |
 | **Almide (with warmup)** | **261.6s** | **$1.03** | **20/20** |
 
-Almide has no training data in any public LLM corpus yet — the generation speed gap is expected to narrow as more Almide code enters training sets. Despite being slower, Almide achieves **100% pass rate** with zero failures across 40 trials (20 no-warmup + 20 warmup). See [full results](https://github.com/almide/benchmark) for all 16 languages.
+Almide has no training data in any public LLM corpus yet — the generation speed gap is expected to narrow as more Almide code enters training sets. Despite being slower, Almide achieves **100% pass rate** with zero failures across 40 trials.
 
 ## WASM Binary Size
 
@@ -250,14 +250,6 @@ The compiler itself uses `almide-grammar`'s TOML files (`tokens.toml`, `preceden
 ### Playground — [playground](https://github.com/almide/playground)
 
 Browser-based compiler and runner. The Almide compiler runs as WASM — no server, no installation. Try it at [almide.github.io/playground](https://almide.github.io/playground/).
-
-### Benchmark — [benchmark](https://github.com/almide/benchmark)
-
-MiniGit benchmark suite comparing Almide against 15 languages for LLM code generation speed and reliability.
-
-### MCP Server — [mcp-server](https://github.com/almide/mcp-server)
-
-Model Context Protocol server for Almide — enables AI assistants to compile, check, and run Almide code.
 
 ## Documentation
 
