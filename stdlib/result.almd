@@ -1,0 +1,65 @@
+// result — Result[A, E] utilities
+// Bundled stdlib module (written in Almide, auto multi-target)
+
+fn map[A, B, E](r: Result[A, E], f: fn(A) -> B) -> Result[B, E] =
+  match r { ok(x) => ok(f(x)), err(e) => err(e) }
+
+fn map_err[A, E, F](r: Result[A, E], f: fn(E) -> F) -> Result[A, F] =
+  match r { ok(x) => ok(x), err(e) => err(f(e)) }
+
+fn flat_map[A, B, E](r: Result[A, E], f: fn(A) -> Result[B, E]) -> Result[B, E] =
+  match r { ok(x) => f(x), err(e) => err(e) }
+
+fn unwrap_or[A, E](r: Result[A, E], default: A) -> A =
+  match r { ok(x) => x, err(_) => default }
+
+fn unwrap_or_else[A, E](r: Result[A, E], f: fn(E) -> A) -> A =
+  match r { ok(x) => x, err(e) => f(e) }
+
+fn is_ok[A, E](r: Result[A, E]) -> Bool =
+  match r { ok(_) => true, err(_) => false }
+
+fn is_err[A, E](r: Result[A, E]) -> Bool =
+  match r { ok(_) => false, err(_) => true }
+
+fn to_option[A, E](r: Result[A, E]) -> Option[A] =
+  match r { ok(x) => some(x), err(_) => none }
+
+fn to_err_option[A, E](r: Result[A, E]) -> Option[E] =
+  match r { ok(_) => none, err(e) => some(e) }
+
+fn collect[T, E](rs: List[Result[T, E]]) -> Result[List[T], List[E]] = {
+  var oks: List[T] = []
+  var errs: List[E] = []
+  for item in rs {
+    match item {
+      ok(v) => { oks = oks + [v] }
+      err(e) => { errs = errs + [e] }
+    }
+  }
+  if list.is_empty(errs) then ok(oks) else err(errs)
+}
+
+fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = {
+  var oks: List[T] = []
+  var errs: List[E] = []
+  for item in rs {
+    match item {
+      ok(v) => { oks = oks + [v] }
+      err(e) => { errs = errs + [e] }
+    }
+  }
+  (oks, errs)
+}
+
+fn collect_map[T, U, E](xs: List[T], f: fn(T) -> Result[U, E]) -> Result[List[U], List[E]] = {
+  var oks: List[U] = []
+  var errs: List[E] = []
+  for x in xs {
+    match f(x) {
+      ok(v) => { oks = oks + [v] }
+      err(e) => { errs = errs + [e] }
+    }
+  }
+  if list.is_empty(errs) then ok(oks) else err(errs)
+}
