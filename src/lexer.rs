@@ -47,6 +47,7 @@ pub enum TokenType {
     PipePipe,  // ||
     Underscore,
     Question,         // ?
+    QuestionDot,      // ?.
     QuestionQuestion, // ??
     DotDot,    // ..
     DotDotEq,  // ..=
@@ -494,6 +495,7 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
         ('&', Some('&'), _) => (TokenType::AmpAmp, "&&", 2),
         ('|', Some('|'), _) => (TokenType::PipePipe, "||", 2),
         ('?', Some('?'), _) => (TokenType::QuestionQuestion, "??", 2),
+        ('?', Some('.'), _) => (TokenType::QuestionDot, "?.", 2),
         ('.', Some('.'), _) => (TokenType::DotDot, "..", 2),
         // Single-char
         ('(', _, _) => (TokenType::LParen, "(", 1),

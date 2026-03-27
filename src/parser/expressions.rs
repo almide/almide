@@ -338,6 +338,15 @@ impl Parser {
                     expr: Box::new(expr), fallback: Box::new(fallback),
                     id: self.next_id(), span, resolved_type: None,
                 };
+            } else if self.check(TokenType::QuestionDot) && !self.newline_before_current() {
+                // expr?.field — optional chaining
+                let span = Some(self.current_span());
+                self.advance();
+                let field = self.expect_any_name()?;
+                expr = Expr::OptionalChain {
+                    expr: Box::new(expr), field,
+                    id: self.next_id(), span, resolved_type: None,
+                };
             } else if self.check(TokenType::Question) && !self.newline_before_current() {
                 // expr? — convert to Option
                 let span = Some(self.current_span());

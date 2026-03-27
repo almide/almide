@@ -305,6 +305,7 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::Unwrap { expr: e, .. } => { fmt_expr(out, e, depth); out.push('!'); }
         Expr::UnwrapOr { expr: e, fallback, .. } => { fmt_expr(out, e, depth); out.push_str(" ?? "); fmt_expr(out, fallback, depth); }
         Expr::ToOption { expr: e, .. } => { fmt_expr(out, e, depth); out.push('?'); }
+        Expr::OptionalChain { expr: e, field, .. } => { fmt_expr(out, e, depth); out.push_str("?."); out.push_str(field); }
         Expr::Await { expr: e, .. } => { out.push_str("await "); fmt_expr(out, e, depth); }
         Expr::If { cond, then, else_, .. } => {
             out.push_str("if "); fmt_expr(out, cond, depth); out.push_str(" then "); fmt_expr(out, then, depth);

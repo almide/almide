@@ -399,6 +399,52 @@ impl Checker {
                 }
             }
 
+            // expr?.field — optional chaining: Option[T] → access T.field → Option[FieldType]
+            ast::Expr::OptionalChain { expr: inner, field, .. } => {
+                let t = self.infer_expr(inner);
+                let resolved = resolve_ty(&t, &self.uf);
+                let inner_ty = if let Some(ty) = resolved.option_inner() {
+                    ty
+                } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+                    return self.fresh_var();
+                } else {
+                    self.emit(super::err(
+                        format!("operator '?.' requires Option type but got {}", resolved.display()),
+                        "Use '?.' only on Option[T] values",
+                        "operator ?.",
+                    ));
+                    return Ty::Unknown;
+                };
+                // Resolve field type from inner_ty
+                match &inner_ty {
+                    Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                        if let Some((_, field_ty)) = fields.iter().find(|(n, _)| n == field) {
+                            Ty::option(field_ty.clone())
+                        } else {
+                            self.emit(super::err(
+                                format!("field '{}' not found on type {}", field, inner_ty.display()),
+                                "Check the field name",
+                                format!("field {}", field),
+                            ));
+                            Ty::Unknown
+                        }
+                    }
+                    _ => {
+                        let field_ty = self.resolve_field_type(&inner_ty, field);
+                        if !matches!(field_ty, Ty::Unknown) {
+                            Ty::option(field_ty)
+                        } else {
+                            self.emit(super::err(
+                                format!("cannot access field '{}' on type {}", field, inner_ty.display()),
+                                "Optional chaining requires a record type inside Option",
+                                format!("field {}", field),
+                            ));
+                            Ty::Unknown
+                        }
+                    }
+                }
+            }
+
             ast::Expr::Error { .. } | ast::Expr::Placeholder { .. } => Ty::Unknown,
 
             ast::Expr::MapLiteral { entries, .. } => {

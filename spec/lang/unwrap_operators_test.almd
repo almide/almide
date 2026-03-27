@@ -104,3 +104,26 @@ test "qq chain fallback key missing" {
   let port = int.parse(map.get(["host": "localhost"], "port") ?? "3000") ?? 80
   assert_eq(port, 3000)
 }
+
+// ── expr?.field — optional chaining ──
+
+type Profile = { name: String, age: Int }
+
+fn get_profile(id: Int) -> Option[Profile] =
+  if id == 1 then some({ name: "Alice", age: 30 })
+  else none
+
+test "optional chain some" {
+  let name = get_profile(1)?.name
+  assert_eq(name, some("Alice"))
+}
+
+test "optional chain none" {
+  let name = get_profile(999)?.name
+  assert_eq(name, none)
+}
+
+test "optional chain age" {
+  let age = get_profile(1)?.age
+  assert_eq(age, some(30))
+}
