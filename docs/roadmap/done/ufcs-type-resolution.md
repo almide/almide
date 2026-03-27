@@ -40,11 +40,11 @@ Enhance `expr_ty` in the lowerer to recursively infer types when the span lookup
 
 All multi-module UFCS methods:
 - `len` — string, list, map
-- `contains` / `contains?` — string, list, map
+- `contains` — string, list, map
 - `join` — string, list
 - `reverse` — string, list
 - `index_of` — string, list
 - `count` — string, list
 - `slice` — string, list
 - `get` / `get_or` / `set` — list, map
-- `is_empty?` — list, map
+- `is_empty` — list, map

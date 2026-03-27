@@ -521,8 +521,8 @@ Named arguments after positional ones are allowed. Positional arguments after na
 Functions ending in `?` must return `Bool`:
 
 ```
-fn empty?(xs: List[Int]) -> Bool = list.len(xs) == 0
-fn tracked?(index: Index, path: Path) -> Bool = _
+fn empty(xs: List[Int]) -> Bool = list.len(xs) == 0
+fn tracked(index: Index, path: Path) -> Bool = _
 ```
 
 ### 8.5 `effect fn` -- Explicit Side Effects
@@ -1053,16 +1053,16 @@ Declared at the top of a file. Enables stricter compiler checking.
 
 ### Predicates
 
-`?` suffix on function names: `is_empty?`, `exists?`, `contains?`. Return type must be `Bool`.
+`?` suffix on function names: `is_empty`, `exists`, `contains`. Return type must be `Bool`.
 
-The `is_` prefix convention is used for predicates in the stdlib: `string.is_empty?(s)`, `string.is_digit?(s)`.
+The `is_` prefix convention is used for predicates in the stdlib: `string.is_empty(s)`, `string.is_digit(s)`.
 
 ### Stdlib Naming Rules
 
 | Convention | Rule | Example |
 |---|---|---|
 | Module prefix | `module.function()` canonical form | `string.len(s)`, `list.get(xs, i)` |
-| Predicate suffix | `?` for boolean-returning functions | `string.is_empty?(s)`, `fs.exists?(path)` |
+| Predicate suffix | `?` for boolean-returning functions | `string.is_empty(s)`, `fs.exists(path)` |
 | No synonyms | One name per operation | `len` not `length`/`size`/`count` |
 | Symmetric pairs | Matching names for inverses | `split`/`join`, `to_string`/`to_int` |
 | Return type consistency | Fallible lookups return `Option`, I/O returns `Result` | `list.get() -> Option[T]` |
@@ -1076,39 +1076,39 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 ### 18.1 Auto-Imported Modules
 
 **string** (41 functions):
-`trim`, `trim_start`, `trim_end`, `split`, `join`, `len`, `lines`, `pad_left`, `pad_right`, `starts_with?`, `ends_with?`, `slice`, `to_bytes`, `from_bytes`, `contains`, `to_upper`, `to_lower`, `to_int`, `replace`, `char_at`, `chars`, `index_of`, `repeat`, `count`, `reverse`, `is_empty?`, `is_digit?`, `is_alpha?`, `is_alphanumeric?`, `is_whitespace?`, `strip_prefix`, `strip_suffix`, `capitalize`, `is_upper?`, `is_lower?`, `codepoint`, `from_codepoint`, `pad_end`, `replace_first`, `last_index_of`, `to_float`
+`trim`, `trim_start`, `trim_end`, `split`, `join`, `len`, `lines`, `pad_left`, `pad_right`, `starts_with`, `ends_with`, `slice`, `to_bytes`, `from_bytes`, `contains`, `to_upper`, `to_lower`, `to_int`, `replace`, `char_at`, `chars`, `index_of`, `repeat`, `count`, `reverse`, `is_empty`, `is_digit`, `is_alpha`, `is_alphanumeric`, `is_whitespace`, `strip_prefix`, `strip_suffix`, `capitalize`, `is_upper`, `is_lower`, `codepoint`, `from_codepoint`, `pad_end`, `replace_first`, `last_index_of`, `to_float`
 
 **list** (54 functions):
-`len`, `get`, `get_or`, `first`, `last`, `sort`, `sort_by`, `reverse`, `contains`, `index_of`, `any`, `all`, `each`, `map`, `flat_map`, `filter`, `find`, `fold`, `enumerate`, `zip`, `flatten`, `take`, `drop`, `chunk`, `unique`, `join`, `sum`, `product`, `min`, `max`, `is_empty?`, `push`, `pop`, `insert`, `remove`, `concat`, `slice`, `range`, `count`, `find_index`, `partition`, `scan`, `window`, `zip_with`, `unzip`, `group_by`, `frequencies`, `intersperse`, `reduce`, `take_while`, `drop_while`, `dedup`, `rotate`, `transpose`
+`len`, `get`, `get_or`, `first`, `last`, `sort`, `sort_by`, `reverse`, `contains`, `index_of`, `any`, `all`, `each`, `map`, `flat_map`, `filter`, `find`, `fold`, `enumerate`, `zip`, `flatten`, `take`, `drop`, `chunk`, `unique`, `join`, `sum`, `product`, `min`, `max`, `is_empty`, `push`, `pop`, `insert`, `remove`, `concat`, `slice`, `range`, `count`, `find_index`, `partition`, `scan`, `window`, `zip_with`, `unzip`, `group_by`, `frequencies`, `intersperse`, `reduce`, `take_while`, `drop_while`, `dedup`, `rotate`, `transpose`
 
 **map** (16 functions):
-`new`, `get`, `get_or`, `set`, `contains`, `remove`, `merge`, `keys`, `values`, `len`, `entries`, `from_list`, `is_empty?`, `map_values`, `filter`, `fold`
+`new`, `get`, `get_or`, `set`, `contains`, `remove`, `merge`, `keys`, `values`, `len`, `entries`, `from_list`, `is_empty`, `map_values`, `filter`, `fold`
 
 **int** (21 functions):
 `to_string`, `to_hex`, `parse`, `parse_hex`, `abs`, `min`, `max`, `band`, `bor`, `bxor`, `bshl`, `bshr`, `bnot`, `wrap_add`, `wrap_mul`, `rotate_right`, `rotate_left`, `to_u32`, `to_u8`, `clamp`, `signum`
 
 **float** (16 functions):
-`to_string`, `to_int`, `from_int`, `round`, `floor`, `ceil`, `abs`, `sqrt`, `parse`, `min`, `max`, `clamp`, `is_nan?`, `is_infinite?`, `signum`, `truncate`
+`to_string`, `to_int`, `from_int`, `round`, `floor`, `ceil`, `abs`, `sqrt`, `parse`, `min`, `max`, `clamp`, `is_nan`, `is_infinite`, `signum`, `truncate`
 
 **math** (21 functions):
 `min`, `max`, `abs`, `pow`, `pi`, `e`, `sin`, `cos`, `tan`, `log`, `exp`, `sqrt`, `asin`, `acos`, `atan`, `atan2`, `log2`, `log10`, `floor`, `ceil`, `round`
 
 **result** (9 functions):
-`map`, `map_err`, `and_then`, `unwrap_or`, `is_ok?`, `is_err?`, `ok`, `err`, `flatten`
+`map`, `map_err`, `and_then`, `unwrap_or`, `is_ok`, `is_err`, `ok`, `err`, `flatten`
 
 **option** (9 functions):
-`map`, `and_then`, `unwrap_or`, `ok_or`, `is_some?`, `is_none?`, `flatten`, `filter`, `zip`
+`map`, `and_then`, `unwrap_or`, `ok_or`, `is_some`, `is_none`, `flatten`, `filter`, `zip`
 
 **value** (19 functions):
 Type-agnostic value operations for dynamic data handling.
 
 **set** (auto-imported):
-Set operations: `new`, `insert`, `contains`, `remove`, `union`, `intersection`, `difference`, `len`, `is_empty?`, `to_list`, `from_list`.
+Set operations: `new`, `insert`, `contains`, `remove`, `union`, `intersection`, `difference`, `len`, `is_empty`, `to_list`, `from_list`.
 
 ### 18.2 Import-Required Modules
 
 **fs** (24 functions, all effect):
-`read_text`, `read_bytes`, `read_lines`, `write`, `write_bytes`, `append`, `mkdir_p`, `exists?`, `is_dir?`, `is_file?`, `remove`, `list_dir`, `copy`, `rename`, `remove_dir`, `metadata`, `glob`, `walk_dir`, `read_dir`, `create_dir`, `symlink`, `read_link`, `canonical`, `temp_dir`
+`read_text`, `read_bytes`, `read_lines`, `write`, `write_bytes`, `append`, `mkdir_p`, `exists`, `is_dir`, `is_file`, `remove`, `list_dir`, `copy`, `rename`, `remove_dir`, `metadata`, `glob`, `walk_dir`, `read_dir`, `create_dir`, `symlink`, `read_link`, `canonical`, `temp_dir`
 
 **env** (9 functions, effect):
 `unix_timestamp`, `millis`, `args`, `get`, `set`, `cwd`, `sleep_ms`, `home_dir`, `hostname`
@@ -1120,7 +1120,7 @@ Set operations: `new`, `insert`, `contains`, `remove`, `union`, `intersection`, 
 `exec`, `exec_status`, `exit`, `stdin_lines`, `spawn`, `pid`
 
 **json** (36 functions):
-`parse`, `stringify`, `stringify_pretty`, `get`, `get_string`, `get_int`, `get_float`, `get_bool`, `get_array`, `keys`, `to_string`, `to_int`, `as_string`, `as_int`, `as_float`, `as_bool`, `as_array`, `object`, `s`, `i`, `f`, `b`, `null`, `array`, `from_string`, `from_int`, `from_float`, `from_bool`, `from_map`, `is_null?`, `is_string?`, `is_int?`, `is_array?`, `is_object?`, `len`, `merge`
+`parse`, `stringify`, `stringify_pretty`, `get`, `get_string`, `get_int`, `get_float`, `get_bool`, `get_array`, `keys`, `to_string`, `to_int`, `as_string`, `as_int`, `as_float`, `as_bool`, `as_array`, `object`, `s`, `i`, `f`, `b`, `null`, `array`, `from_string`, `from_int`, `from_float`, `from_bool`, `from_map`, `is_null`, `is_string`, `is_int`, `is_array`, `is_object`, `len`, `merge`
 
 **random** (4 functions, effect):
 `int`, `float`, `choice`, `shuffle`
@@ -1138,7 +1138,7 @@ Date/time operations: `now`, `year`, `month`, `day`, `hour`, `minute`, `second`,
 `message`, `chain`, `context`
 
 **regex** (8 functions):
-`match?`, `full_match?`, `find`, `find_all`, `replace`, `replace_first`, `split`, `captures`
+`match`, `full_match`, `find`, `find_all`, `replace`, `replace_first`, `split`, `captures`
 
 **http** (26 functions, effect):
 HTTP client operations.

@@ -25,7 +25,7 @@ Automatic. All value types support `==`. Only `Fn` types are rejected.
 
 ```almide
 type Color = | Red | Green | Blue
-fn same_color?(a: Color, b: Color) -> Bool = a == b  // just works
+fn same_color(a: Color, b: Color) -> Bool = a == b  // just works
 ```
 
 - Primitives: Int, Float, String, Bool, Unit — always Eq

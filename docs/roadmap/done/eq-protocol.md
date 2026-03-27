@@ -6,7 +6,7 @@ Automatic `==` / `!=` for all value types. No `deriving` needed.
 
 ```almide
 type Color = | Red | Green | Blue
-fn same_color?(a: Color, b: Color) -> Bool = a == b  // just works
+fn same_color(a: Color, b: Color) -> Bool = a == b  // just works
 ```
 
 ## Supported Types
