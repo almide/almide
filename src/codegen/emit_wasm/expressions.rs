@@ -459,58 +459,130 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(scratch);
             }
 
-            // ── Unwrap (propagate err on failure — same as Try) ──
+            // ── Unwrap (propagate err on failure) ──
             IrExprKind::Unwrap { expr: inner } => {
+                let is_option = inner.ty.is_option();
                 self.emit_expr(inner);
                 let scratch = self.scratch.alloc_i32();
-                wasm!(self.func, {
-                    local_set(scratch);
-                    local_get(scratch);
-                    i32_load(0);
-                    i32_const(0);
-                    i32_ne;
-                    if_empty;
-                    local_get(scratch);
-                    return_;
-                    end;
-                });
-                if !matches!(&expr.ty, Ty::Unit) {
-                    wasm!(self.func, { local_get(scratch); });
-                    self.emit_load_at(&expr.ty, 4);
+                if is_option {
+                    // Option: ptr==0 → None (propagate as err), ptr!=0 → Some (payload at ptr)
+                    wasm!(self.func, {
+                        local_set(scratch);
+                        local_get(scratch);
+                        i32_eqz;
+                        if_empty;
+                        // None → build an err Result and return it
+                        i32_const(0);
+                        return_;
+                        end;
+                    });
+                    // Some: load payload from ptr
+                    if !matches!(&expr.ty, Ty::Unit) {
+                        wasm!(self.func, { local_get(scratch); });
+                        self.emit_load_at(&expr.ty, 0);
+                    }
+                } else {
+                    // Result: [tag:i32, payload]. tag==0 → Ok, tag!=0 → Err
+                    wasm!(self.func, {
+                        local_set(scratch);
+                        local_get(scratch);
+                        i32_load(0);
+                        i32_const(0);
+                        i32_ne;
+                        if_empty;
+                        local_get(scratch);
+                        return_;
+                        end;
+                    });
+                    if !matches!(&expr.ty, Ty::Unit) {
+                        wasm!(self.func, { local_get(scratch); });
+                        self.emit_load_at(&expr.ty, 4);
+                    }
                 }
                 self.scratch.free_i32(scratch);
             }
 
             // ── UnwrapOr (fallback on err/none) ──
             IrExprKind::UnwrapOr { expr: inner, fallback } => {
-                // Evaluate inner Result/Option ptr
+                let is_option = inner.ty.is_option();
                 self.emit_expr(inner);
                 let scratch = self.scratch.alloc_i32();
-                let vt = values::ty_to_valtype(&expr.ty).unwrap_or(ValType::I32);
-                match vt {
-                    ValType::I64 => {
-                        wasm!(self.func, { local_set(scratch); local_get(scratch); i32_load(0); i32_eqz; if_i64; local_get(scratch); i64_load(4); else_; });
-                        self.emit_expr(fallback);
-                        wasm!(self.func, { end; });
-                    }
-                    ValType::F64 => {
-                        wasm!(self.func, { local_set(scratch); local_get(scratch); i32_load(0); i32_eqz; if_f64; local_get(scratch); f64_load(4); else_; });
-                        self.emit_expr(fallback);
-                        wasm!(self.func, { end; });
-                    }
-                    _ => {
-                        wasm!(self.func, { local_set(scratch); local_get(scratch); i32_load(0); i32_eqz; if_i32; local_get(scratch); i32_load(4); else_; });
-                        self.emit_expr(fallback);
-                        wasm!(self.func, { end; });
-                    }
+                let bt = values::block_type(&expr.ty);
+                if is_option {
+                    // Option: ptr==0 → fallback, ptr!=0 → load payload from ptr
+                    wasm!(self.func, {
+                        local_set(scratch);
+                        local_get(scratch);
+                        i32_eqz;
+                    });
+                    self.func.instruction(&Instruction::If(bt));
+                    self.emit_expr(fallback);
+                    wasm!(self.func, { else_; local_get(scratch); });
+                    self.emit_load_at(&expr.ty, 0);
+                    wasm!(self.func, { end; });
+                } else {
+                    // Result: tag==0 → ok (load payload at +4), tag!=0 → fallback
+                    wasm!(self.func, {
+                        local_set(scratch);
+                        local_get(scratch);
+                        i32_load(0);
+                        i32_eqz;
+                    });
+                    self.func.instruction(&Instruction::If(bt));
+                    wasm!(self.func, { local_get(scratch); });
+                    self.emit_load_at(&expr.ty, 4);
+                    wasm!(self.func, { else_; });
+                    self.emit_expr(fallback);
+                    wasm!(self.func, { end; });
                 }
                 self.scratch.free_i32(scratch);
             }
 
-            // ── ToOption (Result → Option) ──
+            // ── ToOption (Result → Option, Option passthrough) ──
             IrExprKind::ToOption { expr: inner } => {
-                // Result and Option share the same tag layout; just re-emit inner
-                self.emit_expr(inner);
+                if inner.ty.is_option() {
+                    // Option → Option: identity
+                    self.emit_expr(inner);
+                } else {
+                    // Result → Option: ok(v) → some(v), err(_) → none (ptr=0)
+                    self.emit_expr(inner);
+                    let scratch = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        local_set(scratch);
+                        local_get(scratch);
+                        i32_load(0);
+                        i32_eqz;
+                        if_i32;
+                    });
+                    // Ok: allocate Some ptr and copy payload
+                    let inner_ty = inner.ty.result_ok_ty().unwrap_or(Ty::Unknown);
+                    let inner_size = values::byte_size(&inner_ty);
+                    if inner_size > 0 {
+                        wasm!(self.func, {
+                            i32_const(inner_size as i32);
+                            call(self.emitter.rt.alloc);
+                        });
+                        let some_scratch = self.scratch.alloc_i32();
+                        wasm!(self.func, { local_tee(some_scratch); });
+                        wasm!(self.func, { local_get(scratch); });
+                        self.emit_load_at(&inner_ty, 4);
+                        self.emit_store_at(&inner_ty, 0);
+                        wasm!(self.func, { local_get(some_scratch); });
+                        self.scratch.free_i32(some_scratch);
+                    } else {
+                        // Unit payload — Some is just a non-zero ptr
+                        wasm!(self.func, {
+                            i32_const(1);
+                        });
+                    }
+                    wasm!(self.func, {
+                        else_;
+                        // Err: return 0 (None)
+                        i32_const(0);
+                        end;
+                    });
+                    self.scratch.free_i32(scratch);
+                }
             }
 
             // ── Map index access: m[key] → Option[V] ──
