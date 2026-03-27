@@ -672,6 +672,15 @@ match shape {
 items.map((x) => x * 2)
 ```
 
+The body is any expression, including block expressions for multi-line lambdas:
+
+```
+let f = (x) => {
+  let y = x * 2
+  y + 1
+}
+```
+
 One form only. Lambda parameters may optionally include type annotations.
 
 ### 10.5 Block Expression

@@ -111,6 +111,12 @@ literal                    // int, float, string, bool
 (x) => expr
 (x, y) => expr
 items.map((x) => x + 1)
+
+// multi-line: use a block as the body
+let f = (x) => {
+  let y = x * 2
+  y + 1
+}
 ```
 
 ### Block (last expression is the value)

@@ -1,4 +1,5 @@
 <!-- description: Auto-inferred effect capabilities with package-level permissions -->
+<!-- done: 2026-03-27 -->
 # Effect System — Auto-Inferred Capabilities
 
 **Priority:** 1.x (information display) → 2.x (restriction enforcement)

@@ -6,7 +6,7 @@
 
 ## Active
 
-13 items
+10 items
 
 | Item | Description |
 |------|-------------|
@@ -14,13 +14,10 @@
 | [Compiler Architecture: All 10s](active/compiler-architecture-10.md) | Achieve 10/10 on every compiler architecture quality metric |
 | [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Automated verification that Rust, TS, and WASM produce identical output |
 | [Diagnostic end_col — Precise Error Underlines](active/diagnostic-end-col.md) | Track end column in diagnostics for precise error underlines |
-| [Effect System — Auto-Inferred Capabilities](active/effect-system.md) | Auto-inferred effect capabilities with package-level permissions |
 | [Emit Readability](active/emit-readability.md) | Improve readability of generated Rust and TypeScript output |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](active/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
-| [HTTPS Native Support](active/https-native.md) | Native HTTPS support via rustls across all targets |
 | [Purity Exploitation — Leveraging fn/effect fn Distinction](active/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | [Stdlib in Almide: Unified Library Architecture](active/stdlib-in-almide.md) | Rewrite stdlib in Almide with a 3-layer architecture |
-| [Unwrap Operators: `!` `??` `?` `?.`](active/unwrap-operators.md) | Postfix !, ??, ? and ?. operators for explicit Result/Option unwrapping |
 | [WASM HTTP Client](active/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
 | [WASM Remaining FS Operations](active/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
 
@@ -61,13 +58,16 @@
 
 ## Done
 
-158 items
+161 items
 
 <details>
-<summary>Show all 158 completed items</summary>
+<summary>Show all 161 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-03-27 | [Unwrap Operators: `!` `??` `?` `?.`](done/unwrap-operators.md) | Postfix !, ??, ? and ?. operators for explicit Result/Option unwrapping |
+| 2026-03-27 | [HTTPS Native Support](done/https-native.md) | Native HTTPS support via rustls across all targets |
+| 2026-03-27 | [Effect System — Auto-Inferred Capabilities](done/effect-system.md) | Auto-inferred effect capabilities with package-level permissions |
 | 2026-03-25 | [WASM Filesystem I/O](done/wasm-fs-io.md) | WASI-based filesystem I/O for WASM target |
 | 2026-03-25 | [TypeScript Test Runner](done/ts-test-runner.md) | almide test --target ts command with Deno/Node support |
 | 2026-03-25 | [Diagnostic Secondary Spans](done/diagnostic-secondary-spans.md) | Activate secondary spans showing declaration sites in error messages |

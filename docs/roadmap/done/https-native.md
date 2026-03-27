@@ -1,4 +1,5 @@
 <!-- description: Native HTTPS support via rustls across all targets -->
+<!-- done: 2026-03-27 -->
 # HTTPS Native Support
 
 **Goal**: `http.get("https://...")` works across all targets
