@@ -20,11 +20,7 @@ type Handler = (String) -> String                    // function type alias
 
 ### Conventions
 ```
-type ConfigError: From =       // convention after type name with :
-  | Io(IoError)
-  | Parse(ParseError)
-
-type Color: Eq, Repr = Red | Green | Blue
+type Color: Eq, Repr = Red | Green | Blue   // convention after type name with :
 ```
 
 ### Built-in types
@@ -59,9 +55,6 @@ Eq and Hash are automatic (compiler-derived from type structure). No annotation 
 ```
 // Eq: all value types support == (except Fn)
 let same = color_a == color_b  // just works
-
-// From: opt-in for error conversions
-type AppError: From = | Io(IoError) | Parse(ParseError)
 ```
 ### Protocols (user-defined conventions)
 ```
@@ -357,9 +350,9 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 import fs
 import json
 
-type AppError: From =
+type AppError =
   | NotFound(String)
-  | Io(IoError)
+  | Io(String)
 
 effect fn greet(name: String) -> Result[Unit, AppError] = {
   guard string.len(name) > 0 else err(NotFound("empty name"))

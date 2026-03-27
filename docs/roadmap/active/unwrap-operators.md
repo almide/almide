@@ -161,7 +161,7 @@ effect fn load(path: String) -> Result[Config, LoadError] = {
 
 ## Breaking changes
 
-1. **`From` convention removed** — `type Foo: From = ...` no longer valid. Replace `: From` with explicit `map_err` + `!`.
+1. **`From` convention removed** — `type Foo: From = ...` no longer valid. Use `result.map_err(...)!` for explicit error type conversion.
 
 2. **auto-`?` removed** — `effect fn` no longer silently inserts `?`. All Result-returning calls must use `!`, `??`, or `?` explicitly.
 

@@ -310,7 +310,7 @@ Inline variant (without leading `|`):
 type Direction = North | South | East | West
 ```
 
-### 5.4 Conventions (deriving)
+### 5.4 Conventions
 
 ```
 ConventionClause ::= ":" TypeName ("," TypeName)*
@@ -319,19 +319,11 @@ ConventionClause ::= ":" TypeName ("," TypeName)*
 Convention names are specified after the type name with `:`, before `=`:
 
 ```
-type ConfigError: From =
-  | Io(IoError)
-  | Parse(ParseError)
-  | Decode(DecodeError)
-
-// Equivalent to:
-// impl From[IoError] for ConfigError { fn from(e: IoError) -> ConfigError = Io(e) }
-// impl From[ParseError] for ConfigError { fn from(e: ParseError) -> ConfigError = Parse(e) }
-// impl From[DecodeError] for ConfigError { fn from(e: DecodeError) -> ConfigError = Decode(e) }
-
 type Color: Eq, Repr =
   | Red | Green | Blue
 ```
+
+Available conventions: `Eq`, `Repr`, `Ord`, `Hash`, `Codec`. `Eq` and `Hash` are automatic for all value types and do not need to be declared.
 
 ### 5.5 Protocols
 
@@ -437,7 +429,7 @@ impl Iterable[T] for List[T] {
 ### 6.3 Built-in Protocols
 
 - **Eq** and **Hash** are compiler-derived automatically from type structure. No annotation needed.
-- Conventions are specified with `:` after the type name: `type Foo: From = ...`
+- Conventions are specified with `:` after the type name: `type Color: Eq, Repr = ...`
 
 ---
 
@@ -905,21 +897,46 @@ In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equal
 
 Exceptions **do not exist**. There is no `throw`/`catch`.
 
-### 12.2 Auto Error Propagation
+### 12.2 Unwrap Operators
 
-Inside `effect fn`, expressions returning `Result[T, E]` are automatically unwrapped. If the expression returns an error, it propagates to the enclosing function immediately.
-
-### 12.3 Error Conversion with From
+Three postfix operators for explicit error handling on `Result[T, E]` and `Option[T]`:
 
 ```
-type AppError: From =
-  | Io(IoError)
-  | Parse(ParseError)
+expr!          // unwrap — propagate err on failure (effect fn only)
+expr ?? val    // unwrap or — use fallback on failure
+expr?          // to option — convert Result to Option (err → none)
+```
 
-effect fn load(path: String) -> Result[Config, AppError] = {
-  let text = fs.read_text(path)    // IoError -> AppError via From (auto-propagated)
-  let raw = json.parse(text)       // ParseError -> AppError via From (auto-propagated)
-  decode[Config](raw)
+```
+effect fn load(path: String) -> Result[Config, String] = {
+  let text = fs.read_text(path)!       // err → propagates
+  let config = json.parse(text)!       // err → propagates
+  ok(config)
+}
+
+let port = int.parse(input) ?? 8080    // err → use 8080
+let name = map.get(config, "key") ?? "default"  // none → use "default"
+```
+
+### 12.3 Typed Error Variants
+
+For branching on error kinds, use a variant type as the error parameter:
+
+```
+type LoadError = | NotFound(String) | ParseFailed(String)
+
+effect fn load(path: String) -> Result[Config, LoadError] = {
+  let text = fs.read_text(path)
+    |> result.map_err((e) => NotFound(e))!
+  let config = json.parse(text)
+    |> result.map_err((e) => ParseFailed(e))!
+  ok(config)
+}
+
+match load("app.toml") {
+  ok(config) => use(config),
+  err(NotFound(path)) => create_default(),
+  err(ParseFailed(msg)) => println("Bad config: ${msg}"),
 }
 ```
 
@@ -1414,9 +1431,9 @@ type Config = {
   description: String,
 }
 
-type ConfigError: From =
-  | Io(IoError)
-  | Parse(ParseError)
+type ConfigError =
+  | Io(String)
+  | Parse(String)
 
 fn default_config(root: String) -> Config =
   { root: root, bare: false, description: "" }
