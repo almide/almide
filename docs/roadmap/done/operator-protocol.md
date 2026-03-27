@@ -1,4 +1,5 @@
 <!-- description: Convention-based operator dispatch (==, repr, sort, hash) -->
+<!-- done: 2026-03-15 -->
 # Operator Protocol
 
 Convention 宣言に基づく演算子・言語機能のディスパッチ。

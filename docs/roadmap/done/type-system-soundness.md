@@ -1,4 +1,5 @@
 <!-- description: Type system soundness fixes (Unknown propagation, unification, occurs) -->
+<!-- done: 2026-03-15 -->
 # Type System Soundness
 
 ## Summary

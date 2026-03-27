@@ -1,4 +1,5 @@
 <!-- description: Native TS output for edge runtimes (Workers, Deno Deploy, Vercel) -->
+<!-- done: 2026-03-18 -->
 # TS Edge-Native Deployment
 
 ## Thesis

@@ -1,4 +1,5 @@
 <!-- description: Production readiness checklist (11 stdlib runtimes, CI, packaging) -->
+<!-- done: 2026-03-18 -->
 # Production Readiness Requirements
 
 ## 1. 11 stdlib ランタイム未実装

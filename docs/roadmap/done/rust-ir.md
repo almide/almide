@@ -1,4 +1,5 @@
 <!-- description: Two-stage Rust codegen pipeline via RustIR intermediate repr -->
+<!-- done: 2026-03-15 -->
 # RustIR: Rust Codegen Intermediate Representation
 
 ## 動機

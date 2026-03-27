@@ -1,4 +1,5 @@
 <!-- description: Unified verb system across all stdlib container types -->
+<!-- done: 2026-03-18 -->
 # Stdlib API Surface Reform
 
 ## Vision

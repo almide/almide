@@ -1,4 +1,5 @@
 <!-- description: Continue parsing after syntax errors to report multiple diagnostics -->
+<!-- done: 2026-03-15 -->
 # Parser Error Recovery
 
 ## Summary

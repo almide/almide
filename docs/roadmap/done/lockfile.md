@@ -1,4 +1,5 @@
 <!-- description: Dependency lockfile with git-based resolution and reproducible builds -->
+<!-- done: 2026-03-17 -->
 # almide.lock [DONE — 1.0 Phase III]
 
 ## 実装済み

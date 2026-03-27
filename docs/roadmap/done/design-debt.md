@@ -1,4 +1,5 @@
 <!-- description: Design debt including partial TOML dispatch and anonymous records -->
+<!-- done: 2026-03-18 -->
 # Design Debt
 
 ## 1. gen_generated_call の部分接続

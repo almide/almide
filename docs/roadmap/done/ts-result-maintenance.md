@@ -1,4 +1,5 @@
 <!-- description: Replace TS Result erasure (throw/catch) with Result objects -->
+<!-- done: 2026-03-16 -->
 # TS Target: Result Maintenance (Erasure to Object)
 
 ## 現状

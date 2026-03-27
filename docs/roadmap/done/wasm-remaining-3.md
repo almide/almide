@@ -1,4 +1,5 @@
 <!-- description: Root cause analysis of last 3 WASM test failures -->
+<!-- done: 2026-03-23 -->
 # WASM Remaining 3 Failures — Root Cause Analysis & Fix Plan
 
 ## Current Status

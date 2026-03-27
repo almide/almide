@@ -1,4 +1,5 @@
 <!-- description: Map literal syntax with Swift-style [:] empty map notation -->
+<!-- done: 2026-03-13 -->
 # Map Literal Syntax
 
 ## Goal

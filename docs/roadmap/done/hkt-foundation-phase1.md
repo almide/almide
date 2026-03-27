@@ -1,4 +1,5 @@
 <!-- description: HKT foundation phases 1-4 with type constructors and algebraic laws -->
+<!-- done: 2026-03-19 -->
 # HKT Foundation — Phase 1-4 + Stream Fusion (All 6 Laws)
 
 **完了日:** 2026-03-19

@@ -1,4 +1,5 @@
 <!-- description: Fill stdlib gaps in int, string, list, and map modules -->
+<!-- done: 2026-03-11 -->
 # Stdlib Completeness
 
 Fill gaps that make Almide less capable than Python/Go for everyday tasks.

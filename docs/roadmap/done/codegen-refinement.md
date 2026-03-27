@@ -1,4 +1,5 @@
 <!-- description: Small independent optimizations improving generated Rust code quality -->
+<!-- done: 2026-03-15 -->
 # Codegen Refinement
 
 Small, independent optimizations that improve generated Rust code quality. Each is low-difficulty and can be implemented independently.

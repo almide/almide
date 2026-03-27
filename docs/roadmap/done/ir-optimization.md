@@ -1,4 +1,5 @@
 <!-- description: Constant folding, dead code elimination, and basic inlining passes -->
+<!-- done: 2026-03-15 -->
 # IR Optimization Passes
 
 ## Summary

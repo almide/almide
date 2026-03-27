@@ -1,4 +1,5 @@
 <!-- description: Async model with async fn, await, and async let constructs -->
+<!-- done: 2026-03-14 -->
 # Structured Concurrency
 
 ## Philosophy

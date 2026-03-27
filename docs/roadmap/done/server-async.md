@@ -1,4 +1,5 @@
 <!-- description: Make http.serve handler an effect context for I/O calls -->
+<!-- done: 2026-03-18 -->
 # Server Async — http.serve Effect Integration
 
 ## 概要

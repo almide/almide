@@ -1,4 +1,5 @@
 <!-- description: Exercise suite with 20 exercises and 230 tests for LLM benchmarking -->
+<!-- done: 2026-03-17 -->
 # Exercise Suite v0.6.0
 
 ## Status: 20/23 exercises, 230 tests — Tier 1-4 + Tier 6 complete

@@ -1,4 +1,5 @@
 <!-- description: Write stdlib in Almide for automatic multi-target support -->
+<!-- done: 2026-03-11 -->
 # Stdlib Self-Hosting
 
 As of v0.2.1, all stdlib functions have been extracted from inline codegen to separated runtime files (see [Stdlib runtime extraction](#stdlib-runtime-extraction-completed-in-v021)). Type signatures remain in `stdlib.rs` and dispatch logic in `calls.rs`. The next goal: **Almide writes its own stdlib in Almide**, achieving automatic multi-target support with zero compiler changes.

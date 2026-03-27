@@ -1,4 +1,5 @@
 <!-- description: Move uuid, crypto, toml, compress, term out of stdlib to packages -->
+<!-- done: 2026-03-20 -->
 # Stdlib Scope Reduction — Complete
 
 **優先度:** 1.0前 — 凍結前に外に出すものを決める

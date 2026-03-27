@@ -1,4 +1,5 @@
 <!-- description: Showcase: CSV-to-JSON data pipeline with list HOFs and pipes -->
+<!-- done: 2026-03-18 -->
 # Showcase 3: CSV to JSON Pipeline (Data Processing)
 
 **領域:** Data processing

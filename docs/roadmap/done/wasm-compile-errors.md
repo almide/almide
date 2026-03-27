@@ -1,4 +1,5 @@
 <!-- description: WASM compile error elimination (type mismatches, lambda issues) -->
+<!-- done: 2026-03-23 -->
 # WASM Compile Error Elimination Roadmap
 
 ## Status: 10件 (109/182 passed)

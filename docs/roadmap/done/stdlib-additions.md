@@ -1,4 +1,5 @@
 <!-- description: Stdlib module additions (set expanded to 20 functions) -->
+<!-- done: 2026-03-20 -->
 # Stdlib Additions — Complete
 
 **優先度:** 1.x — 1.0後に段階的追加

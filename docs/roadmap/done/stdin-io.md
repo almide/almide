@@ -1,4 +1,5 @@
 <!-- description: stdin reading and interactive I/O via io module -->
+<!-- done: 2026-03-11 -->
 # stdin / Interactive I/O
 
 ### API

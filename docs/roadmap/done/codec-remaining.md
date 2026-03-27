@@ -1,4 +1,5 @@
 <!-- description: Remaining codec features after Phase 0-2 completion -->
+<!-- done: 2026-03-15 -->
 # Codec Remaining
 
 Phase 0-2 完了。残りの機能。

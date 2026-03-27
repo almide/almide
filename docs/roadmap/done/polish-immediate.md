@@ -1,4 +1,5 @@
 <!-- description: Quick-win polish items (ICE warnings, integration tests, TS E2E) -->
+<!-- done: 2026-03-18 -->
 # Quick-Win Polish Items
 
 ## 1. ICE 警告の除去

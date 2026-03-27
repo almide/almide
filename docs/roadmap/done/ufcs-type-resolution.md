@@ -1,4 +1,5 @@
 <!-- description: Fix UFCS resolution for ambiguous methods on complex expressions -->
+<!-- done: 2026-03-14 -->
 # UFCS Type Resolution for Ambiguous Methods
 
 ## Problem

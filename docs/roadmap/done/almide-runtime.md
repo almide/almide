@@ -1,4 +1,5 @@
 <!-- description: Runtime design targeting best-in-class compiler performance -->
+<!-- done: 2026-03-18 -->
 # Almide Runtime
 
 > Do not win by being safe. Win by reaching the ideal.

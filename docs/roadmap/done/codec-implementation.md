@@ -1,4 +1,5 @@
 <!-- description: Three-layer codec implementation: compiler, format library, user code -->
+<!-- done: 2026-03-15 -->
 # Codec Implementation Plan
 
 ## 3層モデル

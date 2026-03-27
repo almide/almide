@@ -1,4 +1,5 @@
 <!-- description: Showcase: Markdown-to-HTML converter using variant types and match -->
+<!-- done: 2026-03-18 -->
 # Showcase 4: Markdown to HTML (DevTool)
 
 **領域:** DevTool / テキスト変換

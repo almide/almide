@@ -1,4 +1,5 @@
 <!-- description: Fix WASM validation errors from union-find generic instantiation -->
+<!-- done: 2026-03-23 -->
 # WASM Validation Fixes
 
 ## Status: Rust 153/153, WASM 1 compile failure (type_system_test), 8 skipped (Codec)

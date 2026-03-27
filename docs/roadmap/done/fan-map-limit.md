@@ -1,4 +1,5 @@
 <!-- description: Add concurrency limit parameter to fan.map -->
+<!-- done: 2026-03-19 -->
 # fan.map Concurrency Limit
 
 ## 概要

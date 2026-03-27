@@ -1,4 +1,5 @@
 <!-- description: AOT cross-compilation producing multiple target artifacts in one build -->
+<!-- done: 2026-03-18 -->
 # Cross-Target AOT Compilation [PLANNED]
 
 ## Motivation

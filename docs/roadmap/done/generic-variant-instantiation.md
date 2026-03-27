@@ -1,4 +1,5 @@
 <!-- description: Fix type instantiation for generic variant constructors like Nothing -->
+<!-- done: 2026-03-15 -->
 # Generic Variant Type Instantiation
 
 **テスト:** `spec/lang/type_system_test.almd`

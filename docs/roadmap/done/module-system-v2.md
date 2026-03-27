@@ -1,4 +1,5 @@
 <!-- description: File-based module system with visibility controls and mod.almd -->
+<!-- done: 2026-03-13 -->
 # Module System v2
 
 ### Design Principles

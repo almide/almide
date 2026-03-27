@@ -1,4 +1,5 @@
 <!-- description: Unified async/concurrency design using effect fn and fan syntax -->
+<!-- done: 2026-03-17 -->
 # Fan Concurrency
 
 > **`effect fn` が非同期の境界。`fan` が並行の構文。async/await は書かない。**

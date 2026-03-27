@@ -1,4 +1,5 @@
 <!-- description: Unify grammar definitions into a single source of truth -->
+<!-- done: 2026-03-18 -->
 # Grammar Codegen: Single Source of Truth [P1]
 
 ## Problem

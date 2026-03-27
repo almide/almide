@@ -1,4 +1,5 @@
 <!-- description: Strategy for adding new codegen targets with minimal cost -->
+<!-- done: 2026-03-18 -->
 # Multi-Target Strategy
 
 ## Vision

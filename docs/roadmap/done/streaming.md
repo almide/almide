@@ -1,4 +1,5 @@
 <!-- description: WebSocket, SSE, and streaming data support -->
+<!-- done: 2026-03-19 -->
 # Streaming — WebSocket, SSE, Stream
 
 ## 概要

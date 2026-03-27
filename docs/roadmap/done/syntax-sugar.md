@@ -1,4 +1,5 @@
 <!-- description: Syntax sugar (ranges, exhaustiveness check, lambda shorthand) -->
+<!-- done: 2026-03-15 -->
 # Syntax Sugar
 
 ## Range Literals ✅

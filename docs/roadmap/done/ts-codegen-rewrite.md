@@ -1,4 +1,5 @@
 <!-- description: Rewrite TS codegen to two-stage pipeline (IR to TsIR to String) -->
+<!-- done: 2026-03-15 -->
 # TS/JS Codegen Rewrite
 
 ## Summary

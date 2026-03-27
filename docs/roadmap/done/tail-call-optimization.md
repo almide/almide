@@ -1,4 +1,5 @@
 <!-- description: Self-recursive tail call to labeled loop transformation -->
+<!-- done: 2026-03-15 -->
 # Tail Call Optimization
 
 ## Summary

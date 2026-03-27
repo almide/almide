@@ -1,4 +1,5 @@
 <!-- description: Reorganize tests into spec/ (lang/stdlib/integration) and tests/ -->
+<!-- done: 2026-03-12 -->
 # Test Directory Structure Redesign
 
 テスト関連がルートに散らばっていた（`lang/`, `stdlib/`, `exercises/`, `tests/`）問題を解決。

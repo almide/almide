@@ -1,4 +1,5 @@
 <!-- description: Fix correctness issues in generated code (auto-unwrap, range, guard) -->
+<!-- done: 2026-03-15 -->
 # Codegen Correctness Fixes
 
 生成コードの正確性に関わる問題の修正。

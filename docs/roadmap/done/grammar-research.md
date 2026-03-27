@@ -1,4 +1,5 @@
 <!-- description: A/B testing infrastructure for syntax design using LLM benchmarks -->
+<!-- done: 2026-03-15 -->
 # Grammar Research Infrastructure
 
 ## Vision

@@ -1,4 +1,5 @@
 <!-- description: Type system extensions (generics migration, inference improvements) -->
+<!-- done: 2026-03-15 -->
 # Type System Extensions
 
 The type system is Almide's primary lever for surpassing other AI-targeted languages. The goal: **catch more errors at compile time without making the language harder for LLMs to write.** Every feature below follows one rule — the compiler gets smarter, the syntax stays simple.

@@ -1,4 +1,5 @@
 <!-- description: Complete classification of codegen transforms by context depth -->
+<!-- done: 2026-03-18 -->
 # Codegen v3: Transform Classification
 
 Codegen がやっている全変換を、必要な文脈の深さで 3 段階に分類する。

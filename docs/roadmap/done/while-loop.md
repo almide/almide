@@ -1,4 +1,5 @@
 <!-- description: Dedicated while loop syntax replacing do-block guard pattern -->
+<!-- done: 2026-03-12 -->
 # While Loop
 
 ## The Problem

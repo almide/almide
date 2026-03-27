@@ -1,4 +1,5 @@
 <!-- description: Swift-style result builder DSL for structured data construction -->
+<!-- done: 2026-03-18 -->
 # Result Builder
 
 ## Vision

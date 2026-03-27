@@ -1,4 +1,5 @@
 <!-- description: Open record / row polymorphism implementation for structural typing -->
+<!-- done: 2026-03-16 -->
 # Open Record / Row Polymorphism — Implementation Guide
 
 **テスト:** `spec/lang/open_record_test.almd`

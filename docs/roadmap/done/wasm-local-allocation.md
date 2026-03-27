@@ -1,4 +1,5 @@
 <!-- description: Redesign WASM function local allocation and scratch layout -->
+<!-- done: 2026-03-23 -->
 # WASM Local Allocation Redesign
 
 ## Status: 設計段階

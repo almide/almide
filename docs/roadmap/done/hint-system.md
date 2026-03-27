@@ -1,4 +1,5 @@
 <!-- description: Decouple hint generation from parser into a dedicated system -->
+<!-- done: 2026-03-13 -->
 # Hint System Architecture [P0]
 
 ## Why This Is Critical

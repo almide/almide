@@ -1,4 +1,5 @@
 <!-- description: Warn on unused variables and imports, suppressible with _ prefix -->
+<!-- done: 2026-03-15 -->
 # Unused Variable Warnings
 
 ## Summary

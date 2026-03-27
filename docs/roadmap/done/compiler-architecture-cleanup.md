@@ -1,4 +1,5 @@
 <!-- description: Compiler structural cleanup including clone/deref IR conversion -->
+<!-- done: 2026-03-18 -->
 # Compiler Architecture Cleanup
 
 **優先度:** Medium — 1.0後でもいいが、やるなら早い方がいい

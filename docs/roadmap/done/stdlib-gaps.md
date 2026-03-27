@@ -1,4 +1,5 @@
 <!-- description: Reduce AI-generated boilerplate via new stdlib functions -->
+<!-- done: 2026-03-11 -->
 # Stdlib Gaps
 
 ## Goal

@@ -1,4 +1,5 @@
 <!-- description: Typed intermediate representation between checker and emitters -->
+<!-- done: 2026-03-12 -->
 # Typed IR
 
 ## The Problem

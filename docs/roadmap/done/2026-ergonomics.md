@@ -1,4 +1,5 @@
 <!-- description: Ergonomics issues found via self-tooling, evaluated against design principles -->
+<!-- done: 2026-03-17 -->
 # 2026 Ergonomics Roadmap
 
 Self-tooling (Chrome extension, TextMate generator, Playground modules) で発見された

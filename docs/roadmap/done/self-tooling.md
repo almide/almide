@@ -1,4 +1,5 @@
 <!-- description: Editor tools (tree-sitter grammar, TextMate) written in Almide -->
+<!-- done: 2026-03-12 -->
 # Self-Tooling: Editor Tools Written in Almide
 
 Demonstrate that Almide's entire editor ecosystem can be written in Almide itself, produced by AI from scratch. This proves the mission: "LLMs can mass-produce an ecosystem in Almide."

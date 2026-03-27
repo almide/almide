@@ -1,4 +1,5 @@
 <!-- description: Reform ++ concatenation operator for strings and lists -->
+<!-- done: 2026-03-18 -->
 # Concatenation Operator Reform
 
 **優先度:** High — 1.0 前の breaking change 候補

@@ -1,4 +1,5 @@
 <!-- description: Write-once cross-platform support with transparent OS differences -->
+<!-- done: 2026-03-11 -->
 # Cross-Platform Support
 
 Almide is a write-once language — platform differences are the compiler's problem, never the user's.

@@ -1,4 +1,5 @@
 <!-- description: Fix Rust codegen emitting invalid type for anonymous records -->
+<!-- done: 2026-03-18 -->
 # Anonymous Record Codegen Fix
 
 **優先度:** High — Grammar Lab 実験で全タスクの 30% が影響

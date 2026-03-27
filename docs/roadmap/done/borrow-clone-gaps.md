@@ -1,4 +1,5 @@
 <!-- description: Fix cases where Rust codegen fails to insert necessary clones -->
+<!-- done: 2026-03-17 -->
 # Borrow/Clone Gaps
 
 Rust codegen が変数の clone を挿入し損ねるケースを徹底的に潰す。

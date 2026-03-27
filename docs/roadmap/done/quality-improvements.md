@@ -1,4 +1,5 @@
 <!-- description: Quality improvements (error line numbers, heredoc tracking) -->
+<!-- done: 2026-03-17 -->
 # Quality Improvements
 
 ## 1. エラーメッセージの行番号 ✅

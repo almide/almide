@@ -1,4 +1,5 @@
 <!-- description: Separate --target (output language) from --platform (runtime env) -->
+<!-- done: 2026-03-18 -->
 # Platform / Target Separation
 
 ## Thesis

@@ -1,4 +1,5 @@
 <!-- description: Report all errors at once instead of stopping at the first one -->
+<!-- done: 2026-03-13 -->
 # Error Recovery
 
 ## Why This Is Critical

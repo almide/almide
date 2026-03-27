@@ -1,4 +1,5 @@
 <!-- description: Systematic language feature test suite for regression detection -->
+<!-- done: 2026-03-11 -->
 # Language Test Suite
 
 Almide の言語機能を体系的にテストするスイート。`lang/` に配置。

@@ -1,4 +1,5 @@
 <!-- description: Separate AST-to-IR lowering from use-count analysis into two passes -->
+<!-- done: 2026-03-18 -->
 # Lower Two-Pass Separation
 
 **優先度:** post-1.0

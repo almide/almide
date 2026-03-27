@@ -1,4 +1,5 @@
 <!-- description: Three-tier import visibility for stdlib modules -->
+<!-- done: 2026-03-24 -->
 # Stdlib Import Control
 
 **優先度:** 1.0

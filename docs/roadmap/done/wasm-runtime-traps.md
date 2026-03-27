@@ -1,4 +1,5 @@
 <!-- description: Fix 44 WASM runtime traps (protocols, maps, closures, strings) -->
+<!-- done: 2026-03-23 -->
 # WASM Runtime Traps
 
 ## Status: 21 pass, 44 runtime traps, 8 skipped, 0 compile failures

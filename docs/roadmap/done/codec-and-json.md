@@ -1,4 +1,5 @@
 <!-- description: Format-agnostic codec protocol with JSON as first implementation -->
+<!-- done: 2026-03-15 -->
 # Codec Protocol & JSON
 
 ## Vision

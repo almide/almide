@@ -1,4 +1,5 @@
 <!-- description: IR-to-IR transform passes applied before codegen for all targets -->
+<!-- done: 2026-03-15 -->
 # IR Optimization Passes
 
 IR-to-IR transform passes inserted before codegen to improve generated code quality.

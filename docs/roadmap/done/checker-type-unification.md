@@ -1,4 +1,5 @@
 <!-- description: Unify InferTy and Ty representations in the type checker -->
+<!-- done: 2026-03-18 -->
 # Checker InferTy/Ty Unification
 
 **優先度:** post-1.0 (1.x)

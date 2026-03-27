@@ -1,4 +1,5 @@
 <!-- description: Fix cases where same .almd produces different results on Rust vs TS -->
+<!-- done: 2026-03-18 -->
 # Cross-Target Semantics
 
 同じ `.almd` が Rust と TS で異なる結果を出すケースの修正。Almide の「同じコードが両方で動く」前提を保証する。

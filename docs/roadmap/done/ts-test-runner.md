@@ -1,4 +1,5 @@
 <!-- description: almide test --target ts command with Deno/Node support -->
+<!-- done: 2026-03-25 -->
 # TypeScript Test Runner
 
 **完了日:** 2026-03-25

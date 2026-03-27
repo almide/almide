@@ -1,4 +1,5 @@
 <!-- description: Ground-up rewrite of the 890-line source formatter -->
+<!-- done: 2026-03-15 -->
 # Formatter Rewrite
 
 ## Summary

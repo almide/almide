@@ -1,4 +1,5 @@
 <!-- description: Showcase: dotenv file loader and missing-key checker -->
+<!-- done: 2026-03-18 -->
 # Showcase 5: dotenv Loader (Script)
 
 **領域:** Script / 設定管理

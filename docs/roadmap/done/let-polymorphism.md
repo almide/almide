@@ -1,3 +1,4 @@
+<!-- done: 2026-03-16 -->
 # Let-Polymorphism (Algorithm W)
 
 ## 現状

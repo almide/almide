@@ -1,4 +1,5 @@
 <!-- description: Enable comfortable CLI tool authoring with run, build, and WASM targets -->
+<!-- done: 2026-03-17 -->
 # CLI-First
 
 ## Vision
