@@ -2,27 +2,27 @@
 <!-- done: 2026-03-15 -->
 # Codec Test Specification
 
-Swift Codable / Serde / Kotlin serialization / Jackson の知見に基づくテストケース集。
-実装前に仕様を明文化するためのもの。
+Test case collection based on insights from Swift Codable / Serde / Kotlin serialization / Jackson.
+Created to document specifications before implementation.
 
-## 0. Almide の設計判断 (既決)
+## 0. Almide design decisions (settled)
 
-| 判断 | 決定 | 根拠 |
+| Decision | Determination | Rationale |
 |------|------|------|
-| missing vs null | **区別しない** (merge) | Option[T] で missing も null も none |
-| default on missing | **Yes** | field default があれば missing 時に適用 |
-| default on null | **Yes** | null も missing と同様に default で埋める |
-| unknown fields | **Ignore** (default) | strict reject は JsonOptions で opt-in |
-| alias | **decode only** | encode は alias (or field name) を使用 |
-| coercion | **No** (strict) | repair API で opt-in |
-| compile-time type 優先 | **Yes** | Almide に runtime polymorphism なし |
-| polymorphism | **Tagged 必須** | Variant の Tagged 形式 |
-| canonical encode | **field declaration order** | 安定 |
-| encode/decode 非対称 | **許容** | manual codec で片方だけ書ける |
+| missing vs null | **No distinction** (merge) | Option[T] treats both missing and null as none |
+| default on missing | **Yes** | Apply field default when missing |
+| default on null | **Yes** | Fill null with default just like missing |
+| unknown fields | **Ignore** (default) | strict reject is opt-in via JsonOptions |
+| alias | **decode only** | encode uses alias (or field name) |
+| coercion | **No** (strict) | opt-in via repair API |
+| compile-time type priority | **Yes** | Almide has no runtime polymorphism |
+| polymorphism | **Tagged required** | Variant Tagged format |
+| canonical encode | **field declaration order** | stable |
+| encode/decode asymmetry | **allowed** | Can write only one side with manual codec |
 
-## 1. P0: 最初に通すべきテスト (20件)
+## 1. P0: Tests to pass first (20 cases)
 
-### Presence / Null / Default (12件)
+### Presence / Null / Default (12 cases)
 
 ```
 P0-001: required field missing → err("missing field 'id'")
@@ -39,7 +39,7 @@ P0-011: array element required missing → err with index
 P0-012: all fields present → roundtrip success
 ```
 
-### Unknown / Alias (4件)
+### Unknown / Alias (4 cases)
 
 ```
 P0-013: unknown field ignored (default mode)
@@ -48,7 +48,7 @@ P0-015: alias encode: type_ as "type" → "type" key output
 P0-016: unknown field rejected (strict mode, future)
 ```
 
-### Roundtrip (4件)
+### Roundtrip (4 cases)
 
 ```
 P0-017: flat record encode-decode roundtrip
@@ -57,9 +57,9 @@ P0-019: variant encode-decode roundtrip (Tagged)
 P0-020: encode then stringify then parse then decode = original
 ```
 
-## 2. P1: 次に通すべきテスト (20件)
+## 2. P1: Tests to pass next (20 cases)
 
-### Enum / Variant (6件)
+### Enum / Variant (6 cases)
 
 ```
 P1-001: unit variant encode → {"Red": null}
@@ -70,7 +70,7 @@ P1-005: variant payload mismatch → err
 P1-006: variant discriminator missing → err
 ```
 
-### List (4件)
+### List (4 cases)
 
 ```
 P1-007: empty list decode → []
@@ -79,7 +79,7 @@ P1-009: list of Codec types roundtrip (List[Weather])
 P1-010: list element type mismatch → err with index
 ```
 
-### Error Quality (6件)
+### Error Quality (6 cases)
 
 ```
 P1-011: missing field error includes field name
@@ -90,7 +90,7 @@ P1-015: alias error uses wire key name, not field name
 P1-016: multiple errors collected (validate mode, future)
 ```
 
-### Schema Evolution (4件)
+### Schema Evolution (4 cases)
 
 ```
 P1-017: old payload (missing new optional field) → decode success
@@ -99,7 +99,7 @@ P1-019: field renamed with alias → old key still accepted
 P1-020: new required field added → old payload fails clearly
 ```
 
-## 3. P2: 高度なテスト (15件)
+## 3. P2: Advanced tests (15 cases)
 
 ### Coercion (repair mode)
 
@@ -136,34 +136,34 @@ P2-014: many unknown fields in strict mode → all reported
 P2-015: large string field → no truncation
 ```
 
-## 4. 未決の判断ポイント
+## 4. Open decision points
 
-Almide で明文化が必要な決定:
+Decisions that need to be documented for Almide:
 
-| 問題 | 選択肢 | 推奨 |
+| Issue | Options | Recommended |
 |------|--------|------|
 | duplicate key | last wins / err | **err** (strict default) |
 | null on non-Optional, no default | err / ignore | **err** |
-| encode Option none | omit field / emit null | **omit** (codec-and-json.md 決定済み) |
+| encode Option none | omit field / emit null | **omit** (decided in codec-and-json.md) |
 | encode default value | always / omit if == default | **always** (simplicity) |
 | error path format | `coord.lon` / `["coord", "lon"]` | **dot notation** |
 | unknown enum case preserve | preserve / err | **err** |
-| generic T: Codec constraint | compile-time check | **auto-derive 生成時に検証** (実装済み) |
-| flatten / inline | support / don't | **don't** (Canonicity — 1つの構造に1つの表現) |
+| generic T: Codec constraint | compile-time check | **verified during auto-derive generation** (implemented) |
+| flatten / inline | support / don't | **don't** (Canonicity — one representation per structure) |
 
-## 5. Almide で Not Applicable
+## 5. Not Applicable in Almide
 
-Swift/Serde の概念で Almide に該当しないもの:
+Swift/Serde concepts that do not apply to Almide:
 
-- **class 継承の encode/decode** — Almide に class なし
-- **property wrapper** — Almide に wrapper pattern なし
-- **existential / any Codable** — Almide に existential なし
-- **flatten** — Canonicity 違反、サポートしない
-- **CodingKeys enum** — field alias で代替
-- **runtime type dispatch** — Almide は compile-time only
-- **lazy decode / streaming** — 将来検討、今は eager
+- **class inheritance encode/decode** — Almide has no classes
+- **property wrapper** — Almide has no wrapper pattern
+- **existential / any Codable** — Almide has no existentials
+- **flatten** — Canonicity violation, not supported
+- **CodingKeys enum** — replaced by field alias
+- **runtime type dispatch** — Almide is compile-time only
+- **lazy decode / streaming** — future consideration, currently eager
 
-## 6. テストのフォーマット
+## 6. Test format
 
 ```almide
 test "P0-001: required field missing" {
@@ -176,7 +176,7 @@ test "P0-001: required field missing" {
 }
 ```
 
-## 関連
+## Related
 
-- [Codec Implementation Plan](codec-implementation.md) — 実装設計
-- [Codec Protocol & JSON](codec-and-json.md) — 元の設計仕様
+- [Codec Implementation Plan](codec-implementation.md) — Implementation design
+- [Codec Protocol & JSON](codec-and-json.md) — Original design specification

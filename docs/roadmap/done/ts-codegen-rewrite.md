@@ -3,27 +3,27 @@
 # TS/JS Codegen Rewrite
 
 ## Summary
-`src/emit_ts/` を書き直し。Rust codegen と同じ 2 段パイプライン (IR → TsIR → String) に統一。
+Rewrite `src/emit_ts/`. Unify with the same two-stage pipeline as Rust codegen (IR → TsIR → String).
 
 ## Current State
-- 旧コードのまま（4 ファイル）
-- Rust codegen は RustIR パイプラインに移行済みだが、TS は未対応
-- stdlib が空のため、TS runtime (`emit_ts_runtime.rs`) も大幅に簡素化可能
+- Still using the old code (4 files)
+- Rust codegen has migrated to the RustIR pipeline, but TS has not
+- Since stdlib is empty, the TS runtime (`emit_ts_runtime.rs`) can also be significantly simplified
 
 ## Goal
-- IR → TsIR → String の 2 段パイプライン
-- 各ファイル < 500 行
-- Rust codegen と同じ設計原則:
-  - Lower で全判定
-  - Render は pure pattern match
+- Two-stage pipeline: IR → TsIR → String
+- Each file < 500 lines
+- Same design principles as Rust codegen:
+  - All decisions made during lowering
+  - Rendering is pure pattern matching
 
 ## Design
 ```
 emit_ts/
-  ts_ir.rs      — TsIR データ型
+  ts_ir.rs      — TsIR data types
   lower_ts.rs   — IR → TsIR (Result erasure, ok→value, err→throw)
   render_ts.rs  — TsIR → TypeScript/JavaScript source
-  mod.rs        — エントリポイント
+  mod.rs        — Entry point
 ```
 
 ## Files

@@ -2,7 +2,7 @@
 <!-- done: 2026-03-14 -->
 # Bidirectional Type Inference for Lambda Parameters
 
-**Status**: 実装完了 (commit 002180d, 2026-03-14)。checker の two-pass 推論 + lowerer への型伝搬を実装。
+**Status**: Implementation complete (commit 002180d, 2026-03-14). Implemented two-pass inference in checker + type propagation to lowerer.
 
 ## Problem
 

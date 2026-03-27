@@ -6,7 +6,7 @@
 IR-to-IR optimization passes: constant folding, DCE, and basic inlining.
 
 ## Current State
-IR に最適化パスがない。生成された Rust コードは rustc が最適化するが、IR レベルの最適化で不要な clone やアロケーションを削減できる。
+No optimization passes on IR. Generated Rust code is optimized by rustc, but IR-level optimization can eliminate unnecessary clones and allocations.
 
 ## Design
 
@@ -19,22 +19,22 @@ if true then a else b → a
 ```
 
 ### Pass 2: Dead Code Elimination
-use-count が 0 のバインディングを除去。
+Remove bindings with use-count of 0.
 ```
-let x = expensive()  // x が未使用
+let x = expensive()  // x is unused
 println("hello")
 →
 println("hello")
 ```
 
 ### Pass 3: Simple Inlining (future)
-1 回だけ使われる小さな関数をインライン展開。
+Inline expand small functions that are only used once.
 
 ## Implementation
-- `src/optimize.rs` (新ファイル) — `optimize_program(&mut IrProgram)`
-- `src/main.rs` — lower 後、codegen 前にパスを挿入
-- 各パスは `IrProgram` を in-place で変換
-- テスト: 最適化前後の出力を比較
+- `src/optimize.rs` (new file) — `optimize_program(&mut IrProgram)`
+- `src/main.rs` — insert passes after lowering, before codegen
+- Each pass transforms `IrProgram` in-place
+- Tests: compare output before and after optimization
 
 ## Pipeline Position
 ```

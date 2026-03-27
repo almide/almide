@@ -3,29 +3,29 @@
 # Derive Conventions
 
 ## Summary
-trait/typeclass を導入せず、固定 convention + コロン構文で polymorphism を実現する。
-LLM の生成精度を最大化する設計判断。
+Achieve polymorphism with fixed conventions + colon syntax without introducing traits/typeclasses.
+A design decision that maximizes LLM generation accuracy.
 
 ## Design Rationale
-- **LLM は固定パターンを最も正確に書ける**: convention が 6 個なら完全に覚えられる
-- **型エラーの発生源を消す**: trait + impl + bound の組み合わせ爆発がない
-- **「見慣れないパターン」問題を回避**: 全プロジェクトで同じ convention
-- **人間の学習コストはエラーメッセージで導ける**: LLM にとって初見問題は存在しない
+- **LLMs write fixed patterns most accurately**: With 6 conventions, they can memorize them completely
+- **Eliminate type error sources**: No combinatorial explosion of trait + impl + bound
+- **Avoid "unfamiliar pattern" problem**: Same conventions across all projects
+- **Human learning cost can be guided by error messages**: No first-encounter problem for LLMs
 
-## Almide の多相性モデル
+## Almide's polymorphism model
 
-2パターンだけ:
-1. **組み込み convention** — コロンで宣言、演算子・言語機能と連動
-2. **structural bound** — メソッドを書けば使える、bound で制約できる
+Only 2 patterns:
+1. **Built-in conventions** — declared with colon, linked to operators and language features
+2. **Structural bounds** — write methods and they work, constrain with bounds
 
 ```almide
-// 1. 組み込み convention
+// 1. Built-in convention
 type Dog: Eq, Repr = { name: String, breed: String }
 
 fn Dog.eq(a: Dog, b: Dog) -> Bool = d.name == other.name
 fn Dog.repr(d: Dog) -> String = "${d.name} (${d.breed})"
 
-// 2. structural bound (convention 定義不要、メソッド + bound)
+// 2. structural bound (no convention definition needed, methods + bounds)
 fn print_all[T: { display: () -> String }](items: List[T]) =
   for item in items { println(item.display()) }
 ```
@@ -35,10 +35,10 @@ fn print_all[T: { display: () -> String }](items: List[T]) =
 ```almide
 type Dog: Eq, Repr = { name: String, breed: String }
 type Color: Eq, Repr = Red | Green | Blue | Rgb(Int, Int, Int)
-type UserId = Int  // alias — convention なし
+type UserId = Int  // alias — no convention
 ```
 
-## Fixed Conventions (6個、これ以上増えない)
+## Fixed Conventions (6 total, no more will be added)
 
 | Convention | Required Function | Enables |
 |---|---|---|
@@ -47,54 +47,54 @@ type UserId = Int  // alias — convention なし
 | `Ord` | `T.ord(self, other: T) -> Int` | `sort()`, `<`, `>`, `<=`, `>=` |
 | `Hash` | `T.hash(self) -> Int` | `Map` key, `Set` |
 | `Encode` | `T.encode(self) -> String` | JSON/TOML serialize |
-| `Decode` | `T.decode(s: String) -> Result[T, String]` | deserialize (静的メソッド) |
+| `Decode` | `T.decode(s: String) -> Result[T, String]` | deserialize (static method) |
 
-名前の選定基準: LLM の学習データに最も多く出現する概念名。
-- `Eq` — Rust/Haskell/MoonBit 共通
-- `Repr` — Python `__repr__` (学習データ最大の言語)
-- `Ord` — Rust/Haskell 共通
-- `Hash` — 全言語共通
+Name selection criteria: concept names that appear most frequently in LLM training data.
+- `Eq` — common to Rust/Haskell/MoonBit
+- `Repr` — Python `__repr__` (largest language in training data)
+- `Ord` — common to Rust/Haskell
+- `Hash` — common to all languages
 
-Auto derive: カスタム関数が未定義ならコンパイラが自動生成。
+Auto derive: compiler auto-generates when custom functions are not defined.
 
 ## Implementation Phases
 
 ### Phase 1: Parser + Checker + Codegen mapping ✅ DONE
-- `type Dog: Eq, Repr = { ... }` コロン構文パース
-- `fn Dog.eq(self, ...)` メソッド定義構文パース
-- Checker が convention 名を検証 (6種固定)
-- Rust codegen が `#[derive(PartialEq, Eq, Ord, Hash)]` にマッピング
-- Formatter が `: Eq, Repr` 出力
+- `type Dog: Eq, Repr = { ... }` colon syntax parsing
+- `fn Dog.eq(self, ...)` method definition syntax parsing
+- Checker validates convention names (fixed set of 6)
+- Rust codegen maps to `#[derive(PartialEq, Eq, Ord, Hash)]`
+- Formatter outputs `: Eq, Repr`
 
 ### Phase 2: Method Resolution
-- `fn Dog.repr(self, ...)` を checker が型の関連関数として登録
-- `dog.repr()` → UFCS で `Dog.repr(dog)` に解決
-- lower が `Dog.repr` を IR の `CallTarget` に変換
+- Checker registers `fn Dog.repr(self, ...)` as an associated function of the type
+- `dog.repr()` → resolved to `Dog.repr(dog)` via UFCS
+- Lowerer converts `Dog.repr` to IR `CallTarget`
 
 ### Phase 3: Operator Dispatch
-- `a == b` on Dog → `Dog.eq(a, b)` にディスパッチ (`Eq` 宣言時)
-- `"${dog}"` → `Dog.repr(dog)` にディスパッチ (`Repr` 宣言時)
-- `dogs.sort()` → `Dog.ord` を使用 (`Ord` 宣言時)
+- `a == b` on Dog → dispatches to `Dog.eq(a, b)` (when `Eq` declared)
+- `"${dog}"` → dispatches to `Dog.repr(dog)` (when `Repr` declared)
+- `dogs.sort()` → uses `Dog.ord` (when `Ord` declared)
 
 ### Phase 4: Auto Derive
-- convention 関数が未定義の場合、IR に自動生成
-- `Eq`: 全フィールドの `==` で比較
-- `Repr`: `TypeName { field1: value1, ... }` 形式
-- `Ord`: フィールド順に辞書順比較
-- `Hash`: 全フィールドの hash を combine
+- When convention functions are undefined, auto-generate in IR
+- `Eq`: compare with `==` on all fields
+- `Repr`: `TypeName { field1: value1, ... }` format
+- `Ord`: lexicographic comparison in field order
+- `Hash`: combine hash of all fields
 
 ### Phase 5: Static Methods + Encode/Decode
-- `Config.decode(json)` — 型名を namespace とした静的メソッド呼び出し
-- `Encode`: JSON 形式出力
-- `Decode`: JSON パース
+- `Config.decode(json)` — static method call with type name as namespace
+- `Encode`: JSON format output
+- `Decode`: JSON parse
 
 ## Files
 ```
-src/parser/mod.rs          — fn Dog.eq() パース (expect_any_fn_name)
-src/parser/declarations.rs — type Dog: Eq, Repr パース
-src/check/mod.rs           — convention 名検証、関連関数登録
-src/lower.rs               — convention メソッド解決、auto derive 生成
-src/emit_rust/lower_rust.rs — Rust derive マッピング
+src/parser/mod.rs          — fn Dog.eq() parsing (expect_any_fn_name)
+src/parser/declarations.rs — type Dog: Eq, Repr parsing
+src/check/mod.rs           — convention name validation, associated function registration
+src/lower.rs               — convention method resolution, auto derive generation
+src/emit_rust/lower_rust.rs — Rust derive mapping
 src/emit_ts/lower_ts.rs    — TS convention dispatch
-src/fmt.rs                 — コロン構文出力
+src/fmt.rs                 — colon syntax output
 ```

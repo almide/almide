@@ -2,109 +2,109 @@
 # Self-Hosting: Autonomous Bootstrap Compiler
 
 **Status**: On Hold (Phase 3+ prerequisite)
-**Priority**: Strategic — ミッション直結
-**Prerequisite**: 言語仕様安定, WASM direct emit 完成, Protocol/Generics 成熟
+**Priority**: Strategic — Directly aligned with mission
+**Prerequisite**: Language spec stable, WASM direct emit complete, Protocol/Generics mature
 
-## なぜやるのか
+## Why
 
-Almide のミッションは **modification survival rate** — LLM が最も正確に書ける言語であること。
+Almide's mission is **modification survival rate** — being the language LLMs can write most accurately.
 
-セルフホスティングはこのミッションの論理的帰結になる:
+Self-hosting is the logical consequence of this mission:
 
-1. **コンパイラのソースが Almide で書かれている** → LLM が最も正確に読み書きできるコンパイラになる
-2. **WASM direct emit で 350KB 級の全部入りバイナリが出せる** → compiler + formatter + test runner + type checker が単一バイナリに収まる
-3. **1 + 2 の組み合わせ** → LLM がコンパイラ自体を改変 → 再コンパイル → 改変されたコンパイラでさらに改変、というループが自己完結する
+1. **Compiler source is written in Almide** → Becomes the compiler LLMs can read and write most accurately
+2. **WASM direct emit can produce a 350KB all-in-one binary** → compiler + formatter + test runner + type checker fit in a single binary
+3. **Combining 1 + 2** → LLMs modify the compiler itself → recompile → modify further with the modified compiler, a self-contained loop
 
-つまり: **dev container に 350KB の WASM バイナリを 1 つ置くだけで、LLM が自分の道具を自分で研ぐループが回り始める。**
+In other words: **Place a single 350KB WASM binary in a dev container, and the loop where LLMs sharpen their own tools begins.**
 
-普通の言語でこれは成立しない:
-- ソースが複雑すぎて LLM が壊す → 修正生存率が低い
-- ツールチェーンの依存関係で環境構築に失敗する → セットアップコストが高い
-- バイナリが大きすぎて配布が重い → 起動コストが高い
+This doesn't work with ordinary languages:
+- Source is too complex and LLMs break it → low modification survival rate
+- Toolchain dependencies cause environment setup failures → high setup cost
+- Binary is too large for easy distribution → high startup cost
 
-Almide は 3 つとも解決できる位置にいる。
+Almide is positioned to solve all three.
 
-## ゴール像
+## Goal State
 
 ```
-350KB WASM バイナリ 1 つ:
-  almide compile  — セルフコンパイル可能
-  almide fmt      — フォーマッタ内蔵
-  almide test     — テストランナー内蔵
-  almide check    — 型チェッカー内蔵
+Single 350KB WASM binary:
+  almide compile  — Self-compilable
+  almide fmt      — Formatter built-in
+  almide test     — Test runner built-in
+  almide check    — Type checker built-in
 
-実行環境:
-  wasmtime / wasmer / ブラウザ / エッジ — どこでも同じバイナリが動く
+Execution environment:
+  wasmtime / wasmer / browser / edge — Same binary runs anywhere
 
-LLM ループ:
-  LLM がソースを読む → 修正 → almide test → almide compile → 新しいコンパイラ
-  ↑ このループが外部依存ゼロで回る
+LLM loop:
+  LLM reads source → modifies → almide test → almide compile → new compiler
+  ↑ This loop runs with zero external dependencies
 ```
 
-## 段階的移行
+## Incremental Migration
 
-| Phase | 対象 | 理由 |
-|-------|------|------|
-| 0 | formatter | 文字列処理中心、壊れても被害が限定的 |
-| 1 | test runner | コンパイラ本体への依存が少ない |
-| 2 | lexer | 文字列処理中心、依存が少ない |
-| 3 | parser | 再帰下降、データ構造操作 |
-| 4 | type checker | 最も複雑、言語機能をフルに使う |
-| 5 | lowering + codegen | IR 変換、WASM emit |
-| 6 | bootstrap | 古い Almide コンパイラで新しい Almide コンパイラをコンパイル |
+| Phase | Target | Reason |
+|-------|--------|--------|
+| 0 | Formatter | String processing focused, limited damage if broken |
+| 1 | Test runner | Few dependencies on compiler core |
+| 2 | Lexer | String processing focused, few dependencies |
+| 3 | Parser | Recursive descent, data structure manipulation |
+| 4 | Type checker | Most complex, uses language features to their fullest |
+| 5 | Lowering + codegen | IR transformation, WASM emit |
+| 6 | Bootstrap | Compile new Almide compiler with old Almide compiler |
 
-Phase 0-1 は言語機能の成熟度テストを兼ねる。ここで足りない機能が見つかれば言語側にフィードバックする。
+Phase 0-1 doubles as a language feature maturity test. Missing features discovered here feed back into the language.
 
-## 前提条件
+## Prerequisites
 
-- [ ] WASM direct emit が stdlib 含めて完成している
-- [ ] Protocol / Generics が安定している（コンパイラの内部データ構造に必要）
-- [ ] ファイル I/O が WASI 経由で動く
-- [ ] 言語仕様がほぼ凍結されている（bootstrap breakage を最小化）
-- [ ] テストカバレッジがコンパイラの正しさを十分に保証している
+- [ ] WASM direct emit is complete including stdlib
+- [ ] Protocol / Generics are stable (needed for compiler internal data structures)
+- [ ] File I/O works via WASI
+- [ ] Language spec is nearly frozen (minimize bootstrap breakage)
+- [ ] Test coverage sufficiently guarantees compiler correctness
 
-### 不足している言語機能
+### Missing Language Features
 
-**データ構造・型システム**
+**Data Structures / Type System**
 
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| 効率的な HashMap/BTreeMap | ❌ | 現在の `Map` は限定的。シンボルテーブル、型環境に必須 |
-| Trait / typeclass | ❌ | 共通インターフェース（Display, Eq, Hash）の抽象化 |
-| 代数的データ型の再帰 | ⚠️ | AST/IR 表現に必須。再帰 variant の動作確認要 |
-| ジェネリクスの成熟 | ⚠️ | コンテナ型、visitor パターンに必要 |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Efficient HashMap/BTreeMap | ❌ | Current `Map` is limited. Essential for symbol tables, type environments |
+| Trait / typeclass | ❌ | Abstraction for common interfaces (Display, Eq, Hash) |
+| Recursive algebraic data types | ⚠️ | Essential for AST/IR representation. Need to verify recursive variant behavior |
+| Generics maturity | ⚠️ | Needed for container types, visitor pattern |
 
-**文字列・バイナリ操作**
+**String / Binary Operations**
 
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| char 単位の操作 | ❌ | レキサーに必須（peek, advance, char category 判定） |
-| バイト列操作 | ❌ | WASM バイナリ生成に必須（LEB128 エンコード等） |
-| StringBuilder 相当 | ❌ | コード生成の効率的な文字列組み立て |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Character-level operations | ❌ | Essential for lexer (peek, advance, char category checks) |
+| Byte sequence operations | ❌ | Essential for WASM binary generation (LEB128 encoding, etc.) |
+| StringBuilder equivalent | ❌ | Efficient string assembly for code generation |
 
-**ランタイム・制御**
+**Runtime / Control**
 
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| ファイルシステム（ディレクトリ走査） | ❌ | 複数ファイルのコンパイルに必要 |
-| プロセス引数・終了コード | ⚠️ | CLI として動作するために必要 |
-| パニック / 回復不能エラー | ❌ | ICE (Internal Compiler Error) のハンドリング |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| File system (directory traversal) | ❌ | Needed for multi-file compilation |
+| Process arguments / exit codes | ⚠️ | Needed for CLI operation |
+| Panic / unrecoverable errors | ❌ | ICE (Internal Compiler Error) handling |
 
-## 技術的課題
+## Technical Challenges
 
-- **Bootstrap 信頼チェーン**: 最初の 1 回は Rust 版からビルドする必要がある
-- **WASM 上でのファイル I/O**: WASI で解決可能だが、コンパイラのファイルアクセスパターンとの整合が要る
-- **コンパイラの複雑さ**: 型推論・パターンマッチ・IR 変換はAlmide の言語機能を限界まで使う。足りなければ言語を拡張する必要がある
-- **バイナリサイズ**: 350KB 目標を維持するために、コンパイラ自体のコードサイズを意識した設計が必要
+- **Bootstrap trust chain**: The first build must be done from the Rust version
+- **File I/O on WASM**: Solvable with WASI, but alignment with compiler file access patterns is needed
+- **Compiler complexity**: Type inference, pattern matching, and IR transformation push Almide's language features to their limits. If insufficient, the language needs to be extended
+- **Binary size**: Design must be mindful of compiler code size to maintain the 350KB target
 
-## 成功したとき何が起きるか
+## What Happens When This Succeeds
 
-**Almide は「LLM が最も正確に書ける言語」から「LLM が自律的に進化させられるツールチェーン」になる。**
+**Almide evolves from "the language LLMs can write most accurately" to "the toolchain LLMs can autonomously evolve."**
 
-350KB の WASM バイナリが dev container に 1 つあれば、外部依存なしに:
-- コンパイラ自体のバグを LLM が修正できる
-- 新しい最適化パスを LLM が追加できる
-- 新しいターゲットを LLM が実装できる
-- これらすべてをテスト付きで検証できる
+With a single 350KB WASM binary in a dev container, with no external dependencies:
+- LLMs can fix bugs in the compiler itself
+- LLMs can add new optimization passes
+- LLMs can implement new targets
+- All of the above can be verified with tests
 
-コンパイラが小さく、ソースが LLM に読みやすく、ツールが自己完結している — この 3 つが揃ったとき、コンパイラは **ソフトウェアではなくエージェントの一部** になる。
+When the compiler is small, the source is LLM-readable, and the tools are self-contained — when these three come together, the compiler becomes **not software, but part of the agent**.

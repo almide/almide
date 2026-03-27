@@ -4,55 +4,55 @@
 
 ## Vision
 
-Almide で実用的な CLI ツールを書き、開発時は `almide run` で即実行、配布時は `almide build` で単一ネイティブバイナリを生成できる。同じコードが TS パスでも Rust パスでも動くことを @extern + glue が保証する。
+Write practical CLI tools in Almide, with `almide run` for instant execution during development and `almide build` for producing a single native binary for distribution. Cross-target consistency between TS and Rust paths is guaranteed by @extern + glue.
 
 ```
-開発:  almide run app.almd           → TS → Deno 即実行（go run 相当）
-配布:  almide build app.almd -o app  → Rust → 単一ネイティブバイナリ（go build 相当）
-WASM:  almide build app.almd --target wasm → Rust → .wasm
+Dev:     almide run app.almd           → TS → Deno instant execution (like go run)
+Dist:    almide build app.almd -o app  → Rust → single native binary (like go build)
+WASM:    almide build app.almd --target wasm → Rust → .wasm
 ```
 
 ---
 
-## 現状の実力（v0.5.13）
+## Current Capabilities (v0.5.13)
 
-### 書ける CLI ツール
+### CLI tools you can write
 
-| カテゴリ | 使える機能 | 具体例 |
+| Category | Available features | Examples |
 |---|---|---|
-| **引数解析** | `args.positional()`, `args.flag()`, `args.option()` | `mytool --verbose -o out.json input.csv` |
-| **ファイル処理** | `fs.read_text/write/read_lines/glob/walk` | ファイル変換、ログ集約、静的サイト生成 |
-| **構造化データ** | `json.parse/stringify`, `csv.parse_with_header`, `toml.parse` | JSON/CSV/TOML 変換ツール |
-| **パス操作** | `path.join/dirname/basename/extension/normalize` | クロスプラットフォームパス処理 |
-| **正規表現** | `regex.is_match/find_all/replace/captures` | テキスト検索・置換ツール |
-| **プロセス実行** | `process.exec/exec_status/exec_with_stdin` | ビルドスクリプト、タスクランナー |
-| **HTTP** | `http.get/post/get_json`, `http.serve` | API クライアント、Webhook サーバー |
-| **環境** | `env.get/cwd/os`, `process.exit` | 環境依存の分岐、終了コード |
-| **エラー処理** | `Result[T, E]`, `effect fn`, `do` block | ファイル不在、パース失敗の適切な報告 |
+| **Arg parsing** | `args.positional()`, `args.flag()`, `args.option()` | `mytool --verbose -o out.json input.csv` |
+| **File processing** | `fs.read_text/write/read_lines/glob/walk` | File conversion, log aggregation, static site generation |
+| **Structured data** | `json.parse/stringify`, `csv.parse_with_header`, `toml.parse` | JSON/CSV/TOML conversion tools |
+| **Path operations** | `path.join/dirname/basename/extension/normalize` | Cross-platform path handling |
+| **Regex** | `regex.is_match/find_all/replace/captures` | Text search/replace tools |
+| **Process execution** | `process.exec/exec_status/exec_with_stdin` | Build scripts, task runners |
+| **HTTP** | `http.get/post/get_json`, `http.serve` | API clients, webhook servers |
+| **Environment** | `env.get/cwd/os`, `process.exit` | Environment-dependent branching, exit codes |
+| **Error handling** | `Result[T, E]`, `effect fn`, `do` block | Proper reporting of missing files, parse failures |
 
-**実証済み**: exercises/ に config-merger (317行)、pipeline、isbn-verifier 等の CLI 的プログラムが動作。
+**Demonstrated**: exercises/ contains working CLI-like programs including config-merger (317 lines), pipeline, isbn-verifier, etc.
 
-### 書けない CLI ツール
+### CLI tools you can't write
 
-| 不足 | 影響 | 解決手段 |
+| Gap | Impact | Solution |
 |---|---|---|
-| **ターミナル装飾** | 色付き出力、進捗バー、スピナーがない | `term` モジュール拡充（ANSI エスケープ） |
-| **async / 並行処理** | 複数ファイル並列処理、複数 API 同時呼出しができない | structured concurrency (既存 roadmap) |
-| **インタラクティブ入力** | Y/N 確認、メニュー選択ができない | `io.prompt()`, `io.confirm()` 追加 |
-| **パッケージ依存** | 外部ライブラリを使えない | パッケージレジストリ（後回し可） |
-| **DB 接続** | SQLite/PostgreSQL を直接使えない | @extern で Rust crate をラップ |
-| **シグナル処理** | Ctrl+C のハンドリングができない | `process.on_signal()` 追加 |
+| **Terminal decoration** | No colored output, progress bars, spinners | Extend `term` module (ANSI escapes) |
+| **Async / concurrency** | Can't process files in parallel, can't call multiple APIs simultaneously | Structured concurrency (existing roadmap) |
+| **Interactive input** | Can't do Y/N confirmations, menu selection | Add `io.prompt()`, `io.confirm()` |
+| **Package dependencies** | Can't use external libraries | Package registry (can defer) |
+| **DB connections** | Can't directly use SQLite/PostgreSQL | Wrap Rust crates via @extern |
+| **Signal handling** | Can't handle Ctrl+C | Add `process.on_signal()` |
 
 ---
 
-## ゴール: 5つの CLI ツールが書ける状態
+## Goal: 5 CLI tools can be written
 
-以下の CLI ツールが Almide で自然に書けることをゴールとする。
+The goal is for the following CLI tools to be naturally writable in Almide.
 
-### 1. ファイル変換ツール（今すぐ書ける）
+### 1. File conversion tool (can write now)
 
 ```almide
-// csv2json: CSV → JSON 変換
+// csv2json: CSV → JSON conversion
 effect fn main() =
   let args = args.positional()
   let input = args.get(0).unwrap_or("input.csv")
@@ -62,12 +62,12 @@ effect fn main() =
   println(json_out)
 ```
 
-**ステータス: 今すぐ書ける ✅**
+**Status: Can write now ✅**
 
-### 2. プロジェクト初期化ツール（ほぼ書ける）
+### 2. Project initialization tool (nearly writable)
 
 ```almide
-// init: ディレクトリ構造を作成
+// init: Create directory structure
 effect fn main() =
   let name = args.option_or("name", "my-project")
   fs.mkdir_p("{name}/src")
@@ -77,16 +77,16 @@ effect fn main() =
   println("Created project: {name}")
 ```
 
-**ステータス: 今すぐ書ける ✅**
+**Status: Can write now ✅**
 
-### 3. API クライアント（async が要る）
+### 3. API client (needs async)
 
 ```almide
-// ghstats: GitHub API から統計を取得
+// ghstats: Fetch stats from GitHub API
 effect fn main() = do {
   let token = env.get("GITHUB_TOKEN").unwrap_or("")
   let repos = args.positional()
-  // 全リポジトリの情報を並列取得したい
+  // Want to fetch all repo info in parallel
   async let results = repos.map((repo) =>
     http.get_json("https://api.github.com/repos/{repo}")
   )
@@ -98,12 +98,12 @@ effect fn main() = do {
 }
 ```
 
-**ステータス: async が必要 🔶** — sync の逐次実行なら今でも書ける
+**Status: Needs async 🔶** — sequential sync execution works today
 
-### 4. ファイル検索ツール（ほぼ書ける）
+### 4. File search tool (nearly writable)
 
 ```almide
-// find: パターンでファイルを検索し、中身をgrep
+// find: Search files by pattern and grep contents
 effect fn main() = do {
   let pattern = args.positional().get(0).unwrap_or("*.almd")
   let query = args.option("grep")
@@ -125,17 +125,17 @@ effect fn main() = do {
 }
 ```
 
-**ステータス: ほぼ書ける ✅** — `enumerate` があれば完全（なければ手動カウンタで代用可）
+**Status: Nearly writable ✅** — fully functional with `enumerate` (or manual counter as workaround)
 
-### 5. ビルドスクリプト / タスクランナー（ターミナル装飾が欲しい）
+### 5. Build script / task runner (wants terminal decoration)
 
 ```almide
-// tasks.almd: プロジェクトのタスクを定義・実行
+// tasks.almd: Define and run project tasks
 effect fn main() = do {
   let task = args.positional().get(0).unwrap_or("help")
   match task {
     "build" => {
-      println("[build] Compiling...")     // 色付きにしたい
+      println("[build] Compiling...")     // would like colored output
       let result = process.exec("cargo", ["build", "--release"])
       println("[build] Done: {result}")
     }
@@ -154,90 +154,90 @@ effect fn main() = do {
 }
 ```
 
-**ステータス: 書ける（色なし）✅** — term モジュール拡充で色付きにしたい
+**Status: Writable (no color) ✅** — would like colored output via term module extension
 
 ---
 
-## ギャップ分析と優先度
+## Gap Analysis and Priorities
 
-### Must Have（CLI ゴール達成に必須）
+### Must Have (required to achieve CLI goal)
 
-| 機能 | 今の状態 | やること | 既存 roadmap |
+| Feature | Current state | Action | Existing roadmap |
 |---|---|---|---|
-| **@extern + glue** | 設計完了 | 実装 Step 1〜3 | [Runtime Architecture Reform](stdlib-self-hosted-redesign.md) |
-| **? suffix 廃止** | ✅ 完了 | — | [API Surface Reform](stdlib-verb-system.md) Step 1 |
-| **Result の TS 統一表現** | 設計完了 (glue) | glue runtime 実装 | [Runtime Architecture Reform](stdlib-self-hosted-redesign.md) |
+| **@extern + glue** | Design complete | Implement Steps 1-3 | [Runtime Architecture Reform](stdlib-self-hosted-redesign.md) |
+| **? suffix removal** | ✅ Complete | — | [API Surface Reform](stdlib-verb-system.md) Step 1 |
+| **TS unified Result representation** | Design complete (glue) | Implement glue runtime | [Runtime Architecture Reform](stdlib-self-hosted-redesign.md) |
 
-### Should Have（CLI 体験を良くする）
+### Should Have (improves CLI experience)
 
-| 機能 | 今の状態 | やること | 既存 roadmap |
+| Feature | Current state | Action | Existing roadmap |
 |---|---|---|---|
-| **ターミナル色/スタイル** | `term` モジュール最小 | ANSI エスケープラッパー追加 | なし（新規） |
-| **async / parallel** | 設計完了 | Phase 0〜1 実装 | [Platform Async](platform-async.md), [Structured Concurrency](structured-concurrency.md) |
-| **インタラクティブ入力** | `io.read_line` のみ | `io.prompt()`, `io.confirm()` 追加 | なし（新規） |
-| **Verb System** | 設計完了 | Step 2〜5 | [API Surface Reform](stdlib-verb-system.md) |
+| **Terminal color/style** | `term` module minimal | Add ANSI escape wrappers | None (new) |
+| **Async / parallel** | Design complete | Implement Phase 0-1 | [Platform Async](platform-async.md), [Structured Concurrency](structured-concurrency.md) |
+| **Interactive input** | `io.read_line` only | Add `io.prompt()`, `io.confirm()` | None (new) |
+| **Verb System** | Design complete | Steps 2-5 | [API Surface Reform](stdlib-verb-system.md) |
 
-### Nice to Have（CLI 以降のユースケースに効く）
+### Nice to Have (benefits use cases beyond CLI)
 
-| 機能 | やること | 既存 roadmap |
+| Feature | Action | Existing roadmap |
 |---|---|---|
-| DB 接続 | @extern で SQLite/PostgreSQL ラップ | なし |
-| シグナル処理 | `process.on_signal("SIGINT", handler)` | なし |
-| パッケージレジストリ | 外部依存の解決 | on-hold |
+| DB connections | Wrap SQLite/PostgreSQL via @extern | None |
+| Signal handling | `process.on_signal("SIGINT", handler)` | None |
+| Package registry | External dependency resolution | on-hold |
 
 ---
 
-## 開発 / 配布モデル
+## Dev / Distribution Model
 
-### 開発時: TS パスで高速イテレーション
+### Development: Fast iteration via TS path
 
 ```bash
-almide run app.almd              # TS → Deno 即実行
-almide run app.almd arg1 arg2    # 引数も渡せる（既存機能）
+almide run app.almd              # TS → Deno instant execution
+almide run app.almd arg1 arg2    # Args can be passed too (existing feature)
 ```
 
-- Rust コンパイル不要、即実行
-- async は JS の async/await にそのまま写る（検証が楽）
-- エラーメッセージも即座にフィードバック
+- No Rust compilation needed, instant execution
+- Async maps directly to JS async/await (easy to verify)
+- Error messages give immediate feedback
 
-### 配布時: ネイティブバイナリ
+### Distribution: Native binary
 
 ```bash
-almide build app.almd -o mytool          # 単一バイナリ
+almide build app.almd -o mytool          # Single binary
 almide build app.almd --target wasm      # WASM
 ```
 
-- `./mytool` で動く。依存ランタイムなし
-- Go / Rust の CLI と同じ配布体験
-- async は tokio が吸収（ユーザーは意識しない）
+- `./mytool` just works. No runtime dependency
+- Same distribution experience as Go / Rust CLI tools
+- Async is absorbed by tokio (transparent to the user)
 
-### async の検証戦略
+### Async verification strategy
 
-**TS パスで先に検証、Rust パスは後から**:
+**Verify on TS path first, Rust path later**:
 
 ```
-Almide async let → JS Promise.all    # ほぼ 1:1 で写る。先にここで意味論を固める
-Almide async let → tokio::spawn      # 意味論が固まってから Rust に変換
+Almide async let → JS Promise.all    # Nearly 1:1 mapping. Lock down semantics here first
+Almide async let → tokio::spawn      # Convert to Rust after semantics are settled
 ```
 
-TS パスの方がコンパイラの仕事が軽い（JS が async を持っているので構文変換だけ）。Rust パスは tokio の Send + 'static 制約等の難しさがあるので、意味論が固まってから取り組む方が安全。
+The TS path requires less compiler work (JS has async natively, so it's just syntax transformation). The Rust path has tokio's Send + 'static constraints and other complications, so it's safer to tackle it after semantics are settled.
 
 ---
 
 ## Implementation Steps
 
-### Step 1: ショーケース CLI ツール（今すぐ）
+### Step 1: Showcase CLI tools (immediate)
 
-既存機能だけで書ける CLI ツールを 2〜3 本作り、exercises/ または examples/ に置く。「Almide で CLI が書ける」ことを実証する。
+Build 2-3 CLI tools using only existing features and place in exercises/ or examples/. Demonstrate that "you can write CLI tools in Almide."
 
-候補:
-- `csv2json` — CSV → JSON 変換（args + fs + csv + json）
-- `project-init` — プロジェクト初期化（args + fs + path）
-- `grep-lite` — ファイル内テキスト検索（args + fs + glob + string/regex）
+Candidates:
+- `csv2json` — CSV → JSON conversion (args + fs + csv + json)
+- `project-init` — Project initialization (args + fs + path)
+- `grep-lite` — Text search in files (args + fs + glob + string/regex)
 
-### Step 2: ターミナル装飾（term モジュール拡充）
+### Step 2: Terminal decoration (extend term module)
 
-ANSI エスケープコードのラッパーを `stdlib/term.almd` に追加:
+Add ANSI escape code wrappers to `stdlib/term.almd`:
 
 ```almide
 term.red("Error: file not found")
@@ -246,41 +246,41 @@ term.bold("Building...")
 term.dim("(3 files)")
 ```
 
-純粋 Almide で実装可能（ANSI エスケープは文字列操作）。@extern 不要。
+Implementable in pure Almide (ANSI escapes are string operations). No @extern needed.
 
-### Step 3: インタラクティブ入力
+### Step 3: Interactive input
 
 ```almide
 let name = io.prompt("Project name: ")
 let confirm = io.confirm("Create {name}?")   // Y/n
 ```
 
-`io.read_line` の上に .almd で構築可能。
+Can be built on top of `io.read_line` in .almd.
 
-### Step 4: async（既存 roadmap に従う）
+### Step 4: Async (follow existing roadmap)
 
-[Platform Async](platform-async.md) / [Structured Concurrency](structured-concurrency.md) の Phase 0〜1 を CLI 文脈で実装。
+Implement [Platform Async](platform-async.md) / [Structured Concurrency](structured-concurrency.md) Phase 0-1 in CLI context.
 
-検証ツール: `ghstats`（複数 API 並列呼出し）を TS パスで動かす。
+Verification tool: Run `ghstats` (parallel multiple API calls) on TS path.
 
-### Step 5: @extern + glue（既存 roadmap に従う）
+### Step 5: @extern + glue (follow existing roadmap)
 
-[Runtime Architecture Reform](stdlib-self-hosted-redesign.md) の Step 1〜3 を実装。CLI ツールの TS/Rust 両パスでの動作を保証。
+Implement [Runtime Architecture Reform](stdlib-self-hosted-redesign.md) Steps 1-3. Guarantee CLI tools work on both TS/Rust paths.
 
 ---
 
 ## Success Criteria
 
-- exercises/ に 3 本以上の実用 CLI ツールが動作する
-- `almide run tool.almd` で TS パス即実行できる
-- `almide build tool.almd -o tool` でネイティブバイナリが出る
-- 同じ .almd ファイルが TS パスでも Rust パスでも同じ結果を返す
-- ターミナルに色付き出力ができる
-- `io.prompt()` / `io.confirm()` でインタラクティブ入力ができる
+- 3+ practical CLI tools working in exercises/
+- `almide run tool.almd` provides instant execution via TS path
+- `almide build tool.almd -o tool` produces a native binary
+- Same .almd file produces identical results on both TS and Rust paths
+- Terminal colored output works
+- `io.prompt()` / `io.confirm()` provide interactive input
 
 ## Related
 
 - [Runtime Architecture Reform](stdlib-self-hosted-redesign.md) — @extern + glue
-- [API Surface Reform](stdlib-verb-system.md) — 動詞体系
-- [Platform Async](platform-async.md) — 透過的 async
+- [API Surface Reform](stdlib-verb-system.md) — verb system
+- [Platform Async](platform-async.md) — transparent async
 - [Structured Concurrency](structured-concurrency.md) — async let

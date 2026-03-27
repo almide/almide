@@ -1,41 +1,41 @@
 <!-- description: Implement remaining filesystem operations for the WASM target -->
 # WASM Remaining FS Operations
 
-**優先度:** 中 — read_text/write/exists は実装済み。残りは実用上の必要に応じて追加
-**前提:** WASI path_open, fd_read, fd_write, fd_close, fd_filestat_get, path_filestat_get 登録済み
+**Priority:** Medium — read_text/write/exists are implemented. Remaining operations added as needed
+**Prerequisites:** WASI path_open, fd_read, fd_write, fd_close, fd_filestat_get, path_filestat_get registered
 
 ---
 
-## 実装済み
+## Implemented
 
-- [x] `fs.read_text(path)` — path_open → fd_filestat_get → fd_read → String 構築
+- [x] `fs.read_text(path)` — path_open → fd_filestat_get → fd_read → String construction
 - [x] `fs.write(path, content)` — path_open(O_CREAT|O_TRUNC) → fd_write
-- [x] `fs.exists(path)` — path_filestat_get → errno チェック
+- [x] `fs.exists(path)` — path_filestat_get → errno check
 - [x] wasmtime `--dir=/` (root preopened) + WASI absolute path strip
-- [x] top-level let 動的初期化 (`compile_init_globals`)
+- [x] top-level let dynamic initialization (`compile_init_globals`)
 - [x] mutable collection operations: `list.push`, `list.pop`, `list.clear`, `map.insert`, `map.delete`, `map.clear`
 
-## 未実装（優先度順）
+## Not Yet Implemented (by priority)
 
-### 高
-- [ ] `fs.list_dir(path)` — fd_readdir のパース、dirent 構造体の解析が必要
-- [ ] `fs.mkdir_p(path)` — path_create_directory + パス分割による再帰作成
+### High
+- [ ] `fs.list_dir(path)` — requires parsing fd_readdir, analyzing dirent structs
+- [ ] `fs.mkdir_p(path)` — path_create_directory + recursive creation via path splitting
 - [ ] `fs.remove(path)` — path_unlink_file
 
-### 中
-- [ ] `fs.read_lines(path)` — read_text + split("\n") で合成可能（コンパイラ側不要、Almide で書ける）
-- [ ] `fs.append(path, content)` — path_open の oflags を O_APPEND に変更するだけ
-- [ ] `fs.rename(src, dst)` — path_rename WASI 呼び出し
-- [ ] `fs.copy(src, dst)` — read_text + write で合成
+### Medium
+- [ ] `fs.read_lines(path)` — composable via read_text + split("\n") (no compiler work needed, can be written in Almide)
+- [ ] `fs.append(path, content)` — just change path_open oflags to O_APPEND
+- [ ] `fs.rename(src, dst)` — path_rename WASI call
+- [ ] `fs.copy(src, dst)` — composable via read_text + write
 
-### 低
-- [ ] `fs.read_bytes(path)` — read_text と類似（String ではなく List[Int] を構築）
-- [ ] `fs.write_bytes(path, bytes)` — write と類似
-- [ ] `fs.is_dir?(path)` / `fs.is_file?(path)` — path_filestat_get のフラグ解析
-- [ ] `fs.stat(path)` — fd_filestat_get の結果を Record に変換
+### Low
+- [ ] `fs.read_bytes(path)` — similar to read_text (builds List[Int] instead of String)
+- [ ] `fs.write_bytes(path, bytes)` — similar to write
+- [ ] `fs.is_dir?(path)` / `fs.is_file?(path)` — flag analysis from path_filestat_get
+- [ ] `fs.stat(path)` — convert fd_filestat_get result to Record
 
-## 技術的注意
+## Technical Notes
 
-- bump allocator は解放なし — 大量ファイル操作でメモリ使用量が増加する
-- fd_readdir の dirent 構造体パースが最も複雑（可変長レコード）
-- read_lines / copy は Almide コードで合成可能なため、コンパイラ側の実装は不要かもしれない
+- Bump allocator has no deallocation — memory usage grows with heavy file operations
+- fd_readdir dirent struct parsing is the most complex part (variable-length records)
+- read_lines / copy can be composed in Almide code, so compiler-side implementation may not be necessary

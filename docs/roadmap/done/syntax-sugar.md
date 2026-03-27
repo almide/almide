@@ -16,19 +16,19 @@ Detects at compile time when a match on a variant type does not cover all cases.
 
 ---
 
-## Lambda Syntax: `fn` を廃止、パレンスタイルに統一 ✅
+## Lambda Syntax: Deprecate `fn`, unify to parentheses style ✅
 
-`fn(params) => expr` を廃止し、`(params) => expr` に統一完了。
-- パーサーから `fn(` lambda パスを削除
-- 全 `.almd` ファイル (44ファイル) を一括置換
-- Rust テスト、ドキュメント、ヒントメッセージを更新
-- `fn` keyword は関数宣言 (`fn name(...) -> Type = ...`) 専用に
+Deprecated `fn(params) => expr` and unified to `(params) => expr`.
+- Removed `fn(` lambda path from parser
+- Batch-replaced all `.almd` files (44 files)
+- Updated Rust tests, documentation, and hint messages
+- `fn` keyword is now exclusively for function declarations (`fn name(...) -> Type = ...`)
 
 ---
 
 ## Default Arguments ✅
 
-Call-site expansion 方式で実装。Lowering 時に不足引数にデフォルト値を IR に挿入。codegen 変更不要。
+Implemented via call-site expansion. Default values inserted into IR for missing arguments during lowering. No codegen changes needed.
 
 ```almide
 fn greet(name: String, greeting: String = "Hello") -> String =
@@ -38,28 +38,28 @@ greet("Alice")              // → greet("Alice", "Hello") at IR level
 greet("Alice", "Hi")        // → greet("Alice", "Hi")
 ```
 
-- Parser: `name: Type = expr` を Param.default に格納
-- Checker: fn_min_params で引数数を許容
-- Lowerer: call-site で defaults を展開（ターゲット非依存）
+- Parser: store `name: Type = expr` in Param.default
+- Checker: allow argument count via fn_min_params
+- Lowerer: expand defaults at call-site (target-independent)
 
 ---
 
 ## List Comprehensions — Won't Do
 
-Canonicity 違反。`xs |> list.filter(...) |> list.map(...)` で同じことが書ける。
+Violates Canonicity. `xs |> list.filter(...) |> list.map(...)` achieves the same thing.
 
 ## Named Arguments
 
 ```almide
-// Optional, positional args の後ろでのみ使用可能
+// Optional, only usable after positional args
 create_user("Alice", admin: true)
 http.response(status: 200, body: "OK")
 
-// 位置引数のみも OK
+// Positional args only is also OK
 create_user("Alice", 30, false)
 ```
 
-Swift 参考だが external/internal name 分離なし。Almide は Vocabulary Economy 重視。
+Inspired by Swift but without external/internal name separation. Almide prioritizes Vocabulary Economy.
 
 ## Raw String Literals ✅
 

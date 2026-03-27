@@ -1,38 +1,38 @@
 <!-- description: Automated verification that Rust, TS, and WASM produce identical output -->
 # Cross-Target Parity Matrix
 
-**優先度:** High — WASM 対応進行中の今が最適タイミング
-**前提:** Cross-Target CI 完了済み、WASM 167/194 pass (0 failed, 27 skipped), TS テストランナー追加済み
-**目標:** Rust/TS/WASM 3ターゲット間の挙動差異を体系的に検出・防止する自動検証基盤
+**Priority:** High — Optimal timing while WASM support is in progress
+**Prerequisites:** Cross-Target CI completed, WASM 167/194 pass (0 failed, 27 skipped), TS test runner added
+**Goal:** Automated verification infrastructure to systematically detect and prevent behavioral differences across Rust/TS/WASM targets
 
-> 「CI で "全テスト通過" は必要条件。パリティマトリクスは十分条件。」
+> "All tests passing in CI is a necessary condition. The parity matrix is the sufficient condition."
 
 ---
 
 ## Why
 
-Cross-Target CI は「同じテストが両方通るか」を見る。パリティマトリクスは「同じ入力に対して同じ出力を返すか」を見る。前者では検出できない差異がある:
+Cross-Target CI checks "do the same tests pass on both." The parity matrix checks "do they return the same output for the same input." There are differences the former cannot detect:
 
-- 浮動小数点の丸め差異
-- 文字列のエンコーディング差異 (UTF-8 boundary)
-- 整数オーバーフロー挙動
-- エラーメッセージの文言差異
-- コレクションの順序保証 (Map iteration order)
-- ゼロ除算・NaN の伝播
+- Floating-point rounding differences
+- String encoding differences (UTF-8 boundaries)
+- Integer overflow behavior
+- Error message wording differences
+- Collection ordering guarantees (Map iteration order)
+- Division by zero / NaN propagation
 
-WASM ターゲットが安定に向かう今、3ターゲット間の「見えない差異」を潰す仕組みが必要。
+As the WASM target stabilizes, we need a mechanism to eliminate "invisible differences" across the 3 targets.
 
 ---
 
 ## Design
 
-### パリティテストの構造
+### Parity Test Structure
 
 ```almd
 // spec/parity/numeric_parity_test.almd
 test "integer overflow behaves identically" {
     let x = 2147483647  // i32 max
-    assert_eq(x + 1, 2147483648)  // i64 なので wrap しない
+    assert_eq(x + 1, 2147483648)  // i64 so no wrap
 }
 
 test "float precision consistent" {
@@ -40,61 +40,61 @@ test "float precision consistent" {
 }
 ```
 
-パリティテストは通常のテストと同じ形式だが、`spec/parity/` に配置し、全ターゲットで出力を比較する。
+Parity tests have the same format as regular tests but are placed in `spec/parity/` and compared across all targets for output.
 
-### 検証レイヤー
+### Verification Layers
 
-| レイヤー | 検証内容 | 方法 |
+| Layer | What is Verified | Method |
 |---|---|---|
-| L1: 出力一致 | stdout が全ターゲットで一致 | 既存 CI の拡張 |
-| L2: エッジケース | 型境界・精度・エンコーディング | 専用パリティテスト |
-| L3: stdlib 網羅 | 全 stdlib 関数が全ターゲットで同一挙動 | モジュール別マトリクス |
-| L4: エラー挙動 | panic/throw/trap の条件が一致 | エラーケーステスト |
+| L1: Output match | stdout matches across all targets | Extension of existing CI |
+| L2: Edge cases | Type boundaries, precision, encoding | Dedicated parity tests |
+| L3: stdlib coverage | All stdlib functions behave identically across targets | Per-module matrix |
+| L4: Error behavior | panic/throw/trap conditions match | Error case tests |
 
-### CI 統合
+### CI Integration
 
 ```yaml
 # .github/workflows/ci-parity.yml
-# develop push で自動実行
-# 各テストを --target rust, --target ts, --target wasm で実行
-# stdout を diff し、差異があれば fail
+# Auto-runs on develop push
+# Executes each test with --target rust, --target ts, --target wasm
+# Diffs stdout, fails on differences
 ```
 
 ---
 
 ## Phases
 
-### Phase 1: パリティテスト基盤 + 数値・文字列
+### Phase 1: Parity Test Infrastructure + Numeric/String
 
-- [ ] `spec/parity/` ディレクトリ作成
-- [ ] パリティテストランナー (`almide test --parity`: 全ターゲットで実行 + diff)
-- [ ] 数値パリティテスト (整数境界、浮動小数点精度、NaN/Inf)
-- [ ] 文字列パリティテスト (UTF-8 境界、空文字列、絵文字、結合文字)
-- [ ] CI ワークフロー追加
+- [ ] Create `spec/parity/` directory
+- [ ] Parity test runner (`almide test --parity`: run on all targets + diff)
+- [ ] Numeric parity tests (integer boundaries, floating-point precision, NaN/Inf)
+- [ ] String parity tests (UTF-8 boundaries, empty strings, emoji, combining characters)
+- [ ] Add CI workflow
 
-### Phase 2: stdlib マトリクス
+### Phase 2: stdlib Matrix
 
-- [ ] 22 モジュール × 3 ターゲットのパリティマトリクス自動生成
-- [ ] 各 stdlib 関数にパリティテスト追加 (エッジケース重点)
-- [ ] マトリクスレポート出力 (`almide test --parity --report`)
+- [ ] Auto-generate 22 modules × 3 targets parity matrix
+- [ ] Add parity tests for each stdlib function (focus on edge cases)
+- [ ] Matrix report output (`almide test --parity --report`)
 
-### Phase 3: エラー挙動パリティ
+### Phase 3: Error Behavior Parity
 
-- [ ] ゼロ除算、範囲外アクセス、型ミスマッチのエラー挙動統一
-- [ ] エラーメッセージのターゲット間差異の許容範囲定義
-- [ ] trap/panic/throw の発生条件一致テスト
+- [ ] Unify error behavior for division by zero, out-of-bounds access, type mismatch
+- [ ] Define acceptable tolerance for error message differences across targets
+- [ ] Tests for matching trap/panic/throw trigger conditions
 
-### Phase 4: 回帰防止
+### Phase 4: Regression Prevention
 
-- [ ] 新規 stdlib 関数追加時にパリティテスト必須化 (CI gate)
-- [ ] パリティ違反の自動分類 (意図的差異 vs バグ)
-- [ ] ターゲット品質ダッシュボード (Tier 1/2/3 と連動)
+- [ ] Make parity tests mandatory when adding new stdlib functions (CI gate)
+- [ ] Auto-classification of parity violations (intentional difference vs bug)
+- [ ] Target quality dashboard (linked with Tier 1/2/3)
 
 ---
 
 ## Success Criteria
 
-- 全 stdlib 関数に対するパリティテストが存在する
-- Rust/TS 間のパリティ 100%
-- WASM との差異が文書化され、意図的差異のみ残る
-- 新規 stdlib 追加時にパリティテストがないと CI fail
+- Parity tests exist for all stdlib functions
+- 100% parity between Rust/TS
+- Differences with WASM are documented, with only intentional differences remaining
+- CI fails if a new stdlib addition lacks parity tests

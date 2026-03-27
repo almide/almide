@@ -4,44 +4,44 @@
 
 ## Problem
 
-`main.almd` から同パッケージの `mod.almd`（ライブラリエントリーポイント）の pub 関数にアクセスできない。
+`main.almd` cannot access pub functions from the same package's `mod.almd` (library entry point).
 
 ```
 src/
-  mod.almd    ← 外部: import almide_grammar で解決
-  main.almd   ← CLI: mod.almd の pub fn を使いたい
+  mod.almd    ← External: resolved via import almide_grammar
+  main.almd   ← CLI: wants to use pub fn from mod.almd
 ```
 
-- `import self.mod` → `mod` はキーワードなのでパースエラー
-- データを別ファイル（`grammar.almd`）に分離すると、外部APIが `almide_grammar.grammar.keyword_groups()` と深くなる
-- re-export が無いので `mod.almd` 経由のフラット化もできない
+- `import self.mod` → `mod` is a keyword, so parse error
+- Separating data into another file (`grammar.almd`) makes the external API deep: `almide_grammar.grammar.keyword_groups()`
+- No re-export, so flattening via `mod.almd` is also impossible
 
 ## Design
 
-**`import self` で `mod.almd` を参照できるようにする。**
+**Make `mod.almd` accessible via `import self`.**
 
 ```almide
 // main.almd
-import self               // → src/mod.almd をロード
-import self as grammar     // → エイリアスも可
+import self               // → loads src/mod.almd
+import self as grammar     // → alias also available
 
-grammar.keyword_groups()   // mod.almd の pub fn にアクセス
+grammar.keyword_groups()   // access pub fn from mod.almd
 ```
 
 ### Semantics
 
-- `import self` = パッケージの `src/mod.almd` をインポート
-- 既存の `import self.xxx` (サブモジュール) はそのまま
-- `mod.almd` が存在しない場合はエラー: `"package has no mod.almd entry point"`
-- エイリアス無しの場合、パッケージ名がプレフィックス（`almide_grammar.keyword_groups()`）
+- `import self` = imports the package's `src/mod.almd`
+- Existing `import self.xxx` (submodule) remains unchanged
+- Error if `mod.almd` doesn't exist: `"package has no mod.almd entry point"`
+- Without alias, package name is the prefix (`almide_grammar.keyword_groups()`)
 
 ### Why not alternatives
 
-| 案 | 問題 |
-|----|------|
-| `main.almd` が `mod.almd` を暗黙参照 | 暗黙は Almide の設計哲学に反する |
-| re-export (`pub import`) | 新しい概念の導入コストが高い |
-| `mod` をキーワードから外す | 既存コードへの影響大 |
+| Alternative | Problem |
+|-------------|---------|
+| `main.almd` implicitly references `mod.almd` | Implicit behavior goes against Almide's design philosophy |
+| re-export (`pub import`) | High introduction cost for a new concept |
+| Remove `mod` as a keyword | Large impact on existing code |
 
 ## Implementation
 
@@ -59,8 +59,8 @@ if is_self_import {
 }
 ```
 
-変更箇所は `resolve.rs` の1箇所のみ。パーサー変更不要（`import self` は既に有効なトークン列）。
+Only one change location in `resolve.rs`. No parser changes needed (`import self` is already a valid token sequence).
 
 ## Motivation
 
-`almide-grammar` パッケージで `mod.almd`（データ定義）と `main.almd`（CLIジェネレータ）を分離する際にブロッカーとなった。ライブラリ+CLIの構成は今後増えるため、早期に解決すべき。
+This became a blocker when separating `mod.almd` (data definitions) and `main.almd` (CLI generator) in the `almide-grammar` package. The library + CLI pattern will increase in the future, so this should be resolved early.

@@ -2,38 +2,38 @@
 <!-- done: 2026-03-18 -->
 # Anonymous Record Codegen Fix
 
-**優先度:** High — Grammar Lab 実験で全タスクの 30% が影響
-**見積り:** 1–2日
-**ブランチ:** develop
+**Priority:** High — affects 30% of all tasks in Grammar Lab experiments
+**Estimate:** 1-2 days
+**Branch:** develop
 
-## 問題
+## Problem
 
-空リストリテラル `[]` に anonymous record 型の型注釈がつくと、Rust codegen が `AnonRecord` という存在しない型名を出力する。
+When an empty list literal `[]` gets a type annotation with an anonymous record type, Rust codegen emits the non-existent type name `AnonRecord`.
 
 ```almide
 let ps: List[Product] = []
 // Product = { name: String, price: Int, category: String }
 ```
 
-生成される Rust:
+Generated Rust:
 ```rust
-let ps: Vec<Product> = Vec::<AnonRecord>::new();  // ← AnonRecord が未定義
+let ps: Vec<Product> = Vec::<AnonRecord>::new();  // ← AnonRecord is undefined
 ```
 
-正しくは:
+Correct output:
 ```rust
 let ps: Vec<Product> = Vec::<Product>::new();
-// または
+// or
 let ps: Vec<Product> = vec![];
 ```
 
-## 影響
+## Impact
 
-- Grammar Lab `optional-handling` 実験で 10 タスク中 3 タスク (t07, t08, t10) がこのバグで fail
-- LLM の出力は正しいのに compile が通らない = **LLM survival rate を人為的に下げている**
-- テストで `let xs: List[T] = []` を書くたびに踏む。頻出パターン
+- In Grammar Lab `optional-handling` experiment, 3 out of 10 tasks (t07, t08, t10) fail due to this bug
+- LLM output is correct but compilation fails = **artificially lowering LLM survival rate**
+- Triggered every time `let xs: List[T] = []` is written in tests. Common pattern
 
-## 再現
+## Reproduction
 
 ```almide
 type Item = { name: String, value: Int }
@@ -49,24 +49,24 @@ $ almide test repro.almd
 error[E0412]: cannot find type `AnonRecord` in this scope
 ```
 
-## 原因 (推定)
+## Root Cause (suspected)
 
-`emit_rust/` の空リスト codegen で、型パラメータを解決する際に anonymous record 型のマッピングが行われていない。`Ty::Record(fields)` → Rust 構造体名 (`AlmdRec_*` or type alias) の変換が空リスト文脈で欠けている。
+In `emit_rust/`'s empty list codegen, the anonymous record type mapping is missing when resolving type parameters. The `Ty::Record(fields)` → Rust struct name (`AlmdRec_*` or type alias) conversion is absent in the empty list context.
 
-## 修正方針
+## Fix Strategy
 
-1. `emit_rust/` で空リスト `[]` の codegen を特定
-2. 型注釈から element type を取得する箇所を確認
-3. `Ty::Record` → concrete Rust 型名の変換を空リストにも適用
-4. テスト: `let xs: List[{a: Int}] = []` が compile + pass することを確認
+1. Locate empty list `[]` codegen in `emit_rust/`
+2. Check where element type is obtained from type annotations
+3. Apply `Ty::Record` → concrete Rust type name conversion to empty lists as well
+4. Test: verify `let xs: List[{a: Int}] = []` compiles and passes
 
-## 確認タスク
+## Verification Tasks
 
-- [ ] `src/emit_rust/` で `AnonRecord` を grep → 生成箇所を特定
-- [ ] 空リスト以外にも同じ問題がないか確認 (`none` の型推論など)
-- [ ] 修正後、Grammar Lab の t07/t08/t10 が PASS に変わることを確認
+- [ ] Grep `AnonRecord` in `src/emit_rust/` → identify generation site
+- [ ] Check if the same issue exists elsewhere (e.g., `none` type inference)
+- [ ] After fix, verify Grammar Lab t07/t08/t10 change to PASS
 
-## 関連
+## Related
 
-- [design-debt.md #2](../on-hold/design-debt.md) — Anonymous record の根本設計
+- [design-debt.md #2](../on-hold/design-debt.md) — Fundamental anonymous record design
 - Grammar Lab [optional-handling REPORT](../../../research/grammar-lab/experiments/optional-handling/REPORT.md)

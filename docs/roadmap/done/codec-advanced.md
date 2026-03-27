@@ -2,33 +2,33 @@
 <!-- done: 2026-03-15 -->
 # Codec Advanced
 
-Codec 基盤 (encode/decode/Value/JSON roundtrip) は完成。高度な機能。
+Codec foundation (encode/decode/Value/JSON roundtrip) is complete. Advanced features follow.
 
-## DecodeError 構造化
+## Structured DecodeError
 - `DecodeError { path: List[String], kind: DecodeErrorKind }`
-- error path: `"coord.lon"` 形式
-- 現在は `err("missing field 'name'")` — 文字列のみ
+- error path: `"coord.lon"` format
+- Currently `err("missing field 'name'")` — string only
 
 ## json.validate[T]
-- decode せずに問題を列挙
-- `List[DecodeIssue]` を返す
+- Enumerate issues without decoding
+- Returns `List[DecodeIssue]`
 
 ## json.repair[T]
-- 修復しながら decode (Safe/Coercive)
+- Decode while repairing (Safe/Coercive)
 - `RepairResult[T] = Valid(T) | Repaired(T, fixes) | Invalid(issues)`
 
 ## json.describe[T] — JSON Schema
-- JSON Schema Draft 2020-12 互換
-- LLM function calling に使える
+- JSON Schema Draft 2020-12 compatible
+- Usable for LLM function calling
 
 ## Variant decode (Tagged)
-- Variant encode は実装済み
-- decode: Object のキーから variant name を判定し、payload を decode
+- Variant encode is already implemented
+- decode: Determine variant name from Object key and decode payload
 
 ## json.decode[T](text) convenience
 - `json.decode[Person](text)` → `json.parse(text)? |> Person.decode`
-- checker の型引数解決が必要
+- Requires checker type argument resolution
 
-## Codec(naming_strategy) 構文 sugar
+## Codec(naming_strategy) syntax sugar
 - `type ApiRes: Codec(snake_case) = { ... }`
-- 現在は `value.to_snake_case(v)` で手動対応可能
+- Currently achievable manually via `value.to_snake_case(v)`

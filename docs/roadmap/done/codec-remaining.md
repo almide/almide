@@ -2,7 +2,7 @@
 <!-- done: 2026-03-15 -->
 # Codec Remaining
 
-Phase 0-2 完了。残りの機能。
+Phase 0-2 complete. Remaining features.
 
 ## Done
 
@@ -27,23 +27,23 @@ match json.parse(text) { ok(v) => Person.decode(v), err(e) => err(e) }
 let camel = value.to_camel_case(person.encode())
 let text = json.stringify(camel)  // → {"userName": "Alice"}
 ```
-関数合成で実現。`Codec(snake_case)` 構文は Future の sugar。
+Achieved via function composition. `Codec(snake_case)` syntax is future sugar.
 
 ## Future
 
-旧 TOML → runtime crate 移行は [Stdlib Runtime Architecture](stdlib-self-hosted-redesign.md) のスコープ。Codec 側は TOML で動作中。
+Legacy TOML → runtime crate migration is in the scope of [Stdlib Runtime Architecture](stdlib-self-hosted-redesign.md). Codec side runs on TOML.
 
-### DecodeError 構造化
+### Structured DecodeError
 - `DecodeError { path: List[String], kind: DecodeErrorKind }`
 - error path: `"coord.lon"` 形式
 
 ### json.validate[T] / json.repair[T]
-- validate: decode せずに問題を列挙
-- repair: 修復しながら decode (Safe/Coercive)
+- validate: enumerate issues without decoding
+- repair: decode while repairing (Safe/Coercive)
 
 ### json.describe[T] — JSON Schema
-- JSON Schema Draft 2020-12 互換
+- JSON Schema Draft 2020-12 compatible
 
-### 他フォーマット
+### Other formats
 - yaml.stringify / yaml.parse
-- toml → Value ベースに移行
+- toml → migrate to Value-based

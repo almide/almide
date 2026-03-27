@@ -1,12 +1,12 @@
 <!-- description: LLM accuracy benchmarks comparing Almide, Python, and MoonBit -->
 # LLM Benchmark Execution
 
-**優先度:** 高 — Almide の存在意義「LLM が最も正確に書ける言語」の実証
-**前提:** benchmark/ フレームワーク + msr/ ツール構築済み
+**Priority:** High — Proving Almide's raison d'etre: "the language LLMs can write most accurately"
+**Prerequisites:** benchmark/ framework + msr/ tool already built
 
 ---
 
-## 初期結果 (2026-03-25, Haiku, n=1)
+## Initial Results (2026-03-25, Haiku, n=1)
 
 | Language | Score | Cheatsheet | Training data |
 |----------|-------|------------|---------------|
@@ -14,36 +14,36 @@
 | **Python** | 25/25 (100%) | No | Massive |
 | **MoonBit** | 24/24 (100%) | No | Limited |
 
-所要時間: Almide ~11分, Python ~6分, MoonBit ~12分
+Time taken: Almide ~11min, Python ~6min, MoonBit ~12min
 
-**結論:** この難度では差がつかない。modification survival rate や より難しい問題が必要。
-ただし「Almide は学習データなし + CHEATSHEET だけで Python と同等」は事実として確立。
+**Conclusion:** At this difficulty level, no meaningful difference emerges. We need modification survival rate and harder problems.
+However, the fact that "Almide matches Python with zero training data + CHEATSHEET alone" is now established.
 
-## ツール
+## Tools
 
-- `research/benchmark/msr/msr.almd` — Almide 用 MSR ランナー（Almide 自身で記述）
-- `research/benchmark/msr/python/run.sh` — Python 用（25 問プロンプト付き）
-- `research/benchmark/msr/moonbit/run.sh` — MoonBit 用（25 問プロンプト付き）
-- `research/benchmark/framework/runner.py` — 汎用フレームワーク（FAR/MSR/FLE 対応、未使用）
+- `research/benchmark/msr/msr.almd` — MSR runner for Almide (written in Almide itself)
+- `research/benchmark/msr/python/run.sh` — Python runner (25 problems with prompts)
+- `research/benchmark/msr/moonbit/run.sh` — MoonBit runner (25 problems with prompts)
+- `research/benchmark/framework/runner.py` — General framework (supports FAR/MSR/FLE, unused)
 
-## 次のステップ
+## Next Steps
 
-### Phase 1: n=10 反復実行
-- [ ] 同じ 24 問を各言語 10 回実行して安定性を測定
-- [ ] 1 回は全部通っても、10 回中の成功率で差が出る可能性
+### Phase 1: n=10 Repeated Execution
+- [ ] Run the same 24 problems 10 times per language to measure stability
+- [ ] Even if one run passes everything, differences may emerge in success rate across 10 runs
 
 ### Phase 2: Modification Survival Rate
-- [ ] 模範解答を渡して変更指示を出す（例:「戻り値を Result 型に変更して」）
-- [ ] Almide の effect fn / 型システムの強みが活きる変更カテゴリ:
-  - 戻り値型変更 (String → Result[String, E])
-  - variant case 追加 (exhaustiveness check が全 match を指摘)
-  - record field 追加 (コンパイラが全使用箇所を報告)
-- [ ] この指標で Almide と Python/MoonBit の差を定量化
+- [ ] Provide reference solutions and issue modification instructions (e.g., "change the return type to Result")
+- [ ] Modification categories where Almide's effect fn / type system strengths shine:
+  - Return type changes (String → Result[String, E])
+  - Variant case additions (exhaustiveness check catches all match sites)
+  - Record field additions (compiler reports all usage sites)
+- [ ] Quantify the gap between Almide and Python/MoonBit on this metric
 
-### Phase 3: より難しい問題
-- [ ] 複数モジュール連携、エラー伝播チェーン、generics の複合使用
-- [ ] 実プロジェクト規模（数百行）の問題追加
+### Phase 3: Harder Problems
+- [ ] Multi-module coordination, error propagation chains, complex generics usage
+- [ ] Add production-scale problems (hundreds of lines)
 
-### Phase 4: 分析・公開
-- [ ] 集計、統計的有意性検定 (Fisher exact test)
-- [ ] README / サイトへの結果掲載
+### Phase 4: Analysis and Publication
+- [ ] Aggregation, statistical significance testing (Fisher exact test)
+- [ ] Publish results on README / website

@@ -4,29 +4,29 @@
 
 ## Thesis
 
-`--target` に出力形式とプラットフォームの 2 つの意味が混在している。これを分離する。
+`--target` conflates two meanings: output format and platform. Separate them.
 
 ```bash
-# 今: target にプラットフォームが混ざる
+# Current: platform mixed into target
 almide build app.almd --target ts-browser
 almide build app.almd --target ts-node
 almide build app.almd --target ts-worker
 
-# あるべき姿: 直交する 2 軸
+# Ideal: two orthogonal axes
 almide build app.almd --target ts --platform browser
 almide build app.almd --target ts --platform node
 almide build app.almd --target ts --platform worker
 almide build app.almd --target rust --platform native
 ```
 
-- **target** = 出力言語 (codegen の選択): `rust`, `ts`, `wasm`
-- **platform** = 使える API の集合 (`@extern` の可用性): `browser`, `node`, `worker`, `native`
+- **target** = output language (codegen selection): `rust`, `ts`, `wasm`
+- **platform** = available API set (`@extern` availability): `browser`, `node`, `worker`, `native`
 
 ## Why Separate
 
-### 問題: target にプラットフォームを混ぜると爆発する
+### Problem: Mixing platform into target causes combinatorial explosion
 
-target × platform の組み合わせが全部 `--target` のバリアントになる:
+All target x platform combinations become `--target` variants:
 
 ```
 ts-browser, ts-node, ts-worker, ts-deno,
@@ -34,37 +34,37 @@ rust-native, rust-wasm,
 wasm-browser, wasm-worker, ...
 ```
 
-新しいプラットフォームが増えるたびに全 target に組み合わせが必要。スケールしない。
+Every new platform requires combinations with all targets. Does not scale.
 
-### 解決: 直交する 2 軸
+### Solution: Two orthogonal axes
 
 ```
-target (codegen)     platform (API 可用性)
+target (codegen)     platform (API availability)
 ├── rust              ├── native
 ├── ts                ├── node
 └── wasm              ├── browser
                       └── worker
 ```
 
-target と platform は独立に選べる。組み合わせの妥当性はコンパイラが検証する:
+Target and platform can be chosen independently. The compiler validates the combination:
 
-| target | platform | 妥当性 |
+| target | platform | Validity |
 |---|---|---|
-| ts | browser | OK — DOM API 使用可能 |
-| ts | node | OK — fs, process 使用可能 |
-| ts | worker | OK — fetch, KV 使用可能 |
-| ts | native | NG — TS は native ランタイムがない |
-| rust | native | OK — std::fs, std::process 使用可能 |
-| rust | browser | NG (wasm 経由なら可能、将来の話) |
+| ts | browser | OK — DOM API available |
+| ts | node | OK — fs, process available |
+| ts | worker | OK — fetch, KV available |
+| ts | native | NG — TS has no native runtime |
+| rust | native | OK — std::fs, std::process available |
+| rust | browser | NG (possible via wasm, future work) |
 | wasm | browser | OK — Web API + WASM import |
 | wasm | worker | OK — WASM Workers |
 
 ## Platform Hierarchy
 
-プラットフォームは包含関係を持つ階層構造:
+Platforms have a hierarchical inclusion structure:
 
 ```
-any                  ← JSON, Math, Array, 基本型操作
+any                  ← JSON, Math, Array, basic type operations
 ├── web              ← Web standard API (fetch, URL, Request/Response, crypto.subtle)
 │   ├── browser      ← DOM (document, window, navigator, localStorage)
 │   └── worker       ← Edge-specific (KV, D1, env bindings, etc.)
@@ -72,17 +72,17 @@ any                  ← JSON, Math, Array, 基本型操作
 └── native           ← Rust std (std::fs, std::process, std::net, etc.)
 ```
 
-**包含ルール:**
-- `browser` の関数は `web` と `any` の関数も使える
-- `worker` の関数は `web` と `any` の関数も使える
-- `node` の関数は `any` の関数のみ使える (`web` は含まない)
-- `native` の関数は `any` の関数のみ使える
+**Inclusion rules:**
+- `browser` functions can also use `web` and `any` functions
+- `worker` functions can also use `web` and `any` functions
+- `node` functions can only use `any` functions (`web` is not included)
+- `native` functions can only use `any` functions
 
-`web` が `browser` と `worker` の共通基盤になる。Web standard Fetch API, URL, crypto.subtle 等は `web` に属し、どちらのプラットフォームでも使える。
+`web` serves as the common foundation for `browser` and `worker`. Web standard Fetch API, URL, crypto.subtle etc. belong to `web` and are available on both platforms.
 
-## @extern の設計
+## @extern Design
 
-### 現在
+### Current
 
 ```almide
 @extern(rs, "std::cmp", "min")
@@ -90,12 +90,12 @@ any                  ← JSON, Math, Array, 基本型操作
 fn my_max(a: Int, b: Int) -> Int
 ```
 
-`@extern` の第 1 引数が target 言語。プラットフォームの概念がない。
+The first argument of `@extern` is the target language. No concept of platform.
 
-### 新設計
+### New Design
 
 ```almide
-// プラットフォーム能力に紐づく
+// Tied to platform capabilities
 @extern(platform: any, "JSON", "parse")
 fn parse_json(s: String) -> Value
 
@@ -112,41 +112,41 @@ fn read_file(path: String) -> String
 fn read_file(path: String) -> String
 ```
 
-### target と platform の交差
+### Intersection of Target and Platform
 
-同じ関数に target 別の実装 + platform 制約を持てる:
+A single function can have target-specific implementations + platform constraints:
 
 ```almide
-// fs.read_file の定義 (stdlib 内部)
+// fs.read_file definition (inside stdlib)
 @extern(platform: node, "fs", "readFileSync")
 @extern(platform: native, "std::fs", "read_to_string")
 effect fn read_file(path: String) -> String
 ```
 
-- `--target ts --platform node` → `fs.readFileSync` を使用
-- `--target rust --platform native` → `std::fs::read_to_string` を使用
-- `--target ts --platform browser` → コンパイルエラー: `read_file requires platform node or native`
+- `--target ts --platform node` — uses `fs.readFileSync`
+- `--target rust --platform native` — uses `std::fs::read_to_string`
+- `--target ts --platform browser` — compile error: `read_file requires platform node or native`
 
-### 後方互換
+### Backward Compatibility
 
-既存の `@extern(rs, ...)` / `@extern(ts, ...)` は以下のショートハンドとして維持:
+Existing `@extern(rs, ...)` / `@extern(ts, ...)` are maintained as shorthand for:
 
 ```almide
 @extern(rs, ...)  →  @extern(target: rust, platform: native, ...)
 @extern(ts, ...)  →  @extern(target: ts, platform: any, ...)
 ```
 
-既存コードは変更不要。
+No changes required to existing code.
 
-## Platform の推論
+## Platform Inference
 
-### ライブラリ — 宣言不要、使用から推論
+### Libraries — No declaration needed, inferred from usage
 
-ライブラリは platform を明示宣言しない。使っている `@extern` から必要な最低限の platform が自動推論される:
+Libraries do not explicitly declare platform. The minimum required platform is automatically inferred from the `@extern` usage:
 
 ```almide
 // my_lib.almd
-import dom exposing (create_element, append)  // browser API を使用
+import dom exposing (create_element, append)  // uses browser API
 
 fn render(text: String) -> DomNode = {
   let el = create_element("p")
@@ -155,10 +155,10 @@ fn render(text: String) -> DomNode = {
 }
 ```
 
-コンパイラ推論: `my_lib` は `create_element` (@extern platform: browser) を使用 → **platform: browser が必要**
+Compiler inference: `my_lib` uses `create_element` (@extern platform: browser) -> **requires platform: browser**
 
 ```bash
-# ユーザーがこのライブラリを使う
+# User uses this library
 almide build app.almd --target ts --platform node
 # error: my_lib requires platform browser, but target platform is node
 #   --> app.almd:1:1
@@ -169,15 +169,15 @@ almide build app.almd --target ts --platform node
 #    = hint: use --platform browser, or remove the import
 ```
 
-### アプリケーション — --platform で指定
+### Applications — Specified via --platform
 
 ```bash
-almide build app.almd --target ts --platform browser   # 明示指定
-almide build app.almd --target ts                      # デフォルト: node (後方互換)
-almide build app.almd --target rust                    # デフォルト: native
+almide build app.almd --target ts --platform browser   # explicit
+almide build app.almd --target ts                      # default: node (backward compatible)
+almide build app.almd --target rust                    # default: native
 ```
 
-### almide.toml でのデフォルト指定
+### Default in almide.toml
 
 ```toml
 [build]
@@ -185,35 +185,35 @@ target = "ts"
 platform = "worker"
 ```
 
-プロジェクトごとにデフォルトを固定できる。CI やチームでの統一に使う。
+Set per-project defaults. Useful for CI and team-wide consistency.
 
-## stdlib への影響
+## Impact on stdlib
 
-各 stdlib モジュールの関数が適切な platform タグを持つ:
+Each stdlib module function carries the appropriate platform tag:
 
-| モジュール | platform | 理由 |
+| Module | platform | Reason |
 |---|---|---|
-| string, list, map, int, float | `any` | 純粋な計算 |
+| string, list, map, int, float | `any` | Pure computation |
 | math, random | `any` | JS Math / Rust std::f64 |
-| json | `any` | JSON.parse は全ランタイム共通 |
+| json | `any` | JSON.parse is common across all runtimes |
 | regex | `any` | JS RegExp / Rust regex crate |
-| crypto (hash) | `any` | 基本的なハッシュは全ランタイム |
+| crypto (hash) | `any` | Basic hashing works on all runtimes |
 | crypto (subtle) | `web` | Web Crypto API |
 | http (fetch) | `web` | Web standard Fetch API |
 | http (server) | `node` | Node.js http module / Deno.serve |
-| fs, path | `node` / `native` | ファイルシステム |
-| process (spawn) | `node` / `native` | 子プロセス |
-| env (get) | `any` | Deno.env, process.env, std::env 全対応 |
-| env (set) | `node` / `native` | browser/worker では不可 |
+| fs, path | `node` / `native` | Filesystem |
+| process (spawn) | `node` / `native` | Child processes |
+| env (get) | `any` | Deno.env, process.env, std::env all supported |
+| env (set) | `node` / `native` | Not possible in browser/worker |
 | dom | `browser` | DOM API |
 | datetime | `any` | Date / chrono |
 | log | `any` | console.log / eprintln |
 
-**1 モジュール内で関数ごとに platform が異なりうる。** `env.get` は `any` だが `env.set` は `node`。これは関数単位の `@extern` タグで自然に表現される。
+**Platform can differ per function within a module.** `env.get` is `any` but `env.set` is `node`. This is naturally expressed through function-level `@extern` tags.
 
-## コンパイルエラーの設計
+## Compile Error Design
 
-### 使えない API の呼び出し
+### Calling unavailable APIs
 
 ```
 error: fs.read_file requires platform node or native, but target platform is browser
@@ -225,7 +225,7 @@ error: fs.read_file requires platform node or native, but target platform is bro
    = hint: filesystem is not available in browser. Consider using fetch() to load data from a URL
 ```
 
-### platform 不一致のインポート
+### Platform-mismatched imports
 
 ```
 error: cannot import server_lib (requires platform node) in platform worker
@@ -239,7 +239,7 @@ error: cannot import server_lib (requires platform node) in platform worker
    = hint: use --platform node, or use a browser-compatible alternative
 ```
 
-### target × platform の不正な組み合わせ
+### Invalid target x platform combination
 
 ```
 error: platform native is not compatible with target ts
@@ -253,19 +253,19 @@ error: platform native is not compatible with target ts
 
 ## Relationship to Other Roadmap Items
 
-- **ts-edge-native.md**: このドキュメントが解決する問題の前提。platform 分離がないとエッジで使える API がコンパイル時に分からない。ts-edge-native の Phase 2 は本ドキュメントに移管
-- **almide-ui.md**: Almide UI は `platform: browser` に依存。platform 推論により、Almide UI を使ったコードは自動的に browser platform が要求される
-- **cross-target-semantics.md**: platform 分離により「同じコードが Rust と TS で同じ結果」の検証スコープが `platform: any` の関数に限定できる
-- **rainbow-gate.md**: Rainbow FFI Gate は本質的に platform-specific。@extern の platform タグが FFI の基盤になる
+- **ts-edge-native.md**: Prerequisite for the problem this document solves. Without platform separation, available APIs at the edge cannot be determined at compile time. ts-edge-native Phase 2 is transferred to this document
+- **almide-ui.md**: Almide UI depends on `platform: browser`. Through platform inference, code using Almide UI automatically requires browser platform
+- **cross-target-semantics.md**: Platform separation limits the scope of "same code produces same results in Rust and TS" verification to `platform: any` functions
+- **rainbow-gate.md**: Rainbow FFI Gate is inherently platform-specific. The @extern platform tag becomes the foundation for FFI
 
 ## Why ON HOLD
 
-現在の `@extern(rs, ...)` / `@extern(ts, ...)` で言語コアの開発には十分。platform 分離が必要になるのは TS ターゲットでの本格的な Web/Edge 開発が始まるとき。
+The current `@extern(rs, ...)` / `@extern(ts, ...)` is sufficient for core language development. Platform separation becomes necessary when serious Web/Edge development on the TS target begins.
 
-ただし:
+However:
 
-- **設計はシンプル** — @extern に platform フィールドを追加し、コンパイラが階層を見て検証するだけ
-- **後方互換** — 既存の `@extern(rs, ...)` / `@extern(ts, ...)` はショートハンドとして維持
-- **段階的に導入可能** — まず `any` / `node` / `browser` の 3 つだけで始められる
+- **Design is simple** — just add a platform field to @extern and have the compiler validate against the hierarchy
+- **Backward compatible** — existing `@extern(rs, ...)` / `@extern(ts, ...)` maintained as shorthand
+- **Incrementally adoptable** — can start with just 3: `any` / `node` / `browser`
 
-ts-edge-native / almide-ui が動き出すときに必要になる。
+Will be needed when ts-edge-native / almide-ui work begins.

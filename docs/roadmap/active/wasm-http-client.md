@@ -1,42 +1,45 @@
 <!-- description: HTTP client support for the WASM target via WASI or host imports -->
 # WASM HTTP Client
 
-**優先度:** 中 — V8 Isolate 環境での実用性に直結するが、WASI の制約で短期解決が難しい
-**前提:** WASM fs I/O 実装済み（read_text, write, exists）
+**Priority:** Medium — Directly impacts practicality in V8 Isolate environments, but hard to solve short-term due to WASI constraints
+**Prerequisites:** WASM fs I/O implemented (read_text, write, exists)
 
 ---
 
-## 現状
+## Current State
 
-- HTTP response 構築系（response, json, set_header 等）は WASM で動作済み
-- HTTP client 系（get, post, put 等）は stub → デフォルト値を返す
-- WASI preview1 にはネットワーキング API が存在しない
+- HTTP response construction functions (response, json, set_header, etc.) already work in WASM
+- HTTP client functions (get, post, put, etc.) are stubs — return default values
+- WASI preview1 has no networking API
 
-## なぜ難しいか
+## Why This Is Difficult
 
-1. **WASI preview1 にソケット/HTTP がない** — 仕様外
-2. **wasi-http (preview2)** は Component Model 前提 — Almide は Core WASM (preview1) ベース
-3. **ホスト固有 import** は移植性を損なう — Cloudflare Workers 固有にすると汎用 WASI バイナリの価値がなくなる
+1. **WASI preview1 has no sockets/HTTP** — outside the spec
+2. **wasi-http (preview2)** requires Component Model — Almide is Core WASM (preview1) based
+3. **Host-specific imports** hurt portability — making it Cloudflare Workers-specific would eliminate the value of generic WASI binaries
 
-## 選択肢
+## Options
 
-### A. WASI preview2 + Component Model 対応（大規模）
-- wasm-encoder の Component Model 対応が必要
-- wasi-http インターフェースの実装
-- wasmtime / Cloudflare Workers 両対応
-- **工数: 大（数週間）**
+### A. WASI preview2 + Component Model Support (Large Scope)
 
-### B. ホスト提供 import 方式（中規模）
-- `__almide_http_get(url_ptr, url_len) -> (status, body_ptr, body_len)` のようなカスタム import
-- ホストランタイム（wasmtime wrapper / CF Worker）が実装を提供
-- 移植性は低いが即座に動く
-- **工数: 中（数日）**
+- Requires Component Model support in wasm-encoder
+- Implement wasi-http interfaces
+- Support both wasmtime and Cloudflare Workers
+- **Effort: Large (several weeks)**
 
-### C. 現状維持 + エラー Result 返却（最小）
-- http client を WASM で呼ぶと `err("http client not supported on WASM target")` を返す
-- コンパイル時 warning も検討
-- **工数: 小（数時間）**
+### B. Host-Provided Import Approach (Medium Scope)
 
-## 推奨
+- Custom imports like `__almide_http_get(url_ptr, url_len) -> (status, body_ptr, body_len)`
+- Host runtime (wasmtime wrapper / CF Worker) provides the implementation
+- Low portability but works immediately
+- **Effort: Medium (a few days)**
 
-短期は **C**（エラー Result）、中期で **B**（ホスト import）を検討。A は WASI preview2 の安定化を待つ。
+### C. Status Quo + Error Result Return (Minimal Scope)
+
+- Calling http client from WASM returns `err("http client not supported on WASM target")`
+- Consider compile-time warning as well
+- **Effort: Small (a few hours)**
+
+## Recommendation
+
+Short-term: **C** (error Result). Medium-term: evaluate **B** (host imports). Wait for WASI preview2 stabilization before pursuing A.

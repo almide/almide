@@ -2,55 +2,55 @@
 <!-- done: 2026-03-15 -->
 # Generic Variant Type Instantiation
 
-**テスト:** `spec/lang/type_system_test.almd`
-**ステータス:** ✅ 解決済み (commit af22305)
+**Test:** `spec/lang/type_system_test.almd`
+**Status:** ✅ Resolved (commit af22305)
 
-## 問題
+## Problem
 
 `type Maybe[T] = | Just(T) | Nothing` + `let y: Maybe[Int] = Nothing()` が以下を生成:
 
 ```rust
-let y = Maybe::Nothing;  // エラー: type annotations needed for Maybe<_>
+let y = Maybe::Nothing;  // error: type annotations needed for Maybe<_>
 ```
 
-## 根本原因（3層の問題）
+## Root Cause (3-Layer Problem)
 
-### 層1: コンストラクタが空の型引数を返していた
+### Layer 1: Constructor was returning empty type arguments
 
-`check_named_call` のバリアントコンストラクタ処理が `Ty::Named(type_name, vec![])` を返していた。ジェネリック型なのに型引数が空。
+The variant constructor handling in `check_named_call` was returning `Ty::Named(type_name, vec![])`. A generic type with empty type arguments.
 
-**修正:** `instantiate_type_generics()` を追加。型定義の TypeVar 数を数え、それぞれに fresh な推論変数を生成。`Ty::Named("Maybe", [TypeVar("?5")])` を返すように変更。
+**Fix:** Added `instantiate_type_generics()`. Counts the TypeVars in the type definition, generates fresh inference variables for each. Changed to return `Ty::Named("Maybe", [TypeVar("?5")])`.
 
-### 層2: Named 型の引数が unify されていなかった
+### Layer 2: Named type arguments were not being unified
 
-`unify_infer` の `Concrete ↔ Concrete` パスで `(Named(na, _), Named(nb, _)) if na == nb => true` — 名前が同じなら引数を**無視**していた。HM の unification は型コンストラクタの引数を再帰的に unify する。
+In `unify_infer`'s `Concrete ↔ Concrete` path: `(Named(na, _), Named(nb, _)) if na == nb => true` — if the names matched, arguments were **ignored**. HM unification recursively unifies type constructor arguments.
 
-**修正:** `Named` 同士の unification で引数を `from_ty` 経由で `InferTy` に変換し、再帰的に unify するように変更。
+**Fix:** Changed unification of `Named` types to convert arguments to `InferTy` via `from_ty` and unify recursively.
 
-### 層3: resolve_inference_vars が Named の引数に到達しなかった（**真の根本原因**）
+### Layer 3: resolve_inference_vars didn't reach Named arguments (**the true root cause**)
 
-`resolve_inference_vars` の `resolve_inner` が `Ty::Named(name, args)` をキャッチオールの `_ => ty.clone()` で処理していた。結果、`Named("Maybe", [TypeVar("?5")])` の中の `?5` が `Int` に解決されず、IR に `TypeVar("?5")` が残り続けた。
+`resolve_inner` in `resolve_inference_vars` was handling `Ty::Named(name, args)` with the catch-all `_ => ty.clone()`. As a result, `?5` inside `Named("Maybe", [TypeVar("?5")])` was never resolved to `Int`, and `TypeVar("?5")` persisted in the IR.
 
-**修正（1行）:**
+**Fix (1 line):**
 
 ```rust
-// src/check/types.rs resolve_inner() に追加
+// Added to src/check/types.rs resolve_inner()
 Ty::Named(name, args) if !args.is_empty() => {
     Ty::Named(name.clone(), args.iter().map(|a| Self::resolve_inner(a, solutions, seen)).collect())
 }
 ```
 
-## 型理論との対応
+## Correspondence to Type Theory
 
-HM (Hindley-Milner) の2つの原則:
+Two principles of HM (Hindley-Milner):
 
-1. **型コンストラクタの構造的 unification**: `Maybe(?5)` と `Maybe(Int)` の unification は `?5 = Int` を導出する
-2. **型変数の再帰的解決**: 制約解決後、全ての型構造内の型変数を置換する（Named の引数含む）
+1. **Structural unification of type constructors**: unifying `Maybe(?5)` and `Maybe(Int)` derives `?5 = Int`
+2. **Recursive resolution of type variables**: after constraint solving, substitute type variables within all type structures (including Named arguments)
 
-Almide はこの2つ目が欠けていた。HM では当然やることだが、`resolve_inference_vars` の実装時に `Named` のケースが抜けていた。
+Almide was missing the second one. This is standard in HM, but the `Named` case was omitted during the implementation of `resolve_inference_vars`.
 
-## 変更ファイル
+## Changed Files
 
-- `src/check/types.rs` — `resolve_inner` に `Ty::Named` の再帰処理追加 (+3行)
-- `src/check/mod.rs` — `unify_infer` の Named 同士の unification を構造的に (+4行)
-- `src/check/calls.rs` — `instantiate_type_generics` 追加、コンストラクタが fresh vars を生成 (+15行)
+- `src/check/types.rs` — added recursive processing of `Ty::Named` in `resolve_inner` (+3 lines)
+- `src/check/mod.rs` — made `unify_infer` structurally unify Named types (+4 lines)
+- `src/check/calls.rs` — added `instantiate_type_generics`, constructors now generate fresh vars (+15 lines)

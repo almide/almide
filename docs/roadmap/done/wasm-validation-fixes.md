@@ -4,65 +4,65 @@
 
 ## Status: Rust 153/153, WASM 1 compile failure (type_system_test), 8 skipped (Codec)
 
-## 諸悪の根源: Checker の Union-Find Generic Instantiation 汚染
+## Root of All Evil: Checker's Union-Find Generic Instantiation Contamination
 
-### 症状
+### Symptom
 
-generic 関数 `fn either_map_right[A, B, C](e: Either[A, B], f: (B) -> C) -> Either[A, C]` で:
+For generic function `fn either_map_right[A, B, C](e: Either[A, B], f: (B) -> C) -> Either[A, C]`:
 
 ```
-checker が A=String, B=Int, C=Int を推論すべきところ、
-Union-Find で A の fresh var が B/C の fresh var と同じ等価クラスに入り、
-A=Int に汚染される。
+Where the checker should infer A=String, B=Int, C=Int,
+Union-Find places A's fresh var into the same equivalence class as B/C's fresh vars,
+contaminating A=Int.
 
-結果: match subject.ty, arm body.ty, pattern.ty が全て汚染。
-Left(a) の a が String ではなく Int として型付けされる。
-codegen が i64_load (Int) を出すが、実際の payload は String (i32) → validation error。
+Result: match subject.ty, arm body.ty, pattern.ty are all contaminated.
+Left(a)'s a is typed as Int instead of String.
+codegen emits i64_load (Int), but the actual payload is String (i32) → validation error.
 ```
 
-### 根本原因
+### Root Cause
 
-`check_call_with_type_args` で generic 関数を呼ぶとき:
+When calling a generic function via `check_call_with_type_args`:
 
-1. `fresh_var()` で各 generic param に inference var を割り当て (?N, ?M, ?O)
-2. `constrain(param_ty_substituted, arg_ty)` で引数型と unify
-3. Union-Find の `bind/union` で ?N, ?M, ?O が concrete 型にバインド
+1. `fresh_var()` assigns inference vars to each generic param (?N, ?M, ?O)
+2. `constrain(param_ty_substituted, arg_ty)` unifies with argument types
+3. Union-Find's `bind/union` binds ?N, ?M, ?O to concrete types
 
-**問題**: step 3 で `bind` が既存のバインドを上書き。`?N = String` がセットされた後、
-別の constraint で `?N = Int` に上書きされる。または `union(?N, ?M)` で
-異なる generic params が同じ等価クラスに入る。
+**Problem**: in step 3, `bind` overwrites existing bindings. After `?N = String` is set,
+another constraint overwrites it with `?N = Int`. Or `union(?N, ?M)` places
+different generic params into the same equivalence class.
 
-### なぜ codegen パッチでは解決しないか
+### Why Codegen Patches Don't Fix This
 
-checker が `expr_types` に汚染された型を格納 → lowering が IR に汚染型を設定
-→ mono が TypeVar を置換するが concrete 型は変えない → codegen が汚染型で命令を生成
+The checker stores contaminated types in `expr_types` → lowering sets contaminated types in IR
+→ mono replaces TypeVars but doesn't change concrete types → codegen emits instructions with contaminated types
 
-**汚染は IR 全体に伝播する。** scan, emit, pattern, match result — 全てが影響。
-codegen で個別に修正しても、次の式で同じ問題が再発。
+**Contamination propagates throughout the entire IR.** scan, emit, pattern, match result — everything is affected.
+Even if fixed individually in codegen, the same problem reoccurs at the next expression.
 
-### 正しい修正
+### Correct Fix
 
-checker の generic instantiation で **各 generic param の fresh var を independent に管理**。
+**Manage each generic param's fresh var independently** in the checker's generic instantiation.
 
-具体的な選択肢:
+Specific options:
 
-**A. Scoped fresh vars**: generic 関数呼び出しごとに independent な fresh var set を作り、
-call の constraint 解決が完了するまで他の constraint から分離。
+**A. Scoped fresh vars**: create an independent fresh var set per generic function call,
+isolated from other constraints until the call's constraint resolution completes.
 
-**B. Bidirectional inference**: top-down で期待型を伝播し、bottom-up で推論型を返す。
-generic params は top-down の期待型から先に解決。Union-Find の上書き問題が発生しない。
+**B. Bidirectional inference**: propagate expected types top-down, return inferred types bottom-up.
+Generic params are resolved first from top-down expected types. The Union-Find overwrite problem doesn't occur.
 
-**C. Constraint 分離**: generic 関数呼び出しの constraint を別の solver context で解決し、
-結果のみを main context に merge。HM inference の let-polymorphism と同じ考え方。
+**C. Constraint isolation**: resolve generic function call constraints in a separate solver context,
+merge only results into the main context. Same concept as HM inference's let-polymorphism.
 
-**推奨**: A が最小変更。B は理想だが checker 全体の書き直し。C は中間。
+**Recommended**: A is minimal change. B is ideal but requires rewriting the entire checker. C is in between.
 
-### この branch でやったこと (workaround)
+### What This Branch Did (Workaround)
 
-- `IrPattern::Bind { var, ty }` — pattern が型を自前で持つ (VarTable 非依存)
-- mono `substitute_pattern_types` — mono で pattern.ty を concrete に置換
-- checker match result var 分離 — `first` arm type を直接返す (shared fresh var なし)
-- propagate で match.ty を func.ret_ty で修正
-- emit_match で arm body の WASM type consensus を使用
+- `IrPattern::Bind { var, ty }` — pattern carries its own type (VarTable-independent)
+- mono `substitute_pattern_types` — replace pattern.ty with concrete types in mono
+- Checker match result var isolation — directly return `first` arm type (no shared fresh var)
+- Fix match.ty with func.ret_ty in propagate
+- Use arm body WASM type consensus in emit_match
 
-**全て workaround。** checker を直せば不要になる。
+**All workarounds.** They become unnecessary once the checker is fixed.

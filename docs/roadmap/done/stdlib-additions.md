@@ -2,37 +2,37 @@
 <!-- done: 2026-03-20 -->
 # Stdlib Additions — Complete
 
-**優先度:** 1.x — 1.0後に段階的追加
-**リサーチ:** [stdlib-module-matrix.md](../../research/stdlib-module-matrix.md)
+**Priority:** 1.x — incremental additions after 1.0
+**Research:** [stdlib-module-matrix.md](../../research/stdlib-module-matrix.md)
 
-## 完了: set モジュール (20関数)
+## Complete: set module (20 functions)
 
-11 → 20 関数に拡充。Gleam set (20関数) と同等。
+Expanded from 11 to 20 functions. On par with Gleam set (20 functions).
 
-### 追加した関数 (9件)
+### Added Functions (9)
 
-| 関数 | 説明 | 他言語 |
-|------|------|--------|
-| `symmetric_difference(a, b)` | 排他的和 | Rust, Gleam, Python, Elixir |
+| Function | Description | Other Languages |
+|----------|-------------|-----------------|
+| `symmetric_difference(a, b)` | Symmetric difference | Rust, Gleam, Python, Elixir |
 | `is_subset(a, b)` | a ⊆ b | Rust, Gleam, Python, Elixir |
-| `is_disjoint(a, b)` | 共通要素なし | Rust, Gleam, Python, Elixir |
-| `filter(s, f)` | 述語一致のみ保持 | Gleam, Elm, Kotlin, Elixir |
-| `map(s, f)` | 要素変換 | Gleam, Elm, Kotlin |
-| `fold(s, init, f)` | 畳み込み | Gleam, Elm, Kotlin, Elixir |
-| `each(s, f)` | 副作用付き反復 | list/map と一貫性 |
-| `any(s, f)` | いずれかが真 | list/map と一貫性 |
-| `all(s, f)` | すべてが真 | list/map と一貫性 |
+| `is_disjoint(a, b)` | No common elements | Rust, Gleam, Python, Elixir |
+| `filter(s, f)` | Keep only predicate matches | Gleam, Elm, Kotlin, Elixir |
+| `map(s, f)` | Transform elements | Gleam, Elm, Kotlin |
+| `fold(s, init, f)` | Accumulate with initial value | Gleam, Elm, Kotlin, Elixir |
+| `each(s, f)` | Iterate with side effects | Consistent with list/map |
+| `any(s, f)` | Any element is true | Consistent with list/map |
+| `all(s, f)` | All elements are true | Consistent with list/map |
 
-## 保留候補 (2.x以降)
+## Deferred Candidates (2.x+)
 
-| Module | 根拠 |
-|--------|------|
-| **net** (TCP/UDP) | Rust✅ Go✅。http より低レイヤー。需要があれば |
-| **encoding** (base64等) | Go✅。現在 .almd で提供中。TOML昇格は需要次第 |
-| **channel** | Go✅ Rust✅。fan の拡張として検討 |
+| Module | Rationale |
+|--------|-----------|
+| **net** (TCP/UDP) | Rust✅ Go✅. Lower layer than http. On demand |
+| **encoding** (base64 etc.) | Go✅. Currently provided as .almd. TOML promotion on demand |
+| **channel** | Go✅ Rust✅. Under consideration as fan extension |
 
-## 設計原則
+## Design Principles
 
-- **追加は慎重に** — 一度 stdlib に入ると凍結される
-- **パッケージで試してからstdlibに昇格** — Deno model
-- **multi-target で動作するもののみ** — Rust + TS 両方で意味があること
+- **Add conservatively** — once in stdlib, it is frozen
+- **Try in packages before promoting to stdlib** — Deno model
+- **Only things that work multi-target** — must be meaningful for both Rust + TS

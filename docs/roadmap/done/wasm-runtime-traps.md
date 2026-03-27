@@ -11,39 +11,39 @@ basic protocol method, basic protocol satisfaction, builder pattern via protocol
 convention method resolution, convention method via UFCS, diamond protocol,
 generic function with protocol bound, protocol methods chained via pipe
 
-**Root**: protocol メソッド呼び出しが `unreachable` に落ちる。
-WASM codegen で convention/protocol dispatch が未実装。
-Rust codegen は `TypeName.method(self)` の直接呼び出しに変換するが、WASM ではテーブル間接呼び出しか名前解決が必要。
+**Root**: Protocol method calls fall through to `unreachable`.
+Convention/protocol dispatch is not implemented in WASM codegen.
+Rust codegen transforms to direct calls via `TypeName.method(self)`, but WASM requires either table indirect calls or name resolution.
 
-**Fix**: emit_call で protocol method を Named call に解決する。
+**Fix**: Resolve protocol methods to Named calls in emit_call.
 
 ### Map operations [4 files]
 map basic operations, map creation and get, empty map operations, empty map with type annotation
 
-**Root**: Map 型の WASM runtime が未実装。
-List は linear memory + length header で実装済みだが、Map はハッシュテーブルが必要。
+**Root**: Map type WASM runtime is not implemented.
+List is implemented with linear memory + length header, but Map requires a hash table.
 
-**Fix**: Map runtime を実装（hash + bucket array）。大工事。
+**Fix**: Implement Map runtime (hash + bucket array). Major effort.
 
 ### Map iteration [3 files]
 for over map, for with map tuple destructure, for with zip
 
-**Root**: `for k, v in map` の WASM codegen が未実装。
-List iteration は実装済み。Map iteration は Map runtime に依存。
+**Root**: WASM codegen for `for k, v in map` is not implemented.
+List iteration is implemented. Map iteration depends on the Map runtime.
 
-**Fix**: Map runtime 後に実装。
+**Fix**: Implement after Map runtime.
 
 ### Fan (sequential fallback) [4 files]
 fan basic, fan.map, fan.race, fan.any
 
-**Root**: fan (並行実行) の WASM codegen が未実装。
-WASM は single-thread だが、fan の semantics は「複数の式を実行して結果を集める」。
-sequential に実行すれば同じ結果が得られる。
+**Root**: WASM codegen for fan (concurrent execution) is not implemented.
+WASM is single-threaded, but fan's semantics is "execute multiple expressions and collect results".
+Sequential execution produces the same results.
 
-**Fix**: fan を sequential fallback で実装。
+**Fix**: Implement fan with sequential fallback.
 - `fan { a, b, c }` → `(a(), b(), c())`
 - `fan.map(list, fn)` → `list.map(list, fn)`
-- `fan.race(list, fn)` → 先頭要素を返す
+- `fan.race(list, fn)` → return the first element
 
 ### Deep equality [3 files]
 nested list equality, deep equality on nested structures, recursive variant types
@@ -56,40 +56,40 @@ deep equality が incomplete。`option_eq_i64` / `list_eq` が shallow compariso
 ### Record/Variant features [3 files]
 let record destructure, nested open record, basic variant record construction
 
-**Root**: record destructure (`let { name, age } = person`) と variant record
-construction の WASM codegen が incomplete。
+**Root**: WASM codegen for record destructure (`let { name, age } = person`) and variant record
+construction is incomplete.
 
-**Fix**: emit_stmt の BindDestructure と emit_record の variant record case を実装。
+**Fix**: Implement BindDestructure in emit_stmt and the variant record case in emit_record.
 
 ### Type features [5 files]
 match constructor with payload, match nested option, default fields - omit all defaults,
 comparison on type variable, multi type param generic
 
-**Root**: 個別のパターンマッチや generic 関数の codegen edge case。
-各テストで最初に trap する箇所を特定して個別修正。
+**Root**: Individual pattern matching and generic function codegen edge cases.
+Identify the first trap point in each test and fix individually.
 
-**Fix**: 各ケースを調査して修正。
+**Fix**: Investigate and fix each case.
 
 ### String operations [2 files]
 string split and join, json stringify
 
-**Root**: `string.split`, `string.join` の WASM runtime が未実装 (stub)。
+**Root**: WASM runtime for `string.split`, `string.join` is not implemented (stub).
 
-**Fix**: runtime に string split/join を実装。
+**Fix**: Implement string split/join in runtime.
 
 ### Import/Codec [4 files]
 encode/decode roundtrip, result.map, naming strategy, unit variant encode
 
-**Root**: Codec 系 + module import の WASM 対応。
+**Root**: Codec-related + module import WASM support.
 
-**Fix**: 大部分は skip 対象。result.map は stdlib runtime に追加。
+**Fix**: Most should be skipped. Add result.map to stdlib runtime.
 
 ### Misc codegen [4 files]
 UFCS basic, pipe into list function, nested closure, do guard
 
-**Root**: 個別の codegen パターン。UFCS 変換、pipe desugar、closure の nested capture 等。
+**Root**: Individual codegen patterns. UFCS transformation, pipe desugaring, nested closure capture, etc.
 
-**Fix**: 各ケースを調査して修正。
+**Fix**: Investigate and fix each case.
 
 ### Other [4 files]
 structured error, string keys, tco deep recursion, variant roundtrip
@@ -99,10 +99,10 @@ structured error, string keys, tco deep recursion, variant roundtrip
 | Priority | Category | Files | Impact | Effort |
 |----------|----------|-------|--------|--------|
 | 1 | Fan sequential fallback | 4 | -4 traps | Low |
-| 2 | Protocol dispatch | 8 | -8 traps, 大量のテスト unblock | Medium |
+| 2 | Protocol dispatch | 8 | -8 traps, unblocks many tests | Medium |
 | 3 | Record/Variant features | 3 | -3 traps | Medium |
-| 4 | Type features | 5 | -5 traps | Medium (個別) |
-| 5 | Misc codegen | 4 | -4 traps | Medium (個別) |
+| 4 | Type features | 5 | -5 traps | Medium (individual) |
+| 5 | Misc codegen | 4 | -4 traps | Medium (individual) |
 | 6 | Deep equality | 3 | -3 traps | Medium |
 | 7 | String operations | 2 | -2 traps | Low |
 | 8 | Import/Codec skip | 4 | -4 traps | 5 min |
@@ -113,7 +113,7 @@ structured error, string keys, tco deep recursion, variant roundtrip
 
 | After step | Pass | Traps |
 |------------|------|-------|
-| 現状 | 21 | 44 |
+| Current | 21 | 44 |
 | 1 (fan) | 25 | 40 |
 | 2 (protocol) | 29+ | 32 |
 | 3-5 (features) | 41+ | 20 |

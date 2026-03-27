@@ -2,30 +2,30 @@
 <!-- done: 2026-03-18 -->
 # Showcase 4: Markdown to HTML (DevTool)
 
-**領域:** DevTool / テキスト変換
-**目的:** Markdown→HTML変換。variant型 + exhaustive match の実用例。
+**Domain:** DevTool / text conversion
+**Purpose:** Markdown to HTML conversion. Practical example of variant types + exhaustive match.
 
-## 仕様
+## Specification
 
 ```
 almide run showcase/md2html.almd -- README.md > output.html
 ```
 
-- Markdown サブセット: `#` 見出し, `**` 太字, `*` 斜体, `` ` `` コード, `- ` リスト, 空行で段落区切り
-- variant型で AST 定義
-- pattern match で HTML レンダリング
+- Markdown subset: `#` headings, `**` bold, `*` italic, `` ` `` code, `- ` lists, blank lines for paragraph breaks
+- AST defined with variant types
+- HTML rendering via pattern match
 
-## 使う機能
+## Features Used
 
-- `type MdNode = | Heading { ... } | Paragraph { ... } | ...` (variant型)
+- `type MdNode = | Heading { ... } | Paragraph { ... } | ...` (variant types)
 - exhaustive `match`
 - `string.starts_with`, `string.slice`, `string.replace`
 - `list.map`, `string.join`
 - `fs.read_text`, `io.print`
 
-## 成功基準
+## Success Criteria
 
-- [ ] Tier 1 (Rust) で動作
-- [ ] Tier 2 (TS/Deno) で動作
-- [ ] 80行以内
-- [ ] README に使い方記載
+- [ ] Works on Tier 1 (Rust)
+- [ ] Works on Tier 2 (TS/Deno)
+- [ ] Under 80 lines
+- [ ] Usage documented in README

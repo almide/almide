@@ -2,9 +2,9 @@
 <!-- done: 2026-03-17 -->
 # Runtime Gaps — Complete
 
-全 22 モジュール / 355 関数のランタイム実装完了 (100%)。
+All 22 modules / 355 functions runtime implementation complete (100%).
 
-| モジュール | 関数数 |
+| Module | Function Count |
 |-----------|--------|
 | list | 54 |
 | string | 41 |
@@ -29,4 +29,4 @@
 | error | 3 |
 | io | 3 |
 
-regex は自前エンジン（350 行、外部 crate 不要）。
+regex uses a custom engine (350 lines, no external crate dependency).

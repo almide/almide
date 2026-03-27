@@ -2,38 +2,38 @@
 <!-- done: 2026-03-18 -->
 # Cross-Target CI
 
-> "ターゲット選択がプログラムの挙動を変えてはならない" — TypeScript の教訓
+> "Target selection must not change program behavior" — lesson from TypeScript
 
-## 概要
+## Overview
 
-全テストを Rust ターゲットと TS ターゲットの両方で実行し、出力が一致することを自動検証する。
+Run all tests on both Rust and TS targets and automatically verify that outputs match.
 
-## 実装
+## Implementation
 
-- [x] CI スクリプト: `.github/workflows/ci-cross-target.yml` (develop push で自動実行)
+- [x] CI script: `.github/workflows/ci-cross-target.yml` (auto-runs on develop push)
 - [x] **spec/lang: 45/45 pass**
 - [x] **spec/stdlib: 14/14 pass**
 - [x] **spec/integration: 13/13 pass**
 - [x] **exercises: 34/34 pass**
-- [x] **合計: 106/106 (100%)**
+- [x] **Total: 106/106 (100%)**
 
-## Codegen v3 による達成 (2026-03-18)
+## Achieved via Codegen v3 (2026-03-18)
 
-- [x] `is_rust()` 42 → 0: walker 完全 target-agnostic
+- [x] `is_rust()` 42 → 0: walker fully target-agnostic
 - [x] ResultErasurePass: ok(x)→x, err(e)→throw (TS/Python)
 - [x] ShadowResolvePass: let shadowing → assignment (TS)
-- [x] MatchLoweringPass 拡張: Constructor + RecordPattern + guard
-- [x] break-in-IIFE 解決: contains_loop_control で IIFE 回避
-- [x] 40+ TOML テンプレートで Rust/TS 構文差異を吸収
+- [x] MatchLoweringPass extended: Constructor + RecordPattern + guard
+- [x] break-in-IIFE resolved: IIFE avoidance via contains_loop_control
+- [x] 40+ TOML templates absorb Rust/TS syntax differences
 
-## 既知の制限
+## Known limitations
 
-なし。全 106 テストが Rust + TS 両方で pass。
+None. All 106 tests pass on both Rust + TS.
 
-## ターゲット品質階層
+## Target quality tiers
 
-| Tier | ターゲット | 基準 | 現状 |
-|------|-----------|------|------|
-| Tier 1 | Rust | 全テスト通過 | 72/72 ✅ |
-| Tier 1 | TS/JS | 全テスト通過 | 106/106 ✅ |
-| Tier 3 | WASM | 基本動作確認 | CI あり (smoke test) |
+| Tier | Target | Criteria | Current |
+|------|--------|----------|---------|
+| Tier 1 | Rust | All tests passing | 72/72 ✅ |
+| Tier 1 | TS/JS | All tests passing | 106/106 ✅ |
+| Tier 3 | WASM | Basic operation confirmed | CI available (smoke test) |

@@ -2,63 +2,63 @@
 <!-- done: 2026-03-16 -->
 # Open Record / Row Polymorphism — Implementation Guide
 
-**テスト:** `spec/lang/open_record_test.almd`
-**ステータス:** 16 rustc エラー, 0 checker エラー
-**理論:** Rémy 1989 Row Polymorphism
+**Tests:** `spec/lang/open_record_test.almd`
+**Status:** 16 rustc errors, 0 checker errors
+**Theory:** Remy 1989 Row Polymorphism
 
-## 現状のアーキテクチャ
+## Current Architecture
 
 ```
-チェッカー (src/check/)     → OpenRecord は compatible チェックで通る ✅
-monomorphizer (src/mono.rs) → generic + structural bound のみ対応 ⚠️
-codegen (src/emit_rust/)    → OpenRecord / TypeVar("Named") が Rust 型に変換できない ❌
+Checker (src/check/)        → OpenRecord passes compatible check ✅
+Monomorphizer (src/mono.rs) → Only handles generic + structural bound ⚠️
+Codegen (src/emit_rust/)    → Cannot convert OpenRecord / TypeVar("Named") to Rust type ❌
 ```
 
-## テストが要求する2パターン
+## Two Patterns Required by Tests
 
-### パターン A: 直接 OpenRecord パラメータ
+### Pattern A: Direct OpenRecord Parameter
 ```almide
 fn greet(who: { name: String, .. }) -> String = "Hello, ${who.name}!"
 greet(Dog { name: "Rex", breed: "Lab" })  // Dog は name を持つ
 ```
-**monomorphizer が認識しない** — generic がないから。
+**Not recognized by monomorphizer** — because there are no generics.
 
-### パターン B: Generic + Structural Bound
+### Pattern B: Generic + Structural Bound
 ```almide
 fn describe[T: { name: String, .. }](x: T) -> String = "name: ${x.name}"
 describe(Dog { name: "Rex", breed: "Lab" })
 ```
-**monomorphizer が対応済み** — `src/mono.rs` で specialization される。
+**Already handled by monomorphizer** — specialized in `src/mono.rs`.
 
-## 修正するファイル
+## Files to Modify
 
-### 1. `src/mono.rs` — find_structurally_bounded_fns を拡張
+### 1. `src/mono.rs` — Extend find_structurally_bounded_fns
 
 ```rust
-// 現状: generic + structural bound のみ検出
+// Current: only detects generic + structural bound
 fn find_structurally_bounded_fns(functions: &[IrFunction]) -> HashMap<String, Vec<BoundedParam>> {
     for func in functions {
         if let Some(ref generics) = func.generics {
-            // structural_bound がある generic param を検出
+            // detect generic params with structural_bound
         }
     }
 }
 
-// 修正: 直接 OpenRecord パラメータも検出
+// Fix: also detect direct OpenRecord parameters
 fn find_open_record_fns(functions: &[IrFunction]) -> HashMap<String, Vec<OpenRecordParam>> {
     for func in functions {
         for (i, param) in func.params.iter().enumerate() {
             if matches!(&param.ty, Ty::OpenRecord { .. }) {
-                // この関数は monomorphization 対象
+                // this function is a monomorphization candidate
             }
         }
     }
 }
 ```
 
-### 2. `src/mono.rs` — discover_instances を拡張
+### 2. `src/mono.rs` — Extend discover_instances
 
-Call site で渡される具体型を収集:
+Collect concrete types passed at call sites:
 
 ```rust
 // greet(Dog { name: "Rex", breed: "Lab" })
@@ -66,54 +66,54 @@ Call site で渡される具体型を収集:
 // → instance: ("greet", "Dog") → { param_0 → Dog }
 ```
 
-IR の Call ノードを走査し、target が open record fn で args の型が Named なら instance を登録。
+Traverse IR Call nodes; register an instance when the target is an open record fn and the arg type is Named.
 
-### 3. `src/mono.rs` — specialize_function を拡張
+### 3. `src/mono.rs` — Extend specialize_function
 
-Open record パラメータの型を具体型に置換:
+Replace open record parameter types with concrete types:
 
 ```rust
 // greet(who: { name: String, .. }) → greet__Dog(who: Dog)
-// 関数 body 内の who.name は Dog::name に解決される
+// who.name in function body resolves to Dog::name
 ```
 
-### 4. `src/mono.rs` — rewrite_calls を拡張
+### 4. `src/mono.rs` — Extend rewrite_calls
 
-Call site を specialized 版にリダイレクト:
+Redirect call sites to specialized versions:
 
 ```rust
 // greet(dog) → greet__Dog(dog)
 ```
 
-## アルゴリズムの核心 (Row Unification)
+## Algorithm Core (Row Unification)
 
 ```
 unify({ name: String, .. }, Dog)
   ↓
-Dog を resolve → { name: String, breed: String }
+Resolve Dog → { name: String, breed: String }
   ↓
 { name: String | ρ } vs { name: String, breed: String | RowEmpty }
   ↓
-共通: name: String ✓
-余り: breed: String → ρ に入る
+Common: name: String ✓
+Remainder: breed: String → goes into ρ
   ↓
 ρ = { breed: String }
 ```
 
-これはチェッカーでは **既に動いてる** (compatible チェック)。codegen 側の monomorphization が足りないだけ。
+This **already works** in the checker (compatible check). Only the codegen-side monomorphization is missing.
 
-## 実装順序
+## Implementation Order
 
-1. `find_open_record_fns()` — OpenRecord パラメータを持つ関数を検出
-2. `discover_instances()` — 各 call site の具体型を収集
-3. `specialize_function()` — OpenRecord → 具体型 に置換した関数コピーを生成
-4. `rewrite_calls()` — call site を specialized 版にリダイレクト
-5. codegen の `TypeVar("Named")` → resolved named type のフォールバック
+1. `find_open_record_fns()` — Detect functions with OpenRecord parameters
+2. `discover_instances()` — Collect concrete types at each call site
+3. `specialize_function()` — Generate function copies with OpenRecord replaced by concrete type
+4. `rewrite_calls()` — Redirect call sites to specialized versions
+5. Fallback for `TypeVar("Named")` in codegen to resolved named type
 
-## テストの期待結果
+## Expected Test Results
 
 ```
 spec/lang/open_record_test.almd: 16 tests pass
 ```
 
-全 16 テストが Rust compilation を通過し、runtime assertion を満たすこと。
+All 16 tests pass Rust compilation and satisfy runtime assertions.

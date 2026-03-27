@@ -3,29 +3,29 @@
 
 ## Thesis
 
-Almide で書いたコードを、どの言語からでもネイティブ速度で呼べるライブラリとして出力する。トランスパイラではなく **ライブラリコンパイラ**。
+Output code written in Almide as libraries callable from any language at native speed. Not a transpiler — a **library compiler**.
 
-Almide の強み（row polymorphism + monomorphization + borrow analysis）はすべて Rust コード生成時に発揮される。Python/Ruby に直接トランスパイルすると、これらの強みがすべて消える。だからターゲット言語を増やすのではなく、Almide → Rust → 共有ライブラリ → 各言語バインディング、という経路で各言語に速度を届ける。
+Almide's strengths (row polymorphism + monomorphization + borrow analysis) are all realized during Rust code generation. Transpiling directly to Python/Ruby would erase all of these strengths. So instead of adding target languages, we deliver speed to each language via the path: Almide → Rust → shared library → language bindings.
 
 ```
 almide source
     ↓
-  Rust codegen（borrow analysis, monomorphization — ゼロコスト）
+  Rust codegen (borrow analysis, monomorphization — zero cost)
     ↓
   cdylib (.so / .dylib / .dll)
     ↓
-  ┌─ Python ──→ PyO3 バインディング（pip install 可能）
-  ├─ Ruby ────→ Magnus バインディング（gem 可能）
-  ├─ Node.js ─→ napi-rs バインディング（npm 可能）
-  ├─ Swift ───→ C ABI ブリッジ
+  ┌─ Python ──→ PyO3 bindings (pip installable)
+  ├─ Ruby ────→ Magnus bindings (gem installable)
+  ├─ Node.js ─→ napi-rs bindings (npm installable)
+  ├─ Swift ───→ C ABI bridge
   ├─ Kotlin ──→ JNI / Panama FFI
   ├─ Erlang ──→ Rustler NIF
-  └─ WASM ────→ wasmtime / wasmer（全言語共通）
+  └─ WASM ────→ wasmtime / wasmer (universal across languages)
 ```
 
 ## Syntax
 
-`export` マークされた関数が FFI 境界に公開される:
+Functions marked with `export` are exposed at the FFI boundary:
 
 ```almide
 // lib.almd
@@ -44,23 +44,23 @@ export type Color =
 ```
 
 ```bash
-# 共有ライブラリを生成
+# Generate shared library
 almide build lib.almd --lib
 
-# 特定言語のバインディング付きで生成
+# Generate with bindings for a specific language
 almide build lib.almd --lib --bind python
 almide build lib.almd --lib --bind ruby
 almide build lib.almd --lib --bind node
 almide build lib.almd --lib --bind wasm
 ```
 
-### 利用側
+### Consumer Side
 
 ```python
 # Python
 from almide_lib import fibonacci, greet, Color
 
-print(fibonacci(40))                    # ← ネイティブ速度
+print(fibonacci(40))                    # ← native speed
 print(greet({"name": "Alice", "age": 30}))
 c = Color.Custom(r=255, g=0, b=128)
 ```
@@ -69,7 +69,7 @@ c = Color.Custom(r=255, g=0, b=128)
 # Ruby
 require 'almide_lib'
 
-puts AlmideLib.fibonacci(40)           # ← ネイティブ速度
+puts AlmideLib.fibonacci(40)           # ← native speed
 puts AlmideLib.greet({ name: "Alice", age: 30 })
 c = AlmideLib::Color.custom(r: 255, g: 0, b: 128)
 ```
@@ -78,16 +78,16 @@ c = AlmideLib::Color.custom(r: 255, g: 0, b: 128)
 // Node.js
 const { fibonacci, greet, Color } = require('almide-lib')
 
-console.log(fibonacci(40))            // ← ネイティブ速度
+console.log(fibonacci(40))            // ← native speed
 console.log(greet({ name: "Alice", age: 30 }))
 const c = Color.Custom({ r: 255, g: 0, b: 128 })
 ```
 
 ## Type Mapping
 
-Almide の型情報がそのままバインディングの型ヒントになる:
+Almide's type information directly becomes type hints for bindings:
 
-| Almide | Rust (内部) | Python | Ruby | Node.js |
+| Almide | Rust (internal) | Python | Ruby | Node.js |
 |--------|------------|--------|------|---------|
 | `Int` | `i64` | `int` | `Integer` | `number` / `bigint` |
 | `Float` | `f64` | `float` | `Float` | `number` |
@@ -96,13 +96,13 @@ Almide の型情報がそのままバインディングの型ヒントになる:
 | `List[T]` | `Vec<T>` | `list[T]` | `Array` | `T[]` |
 | `Map[K, V]` | `HashMap<K, V>` | `dict[K, V]` | `Hash` | `Map<K, V>` |
 | `Option[T]` | `Option<T>` | `T \| None` | `T \| nil` | `T \| undefined` |
-| `Result[T, E]` | `Result<T, E>` | 例外に変換 | 例外に変換 | 例外に変換 |
+| `Result[T, E]` | `Result<T, E>` | Converted to exception | Converted to exception | Converted to exception |
 | `{ x: Int, y: Int }` | `struct` | `TypedDict` / `dataclass` | `Struct` / `Hash` | `interface` |
 | `\| A(T) \| B` | `enum` | `class` (tagged union) | `class` (tagged union) | `class` (tagged union) |
 
-### Record → 構造体
+### Record → Struct
 
-`export` された関数の open record パラメータは、monomorphization 後の具体型が公開される:
+For `export` functions with open record parameters, the concrete type after monomorphization is exposed:
 
 ```almide
 export fn area(shape: { width: Float, height: Float, .. }) -> Float =
@@ -110,9 +110,9 @@ export fn area(shape: { width: Float, height: Float, .. }) -> Float =
 ```
 
 ```python
-# Python 側: dict でも dataclass でもOK
+# Python side: dict or dataclass both work
 area({"width": 3.0, "height": 4.0})
-area({"width": 3.0, "height": 4.0, "color": "red"})  # 余分なフィールドは無視
+area({"width": 3.0, "height": 4.0, "color": "red"})  # Extra fields are ignored
 ```
 
 ### Variant → Tagged Union
@@ -135,29 +135,29 @@ match s:
 
 ## Generated Output
 
-`almide build lib.almd --lib --bind python` が生成するもの:
+`almide build lib.almd --lib --bind python` generates:
 
 ```
 dist/
 ├── src/
-│   └── lib.rs              # Almide → Rust 生成コード
+│   └── lib.rs              # Almide → Rust generated code
 ├── bindings/
 │   └── python/
 │       ├── almide_lib/
-│       │   ├── __init__.py  # Python API（PyO3 ラッパー）
-│       │   └── __init__.pyi # 型スタブ（IDE 補完用）
-│       ├── Cargo.toml       # PyO3 依存
-│       ├── pyproject.toml   # pip install 用
+│       │   ├── __init__.py  # Python API (PyO3 wrapper)
+│       │   └── __init__.pyi # Type stubs (for IDE completion)
+│       ├── Cargo.toml       # PyO3 dependency
+│       ├── pyproject.toml   # For pip install
 │       └── src/
-│           └── lib.rs       # #[pyfunction] / #[pyclass] 自動生成
+│           └── lib.rs       # Auto-generated #[pyfunction] / #[pyclass]
 ├── Cargo.toml
-└── build.sh                 # maturin build のラッパー
+└── build.sh                 # Wrapper for maturin build
 ```
 
-### 生成される Rust FFI コード（Python 向け）
+### Generated Rust FFI Code (for Python)
 
 ```rust
-// bindings/python/src/lib.rs（自動生成）
+// bindings/python/src/lib.rs (auto-generated)
 use pyo3::prelude::*;
 use almide_lib;
 
@@ -181,11 +181,11 @@ fn almide_lib(_py: Python, m: &PyModule) -> PyResult<()> {
 }
 ```
 
-Almide コンパイラが型情報を使って `#[pyfunction]` / `#[pyclass]` を自動生成する。Rust ユーザーが手で書くボイラープレートがゼロになる。
+The Almide compiler uses type information to auto-generate `#[pyfunction]` / `#[pyclass]`. The boilerplate that Rust users write by hand drops to zero.
 
 ## WASM Path
 
-WASM 経由なら全言語で即座に使える。バインディング生成不要:
+Via WASM, immediately usable from all languages. No binding generation needed:
 
 ```bash
 almide build lib.almd --lib --bind wasm    # → lib.wasm + lib.d.ts
@@ -200,70 +200,70 @@ instance = Instance(store, module, [])
 print(instance.exports(store)["fibonacci"](40))
 ```
 
-WASM は言語間ポータビリティが最大だが、GC型（String, List, Map）の受け渡しに component model が必要。primitive 型（Int, Float, Bool）なら今すぐ動く。
+WASM has maximum cross-language portability, but passing GC types (String, List, Map) requires the component model. Primitive types (Int, Float, Bool) work immediately.
 
 ## Implementation Phases
 
-### Phase 1: `--lib` 基盤 (P0)
+### Phase 1: `--lib` Foundation (P0)
 
-`almide build --lib` で cdylib を出力する:
+Output cdylib with `almide build --lib`:
 
-- [ ] `export` キーワードの構文追加（parser）
-- [ ] `export` 関数の型制約チェック（FFI 安全な型のみ許可）
-- [ ] `--lib` フラグで `fn main` なしのコード生成
-- [ ] Cargo.toml に `crate-type = ["cdylib", "rlib"]` を出力
-- [ ] C ABI ヘッダー（`.h`）の自動生成
+- [ ] Add `export` keyword syntax (parser)
+- [ ] Type constraint check for `export` functions (only FFI-safe types allowed)
+- [ ] Code generation without `fn main` via `--lib` flag
+- [ ] Output `crate-type = ["cdylib", "rlib"]` in Cargo.toml
+- [ ] Auto-generate C ABI header (`.h`)
 
-### Phase 2: Python バインディング (P0)
+### Phase 2: Python Bindings (P0)
 
-最も需要が大きい。PyO3 + maturin:
+Highest demand. PyO3 + maturin:
 
-- [ ] `--bind python` で PyO3 ラッパー自動生成
-- [ ] 型マッピング: Almide 型 → PyO3 型変換コード
-- [ ] Record → PyDict 変換
-- [ ] Variant → Python class 生成
-- [ ] `.pyi` スタブ自動生成（IDE 補完）
-- [ ] `pyproject.toml` 生成（pip install 対応）
+- [ ] Auto-generate PyO3 wrapper with `--bind python`
+- [ ] Type mapping: Almide type → PyO3 type conversion code
+- [ ] Record → PyDict conversion
+- [ ] Variant → Python class generation
+- [ ] Auto-generate `.pyi` stubs (IDE completion)
+- [ ] Generate `pyproject.toml` (pip install support)
 
-### Phase 3: Node.js バインディング (P1)
+### Phase 3: Node.js Bindings (P1)
 
-napi-rs 経由:
+Via napi-rs:
 
-- [ ] `--bind node` で napi-rs ラッパー自動生成
-- [ ] `.d.ts` 型定義生成
-- [ ] `package.json` 生成（npm publish 対応）
+- [ ] Auto-generate napi-rs wrapper with `--bind node`
+- [ ] Generate `.d.ts` type definitions
+- [ ] Generate `package.json` (npm publish support)
 
-### Phase 4: Ruby バインディング (P1)
+### Phase 4: Ruby Bindings (P1)
 
-Magnus 経由:
+Via Magnus:
 
-- [ ] `--bind ruby` で Magnus ラッパー自動生成
-- [ ] `.gemspec` 生成
+- [ ] Auto-generate Magnus wrapper with `--bind ruby`
+- [ ] Generate `.gemspec`
 
-### Phase 5: WASM バインディング (P2)
+### Phase 5: WASM Bindings (P2)
 
 wasm-bindgen / component model:
 
-- [ ] `--bind wasm` で WASM モジュール生成
-- [ ] component model 対応（String, List の受け渡し）
-- [ ] WAI / WIT 定義ファイル生成
+- [ ] Generate WASM module with `--bind wasm`
+- [ ] Component model support (String, List passing)
+- [ ] Generate WAI / WIT definition files
 
 ## Why Not Transpile?
 
-Python/Ruby に直接トランスパイルしない理由:
+Reasons for not transpiling directly to Python/Ruby:
 
-| | トランスパイル | ライブラリ FFI |
+| | Transpile | Library FFI |
 |---|---|---|
-| 実行速度 | Python/Ruby の速度 | Rust ネイティブ速度 |
-| borrow analysis | 無意味（GC 言語） | 完全に活きる |
-| monomorphization | 無意味（動的型付け） | 完全に活きる |
-| ランタイム実装 | 282関数 × 各言語 | 不要（Rust 実装を共有） |
-| 追加コード量 | ~31,000行 / 言語 | ~2,000行 / 言語 |
-| エコシステム統合 | 中途半端な互換 | pip/gem/npm にそのまま乗る |
-| 型安全性 | 消える | バインディング側で型ヒント提供 |
+| Execution speed | Python/Ruby speed | Rust native speed |
+| Borrow analysis | Meaningless (GC language) | Fully utilized |
+| Monomorphization | Meaningless (dynamic typing) | Fully utilized |
+| Runtime implementation | 282 functions × each language | Not needed (shared Rust implementation) |
+| Additional code | ~31,000 lines / language | ~2,000 lines / language |
+| Ecosystem integration | Half-baked compatibility | Rides directly on pip/gem/npm |
+| Type safety | Lost | Type hints provided by bindings |
 
-**Almide の価値は「書きやすさ × 速さ」。** トランスパイルは速さを捨てる。FFI は両方残す。
+**Almide's value is "ease of writing x speed."** Transpiling sacrifices speed. FFI preserves both.
 
 ## Priority
 
-`--lib` 基盤 > Python バインディング > Node.js > Ruby > WASM component model
+`--lib` foundation > Python bindings > Node.js > Ruby > WASM component model

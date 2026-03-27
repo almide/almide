@@ -148,71 +148,71 @@ await sleep(100ms)
 
 ---
 
-## Multi-Target Async: 調査結果と設計判断
+## Multi-Target Async: Research Findings and Design Decisions
 
-### 他言語の WASM async 対応状況
+### WASM Async Support in Other Languages
 
-| 言語 | WASM async | アプローチ | 制約 |
+| Language | WASM async | Approach | Constraints |
 |------|-----------|-----------|------|
-| **Rust** | wasm-bindgen-futures | Future↔Promise ブリッジ。ブラウザの microtask queue に委譲。独自 executor 不要 | WASM 側は完全シングルスレッド |
-| **SwiftWasm** | 2つの executor | ① cooperative executor（CLI/WASI用、ホストに制御を返さない）② JS event loop executor（ブラウザ用、明示的切替） | libdispatch 非対応 |
-| **AssemblyScript** | **未対応** | event loop がないため async/await 自体が存在しない。Stack Switching 提案待ち | WASM stack switching (Phase 3) 依存 |
-| **Kotlin/Wasm** | Beta | GC proposal 必須。コルーチンの WASM 対応は未公開 | ブラウザ版のみ、coroutine 対応不明 |
-| **Gleam** | JSターゲットのみ | 「Erlang と JS は非互換な concurrency システム」。concurrency はライブラリ層で提供 | actor model は Erlang でのみ動作 |
+| **Rust** | wasm-bindgen-futures | Future-Promise bridge. Delegates to browser's microtask queue. No custom executor needed | WASM side is fully single-threaded |
+| **SwiftWasm** | 2 executors | 1) cooperative executor (CLI/WASI, does not return control to host) 2) JS event loop executor (browser, explicit switch) | libdispatch not supported |
+| **AssemblyScript** | **Not supported** | No event loop, so async/await itself does not exist. Waiting for Stack Switching proposal | Depends on WASM stack switching (Phase 3) |
+| **Kotlin/Wasm** | Beta | GC proposal required. Coroutine WASM support not published | Browser version only, coroutine support unclear |
+| **Gleam** | JS target only | "Erlang and JS have incompatible concurrency systems." Concurrency provided at the library layer | Actor model works only on Erlang |
 
-### WASM エコシステムの async 関連仕様
+### WASM Ecosystem Async-Related Specifications
 
-| 仕様 | フェーズ | 内容 | Almide への影響 |
+| Spec | Phase | Content | Impact on Almide |
 |------|---------|------|----------------|
-| **JSPI** (JS Promise Integration) | **Phase 4 (標準化済)** | WASM↔JS Promise の自動ブリッジ。同期的 WASM コードから async JS API を透過的に呼べる。~1μs/call。Chrome 137+, Firefox 139+ | **最重要**。Almide WASM ターゲットのベース技術 |
-| **Asyncify** (Binaryen) | 利用可能 | コンパイル時変換で WASM スタックを保存/復元。コードサイズ +50% | JSPI が使えない環境でのフォールバック |
-| **Threads + SharedArrayBuffer** | 標準化済 | Worker 間メモリ共有。CORS 制約あり | 真の並列が必要な場合のみ。Phase 1 では不要 |
-| **Stack Switching** | Phase 3 | WASM レベルのコルーチン/fiber | 将来的には cooperative executor の基盤になりうる |
+| **JSPI** (JS Promise Integration) | **Phase 4 (standardized)**| WASM↔JS Promise の自動ブリッジ。同期的 WASM コードから async JS API を透過的に呼べる。~1μs/call。Chrome 137+, Firefox 139+ | **最重要**。Almide WASM ターゲットのベース技術 |
+| **Asyncify** (Binaryen) | Available | Compile-time transformation to save/restore WASM stack. Code size +50% | Fallback for environments where JSPI is unavailable |
+| **Threads + SharedArrayBuffer** | Standardized | Shared memory between Workers. CORS constraints | Only when true parallelism is needed. Not needed in Phase 1 |
+| **Stack Switching** | Phase 3 | WASM-level coroutines/fibers | Could become the foundation for cooperative executors in the future |
 
-### 核心的な洞察
+### Core Insight
 
-**WASM 環境での「並行」はすべてシングルスレッド上の協調的マルチタスク。** 真の並列実行は存在しない。
+**"Concurrency" in WASM environments is entirely cooperative multitasking on a single thread.** True parallel execution does not exist.
 
-これは Almide にとって都合がいい：
-- `async let` の意味論が「I/O 待ちの並行」に限定される（CPU 並列ではない）
-- LLM が書くコードの大半は「複数の fetch を同時に発火して全部待つ」パターン
-- 複雑なスレッド安全性の問題が発生しない
+This works in Almide's favor:
+- `async let` semantics are limited to "concurrency while waiting for I/O" (not CPU parallelism)
+- Most LLM-written code follows the pattern of "fire multiple fetches simultaneously and wait for all"
+- Complex thread safety issues do not arise
 
-### 設計判断
+### Design Decisions
 
-#### 判断 1: `Future[T]` を型システムに入れるか
+#### Decision 1: Include `Future[T]` in the type system?
 
-**判断: 入れない。暗黙的に扱う。**
+**Decision: No. Handle implicitly.**
 
-理由:
-- `async fn foo() -> Int` の戻り型は `Int`（`Future[Int]` ではない）
-- `await` は型レベルでは no-op（`T → T`）。効果は codegen のみ
-- `async let x = foo()` で `x` の型は `Int`。`await x` も `Int`
-- Swift と同じアプローチ: `async let` のバインディングは「まだ利用不可の T」であり、`await` が「利用可能にする」
-- `Future[T]` を露出させると、LLM が `Future[Future[T]]` やジェネリクス境界で混乱する
+Reasons:
+- Return type of `async fn foo() -> Int` is `Int` (not `Future[Int]`)
+- `await` is a no-op at the type level (`T -> T`). Effect is codegen only
+- In `async let x = foo()`, `x`'s type is `Int`. `await x` is also `Int`
+- Same approach as Swift: `async let` bindings are "not yet available T", and `await` "makes them available"
+- Exposing `Future[T]` would confuse LLMs with `Future[Future[T]]` and generics boundaries
 
-型チェッカーの実装:
-- `async let x = expr` → `x` の型は `expr` の戻り型 `T`。ただし `consumed: false` フラグ付き
-- `await x` → 型は `T`。`consumed = true` に変更
-- 2回目の `await x` → コンパイルエラー「handle already consumed」
-- スコープ終了時に `consumed = false` のバインディング → 警告（cancellation が発生する）
+Type checker implementation:
+- `async let x = expr` -> `x`'s type is the return type `T` of `expr`. With `consumed: false` flag
+- `await x` -> type is `T`. Changes to `consumed = true`
+- Second `await x` -> compile error "handle already consumed"
+- Bindings with `consumed = false` at scope exit -> warning (cancellation occurs)
 
-#### 判断 2: Rust ターゲットの executor
+#### Decision 2: Rust target executor
 
-**判断: tokio を使う。ただし `Send + 'static` 制約を回避する設計にする。**
+**Decision: Use tokio. But design to avoid the `Send + 'static` constraint.**
 
-理由:
-- `almide_block_on` の busy-wait (dummy waker + `yield_now` ループ) は本番では使えない
-- 独自 executor は保守コストが高く、エコシステムとの互換性がない
-- tokio は Rust async のデファクト標準
+Reasons:
+- `almide_block_on`'s busy-wait (dummy waker + `yield_now` loop) is not usable in production
+- Custom executor has high maintenance cost and no ecosystem compatibility
+- tokio is the de facto standard for Rust async
 
-回避策:
-- `async let` は `tokio::spawn` ではなく `tokio::task::JoinSet` + ローカル参照で実装
-- `Send` 制約が問題になる場合は `tokio::task::LocalSet` を使う（シングルスレッド executor）
-- `almide_block_on` → `tokio::runtime::Runtime::block_on` に置換
+Workarounds:
+- `async let` implemented with `tokio::task::JoinSet` + local references, not `tokio::spawn`
+- Use `tokio::task::LocalSet` when `Send` constraint is problematic (single-thread executor)
+- Replace `almide_block_on` with `tokio::runtime::Runtime::block_on`
 
 ```rust
-// 現在の almide_block_on (busy-wait — 廃止予定)
+// Current almide_block_on (busy-wait — to be deprecated)
 fn almide_block_on<F: std::future::Future>(future: F) -> F::Output {
     let waker = unsafe { Waker::from_raw(dummy_raw_waker()) };
     let mut cx = Context::from_waker(&waker);
@@ -225,7 +225,7 @@ fn almide_block_on<F: std::future::Future>(future: F) -> F::Output {
     }
 }
 
-// 置換後
+// Replacement
 fn almide_block_on<F: std::future::Future>(future: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -235,14 +235,14 @@ fn almide_block_on<F: std::future::Future>(future: F) -> F::Output {
 }
 ```
 
-依存関係の影響:
-- `Cargo.toml` に `tokio = { version = "1", features = ["rt", "time", "macros"] }` 追加
-- 生成バイナリのサイズ増 (~数百KB)
-- WASM ターゲットでは tokio を使わない（別パス）
+Dependency impact:
+- Add `tokio = { version = "1", features = ["rt", "time", "macros"] }` to `Cargo.toml`
+- Generated binary size increase (~hundreds of KB)
+- Do not use tokio for WASM target (separate path)
 
-#### 判断 3: TS ターゲット
+#### Decision 3: TS target
 
-**判断: native async/await をそのまま使う。`async let` は即座に Promise を開始する変数束縛に変換。**
+**Decision: Use native async/await as-is. `async let` converts to a variable binding that immediately starts a Promise.**
 
 ```typescript
 // Almide: async let a = fetch_a()
@@ -251,23 +251,23 @@ fn almide_block_on<F: std::future::Future>(future: F) -> F::Output {
 // Almide: await a
 // TS:     await __a_promise
 
-// キャンセルは AbortController で実装
+// Cancellation implemented with AbortController
 const __a_ctrl = new AbortController();
 const __a_promise = fetch_a({ signal: __a_ctrl.signal });
-// スコープ終了時: __a_ctrl.abort()
+// On scope exit: __a_ctrl.abort()
 ```
 
-課題:
-- AbortController はすべての async 関数が `signal` パラメータを受け取る必要がある
-- Almide stdlib の async 関数には暗黙的に signal を注入するか、キャンセルは best-effort にするか
+Challenges:
+- AbortController requires all async functions to accept a `signal` parameter
+- Whether to implicitly inject signal into Almide stdlib async functions, or make cancellation best-effort
 
-**判断: キャンセルは best-effort。** Promise を abort しても実行中の fetch は止まらない場合がある。これは JS の制約であり、Almide が解決すべき問題ではない。スコープ終了時に `Promise.allSettled` で待つだけで十分。
+**Decision: Cancellation is best-effort.** Aborting a Promise may not stop an in-flight fetch. This is a JS constraint, not a problem Almide should solve. Waiting with `Promise.allSettled` on scope exit is sufficient.
 
-#### 判断 4: WASM ターゲット
+#### Decision 4: WASM target
 
-**判断: JSPI ベースで実装。Phase 1 では eager sequential fallback。**
+**Decision: Implement based on JSPI. Phase 1 uses eager sequential fallback.**
 
-JSPI (Phase 4、Chrome 137+ / Firefox 139+) により、同期的な WASM コードから async JS API を呼べる。Almide の WASM ターゲットでは:
+With JSPI (Phase 4, Chrome 137+ / Firefox 139+), async JS APIs can be called from synchronous WASM code. For Almide's WASM target:
 
 ```
 async let a = fetch_a()   →  WASM 内では逐次実行（JSPI が suspend/resume）
@@ -276,28 +276,28 @@ await a                    →  既に完了済
 await b                    →  既に完了済
 ```
 
-Phase 1 では「`async let` はシングルスレッドで逐次実行」に degradation する。これは正しくないが安全（デッドロックしない、結果は同じ、ただし遅い）。
+In Phase 1, `async let` degrades to "sequential execution on a single thread." This is not correct but safe (no deadlocks, same results, just slower).
 
-将来の改善パス:
-1. **JSPI + Promise.all**: `async let` の複数タスクを JS 側で `Promise.all` にまとめ、WASM は1回の suspend で全完了を待つ
-2. **Stack Switching (Phase 3 待ち)**: WASM 内で cooperative scheduling が可能になれば、真の並行が実現
+Future improvement paths:
+1. **JSPI + Promise.all**: Bundle multiple `async let` tasks into `Promise.all` on the JS side, WASM waits for all to complete with a single suspend
+2. **Stack Switching (waiting for Phase 3)**: Once cooperative scheduling is possible within WASM, true concurrency is achieved
 
-#### 判断 5: `async let` の `do` ブロック必須制約
+#### Decision 5: `do` block requirement for `async let`
 
-**判断: `async let` は `do` ブロック内でなくても使える。ただし `do` 内ではキャンセル伝播が自動化される。**
+**Decision: `async let` can be used outside `do` blocks. However, cancellation propagation is automated inside `do`.**
 
-理由:
-- `do` 必須にすると、エラーを返さない async 関数（`async fn foo() -> Int`）が `do` を強制される
-- Swift も `async let` を `do` なしで使える
+Reasons:
+- Requiring `do` would force async functions that do not return errors (`async fn foo() -> Int`) into `do`
+- Swift also allows `async let` without `do`
 
 ```almide
-// do なし — エラーなし関数の並行実行
+// Without do — concurrent execution of error-free functions
 async fn fast_compute() -> Int =
   async let a = compute_a()
   async let b = compute_b()
   await a + await b
 
-// do あり — エラーありの並行実行（キャンセル伝播付き）
+// With do — concurrent execution with errors (with cancellation propagation)
 async fn risky_compute() -> Result[Int, String] =
   do {
     async let a = try_compute_a()
@@ -308,58 +308,58 @@ async fn risky_compute() -> Result[Int, String] =
 
 ---
 
-## 現在の実装状況（Layer 1）
+## Current Implementation Status (Layer 1)
 
-### 実装済み
+### Implemented
 
-- `async fn` / `await` のパース（AST: `Decl::Fn { async: Some(bool) }`, `Expr::Await`）
-- 型チェック: `async fn` は `effect fn` と同等に扱う。`await` は `Result<T, E>` → `T` のアンラップ
+- Parsing of `async fn` / `await` (AST: `Decl::Fn { async: Some(bool) }`, `Expr::Await`)
+- Type checking: `async fn` treated equivalently to `effect fn`. `await` unwraps `Result<T, E>` to `T`
 - IR: `IrExprKind::Await`, `IrFunction { is_async }`
 - Rust codegen: `async fn` → Rust `async fn`。`await` → `almide_block_on(expr)`
 - TS codegen: `async fn` → TS `async function`。`await` → `await expr`
-- HTTP stdlib にネイティブ async 関数あり
+- HTTP stdlib has native async functions
 
-### 既知の問題
+### Known Issues
 
-1. **`almide_block_on` が busy-wait**: dummy waker + `yield_now` ループ。CPU を浪費し、真の async I/O が動作しない
-2. **`Future[T]` 型がない**: 型システムは `Result` で代用。`await` の型チェックが不完全
-3. **テストがゼロ**: async 関連のテストファイルが存在しない
-4. **`async let` 未実装**: パーサー、チェッカー、codegen すべて未着手
+1. **`almide_block_on` is busy-wait**: dummy waker + `yield_now` loop. Wastes CPU and real async I/O does not work
+2. **No `Future[T]` type**: Type system substitutes with `Result`. `await` type checking is incomplete
+3. **Zero tests**: No async-related test files exist
+4. **`async let` not implemented**: Parser, checker, codegen all not started
 
 ---
 
-## 実装フェーズ（改訂版）
+## Implementation Phases (Revised)
 
-### Phase 0: Layer 1 安定化（前提条件）
+### Phase 0: Layer 1 Stabilization (Prerequisites)
 
-Layer 2 に進む前に、既存の async/await を安定化する。
+Stabilize existing async/await before proceeding to Layer 2.
 
 - [ ] **`almide_block_on` を tokio に置換**
   - `tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(future)`
-  - 生成コードの `Cargo.toml` に tokio 依存を追加する codegen 変更
-  - WASM ターゲットでは tokio を使わない分岐を入れる
+  - Codegen change to add tokio dependency to generated `Cargo.toml`
+  - Add branch to not use tokio for WASM target
 - [ ] **Layer 1 テスト追加** (`spec/lang/async_test.almd`)
-  - `async fn` の宣言と `await` での呼び出し
-  - `async fn` + `do` ブロックでのエラー伝播
-  - `async fn` 内での stdlib async 関数呼び出し (`http.get` 等)
-  - フォーマッタの `async fn` / `await` 対応確認
-- [ ] **`await` 型チェック修正**: 現在 `Result<T, E> → T` だが、非 Result 型もパススルーしている。`async fn` の戻り型に基づいて正しくチェック
+  - `async fn` declaration and calling with `await`
+  - Error propagation with `async fn` + `do` block
+  - Calling stdlib async functions inside `async fn` (`http.get` etc.)
+  - Verify formatter support for `async fn` / `await`
+- [ ] **Fix `await` type checking**: Currently `Result<T, E> -> T` but also passes through non-Result types. Check correctly based on `async fn` return type
 
 ### Phase 1: `async let` + scope-based cancellation
 
-**パーサー**:
-- [ ] `async let name = expr` を新しい `Stmt::AsyncLet` として追加
-  - `Stmt` enum に `AsyncLet { name, value, span }` バリアント追加
-  - `parse_stmt()` で `TokenType::Async` + `TokenType::Let` のペアを検出
-  - braceless block / do block / braced block すべてで使用可能
+**Parser**:
+- [ ] Add `async let name = expr` as new `Stmt::AsyncLet`
+  - Add `AsyncLet { name, value, span }` variant to `Stmt` enum
+  - Detect `TokenType::Async` + `TokenType::Let` pair in `parse_stmt()`
+  - Usable in braceless block / do block / braced block
 
-**型チェッカー**:
-- [ ] `async let x = expr` → `x` の型は `expr` の戻り型 `T`
-- [ ] `x` に `awaited: bool` トラッキングフラグを付与
-- [ ] `await x` → `awaited = true` に変更。型は `T`
-- [ ] 2回目の `await x` → コンパイルエラー「future handle already consumed」
-- [ ] スコープ終了時に未 await の `async let` バインディング → 警告「un-awaited async binding will be cancelled」
-- [ ] `async let` は `async fn` 内でのみ使用可能（それ以外ではエラー）
+**Type Checker**:
+- [ ] `async let x = expr` -> `x`'s type is the return type `T` of `expr`
+- [ ] Attach `awaited: bool` tracking flag to `x`
+- [ ] `await x` -> change to `awaited = true`. Type is `T`
+- [ ] Second `await x` -> compile error "future handle already consumed"
+- [ ] Un-awaited `async let` bindings at scope exit -> warning "un-awaited async binding will be cancelled"
+- [ ] `async let` only usable inside `async fn` (error otherwise)
 
 **IR**:
 - [ ] `IrStmtKind::AsyncLet { var: VarId, value: IrExpr }` 追加
@@ -379,10 +379,10 @@ let a = __handle_a.await.unwrap();
 // ↓
 // JoinSet::abort_all() + drop
 ```
-- [ ] `tokio::task::LocalSet` ベースの spawn（`Send` 制約回避）
-- [ ] `do` ブロック内: 最初のエラーで `JoinSet::abort_all()`
-- [ ] スコープ終了時のドロップガード生成
-- [ ] main 関数のエントリポイントに `#[tokio::main]` または `LocalSet::new().run_until()` ラッパー
+- [ ] `tokio::task::LocalSet`-based spawn (avoiding `Send` constraint)
+- [ ] Inside `do` block: `JoinSet::abort_all()` on first error
+- [ ] Generate drop guard at scope exit
+- [ ] `#[tokio::main]` or `LocalSet::new().run_until()` wrapper at main function entry point
 
 **TS codegen**:
 ```typescript
@@ -401,23 +401,23 @@ const a = await __a_promise;
 - [ ] `do` ブロック内: `Promise.allSettled` でのクリーンアップは best-effort
 
 **WASM codegen**:
-- [ ] Phase 1 では eager sequential fallback: `async let a = f()` → `let a = await f()` と同等
-- [ ] コンパイラ警告: 「WASM target: async let runs sequentially」
+- [ ] Phase 1 uses eager sequential fallback: `async let a = f()` is equivalent to `let a = await f()`
+- [ ] Compiler warning: "WASM target: async let runs sequentially"
 
-**テスト** (`spec/lang/async_let_test.almd`):
-- [ ] 基本: `async let` + `await` で値を取得
-- [ ] 複数: 3つの `async let` を同時に開始して `await`
-- [ ] 消費: `await x` を2回呼ぶとコンパイルエラー
-- [ ] エラー伝播: `do` 内で1つが失敗 → 残りがキャンセル
-- [ ] スコープ終了: un-awaited binding の警告
+**Tests** (`spec/lang/async_let_test.almd`):
+- [ ] Basic: retrieve value with `async let` + `await`
+- [ ] Multiple: start 3 `async let` simultaneously and `await`
+- [ ] Consumption: calling `await x` twice causes compile error
+- [ ] Error propagation: 1 failure in `do` -> rest cancelled
+- [ ] Scope exit: warning for un-awaited binding
 
 ### Phase 2: `race` / `timeout` / `sleep` stdlib
 
-- [ ] `stdlib/defs/async.toml` に定義追加
-- [ ] `race(futures...)`: 最初に完了したものを返し、残りをキャンセル
-- [ ] `timeout(duration, future)`: 期限内に完了しなければ `err("timeout")`
-- [ ] `sleep(duration)`: 指定時間待機
-- [ ] Duration リテラル (`5s`, `100ms`) のパーサー対応 — or — `sleep(5000)` (ms as Int) で簡略化
+- [ ] Add definitions to `stdlib/defs/async.toml`
+- [ ] `race(futures...)`: return first to complete, cancel the rest
+- [ ] `timeout(duration, future)`: `err("timeout")` if not complete within duration
+- [ ] `sleep(duration)`: wait for specified time
+- [ ] Parser support for Duration literals (`5s`, `100ms`) — or — simplify with `sleep(5000)` (ms as Int)
 
 **Rust codegen**:
 ```rust
@@ -435,72 +435,72 @@ const a = await __a_promise;
 
 - [ ] テスト (`spec/stdlib/async_test.almd`)
 
-### Phase 3: Async streams（将来）
+### Phase 3: Async streams (future)
 
 - [ ] `Stream[T]` 型
 - [ ] `stream.for_each(fn(item) => ...)`, `stream.map(...)`, `stream.collect()`
-- [ ] `for item in stream { }` — 通常の `for...in` が Stream を認識
+- [ ] `for item in stream { }` — existing `for...in` recognizes Stream
 - [ ] Backpressure via bounded channels
-- [ ] Note: `for await x in stream { }` 構文は追加しない。`for...in` の既存構文で対応
+- [ ] Note: `for await x in stream { }` syntax will not be added. Handle with existing `for...in` syntax
 
 ---
 
-## 未決事項
+## Open Questions
 
-### Q1: Duration リテラルを言語に入れるか
+### Q1: Should Duration literals be added to the language?
 
 ```almide
-// Option A: Duration リテラル（新しい構文）
+// Option A: Duration literals (new syntax)
 await sleep(100ms)
 await timeout(5s, fetch(url))
 
-// Option B: Int (ミリ秒) で表現（新構文なし）
+// Option B: Express as Int (milliseconds) (no new syntax)
 await sleep(100)
 await timeout(5000, fetch(url))
 ```
 
-**仮判断: Option B**。Vocabulary Economy の原則。Duration 型は stdlib で定義可能。
+**Tentative decision: Option B**. Vocabulary Economy principle. Duration type can be defined in stdlib.
 
-### Q2: `async let` を `var` でも許可するか
+### Q2: Allow `async let` with `var` too?
 
 ```almide
 async let x = fetch()     // immutable — OK
-async var x = fetch()     // mutable? — 意味不明
+async var x = fetch()     // mutable? — semantically meaningless
 ```
 
-**判断: `async let` のみ。** `async var` は意味論的に矛盾（handle は mutable にできない）。
+**Decision: `async let` only.** `async var` is semantically contradictory (handles cannot be mutable).
 
-### Q3: `async let` のキャプチャ制約
+### Q3: Capture constraints for `async let`
 
 ```almide
 var count = 0
 async let a = do {
-  count = count + 1    // ← 親スコープの var を変更できるか?
+  count = count + 1    // Can parent scope var be modified?
   fetch(url)
 }
 ```
 
-**判断: 禁止。** `async let` のボディは親スコープの `var` をキャプチャできない。`let` バインディングの読み取りのみ許可。理由: 並行実行でのデータ競合を構造的に防ぐ。
+**Decision: Prohibited.** `async let` body cannot capture parent scope `var`. Only reading `let` bindings is allowed. Reason: structurally prevent data races in concurrent execution.
 
 ### Q4: Nested `async let`
 
 ```almide
 async let a = do {
-  async let b = fetch_inner()    // ← ネスト可能か?
+  async let b = fetch_inner()    // Can this be nested?
   await b
 }
 ```
 
-**仮判断: 許可。** Swift と同様。内側の `async let` は内側のスコープで管理。
+**Tentative decision: Allowed.** Same as Swift. Inner `async let` managed by inner scope.
 
 ---
 
 ## Dependencies
 
-- Layer 1 (`async fn` / `await`) — DONE（安定化が必要）
-- Phase 0: tokio 導入 + テスト追加
-- Phase 1: パーサー、チェッカー、IR、codegen すべてに変更
+- Layer 1 (`async fn` / `await`) — DONE (stabilization needed)
+- Phase 0: tokio introduction + test addition
+- Phase 1: changes to parser, checker, IR, and codegen
 
 ## Status
 
-設計改訂完了。実装は Phase 0（Layer 1 安定化）から開始。
+Design revision complete. Implementation starts from Phase 0 (Layer 1 stabilization).

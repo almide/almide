@@ -2,26 +2,26 @@
 <!-- done: 2026-03-19 -->
 # fan.map Concurrency Limit
 
-## 概要
+## Overview
 
-`fan.map(xs, limit: n, f)` — 同時実行数の上限付き fan.map。
+`fan.map(xs, limit: n, f)` — fan.map with a maximum concurrency limit.
 
-## 動機
+## Motivation
 
-`fan.map(urls, fetch)` で 1000 件 URL を処理すると 1000 スレッド同時 spawn → リソース枯渇。
-`limit: 16` なら最大 16 並行で、残りはキューイング。
+Processing 1000 URLs with `fan.map(urls, fetch)` spawns 1000 threads simultaneously → resource exhaustion.
+With `limit: 16`, at most 16 run concurrently and the rest are queued.
 
-## 構文
+## Syntax
 
 ```almide
 let results = fan.map(urls, limit: 16, (url) => http.get(url))
 ```
 
-## 実装方針
+## Implementation Approach
 
 ### Rust (thread backend)
 
-セマフォ的な制御。`std::thread::scope` 内でチャンク分割 or ワーカープール。
+Semaphore-style control. Chunk splitting or worker pool within `std::thread::scope`.
 
 ```rust
 std::thread::scope(|s| {
@@ -35,12 +35,12 @@ std::thread::scope(|s| {
 })
 ```
 
-注: `std::sync::Semaphore` は unstable。代替: `Arc<Mutex<usize>>` + `Condvar`、またはチャンク方式。
+Note: `std::sync::Semaphore` is unstable. Alternatives: `Arc<Mutex<usize>>` + `Condvar`, or chunk-based approach.
 
 ### TS
 
 ```typescript
-// p-limit パターン or 手書き concurrency limiter
+// p-limit pattern or hand-written concurrency limiter
 async function fanMapLimit(xs, limit, f) {
     const results = new Array(xs.length);
     let idx = 0;
@@ -52,11 +52,11 @@ async function fanMapLimit(xs, limit, f) {
 }
 ```
 
-## 前提条件
+## Prerequisites
 
-- `fan.map` の named args サポート（`limit:` はデフォルト引数）
-- チェッカーで `limit` パラメータの型チェック（Int）
+- Named args support for `fan.map` (`limit:` is a default argument)
+- Type checking of the `limit` parameter in the checker (Int)
 
-## 優先度
+## Priority
 
-低。現在の全件同時 spawn は小〜中規模で問題なし。大規模バッチ処理が必要になったら実装。
+Low. The current all-at-once spawn is fine for small to medium scale. Implement when large-scale batch processing is needed.

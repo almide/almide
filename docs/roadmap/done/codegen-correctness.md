@@ -2,19 +2,19 @@
 <!-- done: 2026-03-15 -->
 # Codegen Correctness Fixes
 
-生成コードの正確性に関わる問題の修正。
+Fixes for issues affecting generated code correctness.
 
-## P1 (全7項完了)
+## P1 (all 7 items complete)
 
-1. **auto-`?` の二重ロジック統一** ✅ — `should_auto_unwrap_user/stdlib` に統一
-2. **Range 型のハードコード** ✅ — IR の `expr.ty` から要素型を取得
-3. **Box パターンデストラクトの未バインド変数** ✅ — 非 Bind パターンに `box` / skip 追加
-4. **Guard の break/continue ハンドリング** ✅ — IR ノード種別を検査して適切なコード生成
-5. **Do-block + guard の unreachable** ✅ — `loop { ... break; }` で wrap
-6. **Module/Method 呼び出しの auto-`?`** ✅ — Named 以外の CallTarget でも effect context + Result 返却時に `?` 挿入
-7. **effect fn for-loop の Result ラップ** ✅ — 上記修正 + `in_effect` が `LowerCtx` フィールドで全体伝播
+1. **Unify auto-`?` dual logic** ✅ — unified into `should_auto_unwrap_user/stdlib`
+2. **Range type hardcoding** ✅ — retrieve element type from IR `expr.ty`
+3. **Unbound variables in Box pattern destructuring** ✅ — added `box` / skip for non-Bind patterns
+4. **Guard break/continue handling** ✅ — inspect IR node type for appropriate code generation
+5. **Do-block + guard unreachable** ✅ — wrap with `loop { ... break; }`
+6. **Auto-`?` for Module/Method calls** ✅ — insert `?` for non-Named CallTarget when in effect context + Result return
+7. **Result wrapping in effect fn for-loop** ✅ — above fixes + `in_effect` propagated globally via `LowerCtx` field
 
 ## P2
 
-1. **文字列パターンの borrowed subject** ✅ — String 型 subject に `.as_str()` を自動挿入
-2. **パターンデストラクトの clone 最適化** → Clone Reduction Phase 4 に統合（Member access は既に `is_copy` で判定済み）
+1. **Borrowed subject for string patterns** ✅ — auto-insert `.as_str()` for String-type subjects
+2. **Clone optimization for pattern destructuring** → merged into Clone Reduction Phase 4 (Member access already uses `is_copy` for determination)

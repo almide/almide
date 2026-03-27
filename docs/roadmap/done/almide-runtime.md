@@ -4,24 +4,24 @@
 
 > Do not win by being safe. Win by reaching the ideal.
 
-## なぜ可能か
+## Why this is possible
 
-既存の言語は汎用性の代償を払っている。Almide は制約が強い。それが武器になる:
+Existing languages pay the cost of generality. Almide has strong constraints. That becomes a weapon:
 
 ```
-制約 = 情報 = 最適化の余地
+Constraints = Information = Room for optimization
 ```
 
-| Almide が知ってること | 汎用コンパイラは知らない | 最適化に使える |
-|---------------------|----------------------|--------------|
-| `fn` = pure (副作用なし) | LLVM は関数の純粋性を推測する | 自動並列化、メモ化、呼び出し順入れ替え |
-| `let` = immutable | C/C++ は全変数が可変前提 | コピー不要、参照で十分 |
-| `var` は明示的 | mutation point 不明 | SSA 変換が trivial |
-| null なし | null check 必要 | null check ゼロ |
-| 例外なし (Result) | unwind テーブル必要 | 呼び出し規約がシンプル |
-| use-count がある | lifetime 推論が必要 | GC/RC 不要な場合を静的判定 |
-| 全プログラムが見える | 分割コンパイル前提 | whole-program optimization が常時可能 |
-| コードを書くのが LLM | 人間の癖を想定 | LLM 生成パターン特化の codegen |
+| What Almide knows | What general compilers don't know | Optimization opportunity |
+|---|---|---|
+| `fn` = pure (no side effects) | LLVM guesses function purity | Auto-parallelization, memoization, reordering calls |
+| `let` = immutable | C/C++ assumes all variables are mutable | No copies needed, references suffice |
+| `var` is explicit | Mutation points are unknown | SSA conversion is trivial |
+| No null | Null checks required | Zero null checks |
+| No exceptions (Result) | Unwind tables required | Simpler calling convention |
+| Use-count exists | Lifetime inference required | Statically determine when GC/RC is unnecessary |
+| Entire program is visible | Assumes separate compilation | Whole-program optimization always available |
+| Code is written by LLMs | Assumes human coding habits | LLM-generated pattern-specific codegen |
 
 ---
 
@@ -33,76 +33,76 @@ Source (.almd)
   ▼
 Almide IR (Typed, Pure/Effect annotated)
   │
-  ├─── Tier 0: Direct Interpret     (0ms compile, 10x slow)     ← 開発 REPL
-  ├─── Tier 1: Copy-and-Patch JIT   (1ms compile, 2x slow)      ← 開発 run
-  ├─── Tier 2: Almide Optimizer     (100ms compile, 1.0x)        ← テスト・ステージング
-  └─── Tier 3: LLVM / rustc         (10s compile, 0.95x — C 級)  ← 本番ビルド
+  ├─── Tier 0: Direct Interpret     (0ms compile, 10x slow)     ← Dev REPL
+  ├─── Tier 1: Copy-and-Patch JIT   (1ms compile, 2x slow)      ← Dev run
+  ├─── Tier 2: Almide Optimizer     (100ms compile, 1.0x)        ← Test/staging
+  └─── Tier 3: LLVM / rustc         (10s compile, 0.95x — C level)  ← Production build
 ```
 
-同じ IR から全 Tier が出る。開発中は Tier 0-1、リリース時だけ Tier 2-3。
+All tiers emit from the same IR. Tiers 0-1 during development, Tiers 2-3 only for release.
 
 ---
 
-## 神最適化 1: Static Region Memory
+## Super Optimization 1: Static Region Memory
 
-GC なし。RC なし。Borrow checker なし。全部コンパイル時に決まる。
+No GC. No RC. No borrow checker. Everything is determined at compile time.
 
 ```almide
 fn process(data: List[Int]) -> List[Int] =
   data
     |> list.filter((x) => x > 0)      // region A
-    |> list.map((x) => x * 2)          // region B (A は死ぬ)
-    |> list.take(10)                    // region C (B は死ぬ)
+    |> list.map((x) => x * 2)          // region B (A dies)
+    |> list.take(10)                    // region C (B dies)
 ```
 
-コンパイラが見えること:
-- `filter` の結果は `map` だけが使う → region A は `map` 完了時に一括解放
-- `map` の結果は `take` だけが使う → region B は `take` 完了時に一括解放
-- 中間データはヒープに散らばらない。連続メモリに確保して一発で捨てる
+What the compiler sees:
+- `filter`'s result is only used by `map` → region A is bulk-freed when `map` completes
+- `map`'s result is only used by `take` → region B is bulk-freed when `take` completes
+- Intermediate data doesn't scatter across the heap. Allocated in contiguous memory and discarded at once
 
-Rust の borrow checker より高レベルな判断。use-count + pure fn 保証 + パイプライン解析の組み合わせ。
+Higher-level reasoning than Rust's borrow checker. A combination of use-count + pure fn guarantee + pipeline analysis.
 
 ---
 
-## 神最適化 2: Automatic Parallelism
+## Super Optimization 2: Automatic Parallelism
 
-`fan` は明示的並列。pure fn なら暗黙的にも並列化できる:
+`fan` provides explicit parallelism. Pure fns can be implicitly parallelized too:
 
 ```almide
-fn expensive_a(x: Int) -> Int = ...  // pure, 重い
-fn expensive_b(x: Int) -> Int = ...  // pure, 重い
+fn expensive_a(x: Int) -> Int = ...  // pure, expensive
+fn expensive_b(x: Int) -> Int = ...  // pure, expensive
 
 fn process(x: Int) -> (Int, Int) = {
-  let a = expensive_a(x)   // 依存関係なし
-  let b = expensive_b(x)   // 依存関係なし
+  let a = expensive_a(x)   // no dependency
+  let b = expensive_b(x)   // no dependency
   (a, b)
 }
 ```
 
-effect system が「この 2 つは独立」と証明している。コンパイラが自動で並列化:
+The effect system proves "these two are independent." The compiler auto-parallelizes:
 
 ```
 process(x) → spawn(expensive_a(x)), spawn(expensive_b(x)), join
 ```
 
-Go の goroutine より賢い。Go は「全部並列にできるかも」と推測する。Almide は「これは確実に並列にできる」と知っている。
+Smarter than Go's goroutines. Go guesses "everything might be parallelizable." Almide knows "this is definitely parallelizable."
 
 ---
 
-## 神最適化 3: Speculative Deforestation (Stream Fusion)
+## Super Optimization 3: Speculative Deforestation (Stream Fusion)
 
-関数型プログラミングの最大の敵: 中間データ構造の生成。
+The biggest enemy of functional programming: intermediate data structure creation.
 
 ```almide
 xs |> list.map(f) |> list.filter(g) |> list.fold(0, h)
 ```
 
-ナイーブ実装: 3 つのリストを作って捨てる。
+Naive implementation: creates and discards 3 lists.
 
-Almide コンパイラは pure fn の合成として認識して、中間リストをゼロにする:
+The Almide compiler recognizes this as a composition of pure fns and eliminates intermediate lists entirely:
 
 ```rust
-// 生成コード: リストを1回だけ走査
+// Generated code: traverses the list only once
 let mut acc = 0;
 for x in xs {
     let y = f(x);
@@ -112,132 +112,132 @@ for x in xs {
 }
 ```
 
-Haskell の GHC がやっている stream fusion / deforestation。Almide は effect system があるから安全にできる。GHC は「たぶん純粋」と推測する。Almide は「確実に純粋」と知っている。
+This is the stream fusion / deforestation that GHC (Haskell) does. Almide can do it safely because of the effect system. GHC guesses "probably pure." Almide knows "definitely pure."
 
 ---
 
-## 神最適化 4: Shape-Specialized Codegen
+## Super Optimization 4: Shape-Specialized Codegen
 
 ```almide
 type Point = { x: Float, y: Float }
 let points: List[Point] = ...
 ```
 
-汎用コンパイラ: `List<Box<Point>>` — ポインタの配列。キャッシュミスだらけ。
+General compilers: `List<Box<Point>>` — an array of pointers. Cache misses everywhere.
 
-Almide コンパイラ: 型が完全に見えるから Structure of Arrays に変換:
+Almide compiler: types are fully visible, so it transforms to Structure of Arrays:
 
 ```rust
 struct PointList {
-    xs: Vec<f64>,  // x 座標だけ連続
-    ys: Vec<f64>,  // y 座標だけ連続
+    xs: Vec<f64>,  // only x coordinates, contiguous
+    ys: Vec<f64>,  // only y coordinates, contiguous
 }
 ```
 
-SIMD で一気に処理できる。ゲームエンジンが手動でやっている最適化を、コンパイラが自動でやる。
+Processable in bulk with SIMD. The compiler automatically performs the optimization that game engines do manually.
 
 ---
 
-## 神最適化 5: LLM-Aware Compilation
+## Super Optimization 5: LLM-Aware Compilation
 
-Almide の固有性。コードを書くのが LLM だとわかっているなら:
+Unique to Almide. If we know code is written by LLMs:
 
-- LLM が生成するコードパターンを統計的にプロファイル
-- 頻出パターンに特化した codegen テンプレートを用意
-- LLM が書くコードの特徴（深いパイプライン、多めの中間変数、match の多用）に最適化
+- Statistically profile LLM-generated code patterns
+- Prepare specialized codegen templates for common patterns
+- Optimize for LLM code characteristics (deep pipelines, many intermediate variables, heavy match usage)
 
 ```
-LLM が書く → コンパイラが最適化 → 実行結果を LLM にフィードバック → より良いコードを書く
+LLM writes → Compiler optimizes → Execution results fed back to LLM → Better code written
 ```
 
-コンパイラと LLM の共進化ループ。他の言語にはこの視点がない。
+A co-evolution loop between compiler and LLM. No other language has this perspective.
 
 ---
 
-## Self-Hosting による数学的保証
+## Mathematical Guarantees via Self-Hosting
 
-Almide でコンパイラを書き直すと:
+Rewriting the compiler in Almide gives us:
 
-1. **全パスが pure fn** — コンパイラ自身が証明する
-2. **不動点検証** — `compile(compiler_source) = compiler` が成立すれば正しさの強い証拠
-3. **Trusting Trust 防御** — pure fn は I/O 不可能。コンパイラにバックドアを仕込めない
-4. **コンパイラが自分を最適化する再帰** — 上記の神最適化がコンパイラ自身にも適用される
+1. **All passes are pure fns** — the compiler itself proves this
+2. **Fixed-point verification** — `compile(compiler_source) = compiler` is strong evidence of correctness
+3. **Trusting Trust defense** — pure fns cannot do I/O. Backdoors cannot be injected into the compiler
+4. **Recursive self-optimization** — the super optimizations above are applied to the compiler itself
 
 ---
 
-## 実現ロードマップ
+## Implementation Roadmap
 
-### Phase 0: 基盤 (今ある武器)
+### Phase 0: Foundation (existing weapons)
 - ✅ Typed IR
 - ✅ Pure/Effect split
 - ✅ Use-count analysis
 - ✅ Multi-target codegen (Rust, TS, JS, WASM)
 - ✅ Cross-target CI (91/91)
 
-### Phase 1: 即実行体験
-- IR interpreter (Tier 0) — rustc バイパス。即実行
-- TS path 改善 — `almide run` のデフォルトを TS に
+### Phase 1: Instant execution experience
+- IR interpreter (Tier 0) — bypass rustc. Instant execution
+- TS path improvement — make TS the default for `almide run`
 
 ### Phase 2: Pipe Fusion
-- `map |> filter |> fold` → 1 パス走査
-- 中間リスト除去
-- Pure fn 保証で安全に fusion
+- `map |> filter |> fold` → single-pass traversal
+- Intermediate list elimination
+- Safe fusion guaranteed by pure fn
 
 ### Phase 3: Region Memory
-- Region inference — パイプラインの中間データを region で管理
-- One-shot deallocation — region 単位で一括解放
-- GC/RC 完全不要の静的メモリ管理
+- Region inference — manage intermediate pipeline data via regions
+- One-shot deallocation — bulk free per region
+- Static memory management with no GC/RC needed
 
 ### Phase 4: JIT
 - Copy-and-Patch baseline JIT (Tier 1)
-- Almide IR → machine code テンプレート
-- コンパイル時間 1ms 以下
+- Almide IR → machine code templates
+- Compile time under 1ms
 
 ### Phase 5: Auto-Parallelism
-- Pure fn のデータ依存解析
-- 独立した pure 呼び出しの自動並列化
-- fan との統合 (明示的 + 暗黙的並列の共存)
+- Data dependency analysis for pure fns
+- Automatic parallelization of independent pure calls
+- Integration with fan (explicit + implicit parallelism coexistence)
 
 ### Phase 6: Optimizing Backend (Tier 2)
-- Almide 特化の最適化パイプライン
-- Shape specialization (SoA 変換)
-- SIMD 自動ベクトル化
+- Almide-specific optimization pipeline
+- Shape specialization (SoA transformation)
+- Automatic SIMD vectorization
 - Profile-guided optimization
 
 ### Phase 7: Self-Hosting
-- User-defined generic functions (前提条件)
-- Almide でコンパイラを書き直す
-- Bootstrap test (不動点検証)
-- コンパイラが自分自身を最適化する再帰
+- User-defined generic functions (prerequisite)
+- Rewrite the compiler in Almide
+- Bootstrap test (fixed-point verification)
+- Recursive self-optimization of the compiler
 
 ### Phase 8: LLM Co-Evolution
-- LLM 生成コードのパターン統計
-- 頻出パターン特化の codegen
-- コンパイラ ↔ LLM フィードバックループ
+- LLM-generated code pattern statistics
+- Codegen specialized for common patterns
+- Compiler ↔ LLM feedback loop
 
 ---
 
-## 競合比較
+## Competitive Comparison
 
-| 言語 | コンパイル速度 | 実行速度 | メモリ管理 | 並行性 |
-|------|-------------|---------|-----------|--------|
-| C | 速い | 最速 | 手動 (危険) | 手動 (危険) |
-| Rust | 遅い | 最速級 | Borrow checker | 手動 + async |
-| Go | 速い | 良い | GC (pause) | goroutine |
-| Zig | 速い | 最速級 | 手動 (安全) | 手動 |
-| **Almide (目標)** | **最速** | **最速級** | **Static region (安全)** | **Auto-parallel (安全)** |
+| Language | Compile speed | Execution speed | Memory management | Concurrency |
+|----------|--------------|-----------------|-------------------|-------------|
+| C | Fast | Fastest | Manual (dangerous) | Manual (dangerous) |
+| Rust | Slow | Near-fastest | Borrow checker | Manual + async |
+| Go | Fast | Good | GC (pause) | goroutine |
+| Zig | Fast | Near-fastest | Manual (safe) | Manual |
+| **Almide (goal)** | **Fastest** | **Near-fastest** | **Static region (safe)** | **Auto-parallel (safe)** |
 
-Almide の目標: **Go のコンパイル速度 × Rust の実行速度 × 完全自動のメモリ管理 × 自動並列化**。
+Almide's goal: **Go's compile speed × Rust's execution speed × fully automatic memory management × auto-parallelization**.
 
-制約の強さが武器。人間の自由を奪った分だけ、コンパイラが賢くなる。
+Strong constraints are the weapon. The more freedom taken from humans, the smarter the compiler becomes.
 
 ---
 
-## 参考技術
+## Reference Technologies
 
-- **Copy-and-Patch JIT**: CPython 3.13 で採用。テンプレート化された machine code を貼り合わせる
-- **Stream Fusion**: GHC (Haskell) の中間リスト除去。`foldr/build` 規則
-- **Region Inference**: MLKit (ML) の静的メモリ管理。GC 不要
-- **Structure of Arrays**: Data-Oriented Design。ゲームエンジン (Unity DOTS, Bevy ECS)
-- **Deforestation**: Wadler (1988)。中間データ構造の除去
-- **YJIT / ZJIT**: Ruby の JIT。Copy-and-Patch ベース
+- **Copy-and-Patch JIT**: Adopted by CPython 3.13. Patches together templated machine code
+- **Stream Fusion**: GHC (Haskell) intermediate list elimination. `foldr/build` rules
+- **Region Inference**: MLKit (ML) static memory management. No GC needed
+- **Structure of Arrays**: Data-Oriented Design. Game engines (Unity DOTS, Bevy ECS)
+- **Deforestation**: Wadler (1988). Elimination of intermediate data structures
+- **YJIT / ZJIT**: Ruby JIT. Copy-and-Patch based

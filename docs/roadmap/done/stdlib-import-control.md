@@ -2,84 +2,84 @@
 <!-- done: 2026-03-24 -->
 # Stdlib Import Control
 
-**優先度:** 1.0
-**前提:** なし
+**Priority:** 1.0
+**Prerequisites:** None
 
-## 問題
+## Problem
 
-現在、全 stdlib モジュール（22モジュール）が `import` なしで使える。`math.abs(-5)` と書けば `import math` なしで動く。これは仕様違反。
+Currently, all stdlib modules (22 modules) can be used without `import`. Writing `math.abs(-5)` works without `import math`. This violates the specification.
 
-## 理想形
+## Ideal Design
 
-Swift の Foundation / UIKit モデルを参考に、3層の可視性:
+Referencing Swift's Foundation / UIKit model, three tiers of visibility:
 
-### Tier 1: 暗黙 import（import 不要）
+### Tier 1: Implicit import (no import needed)
 
-言語のコア型に直結するモジュール。UFCS でも `module.func()` でも使える。
+Modules directly tied to core language types. Usable via both UFCS and `module.func()`.
 
-候補:
-- `string` — String 型の操作
-- `int` — Int 型の変換
-- `float` — Float 型の変換
-- `list` — List 型の操作
-- `map` — Map 型の操作
-- `set` — Set 型の操作
-- `option` — Option 型の操作
-- `result` — Result 型の操作
-- `bool` — Bool 型の操作（存在すれば）
+Candidates:
+- `string` — String type operations
+- `int` — Int type conversions
+- `float` — Float type conversions
+- `list` — List type operations
+- `map` — Map type operations
+- `set` — Set type operations
+- `option` — Option type operations
+- `result` — Result type operations
+- `bool` — Bool type operations (if exists)
 
-**根拠:** これらはコア型のメソッド群。`"hello".len()` (UFCS) が import 不要で動くなら、`string.len("hello")` も同等に動くべき。
+**Rationale:** These are method sets for core types. If `"hello".len()` (UFCS) works without import, `string.len("hello")` should work equally.
 
-### Tier 2: 明示 import 必要
+### Tier 2: Explicit import required
 
-汎用ユーティリティ。使わないプログラムも多い。
+General-purpose utilities. Many programs do not use them.
 
-候補:
-- `math` — 数学関数
-- `json` — JSON 操作
-- `regex` — 正規表現
-- `random` — 乱数
-- `datetime` — 日時
-- `env` — 環境変数
-- `fs` — ファイルシステム
-- `http` — HTTP クライアント/サーバー
-- `path` — パス操作
-- `process` — プロセス
-- `log` — ログ
-- `time` — 時間
-- `codec` — エンコード/デコード
+Candidates:
+- `math` — Math functions
+- `json` — JSON operations
+- `regex` — Regular expressions
+- `random` — Random numbers
+- `datetime` — Date and time
+- `env` — Environment variables
+- `fs` — Filesystem
+- `http` — HTTP client/server
+- `path` — Path operations
+- `process` — Processes
+- `log` — Logging
+- `time` — Time
+- `codec` — Encoding/decoding
 
-### Tier 3: 組み込み（モジュール名なしで使える）
+### Tier 3: Built-in (usable without module name)
 
-言語キーワードレベル:
-- `println`, `eprintln` — トップレベル関数
-- `assert`, `assert_eq` — テスト用
-- `ok`, `err`, `some`, `none` — コンストラクタ
-- `fan` — 並行処理
+Language keyword level:
+- `println`, `eprintln` — top-level functions
+- `assert`, `assert_eq` — for testing
+- `ok`, `err`, `some`, `none` — constructors
+- `fan` — concurrency
 
-## 設計判断が必要な点
+## Design Decisions Needed
 
-1. **Tier 1 のリストは正しいか？** string/int/float/list/map/set/option/result で足りるか、多すぎないか
-2. **UFCS との関係:** `x.abs()` は型から `math.abs` に解決される。import なしで動くべきか？
-   - 案A: UFCS は常に動く（型ベース解決は import と無関係）
-   - 案B: UFCS も import が必要（`import math` しないと `(-5).abs()` も動かない）
-   - **推奨: 案A** — UFCS はメソッド呼び出しの糖衣構文であり、import はモジュール名前空間の制御
-3. **既存テストへの影響:** 多くのテストが `import` なしで stdlib を使っている。Tier 1 を正しく設定すれば大半は壊れない
+1. **Is the Tier 1 list correct?** Is string/int/float/list/map/set/option/result sufficient, or too many?
+2. **Relationship with UFCS:** `x.abs()` resolves to `math.abs` from the type. Should it work without import?
+   - Option A: UFCS always works (type-based resolution is independent of import)
+   - Option B: UFCS also requires import (`(-5).abs()` does not work without `import math`)
+   - **Recommendation: Option A** — UFCS is syntactic sugar for method calls, import controls module namespace
+3. **Impact on existing tests:** Many tests use stdlib without `import`. Setting Tier 1 correctly should avoid breaking most of them
 
-## 実装方針
+## Implementation Approach
 
-1. `TypeEnv` に `imported_stdlib: HashSet<String>` を追加
-2. `check_program` で `program.imports` からモジュール名を収集
-3. Tier 1 モジュールは暗黙的に `imported_stdlib` に追加
-4. `resolve_module_call` (infer.rs) と `static_dispatch.rs` で `imported_stdlib` をチェック
-5. `calls.rs` の stdlib フォールバック（UFCS 経由）は import チェックしない（型ベース解決）
+1. Add `imported_stdlib: HashSet<String>` to `TypeEnv`
+2. Collect module names from `program.imports` in `check_program`
+3. Implicitly add Tier 1 modules to `imported_stdlib`
+4. Check `imported_stdlib` in `resolve_module_call` (infer.rs) and `static_dispatch.rs`
+5. stdlib fallback via UFCS in `calls.rs` does not check import (type-based resolution)
 
-## 実装進捗
+## Implementation Progress
 
-| Phase | 内容 | 状態 |
+| Phase | Content | Status |
 |---|---|---|
-| Phase 1 | Tier 分類の確定 (Swift モデル採用) | ✅ 完了 |
-| Phase 2 | imported_stdlib + Tier 1 暗黙登録 | ✅ 完了 |
-| Phase 3 | resolve_module_call + static_dispatch で import ゲート | ✅ 完了 |
-| Phase 4 | 既存テスト全通過 (19ファイルに import 追加) | ✅ 完了 |
-| Phase 5 | エラーメッセージ改善（"did you mean: import math?"） | 未着手 |
+| Phase 1 | Finalize tier classification (adopted Swift model) | ✅ Complete |
+| Phase 2 | imported_stdlib + Tier 1 implicit registration | ✅ Complete |
+| Phase 3 | import gate in resolve_module_call + static_dispatch | ✅ Complete |
+| Phase 4 | All existing tests pass (import added to 19 files) | ✅ Complete |
+| Phase 5 | Error message improvement ("did you mean: import math?") | Not started |

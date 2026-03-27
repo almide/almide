@@ -4,15 +4,15 @@
 
 ## Problem
 
-Almideの文法が3箇所に分散している:
+Almide's grammar is scattered across 3 locations:
 
-| 場所 | 形式 | 用途 |
-|------|------|------|
-| `src/parser/` + `src/lexer.rs` | Rust手書き | コンパイラ本体 |
-| `tree-sitter-almide/grammar.js` | JS手書き | エディタパース、構文ハイライト |
-| (未実装) vscode-almide TextMate | JSON | VSCode シンタックスハイライト |
+| Location | Format | Purpose |
+|----------|--------|---------|
+| `src/parser/` + `src/lexer.rs` | Hand-written Rust | Compiler core |
+| `tree-sitter-almide/grammar.js` | Hand-written JS | Editor parsing, syntax highlighting |
+| (not yet implemented) vscode-almide TextMate | JSON | VSCode syntax highlighting |
 
-キーワード追加・演算子変更のたびに全箇所を手動で同期する必要がある。stdlibで `stdlib/defs/*.toml` → `build.rs` → `src/generated/` のパターンが成功しているので、文法にも同じアプローチを適用する。
+Every keyword addition or operator change requires manual synchronization across all locations. Since the `stdlib/defs/*.toml` → `build.rs` → `src/generated/` pattern has been successful for stdlib, we apply the same approach to grammar.
 
 ## Design
 
@@ -28,7 +28,7 @@ build.rs (or standalone tool) が生成:
 └── src/generated/token_table.rs
 ```
 
-### Phase 1: tokens.toml — キーワード・演算子の一元管理
+### Phase 1: tokens.toml — Centralized Keyword/Operator Management
 
 ```toml
 # grammar/tokens.toml
@@ -52,14 +52,14 @@ close = [")", "]", "}"]
 separator = [",", ":", ";", "."]
 ```
 
-**生成物:**
-- `src/generated/token_table.rs` — lexerのキーワードHashMap、TokenType enum
-- `tree-sitter-almide/` の keywords セクション
-- TextMate grammar の keyword/operator スコープ
+**Generated artifacts:**
+- `src/generated/token_table.rs` — lexer keyword HashMap, TokenType enum
+- `tree-sitter-almide/` keywords section
+- TextMate grammar keyword/operator scopes
 
-**効果:** キーワード追加が1ファイルの編集で完結
+**Effect:** adding a keyword requires editing only one file
 
-### Phase 2: precedence.toml — 演算子優先順位
+### Phase 2: precedence.toml — Operator Precedence
 
 ```toml
 # grammar/precedence.toml
@@ -105,21 +105,21 @@ operators = ["-", "not"]
 associativity = "right"
 ```
 
-**生成物:**
-- tree-sitter の `prec.left()` / `prec.right()` 設定
-- パーサーの優先順位テーブル（検証用 — 手書きパーサーとの整合性チェック）
+**Generated artifacts:**
+- tree-sitter `prec.left()` / `prec.right()` configuration
+- Parser precedence table (for verification — consistency checks against hand-written parser)
 
-### Phase 3: rules.toml — 文法規則 (将来)
+### Phase 3: rules.toml — Grammar Rules (future)
 
-文法規則の宣言的記述。PEG/BNF的なDSL。ここまで来ると設計が大きくなるので、Phase 1-2 の成果を見てから判断。
+Declarative description of grammar rules. A PEG/BNF-style DSL. Since the design becomes large at this point, we decide after evaluating Phase 1-2 results.
 
 ## Implementation Order
 
-1. `grammar/tokens.toml` 作成
-2. `build.rs` にトークンテーブル生成を追加 (既存のstdlib生成と共存)
-3. lexer.rs のキーワードHashMap を `src/generated/token_table.rs` から読むように変更
-4. tree-sitter grammar.js のキーワード部分を生成スクリプトで出力
-5. TextMate grammar 生成
+1. Create `grammar/tokens.toml`
+2. Add token table generation to `build.rs` (coexisting with existing stdlib generation)
+3. Change lexer.rs keyword HashMap to read from `src/generated/token_table.rs`
+4. Output tree-sitter grammar.js keyword section via generation script
+5. TextMate grammar generation
 6. Phase 2 (precedence.toml)
 
 ## Priority
@@ -130,7 +130,7 @@ associativity = "right"
 
 | Project | Approach |
 |---------|----------|
-| **Almide stdlib** | `stdlib/defs/*.toml` → `build.rs` → `src/generated/` — 同じパターンを文法に適用 |
-| **Rust (rustc)** | キーワードリストは `rustc_span::symbol` に一元管理、マクロで生成 |
-| **Swift** | `gyb` (Generate Your Boilerplate) でトークン定義から生成 |
-| **TypeScript** | `src/compiler/scanner.ts` にキーワードテーブル、TextMate は手書き |
+| **Almide stdlib** | `stdlib/defs/*.toml` → `build.rs` → `src/generated/` — applying the same pattern to grammar |
+| **Rust (rustc)** | Keyword list centralized in `rustc_span::symbol`, generated via macros |
+| **Swift** | `gyb` (Generate Your Boilerplate) generates from token definitions |
+| **TypeScript** | Keyword table in `src/compiler/scanner.ts`, TextMate hand-written |

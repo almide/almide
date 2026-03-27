@@ -2,20 +2,20 @@
 <!-- done: 2026-03-18 -->
 # Showcase 3: CSV to JSON Pipeline (Data Processing)
 
-**領域:** Data processing
-**目的:** CSV読み込み → 変換 → JSON出力。list高階関数 + pipe の実用例。
+**Domain:** Data processing
+**Purpose:** CSV read -> transform -> JSON output. Practical example of list higher-order functions + pipe.
 
-## 仕様
+## Specification
 
 ```
 almide run showcase/csv-to-json.almd -- input.csv > output.json
 ```
 
-- CSV パース (ヘッダー行 + データ行)
-- フィルタ/集計/変換をpipeチェーンで
-- JSON出力
+- CSV parsing (header row + data rows)
+- Filter/aggregate/transform via pipe chains
+- JSON output
 
-## 使う機能
+## Features Used
 
 - `string.split`, `string.trim`, `string.lines`
 - `list.map`, `list.filter`, `list.fold`, `list.group_by`
@@ -24,9 +24,9 @@ almide run showcase/csv-to-json.almd -- input.csv > output.json
 - `json.stringify_pretty`
 - `map.from_list`
 
-## 成功基準
+## Success Criteria
 
-- [ ] Tier 1 (Rust) で動作
-- [ ] Tier 2 (TS/Deno) で動作
-- [ ] 40行以内
-- [ ] README に使い方記載
+- [ ] Works on Tier 1 (Rust)
+- [ ] Works on Tier 2 (TS/Deno)
+- [ ] Under 40 lines
+- [ ] Usage documented in README

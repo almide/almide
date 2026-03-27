@@ -2,62 +2,62 @@
 <!-- done: 2026-03-18 -->
 # Concatenation Operator Reform
 
-**優先度:** High — 1.0 前の breaking change 候補
-**リサーチ:** [docs/research/concat-operators.md](../../research/concat-operators.md)
+**Priority:** High — breaking change candidate before 1.0
+**Research:** [docs/research/concat-operators.md](../../research/concat-operators.md)
 
-## 現状
+## Current state
 
-`++` が String と List 両方の結合に使われる（Elm/Haskell方式）。
+`++` is used for both String and List concatenation (Elm/Haskell style).
 
 ```almide
 "Hello, " ++ name ++ "!"   // String
 [1, 2] ++ [3, 4]           // List
 ```
 
-## 問題
+## Problem
 
-1. String結合の大半は補間 `"Hello, ${name}!"` で書ける — `++` は冗長
-2. `++` はLLMにとって馴染みが薄い（Elm/Haskell以外で使わない）
-3. JSON構築で `'"' ++ key ++ '":"' ++ val ++ '"'` のようなコードが生まれる
+1. Most String concatenation can be written with interpolation `"Hello, ${name}!"` — `++` is redundant
+2. `++` is unfamiliar to LLMs (not used outside Elm/Haskell)
+3. JSON construction produces code like `'"' ++ key ++ '":"' ++ val ++ '"'`
 
-## リサーチ結論
+## Research conclusions
 
-- **`+` overload（Python/Kotlin/Swift）**: LLMは慣れてるが `1 + "a"` 問題
-- **別演算子（Gleam `<>`, OCaml `^`/`@`, Elixir `<>`/`++`）**: 明確だがLLM学習コスト
-- **`++` 維持（Elm/Haskell）**: 型安全、polymorphic。**これを採用した言語で後悔した例はない**
-- **補間がある言語では concat operator の重要性が低下** — 全言語共通の傾向
+- **`+` overload (Python/Kotlin/Swift)**: LLMs are familiar, but `1 + "a"` problem
+- **Different operators (Gleam `<>`, OCaml `^`/`@`, Elixir `<>`/`++`)**: Clear but LLM learning cost
+- **Keep `++` (Elm/Haskell)**: Type-safe, polymorphic. **No language that adopted this has regretted it**
+- **In languages with interpolation, concat operator importance decreases** — universal trend across all languages
 
-## 選択肢
+## Options
 
-| 案 | String | List | 互換性 | LLM親和性 |
+| Option | String | List | Compatibility | LLM affinity |
 |---|---|---|---|---|
-| A. `++` 維持 | `++` | `++` | 変更なし | 中 |
-| B. `++` をList専用、String は補間のみ | 補間 `"${a}${b}"` | `++` | breaking | 高 |
-| C. `+` に統一 | `+` | `+` | breaking | 最高 |
-| D. Gleam方式 `<>` | `<>` | `++` or `list.concat` | breaking | 中 |
+| A. Keep `++` | `++` | `++` | No change | Medium |
+| B. `++` for List only, String uses interpolation | Interpolation `"${a}${b}"` | `++` | breaking | High |
+| C. Unify to `+` | `+` | `+` | breaking | Highest |
+| D. Gleam-style `<>` | `<>` | `++` or `list.concat` | breaking | Medium |
 
-## 推奨: A (維持) or B (List専用)
+## Recommended: A (keep) or B (List-only)
 
-### A を推す理由
-- **`++` を採用して後悔した言語はゼロ**（リサーチ結論）
-- 補間があるので String `++` の使用頻度は既に低い
-- 1.0 前に breaking change のリスクを取る理由が弱い
-- LLM は `++` を「Almide の結合演算子」として学習済み
+### Case for A
+- **Zero languages that adopted `++` have regretted it** (research conclusion)
+- With interpolation, String `++` usage frequency is already low
+- Weak justification for taking breaking change risk before 1.0
+- LLMs have already learned `++` as "Almide's concatenation operator"
 
-### B を推す理由
-- String 結合を補間に強制することで**1つの正解**を作れる
-- `++` のセマンティクスが「List結合」に限定され明確
-- ただし `"a" ++ "b"` をコンパイルエラーにすると既存コードが壊れる
+### Case for B
+- Forcing String concatenation to interpolation creates **one right way**
+- `++` semantics become limited to "List concatenation" — clear
+- However, making `"a" ++ "b"` a compile error breaks existing code
 
-## 判断基準
+## Decision criteria
 
-1. 既存の exercises / spec / showcase で `++` が String に使われてる箇所は何件か
-2. それら全てが補間で置き換え可能か
-3. LLM の初回正答率に影響があるか
+1. How many places in existing exercises / spec / showcase use `++` for String
+2. Whether all of them can be replaced with interpolation
+3. Whether it affects LLM first-attempt accuracy
 
 ## TODO
 
-- [ ] `++` の String 使用箇所を数える
-- [ ] 補間で置き換え可能か判定
-- [ ] 決定: A or B
-- [ ] (B の場合) String `++` を deprecation warning → error に
+- [ ] Count String usage sites of `++`
+- [ ] Determine if replaceable with interpolation
+- [ ] Decide: A or B
+- [ ] (If B) String `++` deprecation warning → error

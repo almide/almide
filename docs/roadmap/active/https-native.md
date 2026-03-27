@@ -1,32 +1,32 @@
 <!-- description: Native HTTPS support via rustls across all targets -->
 # HTTPS Native Support
 
-**目標**: `http.get("https://...")` が全ターゲットで動く
+**Goal**: `http.get("https://...")` works across all targets
 
-## 現状
+## Current State
 
-| ターゲット | HTTP | HTTPS | 実装方法 | 状態 |
+| Target | HTTP | HTTPS | Implementation | Status |
 |---|---|---|---|---|
-| Rust (almide run) | OK | **OK** | rustls (pure Rust TLS) | ✅ CLI経由で動作確認済 |
-| Rust (almide build) | OK | **未検証** | 生成バイナリに rustls が含まれるか要確認 | 要検証 |
-| TS (Deno) | OK | OK | `fetch` ネイティブ | ✅ |
-| WASM | NG | NG | WASI にソケット API なし | 将来対応 (wasi:http) |
+| Rust (almide run) | OK | **OK** | rustls (pure Rust TLS) | ✅ Verified working via CLI |
+| Rust (almide build) | OK | **Unverified** | Need to confirm rustls is included in generated binary | Needs verification |
+| TS (Deno) | OK | OK | `fetch` native | ✅ |
+| WASM | NG | NG | No socket API in WASI | Future support (wasi:http) |
 
 ## Done
 
-- [x] **Phase 1: rustls 統合** — `runtime/rs/src/http.rs` に rustls + webpki-roots を統合。`parse_url` が scheme を認識し、https なら `ClientConnection` + `StreamOwned` で TLS 接続。
-- [x] **CLI 動作確認** — `almide run` 経由で `https://` URL へのリクエストが成功
+- [x] **Phase 1: rustls Integration** — Integrated rustls + webpki-roots into `runtime/rs/src/http.rs`. `parse_url` recognizes the scheme and uses `ClientConnection` + `StreamOwned` for TLS connections on https.
+- [x] **CLI Verification** — Requests to `https://` URLs succeed via `almide run`
 
-- [x] **`almide build` での HTTPS 対応** — Effect fn Result wrapping 修正により `effect fn main() -> Unit` + `http.get("https://...")` → `almide build` → 実行成功を確認。rustls は `runtime/rs/Cargo.toml` 経由で自動リンク。
+- [x] **HTTPS Support in `almide build`** — After fixing effect fn Result wrapping, confirmed `effect fn main() -> Unit` + `http.get("https://...")` → `almide build` → execution succeeds. rustls is auto-linked via `runtime/rs/Cargo.toml`.
 
 ## Remaining
 
-### WASM ターゲット (将来)
+### WASM Target (Future)
 
-WASM ではソケット自体がないので、ホストインポートで解決:
+WASM has no sockets at all, so resolution requires host imports:
 ```
-// WASI HTTP が安定したら
+// Once WASI HTTP stabilizes
 import wasi:http/outgoing-handler@0.2.0
 ```
 
-WASI の HTTP 仕様が安定するまで待つ。
+Wait for the WASI HTTP spec to stabilize.

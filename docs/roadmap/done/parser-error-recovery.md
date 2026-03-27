@@ -3,14 +3,14 @@
 # Parser Error Recovery
 
 ## Summary
-1 つのシンタックスエラーでパースが停止する現状を改善。複数エラーを報告し、エラー後もパースを継続する。
+Improve the current behavior where parsing stops at a single syntax error. Report multiple errors and continue parsing after errors.
 
 ## Current Problem
 ```
 error: Expected expression at line 5
   --> app.almd:5:10
 ```
-→ 1 個のエラーで停止。後続の正しいコードもチェックされない。
+Stops at 1 error. Subsequent correct code is not checked either.
 
 ## Goal
 ```
@@ -24,19 +24,19 @@ error: type mismatch at line 12
 ## Design
 
 ### Statement-level recovery
-パース失敗時に次のステートメント境界（`;`, newline + keyword, `}`) まで読み飛ばして継続。
+On parse failure, skip ahead to the next statement boundary (`;`, newline + keyword, `}`) and continue.
 
 ### Declaration-level recovery
-関数/型宣言のパース失敗時に次の `fn`/`type`/`test` まで読み飛ばして継続。
+On function/type declaration parse failure, skip ahead to the next `fn`/`type`/`test` and continue.
 
 ### Error node
-パース失敗した箇所に `Expr::Error` / `Stmt::Error` を挿入。checker はこれらをスキップ。
+Insert `Expr::Error` / `Stmt::Error` at parse failure locations. The checker skips these.
 
 ## Implementation
-- `src/parser/mod.rs` — `recover_to_sync_point()` メソッド追加
-- `src/parser/declarations.rs` — 宣言レベル recovery
-- `src/parser/statements.rs` — 文レベル recovery
-- テスト: 複数エラーが報告されることを検証
+- `src/parser/mod.rs` — add `recover_to_sync_point()` method
+- `src/parser/declarations.rs` — declaration-level recovery
+- `src/parser/statements.rs` — statement-level recovery
+- Tests: verify that multiple errors are reported
 
 ## Files
 ```
