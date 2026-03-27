@@ -593,7 +593,8 @@ impl FuncCompiler<'_> {
 
             // ── Optional chaining: expr?.field → None if expr is None, else Some(expr.field) ──
             IrExprKind::OptionalChain { expr: inner, field } => {
-                // inner is Option<RecordType> (ptr: 0=None, nonzero=Some)
+                // inner is Option<RecordType> — ptr: 0=None, nonzero=Some wrapper
+                // Some wrapper layout: [payload_ptr:i32] where payload_ptr → record
                 self.emit_expr(inner);
                 let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
@@ -605,16 +606,19 @@ impl FuncCompiler<'_> {
                     i32_const(0);
                     else_;
                 });
-                // Some path: scratch points to the inner record. Load field, wrap as Some.
-                // Resolve inner Option's payload type to find field offset.
+                // Some path: dereference Some wrapper to get the actual record pointer
                 let payload_ty = inner.ty.option_inner().unwrap_or_else(|| inner.ty.clone());
+                let payload_size = values::byte_size(&payload_ty);
+                if payload_size > 0 {
+                    wasm!(self.func, { local_get(scratch); i32_load(0); local_set(scratch); });
+                }
                 let fields = self.extract_record_fields(&payload_ty);
                 let tag_offset = self.variant_tag_offset(&payload_ty);
                 if let Some((field_offset, field_ty)) = values::field_offset(&fields, field) {
                     let total_offset = tag_offset + field_offset;
                     let field_size = values::byte_size(&field_ty);
                     if field_size > 0 {
-                        // Allocate Some wrapper, store field value
+                        // Allocate Some wrapper for the field value
                         wasm!(self.func, { i32_const(field_size as i32); call(self.emitter.rt.alloc); });
                         let some_ptr = self.scratch.alloc_i32();
                         wasm!(self.func, { local_tee(some_ptr); local_get(scratch); });
