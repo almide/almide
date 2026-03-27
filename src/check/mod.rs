@@ -227,7 +227,7 @@ impl Checker {
             if let ast::Decl::Import { path, alias, .. } = imp {
                 let name = alias.as_ref().cloned()
                     .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
-                if crate::stdlib::is_stdlib_module(&name) {
+                if crate::stdlib::is_any_stdlib(&name) {
                     self.env.imported_stdlib.insert(sym(&name));
                 }
             }

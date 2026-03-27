@@ -11,8 +11,7 @@ test "bang result ok" {
 }
 
 test "bang result err propagates" {
-  let r = parse_must("bad")
-  assert(result.is_err(r))
+  assert_eq(parse_must("bad") ?? -1, -1)
 }
 
 effect fn chain_bang() -> Result[Int, String] = {
@@ -37,8 +36,7 @@ test "bang option some" {
 }
 
 test "bang option none propagates err" {
-  let r = get_first([])
-  assert(result.is_err(r))
+  assert_eq(get_first([]) ?? -1, -1)
 }
 
 // ── expr ?? on Result ──

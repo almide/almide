@@ -419,9 +419,6 @@ template = "{name}"
 
 # ── Unwrap operators ──
 
-[unwrap_expr]
-template = "{inner}"
-
 [unwrap_or_expr]
 template = "({inner} ?? {fallback})"
 

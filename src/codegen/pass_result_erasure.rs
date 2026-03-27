@@ -78,15 +78,25 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
         }
         // none → keep as OptionNone (template renders as null)
         IrExprKind::OptionNone => IrExprKind::OptionNone,
-        // try(expr) / unwrap(expr) / to_option(expr) → expr (no ? operator in TS)
+        // try(expr) / to_option(expr) → expr (no ? operator in TS)
         IrExprKind::Try { expr: inner }
-        | IrExprKind::Unwrap { expr: inner }
         | IrExprKind::ToOption { expr: inner } => {
             return erase_expr(*inner);
         }
-        // unwrap_or(expr, fallback) → expr (fallback erased in TS)
-        IrExprKind::UnwrapOr { expr: inner, .. } => {
-            return erase_expr(*inner);
+        // unwrap(expr) — erase only for Result (ok/err already throw). Keep for Option (null check needed).
+        IrExprKind::Unwrap { expr: inner } => {
+            if inner.ty.is_option() {
+                IrExprKind::Unwrap { expr: Box::new(erase_expr(*inner)) }
+            } else {
+                return erase_expr(*inner);
+            }
+        }
+        // unwrap_or(expr, fallback) — keep for both Result and Option (TS ?? operator works for null and err)
+        IrExprKind::UnwrapOr { expr: inner, fallback } => {
+            IrExprKind::UnwrapOr {
+                expr: Box::new(erase_expr(*inner)),
+                fallback: Box::new(erase_expr(*fallback)),
+            }
         }
 
         // Recurse into sub-expressions

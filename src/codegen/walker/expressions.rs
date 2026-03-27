@@ -432,7 +432,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let s = render_expr(ctx, inner);
             let when_type = if inner.ty.is_option() { Some("Option") } else { None };
             ctx.templates.render_with("unwrap_expr", when_type, &[], &[("inner", s.as_str())])
-                .unwrap_or_else(|| format!("({})?", s))
+                .unwrap_or_else(|| {
+                    if inner.ty.is_option() {
+                        // Fallback for targets without Option unwrap template (e.g. TS)
+                        format!("((__v) => {{ if (__v === null) throw new Error('unwrap on none'); return __v; }})({})", s)
+                    } else {
+                        format!("({})?", s)
+                    }
+                })
         }
         IrExprKind::UnwrapOr { expr: inner, fallback } => {
             let s = render_expr(ctx, inner);

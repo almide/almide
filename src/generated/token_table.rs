@@ -84,12 +84,13 @@ pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "effect", "else"
     // pattern: \\b(true|false|none|some|ok|err|todo|not|and|or)\\b
 
 ── Operator precedence table ─────────────────────────────────────────
-    // precedence 1: pipe (left) — "|>"
+    // precedence 1: pipe (left) — "|>", ">>"
     // precedence 2: or (left) — "or"
     // precedence 3: and (left) — "and"
-    // precedence 4: comparison (left) — "==", "!=", "<", ">", "<=", ">="
+    // precedence 4: comparison (none) — "==", "!=", "<", ">", "<=", ">="
     // precedence 5: range (none) — "..", "..="
     // precedence 6: additive (left) — "+", "-", "++"
-    // precedence 7: multiplicative (left) — "*", "/", "%", "^"
-    // precedence 8: unary (right) — "-", "not"
+    // precedence 7: multiplicative (left) — "*", "/", "%"
+    // precedence 8: power (right) — "^"
+    // precedence 9: unary (right) — "-", "not"
 */
