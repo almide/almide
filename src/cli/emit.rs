@@ -109,7 +109,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_in
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "module".to_string());
-        let iface = almide::interface::extract(&ir, &module_name);
+        let iface = almide::interface::extract(&ir, &module_name, Some(&source_text));
         let json = serde_json::to_string_pretty(&iface)
             .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
         println!("{}", json);
