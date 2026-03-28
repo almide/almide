@@ -19,5 +19,6 @@
 
 | ファイル | 内容 |
 |---|---|
+| `cli.md` | 全コマンド、オプション、エラーコード、Legacy Mode |
 | `module-system.md` | import, サブモジュール, ダイヤモンド依存, 可視性, @extern |
 | `package-system.md` | 依存管理, MVS, バージョン共存, モジュール境界, レジストリ構想 |
