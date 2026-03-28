@@ -48,6 +48,15 @@ impl Checker {
     /// Resolve a member call statically (module.func, alias, TypeName.method, codec).
     /// Returns Some(Ty) if resolved, None to fall through to UFCS/convention dispatch.
     pub(super) fn resolve_static_member(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        // Resolve nested module paths: bindgen.scaffolding.generate(...)
+        // object = Member(Ident("bindgen"), "scaffolding"), field = "generate"
+        if let Some(dotted) = self.resolve_dotted_module(object) {
+            let key = format!("{}.{}", dotted, field);
+            if self.env.functions.contains_key(&sym(&key)) {
+                return Some(self.check_named_call(&key, arg_tys));
+            }
+        }
+
         let module_name = match object {
             ast::Expr::Ident { name, .. } => Some(name.as_str()),
             _ => None,
@@ -164,7 +173,9 @@ impl Checker {
             }
 
             // Direct stdlib/user module call, or resolved alias
-            let resolved_module = if self.env.imported_stdlib.contains(&sym(module)) || self.env.user_modules.contains(&sym(module)) {
+            // Only imported modules are accessible (no phantom dependencies)
+            let resolved_module = if self.env.imported_stdlib.contains(&sym(module))
+                || self.env.imported_user_modules.contains(&sym(module)) {
                 Some(module.to_string())
             } else {
                 self.env.module_aliases.get(&sym(module)).map(|s| s.to_string())
@@ -183,6 +194,40 @@ impl Checker {
         }
 
         None
+    }
+
+    /// Resolve a nested Member chain to a dotted module path.
+    /// e.g. Member(Member(Ident("bindgen"), "bindings"), "python") → "bindgen.bindings.python"
+    /// Returns None if the chain doesn't start with a known module name.
+    fn resolve_dotted_module(&self, expr: &ast::Expr) -> Option<String> {
+        match expr {
+            ast::Expr::Member { object, field, .. } => {
+                if let ast::Expr::Ident { name: root, .. } = object.as_ref() {
+                    let candidate = format!("{}.{}", root, field);
+                    if self.env.imported_user_modules.contains(&sym(&candidate)) {
+                        return Some(candidate);
+                    }
+                    // Check if candidate is a namespace prefix (e.g. "bindgen.bindings"
+                    // has children like "bindgen.bindings.python" even without mod.almd)
+                    let prefix = format!("{}.", candidate);
+                    if self.env.imported_user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                        return Some(candidate);
+                    }
+                }
+                if let Some(parent) = self.resolve_dotted_module(object) {
+                    let candidate = format!("{}.{}", parent, field);
+                    if self.env.imported_user_modules.contains(&sym(&candidate)) {
+                        return Some(candidate);
+                    }
+                    let prefix = format!("{}.", candidate);
+                    if self.env.imported_user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                        return Some(candidate);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
     }
 
     /// Check if a type has a Codec encode function registered.

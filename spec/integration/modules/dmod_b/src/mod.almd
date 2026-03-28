@@ -1,3 +1,5 @@
 import dmod_d
 
 fn from_b() -> String = "B says: " + dmod_d.shared()
+fn make_b_logger() -> Logger = dmod_d.make_logger("B", 1)
+fn read_logger(l: Logger) -> String = dmod_d.log_name(l)

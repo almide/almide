@@ -155,8 +155,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 CallTarget::Module { module, func } => {
                     // Module calls: use template (TS/JS) or runtime function (Rust)
                     let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
-                    ctx.templates.render_with("module_call", None, &[], &[("module", module.as_str()), ("func", func.as_str()), ("args", args_str.as_str())])
-                        .unwrap_or_else(|| format!("almide_rt_{}_{}({})", module, func, args_str))
+                    let mod_ident = module.replace('.', "_");
+                    let func_ident = func.replace('.', "_");
+                    ctx.templates.render_with("module_call", None, &[], &[("module", mod_ident.as_str()), ("func", func_ident.as_str()), ("args", args_str.as_str())])
+                        .unwrap_or_else(|| {
+                            format!("almide_rt_{}_{}({})", mod_ident, func_ident, args_str)
+                        })
                 }
                 _ => render_generic_call(ctx, target, args)
             }

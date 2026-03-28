@@ -1,7 +1,7 @@
 use std::process::Command;
 use crate::{compile_with_ir, parse_file, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool) {
+pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool) {
     let is_npm = matches!(target, Some("npm"));
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
     let is_wasm_direct = matches!(target, Some("wasm"));
@@ -41,7 +41,9 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         output_raw.to_string()
     };
 
-    let (rs_code, _ir) = compile_with_ir(file, no_check);
+    let opts = crate::codegen::CodegenOptions { repr_c };
+    let (rs_code, _ir) = crate::try_compile_with_ir(file, no_check, &opts)
+        .unwrap_or_else(|_| std::process::exit(1));
 
     // WASI target: use bare rustc (no external crate deps needed for WASM)
     if is_wasm {

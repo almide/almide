@@ -748,7 +748,7 @@ impl Checker {
     /// Resolve a module.func Member expression to a qualified call key.
     fn resolve_module_call(&self, object: &ast::Expr, field: &str) -> Option<String> {
         if let ast::Expr::Ident { name: module, .. } = object {
-            if self.env.imported_stdlib.contains(&sym(module)) || self.env.user_modules.contains(&sym(module)) {
+            if self.env.imported_stdlib.contains(&sym(module)) || self.env.imported_user_modules.contains(&sym(module)) {
                 return Some(format!("{}.{}", module, field));
             }
             if let Some(target) = self.env.module_aliases.get(&sym(module)) {
@@ -756,6 +756,13 @@ impl Checker {
             }
             // Check if Ident.field is a Type.method (protocol implementation)
             let key = format!("{}.{}", module, field);
+            if self.env.functions.contains_key(&sym(&key)) {
+                return Some(key);
+            }
+        }
+        // Nested module path: bindgen.scaffolding.func(...)
+        if let Some(dotted) = self.resolve_dotted_module_path(object) {
+            let key = format!("{}.{}", dotted, field);
             if self.env.functions.contains_key(&sym(&key)) {
                 return Some(key);
             }
@@ -768,6 +775,37 @@ impl Checker {
             }
         }
         None
+    }
+
+    /// Resolve a nested Member chain to a dotted module path.
+    fn resolve_dotted_module_path(&self, expr: &ast::Expr) -> Option<String> {
+        match expr {
+            ast::Expr::Member { object, field, .. } => {
+                if let ast::Expr::Ident { name: root, .. } = object.as_ref() {
+                    let candidate = format!("{}.{}", root, field);
+                    if self.env.imported_user_modules.contains(&sym(&candidate)) {
+                        return Some(candidate);
+                    }
+                    // Namespace prefix: dir without mod.almd but has children
+                    let prefix = format!("{}.", candidate);
+                    if self.env.imported_user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                        return Some(candidate);
+                    }
+                }
+                if let Some(parent) = self.resolve_dotted_module_path(object) {
+                    let candidate = format!("{}.{}", parent, field);
+                    if self.env.imported_user_modules.contains(&sym(&candidate)) {
+                        return Some(candidate);
+                    }
+                    let prefix = format!("{}.", candidate);
+                    if self.env.imported_user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                        return Some(candidate);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
     }
 }
 

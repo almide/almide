@@ -280,20 +280,28 @@ template = "move |{params}| {body}"
 [type_alias]
 template = "type {name} = {type};"
 
-[struct_decl]
-template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\nstruct {name} {{ {fields} }}"
+[[struct_decl]]
+when_attr = "repr_c"
+template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub struct {name} {{\n{fields}\n}}"
 
 [struct_field]
-template = "{name}: {type},"
+template = "    pub {name}: {type},"
 
-[enum_decl]
-template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\nenum {name} {{ {variants} }}"
+[[enum_decl]]
+when_attr = "repr_c"
+template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub enum {name} {{\n{variants}\n}}"
+
+[[enum_decl]]
+template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub enum {name} {{\n{variants}\n}}"
 
 [enum_variant]
-template = "{name}({fields})"
+template = "    {name}({fields})"
 
 [enum_variant_unit]
-template = "{name}"
+template = "    {name}"
 
 # ── Imports ──
 
@@ -407,7 +415,7 @@ template = "{object}.{index}"
 template = ",\n"
 
 [enum_variant_record]
-template = "{name} {{ {fields} }}"
+template = "    {name} {{ {fields} }}"
 
 [destructure_pattern]
 template = "{name} {{ {fields} }}"

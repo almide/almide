@@ -118,6 +118,10 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                     }
                 }
             }
+            // Nested module path: bindgen.scaffolding.generate(...)
+            if let Some(dotted) = resolve_dotted_module_path(object, ctx) {
+                return CallTarget::Module { module: sym(&dotted), func: *field };
+            }
             // TypeName.method(args) → direct named call (not UFCS, no object prepend)
             if let ast::Expr::TypeName { name: type_name, .. } = object.as_ref() {
                 let key = format!("{}.{}", type_name, field);
@@ -193,5 +197,36 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             let ir_callee = lower_expr(ctx, callee);
             CallTarget::Computed { callee: Box::new(ir_callee) }
         }
+    }
+}
+
+/// Resolve a nested Member chain to a dotted module path for CallTarget::Module.
+fn resolve_dotted_module_path(expr: &ast::Expr, ctx: &LowerCtx) -> Option<String> {
+    match expr {
+        ast::Expr::Member { object, field, .. } => {
+            if let ast::Expr::Ident { name: root, .. } = object.as_ref() {
+                let candidate = format!("{}.{}", root, field);
+                if ctx.env.user_modules.contains(&sym(&candidate)) {
+                    return Some(candidate);
+                }
+                // Namespace prefix: dir without mod.almd but has children
+                let prefix = format!("{}.", candidate);
+                if ctx.env.user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                    return Some(candidate);
+                }
+            }
+            if let Some(parent) = resolve_dotted_module_path(object, ctx) {
+                let candidate = format!("{}.{}", parent, field);
+                if ctx.env.user_modules.contains(&sym(&candidate)) {
+                    return Some(candidate);
+                }
+                let prefix = format!("{}.", candidate);
+                if ctx.env.user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                    return Some(candidate);
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }

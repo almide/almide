@@ -1,6 +1,6 @@
 use crate::{parse_file, codegen, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool) {
+pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool, repr_c: bool) {
     let (mut program, source_text, _parse_errors) = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -88,7 +88,14 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
             let mod_types = checker.check_module_bodies(mod_prog);
-            let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
+            let versioned = pkg_id.as_ref().map(|pid| {
+                let base = pid.mod_name();
+                if let Some(suffix) = name.strip_prefix(&pid.name) {
+                    format!("{}{}", base, suffix)
+                } else {
+                    base
+                }
+            });
             let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
             let mod_ir = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
             module_irs.insert(name.clone(), mod_ir);
@@ -119,7 +126,8 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
             other => { eprintln!("Unknown target: {}. Use rust, ts.", other); std::process::exit(1); }
         };
         let ir = ir_program.as_mut().expect("IR required for codegen");
-        match codegen::codegen(ir, t) {
+        let opts = codegen::CodegenOptions { repr_c };
+        match codegen::codegen_with(ir, t, &opts) {
             codegen::CodegenOutput::Source(code) => print!("{}", code),
             codegen::CodegenOutput::Binary(_) => unreachable!(),
         }

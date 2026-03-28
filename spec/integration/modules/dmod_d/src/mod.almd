@@ -1,2 +1,6 @@
+type Logger = { level: Int, name: String }
+
 fn shared() -> String = "from D"
 fn value() -> Int = 42
+fn make_logger(name: String, level: Int) -> Logger = Logger { level: level, name: name }
+fn log_name(l: Logger) -> String = l.name

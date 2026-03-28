@@ -65,6 +65,9 @@ enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Add #[repr(C)] to structs/enums for stable C ABI
+        #[arg(long)]
+        repr_c: bool,
     },
     /// Run tests
     Test {
@@ -140,6 +143,11 @@ enum Commands {
     },
     /// List dependencies
     Deps,
+    /// Print the cached source directory of a dependency
+    DepPath {
+        /// Dependency name (as declared in almide.toml)
+        name: String,
+    },
     /// Emit source code or AST
     #[command(hide = true)]
     Emit {
@@ -157,6 +165,9 @@ enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Add #[repr(C)] to structs/enums for stable C ABI
+        #[arg(long)]
+        repr_c: bool,
     },
 }
 
@@ -192,10 +203,10 @@ fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::Diagnostic>)
 }
 
 fn try_compile(file: &str, no_check: bool) -> Result<String, String> {
-    try_compile_with_ir(file, no_check).map(|(code, _)| code)
+    try_compile_with_ir(file, no_check, &codegen::CodegenOptions::default()).map(|(code, _)| code)
 }
 
-fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<almide::ir::IrProgram>), String> {
+pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
     let (mut program, source_text, parse_errors) = parse_file(file);
     let has_parse_errors = !parse_errors.is_empty();
 
@@ -286,7 +297,15 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
             let mod_types = checker.check_module_bodies(mod_prog);
-            let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
+            let versioned = pkg_id.as_ref().map(|pid| {
+                let base = pid.mod_name(); // e.g. "bindgen_v0"
+                // For submodules (e.g. name="bindgen.scaffolding"), append the suffix
+                if let Some(suffix) = name.strip_prefix(&pid.name) {
+                    format!("{}{}", base, suffix) // "bindgen_v0.scaffolding"
+                } else {
+                    base
+                }
+            });
             let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
             // Also keep in module_irs for backward compat (borrow analysis, etc.)
             let mod_ir_program = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
@@ -331,7 +350,7 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
 
     // Codegen v3: three-layer pipeline (Nanopass + Templates)
     let ir = ir_program.as_mut().expect("IR required for codegen");
-    let code = match codegen::codegen(ir, codegen::pass::Target::Rust) {
+    let code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, codegen_opts) {
         codegen::CodegenOutput::Source(s) => s,
         codegen::CodegenOutput::Binary(_) => unreachable!(),
     };
@@ -339,7 +358,7 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
 }
 
 fn compile_with_ir(file: &str, no_check: bool) -> (String, Option<almide::ir::IrProgram>) {
-    try_compile_with_ir(file, no_check)
+    try_compile_with_ir(file, no_check, &codegen::CodegenOptions::default())
         .unwrap_or_else(|_| std::process::exit(1))
 }
 
@@ -416,9 +435,9 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_run(&file, &program_args, no_check);
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c } => {
             let file = resolve_file(file);
-            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check);
+            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c);
         }
         Commands::Test { file, run, no_check, json, target } => {
             let file_str = file.as_deref().unwrap_or("");
@@ -501,8 +520,25 @@ fn dispatch(cli: Cli) {
                 eprintln!("No almide.toml found");
             }
         }
-        Commands::Emit { file, target, emit_ast, emit_ir, no_check } => {
-            cli::cmd_emit(&file, &target, emit_ast, emit_ir, no_check);
+        Commands::DepPath { name } => {
+            if !std::path::Path::new("almide.toml").exists() {
+                eprintln!("No almide.toml found");
+                std::process::exit(1);
+            }
+            let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+            let fetched = project_fetch::fetch_all_deps(&proj)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+            match fetched.iter().find(|fd| fd.pkg_id.name == name) {
+                Some(fd) => println!("{}", fd.source_dir.display()),
+                None => {
+                    eprintln!("Dependency '{}' not found in almide.toml", name);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Emit { file, target, emit_ast, emit_ir, no_check, repr_c } => {
+            cli::cmd_emit(&file, &target, emit_ast, emit_ir, no_check, repr_c);
         }
     }
 }

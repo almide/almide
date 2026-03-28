@@ -50,6 +50,37 @@ impl NanoPass for CaptureClonePass {
     }
 }
 
+/// Collect all variables bound by a statement (Bind + BindDestructure).
+fn collect_stmt_bindings(stmt: &IrStmt, out: &mut HashSet<VarId>) {
+    match &stmt.kind {
+        IrStmtKind::Bind { var, .. } => { out.insert(*var); }
+        IrStmtKind::BindDestructure { pattern, .. } => collect_pattern_bindings_into(pattern, out),
+        _ => {}
+    }
+}
+
+/// Collect variables bound by a pattern into a VarId set.
+fn collect_pattern_bindings_into(pattern: &IrPattern, out: &mut HashSet<VarId>) {
+    match pattern {
+        IrPattern::Bind { var, .. } => { out.insert(*var); }
+        IrPattern::Constructor { args, .. } => {
+            for a in args { collect_pattern_bindings_into(a, out); }
+        }
+        IrPattern::Tuple { elements } => {
+            for e in elements { collect_pattern_bindings_into(e, out); }
+        }
+        IrPattern::Some { inner, .. } | IrPattern::Ok { inner, .. } | IrPattern::Err { inner, .. } => {
+            collect_pattern_bindings_into(inner, out);
+        }
+        IrPattern::RecordPattern { fields, .. } => {
+            for f in fields {
+                if let Some(p) = &f.pattern { collect_pattern_bindings_into(p, out); }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Walk the IR tree. When we find a Lambda that captures clone-worthy outer
 /// variables, wrap it in a block with pre-clone bindings.
 fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
@@ -61,9 +92,7 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
             // Collect vars defined in this block to extend scope
             let mut local_scope = scope_vars.clone();
             for stmt in stmts.iter() {
-                if let IrStmtKind::Bind { var, .. } = &stmt.kind {
-                    local_scope.insert(*var);
-                }
+                collect_stmt_bindings(stmt, &mut local_scope);
             }
             for stmt in stmts.iter_mut() {
                 if transform_stmt(stmt, vt, &local_scope) { changed = true; }
@@ -121,11 +150,16 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
             let mut loop_scope = scope_vars.clone();
             loop_scope.insert(*var);
             if let Some(vt_) = var_tuple { for v in vt_.iter() { loop_scope.insert(*v); } }
+            // Collect vars defined in loop body so lambdas can see sibling bindings
+            for s in body.iter() { collect_stmt_bindings(s, &mut loop_scope); }
             for s in body { if transform_stmt(s, vt, &loop_scope) { changed = true; } }
         }
         IrExprKind::While { cond, body } => {
             if transform_expr(cond, vt, scope_vars) { changed = true; }
-            for s in body { if transform_stmt(s, vt, scope_vars) { changed = true; } }
+            let mut loop_scope = scope_vars.clone();
+            // Collect vars defined in loop body so lambdas can see sibling bindings
+            for s in body.iter() { collect_stmt_bindings(s, &mut loop_scope); }
+            for s in body { if transform_stmt(s, vt, &loop_scope) { changed = true; } }
         }
         IrExprKind::StringInterp { parts } => {
             for p in parts {
