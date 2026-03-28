@@ -209,7 +209,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
                 } else { vec![] }
             } else { vec![] };
 
-        let resolved = match resolve::resolve_imports_with_deps(test_file, &program, &dep_paths) {
+        let mut resolved = match resolve::resolve_imports_with_deps(test_file, &program, &dep_paths) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("SKIP {} (resolve: {})", test_file, e);
@@ -231,6 +231,17 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         }
 
         let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+        // Lower user modules to IR
+        for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
+            if almide::stdlib::is_stdlib_module(name) { continue; }
+            let mod_types = checker.check_module_bodies(mod_prog);
+            let versioned = pkg_id.as_ref().map(|pid| {
+                let base = pid.mod_name();
+                if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base }
+            });
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
+            ir_program.modules.push(mod_ir_module);
+        }
         almide::optimize::optimize_program(&mut ir_program);
         almide::mono::monomorphize(&mut ir_program);
         let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

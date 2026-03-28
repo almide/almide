@@ -1,0 +1,36 @@
+// Import alias tests
+// Verify that `import pkg as alias` works for packages, submodules, and nested paths.
+
+import dmod_d as d
+
+// ── Basic alias ──
+
+test "alias: top-level function via alias" {
+  assert_eq(d.shared(), "from D")
+}
+
+test "alias: top-level value via alias" {
+  assert_eq(d.value(), 42)
+}
+
+// ── Alias + submodule ──
+
+test "alias: submodule function via alias" {
+  assert_eq(d.utils.format_level(0), "DEBUG")
+  assert_eq(d.utils.format_level(1), "INFO")
+  assert_eq(d.utils.format_level(2), "WARN")
+  assert_eq(d.utils.format_level(99), "ERROR")
+}
+
+// ── Alias + deeply nested submodule (4-level dot) ──
+
+test "alias: nested submodule via alias" {
+  assert_eq(d.nested.deep.greet("alias"), "hello from deep: alias")
+}
+
+// ── Alias + type creation ──
+
+test "alias: create type via alias" {
+  let logger = d.make_logger("aliased", 1)
+  assert_eq(d.log_name(logger), "aliased")
+}

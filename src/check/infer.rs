@@ -782,7 +782,11 @@ impl Checker {
         match expr {
             ast::Expr::Member { object, field, .. } => {
                 if let ast::Expr::Ident { name: root, .. } = object.as_ref() {
-                    let candidate = format!("{}.{}", root, field);
+                    // Resolve alias: if root is an alias (e.g. "d" → "dmod_d"), use the target
+                    let resolved_root = self.env.module_aliases.get(&sym(root))
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| root.to_string());
+                    let candidate = format!("{}.{}", resolved_root, field);
                     if self.env.imported_user_modules.contains(&sym(&candidate)) {
                         return Some(candidate);
                     }

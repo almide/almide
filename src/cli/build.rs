@@ -130,7 +130,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         vec![]
     };
 
-    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+    let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     // Type check
@@ -149,6 +149,22 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
 
     // Lower to IR
     let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+
+    // Lower user modules to IR
+    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
+        if almide::stdlib::is_stdlib_module(name) { continue; }
+        let mod_types = checker.check_module_bodies(mod_prog);
+        let versioned = pkg_id.as_ref().map(|pid| {
+            let base = pid.mod_name();
+            if let Some(suffix) = name.strip_prefix(&pid.name) {
+                format!("{}{}", base, suffix)
+            } else {
+                base
+            }
+        });
+        let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
+        ir_program.modules.push(mod_ir_module);
+    }
 
     // Optimize
     almide::optimize::optimize_program(&mut ir_program);

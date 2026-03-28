@@ -227,14 +227,17 @@ impl Checker {
             if let ast::Decl::Import { path, alias, .. } = imp {
                 let name = alias.as_ref().cloned()
                     .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
+                // Use the canonical name (from path) for user_modules lookup,
+                // since user_modules stores canonical names, not aliases.
+                let canonical = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
                 if crate::stdlib::is_any_stdlib(&name) {
                     self.env.imported_stdlib.insert(sym(&name));
                 }
                 // Track directly imported user modules (including submodules via pkg.sub)
-                if self.env.user_modules.contains(&sym(&name)) {
-                    self.env.imported_user_modules.insert(sym(&name));
+                if self.env.user_modules.contains(&sym(&canonical)) {
+                    self.env.imported_user_modules.insert(sym(&canonical));
                     // Also mark submodules as accessible (import pkg → pkg.sub.* accessible)
-                    let prefix = format!("{}.", name);
+                    let prefix = format!("{}.", canonical);
                     let subs: Vec<Sym> = self.env.user_modules.iter()
                         .filter(|m| m.as_str().starts_with(&prefix))
                         .cloned().collect();
@@ -246,6 +249,10 @@ impl Checker {
                     if self.env.user_modules.contains(&sym(&dotted)) {
                         self.env.imported_user_modules.insert(sym(&dotted));
                     }
+                }
+                // Register alias mapping
+                if alias.is_some() {
+                    self.env.module_aliases.insert(sym(&name), sym(&canonical));
                 }
             }
         }

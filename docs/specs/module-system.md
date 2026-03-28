@@ -1,6 +1,6 @@
 # Module System Specification
 
-> Last updated: 2026-03-28. Verified by `spec/integration/modules/diamond_test.almd` (11 tests) + error tests.
+> Last updated: 2026-03-29. Verified by `spec/integration/modules/` (25 tests + 4 error tests).
 
 ---
 
@@ -281,10 +281,13 @@ fn my_max(a: Int, b: Int) -> Int   // body なし: 全ターゲットに @extern
 | ファイル | テスト数 | カバー範囲 |
 |---|---|---|
 | `spec/integration/modules/diamond_test.almd` | 11 | ダイヤモンド依存、型同一性、サブモジュール、4段ドット |
+| `spec/integration/modules/alias_test.almd` | 5 | import alias: トップレベル、サブモジュール、4段ネスト、型生成 |
+| `spec/integration/modules/submodule_call_test.almd` | 7 | サブモジュール直接呼び出し: 2段/3段/4段、ダイヤモンド経由 |
 | `spec/integration/modules/vis_effect_test.almd` | 2 | effect fn のクロスモジュール呼び出し |
 | `spec/integration/modules/vis_mod_error_test.almd` | error | `mod fn` の外部アクセス拒否 |
 | `spec/integration/modules/vis_local_error_test.almd` | error | `local fn` の外部アクセス拒否 |
 | `spec/integration/modules/phantom_dep_error_test.almd` | error | 推移的依存の直接アクセス拒否 |
+| `spec/integration/modules/deep_phantom_test.almd` | error | 推移的依存のサブモジュールアクセス拒否 |
 
 ### テスト用パッケージ
 

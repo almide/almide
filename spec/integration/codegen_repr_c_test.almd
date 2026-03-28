@@ -1,0 +1,232 @@
+// codegen_repr_c_test — Named types (struct/enum) used in FFI-style patterns:
+// pub fields, field access, variant matching, record spread, display
+
+// ── Simple record types with field access ──
+
+type Point = { x: Float, y: Float }
+
+fn distance(p: Point) -> Float =
+  float.sqrt(p.x * p.x + p.y * p.y)
+
+fn translate(p: Point, dx: Float, dy: Float) -> Point =
+  { x: p.x + dx, y: p.y + dy }
+
+test "record creation and field access" {
+  let p = Point { x: 3.0, y: 4.0 }
+  assert_eq(p.x, 3.0)
+  assert_eq(p.y, 4.0)
+}
+
+test "record field used in computation" {
+  let p = Point { x: 3.0, y: 4.0 }
+  let d = distance(p)
+  assert_eq(d, 5.0)
+}
+
+test "record spread creates new value" {
+  let p1 = Point { x: 1.0, y: 2.0 }
+  let p2 = { ...p1, x: 10.0 }
+  assert_eq(p1.x, 1.0)
+  assert_eq(p2.x, 10.0)
+  assert_eq(p2.y, 2.0)
+}
+
+test "record passed to function and returned" {
+  let p = Point { x: 0.0, y: 0.0 }
+  let p2 = translate(p, 3.0, 4.0)
+  assert_eq(p2.x, 3.0)
+  assert_eq(p2.y, 4.0)
+}
+
+// ── Simple enum (unit variants) ──
+
+type Color = | Red | Green | Blue
+
+fn color_name(c: Color) -> String = match c {
+  Red => "red",
+  Green => "green",
+  Blue => "blue",
+}
+
+fn color_rgb(c: Color) -> (Int, Int, Int) = match c {
+  Red => (255, 0, 0),
+  Green => (0, 255, 0),
+  Blue => (0, 0, 255),
+}
+
+test "unit variant matching" {
+  assert_eq(color_name(Red), "red")
+  assert_eq(color_name(Green), "green")
+  assert_eq(color_name(Blue), "blue")
+}
+
+test "unit variant returns tuple" {
+  let (r, g, b) = color_rgb(Red)
+  assert_eq(r, 255)
+  assert_eq(g, 0)
+  assert_eq(b, 0)
+}
+
+test "unit variant equality" {
+  let c1: Color = Red
+  let c2: Color = Red
+  let c3: Color = Blue
+  assert_eq(c1 == c2, true)
+  assert_eq(c1 == c3, false)
+}
+
+// ── Enum with payloads ──
+
+type Shape = | Circle(Float) | Rect(Float, Float) | Triangle(Float, Float, Float)
+
+fn area(s: Shape) -> Float = match s {
+  Circle(r) => r * r * 3.14159,
+  Rect(w, h) => w * h,
+  Triangle(a, b, c) => {
+    let s = (a + b + c) / 2.0
+    float.sqrt(s * (s - a) * (s - b) * (s - c))
+  },
+}
+
+fn is_circle(s: Shape) -> Bool = match s {
+  Circle(_) => true,
+  _ => false,
+}
+
+test "variant with single payload" {
+  let s = Circle(5.0)
+  let a = area(s)
+  assert_eq(a > 78.0, true)
+  assert_eq(a < 79.0, true)
+}
+
+test "variant with two payloads" {
+  let s = Rect(3.0, 4.0)
+  assert_eq(area(s), 12.0)
+}
+
+test "variant with three payloads (Heron formula)" {
+  let s = Triangle(3.0, 4.0, 5.0)
+  let a = area(s)
+  assert_eq(a, 6.0)
+}
+
+test "variant matching with wildcard" {
+  assert_eq(is_circle(Circle(1.0)), true)
+  assert_eq(is_circle(Rect(1.0, 2.0)), false)
+  assert_eq(is_circle(Triangle(1.0, 1.0, 1.0)), false)
+}
+
+// ── List of variants with filter/map ──
+
+test "list of variants filtered and mapped" {
+  let shapes = [Circle(1.0), Rect(2.0, 3.0), Circle(4.0), Triangle(3.0, 4.0, 5.0)]
+  let circles = list.filter(shapes, (s) => is_circle(s))
+  assert_eq(list.len(circles), 2)
+  let areas = list.map(shapes, (s) => area(s))
+  assert_eq(list.len(areas), 4)
+  assert_eq(list.get(areas, 1), some(6.0))
+}
+
+// ── Record with enum field (composition) ──
+
+type Styled = { shape: Shape, color: Color, label: String }
+
+fn styled_description(s: Styled) -> String = {
+  let shape_name = match s.shape {
+    Circle(_) => "circle",
+    Rect(_, _) => "rect",
+    Triangle(_, _, _) => "triangle",
+  }
+  "${color_name(s.color)} ${shape_name}: ${s.label}"
+}
+
+test "record containing enum fields" {
+  let s = Styled { shape: Circle(5.0), color: Red, label: "big" }
+  assert_eq(styled_description(s), "red circle: big")
+}
+
+test "list of records with enum fields" {
+  let items = [
+    Styled { shape: Circle(1.0), color: Red, label: "small" },
+    Styled { shape: Rect(2.0, 3.0), color: Blue, label: "box" },
+  ]
+  let labels = list.map(items, (i) => i.label)
+  assert_eq(labels, ["small", "box"])
+  let descs = list.map(items, (i) => styled_description(i))
+  assert_eq(list.get(descs, 0), some("red circle: small"))
+  assert_eq(list.get(descs, 1), some("blue rect: box"))
+}
+
+// ── Enum with record payloads used in FFI-like patterns ──
+
+type Message =
+  | Ping
+  | Data { payload: String, seq: Int }
+  | Error { code: Int, message: String }
+
+fn message_code(m: Message) -> Int = match m {
+  Ping => 0,
+  Data { seq, .. } => seq,
+  Error { code, .. } => code,
+}
+
+fn message_summary(m: Message) -> String = match m {
+  Ping => "ping",
+  Data { payload, seq } => "data[${int.to_string(seq)}]: ${payload}",
+  Error { code, message } => "error(${int.to_string(code)}): ${message}",
+}
+
+test "enum with record payloads" {
+  assert_eq(message_code(Ping), 0)
+  assert_eq(message_code(Data { payload: "hello", seq: 42 }), 42)
+  assert_eq(message_code(Error { code: 404, message: "not found" }), 404)
+}
+
+test "enum record payload field extraction" {
+  let m = Data { payload: "test", seq: 1 }
+  assert_eq(message_summary(m), "data[1]: test")
+}
+
+test "enum record payload in list operations" {
+  let msgs = [
+    Ping,
+    Data { payload: "a", seq: 1 },
+    Error { code: 500, message: "fail" },
+    Data { payload: "b", seq: 2 },
+  ]
+  let codes = list.map(msgs, (m) => message_code(m))
+  assert_eq(codes, [0, 1, 500, 2])
+  let summaries = list.map(msgs, (m) => message_summary(m))
+  assert_eq(list.get(summaries, 2), some("error(500): fail"))
+}
+
+// ── Nested named records ──
+
+type BoundingBox = { min: Point, max: Point }
+
+fn bbox_width(b: BoundingBox) -> Float = b.max.x - b.min.x
+fn bbox_height(b: BoundingBox) -> Float = b.max.y - b.min.y
+fn bbox_area(b: BoundingBox) -> Float = bbox_width(b) * bbox_height(b)
+
+fn bbox_contains(b: BoundingBox, p: Point) -> Bool =
+  p.x >= b.min.x and p.x <= b.max.x and p.y >= b.min.y and p.y <= b.max.y
+
+test "nested records with field access chains" {
+  let bb = BoundingBox {
+    min: Point { x: 0.0, y: 0.0 },
+    max: Point { x: 10.0, y: 5.0 },
+  }
+  assert_eq(bbox_width(bb), 10.0)
+  assert_eq(bbox_height(bb), 5.0)
+  assert_eq(bbox_area(bb), 50.0)
+}
+
+test "nested record used in predicate" {
+  let bb = BoundingBox {
+    min: Point { x: 0.0, y: 0.0 },
+    max: Point { x: 10.0, y: 10.0 },
+  }
+  assert_eq(bbox_contains(bb, Point { x: 5.0, y: 5.0 }), true)
+  assert_eq(bbox_contains(bb, Point { x: 15.0, y: 5.0 }), false)
+}
