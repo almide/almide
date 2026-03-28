@@ -358,8 +358,10 @@ fn scan_closures_expr(
             scan_closures_expr(cond, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
             for stmt in body { scan_closures_stmt(stmt, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
-        IrExprKind::ForIn { iterable, body, .. } => {
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
             scan_closures_expr(iterable, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scope_vars.insert(var.0);
+            if let Some(vt) = var_tuple { for v in vt { scope_vars.insert(v.0); } }
             for stmt in body { scan_closures_stmt(stmt, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
         IrExprKind::Match { subject, arms } => {
