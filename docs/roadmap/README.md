@@ -6,7 +6,7 @@
 
 ## Active
 
-10 items
+11 items
 
 | Item | Description |
 |------|-------------|
@@ -16,6 +16,7 @@
 | [Diagnostic end_col — Precise Error Underlines](active/diagnostic-end-col.md) | Track end column in diagnostics for precise error underlines |
 | [Emit Readability](active/emit-readability.md) | Improve readability of generated Rust and TypeScript output |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](active/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
+| [Module Export: Almide Libraries for Every Language](active/module-export.md) | Export Almide modules as native packages for Python, JS/TS, Ruby, and WASM |
 | [Purity Exploitation — Leveraging fn/effect fn Distinction](active/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | [Stdlib in Almide: Unified Library Architecture](active/stdlib-in-almide.md) | Rewrite stdlib in Almide with a 3-layer architecture |
 | [WASM HTTP Client](active/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
