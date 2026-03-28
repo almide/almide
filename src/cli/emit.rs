@@ -1,6 +1,6 @@
 use crate::{parse_file, codegen, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_interface: bool, no_check: bool) {
+pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool) {
     let (mut program, source_text, _parse_errors) = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -51,7 +51,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_in
     }).collect();
 
     // Run checker if needed (always for emit_ir, otherwise when !no_check && !emit_ast)
-    let run_check = emit_ir || emit_interface || (!no_check && !emit_ast);
+    let run_check = emit_ir || (!no_check && !emit_ast);
     let mut checker_opt: Option<check::Checker> = None;
     if run_check {
         let mut checker = check::Checker::new();
@@ -103,17 +103,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_in
         almide::mono::monomorphize(ir);
     }
 
-    if emit_interface {
-        let ir = ir_program.expect("checker must have run for emit_interface");
-        let module_name = std::path::Path::new(file)
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "module".to_string());
-        let iface = almide::interface::extract(&ir, &module_name, Some(&source_text));
-        let json = serde_json::to_string_pretty(&iface)
-            .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
-        println!("{}", json);
-    } else if emit_ir {
+    if emit_ir {
         let ir = ir_program.expect("checker must have run for emit_ir");
         let json = serde_json::to_string_pretty(&ir)
             .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });

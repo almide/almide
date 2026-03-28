@@ -1,4 +1,5 @@
 #![recursion_limit = "512"]
+pub mod almdi;
 pub mod intern;
 pub mod ast;
 pub mod check;

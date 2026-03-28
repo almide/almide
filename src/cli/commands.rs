@@ -603,6 +603,13 @@ pub fn cmd_clean() {
         eprintln!("Cleaned {}", inc_cache.display());
         cleaned = true;
     }
+    let compile_cache = std::path::PathBuf::from("target/compile");
+    if compile_cache.exists() {
+        std::fs::remove_dir_all(&compile_cache)
+            .unwrap_or_else(|e| { eprintln!("Failed to clean compile cache: {}", e); std::process::exit(1); });
+        eprintln!("Cleaned {}", compile_cache.display());
+        cleaned = true;
+    }
     if !cleaned {
         eprintln!("No cache to clean");
     }

@@ -438,7 +438,10 @@ fn has_control_flow_stmt(stmt: &IrStmt) -> bool {
     }
 }
 
-/// Returns true if the expression is trivially cheap (not worth hoisting).
+/// Returns true if the expression is trivially cheap or should not be hoisted.
+/// Lambda is included because closures rely on call-site context for type
+/// inference in Rust — hoisting them to a standalone `let` binding strips
+/// that context and causes `rustc` type annotation errors.
 fn is_trivial(expr: &IrExpr) -> bool {
     matches!(
         &expr.kind,
@@ -450,6 +453,7 @@ fn is_trivial(expr: &IrExpr) -> bool {
         | IrExprKind::Unit
         | IrExprKind::OptionNone
         | IrExprKind::FnRef { .. }
+        | IrExprKind::Lambda { .. }
     )
 }
 

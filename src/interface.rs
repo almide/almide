@@ -5,14 +5,14 @@
 //! to parse Almide source or understand the IR format.
 
 use std::collections::HashMap;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use crate::ir::*;
 use crate::types::Ty;
 use crate::types::constructor::TypeConstructorId;
 
 // ── Interface types ──
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleInterface {
     pub module: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -25,7 +25,7 @@ pub struct ModuleInterface {
     pub dependencies: Vec<DependencyExport>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TypeExport {
     pub name: String,
     pub kind: TypeKindExport,
@@ -37,7 +37,7 @@ pub struct TypeExport {
     pub deprecated: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TypeKindExport {
     Record { fields: Vec<FieldExport> },
@@ -45,7 +45,7 @@ pub enum TypeKindExport {
     Alias { target: TypeRef },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FieldExport {
     pub name: String,
     #[serde(rename = "type")]
@@ -54,21 +54,21 @@ pub struct FieldExport {
     pub has_default: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CaseExport {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<CasePayload>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CasePayload {
     Tuple { fields: Vec<TypeRef> },
     Record { fields: Vec<FieldExport> },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FunctionExport {
     pub name: String,
     pub params: Vec<ParamExport>,
@@ -88,14 +88,14 @@ pub struct FunctionExport {
     pub deprecated: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ParamExport {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: TypeRef,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ConstantExport {
     pub name: String,
     #[serde(rename = "type")]
@@ -107,7 +107,7 @@ pub struct ConstantExport {
 }
 
 /// Serializable constant value.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ConstValue {
     Int(i64),
@@ -117,7 +117,7 @@ pub enum ConstValue {
 }
 
 /// Dependency on another module (stdlib or user module).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DependencyExport {
     pub module: String,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -125,7 +125,7 @@ pub struct DependencyExport {
 }
 
 /// Language-agnostic type reference for the interface.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TypeRef {
     Int,

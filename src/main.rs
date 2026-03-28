@@ -111,6 +111,20 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Compile source to .almdi (module interface + IR artifact)
+    Compile {
+        /// Module name (e.g., "json", "parser") or file path; defaults to project
+        module: Option<String>,
+        /// Output interface as machine-readable JSON (no artifact)
+        #[arg(long)]
+        json: bool,
+        /// Print human-readable interface (no artifact)
+        #[arg(long)]
+        dry_run: bool,
+        /// Output directory for .almdi files (default: target/compile)
+        #[arg(long, short)]
+        output: Option<String>,
+    },
     /// Clear dependency cache
     Clean,
     /// Add a dependency
@@ -140,9 +154,6 @@ enum Commands {
         /// Emit typed IR as JSON
         #[arg(long)]
         emit_ir: bool,
-        /// Emit module interface as JSON (public types + functions)
-        #[arg(long)]
-        emit_interface: bool,
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
@@ -452,6 +463,9 @@ fn dispatch(cli: Cli) {
             };
             cli::cmd_fmt(&fmt_files, write_back);
         }
+        Commands::Compile { module, json, dry_run, output } => {
+            cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
+        }
         Commands::Clean => cli::cmd_clean(),
         Commands::Add { pkg, git, tag } => {
             let (name, git_url, tag) = if let Some(git_url) = git {
@@ -487,8 +501,8 @@ fn dispatch(cli: Cli) {
                 eprintln!("No almide.toml found");
             }
         }
-        Commands::Emit { file, target, emit_ast, emit_ir, emit_interface, no_check } => {
-            cli::cmd_emit(&file, &target, emit_ast, emit_ir, emit_interface, no_check);
+        Commands::Emit { file, target, emit_ast, emit_ir, no_check } => {
+            cli::cmd_emit(&file, &target, emit_ast, emit_ir, no_check);
         }
     }
 }
