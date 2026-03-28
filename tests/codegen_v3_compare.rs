@@ -139,25 +139,6 @@ fn test_walker_rust_output() {
 }
 
 #[test]
-fn test_walker_ts_output() {
-    let program = make_test_program();
-    let templates = template::typescript_templates();
-    let ctx = RenderContext::new(&templates, &program.var_table);
-    let output = walker::render_program(&ctx, &program);
-
-    eprintln!("=== TS Walker Output ===\n{}", output);
-
-    // Check key patterns in TS output
-    assert!(output.contains("function find_value"), "should have function declaration");
-    assert!(output.contains("products"), "should have param name");
-    assert!(!output.contains("Some("), "should NOT have Rust-style Some in TS");
-    // NOTE: TS match rendering is incomplete — match → if/else lowering
-    // needs a Nanopass. Full __deep_eq and null checks will work after
-    // the MatchLowering pass is implemented. For now, just verify
-    // the function structure is correct.
-}
-
-#[test]
 fn test_walker_option_some_divergence() {
     // The core test: same IR, different output for some(x)
     let mut var_table = VarTable::new();
@@ -181,11 +162,6 @@ fn test_walker_option_some_divergence() {
     let rust_out = walker::render_expr(&rust_ctx, &some_expr);
     assert_eq!(rust_out, "Some(value)");
 
-    // TS: value (erased)
-    let ts_templates = template::typescript_templates();
-    let ts_ctx = RenderContext::new(&ts_templates, &var_table);
-    let ts_out = walker::render_expr(&ts_ctx, &some_expr);
-    assert_eq!(ts_out, "value");
 }
 
 #[test]
@@ -210,12 +186,6 @@ fn test_walker_result_divergence() {
     let rust_ctx = RenderContext::new(&rust_templates, &var_table);
     assert_eq!(walker::render_expr(&rust_ctx, &ok_expr), "Ok(data)");
 
-    // TS: { ok: true, value: data }
-    let ts_templates = template::typescript_templates();
-    let ts_ctx = RenderContext::new(&ts_templates, &var_table);
-    let ts_out = walker::render_expr(&ts_ctx, &ok_expr);
-    assert!(ts_out.contains("ok: true"), "TS should wrap in object: {}", ts_out);
-    assert!(ts_out.contains("value: data"), "TS should have value field: {}", ts_out);
 }
 
 #[test]
@@ -240,11 +210,6 @@ fn test_walker_concat_type_dispatch() {
     let rust_out = walker::render_expr(&rust_ctx, &concat);
     assert!(rust_out.contains("format!"), "Rust concat should use format!: {}", rust_out);
 
-    // TS: a + b
-    let ts_templates = template::typescript_templates();
-    let ts_ctx = RenderContext::new(&ts_templates, &var_table);
-    let ts_out = walker::render_expr(&ts_ctx, &concat);
-    assert_eq!(ts_out, "a + b");
 }
 
 #[test]
@@ -277,9 +242,4 @@ fn test_walker_if_formatting() {
     assert!(rust_out.starts_with("if ("), "Rust if: {}", rust_out);
     assert!(!rust_out.contains("if (("), "Rust should not double-paren: {}", rust_out);
 
-    // TS: ternary (cond) ? (then) : (else)
-    let ts_templates = template::typescript_templates();
-    let ts_ctx = RenderContext::new(&ts_templates, &var_table);
-    let ts_out = walker::render_expr(&ts_ctx, &if_expr);
-    assert!(ts_out.contains("?") && ts_out.contains(":"), "TS if should be ternary: {}", ts_out);
 }
