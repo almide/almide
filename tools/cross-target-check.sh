@@ -45,18 +45,6 @@ for f in "$DIR"/*_test.almd; do
         ok=0
     fi
 
-    # 3. TS target
-    if $ALMIDE test "$f" --target ts > "$TMPDIR/${name}.ts" 2>/dev/null; then
-        ts_summary=$(/usr/bin/grep "tests passed" "$TMPDIR/${name}.ts" | head -1)
-        ts_count=$(echo "$ts_summary" | /usr/bin/grep -oE '[0-9]+ tests' | head -1)
-        if [ "$rust_count" != "$ts_count" ]; then
-            ERRORS="$ERRORS\n  $name: Rust=$rust_count TS=$ts_count"
-            ok=0
-        fi
-    else
-        : # TS failures are expected (known codegen issues)
-    fi
-
     if [ "$ok" = "1" ]; then
         MATCH=$((MATCH + 1))
     else

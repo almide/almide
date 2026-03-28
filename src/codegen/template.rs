@@ -230,11 +230,6 @@ pub fn rust_templates() -> TemplateSet {
     load_from_toml("rust", include_str!("../../codegen/templates/rust.toml"))
 }
 
-/// Load TypeScript templates from embedded TOML
-pub fn typescript_templates() -> TemplateSet {
-    load_from_toml("typescript", include_str!("../../codegen/templates/typescript.toml"))
-}
-
 /// Load built-in Rust templates (inline fallback — kept for reference)
 pub fn rust_templates_inline() -> TemplateSet {
     let mut ts = TemplateSet::new("rust");
@@ -346,101 +341,6 @@ pub fn rust_templates_inline() -> TemplateSet {
     ts
 }
 
-/// Load built-in TypeScript templates (inline fallback — kept for reference)
-pub fn typescript_templates_inline() -> TemplateSet {
-    let mut ts = TemplateSet::new("typescript");
-
-    // if/else
-    ts.entries.insert("if_expr".into(), TemplateEntry {
-        rules: vec![TemplateRule {
-            template: "if ({cond}) {{ {then} }} else {{ {else} }}".into(),
-            when_type: None,
-            when_attr: None,
-        }],
-    });
-
-    // let binding
-    ts.entries.insert("let_binding".into(), TemplateEntry {
-        rules: vec![TemplateRule {
-            template: "const {name}: {type} = {value};".into(),
-            when_type: None,
-            when_attr: None,
-        }],
-    });
-
-    // var binding
-    ts.entries.insert("var_binding".into(), TemplateEntry {
-        rules: vec![TemplateRule {
-            template: "let {name}: {type} = {value};".into(),
-            when_type: None,
-            when_attr: None,
-        }],
-    });
-
-    // some(x) — erased in TS
-    ts.entries.insert("some_expr".into(), TemplateEntry {
-        rules: vec![TemplateRule {
-            template: "{inner}".into(),
-            when_type: None,
-            when_attr: None,
-        }],
-    });
-
-    // none — null in TS
-    ts.entries.insert("none_expr".into(), TemplateEntry {
-        rules: vec![TemplateRule {
-            template: "null".into(),
-            when_type: None,
-            when_attr: None,
-        }],
-    });
-
-    // ok(x)
-    ts.entries.insert("ok_expr".into(), TemplateEntry {
-        rules: vec![TemplateRule {
-            template: "{{ ok: true, value: {inner} }}".into(),
-            when_type: None,
-            when_attr: None,
-        }],
-    });
-
-    // err(x)
-    ts.entries.insert("err_expr".into(), TemplateEntry {
-        rules: vec![TemplateRule {
-            template: "{{ ok: false, error: {inner} }}".into(),
-            when_type: None,
-            when_attr: None,
-        }],
-    });
-
-    // concat
-    ts.entries.insert("concat_expr".into(), TemplateEntry {
-        rules: vec![
-            TemplateRule {
-                template: "{left} + {right}".into(),
-                when_type: Some("String".into()),
-                when_attr: None,
-            },
-            TemplateRule {
-                template: "[...{left}, ...{right}]".into(),
-                when_type: Some("List".into()),
-                when_attr: None,
-            },
-        ],
-    });
-
-    // function call (no try in TS)
-    ts.entries.insert("call_expr".into(), TemplateEntry {
-        rules: vec![TemplateRule {
-            template: "{callee}({args})".into(),
-            when_type: None,
-            when_attr: None,
-        }],
-    });
-
-    ts
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,13 +356,6 @@ mod tests {
         let ts = rust_templates();
         let result = ts.render_with("some_expr", None, &[], &[("inner", "x")]);
         assert_eq!(result, Some("Some(x)".to_string()));
-    }
-
-    #[test]
-    fn test_ts_some_erased() {
-        let ts = typescript_templates();
-        let result = ts.render_with("some_expr", None, &[], &[("inner", "x")]);
-        assert_eq!(result, Some("x".to_string()));
     }
 
     #[test]
@@ -549,13 +442,4 @@ template = "{callee}({args})"
         assert!(ts.get("type_int").is_some());
     }
 
-    #[test]
-    fn test_ts_toml_loads() {
-        // Verify the actual typescript.toml loads without panicking
-        let ts = typescript_templates();
-        assert!(ts.get("if_expr").is_some());
-        assert!(ts.get("some_expr").is_some());
-        assert!(ts.get("fn_decl").is_some());
-        assert!(ts.get("type_int").is_some());
-    }
 }

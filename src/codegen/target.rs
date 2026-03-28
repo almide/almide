@@ -17,10 +17,7 @@ use super::pass_auto_parallel::AutoParallelPass;
 use super::pass_box_deref::BoxDerefPass;
 use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
-use super::pass_match_lowering::MatchLoweringPass;
-use super::pass_result_erasure::ResultErasurePass;
 use super::pass_result_propagation::ResultPropagationPass;
-use super::pass_shadow_resolve::ShadowResolvePass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::pass_match_subject::MatchSubjectPass;
 use super::pass_effect_inference::EffectInferencePass;
@@ -78,22 +75,7 @@ fn build_pipeline(target: Target) -> Pipeline {
             // Shared passes
             .add(FanLoweringPass),
 
-        Target::TypeScript => Pipeline::new()
-            // TCO: convert self-recursive tail calls to loops
-            .add(TailCallOptPass)
-            // LICM: hoist loop-invariant expressions before loops
-            .add(LICMPass)
-            // Analysis passes
-            .add(EffectInferencePass)
-            .add(StreamFusionPass)
-            // Semantic lowering
-            .add(MatchLoweringPass)
-            // Result/Option erasure: ok(x)→x, err(e)→throw, some(x)→x, none→null
-            .add(ResultErasurePass)
-            // Shadow resolution: let x = 1; let x = 2 → let x = 1; x = 2
-            .add(ShadowResolvePass)
-            // Shared passes
-            .add(FanLoweringPass),
+        Target::TypeScript => Pipeline::new(), // TS codegen removed — use --target wasm for JS runtimes
 
         Target::Go => Pipeline::new()
             .add(TailCallOptPass)
@@ -124,7 +106,7 @@ fn build_pipeline(target: Target) -> Pipeline {
 fn build_templates(target: Target) -> TemplateSet {
     match target {
         Target::Rust => super::template::rust_templates(),
-        Target::TypeScript => super::template::typescript_templates(),
+        Target::TypeScript => TemplateSet::new("typescript"),
         Target::Go => TemplateSet::new("go"),
         Target::Python => TemplateSet::new("python"),
         Target::Wasm => TemplateSet::new("wasm"),

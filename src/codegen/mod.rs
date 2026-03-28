@@ -129,8 +129,7 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             output.push('\n');
         }
         Target::TypeScript => {
-            output.push_str(&crate::emit_ts_runtime::full_runtime());
-            output.push('\n');
+            output.push_str("// TypeScript target removed — use --target wasm for JS runtimes\n");
         }
         _ => {}
     }
