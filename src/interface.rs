@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use serde::Serialize;
 use crate::ir::*;
-use crate::types::{Ty, VariantPayload};
+use crate::types::Ty;
 use crate::types::constructor::TypeConstructorId;
 
 // ── Interface types ──
@@ -21,6 +21,8 @@ pub struct ModuleInterface {
     pub functions: Vec<FunctionExport>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub constants: Vec<ConstantExport>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<DependencyExport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -31,6 +33,8 @@ pub struct TypeExport {
     pub generics: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -78,6 +82,10 @@ pub struct FunctionExport {
     pub generics: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub examples: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,7 +101,27 @@ pub struct ConstantExport {
     #[serde(rename = "type")]
     pub ty: TypeRef,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<ConstValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub doc: Option<String>,
+}
+
+/// Serializable constant value.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ConstValue {
+    Int(i64),
+    Float(f64),
+    String(String),
+    Bool(bool),
+}
+
+/// Dependency on another module (stdlib or user module).
+#[derive(Debug, Serialize)]
+pub struct DependencyExport {
+    pub module: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stdlib: bool,
 }
 
 /// Language-agnostic type reference for the interface.
@@ -130,20 +158,16 @@ pub enum TypeRef {
 // ── Extraction ──
 
 /// Extract the public module interface from a type-checked IR program.
-/// `source` is the original source text (for doc comment extraction).
+/// `source` is the original source text (for doc/example/deprecation extraction).
 pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> ModuleInterface {
-    // Build record field→name lookup for anonymous record resolution.
-    // Key: sorted field names, Value: type decl name
     let record_names = build_record_lookup(program);
-    // Build variant case→name lookup for Ty::Variant resolution
     let variant_names = build_variant_lookup(program);
-
-    // Extract doc comments from source if available
-    let docs = source.map(|s| extract_docs(s)).unwrap_or_default();
+    let doc_info = source.map(|s| extract_docs(s)).unwrap_or_default();
 
     let mut types = Vec::new();
     let mut functions = Vec::new();
     let mut constants = Vec::new();
+    let mut dependencies = Vec::new();
 
     // Types
     for td in &program.type_decls {
@@ -181,8 +205,14 @@ pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> 
                 target: resolve_ty(target, &record_names, &variant_names),
             },
         };
-        let doc = docs.get(&td.name.to_string()).cloned();
-        types.push(TypeExport { name: td.name.to_string(), kind, generics, doc });
+        let info = doc_info.get(&td.name.to_string());
+        types.push(TypeExport {
+            name: td.name.to_string(),
+            kind,
+            generics,
+            doc: info.and_then(|i| i.doc.clone()),
+            deprecated: info.and_then(|i| i.deprecated.clone()),
+        });
     }
 
     // Functions
@@ -205,7 +235,7 @@ pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> 
             (resolve_ty(&func.ret_ty, &record_names, &variant_names), None)
         };
 
-        let doc = docs.get(&func.name.to_string()).cloned();
+        let info = doc_info.get(&func.name.to_string());
         functions.push(FunctionExport {
             name: func.name.to_string(),
             params: func.params.iter().map(|p| ParamExport {
@@ -216,17 +246,31 @@ pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> 
             effect: func.is_effect,
             error,
             generics,
-            doc,
+            doc: info.and_then(|i| i.doc.clone()),
+            examples: info.map(|i| i.examples.clone()).unwrap_or_default(),
+            deprecated: info.and_then(|i| i.deprecated.clone()),
         });
     }
 
-    // Top-level constants
+    // Top-level constants (with values for literals)
     for tl in &program.top_lets {
         let name = program.var_table.get(tl.var).name.to_string();
+        let value = extract_const_value(&tl.value);
         constants.push(ConstantExport {
-            name,
+            name: name.clone(),
             ty: resolve_ty(&tl.ty, &record_names, &variant_names),
-            doc: None,
+            value,
+            doc: doc_info.get(&name).and_then(|i| i.doc.clone()),
+        });
+    }
+
+    // Dependencies (imported modules)
+    for m in &program.modules {
+        let name = m.name.to_string();
+        let is_stdlib = crate::stdlib::is_stdlib_module(&name);
+        dependencies.push(DependencyExport {
+            module: name,
+            stdlib: is_stdlib,
         });
     }
 
@@ -236,6 +280,19 @@ pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> 
         types,
         functions,
         constants,
+        dependencies,
+    }
+}
+
+// ── Constant value extraction ──
+
+fn extract_const_value(expr: &IrExpr) -> Option<ConstValue> {
+    match &expr.kind {
+        IrExprKind::LitInt { value } => Some(ConstValue::Int(*value)),
+        IrExprKind::LitFloat { value } => Some(ConstValue::Float(*value)),
+        IrExprKind::LitStr { value } => Some(ConstValue::String(value.clone())),
+        IrExprKind::LitBool { value } => Some(ConstValue::Bool(*value)),
+        _ => None,
     }
 }
 
@@ -244,7 +301,6 @@ pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> 
 type RecordLookup = HashMap<Vec<std::string::String>, std::string::String>;
 type VariantLookup = HashMap<Vec<std::string::String>, std::string::String>;
 
-/// Build a lookup table: sorted field names → record type name
 fn build_record_lookup(program: &IrProgram) -> RecordLookup {
     let mut map = HashMap::new();
     for td in &program.type_decls {
@@ -257,7 +313,6 @@ fn build_record_lookup(program: &IrProgram) -> RecordLookup {
     map
 }
 
-/// Build a lookup table: sorted case names → variant type name
 fn build_variant_lookup(program: &IrProgram) -> VariantLookup {
     let mut map = HashMap::new();
     for td in &program.type_decls {
@@ -270,7 +325,6 @@ fn build_variant_lookup(program: &IrProgram) -> VariantLookup {
     map
 }
 
-/// Convert Ty to TypeRef, resolving anonymous records/variants to named types.
 fn resolve_ty(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> TypeRef {
     match ty {
         Ty::Int => TypeRef::Int,
@@ -318,21 +372,18 @@ fn resolve_ty(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> Type
             ret: Box::new(resolve_ty(ret, records, variants)),
         },
         Ty::TypeVar(name) => TypeRef::TypeVar { name: name.to_string() },
-        // Anonymous record → resolve to named type if field signature matches
         Ty::Record { fields } => {
             let mut field_names: Vec<std::string::String> = fields.iter().map(|(n, _)| n.to_string()).collect();
             field_names.sort();
             if let Some(name) = records.get(&field_names) {
                 TypeRef::Named { name: name.clone(), args: vec![] }
             } else {
-                // No matching named type — emit as inline record
                 TypeRef::Named {
                     name: format!("{{{}}}", fields.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>().join(", ")),
                     args: vec![],
                 }
             }
         }
-        // Anonymous variant → resolve to named type if case signature matches
         Ty::Variant { cases, .. } => {
             let mut case_names: Vec<std::string::String> = cases.iter().map(|c| c.name.to_string()).collect();
             case_names.sort();
@@ -348,54 +399,74 @@ fn resolve_ty(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> Type
 
 // ── Doc comment extraction ──
 
-/// Extract doc comments from source text.
-/// Returns a map of name → doc string.
-/// Scans for `// comment` lines immediately preceding `type`, `fn`, `effect fn` declarations.
-fn extract_docs(source: &str) -> HashMap<std::string::String, std::string::String> {
-    let mut docs = HashMap::new();
+/// Extracted documentation info for a declaration.
+#[derive(Debug, Default)]
+struct DocInfo {
+    doc: Option<String>,
+    examples: Vec<String>,
+    deprecated: Option<String>,
+}
+
+/// Extract doc comments, examples, and deprecation markers from source text.
+fn extract_docs(source: &str) -> HashMap<std::string::String, DocInfo> {
+    let mut result = HashMap::new();
     let lines: Vec<&str> = source.lines().collect();
 
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        // Find declarations
         let name = if let Some(rest) = trimmed.strip_prefix("fn ") {
             extract_decl_name(rest)
         } else if let Some(rest) = trimmed.strip_prefix("effect fn ") {
             extract_decl_name(rest)
         } else if let Some(rest) = trimmed.strip_prefix("type ") {
             extract_decl_name(rest)
+        } else if let Some(rest) = trimmed.strip_prefix("let ") {
+            extract_decl_name(rest)
         } else {
             None
         };
 
         if let Some(name) = name {
-            // Collect preceding comment lines
             let mut doc_lines = Vec::new();
+            let mut examples = Vec::new();
+            let mut deprecated = None;
             let mut j = i;
             while j > 0 {
                 j -= 1;
                 let prev = lines[j].trim();
-                if let Some(comment) = prev.strip_prefix("// ") {
-                    doc_lines.push(comment.to_string());
-                } else if let Some(comment) = prev.strip_prefix("//") {
-                    doc_lines.push(comment.to_string());
+                let comment = if let Some(c) = prev.strip_prefix("// ") {
+                    Some(c)
+                } else if let Some(c) = prev.strip_prefix("//") {
+                    Some(c)
                 } else {
-                    break;
+                    None
+                };
+                match comment {
+                    Some(c) => {
+                        if let Some(ex) = c.strip_prefix("example: ") {
+                            examples.push(ex.trim().to_string());
+                        } else if let Some(dep) = c.strip_prefix("deprecated: ") {
+                            deprecated = Some(dep.trim().to_string());
+                        } else if c.starts_with("deprecated") {
+                            deprecated = Some(String::new());
+                        } else {
+                            doc_lines.push(c.to_string());
+                        }
+                    }
+                    None => break,
                 }
             }
-            if !doc_lines.is_empty() {
-                doc_lines.reverse();
-                docs.insert(name, doc_lines.join("\n"));
-            }
+            doc_lines.reverse();
+            examples.reverse();
+            let doc = if doc_lines.is_empty() { None } else { Some(doc_lines.join("\n")) };
+            result.insert(name, DocInfo { doc, examples, deprecated });
         }
     }
-    docs
+    result
 }
 
-/// Extract the name from a declaration line (after `fn `, `type `, etc.)
 fn extract_decl_name(rest: &str) -> Option<std::string::String> {
     let rest = rest.trim();
-    // Take chars until non-identifier
     let name: std::string::String = rest.chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_')
         .collect();
