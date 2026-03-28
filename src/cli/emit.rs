@@ -20,35 +20,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
     let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
-    // Extract user-level import aliases (import pkg as alias, or implicit aliases for multi-segment imports)
-    let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
-        if let crate::ast::Decl::Import { path, alias, .. } = imp {
-            if let Some(a) = alias {
-                // For self-imports, the target is the canonical module name (last segment or package name),
-                // not the dotted path, because resolved.modules stores canonical names
-                let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
-                let target = if is_self_import && path.len() >= 2 {
-                    path.last().map(|s| s.to_string()).unwrap_or_default()
-                } else if is_self_import {
-                    // import self as alias → target is the package name (loaded from resolved modules)
-                    resolved.modules.iter()
-                        .find(|(_, _, _, is_self)| *is_self)
-                        .map(|(name, _, _, _)| name.clone())
-                        .unwrap_or_else(|| path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
-                } else {
-                    path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
-                };
-                Some((a.to_string(), target))
-            } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
-                let last = path.last().expect("path.len() > 1 checked above").to_string();
-                Some((last, path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }).collect();
+    let import_aliases = crate::build_import_aliases(&program, &resolved);
 
     // Run checker if needed (always for emit_ir, otherwise when !no_check && !emit_ast)
     let run_check = emit_ir || (!no_check && !emit_ast);

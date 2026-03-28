@@ -229,31 +229,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
     let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .map_err(|e| { eprintln!("{}", e); e.clone() })?;
 
-    let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
-        if let ast::Decl::Import { path, alias, .. } = imp {
-            if let Some(a) = alias {
-                let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
-                let target = if is_self_import && path.len() >= 2 {
-                    path.last().map(|s| s.to_string()).unwrap_or_default()
-                } else if is_self_import {
-                    resolved.modules.iter()
-                        .find(|(_, _, _, is_self)| *is_self)
-                        .map(|(name, _, _, _)| name.clone())
-                        .unwrap_or_else(|| path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
-                } else {
-                    path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
-                };
-                Some((a.to_string(), target))
-            } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
-                let last = path.last().expect("path.len() > 1 checked above").to_string();
-                Some((last, path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }).collect();
+    let import_aliases = build_import_aliases(&program, &resolved);
 
     let mut ir_program = None;
     let mut module_irs = std::collections::HashMap::new();
@@ -375,6 +351,36 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
             }
         }
     }
+}
+
+/// Build import alias mappings from a program's import declarations.
+/// Used by check, emit, and compile pipelines to register module aliases.
+pub(crate) fn build_import_aliases(program: &ast::Program, resolved: &resolve::ResolvedModules) -> Vec<(String, String)> {
+    program.imports.iter().filter_map(|imp| {
+        if let ast::Decl::Import { path, alias, .. } = imp {
+            if let Some(a) = alias {
+                let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
+                let target = if is_self_import && path.len() >= 2 {
+                    path.last().map(|s| s.to_string()).unwrap_or_default()
+                } else if is_self_import {
+                    resolved.modules.iter()
+                        .find(|(_, _, _, is_self)| *is_self)
+                        .map(|(name, _, _, _)| name.clone())
+                        .unwrap_or_else(|| path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
+                } else {
+                    path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
+                };
+                Some((a.to_string(), target))
+            } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
+                let last = path.last().expect("path.len() > 1").to_string();
+                Some((last, path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }).collect()
 }
 
 fn resolve_file(file: Option<String>) -> String {
