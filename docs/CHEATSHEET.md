@@ -51,7 +51,6 @@ fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 
 ## Built-in Protocols
 Eq and Hash are automatic (compiler-derived from type structure). No annotation needed.
-`From` is the only explicit convention (for error type conversions), specified with `:` after the type name.
 ```
 // Eq: all value types support == (except Fn)
 let same = color_a == color_b  // just works
@@ -227,6 +226,14 @@ y = y + 1                   // reassign (var only)
 let { name, age } = user    // record destructure (1 level only)
 ```
 
+### Unwrap operators
+```
+expr!              // unwrap Result/Option, propagate err (effect fn only)
+expr ?? fallback   // unwrap or use fallback value
+expr?              // Result → Option (err → none)
+expr?.field        // optional chaining (Option[Record] → Option[FieldType])
+```
+
 ### Guard (early return / loop break)
 ```
 guard x > 0 else err("must be positive")
@@ -260,20 +267,18 @@ assert(cond)               // assert true
 
 ## Entry point
 ```
-effect fn main(args: List[String]) -> Result[Unit, AppError] = {
+effect fn main(args: List[String]) -> Result[Unit, String] = {
   // args[0] = program name, args[1] = first argument
-  let cmd = list.get(args, 1)    // returns Option[String]
-  match cmd {
-    some("run") => do_something(),
-    some(other) => err(UnknownCommand(other)),
-    none => err(NoCommand),
-  }
+  let name = list.get(args, 1) ?? "world"
+  let content = fs.read_text("config.txt")!   // propagate error with !
+  println("Hello, ${name}: ${content}")
+  ok(())
 }
 ```
 The runtime calls `main(args)` where `args` includes the program name at index 0.
 
 ## Operators (precedence high→low)
-`. ()` > `not -` > `^` (power) > `* / %` > `+ -` > `== != < > <= >=` (non-assoc) > `and` > `or` > `|>` `>>`
+`. () ! ?? ?` > `not -` > `^` (power) > `* / %` > `+ -` > `== != < > <= >=` (non-assoc) > `and` > `or` > `|>` `>>`
 
 `^` is exponentiation (right-associative, `**` also accepted). `+` is concatenation for strings and lists (overloaded with addition). XOR is available as `int.bxor(a, b)`.
 
@@ -354,7 +359,6 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 ## Complete example
 ```
 import fs
-import json
 
 type AppError =
   | NotFound(String)
@@ -366,29 +370,21 @@ effect fn greet(name: String) -> Result[Unit, AppError] = {
   ok(())
 }
 
-effect fn process_all(items: List[String]) -> Result[Unit, AppError] = {
-  for item in items {
-    println("Processing: ${item}")
-  }
-  ok(())
-}
-
 effect fn main(args: List[String]) -> Result[Unit, AppError] = {
-  let cmd = list.get(args, 1)
+  let cmd = list.get(args, 1) ?? "help"
   match cmd {
-    some("greet") => {
-      let name = match list.get(args, 2) {
-        some(n) => n,
-        none => "world",
-      }
+    "greet" => {
+      let name = list.get(args, 2) ?? "world"
       greet(name)
     },
-    some(other) => {
-      println("Unknown: ${other}")
+    "read" => {
+      let path = list.get(args, 2) ?? "input.txt"
+      let content = fs.read_text(path).map_err((e) => Io(e))!
+      println(content)
       ok(())
     },
-    none => {
-      println("Usage: app <command>")
+    other => {
+      println("Usage: app <greet|read> [arg]")
       ok(())
     },
   }

@@ -22,7 +22,7 @@
 
 ## What is Almide?
 
-Almide is a statically-typed language optimized for AI-generated code. It compiles to Rust, TypeScript, and WebAssembly.
+Almide is a statically-typed language optimized for AI-generated code. It compiles to native binaries (via Rust) and WebAssembly.
 
 The core metric is **modification survival rate** — how often code still compiles and passes tests after a series of AI-driven modifications. The language achieves this through unambiguous syntax, actionable compiler diagnostics, and a standard library that covers common patterns out of the box.
 
@@ -58,7 +58,7 @@ Verify the installation:
 
 ```bash
 almide --version
-# almide 0.9.2
+# almide 0.9.5
 ```
 
 ### Hello World
@@ -75,7 +75,7 @@ almide run hello.almd
 
 ## Features
 
-- **Multi-target** — Same source compiles to Rust (native binary), TypeScript, or WebAssembly
+- **Multi-target** — Same source compiles to native binary (via Rust) or WebAssembly (direct emit)
 - **Generics** — Functions (`fn id[T](x: T) -> T`), records, variant types, recursive variants with auto Box wrapping
 - **Pattern matching** — Exhaustive match with variant destructuring
 - **Effect functions** — `effect fn` for explicit error propagation (`Result` auto-wrapping)
@@ -141,28 +141,26 @@ Almide source (`.almd`) is compiled by a pure-Rust compiler through a three-laye
                                                             ↓
                                               Template Renderer (TOML-driven)
                                                             ↓
-                                                    .rs / .ts / .wasm
+                                                    .rs / .wasm
 ```
 
-The Nanopass pipeline applies target-specific transformations: `ResultPropagation` (Rust `?`), `ResultErasure` (TS `throw`), `MatchLowering` (TS if-else chains), `CloneInsertion` (Rust borrow analysis). The Template Renderer is purely syntactic — all semantic decisions are already encoded in the IR.
+The Nanopass pipeline applies target-specific transformations: `ResultPropagation` (Rust `?`), `CloneInsertion` (Rust borrow analysis), `LICM` (loop-invariant code motion). The Template Renderer is purely syntactic — all semantic decisions are already encoded in the IR.
 
 ```bash
 almide run app.almd              # Compile + execute (Rust target)
 almide run app.almd -- arg1      # With arguments
 almide build app.almd -o app     # Build standalone binary
 almide build app.almd --target wasm  # Build WebAssembly (WASI)
-almide build app.almd --target ts    # Emit TypeScript + run with Deno
+almide compile                   # Compile to .almdi (module interface + IR)
+almide compile parser            # Compile a specific module
+almide compile --json            # Output interface as JSON
 almide test                      # Find and run all test blocks (recursive)
 almide test spec/lang/           # Run tests in a directory
 almide test --run "pattern"      # Filter tests by name
 almide check app.almd            # Type check only
 almide check app.almd --json     # Type check with JSON output
 almide fmt app.almd              # Format source code
-almide clean                     # Clear dependency cache
-almide app.almd --target rust    # Emit Rust source
-almide app.almd --target ts      # Emit TypeScript source
-almide app.almd --emit-ast       # Emit AST as JSON
-almide app.almd --emit-ir        # Emit typed IR as JSON
+almide clean                     # Clear build + dependency cache
 ```
 
 ## Benchmark
@@ -213,11 +211,11 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Category | Status |
 |----------|--------|
 | Compiler | Pure Rust, single binary, 0 ICE |
-| Targets | Rust, TypeScript, JavaScript, WASM |
+| Targets | Rust (native), WASM (direct emit) |
 | Codegen | v3 — Nanopass + TOML templates, fully target-agnostic walker |
 | Stdlib | 381 functions across 22 modules |
-| Tests | 110 test files, 25 exercises, 5 showcases |
-| Cross-target | 91/91 spec+exercise tests pass on both Rust and TS |
+| Tests | 142 test files pass (Rust), 129 pass (WASM) |
+| Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
 
 ## Ecosystem
