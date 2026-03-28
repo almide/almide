@@ -12,6 +12,7 @@ pub mod diagnostic;
 pub mod fmt;
 pub mod generated;
 pub mod ir;
+pub mod interface;
 pub mod lower;
 pub mod mono;
 pub mod optimize;
