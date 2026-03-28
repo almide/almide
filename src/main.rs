@@ -111,6 +111,20 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Compile source to .almdi (module interface + IR artifact)
+    Compile {
+        /// Module name (e.g., "json", "parser") or file path; defaults to project
+        module: Option<String>,
+        /// Output interface as machine-readable JSON (no artifact)
+        #[arg(long)]
+        json: bool,
+        /// Print human-readable interface (no artifact)
+        #[arg(long)]
+        dry_run: bool,
+        /// Output directory for .almdi files (default: target/compile)
+        #[arg(long, short)]
+        output: Option<String>,
+    },
     /// Clear dependency cache
     Clean,
     /// Add a dependency
@@ -448,6 +462,9 @@ fn dispatch(cli: Cli) {
                 files
             };
             cli::cmd_fmt(&fmt_files, write_back);
+        }
+        Commands::Compile { module, json, dry_run, output } => {
+            cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
         Commands::Clean => cli::cmd_clean(),
         Commands::Add { pkg, git, tag } => {

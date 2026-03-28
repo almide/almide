@@ -1,4 +1,5 @@
 #![recursion_limit = "512"]
+pub mod almdi;
 pub mod intern;
 pub mod ast;
 pub mod check;
@@ -12,6 +13,7 @@ pub mod diagnostic;
 pub mod fmt;
 pub mod generated;
 pub mod ir;
+pub mod interface;
 pub mod lower;
 pub mod mono;
 pub mod optimize;

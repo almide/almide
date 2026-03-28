@@ -53,8 +53,11 @@ almide test                      # Find all .almd with test blocks (recursive)
 almide test spec/lang/           # Run tests in a directory
 almide test spec/lang/expr_test.almd  # Run a single test file
 almide test --run "pattern"      # Filter tests by name
-almide check app.almd            # Type check only
-almide fmt app.almd              # Format source
+almide compile                    # Module interface (project)
+almide compile parser             # Module interface (by name)
+almide compile app.almd --json    # Module interface (JSON)
+almide check app.almd             # Type check only
+almide fmt app.almd               # Format source
 almide clean                     # Clear dependency cache
 almide app.almd --target rust    # Emit Rust source
 almide app.almd --target ts      # Emit TypeScript source
