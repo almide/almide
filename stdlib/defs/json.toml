@@ -187,7 +187,7 @@ description = "Create a root JSON path for traversal."
 example = 'json.root()'
 params = []
 return = "JsonPath"
-rust = "AlmideJsonPath::JpRoot"
+rust = "almide_rt_json_root()"
 ts = "__almd_json.path_root()"
 
 [field]
@@ -195,7 +195,7 @@ description = "Extend a JSON path with a field name."
 example = 'json.field(json.root(), "user")'
 params = [{ name = "path", type = "JsonPath" }, { name = "name", type = "String" }]
 return = "JsonPath"
-rust = "AlmideJsonPath::JpField(Box::new({path}), {name})"
+rust = "almide_rt_json_field({path}, {name})"
 ts = "__almd_json.path_field({path}, {name})"
 
 [index]
@@ -203,7 +203,7 @@ description = "Extend a JSON path with an array index."
 example = 'json.index(json.field(json.root(), "items"), 0)'
 params = [{ name = "path", type = "JsonPath" }, { name = "i", type = "Int" }]
 return = "JsonPath"
-rust = "AlmideJsonPath::JpIndex(Box::new({path}), {i})"
+rust = "almide_rt_json_index({path}, {i})"
 ts = "__almd_json.path_index({path}, {i})"
 
 [get_path]

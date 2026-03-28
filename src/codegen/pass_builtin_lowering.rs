@@ -55,6 +55,14 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                 CallTarget::Named { ref name } => {
                     // assert / assert_eq / assert_ne → RustMacro
                     if name == "assert" || name == "assert_eq" || name == "assert_ne" {
+                        // assert(cond, msg) → assert!(cond, "{}", msg)
+                        // Rust's assert! macro requires a format string literal as second arg
+                        if name == "assert" && args.len() == 2 {
+                            let cond = args[0].clone();
+                            let msg = args[1].clone();
+                            let fmt = IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None };
+                            return IrExpr { kind: IrExprKind::RustMacro { name: *name, args: vec![cond, fmt, msg] }, ty, span };
+                        }
                         return IrExpr { kind: IrExprKind::RustMacro { name: *name, args }, ty, span };
                     }
                     // assert_some → assert!(x.is_some())

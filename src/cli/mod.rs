@@ -68,9 +68,23 @@ fn incremental_cache_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(".almide/cache")
 }
 
-/// Cargo.toml template for generated Rust projects.
-/// Includes rustls/webpki-roots for HTTPS support in the http runtime.
+/// Cargo.toml template for generated Rust projects (without HTTP/TLS).
 const GENERATED_CARGO_TOML: &str = r#"[package]
+name = "almide-out"
+version = "0.1.0"
+edition = "2021"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+"#;
+
+/// Cargo.toml template with HTTP/TLS dependencies (only when http runtime is used).
+const GENERATED_CARGO_TOML_HTTP: &str = r#"[package]
 name = "almide-out"
 version = "0.1.0"
 edition = "2021"
@@ -121,9 +135,10 @@ const BURN_MATRIX_RUNTIME: &str = include_str!("../../runtime/rs/burn/matrix_bur
 /// Returns the path to the built binary on success.
 fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {
     let uses_matrix = rs_code.contains("almide_rt_matrix_");
+    let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
-    let cargo_toml = if uses_matrix { GENERATED_CARGO_TOML_ML } else { GENERATED_CARGO_TOML };
+    let cargo_toml = if uses_matrix { GENERATED_CARGO_TOML_ML } else if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
     std::fs::write(project_dir.join("Cargo.toml"), cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
     let final_code = if uses_matrix {
@@ -158,9 +173,11 @@ fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path, release: 
 /// Build generated Rust code using cargo for test mode (--test harness).
 /// Returns the path to the built test binary on success.
 fn cargo_build_test(rs_code: &str, project_dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
+    let cargo_toml = if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
-    std::fs::write(project_dir.join("Cargo.toml"), GENERATED_CARGO_TOML)
+    std::fs::write(project_dir.join("Cargo.toml"), cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
     std::fs::write(src_dir.join("main.rs"), rs_code)
         .map_err(|e| format!("failed to write main.rs: {}", e))?;
