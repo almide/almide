@@ -15,6 +15,7 @@ use super::pass::{
 };
 use super::pass_auto_parallel::AutoParallelPass;
 use super::pass_box_deref::BoxDerefPass;
+use super::pass_capture_clone::CaptureClonePass;
 use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_result_propagation::ResultPropagationPass;
@@ -58,6 +59,7 @@ fn build_pipeline(target: Target) -> Pipeline {
             // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
             .add(StreamFusionPass)
             .add(BorrowInsertionPass)
+            .add(CaptureClonePass)
             .add(CloneInsertionPass)
             // Match subject transforms: String → .as_str(), Option<String> → .as_deref()
             .add(MatchSubjectPass)
