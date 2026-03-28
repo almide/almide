@@ -393,6 +393,30 @@ fn resolve_ty(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> Type
                 TypeRef::Unknown
             }
         }
+        // OpenRecord: same resolution as Record (match fields against known type decls)
+        Ty::OpenRecord { fields } => {
+            let mut field_names: Vec<std::string::String> = fields.iter().map(|(n, _)| n.to_string()).collect();
+            field_names.sort();
+            if let Some(name) = records.get(&field_names) {
+                TypeRef::Named { name: name.clone(), args: vec![] }
+            } else {
+                TypeRef::Named {
+                    name: format!("{{{}}}", fields.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>().join(", ")),
+                    args: vec![],
+                }
+            }
+        }
+        // Union: serialize each member
+        Ty::Union(members) => {
+            if members.len() == 1 {
+                resolve_ty(&members[0], records, variants)
+            } else {
+                // Represent as a tuple of alternatives (binding generators decide how to render)
+                TypeRef::Tuple {
+                    elements: members.iter().map(|t| resolve_ty(t, records, variants)).collect(),
+                }
+            }
+        }
         _ => TypeRef::Unknown,
     }
 }
