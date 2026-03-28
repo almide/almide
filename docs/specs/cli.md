@@ -195,13 +195,17 @@ JSON 出力の構造:
 almide init
 ```
 
-生成物:
+生成���:
 
 ```
-almide.toml
+almide.toml               [package] name, version, edition
 src/
-  main.almd
+  main.almd               effect fn main テンプレート
+tests/                    テスト用ディレクトリ
+CLAUDE.md                 AI 向けプロジェクト説明
 ```
+
+`name` はカレントディレクトリ名から自動生成。
 
 ---
 
@@ -277,6 +281,15 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 |---|---|
 | 0 | 成功 |
 | 1 | コンパイルエラー、テスト失敗、依存解決失敗 |
+
+---
+
+## Global Options
+
+| オプション | 説明 |
+|---|---|
+| `-h, --help` | ヘルプ表示（各コマンドにも付く） |
+| `-V, --version` | バージョン表示（例: `almide 0.9.5`） |
 
 ---
 
