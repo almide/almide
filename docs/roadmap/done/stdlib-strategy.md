@@ -157,7 +157,7 @@ Comparison: Go 1.0 shipped with ~100 packages. Deno 1.0 with ~30 modules. Since 
 
 ```
 module.verb_noun(args)     — basic form
-module.verb_noun?(args)    — returns Bool
+module.verb_noun(args)     — returns Bool
 module.try_verb(args)      — returns Result
 ```
 

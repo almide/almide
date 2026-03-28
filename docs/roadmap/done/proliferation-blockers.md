@@ -4,9 +4,9 @@
 
 Issues discovered during the first `almide proliferate` run (csv module). These were compiler-level problems that reduced LLM success rate and required workarounds in generated code.
 
-## 1. `string.contains?` codegen missing (Rust target) — RESOLVED
+## 1. `string.contains` codegen missing (Rust target) — RESOLVED
 
-**Status:** Fixed. All `?`-suffix functions (`contains?`, `starts_with?`, `ends_with?`, `is_empty?`, `is_dir?`, `is_file?`) are handled in `emit_rust/calls.rs` with both `?` and `_hdlm_qm_` variants.
+**Status:** Fixed. All predicate functions (`contains`, `starts_with`, `ends_with`, `is_empty`, `is_dir`, `is_file`) are handled in `emit_rust/calls.rs`.
 
 ## 2. Ownership / move errors when variable is reused after passing to function — RESOLVED
 

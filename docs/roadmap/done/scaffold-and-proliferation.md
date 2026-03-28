@@ -74,7 +74,7 @@ fn main() = {
 
   // stringify
   let output = csv.stringify([["a", "b"], ["1", "2"]])
-  assert(string.contains?(output, "a,b"))
+  assert(string.contains(output, "a,b"))
 
   io.println("csv: all tests passed")
 }
@@ -348,7 +348,7 @@ description = "Semantic versioning"
 fns = [
   "parse(version: String) -> Result[Map[String, Int], String]",
   "compare(a: String, b: String) -> Int",
-  "satisfies?(version: String, constraint: String) -> Bool",
+  "satisfies(version: String, constraint: String) -> Bool",
 ]
 ```
 
@@ -412,7 +412,7 @@ When an LLM works on an Almide project, auto-inject available packages into CLAU
 ## Available Packages
 - csv: parse, parse_with_header, stringify
 - toml: parse, stringify
-- semver: parse, compare, satisfies?
+- semver: parse, compare, satisfies
 ```
 
 This lets the LLM know packages exist before writing code.

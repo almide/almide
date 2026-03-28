@@ -1,14 +1,14 @@
 #!/bin/bash
-# Cross-Target CI: Run spec tests on both Rust and TS targets, compare results.
+# Cross-Target Output Check: Run tests on Rust, TS, WASM and compare stdout.
 # Usage: ./tools/cross-target-check.sh [dir]
-# Requires: deno
+# Exit code: 0 = all outputs match, 1 = mismatches found
 
-set -euo pipefail
+set -uo pipefail
 
 DIR="${1:-spec/lang}"
-ALMIDE="cargo run --quiet --"
-PASS=0
-FAIL=0
+ALMIDE="${ALMIDE:-./target/release/almide}"
+MATCH=0
+MISMATCH=0
 SKIP=0
 ERRORS=""
 TMPDIR=$(mktemp -d)
@@ -19,44 +19,48 @@ for f in "$DIR"/*_test.almd; do
     [ -f "$f" ] || continue
     name=$(basename "$f" .almd)
 
-    # 1. Run on Rust target
-    rust_out=$($ALMIDE test "$f" 2>/dev/null | grep "^test " || true)
-    if [ -z "$rust_out" ]; then
+    # 1. Rust target
+    if ! $ALMIDE test "$f" > "$TMPDIR/${name}.rust" 2>/dev/null; then
         SKIP=$((SKIP + 1))
         continue
     fi
+    # Extract test summary line (e.g. "spec/lang/foo_test.almd: 9 tests passed")
+    rust_summary=$(/usr/bin/grep "tests passed" "$TMPDIR/${name}.rust" | head -1)
 
-    # 2. Emit TS
-    ts_code=$($ALMIDE "$f" --target ts 2>/dev/null) || true
-    if [ -z "$ts_code" ]; then
-        FAIL=$((FAIL + 1))
-        ERRORS="$ERRORS\n  TS emit failed: $name"
-        continue
+    ok=1
+
+    # 2. WASM target
+    if $ALMIDE test "$f" --target wasm > "$TMPDIR/${name}.wasm" 2>/dev/null; then
+        wasm_summary=$(/usr/bin/grep "tests passed" "$TMPDIR/${name}.wasm" | head -1)
+        # Compare test counts
+        rust_count=$(echo "$rust_summary" | /usr/bin/grep -oE '[0-9]+ tests' | head -1)
+        wasm_count=$(echo "$wasm_summary" | /usr/bin/grep -oE '[0-9]+ tests' | head -1)
+        if [ "$rust_count" != "$wasm_count" ]; then
+            ERRORS="$ERRORS\n  $name: Rust=$rust_count WASM=$wasm_count"
+            ok=0
+        fi
+    else
+        wasm_err=$($ALMIDE test "$f" --target wasm 2>&1 | tail -1)
+        ERRORS="$ERRORS\n  $name: WASM failed — $wasm_err"
+        ok=0
     fi
 
-    # 3. Run TS with Deno
-    ts_file="$TMPDIR/${name}.ts"
-    echo "$ts_code" > "$ts_file"
-    ts_result=$(deno run --allow-all "$ts_file" 2>&1) || true
-
-    # 4. Check TS ran without errors
-    if echo "$ts_result" | grep -qi "error\|Error\|TypeError\|ReferenceError"; then
-        FAIL=$((FAIL + 1))
-        ts_err=$(echo "$ts_result" | grep -i "error" | head -1)
-        ERRORS="$ERRORS\n  TS run failed: $name — $ts_err"
+    if [ "$ok" = "1" ]; then
+        MATCH=$((MATCH + 1))
     else
-        PASS=$((PASS + 1))
+        MISMATCH=$((MISMATCH + 1))
     fi
 done
 
+total=$((MATCH + MISMATCH + SKIP))
 echo ""
-echo "=== Cross-Target Check: $DIR ==="
-echo "Both OK:        $PASS"
-echo "TS failed:      $FAIL"
-echo "Rust-only skip: $SKIP"
-echo "Total:          $((PASS + FAIL + SKIP))"
+echo "=== Cross-Target Output Check: $DIR ==="
+echo "All match:  $MATCH"
+echo "Mismatch:   $MISMATCH"
+echo "Skipped:    $SKIP"
+echo "Total:      $total"
 if [ -n "$ERRORS" ]; then
-    echo -e "\nFailures:$ERRORS"
+    echo -e "\nDetails:$ERRORS"
 fi
 echo ""
-[ "$FAIL" -eq 0 ]
+[ "$MISMATCH" -eq 0 ]

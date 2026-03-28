@@ -3,7 +3,6 @@ pub mod intern;
 pub mod ast;
 pub mod check;
 pub mod codegen;
-pub mod emit_ts_runtime;
 pub mod lexer;
 pub mod parser;
 pub mod project;

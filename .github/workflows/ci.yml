@@ -81,53 +81,6 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test spec/
 
-  test-ts:
-    name: Test TS/Deno
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: almide-linux
-          path: /tmp/almide-bin
-
-      - name: Setup
-        run: chmod +x /tmp/almide-bin/almide
-
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Almide spec tests (TS target)
-        run: |
-          ALMIDE=/tmp/almide-bin/almide
-          passed=0; failed=0; skipped=0; errors=""
-
-          for f in $(find spec/ -name '*.almd' -type f | sort); do
-            ts_code=$($ALMIDE "$f" --target ts 2>/dev/null) || { skipped=$((skipped + 1)); continue; }
-            [ -z "$ts_code" ] && { skipped=$((skipped + 1)); continue; }
-
-            echo "$ts_code" > /tmp/test_ts.ts
-            if deno run --allow-all --no-check /tmp/test_ts.ts > /dev/null 2>&1; then
-              passed=$((passed + 1))
-            else
-              failed=$((failed + 1))
-              errors="$errors\n  FAIL: $f"
-            fi
-          done
-
-          echo "=== TS Target Results ==="
-          echo "Pass: $passed | Fail: $failed | Skip: $skipped"
-          if [ -n "$errors" ]; then echo -e "\nFailures:$errors"; fi
-
-          # Allow up to 3 known failures (cross-target differences)
-          if [ $failed -gt 3 ]; then
-            echo "::error::TS target regressions: $failed failures (max 3)"
-            exit 1
-          fi
-
   test-wasm:
     name: Test WASM
     needs: build
@@ -181,7 +134,6 @@ jobs:
           f=$(find spec/lang -name '*_test.almd' | head -1)
           [ -z "$f" ] && echo "No spec files found" && exit 0
           $ALMIDE "$f" --target rust > /dev/null && echo "Rust emit OK"
-          $ALMIDE "$f" --target ts   > /dev/null && echo "TS emit OK"
           $ALMIDE "$f" --emit-ast    > /dev/null && echo "AST emit OK"
 
   # ═══════════════════════════════════════════════

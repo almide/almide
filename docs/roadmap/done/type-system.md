@@ -539,8 +539,8 @@ type PermissionDenied { path: String }
 
 // Union in error position
 effect fn read_config(path: String) -> Result[Config, NotFound | PermissionDenied] = {
-  guard fs.exists?(path) else err(NotFound { path })
-  guard fs.readable?(path) else err(PermissionDenied { path })
+  guard fs.exists(path) else err(NotFound { path })
+  guard fs.readable(path) else err(PermissionDenied { path })
   let text = fs.read_text(path)
   ok(parse_config(text))
 }

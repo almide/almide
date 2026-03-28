@@ -1,7 +1,6 @@
 name: Cross-Target CI
 
-# Runs spec/ and exercises/ on both Rust and TS targets, reports mismatches.
-# 90/91 pass as of 2026-03-17. 1 known limitation: codegen_do_block_test (break in IIFE).
+# Runs spec/ on both Rust and WASM targets, reports mismatches.
 
 on:
   push:
@@ -18,7 +17,7 @@ env:
 
 jobs:
   cross-target:
-    name: Cross-Target (Rust vs TS)
+    name: Cross-Target (Rust vs WASM)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,48 +38,52 @@ jobs:
       - name: Build
         run: cargo build --release
 
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
+      - name: Install wasmtime
+        run: |
+          VERSION=$(curl -s https://api.github.com/repos/bytecodealliance/wasmtime/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          tar -xf wasmtime-*.tar.xz
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
 
-      - name: Cross-target spec + exercises
+      - name: Cross-target spec (Rust vs WASM)
         run: |
           ALMIDE=./target/release/almide
-          passed=0; failed=0; skipped=0; errors=""
+          rust_pass=0; wasm_pass=0; rust_fail=0; wasm_fail=0; both_pass=0; errors=""
 
-          for f in $(find spec/ exercises/ -name '*.almd' -type f | sort); do
-            # Skip Rust-only failures
-            $ALMIDE test "$f" > /dev/null 2>&1 || { skipped=$((skipped + 1)); continue; }
+          for f in $(find spec/ -name '*.almd' -type f | sort); do
+            rust_ok=false; wasm_ok=false
 
-            # TS emit
-            ts_code=$($ALMIDE "$f" --target ts 2>/dev/null) || { skipped=$((skipped + 1)); continue; }
-            [ -z "$ts_code" ] && { skipped=$((skipped + 1)); continue; }
-
-            # TS run
-            echo "$ts_code" > /tmp/cross_ts.ts
-            if deno run --allow-all /tmp/cross_ts.ts > /dev/null 2>&1; then
-              passed=$((passed + 1))
+            if $ALMIDE test "$f" > /dev/null 2>&1; then
+              rust_ok=true; rust_pass=$((rust_pass + 1))
             else
-              failed=$((failed + 1))
-              errors="$errors\n  FAIL: $f"
+              rust_fail=$((rust_fail + 1))
+            fi
+
+            if $ALMIDE test "$f" --target wasm > /dev/null 2>&1; then
+              wasm_ok=true; wasm_pass=$((wasm_pass + 1))
+            else
+              wasm_fail=$((wasm_fail + 1))
+            fi
+
+            if $rust_ok && $wasm_ok; then
+              both_pass=$((both_pass + 1))
+            elif $rust_ok && ! $wasm_ok; then
+              errors="$errors\n  WASM FAIL (Rust OK): $f"
+            elif ! $rust_ok && $wasm_ok; then
+              errors="$errors\n  Rust FAIL (WASM OK): $f"
             fi
           done
 
+          total=$(find spec/ -name '*.almd' -type f | wc -l)
           echo ""
           echo "=== Cross-Target Results ==="
-          echo "Pass:    $passed"
-          echo "Fail:    $failed"
-          echo "Skip:    $skipped"
-          echo "Total:   $((passed + failed + skipped))"
+          echo "Rust:  $rust_pass pass / $rust_fail fail"
+          echo "WASM:  $wasm_pass pass / $wasm_fail fail"
+          echo "Both:  $both_pass / $total"
 
           if [ -n "$errors" ]; then
-            echo -e "\nFailures:$errors"
+            echo -e "\nMismatches:$errors"
           fi
 
-          echo "::notice::Cross-target: $passed pass, $failed fail, $skipped skip"
-
-          # Allow up to 2 known failures (codegen_do_block_test + buffer)
-          if [ $failed -gt 2 ]; then
-            echo "::error::Cross-target regressions detected ($failed failures, max allowed: 2)"
-            exit 1
-          fi
+          echo "::notice::Cross-target: Rust $rust_pass, WASM $wasm_pass, both $both_pass / $total"

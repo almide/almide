@@ -2,7 +2,7 @@ VERSION := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'
 INSTALL_DIR := $(HOME)/.local/almide
 BIN := target/release/almide
 
-.PHONY: build install test test-wasm test-ts check clean fmt release
+.PHONY: build install test test-wasm test-ts check clean fmt release parity cross-target
 
 ## Build
 
@@ -31,7 +31,16 @@ test-wasm: build
 test-ts: build
 	$(BIN) test --target ts
 
-test-all: test-rust test test-wasm test-ts
+test-all: test-rust test test-wasm test-ts parity
+
+## Parity
+
+parity:
+	bash tools/stdlib-parity-check.sh
+
+cross-target: build
+	bash tools/cross-target-check.sh spec/lang
+	bash tools/cross-target-check.sh spec/stdlib
 
 ## Check
 
@@ -80,6 +89,8 @@ help:
 	@echo "make test-ts    - Run TS target tests"
 	@echo "make test-all   - Run all test suites"
 	@echo "make check      - cargo check"
+	@echo "make parity     - Verify stdlib parity across RS/TS/WASM"
+	@echo "make cross-target - Run spec tests on both Rust and TS targets"
 	@echo "make clean      - Clean build artifacts"
 	@echo "make release    - Test + commit + push version bump"
 	@echo "make pr         - Create PR from develop to main"

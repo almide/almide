@@ -76,6 +76,41 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     );
     emitter.rt.path_filestat_get = emitter.register_import(path_filestat_get_ty);
 
+    // path_create_directory(fd, path, path_len) -> errno
+    let path_create_directory_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.path_create_directory = emitter.register_import(path_create_directory_ty);
+
+    // path_rename(old_fd, old_path, old_path_len, new_fd, new_path, new_path_len) -> errno
+    let path_rename_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.path_rename = emitter.register_import(path_rename_ty);
+
+    // path_unlink_file(fd, path, path_len) -> errno
+    let path_unlink_file_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.path_unlink_file = emitter.register_import(path_unlink_file_ty);
+
+    // path_remove_directory(fd, path, path_len) -> errno
+    let path_remove_directory_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.path_remove_directory = emitter.register_import(path_remove_directory_ty);
+
+    // fd_readdir(fd, buf, buf_len, cookie, bufused_ptr) -> errno
+    let fd_readdir_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32, ValType::I64, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.fd_readdir = emitter.register_import(fd_readdir_ty);
+
     // __alloc(size: i32) -> i32
     let alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.alloc = emitter.register_func("__alloc", alloc_ty);

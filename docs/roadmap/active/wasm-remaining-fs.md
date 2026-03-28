@@ -31,7 +31,7 @@
 ### Low
 - [ ] `fs.read_bytes(path)` — similar to read_text (builds List[Int] instead of String)
 - [ ] `fs.write_bytes(path, bytes)` — similar to write
-- [ ] `fs.is_dir?(path)` / `fs.is_file?(path)` — flag analysis from path_filestat_get
+- [ ] `fs.is_dir(path)` / `fs.is_file(path)` — flag analysis from path_filestat_get
 - [ ] `fs.stat(path)` — convert fd_filestat_get result to Record
 
 ## Technical Notes

@@ -42,14 +42,13 @@ string.from_bytes([104, 105]) → "hi"
 
 ### 1.5 Character predicate functions
 ```almide
-string.is_digit?("3") → true       (* 0-9 *)
-string.is_alpha?("a") → true       (* a-zA-Z *)
-string.is_alphanumeric?("a") → true
-string.is_whitespace?(" ") → true  (* space, tab, newline *)
+string.is_digit("3") → true       (* 0-9 *)
+string.is_alpha("a") → true       (* a-zA-Z *)
+string.is_alphanumeric("a") → true
+string.is_whitespace(" ") → true  (* space, tab, newline *)
 ```
 - Placed in `string` module (no separate char module; single-char String is used)
 - Prevents AI from writing `["0","1",...,"9"]` every time
-- UFCS: `c.is_digit?()`
 
 ## Phase 2: List Operations (LOC -20~30)
 
@@ -132,7 +131,7 @@ time.sleep(1000)                 (* ms *)
 ```almide
 import regex
 
-regex.match?("[0-9]+", "abc123") → true
+regex.is_match("[0-9]+", "abc123") → true
 regex.find("[0-9]+", "abc123def") → some("123")
 regex.find_all("[0-9]+", "a1b22c333") → ["1", "22", "333"]
 regex.replace("[0-9]+", "a1b2", "X") → "aXbX"

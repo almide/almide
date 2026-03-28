@@ -135,67 +135,149 @@ fn stringify_value(v: &Value, depth: usize) -> String {
     }
 }
 
-// ── Path operations ──
+// ── JsonPath type and operations ──
 
-pub fn almide_json_get_path(j: &Value, path: String) -> Option<Value> {
-    let keys: Vec<&str> = path.split('.').collect();
+type JsonPath = AlmideJsonPath;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AlmideJsonPath {
+    JpRoot,
+    JpField(Box<AlmideJsonPath>, String),
+    JpIndex(Box<AlmideJsonPath>, i64),
+}
+
+impl std::fmt::Display for AlmideJsonPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AlmideJsonPath::JpRoot => write!(f, "$"),
+            AlmideJsonPath::JpField(parent, name) => write!(f, "{}.{}", parent, name),
+            AlmideJsonPath::JpIndex(parent, i) => write!(f, "{}[{}]", parent, i),
+        }
+    }
+}
+
+// Wrapper functions for stdlib codegen (json.root(), json.field(), json.index())
+pub fn almide_rt_json_root() -> AlmideJsonPath { AlmideJsonPath::JpRoot }
+pub fn almide_rt_json_field(path: AlmideJsonPath, name: String) -> AlmideJsonPath { AlmideJsonPath::JpField(Box::new(path), name) }
+pub fn almide_rt_json_index(path: AlmideJsonPath, i: i64) -> AlmideJsonPath { AlmideJsonPath::JpIndex(Box::new(path), i) }
+
+/// Resolve a JsonPath to a list of traversal steps, root-first.
+fn resolve_path(path: &AlmideJsonPath) -> Vec<PathStep> {
+    let mut steps = Vec::new();
+    let mut current = path;
+    loop {
+        match current {
+            AlmideJsonPath::JpRoot => break,
+            AlmideJsonPath::JpField(parent, name) => {
+                steps.push(PathStep::Field(name.clone()));
+                current = parent;
+            }
+            AlmideJsonPath::JpIndex(parent, i) => {
+                steps.push(PathStep::Index(*i));
+                current = parent;
+            }
+        }
+    }
+    steps.reverse();
+    steps
+}
+
+enum PathStep {
+    Field(String),
+    Index(i64),
+}
+
+fn get_by_step(v: &Value, step: &PathStep) -> Option<Value> {
+    match step {
+        PathStep::Field(key) => almide_json_get(v, key),
+        PathStep::Index(i) => match v {
+            Value::Array(items) => {
+                let idx = if *i < 0 { items.len() as i64 + *i } else { *i } as usize;
+                items.get(idx).cloned()
+            }
+            _ => None,
+        },
+    }
+}
+
+pub fn almide_json_get_path(j: &Value, path: &AlmideJsonPath) -> Option<Value> {
+    let steps = resolve_path(path);
     let mut current = j.clone();
-    for key in keys {
-        current = almide_json_get(&current, key)?;
+    for step in &steps {
+        current = get_by_step(&current, step)?;
     }
     Some(current)
 }
 
-pub fn almide_json_set_path(j: &Value, path: String, value: Value) -> Result<Value, String> {
-    let keys: Vec<&str> = path.split('.').collect();
-    Ok(set_at_path(j, &keys, &value))
+pub fn almide_json_set_path(j: &Value, path: &AlmideJsonPath, value: Value) -> Result<Value, String> {
+    let steps = resolve_path(path);
+    Ok(set_at_steps(j, &steps, &value))
 }
 
-pub fn almide_json_upsert_path(j: &Value, path: String, value: Value) -> Value {
-    let keys: Vec<&str> = path.split('.').collect();
-    set_at_path(j, &keys, &value)
+pub fn almide_json_remove_path(j: &Value, path: &AlmideJsonPath) -> Value {
+    let steps = resolve_path(path);
+    remove_at_steps(j, &steps)
 }
 
-pub fn almide_json_remove_path(j: &Value, path: String) -> Value {
-    let keys: Vec<&str> = path.split('.').collect();
-    remove_at_path(j, &keys)
-}
-
-fn set_at_path(j: &Value, keys: &[&str], value: &Value) -> Value {
-    if keys.is_empty() { return value.clone(); }
-    match j {
-        Value::Object(entries) => {
-            let key = keys[0];
-            let rest = &keys[1..];
-            let mut new_entries: Vec<(String, Value)> = entries.iter()
-                .map(|(k, v)| if k == key { (k.clone(), set_at_path(v, rest, value)) } else { (k.clone(), v.clone()) })
-                .collect();
-            if !entries.iter().any(|(k, _)| k == key) {
-                let nested = set_at_path(&Value::Object(vec![]), rest, value);
-                new_entries.push((key.to_string(), nested));
+fn set_at_steps(j: &Value, steps: &[PathStep], value: &Value) -> Value {
+    if steps.is_empty() { return value.clone(); }
+    match &steps[0] {
+        PathStep::Field(key) => match j {
+            Value::Object(entries) => {
+                let rest = &steps[1..];
+                let mut new_entries: Vec<(String, Value)> = entries.iter()
+                    .map(|(k, v)| if k == key { (k.clone(), set_at_steps(v, rest, value)) } else { (k.clone(), v.clone()) })
+                    .collect();
+                if !entries.iter().any(|(k, _)| k == key) {
+                    new_entries.push((key.clone(), set_at_steps(&Value::Object(vec![]), rest, value)));
+                }
+                Value::Object(new_entries)
             }
-            Value::Object(new_entries)
-        }
-        _ => {
-            if keys.len() == 1 { value.clone() }
-            else { Value::Object(vec![(keys[0].to_string(), set_at_path(&Value::Object(vec![]), &keys[1..], value))]) }
-        }
+            _ => Value::Object(vec![(key.clone(), set_at_steps(&Value::Object(vec![]), &steps[1..], value))]),
+        },
+        PathStep::Index(i) => match j {
+            Value::Array(items) => {
+                let idx = if *i < 0 { items.len() as i64 + *i } else { *i } as usize;
+                let mut new_items = items.clone();
+                if idx < new_items.len() {
+                    new_items[idx] = set_at_steps(&new_items[idx], &steps[1..], value);
+                }
+                Value::Array(new_items)
+            }
+            _ => j.clone(),
+        },
     }
 }
 
-fn remove_at_path(j: &Value, keys: &[&str]) -> Value {
-    if keys.is_empty() { return Value::Null; }
-    match j {
-        Value::Object(entries) => {
-            let key = keys[0];
-            if keys.len() == 1 {
-                Value::Object(entries.iter().filter(|(k, _)| k != key).cloned().collect())
-            } else {
-                Value::Object(entries.iter().map(|(k, v)| {
-                    if k == key { (k.clone(), remove_at_path(v, &keys[1..])) } else { (k.clone(), v.clone()) }
-                }).collect())
+fn remove_at_steps(j: &Value, steps: &[PathStep]) -> Value {
+    if steps.is_empty() { return Value::Null; }
+    match &steps[0] {
+        PathStep::Field(key) => match j {
+            Value::Object(entries) => {
+                if steps.len() == 1 {
+                    Value::Object(entries.iter().filter(|(k, _)| k != key).cloned().collect())
+                } else {
+                    Value::Object(entries.iter().map(|(k, v)| {
+                        if k == key { (k.clone(), remove_at_steps(v, &steps[1..])) } else { (k.clone(), v.clone()) }
+                    }).collect())
+                }
             }
-        }
-        other => other.clone(),
+            other => other.clone(),
+        },
+        PathStep::Index(i) => match j {
+            Value::Array(items) => {
+                let idx = if *i < 0 { items.len() as i64 + *i } else { *i } as usize;
+                if steps.len() == 1 {
+                    Value::Array(items.iter().enumerate().filter(|(ii, _)| *ii != idx).map(|(_, v)| v.clone()).collect())
+                } else {
+                    let mut new_items = items.clone();
+                    if idx < new_items.len() {
+                        new_items[idx] = remove_at_steps(&new_items[idx], &steps[1..]);
+                    }
+                    Value::Array(new_items)
+                }
+            }
+            other => other.clone(),
+        },
     }
 }

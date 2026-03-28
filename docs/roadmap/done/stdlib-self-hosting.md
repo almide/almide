@@ -108,7 +108,7 @@ almide/
 ```almide
 // stdlib/args.almd — argument parsing, pure Almide
 
-fn flag?(name: String) -> Bool = {
+fn flag(name: String) -> Bool = {
   let args = env.args()
   list.any(args, fn(a) => a == "--" ++ name || a == "-" ++ string.slice(name, 0, 1))
 }
@@ -116,7 +116,7 @@ fn flag?(name: String) -> Bool = {
 fn option(name: String) -> Option[String] = {
   let args = env.args()
   let long = "--" ++ name
-  let eq_match = list.find(args, fn(a) => string.starts_with?(a, long ++ "="))
+  let eq_match = list.find(args, fn(a) => string.starts_with(a, long ++ "="))
   match eq_match {
     some(a) => string.strip_prefix(a, long ++ "=")
     none => {
@@ -136,7 +136,7 @@ fn option_or(name: String, default: String) -> String =
   }
 
 fn positional() -> List[String] =
-  list.filter(env.args(), fn(a) => not string.starts_with?(a, "-"))
+  list.filter(env.args(), fn(a) => not string.starts_with(a, "-"))
     |> list.drop(1)
 ```
 
@@ -168,7 +168,7 @@ All 5 functions migrated to `stdlib/path.almd`. Removed from compiler's `STDLIB_
 | `dirname` | `split("/")` → take all but last → `join("/")` |
 | `basename` | `split("/")` → last non-empty part |
 | `extension` | `split(".")` on basename → last part |
-| `is_absolute?` | `starts_with?(p, "/")` |
+| `is_absolute` | `starts_with(p, "/")` |
 
 #### 2b. time module ✅ Complete
 
@@ -245,7 +245,7 @@ Use cases:
 
 | Module | Functions | Needs bitwise? | Priority |
 |--------|-----------|---------------|----------|
-| `args` | `flag?`, `option`, `option_or`, `positional`, `positional_at` | No | ✅ Done |
+| `args` | `flag`, `option`, `option_or`, `positional`, `positional_at` | No | ✅ Done |
 | `hash` | `sha256`, `sha1`, `md5` | Yes | ✅ Done |
 | `encoding` | `base64_encode/decode`, `hex_encode/decode`, `url_encode/decode` | Yes | ✅ Done |
 | `term` | `red/green/blue/...`, `bold`, `dim`, `color(256)`, `strip` | No | ✅ Done |

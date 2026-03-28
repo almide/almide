@@ -30,7 +30,7 @@ Functions that every mainstream language has and AI-generated code will expect.
 
 #### string
 
-- [x] `string.is_empty?(s)` → `Bool`
+- [x] `string.is_empty(s)` → `Bool`
 - [x] `string.reverse(s)` → `String`
 - [x] `string.strip_prefix(s, prefix)` → `Option[String]` — remove prefix if present
 - [x] `string.strip_suffix(s, suffix)` → `Option[String]` — remove suffix if present
@@ -38,7 +38,7 @@ Functions that every mainstream language has and AI-generated code will expect.
 #### list
 
 - [x] `list.first(xs)` → `Option[T]` — alias-like for `list.get(xs, 0)`
-- [x] `list.is_empty?(xs)` → `Bool`
+- [x] `list.is_empty(xs)` → `Bool`
 - [x] `list.flat_map(xs, f)` → `List[U]` — map then flatten
 - [x] `list.min(xs)` → `Option[T]` — minimum element
 - [x] `list.max(xs)` → `Option[T]` — maximum element
@@ -47,12 +47,12 @@ Functions that every mainstream language has and AI-generated code will expect.
 #### map
 
 - [x] `map.merge(a, b)` → `Map[K, V]` — merge two maps (b wins on conflict)
-- [x] `map.is_empty?(m)` → `Bool`
+- [x] `map.is_empty(m)` → `Bool`
 
 #### fs
 
-- [x] `fs.is_dir?(path)` → `Bool` (effect)
-- [x] `fs.is_file?(path)` → `Bool` (effect)
+- [x] `fs.is_dir(path)` → `Bool` (effect)
+- [x] `fs.is_file(path)` → `Bool` (effect)
 - [x] `fs.copy(src, dst)` → `Result[Unit, IoError]` (effect)
 - [x] `fs.rename(src, dst)` → `Result[Unit, IoError]` (effect)
 
@@ -101,7 +101,7 @@ Functions that every mainstream language has and AI-generated code will expect.
 
 #### New modules (future)
 - **encoding**: ✅ `base64_encode`, `base64_decode`, `hex_encode`, `hex_decode`, `url_encode`, `url_decode`
-- **set**: `Set[T]` API — `new`, `from_list`, `add`, `remove`, `contains`, `union`, `intersection`, `difference`, `len`, `to_list`, `is_empty?`
+- **set**: `Set[T]` API — `new`, `from_list`, `add`, `remove`, `contains`, `union`, `intersection`, `difference`, `len`, `to_list`, `is_empty`
 - **csv**: planned as external package (`almide/csv`) — `parse`, `parse_with_header`, `stringify`
 
 ### CLI improvements
