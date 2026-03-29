@@ -8,6 +8,41 @@ use super::FuncCompiler;
 use super::values;
 
 impl FuncCompiler<'_> {
+    /// Get the element type of a list variable from VarTable.
+    fn list_elem_ty_var(&self, var: VarId) -> Ty {
+        self.list_elem_ty(&self.var_table.get(var).ty)
+    }
+
+    /// Allocate a scratch local appropriate for the given type.
+    fn scratch_for_ty(&mut self, ty: &Ty) -> u32 {
+        match values::ty_to_valtype(ty) {
+            Some(ValType::I64) => self.scratch.alloc_i64(),
+            Some(ValType::F64) => self.scratch.alloc_f64(),
+            _ => self.scratch.alloc_i32(),
+        }
+    }
+
+    /// Free a scratch local allocated by scratch_for_ty.
+    fn free_scratch_for_ty(&mut self, idx: u32, ty: &Ty) {
+        match values::ty_to_valtype(ty) {
+            Some(ValType::I64) => self.scratch.free_i64(idx),
+            Some(ValType::F64) => self.scratch.free_f64(idx),
+            _ => self.scratch.free_i32(idx),
+        }
+    }
+
+    /// Set a scratch local from the stack.
+    fn emit_set_scratch(&mut self, idx: u32, _ty: &Ty) {
+        wasm!(self.func, { local_set(idx); });
+    }
+
+    /// Get a scratch local onto the stack.
+    fn emit_get_scratch(&mut self, idx: u32, _ty: &Ty) {
+        wasm!(self.func, { local_get(idx); });
+    }
+}
+
+impl FuncCompiler<'_> {
     /// Emit a single IR statement.
     pub fn emit_stmt(&mut self, stmt: &IrStmt) {
         match &stmt.kind {
@@ -208,9 +243,162 @@ impl FuncCompiler<'_> {
                     }
                 }
             }
-            IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
-            | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => {
-                // TODO: emit optimized WASM for list operations
+            IrStmtKind::ListSwap { target, a, b } => {
+                // xs.swap(a, b): swap elements at indices a and b
+                // Layout: list_ptr + 4 + idx * elem_size
+                let elem_ty = self.list_elem_ty_var(*target);
+                let elem_size = values::byte_size(&elem_ty) as i32;
+                if let Some(&list_local) = self.var_map.get(&target.0) {
+                    let addr_a = self.scratch.alloc_i32();
+                    let addr_b = self.scratch.alloc_i32();
+                    let tmp = self.scratch_for_ty(&elem_ty);
+
+                    // addr_a = list_ptr + 4 + a * elem_size
+                    wasm!(self.func, { local_get(list_local); i32_const(4); i32_add; });
+                    self.emit_expr(a);
+                    if matches!(&a.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
+                    wasm!(self.func, { i32_const(elem_size); i32_mul; i32_add; local_set(addr_a); });
+
+                    // addr_b = list_ptr + 4 + b * elem_size
+                    wasm!(self.func, { local_get(list_local); i32_const(4); i32_add; });
+                    self.emit_expr(b);
+                    if matches!(&b.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
+                    wasm!(self.func, { i32_const(elem_size); i32_mul; i32_add; local_set(addr_b); });
+
+                    // tmp = *addr_a
+                    wasm!(self.func, { local_get(addr_a); });
+                    self.emit_load_at(&elem_ty, 0);
+                    self.emit_set_scratch(tmp, &elem_ty);
+
+                    // *addr_a = *addr_b
+                    wasm!(self.func, { local_get(addr_a); local_get(addr_b); });
+                    self.emit_load_at(&elem_ty, 0);
+                    self.emit_store_at(&elem_ty, 0);
+
+                    // *addr_b = tmp
+                    wasm!(self.func, { local_get(addr_b); });
+                    self.emit_get_scratch(tmp, &elem_ty);
+                    self.emit_store_at(&elem_ty, 0);
+
+                    self.scratch.free_i32(addr_a);
+                    self.scratch.free_i32(addr_b);
+                    self.free_scratch_for_ty(tmp, &elem_ty);
+                }
+            }
+            IrStmtKind::ListReverse { target, end } => {
+                // xs[..=end].reverse(): swap from both ends inward
+                let elem_ty = self.list_elem_ty_var(*target);
+                let elem_size = values::byte_size(&elem_ty) as i32;
+                if let Some(&list_local) = self.var_map.get(&target.0) {
+                    let lo = self.scratch.alloc_i32();
+                    let hi = self.scratch.alloc_i32();
+                    let addr_lo = self.scratch.alloc_i32();
+                    let addr_hi = self.scratch.alloc_i32();
+                    let tmp = self.scratch_for_ty(&elem_ty);
+
+                    // lo = 0; hi = end (as i32)
+                    wasm!(self.func, { i32_const(0); local_set(lo); });
+                    self.emit_expr(end);
+                    if matches!(&end.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
+                    wasm!(self.func, { local_set(hi); });
+
+                    // while (lo < hi)
+                    let base_ptr = self.scratch.alloc_i32();
+                    wasm!(self.func, { local_get(list_local); i32_const(4); i32_add; local_set(base_ptr); });
+                    wasm!(self.func, {
+                        block_empty;
+                        loop_empty;
+                        // break if lo >= hi
+                        local_get(lo); local_get(hi); i32_ge_s; br_if(1);
+                        // addr_lo = base + lo * elem_size
+                        local_get(base_ptr); local_get(lo); i32_const(elem_size); i32_mul; i32_add; local_set(addr_lo);
+                        // addr_hi = base + hi * elem_size
+                        local_get(base_ptr); local_get(hi); i32_const(elem_size); i32_mul; i32_add; local_set(addr_hi);
+                    });
+                    // tmp = *addr_lo
+                    wasm!(self.func, { local_get(addr_lo); });
+                    self.emit_load_at(&elem_ty, 0);
+                    self.emit_set_scratch(tmp, &elem_ty);
+                    // *addr_lo = *addr_hi
+                    wasm!(self.func, { local_get(addr_lo); local_get(addr_hi); });
+                    self.emit_load_at(&elem_ty, 0);
+                    self.emit_store_at(&elem_ty, 0);
+                    // *addr_hi = tmp
+                    wasm!(self.func, { local_get(addr_hi); });
+                    self.emit_get_scratch(tmp, &elem_ty);
+                    self.emit_store_at(&elem_ty, 0);
+                    // lo++; hi--
+                    wasm!(self.func, {
+                        local_get(lo); i32_const(1); i32_add; local_set(lo);
+                        local_get(hi); i32_const(1); i32_sub; local_set(hi);
+                        br(0);
+                        end; // loop
+                        end; // block
+                    });
+
+                    self.scratch.free_i32(base_ptr);
+                    self.scratch.free_i32(lo);
+                    self.scratch.free_i32(hi);
+                    self.scratch.free_i32(addr_lo);
+                    self.scratch.free_i32(addr_hi);
+                    self.free_scratch_for_ty(tmp, &elem_ty);
+                }
+            }
+            IrStmtKind::ListRotateLeft { target, end } => {
+                // xs[..=end].rotate_left(1): save xs[0], shift left, put saved at end
+                let elem_ty = self.list_elem_ty_var(*target);
+                let elem_size = values::byte_size(&elem_ty) as i32;
+                if let Some(&list_local) = self.var_map.get(&target.0) {
+                    let tmp = self.scratch_for_ty(&elem_ty);
+                    let base = self.scratch.alloc_i32();
+                    let end_i32 = self.scratch.alloc_i32();
+
+                    wasm!(self.func, { local_get(list_local); i32_const(4); i32_add; local_set(base); });
+                    self.emit_expr(end);
+                    if matches!(&end.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
+                    wasm!(self.func, { local_set(end_i32); });
+
+                    // tmp = xs[0]
+                    wasm!(self.func, { local_get(base); });
+                    self.emit_load_at(&elem_ty, 0);
+                    self.emit_set_scratch(tmp, &elem_ty);
+
+                    // memory.copy: dst=base, src=base+elem_size, len=end*elem_size
+                    wasm!(self.func, {
+                        local_get(base);
+                        local_get(base); i32_const(elem_size); i32_add;
+                        local_get(end_i32); i32_const(elem_size); i32_mul;
+                        memory_copy;
+                    });
+
+                    // xs[end] = tmp
+                    wasm!(self.func, { local_get(base); local_get(end_i32); i32_const(elem_size); i32_mul; i32_add; });
+                    self.emit_get_scratch(tmp, &elem_ty);
+                    self.emit_store_at(&elem_ty, 0);
+
+                    self.free_scratch_for_ty(tmp, &elem_ty);
+                    self.scratch.free_i32(base);
+                    self.scratch.free_i32(end_i32);
+                }
+            }
+            IrStmtKind::ListCopySlice { dst, src, len } => {
+                // dst[..n].copy_from_slice(&src[..n])
+                if let (Some(&dst_local), Some(&src_local)) = (self.var_map.get(&dst.0), self.var_map.get(&src.0)) {
+                    let elem_ty = self.list_elem_ty_var(*dst);
+                    let elem_size = values::byte_size(&elem_ty) as i32;
+
+                    // memory.copy: dst=dst_ptr+4, src=src_ptr+4, len=n*elem_size
+                    wasm!(self.func, {
+                        local_get(dst_local); i32_const(4); i32_add;
+                        local_get(src_local); i32_const(4); i32_add;
+                    });
+                    self.emit_expr(len);
+                    if matches!(&len.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
+                    wasm!(self.func, {
+                        i32_const(elem_size); i32_mul;
+                        memory_copy;
+                    });
+                }
             }
             IrStmtKind::MapInsert { target, key, value } => {
                 // m[k] = v  →  target = map.set(target, key, value)

@@ -13,7 +13,7 @@ pub struct PeepholePass;
 impl NanoPass for PeepholePass {
     fn name(&self) -> &str { "Peephole" }
     fn targets(&self) -> Option<Vec<Target>> { None } // all targets
-    fn depends_on(&self) -> Vec<&'static str> { vec!["CloneInsertion"] }
+    fn depends_on(&self) -> Vec<&'static str> { vec![] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
