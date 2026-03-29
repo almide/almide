@@ -722,10 +722,11 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }
     }
 
-    // Check if any top-level let needs dynamic initialization (non-constant values)
+    // Check if any top-level let needs dynamic initialization (non-constant values).
+    // LitStr needs init because string pointers are resolved at runtime via data section.
     let needs_init = program.top_lets.iter().any(|tl| !matches!(&tl.value.kind,
         crate::ir::IrExprKind::LitInt { .. } | crate::ir::IrExprKind::LitFloat { .. } |
-        crate::ir::IrExprKind::LitBool { .. } | crate::ir::IrExprKind::LitStr { .. }
+        crate::ir::IrExprKind::LitBool { .. }
     ));
     let init_globals_idx: Option<u32> = if needs_init {
         let void_ty = emitter.register_type(vec![], vec![]);
@@ -764,7 +765,10 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     let mut user_idx = 0;
     for func in &program.functions {
         let type_idx = user_meta[user_idx];
-        let compiled = functions::compile_function(&mut emitter, func, &program.var_table, type_idx);
+        // Pass init_globals_idx to main function so top-level lets get initialized
+        let is_main = func.name == "main" && !func.is_test;
+        let init_idx = if is_main { init_globals_idx } else { None };
+        let compiled = functions::compile_function_with_init(&mut emitter, func, &program.var_table, type_idx, init_idx);
         emitter.add_compiled(compiled);
         user_idx += 1;
     }

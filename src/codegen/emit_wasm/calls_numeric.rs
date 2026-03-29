@@ -14,9 +14,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.float_to_string); });
             }
             "to_int" => {
-                // truncate f64 → i64
+                // truncate f64 → i64 (saturating: NaN→0, ±Inf→i64::MAX/MIN)
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i64_trunc_f64_s; });
+                self.func.instruction(&wasm_encoder::Instruction::I64TruncSatF64S);
             }
             "round" => {
                 // Round half away from zero: copysign(floor(abs(x) + 0.5), x)

@@ -15,6 +15,16 @@ pub fn compile_function(
     _var_table: &VarTable,
     type_idx: u32,
 ) -> CompiledFunc {
+    compile_function_with_init(emitter, func, _var_table, type_idx, None)
+}
+
+pub fn compile_function_with_init(
+    emitter: &mut WasmEmitter,
+    func: &IrFunction,
+    _var_table: &VarTable,
+    type_idx: u32,
+    init_globals_idx: Option<u32>,
+) -> CompiledFunc {
     let param_count = func.params.len() as u32;
 
     // Map parameters to WASM local indices 0..N-1
@@ -50,8 +60,6 @@ pub fn compile_function(
     for _ in 0..scratch_i64_cap { local_decls.push((1, ValType::I64)); }
     let scratch_f64_base = param_count + local_decls.len() as u32;
     for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); }
-
-    let init_globals_idx: Option<u32> = None;
 
     let wasm_func = Function::new(local_decls);
 
