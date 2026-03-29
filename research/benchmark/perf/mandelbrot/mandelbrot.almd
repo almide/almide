@@ -1,0 +1,87 @@
+// mandelbrot — The Computer Language Benchmarks Game
+// Generate Mandelbrot set as PBM bitmap (P4 binary format).
+// Usage: almide run mandelbrot.almd -- 16000
+//
+// Optimized: incremental cr, 8-pixel batching, chunked parallelism.
+
+import env
+import io
+
+fn compute_chunk(y_start: Int, y_end: Int, n: Int, inv_n: Float) -> Bytes = {
+  let cr_step = 2.0 / inv_n
+  var result = bytes.new((y_end - y_start) * ((n + 7) / 8))
+  bytes.clear(result)
+
+  var y = y_start
+  while y < y_end {
+    let ci = 2.0 * float.from_int(y) / inv_n - 1.0
+    let bytes_per_row = (n + 7) / 8
+
+    // Process 8 pixels at a time
+    var x_byte = 0
+    while x_byte < bytes_per_row {
+      var byte_val = 0
+      let x_base = x_byte * 8
+      var bit = 0
+      while bit < 8 {
+        let x = x_base + bit
+        if x < n then {
+          let cr = -1.5 + float.from_int(x) * cr_step
+
+          var zr = 0.0
+          var zi = 0.0
+          var inside = true
+          var iter = 0
+          while iter < 50 and inside {
+            let zr2 = zr * zr
+            let zi2 = zi * zi
+            if zr2 + zi2 > 4.0 then inside = false
+            else {
+              zi = 2.0 * zr * zi + ci
+              zr = zr2 - zi2 + cr
+              iter = iter + 1
+            }
+          }
+
+          byte_val = byte_val * 2
+          if inside then byte_val = byte_val + 1 else byte_val = byte_val
+        } else {
+          byte_val = byte_val * 2
+        }
+        bit = bit + 1
+      }
+      bytes.push(result, byte_val)
+      x_byte = x_byte + 1
+    }
+    y = y + 1
+  }
+  result
+}
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = if list.len(args) > 0 then {
+    match list.get(args, 0) {
+      some(s) => match int.parse(s) { ok(v) => v, err(_) => 200 },
+      none => 200,
+    }
+  } else 200
+
+  io.write(bytes.from_string("P4\n${int.to_string(n)} ${int.to_string(n)}\n"))
+
+  let inv_n = float.from_int(n)
+
+  // Chunked parallelism: ~64 tasks instead of n tasks
+  let n_chunks = if n < 64 then n else 64
+  let rows_per_chunk = n / n_chunks
+
+  let chunks = fan.map(list.range(0, n_chunks), (chunk_idx) => {
+    let y_start = chunk_idx * rows_per_chunk
+    let y_end = if chunk_idx == n_chunks - 1 then n else y_start + rows_per_chunk
+    ok(compute_chunk(y_start, y_end, n, inv_n))
+  })
+
+  for chunk in chunks {
+    io.write(chunk)
+  }
+}
