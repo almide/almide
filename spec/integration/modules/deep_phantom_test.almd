@@ -1,0 +1,14 @@
+// ============================================================
+// Deep Phantom Dependency Error Test
+// ============================================================
+// EXPECTED: Compile error — undefined variable 'dmod_d'
+//
+// dmod_b imports dmod_d internally, but this file only imports dmod_b.
+// Accessing dmod_d.utils (transitive dependency + submodule) must fail.
+// This extends phantom_dep_error_test.almd to cover submodule access.
+
+import dmod_b
+
+fn main() -> Unit =
+  let x = dmod_d.utils.format_level(0)
+  x

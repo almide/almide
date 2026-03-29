@@ -467,13 +467,22 @@ impl FuncCompiler<'_> {
                         self.emit_call(&target, args, _ret_ty);
                     }
                     _ => {
-                        // Try Type.method dispatch (protocol implementations, e.g. Val.double)
-                        let qualified = format!("{}.{}", module, func);
-                        if let Some(&func_idx) = self.emitter.func_map.get(qualified.as_str()) {
+                        // Try user module function: almide_rt_{module}_{func}
+                        let mod_ident = module.as_str().replace('.', "_");
+                        let func_ident = func.as_str().replace('.', "_");
+                        let prefixed = format!("almide_rt_{}_{}", mod_ident, func_ident);
+                        if let Some(&func_idx) = self.emitter.func_map.get(&prefixed) {
                             for arg in args { self.emit_expr(arg); }
                             wasm!(self.func, { call(func_idx); });
                         } else {
-                            self.emit_stub_call(args);
+                            // Try Type.method dispatch (protocol implementations)
+                            let qualified = format!("{}.{}", module, func);
+                            if let Some(&func_idx) = self.emitter.func_map.get(qualified.as_str()) {
+                                for arg in args { self.emit_expr(arg); }
+                                wasm!(self.func, { call(func_idx); });
+                            } else {
+                                self.emit_stub_call(args);
+                            }
                         }
                     }
                 }

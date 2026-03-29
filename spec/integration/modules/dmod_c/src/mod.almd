@@ -2,3 +2,5 @@ import dmod_d
 
 fn from_c() -> String = "C says: " + dmod_d.shared()
 fn c_value() -> Int = dmod_d.value() + 1
+fn make_c_logger() -> Logger = dmod_d.make_logger("C", 2)
+fn process_logger(l: Logger) -> String = "processed: " + dmod_d.log_name(l)

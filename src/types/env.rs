@@ -20,6 +20,9 @@ pub struct TypeEnv {
     pub constructors: std::collections::HashMap<Sym, (Sym, VariantCase)>,
     /// User-defined module names (for distinguishing from stdlib in module calls)
     pub user_modules: std::collections::HashSet<Sym>,
+    /// User modules directly imported by the current compilation unit.
+    /// Subset of user_modules. Used to enforce module boundaries (no phantom deps).
+    pub imported_user_modules: std::collections::HashSet<Sym>,
     /// Stdlib modules available in scope (Tier 1 implicit + explicitly imported)
     pub imported_stdlib: std::collections::HashSet<Sym>,
 
@@ -75,6 +78,7 @@ impl TypeEnv {
             effect_fns: std::collections::HashSet::new(),
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
+            imported_user_modules: std::collections::HashSet::new(),
             imported_stdlib: {
                 let mut s = std::collections::HashSet::new();
                 // Tier 1: implicit imports (core type modules)

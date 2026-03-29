@@ -167,6 +167,9 @@ fn collect_defined_vars_stmts(stmts: &[IrStmt], defined: &mut HashSet<VarId>) {
     for stmt in stmts {
         match &stmt.kind {
             IrStmtKind::Bind { var, .. } => { defined.insert(*var); }
+            IrStmtKind::BindDestructure { pattern, .. } => {
+                collect_pattern_defined_vars(pattern, defined);
+            }
             IrStmtKind::Assign { var, .. } => {
                 // `var x` assigned inside the loop — x is loop-modified
                 defined.insert(*var);
@@ -178,6 +181,28 @@ fn collect_defined_vars_stmts(stmts: &[IrStmt], defined: &mut HashSet<VarId>) {
             }
             _ => {}
         }
+    }
+}
+
+/// Collect VarIds bound by an IrPattern (tuple destructuring, constructor patterns, etc.).
+fn collect_pattern_defined_vars(pat: &IrPattern, defined: &mut HashSet<VarId>) {
+    match pat {
+        IrPattern::Bind { var, .. } => { defined.insert(*var); }
+        IrPattern::Constructor { args, .. } => {
+            for a in args { collect_pattern_defined_vars(a, defined); }
+        }
+        IrPattern::Tuple { elements } => {
+            for e in elements { collect_pattern_defined_vars(e, defined); }
+        }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
+            collect_pattern_defined_vars(inner, defined);
+        }
+        IrPattern::RecordPattern { fields, .. } => {
+            for f in fields {
+                if let Some(p) = &f.pattern { collect_pattern_defined_vars(p, defined); }
+            }
+        }
+        _ => {}
     }
 }
 

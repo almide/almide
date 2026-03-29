@@ -1,0 +1,162 @@
+// codegen_capture_clone_test — Variables captured by closures and reused afterward,
+// ensuring CaptureClonePass correctly inserts pre-clones
+
+// ── Capture + use after in for loop ──
+
+test "capture then use in for loop" {
+  var result: List[String] = []
+  let items = ["a", "b", "c"]
+  for item in items {
+    let tagged = item + "_tag"
+    let _found = list.filter(items, (x) => x == item)
+    result = result + [tagged]
+  }
+  assert_eq(result, ["a_tag", "b_tag", "c_tag"])
+}
+
+test "outer variable captured in for-loop closure" {
+  let prefix = "item"
+  var labels: List[String] = []
+  for i in [1, 2, 3] {
+    let label = list.map([i], (x) => prefix + "_" + int.to_string(x))
+    labels = labels + label
+  }
+  assert_eq(labels, ["item_1", "item_2", "item_3"])
+  assert_eq(prefix, "item")
+}
+
+// ── Same variable captured by two closures sequentially ──
+
+test "variable in two sequential closures" {
+  let tag = "v"
+  let xs = ["a", "b"]
+  let ys = ["c", "d"]
+  let r1 = list.map(xs, (x) => tag + x)
+  let r2 = list.map(ys, (y) => tag + y)
+  assert_eq(r1, ["va", "vb"])
+  assert_eq(r2, ["vc", "vd"])
+}
+
+test "variable in closure then used directly" {
+  let name = "hello"
+  let items = [1, 2, 3]
+  let mapped = list.map(items, (x) => name + int.to_string(x))
+  let direct = name + "_end"
+  assert_eq(mapped, ["hello1", "hello2", "hello3"])
+  assert_eq(direct, "hello_end")
+}
+
+// ── Three closures capturing the same variable ──
+
+test "variable captured by three closures" {
+  let sep = "-"
+  let a = list.map(["x", "y"], (s) => s + sep + "a")
+  let b = list.map(["x", "y"], (s) => s + sep + "b")
+  let c = list.map(["x", "y"], (s) => s + sep + "c")
+  assert_eq(a, ["x-a", "y-a"])
+  assert_eq(b, ["x-b", "y-b"])
+  assert_eq(c, ["x-c", "y-c"])
+}
+
+// ── Closure capturing list variable ──
+
+test "list captured by closure and reused" {
+  let data = [10, 20, 30]
+  let doubled = list.map(data, (x) => x * 2)
+  let filtered = list.filter(data, (x) => x > 15)
+  let sum = list.sum(data)
+  assert_eq(doubled, [20, 40, 60])
+  assert_eq(filtered, [20, 30])
+  assert_eq(sum, 60)
+}
+
+// ── Closure capturing record variable ──
+
+test "record captured by closure and reused" {
+  let config = { prefix: "log", level: 2 }
+  let items = ["a", "b"]
+  let tagged = list.map(items, (x) => config.prefix + ":" + x)
+  let same_prefix = config.prefix
+  assert_eq(tagged, ["log:a", "log:b"])
+  assert_eq(same_prefix, "log")
+  assert_eq(config.level, 2)
+}
+
+// ── Capture inside nested closures ──
+
+test "capture in nested map operations" {
+  let multiplier = 10
+  let matrix = [[1, 2], [3, 4]]
+  let result = list.map(matrix, (row) =>
+    list.map(row, (x) => x * multiplier)
+  )
+  assert_eq(result, [[10, 20], [30, 40]])
+  assert_eq(multiplier, 10)
+}
+
+// ── For loop with closure + post-loop use of iterated collection ──
+
+test "iterate list then use it after" {
+  let names = ["alice", "bob"]
+  var greetings: List[String] = []
+  for name in names {
+    let upper = string.to_upper(name)
+    let greeting = list.map([upper], (u) => "Hello, " + u)
+    greetings = greetings + greeting
+  }
+  assert_eq(greetings, ["Hello, ALICE", "Hello, BOB"])
+  assert_eq(list.len(names), 2)
+  assert_eq(names, ["alice", "bob"])
+}
+
+// ── Tuple destructure captured by closure ──
+
+test "destructured variable captured by closure" {
+  let (first, second) = ("hello", "world")
+  let items = [1, 2]
+  let r1 = list.map(items, (x) => first + int.to_string(x))
+  let r2 = list.map(items, (x) => second + int.to_string(x))
+  let combined = first + " " + second
+  assert_eq(r1, ["hello1", "hello2"])
+  assert_eq(r2, ["world1", "world2"])
+  assert_eq(combined, "hello world")
+}
+
+// ── Closure in filter + closure in map on same data ──
+
+test "filter and map closures on same list" {
+  let threshold = 3
+  let data = [1, 2, 3, 4, 5]
+  let above = list.filter(data, (x) => x > threshold)
+  let labeled = list.map(data, (x) =>
+    if x > threshold then "high" else "low"
+  )
+  assert_eq(above, [4, 5])
+  assert_eq(labeled, ["low", "low", "low", "high", "high"])
+  assert_eq(list.len(data), 5)
+}
+
+// ── Multiple variables captured in same closure ──
+
+test "multiple captures in one closure" {
+  let base = 100
+  let scale = 2
+  let items = [1, 2, 3]
+  let result = list.map(items, (x) => base + x * scale)
+  assert_eq(result, [102, 104, 106])
+  assert_eq(base, 100)
+  assert_eq(scale, 2)
+}
+
+// ── Var accumulator + closure capture in loop ──
+
+test "var accumulator with closure in loop body" {
+  var total = 0
+  let weights = [1, 2, 3]
+  for w in weights {
+    let contributions = list.map([10, 20], (v) => v * w)
+    total = total + list.sum(contributions)
+  }
+  // w=1: 10+20=30, w=2: 20+40=60, w=3: 30+60=90 => 180
+  assert_eq(total, 180)
+}

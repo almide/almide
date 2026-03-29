@@ -1,0 +1,56 @@
+// Submodule call tests
+// Verify direct access to submodule functions at various nesting depths.
+
+import dmod_d
+import dmod_b
+
+// ── 2-level: package.function ──
+
+test "submodule: top-level function" {
+  assert_eq(dmod_d.shared(), "from D")
+}
+
+test "submodule: top-level value" {
+  assert_eq(dmod_d.value(), 42)
+}
+
+// ── 3-level: package.submodule.function ──
+
+test "submodule: 3-level utils call" {
+  assert_eq(dmod_d.utils.format_level(0), "DEBUG")
+  assert_eq(dmod_d.utils.format_level(1), "INFO")
+  assert_eq(dmod_d.utils.format_level(2), "WARN")
+  assert_eq(dmod_d.utils.format_level(99), "ERROR")
+}
+
+// ── 4-level: package.dir.file.function ──
+
+test "submodule: 4-level nested deep call" {
+  assert_eq(dmod_d.nested.deep.greet("x"), "hello from deep: x")
+  assert_eq(dmod_d.nested.deep.greet(""), "hello from deep: ")
+}
+
+// ── Mix top-level and submodule in same expression ──
+
+test "submodule: top-level and submodule in one expression" {
+  let level = dmod_d.value() - 42
+  let label = dmod_d.utils.format_level(level)
+  assert_eq(label, "DEBUG")
+}
+
+test "submodule: type from top-level used with submodule" {
+  let logger = dmod_d.make_logger("sub-test", 2)
+  let name = dmod_d.log_name(logger)
+  let level_str = dmod_d.utils.format_level(2)
+  assert_eq(name, "sub-test")
+  assert_eq(level_str, "WARN")
+}
+
+// ── Submodule through diamond dependency ──
+
+test "submodule: B uses D, then access D submodule directly" {
+  let from_b = dmod_b.from_b()
+  let level = dmod_d.utils.format_level(1)
+  assert_eq(from_b, "B says: from D")
+  assert_eq(level, "INFO")
+}

@@ -699,6 +699,29 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }
     }
 
+    // Register module functions (user packages, not stdlib)
+    let mut module_func_meta: Vec<(usize, usize, u32)> = Vec::new(); // (module_idx, func_idx, type_idx)
+    for (mi, module) in program.modules.iter().enumerate() {
+        let mod_ident = module.versioned_name
+            .map(|v| v.to_string().replace('.', "_"))
+            .unwrap_or_else(|| module.name.to_string().replace('.', "_"));
+        for (fi, func) in module.functions.iter().enumerate() {
+            let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");
+            let prefixed_name = format!("almide_rt_{}_{}", mod_ident, func_name_sanitized);
+            let params: Vec<ValType> = func.params.iter()
+                .filter_map(|p| values::ty_to_valtype(&p.ty))
+                .collect();
+            let results = values::ret_type(&func.ret_ty);
+            let type_idx = emitter.register_type(params, results);
+            let func_idx = emitter.register_func(&prefixed_name, type_idx);
+            module_func_meta.push((mi, fi, type_idx));
+            user_func_indices.push(func_idx);
+            if func.is_effect {
+                emitter.effect_fns.insert(prefixed_name);
+            }
+        }
+    }
+
     // Check if any top-level let needs dynamic initialization (non-constant values)
     let needs_init = program.top_lets.iter().any(|tl| !matches!(&tl.value.kind,
         crate::ir::IrExprKind::LitInt { .. } | crate::ir::IrExprKind::LitFloat { .. } |
@@ -744,6 +767,14 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         let compiled = functions::compile_function(&mut emitter, func, &program.var_table, type_idx);
         emitter.add_compiled(compiled);
         user_idx += 1;
+    }
+
+    // Module functions (user packages)
+    for &(mi, fi, type_idx) in &module_func_meta {
+        let module = &program.modules[mi];
+        let func = &module.functions[fi];
+        let compiled = functions::compile_function(&mut emitter, func, &module.var_table, type_idx);
+        emitter.add_compiled(compiled);
     }
 
     // Init globals (dynamic top-level let initialization, must come before test runner)

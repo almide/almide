@@ -420,7 +420,15 @@ pub fn lower_module(
     env: &TypeEnv,
     versioned_name: Option<String>,
 ) -> IrModule {
-    let ir_prog = lower_program_with_prefix(prog, expr_types, env, Some(name));
+    let mut ir_prog = lower_program_with_prefix(prog, expr_types, env, Some(name));
+    // Rename top_let variables with module prefix so codegen emits globally unique names.
+    // Functions reference these via VarId, so renaming in the VarTable propagates everywhere.
+    let mod_ident = versioned_name.as_deref().unwrap_or(name).replace('.', "_");
+    for tl in &ir_prog.top_lets {
+        let old_name = ir_prog.var_table.get(tl.var).name;
+        let new_name = format!("ALMIDE_RT_{}_{}", mod_ident.to_uppercase(), old_name.as_str().to_uppercase());
+        ir_prog.var_table.entries[tl.var.0 as usize].name = sym(&new_name);
+    }
     IrModule {
         name: sym(name),
         versioned_name: versioned_name.map(|v| sym(&v)),

@@ -1,0 +1,72 @@
+// Diamond dependency test
+// Structure: this file → dmod_b → dmod_d (+ dmod_d.utils submodule)
+//                       → dmod_c → dmod_d
+// dmod_d is shared (loaded once)
+
+import dmod_b
+import dmod_c
+import dmod_d
+
+// ── Phase 1: Symbol resolution — no collisions ──
+
+test "diamond: B calls D" {
+  assert_eq(dmod_b.from_b(), "B says: from D")
+}
+
+test "diamond: C calls D" {
+  assert_eq(dmod_c.from_c(), "C says: from D")
+}
+
+test "diamond: D called directly" {
+  assert_eq(dmod_d.shared(), "from D")
+}
+
+test "diamond: D value consistent" {
+  assert_eq(dmod_c.c_value(), dmod_d.value() + 1)
+}
+
+// ── Phase 2: Type identity — D type is the same through B and C ──
+
+test "diamond: B creates D Logger type" {
+  let logger = dmod_b.make_b_logger()
+  assert_eq(dmod_d.log_name(logger), "B")
+}
+
+test "diamond: C creates D Logger type" {
+  let logger = dmod_c.make_c_logger()
+  assert_eq(dmod_d.log_name(logger), "C")
+}
+
+test "diamond: B Logger passed to C function" {
+  let logger = dmod_b.make_b_logger()
+  let result = dmod_c.process_logger(logger)
+  assert_eq(result, "processed: B")
+}
+
+test "diamond: C Logger passed to B function" {
+  let logger = dmod_c.make_c_logger()
+  let result = dmod_b.read_logger(logger)
+  assert_eq(result, "C")
+}
+
+test "diamond: direct D Logger works with both B and C" {
+  let logger = dmod_d.make_logger("direct", 0)
+  assert_eq(dmod_b.read_logger(logger), "direct")
+  let logger2 = dmod_d.make_logger("direct2", 0)
+  assert_eq(dmod_c.process_logger(logger2), "processed: direct2")
+}
+
+// ── Phase 3: Submodule through diamond ──
+
+test "diamond: D submodule called directly" {
+  assert_eq(dmod_d.utils.format_level(0), "DEBUG")
+  assert_eq(dmod_d.utils.format_level(1), "INFO")
+  assert_eq(dmod_d.utils.format_level(2), "WARN")
+  assert_eq(dmod_d.utils.format_level(99), "ERROR")
+}
+
+// ── Phase 4: Deep nested submodule (4-level dot: pkg.dir.file.func) ──
+
+test "diamond: 4-level dot call through nested dir" {
+  assert_eq(dmod_d.nested.deep.greet("world"), "hello from deep: world")
+}

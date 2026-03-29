@@ -241,37 +241,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
         // ── Pipe: desugar `a |> f(b)` → `f(a, b)` ──
         ast::Expr::Pipe { left, right, .. } => {
-            let ir_left = lower_expr(ctx, left);
-            match right.as_ref() {
-                ast::Expr::Call { callee, args, type_args, .. } => {
-                    // Pipe inserts left as first argument
-                    let mut all_args = vec![ir_left];
-                    all_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
-                    let target = lower_call_target(ctx, callee);
-                    let ta = type_args.as_ref().map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
-                    // If pipe result type is Unknown, try to infer from callee's return type
-                    let resolved_ty = if matches!(ty, Ty::Unknown) {
-                        if let CallTarget::Named { name } = &target {
-                            ctx.env.functions.get(name)
-                                .map(|f| f.ret.clone())
-                                .unwrap_or(ty)
-                        } else { ty }
-                    } else { ty };
-                    ctx.mk(IrExprKind::Call { target, args: all_args, type_args: ta }, resolved_ty, span)
-                }
-                // Bare function name: `a |> f` → `f(a)`
-                ast::Expr::Ident { .. } | ast::Expr::Member { .. } => {
-                    let target = lower_call_target(ctx, right);
-                    ctx.mk(IrExprKind::Call { target, args: vec![ir_left], type_args: vec![] }, ty, span)
-                }
-                _ => {
-                    let ir_right = lower_expr(ctx, right);
-                    ctx.mk(IrExprKind::Call {
-                        target: CallTarget::Computed { callee: Box::new(ir_right) },
-                        args: vec![ir_left], type_args: vec![],
-                    }, ty, span)
-                }
-            }
+            lower_pipe(ctx, left, right, ty, span)
         }
 
         // ── Compose: desugar `f >> g` → `(x) => g(f(x))` ──
@@ -424,5 +394,69 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::Expr::Todo { message, .. } => ctx.mk(IrExprKind::Todo { message: message.clone() }, ty, span),
         ast::Expr::Error { .. } => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
         ast::Expr::Placeholder { .. } => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
+    }
+}
+
+/// Lower pipe expression, unwrapping postfix operators (??, !, ?) on the RHS
+/// so the pipe targets the inner Call. e.g. `xs |> list.find(p) ?? fallback`
+/// becomes `list.find(xs, p) ?? fallback` rather than treating `??` as part of the pipe target.
+fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> IrExpr {
+    match right {
+        // Transparent postfix: pipe into inner, then wrap with the operator
+        ast::Expr::UnwrapOr { expr: inner, fallback, .. } => {
+            // The inner pipe result is Option[ty] or Result[ty, _]; codegen needs the wrapper
+            // type on the piped expression to generate correct match (Some/None vs Ok/Err).
+            // Use the checker's resolved type for the inner expression.
+            let inner_checked_ty = ctx.expr_ty(inner);
+            let is_wrapper = inner_checked_ty.is_option()
+                || matches!(inner_checked_ty, Ty::Applied(TypeConstructorId::Result, _));
+            let inner_ty = if is_wrapper {
+                inner_checked_ty
+            } else {
+                Ty::Applied(TypeConstructorId::Option, vec![ty.clone()])
+            };
+            let piped = lower_pipe(ctx, left, inner, inner_ty, span.clone());
+            let ir_fallback = lower_expr(ctx, fallback);
+            ctx.mk(IrExprKind::UnwrapOr { expr: Box::new(piped), fallback: Box::new(ir_fallback) }, ty, span)
+        }
+        ast::Expr::Unwrap { expr: inner, .. } => {
+            let inner_ty = match &ty {
+                _ => Ty::result(ty.clone(), Ty::String),
+            };
+            let piped = lower_pipe(ctx, left, inner, inner_ty, span.clone());
+            ctx.mk(IrExprKind::Unwrap { expr: Box::new(piped) }, ty, span)
+        }
+        ast::Expr::Try { expr: inner, .. } => {
+            let piped = lower_pipe(ctx, left, inner, ty.clone(), span.clone());
+            ctx.mk(IrExprKind::ToOption { expr: Box::new(piped) }, ty, span)
+        }
+
+        // Direct pipe targets
+        ast::Expr::Call { callee, args, type_args, .. } => {
+            let ir_left = lower_expr(ctx, left);
+            let mut all_args = vec![ir_left];
+            all_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
+            let target = lower_call_target(ctx, callee);
+            let ta = type_args.as_ref().map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
+            let resolved_ty = if matches!(ty, Ty::Unknown) {
+                if let CallTarget::Named { name } = &target {
+                    ctx.env.functions.get(name).map(|f| f.ret.clone()).unwrap_or(ty)
+                } else { ty }
+            } else { ty };
+            ctx.mk(IrExprKind::Call { target, args: all_args, type_args: ta }, resolved_ty, span)
+        }
+        ast::Expr::Ident { .. } | ast::Expr::Member { .. } => {
+            let ir_left = lower_expr(ctx, left);
+            let target = lower_call_target(ctx, right);
+            ctx.mk(IrExprKind::Call { target, args: vec![ir_left], type_args: vec![] }, ty, span)
+        }
+        _ => {
+            let ir_left = lower_expr(ctx, left);
+            let ir_right = lower_expr(ctx, right);
+            ctx.mk(IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(ir_right) },
+                args: vec![ir_left], type_args: vec![],
+            }, ty, span)
+        }
     }
 }

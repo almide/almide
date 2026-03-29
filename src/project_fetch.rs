@@ -178,6 +178,14 @@ fn fetch_deps_recursive(
             continue;
         }
 
+        // Detect different major versions of the same package (diamond with version split)
+        if let Some(existing) = fetched.iter().find(|f| f.pkg_id.name == pkg_id.name && f.pkg_id.major != pkg_id.major) {
+            eprintln!("warning: package '{}' required at two different major versions", pkg_id.name);
+            eprintln!("  → {} (already loaded)", existing.pkg_id);
+            eprintln!("  → {} (newly required)", pkg_id);
+            eprintln!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major);
+        }
+
         let visit_key = format!("{}@{}", dep.git, version_str);
         if visited.contains(&visit_key) {
             continue;

@@ -41,11 +41,13 @@ pub struct RenderContext<'a> {
     pub type_aliases: std::collections::HashMap<crate::intern::Sym, crate::types::Ty>,
     /// Use minimal generic bounds (Clone only) for bundled .almd module functions.
     pub minimal_generic_bounds: bool,
+    /// Emit `#[repr(C)]` on structs/enums for stable C ABI layout.
+    pub repr_c: bool,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), minimal_generic_bounds: false }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), minimal_generic_bounds: false, repr_c: false }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -96,6 +98,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         ann: ctx.ann.clone(),
         type_aliases: ctx.type_aliases.clone(),
         minimal_generic_bounds: ctx.minimal_generic_bounds,
+        repr_c: ctx.repr_c,
     };
 
     // Extern fn: emit import/use via template
@@ -240,6 +243,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         ann: ctx.ann.clone(),
         type_aliases,
         minimal_generic_bounds: false,
+        repr_c: ctx.repr_c,
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
@@ -269,13 +273,15 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                 .map(|(i, name)| {
                     let type_s = format!("T{}", i);
                     ctx.templates.render_with("struct_field", None, &[], &[("name", name.as_str()), ("type", type_s.as_str())])
-                        .unwrap_or_else(|| format!("{}: T{}", name, i))
+                        .unwrap_or_else(|| format!("    pub {}: T{}", name, i))
                 })
                 .collect();
             let fields_str = fields.join("\n");
             let full_name = format!("{}<{}>", struct_name, generics.join(", "));
-            parts.push(ctx.templates.render_with("struct_decl", None, &[], &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
-                .unwrap_or_else(|| format!("struct {} {{ {} }}", struct_name, fields_str)));
+            let decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
+            let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
+            parts.push(ctx.templates.render_with("struct_decl", None, &decl_attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
+                .unwrap_or_else(|| format!("{}pub struct {} {{\n{}\n}}", repr_prefix, struct_name, fields_str)));
         }
     }
 
@@ -324,7 +330,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         // Bundled .almd modules use minimal generic bounds (Clone only)
         // because their functions don't require PartialEq/PartialOrd/Debug.
         let is_bundled = crate::stdlib::get_bundled_source(&module.name).is_some();
-        let mod_ctx = RenderContext {
+        let mut mod_ctx = RenderContext {
             templates: ctx.templates,
             var_table: &module.var_table,
             indent: ctx.indent,
@@ -333,18 +339,37 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             ann: ctx.ann.clone(),
             type_aliases: ctx.type_aliases.clone(),
             minimal_generic_bounds: is_bundled,
+            repr_c: ctx.repr_c,
         };
         // Module type decls
         for td in &module.type_decls {
             parts.push(render_type_decl(&mod_ctx, td));
         }
-        // Module functions (prefixed with module name)
+        // Module functions (prefixed with module name or versioned name)
+        let mod_ident = module.versioned_name
+            .map(|v| v.replace('.', "_"))
+            .unwrap_or_else(|| module.name.replace('.', "_"));
+        // Module top-level lets (names already prefixed during lowering)
+        for tl in &module.top_lets {
+            let name = mod_ctx.var_table.get(tl.var).name.to_string();
+            let ty_str = render_type_fn(&mod_ctx, &tl.ty);
+            let val_str = render_expr_fn(&mod_ctx, &tl.value);
+            if matches!(tl.kind, TopLetKind::Lazy) {
+                mod_ctx.ann.lazy_vars.insert(tl.var);
+            }
+            let construct = match tl.kind {
+                TopLetKind::Const => "top_let_const",
+                TopLetKind::Lazy => "top_let_lazy",
+            };
+            let rendered = mod_ctx.templates.render_with(construct, None, &[], &[("name", name.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
+                .unwrap_or_else(|| format!("const {} = {};", name, val_str));
+            parts.push(rendered);
+        }
         for func in &module.functions {
             let rendered = render_function(&mod_ctx, func);
-            // Rename: fn name → fn modulename_name (to match almide_rt_module_func naming)
             let prefixed = rendered.replacen(
                 &format!("fn {}", func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
-                &format!("fn almide_rt_{}_{}", module.name, func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
+                &format!("fn almide_rt_{}_{}", mod_ident, func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
                 1
             );
             parts.push(prefixed);

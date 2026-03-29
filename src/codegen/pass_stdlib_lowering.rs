@@ -45,12 +45,36 @@ impl NanoPass for StdlibLoweringPass {
                 tl.value = resolve_unresolved_ufcs(std::mem::take(&mut tl.value), &sibling_names);
             }
         }
+        // Build versioned name mapping: original module name → versioned name
+        // e.g., "json" → "json_v2" when versioned_name is set
+        let version_map: std::collections::HashMap<String, String> = program.modules.iter()
+            .filter_map(|m| m.versioned_name.map(|v| (m.name.to_string(), v.to_string())))
+            .collect();
+        // Rewrite CallTarget::Module names to versioned names in all function bodies
+        if !version_map.is_empty() {
+            for func in &mut program.functions {
+                func.body = rewrite_module_names(std::mem::take(&mut func.body), &version_map);
+            }
+            for tl in &mut program.top_lets {
+                tl.value = rewrite_module_names(std::mem::take(&mut tl.value), &version_map);
+            }
+            for module in &mut program.modules {
+                for func in &mut module.functions {
+                    func.body = rewrite_module_names(std::mem::take(&mut func.body), &version_map);
+                }
+                for tl in &mut module.top_lets {
+                    tl.value = rewrite_module_names(std::mem::take(&mut tl.value), &version_map);
+                }
+            }
+        }
         // Prefix intra-module Named calls to match renamed definitions
         for module in &mut program.modules {
             let sibling_names: Vec<String> = module.functions.iter()
                 .map(|f| f.name.to_string())
                 .collect();
-            let mod_name = module.name.to_string();
+            let mod_name = module.versioned_name
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| module.name.to_string());
             for func in &mut module.functions {
                 func.body = prefix_intra_module_calls(std::mem::take(&mut func.body), &mod_name, &sibling_names);
             }
@@ -68,11 +92,10 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
 
     let kind = match expr.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
-            // Bundled .almd modules (e.g., option) are compiled as regular modules.
-            // Don't rewrite their calls to runtime functions — leave as Module calls.
-            if crate::stdlib::get_bundled_source(&module).is_some()
-                && !crate::stdlib::is_stdlib_module(&module)
-            {
+            // Non-stdlib modules (bundled .almd + user packages): leave as Module calls.
+            // They are rendered by the walker directly, not converted to Named calls.
+            let is_stdlib = crate::stdlib::is_stdlib_module(&module);
+            if !is_stdlib {
                 let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
                 return IrExpr {
                     kind: IrExprKind::Call {
@@ -91,7 +114,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             // Look up per-function transform table
             let info = arg_transforms::lookup(&module, &func);
             let rt_name = info.as_ref().map(|i| i.name.to_string())
-                .unwrap_or_else(|| format!("almide_rt_{}_{}", module, func));
+                .unwrap_or_else(|| format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_")));
 
             // Fill missing optional args with OptionNone
             let total_params = info.as_ref().map(|i| i.args.len()).unwrap_or(args.len());
@@ -670,7 +693,8 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
         {
             let IrExprKind::Call { target: CallTarget::Named { name }, args, type_args } = expr.kind else { unreachable!() };
             let sanitized = name.replace(' ', "_").replace('-', "_").replace('.', "_");
-            let prefixed = format!("almide_rt_{}_{}", mod_name, sanitized);
+            let mod_ident = mod_name.replace('.', "_");
+            let prefixed = format!("almide_rt_{}_{}", mod_ident, sanitized);
             let args = args.into_iter().map(|a| prefix_intra_module_calls(a, mod_name, siblings)).collect();
             IrExprKind::Call {
                 target: CallTarget::Named { name: prefixed.into() },
@@ -681,7 +705,8 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
         IrExprKind::FnRef { ref name } if siblings.iter().any(|s| s == &**name) => {
             let IrExprKind::FnRef { name } = expr.kind else { unreachable!() };
             let sanitized = name.replace(' ', "_").replace('-', "_").replace('.', "_");
-            IrExprKind::FnRef { name: format!("almide_rt_{}_{}", mod_name, sanitized).into() }
+            let mod_ident = mod_name.replace('.', "_");
+            IrExprKind::FnRef { name: format!("almide_rt_{}_{}", mod_ident, sanitized).into() }
         }
         // Recurse into sub-expressions
         IrExprKind::Call { target, args, type_args } => {
@@ -808,4 +833,162 @@ fn prefix_stmts(stmts: Vec<IrStmt>, mod_name: &str, siblings: &[String]) -> Vec<
         };
         IrStmt { kind, span: s.span }
     }).collect()
+}
+
+/// Rewrite CallTarget::Module names using versioned name mapping.
+/// e.g., CallTarget::Module { module: "json" } → CallTarget::Module { module: "json_v2" }
+fn rewrite_module_names(expr: IrExpr, map: &std::collections::HashMap<String, String>) -> IrExpr {
+    use crate::intern::sym;
+    let ty = expr.ty.clone();
+    let span = expr.span;
+    let kind = match expr.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
+            let new_module = map.get(&*module).map(|v| sym(v)).unwrap_or(module);
+            let args = args.into_iter().map(|a| rewrite_module_names(a, map)).collect();
+            IrExprKind::Call { target: CallTarget::Module { module: new_module, func }, args, type_args }
+        }
+        IrExprKind::Call { target, args, type_args } => {
+            let args = args.into_iter().map(|a| rewrite_module_names(a, map)).collect();
+            let target = match target {
+                CallTarget::Method { object, method } => CallTarget::Method { object: Box::new(rewrite_module_names(*object, map)), method },
+                CallTarget::Computed { callee } => CallTarget::Computed { callee: Box::new(rewrite_module_names(*callee, map)) },
+                other => other,
+            };
+            IrExprKind::Call { target, args, type_args }
+        }
+        IrExprKind::Block { stmts, expr } => IrExprKind::Block {
+            stmts: stmts.into_iter().map(|s| rewrite_module_names_stmt(s, map)).collect(),
+            expr: expr.map(|e| Box::new(rewrite_module_names(*e, map))),
+        },
+        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
+            cond: Box::new(rewrite_module_names(*cond, map)),
+            then: Box::new(rewrite_module_names(*then, map)),
+            else_: Box::new(rewrite_module_names(*else_, map)),
+        },
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(rewrite_module_names(*body, map)), lambda_id,
+        },
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
+            var, var_tuple,
+            iterable: Box::new(rewrite_module_names(*iterable, map)),
+            body: body.into_iter().map(|s| rewrite_module_names_stmt(s, map)).collect(),
+        },
+        IrExprKind::Match { subject, arms } => IrExprKind::Match {
+            subject: Box::new(rewrite_module_names(*subject, map)),
+            arms: arms.into_iter().map(|arm| IrMatchArm {
+                pattern: arm.pattern,
+                guard: arm.guard.map(|g| rewrite_module_names(g, map)),
+                body: rewrite_module_names(arm.body, map),
+            }).collect(),
+        },
+        IrExprKind::While { cond, body } => IrExprKind::While {
+            cond: Box::new(rewrite_module_names(*cond, map)),
+            body: body.into_iter().map(|s| rewrite_module_names_stmt(s, map)).collect(),
+        },
+        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
+            parts: parts.into_iter().map(|p| match p {
+                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_module_names(expr, map) },
+                other => other,
+            }).collect(),
+        },
+        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
+            op, left: Box::new(rewrite_module_names(*left, map)), right: Box::new(rewrite_module_names(*right, map)),
+        },
+        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
+            op, operand: Box::new(rewrite_module_names(*operand, map)),
+        },
+        IrExprKind::List { elements } => IrExprKind::List {
+            elements: elements.into_iter().map(|e| rewrite_module_names(e, map)).collect(),
+        },
+        IrExprKind::Record { name, fields } => IrExprKind::Record {
+            name, fields: fields.into_iter().map(|(k, v)| (k, rewrite_module_names(v, map))).collect(),
+        },
+        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(rewrite_module_names(*expr, map)),
+            fallback: Box::new(rewrite_module_names(*fallback, map)),
+        },
+        IrExprKind::Member { object, field } => IrExprKind::Member {
+            object: Box::new(rewrite_module_names(*object, map)), field,
+        },
+        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
+            object: Box::new(rewrite_module_names(*object, map)),
+            index: Box::new(rewrite_module_names(*index, map)),
+        },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(rewrite_module_names(*object, map)),
+            key: Box::new(rewrite_module_names(*key, map)),
+        },
+        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
+            elements: elements.into_iter().map(|e| rewrite_module_names(e, map)).collect(),
+        },
+        IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
+            base: Box::new(rewrite_module_names(*base, map)),
+            fields: fields.into_iter().map(|(k, v)| (k, rewrite_module_names(v, map))).collect(),
+        },
+        IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
+            object: Box::new(rewrite_module_names(*object, map)), index,
+        },
+        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
+            entries: entries.into_iter().map(|(k, v)| (rewrite_module_names(k, map), rewrite_module_names(v, map))).collect(),
+        },
+        IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
+            start: Box::new(rewrite_module_names(*start, map)),
+            end: Box::new(rewrite_module_names(*end, map)),
+            inclusive,
+        },
+        IrExprKind::Fan { exprs } => IrExprKind::Fan {
+            exprs: exprs.into_iter().map(|e| rewrite_module_names(e, map)).collect(),
+        },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(rewrite_module_names(*expr, map)), field,
+        },
+        // Codegen wrapper nodes — must recurse into inner expressions
+        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow {
+            expr: Box::new(rewrite_module_names(*expr, map)), as_str, mutable,
+        },
+        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(rewrite_module_names(*expr, map)) },
+        IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
+            name, args: args.into_iter().map(|a| rewrite_module_names(a, map)).collect(),
+        },
+        other => other,
+    };
+    IrExpr { kind, ty, span }
+}
+
+fn rewrite_module_names_stmt(stmt: IrStmt, map: &std::collections::HashMap<String, String>) -> IrStmt {
+    let kind = match stmt.kind {
+        IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
+            var, mutability, ty, value: rewrite_module_names(value, map),
+        },
+        IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: rewrite_module_names(value, map) },
+        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: rewrite_module_names(expr, map) },
+        IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
+            cond: rewrite_module_names(cond, map),
+            else_: rewrite_module_names(else_, map),
+        },
+        IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
+            target, field, value: rewrite_module_names(value, map),
+        },
+        IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
+            target, index: rewrite_module_names(index, map), value: rewrite_module_names(value, map),
+        },
+        IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
+            target, key: rewrite_module_names(key, map), value: rewrite_module_names(value, map),
+        },
+        IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
+            pattern, value: rewrite_module_names(value, map),
+        },
+        other => other,
+    };
+    IrStmt { kind, span: stmt.span }
 }

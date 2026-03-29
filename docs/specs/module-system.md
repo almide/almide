@@ -1,437 +1,302 @@
-# Module System v2 Specification
+# Module System Specification
 
-> Verified by `exercises/mod-test/mod_system_test.almd` (25 tests) + error tests.
+> Last updated: 2026-03-29. Verified by `spec/integration/modules/` (25 tests + 4 error tests).
 
 ---
 
 ## 1. Package Structure
 
-A package is a directory with `.almd` source files under `src/`.
-
 ```
-mylib/
+mypackage/
+  almide.toml              [package] name = "mypackage", version = "0.1.0"
   src/
-    mod.almd          ← package top-level (optional)
-    parser.almd       ← sub-module: mylib.parser
-    formatter.almd    ← sub-module: mylib.formatter
-    http/
-      mod.almd        ← sub-namespace: mylib.http
-      client.almd     ← sub-module: mylib.http.client
+    mod.almd               パッケージのエントリポイント
+    utils.almd             サブモジュール → mypackage.utils
+    parser.almd            サブモジュール → mypackage.parser
+    bindings/              ディレクトリ = 名前空間（mod.almd 不要）
+      python.almd          サブモジュール → mypackage.bindings.python
+      go.almd              サブモジュール → mypackage.bindings.go
+      internal/
+        helpers.almd       サブモジュール → mypackage.bindings.internal.helpers
 ```
 
-### Rules
-
-- `mod.almd` defines the package's top-level namespace. If absent, the package has no top-level — only direct sub-module imports work.
-- Every sibling `.almd` file (excluding `mod.almd`, `lib.almd`, `main.almd`) becomes a sub-module named `pkg.filename`.
-- Subdirectories with a `mod.almd` create deeper sub-namespaces, scanned recursively to arbitrary depth.
-- Package identity is declared in `almide.toml`, not in source files. There is no `module` declaration.
+**ルール:**
+- `src/mod.almd` がパッケージのトップレベル。`import mypackage` → `mypackage.func()` で呼べる
+- 同階層の `.almd` ファイル（`mod.almd`, `lib.almd`, `main.almd` を除く）が自動的にサブモジュールになる
+- サブディレクトリは名前空間として機能する。`mod.almd` がなくてもドットパスの中間ノードになる
+- 再帰的に任意の深さまでスキャンされる
+- パッケージ名は `almide.toml` の `[package] name` で定義。ソースファイル内に module 宣言は不要
 
 ---
 
-## 2. Import Syntax
-
-```
-import pkg                      -- load package + all sub-namespaces
-import pkg.sub                  -- load specific sub-module only
-import pkg as alias             -- alias the entire package
-import pkg.sub as alias         -- alias a specific sub-module
-import self                     -- load own package entry point (mod.almd)
-import self as alias            -- load own entry point with alias
-import self.sub                 -- load sub-module within own package
-import self.sub as alias        -- load sub-module with alias
-```
-
-### Prohibited
-
-- `import pkg.*` (wildcard) — compile error.
-- Circular imports — detected at resolve time, compile error.
-
----
-
-## 3. Name Resolution
-
-### 3.1 Top-level Access
-
-```
-import mylib
-mylib.hello()          -- calls fn hello() in mylib/src/mod.almd
-```
-
-### 3.2 Sub-namespace Access
-
-```
-import mylib
-mylib.parser.parse(x)     -- calls fn parse() in mylib/src/parser.almd
-mylib.formatter.format(x) -- calls fn format() in mylib/src/formatter.almd
-```
-
-Importing a package with `import pkg` automatically loads all sub-namespaces. No separate `import pkg.sub` is needed.
-
-### 3.3 Deep Nesting (Arbitrary Depth)
-
-```
-import deeplib
-deeplib.hello()                -- 1 level
-deeplib.http.info()            -- 2 levels
-deeplib.http.client.get(url)   -- 3 levels
-```
-
-Resolution uses a `flatten_member_chain` algorithm: the AST member chain `a.b.c.func()` is flattened into segments `["a", "b", "c"]` + function `"func"`. The compiler tries progressively longer dotted paths (`a.b.c`, `a.b`, `a`) to find the matching module.
-
-### 3.4 Direct Sub-module Import
-
-```
-import mylib.parser
-parser.parse(x)        -- accessible by last segment name
-```
-
-When importing `pkg.sub` without an alias, the sub-module is accessible by its last path segment.
-
-### 3.5 Name Conflicts
-
-Different namespaces never conflict. These coexist without ambiguity:
-
-```
-mylib.add(1, 2)            -- from mod.almd
-mylib.parser.parse("x")   -- from parser.almd
-```
-
----
-
-## 4. Aliases
-
-### 4.1 Package Alias
-
-```
-import mylib as m
-m.hello()              -- top-level via alias
-m.parser.parse(x)      -- sub-module via alias
-m.add(1, 2)            -- functions with args via alias
-```
-
-Alias resolution applies to the first segment only. `m.parser.parse()` resolves `m → mylib`, then looks up `mylib.parser`.
-
-### 4.2 Sub-module Alias
-
-```
-import mylib.formatter as fmt
-fmt.format_upper(x)
-```
-
-### 4.3 Multiple Aliases
-
-Multiple aliases coexist in the same file without conflict:
-
-```
-import mylib as m
-import mylib.formatter as fmt
-m.hello()              -- works
-fmt.format_upper(x)    -- works independently
-```
-
-### 4.4 Duplicate Import Deduplication
-
-Importing the same module via different statements loads it only once:
-
-```
-import mylib
-import mylib as m
-mylib.add(5, 5)   -- works
-m.add(5, 5)       -- same module, also works
-```
-
----
-
-## 5. `import self` — Package Entry Point Access
-
-`import self` loads the package's own `src/mod.almd`, allowing `main.almd` to reference functions defined in the library entry point.
-
-### Motivation
-
-A package with both a library (`mod.almd`) and a CLI (`main.almd`) needs `main.almd` to access `mod.almd`'s pub functions. `import self.mod` is not possible because `mod` is a keyword. `import self` solves this.
-
-### Syntax
+## 2. Import
 
 ```almide
-// main.almd — access own package entry point
-import self                      // accessible as package name (from almide.toml)
-import self as grammar           // accessible via alias
-
-grammar.keyword_groups()         // calls pub fn from mod.almd
+import pkg                    // パッケージ全体 + 全サブモジュール
+import pkg.sub                // 特定のサブモジュールのみ
+import pkg as p               // エイリアス
+import self                   // 自パッケージの mod.almd
+import self.sub               // 自パッケージのサブモジュール
 ```
 
-### Resolution
+- `import pkg` でサブモジュール含め全て自動ロード。個別 import 不要
+- `import pkg.sub` は最後のセグメント名で参照可能: `sub.func()`
+- ワイルドカード `import pkg.*` は不可
+- 循環インポートはコンパイルエラー
 
-1. `import self` requires `src/mod.almd` to exist. If absent: compile error with hint.
-2. The module name defaults to the `name` field in `almide.toml`. If no alias and no `almide.toml`, falls back to `"self"`.
-3. With `as alias`, the alias takes precedence for code references — the canonical module name (package name) is used internally.
+---
 
-### Example: Library + CLI Package
-
-```
-almide-grammar/
-  almide.toml           [package] name = "almide_grammar"
-  src/
-    mod.almd            pub fn keyword_groups() -> List[KeywordGroup]
-    main.almd           import self as grammar
-```
+## 3. 呼び出し
 
 ```almide
-// mod.almd — library entry point (imported externally as almide_grammar)
-pub fn keyword_groups() -> List[KeywordGroup] = [...]
+import mypackage
 
-// main.almd — CLI
-import self as grammar
-effect fn main() -> Unit = {
-  for group in grammar.keyword_groups() {
-    println(group.category)
-  }
-}
+// 1段: トップレベル関数
+mypackage.version()
+
+// 2段: サブモジュール関数
+mypackage.utils.format(x)
+
+// 3段: ディレクトリ内サブモジュール
+mypackage.bindings.python.generate(iface)
+
+// N段: 任意の深さ
+mypackage.bindings.internal.helpers.escape(s)
 ```
 
-External consumers:
+AST の `Member` チェーン（`a.b.c.func()`）を末尾から辿り、`imported_user_modules` に登録されたモジュール名またはその子が存在する名前空間に一致する最長パスを見つけ、残りを関数名として解決する。
+
+---
+
+## 4. モジュール境界
+
+**直接 import したパッケージのみアクセス可能。推移的依存は不可視。**
+
 ```almide
-import almide_grammar
-almide_grammar.keyword_groups()
+import B       // B は内部で D を import している
+
+B.func()       // ✓ 直接 import した
+D.func()       // ✗ undefined variable 'D'
 ```
 
-### Errors
-
-| Case | Error |
-|---|---|
-| `import self` without `almide.toml` | `cannot resolve 'import self': no almide.toml found` |
-| `import self` without `src/mod.almd` | `cannot resolve 'import self': no src/mod.almd` |
+D を使いたければ `import D` を明示する。npm の phantom dependency 問題を防ぐ設計。
 
 ---
 
-## 6. Diamond Dependency
-
-When multiple packages depend on the same leaf package, it is loaded exactly once.
+## 5. ダイヤモンド依存
 
 ```
-main → dmod_b → dmod_d
-main → dmod_c → dmod_d
+main → B → D
+main → C → D
 ```
 
-`dmod_d` appears once in the compiled output. Both `dmod_b` and `dmod_c` reference the same module. Deduplication uses a `loaded_names: HashSet<String>` in the resolver.
+D は1回だけロードされ、1回だけコンパイル出力に含まれる。B と C は同じ D を参照する。
+
+```almide
+import B
+import C
+import D
+
+B.from_b()           // "B says: from D" — B 経由で D を呼ぶ
+C.from_c()           // "C says: from D" — C 経由で D を呼ぶ
+D.shared()           // "from D"         — 直接 D を呼ぶ
+```
+
+### 型の同一性
+
+D が定義した型は、B 経由でも C 経由でも同一の型として扱われる。
+
+```almide
+let logger = B.make_logger()     // D.Logger 型を返す
+C.process_logger(logger)         // ✓ B が作った D.Logger を C が受け取れる
+D.log_name(logger)               // ✓ 直接 D に渡すのも同じ型
+```
+
+### バージョン違いのダイヤモンド
+
+`PkgId(name, major)` で管理。同じ `(name, major)` は1つに統一（MVS: 最大の最小バージョンを選択）。異なる major は別モジュールとして共存し、codegen でシンボル名にバージョンが付く（`pkg_v1_func`, `pkg_v2_func`）。異なる major の同名型は互換性がない。
 
 ```
-import dmod_b
-import dmod_c
-import dmod_d
-
-dmod_b.from_b()    -- "B says: from D"  (B calls D internally)
-dmod_c.from_c()    -- "C says: from D"  (C calls D internally)
-dmod_d.shared()    -- "from D"           (direct access also works)
+B requires D v1.x → almide_rt_D_v1_func()
+C requires D v2.x → almide_rt_D_v2_func()
+D_v1.Logger ≠ D_v2.Logger
 ```
 
 ---
 
-## 7. Sub-module Imports
+## 6. 可視性
 
-Sub-modules can import other packages (both stdlib and user packages). Their imports are resolved recursively during the parent package's loading.
-
-```
-// mylib/src/formatter.almd
-fn format_upper(s: String) -> String = string.to_upper(s)   -- uses stdlib
-
-// mylib/src/utils.almd
-import extlib
-fn describe(s: String) -> String = extlib.pub_fn() ++ ": " ++ s   -- uses user package
-```
-
----
-
-## 8. Visibility
-
-Three visibility levels control access across module boundaries:
-
-| Modifier | Scope | Example |
+| 修飾子 | スコープ | 例 |
 |---|---|---|
-| `fn` | Public — accessible from anywhere | `fn pub_fn() -> String` |
-| `mod fn` | Same project only — not from external consumers | `mod fn internal() -> String` |
-| `local fn` | Same file only — not from any other module | `local fn helper() -> String` |
+| `fn` | public — どこからでもアクセス可 | `fn version() -> String` |
+| `mod fn` | 同一プロジェクト内のみ | `mod fn internal() -> String` |
+| `local fn` | 同一ファイル内のみ | `local fn helper() -> String` |
 
-### Enforcement
-
-External access to `mod fn` or `local fn` produces a compile error:
+外部から `mod fn` / `local fn` にアクセスするとコンパイルエラー:
 
 ```
-error: function 'mod_fn' is not accessible from module 'extlib'
-  hint: 'mod_fn' has restricted visibility and cannot be accessed from here
+error: function 'internal' is not accessible from module 'extlib'
+  hint: 'internal' has restricted visibility
 ```
-
-### Self-import Distinction
-
-The compiler tracks whether a module is a self-import (same project, via `import self.xxx`) or external. `is_self_import` is propagated through the module resolution pipeline as a boolean flag. `mod fn` is accessible when `is_self_import = true`.
 
 ---
 
-## 9. Effect Functions Across Modules
+## 7. `import self`
 
-Effect functions (`effect fn`) from external packages are callable in effect context:
+自パッケージの `src/mod.almd` を参照する。`main.almd` からライブラリ関数を呼ぶ場合に使う。
 
+```almide
+// main.almd
+import self as mylib
+mylib.exported_function()
 ```
-// effectlib/src/mod.almd
-effect fn read_config() -> Result[String, String] = ok("config_value")
-fn pure_fn() -> String = "pure"
 
-// caller.almd
-import effectlib
-effect fn main(_args: List[String]) -> Result[Unit, String] = {
-  let config = effectlib.read_config()   -- auto-unwrapped in effect context
-  effectlib.pure_fn()                     -- pure fn also callable
+`almide.toml` の `name` がデフォルトのモジュール名。`as` でエイリアス可。`src/mod.almd` が存在しない場合はエラー。
+
+---
+
+## 8. サブモジュールの依存解決
+
+サブモジュールは stdlib や他パッケージを自由に import できる。親パッケージのロード時に再帰的に解決される。
+
+```almide
+// mypackage/src/formatter.almd
+fn format_upper(s: String) -> String = string.to_upper(s)   // stdlib
+
+// mypackage/src/utils.almd
+import extlib
+fn describe(s: String) -> String = extlib.info() + ": " + s  // 他パッケージ
+```
+
+サブモジュール内の型チェックでは、そのサブモジュールが import した stdlib / ユーザーモジュールが正しく認識される。
+
+---
+
+## 9. 依存管理
+
+### almide.toml
+
+```toml
+[package]
+name = "myapp"
+version = "0.1.0"
+
+[dependencies]
+bindgen = { git = "https://github.com/almide/almide-bindgen.git", tag = "v0.1.0" }
+json = { git = "https://github.com/almide/json.git", tag = "v2.0.0" }
+```
+
+### CLI
+
+```bash
+almide add almide/almide-bindgen          # github.com/almide/ がデフォルト
+almide add almide/almide-bindgen@v0.1.0   # バージョン指定
+almide add user/repo                      # 任意の GitHub リポジトリ
+almide deps                               # 依存一覧
+almide dep-path bindgen                   # キャッシュディレクトリを出力
+```
+
+### almide.lock
+
+`almide.lock` は正確なコミットハッシュを記録する。存在すればそのコミットを使い、なければ tag/branch の HEAD をフェッチして生成。VCS にコミットすべき。
+
+### キャッシュ
+
+`~/.almide/cache/{name}/{tag_or_commit}/` にクローンされる。`almide clean` でクリア。
+
+### バージョン解決
+
+**Minimal Version Selection (MVS):** 複数の依存が同じパッケージを要求する場合、要求される最小バージョンの最大値を選択。SAT ソルバー不要、決定的。
+
+---
+
+## 10. Codegen
+
+### Rust ターゲット
+
+```rust
+// トップレベル関数
+pub fn almide_rt_mypackage_version() -> String { ... }
+
+// サブモジュール関数（ドット → アンダースコア）
+pub fn almide_rt_mypackage_utils_format(s: String) -> String { ... }
+
+// 深いサブモジュール
+pub fn almide_rt_mypackage_bindings_python_generate(iface: String) -> String { ... }
+```
+
+### バージョン付き（異 major 共存時）
+
+```rust
+pub fn almide_rt_mypackage_v2_version() -> String { ... }
+```
+
+`IrModule.versioned_name` が設定されている場合、codegen プレフィックスに使われる。
+
+### struct / enum
+
+```rust
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
+pub struct Logger {
+    pub level: i64,
+    pub name: String,
 }
 ```
 
-In effect context, `Result[T, E]` return values from module calls are auto-unwrapped (the `?` operator is inserted by the compiler).
+`--repr-c` フラグで `#[repr(C)]` 付き出力。Module Interface JSON に ABI 情報（size, align, field offset）を含む。
 
 ---
 
-## 10. Package Without mod.almd
+## 11. @extern
 
-A package directory may omit `mod.almd`. In that case, there is no top-level namespace — only direct sub-module imports work:
-
-```
-nomod_lib/
-  src/
-    parser.almd       ← only sub-module, no mod.almd
-
-import nomod_lib.parser as p
-p.parse("hello")                -- works
--- nomod_lib.parse("hello")     -- would NOT work (no top-level)
-```
-
----
-
-## 11. Foreign Function Interface (`@extern`)
-
-The `@extern` attribute allows functions to delegate to target-specific implementations.
-
-### Syntax
+ターゲット固有の実装に委譲する。
 
 ```almide
-@extern(target, "module", "function")
-fn name(params) -> ReturnType
-```
-
-- `target`: `rs` (Rust) or `ts` (TypeScript)
-- `"module"`: the foreign module path (e.g., `"std::cmp"`, `"Math"`)
-- `"function"`: the foreign function name
-
-### Patterns
-
-```almide
-// Body-optional: @extern provides the implementation, body is fallback
 @extern(rs, "std::cmp", "min")
-fn my_min(a: Int, b: Int) -> Int = if a < b then a else b
+fn my_min(a: Int, b: Int) -> Int = if a < b then a else b   // フォールバック body
 
-// Body-less: both targets must have @extern
 @extern(rs, "std::cmp", "max")
 @extern(ts, "Math", "max")
-fn my_max(a: Int, b: Int) -> Int
+fn my_max(a: Int, b: Int) -> Int   // body なし: 全ターゲットに @extern 必須
 ```
 
-### Completeness Rules
-
-| Has body? | @extern(rs) | @extern(ts) | Result |
-|-----------|-------------|-------------|--------|
-| Yes | Optional | Optional | Body used as fallback for missing targets |
-| No | Required | Required | Compile error if either is missing |
-
-### Code Generation
-
-- **Rust**: `@extern(rs, "mod", "func")` emits `mod::func(args)`
-- **TypeScript**: `@extern(ts, "mod", "func")` emits `mod.func(args)`
-
-### Stdlib Runtime Architecture
-
-All stdlib modules use separated runtime files instead of inline codegen:
-
-| Runtime file | Modules |
-|---|---|
-| `platform_runtime.txt` | fs, env, process, io, random |
-| `core_runtime.txt` | string, int, float, math |
-| `collection_runtime.txt` | list, map |
-| `json_runtime.txt` | json |
-| `http_runtime.txt` | http |
-| `regex_runtime.txt` | regex |
-| `time_runtime.txt` | time |
-
-Rust runtime functions follow `almide_rt_<module>_<func>()` naming. TS runtime uses `__almd_<module>.<func>()` namespaced objects.
-
 ---
 
-## 12. Compiler Pipeline
+## 12. ファイル解決順序
 
-### Resolve Phase (`src/resolve.rs`)
-
-1. Parse import declarations from the source file
-2. For each `import pkg`: find `pkg/src/mod.almd`, parse it, recursively resolve its imports (depth-first), then scan sub-namespaces
-3. For each `import pkg.sub`: find the specific sub-module file, register with dotted name
-4. Deduplication via `loaded_names: HashSet<String>` — prevents double-loading in diamond scenarios
-5. Circular dependency detection via `loading: HashSet<String>`
-6. Output: `Vec<(name, Program, Option<PkgId>, is_self_import)>`
-
-### Check Phase (`src/check/`)
-
-1. Register each module's exported functions and types with dotted prefix
-2. Register import aliases (explicit `as` and implicit last-segment for multi-segment imports)
-3. On call: `flatten_member_chain` → alias resolution on first segment → progressive dotted path matching → type check
-
-### Emit Phase (`src/emit_rust/`, `src/emit_ts/`)
-
-**Rust:**
-1. Register import aliases
-2. Each module emitted as `mod pkg_sub { ... }` (dots replaced with underscores)
-3. On call: same `flatten_member_chain` + alias resolution → `pkg_sub::func()` in generated Rust
-4. Stdlib calls dispatch to `almide_rt_*` runtime functions (defined in `*_runtime.txt` files)
-5. `@extern(rs, ...)` functions emit `module::function(args)` delegation
-
-**TypeScript:**
-1. Each module emitted as a namespace object via IIFE
-2. Stdlib calls dispatch to `__almd_<module>.<func>()` runtime objects (defined in `emit_ts_runtime.rs`)
-3. `@extern(ts, ...)` functions emit `module.function(args)` delegation
-
----
-
-## 13. File Resolution Order
-
-When resolving `import pkg`, the compiler searches in order:
+`import pkg` の解決:
 
 1. `{base_dir}/pkg.almd`
 2. `{base_dir}/pkg/mod.almd`
 3. `{base_dir}/pkg/src/mod.almd`
-4. `{base_dir}/pkg/src/lib.almd` (legacy)
-5. Dependencies listed in `almide.toml`
+4. `{base_dir}/pkg/src/lib.almd` (非推奨)
+5. `almide.toml` の `[dependencies]` → `~/.almide/cache/{name}/...`
 
-When resolving `import pkg.sub`, the compiler searches:
-
-1. `{pkg_src_dir}/sub.almd`
-2. `{pkg_src_dir}/sub/mod.almd`
+依存パッケージの `src/mod.almd` が見つかった場合、同ディレクトリのサブモジュールとサブディレクトリを再帰スキャン。
 
 ---
 
-## Test Reference
+## テスト
 
-All behaviors above are verified by executable tests:
-
-| File | Tests | Covers |
+| ファイル | テスト数 | カバー範囲 |
 |---|---|---|
-| `exercises/mod-test/mod_system_test.almd` | 25 | Sections 1–6, 8–9 |
-| `exercises/mod-test/vis_effect_test.almd` | 2 assertions | Section 8 |
-| `exercises/mod-test/vis_mod_error_test.almd` | error check | Section 7 (`mod fn` rejected) |
-| `exercises/mod-test/vis_local_error_test.almd` | error check | Section 7 (`local fn` rejected) |
-| `exercises/extern-test/extern_test.almd` | 6 assertions | Section 10 (`@extern` patterns) |
-| `exercises/mod-test/run_tests.sh` | runner | Executes mod tests |
+| `spec/integration/modules/diamond_test.almd` | 11 | ダイヤモンド依存、型同一性、サブモジュール、4段ドット |
+| `spec/integration/modules/alias_test.almd` | 5 | import alias: トップレベル、サブモジュール、4段ネスト、型生成 |
+| `spec/integration/modules/submodule_call_test.almd` | 7 | サブモジュール直接呼び出し: 2段/3段/4段、ダイヤモンド経由 |
+| `spec/integration/modules/vis_effect_test.almd` | 2 | effect fn のクロスモジュール呼び出し |
+| `spec/integration/modules/vis_mod_error_test.almd` | error | `mod fn` の外部アクセス拒否 |
+| `spec/integration/modules/vis_local_error_test.almd` | error | `local fn` の外部アクセス拒否 |
+| `spec/integration/modules/phantom_dep_error_test.almd` | error | 推移的依存の直接アクセス拒否 |
+| `spec/integration/modules/deep_phantom_test.almd` | error | 推移的依存のサブモジュールアクセス拒否 |
 
-### Test Packages
+### テスト用パッケージ
 
-| Package | Structure | Purpose |
+| パッケージ | 構造 | 目的 |
 |---|---|---|
-| `mylib` | mod.almd + parser + formatter + utils | Basic, sub-ns, sub-import |
-| `deeplib` | mod.almd + http/mod.almd + http/client.almd | 3-level nesting |
-| `extlib` | fn + mod fn + local fn | Visibility |
-| `dmod_b`, `dmod_c`, `dmod_d` | Diamond: B→D, C→D | Diamond dependency |
-| `effectlib` | effect fn + pure fn | Cross-module effects |
-| `nomod_lib` | parser.almd only (no mod.almd) | No top-level package |
+| `mylib` | mod.almd + parser + formatter + utils | サブモジュール基本 |
+| `deeplib` | mod.almd + http/mod.almd + http/client.almd | 3段ネスト |
+| `dmod_b`, `dmod_c`, `dmod_d` | B→D, C→D のダイヤモンド。D に型定義 + サブモジュール | ダイヤモンド + 型同一性 |
+| `dmod_d/nested/deep.almd` | 4段ドット呼び出し | mod.almd なしディレクトリの名前空間 |
+| `extlib` | fn + mod fn + local fn | 可視性 |
+| `effectlib` | effect fn + pure fn | エフェクト関数 |
+| `nomod_lib` | parser.almd のみ（mod.almd なし） | トップレベルなしパッケージ |

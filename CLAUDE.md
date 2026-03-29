@@ -35,11 +35,13 @@ lefthook install
 
 ## Project Overview
 
-Almide is a programming language (.almd files) compiled via a pure-Rust compiler with multi-target codegen (Rust, TypeScript, WASM).
+Almide is a programming language (.almd files) compiled via a pure-Rust compiler with dual-target codegen (Rust, WASM).
 
 - **Architecture**: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — compiler pipeline, module map
 - **Language reference**: [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — syntax, stdlib, idioms (for AI code generation)
-- **Stdlib spec**: [docs/STDLIB-SPEC.md](./docs/STDLIB-SPEC.md) — 381 functions across 22 modules
+- **Stdlib spec**: [docs/STDLIB-SPEC.md](./docs/STDLIB-SPEC.md) — stdlib function reference
+- **Module system**: [docs/specs/module-system.md](./docs/specs/module-system.md) — import, サブモジュール, ダイヤモンド依存
+- **Package system**: [docs/specs/package-system.md](./docs/specs/package-system.md) — 依存管理, MVS, バージョン共存
 
 ## Building & Usage
 
@@ -59,8 +61,11 @@ almide compile app.almd --json    # Module interface (JSON)
 almide check app.almd             # Type check only
 almide fmt app.almd               # Format source
 almide clean                     # Clear dependency cache
+almide add almide/pkg@v0.1.0    # Add dependency (github.com/almide/ default)
+almide deps                      # List dependencies
+almide dep-path bindgen          # Print cached source dir of a dependency
 almide app.almd --target rust    # Emit Rust source
-almide app.almd --target ts      # Emit TypeScript source
+almide app.almd --target rust --repr-c  # Emit with #[repr(C)]
 almide app.almd --emit-ast       # Emit AST as JSON
 ```
 
@@ -97,7 +102,6 @@ almide test
 When adding or modifying stdlib functions:
 - Add/edit the definition in `stdlib/defs/<module>.toml` (type sig + codegen templates)
 - Implement the Rust runtime in `runtime/rust/<module>.rs`
-- Implement the TS runtime in `runtime/ts/<module>.ts`
 - `cargo build` auto-generates all codegen dispatch — no manual edits needed
 - Write a test in `spec/stdlib/` (as `*_test.almd` or inline `test` block)
 
@@ -108,11 +112,16 @@ When modifying codegen:
 
 ## Key Design Decisions
 
-- **Multi-target**: Same IR emits to Rust, TypeScript, or WASM via `--target rust|ts|wasm`
+- **Multi-target**: Same IR emits to Rust or WASM via `--target rust|wasm` (TS codegen は削除済み)
 - **Codegen v3**: Nanopass pipeline (semantic rewrites) + TOML template renderer (syntax)
-- **Result erasure (TS)**: `ok(x)` → `x`, `err(e)` → `throw new Error(e)`
 - **Effect fn (Rust)**: `effect fn` → `Result<T, String>`, auto `?` propagation
-- **`==`/`!=`**: Deep equality in TS (`__deep_eq`), `almide_eq!` macro in Rust
+- **`==`/`!=`**: `almide_eq!` macro in Rust
 - **`+`**: Concatenation for strings and lists (overloaded with addition)
-- **`do` block**: With guard → loop. Without guard → auto error propagation block.
 - **Diagnostics**: Every error includes file:line, context, and actionable hint
+
+## Documentation
+
+- 言語仕様: `docs/specs/` — ルールは [docs/specs/CLAUDE.md](./docs/specs/CLAUDE.md)
+- コンパイラ設計: `docs/ARCHITECTURE.md`
+- 言語リファレンス: `docs/CHEATSHEET.md`
+- ロードマップ: `docs/roadmap/`

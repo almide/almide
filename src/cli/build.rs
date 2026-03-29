@@ -1,7 +1,7 @@
 use std::process::Command;
 use crate::{compile_with_ir, parse_file, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool) {
+pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool) {
     let is_npm = matches!(target, Some("npm"));
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
     let is_wasm_direct = matches!(target, Some("wasm"));
@@ -41,7 +41,9 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         output_raw.to_string()
     };
 
-    let (rs_code, _ir) = compile_with_ir(file, no_check);
+    let opts = crate::codegen::CodegenOptions { repr_c };
+    let (rs_code, _ir) = crate::try_compile_with_ir(file, no_check, &opts)
+        .unwrap_or_else(|_| std::process::exit(1));
 
     // WASI target: use bare rustc (no external crate deps needed for WASM)
     if is_wasm {
@@ -128,7 +130,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         vec![]
     };
 
-    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+    let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     // Type check
@@ -147,6 +149,22 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
 
     // Lower to IR
     let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+
+    // Lower user modules to IR
+    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
+        if almide::stdlib::is_stdlib_module(name) { continue; }
+        let mod_types = checker.check_module_bodies(mod_prog);
+        let versioned = pkg_id.as_ref().map(|pid| {
+            let base = pid.mod_name();
+            if let Some(suffix) = name.strip_prefix(&pid.name) {
+                format!("{}{}", base, suffix)
+            } else {
+                base
+            }
+        });
+        let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
+        ir_program.modules.push(mod_ir_module);
+    }
 
     // Optimize
     almide::optimize::optimize_program(&mut ir_program);

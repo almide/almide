@@ -8,6 +8,8 @@ use super::types::render_type;
 use super::helpers::{template_or, ty_contains_name};
 
 pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
+    let decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
+
     // Build generics string e.g. "<T>" or "<T, U>"
     let generics_str = if let Some(generics) = &td.generics {
         if generics.is_empty() {
@@ -29,13 +31,14 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .map(|f| {
                     let type_s = render_type(ctx, &f.ty);
                     ctx.templates.render_with("struct_field", None, &[], &[("name", f.name.as_str()), ("type", type_s.as_str())])
-                        .unwrap_or_else(|| format!("{}: {},", f.name, render_type(ctx, &f.ty)))
+                        .unwrap_or_else(|| format!("    pub {}: {},", f.name, render_type(ctx, &f.ty)))
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
             let full_name = format!("{}{}", td.name, generics_str);
-            let fallback = format!("struct {} {{ {} }}", full_name, &fields_str);
-            ctx.templates.render_with("struct_decl", None, &[], &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
+            let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
+            let fallback = format!("{}pub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str);
+            ctx.templates.render_with("struct_decl", None, &decl_attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
                 .unwrap_or(fallback)
         }
         IrTypeDeclKind::Variant { cases, .. } => {
@@ -89,8 +92,9 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             let sep = template_or(ctx, "enum_variant_sep", &[], ",\n");
             let variants_str = variants_parts.join(&sep);
             let full_name = format!("{}{}", td.name, generics_str);
-            let fallback = format!("enum {} {{ {} }}", full_name, &variants_str);
-            ctx.templates.render_with("enum_decl", None, &[], &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
+            let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
+            let fallback = format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str);
+            ctx.templates.render_with("enum_decl", None, &decl_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
                 .unwrap_or(fallback)
         }
         IrTypeDeclKind::Alias { target } => {

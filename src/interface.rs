@@ -32,9 +32,28 @@ pub struct TypeExport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generics: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub abi: Option<AbiLayout>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub doc: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deprecated: Option<String>,
+}
+
+/// C ABI layout information for a type (size, alignment, field offsets).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AbiLayout {
+    pub size: usize,
+    pub align: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<AbiField>,
+}
+
+/// C ABI field layout within a struct.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AbiField {
+    pub name: String,
+    pub offset: usize,
+    pub size: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -205,11 +224,13 @@ pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> 
                 target: resolve_ty(target, &record_names, &variant_names),
             },
         };
+        let abi = compute_abi(td);
         let info = doc_info.get(&td.name.to_string());
         types.push(TypeExport {
             name: td.name.to_string(),
             kind,
             generics,
+            abi,
             doc: info.and_then(|i| i.doc.clone()),
             deprecated: info.and_then(|i| i.deprecated.clone()),
         });
@@ -418,6 +439,113 @@ fn resolve_ty(ty: &Ty, records: &RecordLookup, variants: &VariantLookup) -> Type
             }
         }
         _ => TypeRef::Unknown,
+    }
+}
+
+// ── ABI layout computation ──
+
+/// Compute C ABI layout for a type, if it has a fixed layout (no generics, no opaque types).
+fn compute_abi(td: &IrTypeDecl) -> Option<AbiLayout> {
+    // Skip generic types — layout depends on type parameters
+    if td.generics.as_ref().map_or(false, |g| !g.is_empty()) {
+        return None;
+    }
+    match &td.kind {
+        IrTypeDeclKind::Record { fields } => {
+            let mut abi_fields = Vec::new();
+            let mut offset = 0usize;
+            let mut max_align = 1usize;
+            for f in fields {
+                let (size, align) = c_abi_size_align(&f.ty)?;
+                // Pad to alignment
+                let padding = (align - (offset % align)) % align;
+                offset += padding;
+                abi_fields.push(AbiField {
+                    name: f.name.to_string(),
+                    offset,
+                    size,
+                });
+                offset += size;
+                max_align = max_align.max(align);
+            }
+            // Pad struct size to alignment
+            let padding = (max_align - (offset % max_align)) % max_align;
+            offset += padding;
+            Some(AbiLayout { size: offset, align: max_align, fields: abi_fields })
+        }
+        IrTypeDeclKind::Variant { cases, .. } => {
+            // C repr enum: tag (i32 = 4 bytes) + max payload
+            let tag_size = 4usize;
+            let tag_align = 4usize;
+            let mut max_payload_size = 0usize;
+            let mut max_payload_align = 1usize;
+            for case in cases {
+                let (payload_size, payload_align) = match &case.kind {
+                    IrVariantKind::Unit => (0, 1),
+                    IrVariantKind::Tuple { fields } => {
+                        let mut size = 0usize;
+                        let mut align = 1usize;
+                        for f in fields {
+                            let (fs, fa) = c_abi_size_align(f)?;
+                            let padding = (fa - (size % fa)) % fa;
+                            size += padding + fs;
+                            align = align.max(fa);
+                        }
+                        (size, align)
+                    }
+                    IrVariantKind::Record { fields } => {
+                        let mut size = 0usize;
+                        let mut align = 1usize;
+                        for f in fields {
+                            let (fs, fa) = c_abi_size_align(&f.ty)?;
+                            let padding = (fa - (size % fa)) % fa;
+                            size += padding + fs;
+                            align = align.max(fa);
+                        }
+                        (size, align)
+                    }
+                };
+                max_payload_size = max_payload_size.max(payload_size);
+                max_payload_align = max_payload_align.max(payload_align);
+            }
+            let total_align = tag_align.max(max_payload_align);
+            // tag + padding + max_payload
+            let payload_offset = tag_size + (total_align - (tag_size % total_align)) % total_align;
+            let raw_size = if max_payload_size == 0 { tag_size } else { payload_offset + max_payload_size };
+            let total_size = raw_size + (total_align - (raw_size % total_align)) % total_align;
+            Some(AbiLayout { size: total_size, align: total_align, fields: vec![] })
+        }
+        IrTypeDeclKind::Alias { .. } => None,
+    }
+}
+
+/// Return (size, align) for a type under C ABI rules (64-bit platform).
+fn c_abi_size_align(ty: &Ty) -> Option<(usize, usize)> {
+    match ty {
+        Ty::Bool => Some((1, 1)),
+        Ty::Int => Some((8, 8)),    // i64
+        Ty::Float => Some((8, 8)),  // f64
+        // String, List, Map, Set, Option, Result are pointer-based (opaque)
+        Ty::String => Some((16, 8)),  // (ptr, len)
+        Ty::Bytes => Some((16, 8)),
+        Ty::Unit => Some((0, 1)),
+        // Named user types: would need full type table lookup — skip for now
+        Ty::Named(_, _) => None,
+        Ty::Applied(_, _) => None,
+        Ty::Tuple(elems) => {
+            let mut size = 0usize;
+            let mut align = 1usize;
+            for e in elems {
+                let (es, ea) = c_abi_size_align(e)?;
+                let padding = (ea - (size % ea)) % ea;
+                size += padding + es;
+                align = align.max(ea);
+            }
+            let padding = (align - (size % align)) % align;
+            size += padding;
+            Some((size, align))
+        }
+        _ => None,
     }
 }
 

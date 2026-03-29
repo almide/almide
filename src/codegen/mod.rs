@@ -26,6 +26,7 @@ pub mod pass;
 pub mod pass_auto_parallel;
 pub mod pass_box_deref;
 pub mod pass_builtin_lowering;
+pub mod pass_capture_clone;
 pub mod pass_clone;
 pub mod pass_fan_lowering;
 pub mod pass_match_lowering;
@@ -50,6 +51,13 @@ use pass::Target;
 pub enum CodegenOutput {
     Source(String),
     Binary(Vec<u8>),
+}
+
+/// Options that control codegen behavior beyond target selection.
+#[derive(Debug, Clone, Default)]
+pub struct CodegenOptions {
+    /// Emit `#[repr(C)]` on structs/enums for stable C ABI layout.
+    pub repr_c: bool,
 }
 
 /// Strip `mod tests { ... }` blocks from runtime source (avoid conflicts with user tests)
@@ -85,6 +93,10 @@ fn strip_test_blocks(src: &str) -> String {
 /// - Rust/TS/JS: Nanopass → Walker (template renderer) → source code
 /// - WASM: Nanopass → direct binary emit → .wasm bytes
 pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
+    codegen_with(program, target, &CodegenOptions::default())
+}
+
+pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOptions) -> CodegenOutput {
     let config = target::configure(target);
 
     // Layer 2: Run Nanopass pipeline (semantic rewrites — takes ownership, returns modified)
@@ -95,17 +107,18 @@ pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
     // Layer 3: Target-specific emit
     match target {
         Target::Wasm => CodegenOutput::Binary(emit_wasm::emit(program)),
-        _ => CodegenOutput::Source(emit_source(program, target, &config)),
+        _ => CodegenOutput::Source(emit_source(program, target, &config, options)),
     }
 }
 
 /// Emit source code for text targets (Rust, TypeScript, JavaScript).
-fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetConfig) -> String {
+fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetConfig, options: &CodegenOptions) -> String {
     // Template-driven rendering (walker reads annotations, never checks types)
     let ann = std::mem::take(&mut program.codegen_annotations);
-    let ctx = walker::RenderContext::new(&config.templates, &program.var_table)
+    let mut ctx = walker::RenderContext::new(&config.templates, &program.var_table)
         .with_target(target)
         .with_annotations(ann);
+    ctx.repr_c = options.repr_c;
     let user_code = walker::render_program(&ctx, program);
 
     // Prepend runtime preamble

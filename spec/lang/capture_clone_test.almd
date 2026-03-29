@@ -1,0 +1,26 @@
+// Direct reproduction: String var captured by 2 separate closures
+fn use_twice(xs: List[String], ys: List[String], tag: String) -> (List[String], List[String]) = {
+  let a = list.map(xs, (x) => tag + ": " + x)
+  let b = list.map(ys, (y) => tag + ": " + y)
+  (a, b)
+}
+
+fn use_three_times(xs: List[String], config: List[String], label: String) -> (List[String], List[String], String) = {
+  let mapped = list.map(xs, (x) => label + x)
+  let filtered = list.filter(config, (c) => string.contains(c, label))
+  let result = label + " done"
+  (mapped, filtered, result)
+}
+
+test "string var in two closures" {
+  let (a, b) = use_twice(["x"], ["y"], "tag")
+  assert_eq(a, ["tag: x"])
+  assert_eq(b, ["tag: y"])
+}
+
+test "string var in two closures and after" {
+  let (m, f, r) = use_three_times(["a"], ["xHello", "nope"], "Hello")
+  assert_eq(m, ["Helloa"])
+  assert_eq(f, ["xHello"])
+  assert_eq(r, "Hello done")
+}

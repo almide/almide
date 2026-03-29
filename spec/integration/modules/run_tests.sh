@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # ============================================================
-# Module System v2 — Test Runner
+# Module System — Test Runner
 # ============================================================
 # Runs all module system specification tests:
 #   - Happy-path tests (must compile + pass)
 #   - Error tests (must fail to compile with expected message)
 #
 # Usage:
-#   cd exercises/mod-test && bash run_tests.sh
-#   # or from project root:
-#   bash exercises/mod-test/run_tests.sh
+#   bash spec/integration/modules/run_tests.sh
 
 set -euo pipefail
 
@@ -21,23 +19,22 @@ ERRORS=""
 
 green()  { printf "\033[32m%s\033[0m" "$1"; }
 red()    { printf "\033[31m%s\033[0m" "$1"; }
-yellow() { printf "\033[33m%s\033[0m" "$1"; }
 
 # --- Happy-path tests (must succeed) ---
 HAPPY_TESTS=(
-  "mod_system_test.almd"      # Comprehensive spec: 25 tests
-  "vis_effect_test.almd"      # Effect fn across modules
+  "diamond_test.almd"
+  "alias_test.almd"
+  "submodule_call_test.almd"
+  "vis_effect_test.almd"
 )
 
-echo "=== Module System v2 — Specification Tests ==="
+echo "=== Module System — Specification Tests ==="
 echo ""
 
 for f in "${HAPPY_TESTS[@]}"; do
   printf "  %-40s " "$f"
-  if output=$("$ALMIDE" run "$DIR/$f" 2>&1); then
-    # Count tests from output
-    count=$(echo "$output" | grep -c ' ok$' || true)
-    green "PASS"; echo " ($count tests)"
+  if output=$("$ALMIDE" test "$DIR/$f" 2>&1); then
+    green "PASS"; echo ""
     PASS=$((PASS + 1))
   else
     red "FAIL"; echo ""
@@ -55,7 +52,7 @@ check_error_test() {
   local file="$1"
   local expected_msg="$2"
   printf "  %-40s " "$file"
-  if output=$("$ALMIDE" run "$DIR/$file" 2>&1); then
+  if output=$("$ALMIDE" check "$DIR/$file" 2>&1); then
     red "FAIL"; echo " (should have failed but succeeded)"
     ERRORS="${ERRORS}\n--- $file ---\nExpected compile error but succeeded\n"
     FAIL=$((FAIL + 1))
@@ -69,8 +66,10 @@ check_error_test() {
   fi
 }
 
-check_error_test "vis_mod_error_test.almd"   "is not accessible"
-check_error_test "vis_local_error_test.almd"  "is not accessible"
+check_error_test "vis_mod_error_test.almd"       "is not accessible"
+check_error_test "vis_local_error_test.almd"      "is not accessible"
+check_error_test "phantom_dep_error_test.almd"    "undefined variable"
+check_error_test "deep_phantom_test.almd"         "undefined variable"
 
 # --- Summary ---
 echo ""

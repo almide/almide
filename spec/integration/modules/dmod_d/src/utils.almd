@@ -1,0 +1,7 @@
+fn format_level(level: Int) -> String =
+  match level {
+    0 => "DEBUG"
+    1 => "INFO"
+    2 => "WARN"
+    _ => "ERROR"
+  }

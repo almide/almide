@@ -1,0 +1,9 @@
+// Test: phantom dependency is rejected
+// dmod_b imports dmod_d, but THIS file only imports dmod_b.
+// Accessing dmod_d directly should fail.
+
+import dmod_b
+
+fn main() -> Unit =
+  let x = dmod_d.shared()
+  x

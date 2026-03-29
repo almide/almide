@@ -1,338 +1,612 @@
+> Last updated: 2026-03-28
+
 # Type System Specification
 
-> Verified by `exercises/generics-test/` (3 test files, 21 tests) + all exercises (zero regressions).
+Almide uses a constraint-based type system with bidirectional inference, structural typing for records, and a protocol system for ad-hoc polymorphism. All types are resolved at compile time; there are no runtime type checks.
 
 ---
 
 ## 1. Primitive Types
 
-| Almide | Rust | TypeScript |
-|--------|------|------------|
-| `Int` | `i64` | `number` |
-| `Float` | `f64` | `number` |
-| `Bool` | `bool` | `boolean` |
-| `String` | `String` | `string` |
-| `Unit` | `()` | `void` |
-| `Path` | `String` | `string` |
-| `Bytes` | `Vec<u8>` | `Uint8Array` |
+Seven built-in primitive types. Each has kind `*` (concrete, zero type parameters).
+
+| Type     | Description                | Eq  | Hash | Ord |
+|----------|----------------------------|-----|------|-----|
+| `Int`    | 64-bit signed integer      | yes | yes  | yes |
+| `Float`  | 64-bit IEEE 754            | yes | no   | yes |
+| `String` | UTF-8 string               | yes | yes  | yes |
+| `Bool`   | `true` / `false`           | yes | yes  | yes |
+| `Unit`   | Zero-value type `()`       | yes | yes  | yes |
+| `Bytes`  | Byte buffer                | yes | yes  | no  |
+| `Matrix` | Numeric matrix             | yes | no   | no  |
+
+`Float` is not hashable (cannot be a `Map` key or `Set` element). Function types (`Fn`) are neither Eq nor hashable.
+
+```
+let x = 42          // Int
+let y = 3.14        // Float
+let s = "hello"     // String
+let b = true        // Bool
+let u = ()          // Unit
+```
+
+Tests: `spec/lang/expr_test.almd`, `spec/lang/bytes_test.almd`, `spec/lang/matrix_test.almd`
 
 ---
 
 ## 2. Collection Types
 
-| Almide | Rust | TypeScript |
-|--------|------|------------|
-| `List[T]` | `Vec<T>` | `T[]` |
-| `Map[K, V]` | `HashMap<K, V>` | `Map<K, V>` |
-| `Option[T]` | `Option<T>` | `T \| null` |
-| `Result[T, E]` | `Result<T, E>` | `T` (error = throw) |
+### List[T]
+
+Homogeneous ordered sequence. Kind: `* -> *`.
+
+```
+let xs = [1, 2, 3]              // List[Int]
+let ys: List[String] = []       // empty list requires annotation
+let zs = xs + [4, 5]            // + concatenates lists
+let first = xs[0]               // Int (index access)
+```
+
+### Map[K, V]
+
+Key-value dictionary. Kind: `* -> * -> *`. Keys must be hashable (no `Float`, `Fn`, or `Map` keys).
+
+```
+let m = ["a": 1, "b": 2]       // Map[String, Int]
+let empty: Map[String, Int] = [:]
+let v = m["a"]                  // Option[Int]
+```
+
+### Set[T]
+
+Unique element collection. Kind: `* -> *`. Elements must be hashable.
+
+```
+let s = set.from_list([1, 2, 3])  // Set[Int]
+```
+
+### Tuple
+
+Fixed-length heterogeneous product type. Variable arity.
+
+```
+let t = (1, "hello", true)     // (Int, String, Bool)
+let x = t.0                    // Int — positional access
+let (a, b) = (1, 2)            // destructuring
+```
+
+Tests: `spec/lang/data_types_test.almd`, `spec/lang/tuple_test.almd`, `spec/lang/map_literal_test.almd`
 
 ---
 
-## 3. User-Defined Types
+## 3. Option[T] and Result[T, E]
 
-### 3.1 Record Types
+Built-in parameterized types for nullable values and error handling. Both are `Applied` types with dedicated constructors.
 
-```almide
-type User = { id: Int, name: String }
-type Pair[A, B] = { fst: A, snd: B }
+### Option[T]
+
+Kind: `* -> *`. Constructors: `some(v)`, `none`.
+
+```
+let x: Option[Int] = some(42)
+let y: Option[Int] = none
+match x {
+  some(v) => v,
+  none => 0,
+}
 ```
 
-- Compiled to `struct` (Rust) / `interface` (TypeScript)
-- Anonymous record literals auto-resolve to named struct types when field names match
-- Generic record types supported with type parameters
+### Result[T, E]
 
-### 3.2 Variant Types
+Kind: `* -> * -> *`. Constructors: `ok(v)`, `err(e)`.
 
-```almide
-type Token =
-  | Word(String)
-  | Number(Int)
-  | Eof
-
-type Shape =
-  | Circle(Float)
-  | Rect{ width: Float, height: Float }
-  | Point
+```
+let x: Result[Int, String] = ok(42)
+let y: Result[Int, String] = err("fail")
 ```
 
-Three forms: unit (no payload), tuple-style (positional), record-style (named fields).
+In `effect fn` bodies, `Result` is auto-unwrapped with `!`:
 
-- Compiled to `enum` (Rust) / discriminated union (TypeScript)
-- Non-generic variants use `use Enum::*` for unqualified constructor access
-- `deriving From` generates `impl From<InnerType>` for single-field tuple cases
-
-### 3.3 Type Alias
-
-```almide
-type Name = String
-type UserList = List[User]
 ```
+effect fn read(path: String) -> Result[String, String] = {
+  let content = fs.read_text(path)!   // propagates err
+  ok(content)
+}
+```
+
+Tests: `spec/lang/data_types_test.almd`, `spec/lang/error_test.almd`, `spec/lang/unwrap_operators_test.almd`
 
 ---
 
-## 4. Generics
+## 4. Record Types
 
-### 4.1 Syntax
+### Named Records
 
-Type parameters use `[]` notation. `<>` is reserved for comparison operators.
+Declared with `type`. Fields are accessed by name.
 
 ```
-GenericParams ::= "[" TypeParam ( "," TypeParam )* "]"
-TypeParam     ::= TypeName
+type Point = { x: Float, y: Float }
+
+let p: Point = { x: 1.0, y: 2.0 }
+let px = p.x                          // Float
+let p2 = { ...p, y: 5.0 }            // spread update
 ```
 
-No trait bounds yet — `T` accepts anything (see §4.7).
+### Anonymous Records
 
-### 4.2 Generic Functions
+Record literals without a type name are structurally typed.
 
-```almide
-fn identity[T](x: T) -> T = x
+```
+let user = { name: "alice", age: 30 }   // { name: String, age: Int }
+let n = user.name                        // String
+```
+
+### Open Records (Row Polymorphism)
+
+A parameter typed `{ field: Type, .. }` accepts any record that has at least the required fields. Extra fields are allowed and preserved.
+
+```
+fn greet(who: { name: String, .. }) -> String = "Hello, ${who.name}!"
+
+type Dog = { name: String, breed: String }
+type Person = { name: String, age: Int, email: String }
+
+greet(Dog { name: "Rex", breed: "Lab" })       // ok
+greet(Person { name: "Alice", age: 30, email: "a@b" })  // ok
+greet({ name: "Bob" })                          // ok — exact match
+```
+
+Open records can be used as type aliases (shape aliases):
+
+```
+type Named = { name: String, .. }
+fn greet_named(who: Named) -> String = "Hi, ${who.name}!"
+```
+
+Nested open records are supported:
+
+```
+fn get_port(app: { config: { port: Int, .. }, .. }) -> Int = app.config.port
+```
+
+Closed records (`{ name: String }` without `..`) require exact field match.
+
+Tests: `spec/lang/open_record_test.almd`, `spec/lang/record_spread_test.almd`
+
+---
+
+## 5. Variant Types
+
+Algebraic data types (tagged unions). Declared with `|`-separated cases.
+
+### Unit Payload (Enum-like)
+
+```
+type Direction = | North | South | East | West
+
+fn to_str(d: Direction) -> String = match d {
+  North => "N",
+  South => "S",
+  East => "E",
+  West => "W",
+}
+```
+
+### Tuple Payload
+
+```
+type Shape = | Circle(Float) | Rect(Float, Float)
+
+fn area(s: Shape) -> Float = match s {
+  Circle(r) => 3.14 * r * r,
+  Rect(w, h) => w * h,
+}
+```
+
+### Record Payload
+
+Variant cases can carry named fields:
+
+```
+type Pat =
+  | Match { scope: String, regex: String }
+  | BeginEnd { scope: String, begin: String, end_pat: String, patterns: List[Pat] }
+  | Include(String)
+  | Empty
+```
+
+Record variant construction and pattern matching:
+
+```
+let p = Match { scope: "keyword", regex: "\\bfn\\b" }
+match p {
+  Match { scope, regex } => scope + " " + regex,
+  BeginEnd { scope, .. } => scope,
+  _ => "other",
+}
+```
+
+### Recursive Variants
+
+Variant types can reference themselves. The type checker uses cycle detection to prevent infinite loops in Eq/Hash checks.
+
+```
+type Tree[T] = | Leaf(T) | Node(T, List[T])
+```
+
+### Inline Variants (No Leading Pipe)
+
+When omitting the leading `|`, the first case starts immediately:
+
+```
+type AppError = NotFound(String) | Io(String)
+```
+
+Tests: `spec/lang/data_types_test.almd`, `spec/lang/type_system_test.almd`, `spec/lang/variant_record_test.almd`
+
+---
+
+## 6. Function Types
+
+Functions are first-class values. The type syntax uses `fn(Params) -> Ret`.
+
+```
+fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
+
+fn make_adder(n: Int) -> fn(Int) -> Int = (x) => x + n
+
+let add5 = make_adder(5)
+apply(add5, 10)              // 15
+```
+
+Internally represented as `Ty::Fn { params: Vec<Ty>, ret: Box<Ty> }`.
+
+Function types are never Eq and never hashable.
+
+### Effect Functions
+
+`effect fn` marks functions that perform side effects. The type checker enforces that pure functions cannot call effect functions (error E006). The `is_effect` flag on `FnSig` tracks this.
+
+```
+effect fn read_file(path: String) -> Result[String, String] = fs.read_text(path)
+```
+
+### Type Aliases for Function Types
+
+```
+type Handler = (String) -> String
+```
+
+Tests: `spec/lang/type_system_test.almd`, `spec/lang/function_test.almd`, `spec/lang/lambda_test.almd`, `spec/lang/effect_fn_test.almd`
+
+---
+
+## 7. User-Defined Generics
+
+Generic type parameters use `[]` syntax (not `<>`).
+
+### Generic Functions
+
+```
+fn id[T](x: T) -> T = x
 fn pair[A, B](a: A, b: B) -> (A, B) = (a, b)
-fn wrap_list[T](x: T) -> List[T] = [x]
 ```
 
-- Rust: `fn identity<T: Clone + Debug + PartialEq + PartialOrd>(x: T) -> T`
-- TypeScript: `function identity<T>(x: T): T` (erased in JS mode)
-- Type variables are registered per declaration and cleaned up after
+Type arguments can be inferred or explicit:
 
-### 4.3 Generic Record Types
+```
+id(42)           // T inferred as Int
+id[String]("hi") // T explicitly String
+```
 
-```almide
-type Stack[T] = { items: List[T], size: Int }
-type Pair[A, B] = { fst: A, snd: B }
+### Generic Record Types
 
-fn stack_push[T](s: Stack[T], item: T) -> Stack[T] = {
-  { items: s.items ++ [item], size: s.size + 1 }
+```
+type Box[T] = { value: T, label: String }
+
+fn unbox[T](b: Box[T]) -> T = b.value
+```
+
+### Generic Variant Types
+
+```
+type Either[A, B] = | Left(A) | Right(B)
+
+fn map_right[A, B, C](e: Either[A, B], f: fn(B) -> C) -> Either[A, C] = match e {
+  Left(a) => Left(a),
+  Right(b) => Right(f(b)),
 }
 ```
 
-- Anonymous record literals `{ items: ..., size: ... }` auto-resolve to `Stack<T>` when field names match
-- Rust: generic bounds `<T: Clone + Debug + PartialEq + PartialOrd>` on struct and impl blocks
-- TypeScript: `<T>` on interfaces
+### Structural Bounds on Generics
 
-### 4.4 Generic Variant Types
-
-```almide
-type Maybe[T] =
-  | Just(T)
-  | Nothing
-
-fn from_option[T](opt: Option[T]) -> Maybe[T] =
-  match opt {
-    some(v) => Just(v)
-    none => Nothing
-  }
-```
-
-- Rust: `use Enum::*` is skipped for generic enums (Rust doesn't allow it)
-- Instead, constructor wrapper functions are generated:
-  - `fn Just<T>(_0: T) -> Maybe<T> { Maybe::Just(_0) }`
-  - `fn Nothing<T>() -> Maybe<T> { Maybe::Nothing }`
-- Unit constructors (e.g. `Nothing`) auto-call as `Nothing()` in expression context
-- Pattern matching uses qualified paths: `Maybe::Just(v)`, `Maybe::Nothing`
-
-### 4.5 Recursive Generic Variants
-
-```almide
-type Tree[T] =
-  | Leaf(T)
-  | Node(Tree[T], Tree[T])
-
-fn tree_sum(t: Tree[Int]) -> Int =
-  match t {
-    Leaf(v) => v
-    Node(left, right) => tree_sum(left) + tree_sum(right)
-  }
-
-fn tree_map[A, B](t: Tree[A], f: fn(A) -> B) -> Tree[B] =
-  match t {
-    Leaf(v) => Leaf(f(v))
-    Node(left, right) => Node(tree_map(left, f), tree_map(right, f))
-  }
-```
-
-Self-referencing variant fields are auto-detected and handled transparently:
-
-- **Rust enum definition**: recursive fields wrapped with `Box<>` to avoid infinite-size types
-  - `Node(Box<Tree<T>>, Box<Tree<T>>)`
-- **Constructor wrappers**: accept unboxed values, insert `Box::new()` internally
-  - `fn Node<T>(_0: Tree<T>, _1: Tree<T>) -> Tree<T> { Tree::Node(Box::new(_0), Box::new(_1)) }`
-- **Pattern matching**: auto-deref with temporary bindings
-  - `Tree::Node(__boxed_left, __boxed_right) => { let left = *__boxed_left; let right = *__boxed_right; ... }`
-- **TypeScript**: no special handling needed (reference types, no size issue)
-
-The user never writes `Box`, `Box::new()`, or deref operators — the compiler handles it entirely.
-
-### 4.6 Call-site Type Arguments
-
-```almide
-identity[Int](42)
-stack_new[Int]()
-pair[Int, String](1, "hello")
-```
-
-- Parser: `peek_type_args_call()` lookahead distinguishes `f[Type](args)` from list indexing `a[0]`
-- Rust: turbofish syntax `f::<i64>(args)`
-- TypeScript: type args erased (TS infers from usage)
-- Formatter: roundtrips `f[Type](args)` correctly
-
-### 4.7 Type Inference
-
-Type variables (`T`, `A`, `B`) are compatible with everything during type checking. The checker does not attempt full Hindley-Milner inference — it relies on explicit type annotations and structural compatibility.
-
-Design rationale: AI-friendliness over type safety rigor. LLM-generated code nearly always uses concrete types. Strict inference would add complexity without proportional benefit for the target use case.
-
-### 4.8 Auto-derived Bounds (Rust Target)
-
-All generic type parameters receive the following Rust bounds:
+Generic parameters can require specific record fields:
 
 ```
-T: Clone + std::fmt::Debug + PartialEq + PartialOrd
+fn describe[T: { name: String, .. }](x: T) -> String = "name: ${x.name}"
+
+fn set_name[T: { name: String, .. }](x: T, n: String) -> T = { ...x, name: n }
 ```
 
-| Bound | Reason |
-|-------|--------|
-| `Clone` | Almide values are always copyable (no ownership model exposed) |
-| `Debug` | Required for `println!("{:?}", ...)` formatting |
-| `PartialEq` | Required for `==` / `!=` operators |
-| `PartialOrd` | Required for `>` / `<` / `>=` / `<=` operators |
+The bound `T: { name: String, .. }` is an `OpenRecord` constraint. The checker stores it in `FnSig.structural_bounds` and validates it at each call site.
+
+### Protocol Bounds on Generics
+
+```
+fn display[T: Showable](item: T) -> String = item.show()
+fn show_named[T: Showable + Nameable](item: T) -> String = item.get_name() + ": " + item.show()
+```
+
+Multiple bounds are joined with `+`. The checker validates that the concrete type at each call site has declared conformance to all required protocols.
+
+Tests: `spec/lang/generics_test.almd`, `spec/lang/type_system_test.almd`, `spec/lang/open_record_test.almd`, `spec/lang/protocol_generics_test.almd`
 
 ---
 
-## 5. Function Types
+## 8. Type Inference
 
-```almide
-fn(Int) -> String           // function taking Int, returning String
-fn(A, B) -> C               // generic function type
-fn() -> Unit                // no-argument function
+Almide uses constraint-based type inference with a Union-Find data structure.
+
+### Three-Pass Architecture
+
+1. **Infer** (`infer.rs`): Walk the AST, assign fresh type variables (`?0`, `?1`, ...) to unknown types, collect equality constraints between types.
+2. **Solve** (`solving.rs`): Process constraints via unification. The Union-Find merges equivalent type variables and binds them to concrete types.
+3. **Substitute** (`mod.rs`): Replace all inference variables in `expr_types` with their resolved concrete types.
+
+### Inference Variables
+
+Fresh type variables are named `?N` (e.g., `?0`, `?1`). They are distinct from user-declared `TypeVar`s (`T`, `U`). The `UnionFind` structure manages equivalence classes with union-by-rank and path compression.
+
+### Bidirectional Inference
+
+Types flow both forward (from arguments to return) and backward (from expected type to expression):
+
+```
+let xs: List[Int] = []         // [] gets type List[Int] from annotation
+let f = (x) => x + 1          // x inferred as Int from + operator
 ```
 
-- Used in higher-order function parameters
-- Rust: `fn(i64) -> String` or closure types
-- TypeScript: `(a: number) => string`
+### Let-Polymorphism
+
+Generic functions are instantiated with fresh inference variables at each call site:
+
+```
+fn id[T](x: T) -> T = x
+id(42)          // T = Int at this call
+id("hello")     // T = String at this call
+```
+
+### Lambda Parameter Inference
+
+Lambda parameters are inferred from how they are used:
+
+```
+list.map([1, 2, 3], (x) => x * 2)   // x: Int inferred from List[Int]
+```
+
+### Constraint Solving
+
+Constraints are `(expected, actual, context)` triples. The solver unifies each pair:
+
+- **Inference var + concrete**: Bind the var to the concrete type.
+- **Inference var + inference var**: Union the two vars.
+- **Concrete + concrete**: Structurally recurse (e.g., `List[?0]` vs `List[Int]` unifies `?0 = Int`).
+- **Unknown**: Unifies with everything (error recovery sentinel).
+
+An **occurs check** prevents infinite types (e.g., `T = List[T]`).
+
+Tests: `spec/lang/bidirectional_type_test.almd`, `spec/lang/type_annotation_test.almd`, `spec/lang/lambda_test.almd`
 
 ---
 
-## 6. Tuple Types
+## 9. Structural Typing and Open Records
 
-```almide
-(Int, String)               // pair
-(A, B, C)                   // triple
+Almide supports structural subtyping for records via open record types.
+
+### Compatibility Rules
+
+| Parameter type   | Argument type    | Result  |
+|------------------|------------------|---------|
+| `{ a: Int }`     | `{ a: Int }`     | ok      |
+| `{ a: Int }`     | `{ a: Int, b: String }` | error (closed, extra field) |
+| `{ a: Int, .. }` | `{ a: Int, b: String }` | ok (open, extra allowed)    |
+| `{ a: Int, .. }` | `Named` with field `a: Int` | ok (named types resolved) |
+| `{ a: Int, .. }` | `{ a: Int }`     | ok (exact match allowed)    |
+
+### Unification with Open Records
+
+Open records use order-independent field matching. For `{ a: Int, .. }` vs `{ a: Int, b: String }`, unification succeeds if every required field has a matching field (by name) in the actual type.
+
+### Chain Calling
+
+Open record parameters compose: a function accepting `{ name: String, breed: String, .. }` can pass its argument to a function accepting `{ name: String, .. }`.
+
+```
+fn chain_b(x: { name: String, .. }) -> String = x.name
+fn chain_a(x: { name: String, breed: String, .. }) -> String = chain_b(x)
 ```
 
-- Rust: `(i64, String)`
-- TypeScript: `[number, string]`
+Tests: `spec/lang/open_record_test.almd`
 
 ---
 
-## 7. Type Checker Behavior
+## 10. Protocol System
 
-### 7.1 Type Resolution
+Protocols define a set of methods that conforming types must implement. They serve the same role as traits (Rust) or typeclasses (Haskell).
 
-The checker resolves types through the following process:
+### Defining a Protocol
 
-1. Register all declarations (functions, types, traits, impls) in a single pass
-2. For each function: register generic type variables as `Ty::TypeVar`
-3. Check parameter types and body expression type
-4. Verify return type compatibility (with `resolve_named` for structural comparison)
-5. Clean up type variables after each declaration
-
-### 7.2 Compatibility Rules
-
-| Left | Right | Compatible? |
-|------|-------|-------------|
-| `TypeVar` | anything | Yes |
-| anything | `TypeVar` | Yes |
-| `Int` | `Int` | Yes |
-| `Int` | `Float` | No |
-| `List[T]` | `List[Int]` | Yes (via TypeVar) |
-| `{ a: Int }` | `{ a: Int }` | Yes (structural) |
-| Record literal | Named type | Yes (if fields match) |
-
-### 7.3 Named Type Resolution
-
-Anonymous record literals auto-resolve to declared struct types. The emitter maintains a `named_record_types` map (field names → struct name) that is consulted before generating anonymous `AlmdRec` structs.
-
-```almide
-type Point = { x: Int, y: Int }
-let p = { x: 1, y: 2 }  // resolves to Point, not AlmdRec0
 ```
-
----
-
-## 8. Implementation Details
-
-### 8.1 Compiler Pipeline
-
-| Layer | Type System Role |
-|-------|-----------------|
-| AST (`ast.rs`) | `TypeExpr` enum, `GenericParam`, `Expr::Call.type_args` |
-| Parser | `try_parse_generic_params()`, `peek_type_args_call()`, `parse_type_expr()` |
-| Type Checker (`check/`) | `Ty::TypeVar`, `FnSig.generics`, compatibility checking |
-| Rust Emitter | Generic bounds, Box wrapping, turbofish, constructor wrappers |
-| TS Emitter | `<T>` on declarations (erased in JS mode) |
-| Formatter | Roundtrip `[T]` on declarations and call-site type args |
-
-### 8.2 Internal Type Representation
-
-```rust
-enum Ty {
-    Int, Float, String, Bool, Unit,
-    List(Box<Ty>),
-    Map(Box<Ty>, Box<Ty>),
-    Option(Box<Ty>),
-    Result(Box<Ty>, Box<Ty>),
-    Fn(Vec<Ty>, Box<Ty>),
-    Tuple(Vec<Ty>),
-    Record(Vec<(String, Ty)>),
-    Named(String),
-    TypeVar(String),        // generic type variable
-    Unknown,
+protocol Showable {
+  fn show(a: Self) -> String
 }
 ```
 
-### 8.3 Emitter State for Generics
+`Self` in method signatures is a `TypeVar("Self")` that gets substituted with the concrete type at each conformance site.
 
-| Field | Purpose |
-|-------|---------|
-| `named_record_types` | field names → struct name (for anonymous record resolution) |
-| `generic_variant_constructors` | constructor name → enum name (for pattern qualification) |
-| `generic_variant_unit_ctors` | unit constructor names (for auto-`()` in expression context) |
-| `boxed_variant_args` | (constructor, arg_index) pairs (for recursive variant Box wrapping) |
+### Declaring Conformance
+
+Two ways to declare that a type implements a protocol:
+
+**Convention methods** (inline):
+
+```
+type Dog: Showable = { name: String }
+fn Dog.show(d: Dog) -> String = "Dog: " + d.name
+```
+
+**Impl blocks**:
+
+```
+type Cat = { name: String }
+
+impl Showable for Cat {
+  fn show(c: Cat) -> String = "Cat: " + c.name
+}
+```
+
+Both register methods as `Type.method` in the function environment.
+
+### Built-in Protocols
+
+| Protocol | Methods | Notes |
+|----------|---------|-------|
+| `Eq`     | `fn eq(a: Self, b: Self) -> Bool` | All value types are Eq except `Fn`. Auto-derived. |
+| `Repr`   | `fn repr(v: Self) -> String` | String representation. |
+| `Ord`    | `fn compare(a: Self, b: Self) -> Int` | Ordering (-1, 0, 1). |
+| `Hash`   | `fn hash(v: Self) -> Int` | Hash code. No `Float`, `Fn`, or `Map`. |
+| `Codec`  | `fn encode(v: Self) -> Value`, `fn decode(v: Value) -> Result[Self, String]` | Serialization. |
+
+### Protocol Validation
+
+After all declarations are registered, the checker validates:
+
+1. All required methods are defined (convention or impl block).
+2. Method signatures match the protocol definition (parameter types, return type, arity).
+3. `Self` is correctly substituted with the concrete type.
+
+### Using Protocols as Generic Bounds
+
+```
+fn display[T: Showable](item: T) -> String = item.show()
+```
+
+At each call site, the checker verifies that the concrete type for `T` has declared conformance to `Showable`.
+
+### Multiple Protocols
+
+```
+type Widget: Showable, Nameable = { id: Int, name: String }
+fn show_named[T: Showable + Nameable](item: T) -> String = item.get_name() + ": " + item.show()
+```
+
+### Marker Protocols
+
+Protocols with no methods serve as markers:
+
+```
+protocol Serializable {}
+type Marker: Serializable = { tag: String }
+```
+
+Tests: `spec/lang/protocol_test.almd`, `spec/lang/impl_block_test.almd`, `spec/lang/protocol_generics_test.almd`, `spec/lang/protocol_advanced_test.almd`, `spec/lang/derive_conventions_test.almd`
 
 ---
 
-## 9. Not Yet Implemented
+## 11. Type Aliases
 
-### 9.1 Trait Bounds
+`type Name = ExistingType` creates a transparent alias. The alias is interchangeable with the underlying type.
 
-```almide
-// Future syntax:
-fn sort[T: Ord](xs: List[T]) -> List[T] = ...
+```
+type Score = Int
+type Label = String
+
+let s: Score = 100
+let total = s + 50      // works: Score is Int
 ```
 
-Depends on trait system maturation. Currently all type variables accept anything.
+Type aliases are resolved by `TypeEnv.resolve_named`, which looks up the name in `env.types` and returns the underlying type definition.
 
-### 9.2 Higher-Kinded Types (HKT)
-
-```almide
-// Not planned:
-type Functor[F[_]] = trait { ... }
-```
-
-Out of scope. Requires kind system, type inference engine rewrite, and Rust emitter overhaul. No production language with multi-target codegen has succeeded at this. The investment (2-4 months) does not align with the mission — LLMs rarely generate code that requires HKT.
-
-### 9.3 Variance
-
-Covariance/contravariance rules for generic type parameters are under consideration for v0.7. Currently not enforced.
+Tests: `spec/lang/type_alias_test.almd`
 
 ---
 
-## 10. Test Reference
+## 12. Union Types
 
-| File | Tests | Covers |
-|------|-------|--------|
-| `exercises/generics-test/generics_test.almd` | 10 | Generic functions, generic records, call-site type args |
-| `exercises/generics-test/generics_variant_test.almd` | 6 | Generic variants, PartialOrd, pattern matching, maybe_map |
-| `exercises/generics-test/generics_recursive_test.almd` | 5 | Recursive variants, tree_sum, tree_size, tree_map |
+Inline union types represent a value that can be one of several types:
+
+```
+type StringOrInt = Int | String
+```
+
+Internally, `Ty::Union(Vec<Ty>)` stores members sorted and deduplicated. The `Ty::union()` constructor flattens nested unions and deduplicates:
+
+- `Ty::union([Int, String, Int])` produces `Ty::Union([Int, String])`
+- `Ty::union([Int])` produces `Ty::Int` (single member unwrapped)
+
+Unification with unions tries each member with snapshotted bindings, committing the first success.
+
+---
+
+## 13. How Types Flow Through the Compiler
+
+```
+Source (.almd)
+    │
+    ▼
+  Parse → AST (untyped)
+    │
+    ▼
+  Check → expr_types: HashMap<ExprId, Ty>
+    │        ├── registration.rs  — register FnSig, type decls, protocols
+    │        ├── infer.rs         — walk AST, assign ?N vars, collect constraints
+    │        ├── solving.rs       — Union-Find unification
+    │        └── resolve          — substitute ?N → concrete Ty in expr_types
+    │
+    ▼
+  Lower → Typed IR (IrProgram)
+    │        ├── trusts expr_types — no type guessing
+    │        ├── desugars pipe, UFCS, interpolation, operators
+    │        └── assigns VarId to every variable reference
+    │
+    ▼
+  Codegen → target source (Rust / WASM)
+             ├── reads IR types for dispatch decisions
+             └── emits target-specific type representations
+```
+
+### Key Data Structures
+
+- **`Ty` enum** (`src/types/mod.rs`): Internal type representation. 17 variants covering all types.
+- **`TypeEnv`** (`src/types/env.rs`): The type environment. Holds type declarations, function signatures, scopes, protocol definitions, and conformance tracking.
+- **`FnSig`** (`src/types/mod.rs`): Function signature with params, return type, generics, structural bounds, and protocol bounds.
+- **`TypeConstructorId`** (`src/types/constructor.rs`): Identifies type constructors (List, Option, Result, Map, Set, user-defined). Used by the `Applied` variant of `Ty`.
+- **`Kind`** (`src/types/constructor.rs`): The "type of a type constructor" — `*`, `* -> *`, `* -> * -> *`.
+- **`UnionFind`** (`src/check/types.rs`): Disjoint-set structure for inference variable equivalence. Union-by-rank with path compression.
+- **`Checker`** (`src/check/mod.rs`): Orchestrates the three-pass type checking pipeline.
+
+### Unification (`src/types/unify.rs`)
+
+The `unify` function matches a signature type against a concrete type, collecting `TypeVar` bindings:
+
+1. `TypeVar` on signature side: bind to actual type (with occurs check).
+2. `TypeVar` on actual side: accept (polymorphic compatibility).
+3. `Applied` types: match constructor ID, recursively unify args.
+4. `Union` types: try each member with snapshotted bindings.
+5. Everything else: delegate to `Ty::compatible`.
+
+`substitute` replaces bound `TypeVar`s in a type with their bindings.
+
+### Type Constructor Registry (`src/types/constructor.rs`)
+
+Every type constructor is registered with its kind and algebraic laws. The registry enables uniform operations across all container types and supports stream fusion optimizations:
+
+| Constructor | Kind           | Algebraic Laws                              |
+|-------------|----------------|---------------------------------------------|
+| `List`      | `* -> *`       | FunctorComposition, FunctorIdentity, FilterComposition, MapFoldFusion, MapFilterFusion |
+| `Option`    | `* -> *`       | FunctorComposition, FunctorIdentity, MonadAssociativity |
+| `Result`    | `* -> * -> *`  | FunctorComposition, FunctorIdentity         |
+| `Set`       | `* -> *`       | (none)                                      |
+| `Map`       | `* -> * -> *`  | (none)                                      |
+
+User-defined types are registered via `register_user_type` with their arity.
