@@ -174,12 +174,27 @@ fn collect_defined_vars_stmts(stmts: &[IrStmt], defined: &mut HashSet<VarId>) {
                 // `var x` assigned inside the loop — x is loop-modified
                 defined.insert(*var);
             }
+            IrStmtKind::IndexAssign { target, index, value } => {
+                // `xs[i] = v` — the list/array variable is mutated
+                defined.insert(*target);
+                collect_defined_vars_expr(index, defined);
+                collect_defined_vars_expr(value, defined);
+            }
+            IrStmtKind::FieldAssign { target, value, .. } => {
+                defined.insert(*target);
+                collect_defined_vars_expr(value, defined);
+            }
+            IrStmtKind::MapInsert { target, key, value } => {
+                defined.insert(*target);
+                collect_defined_vars_expr(key, defined);
+                collect_defined_vars_expr(value, defined);
+            }
             IrStmtKind::Expr { expr } => collect_defined_vars_expr(expr, defined),
             IrStmtKind::Guard { cond, else_ } => {
                 collect_defined_vars_expr(cond, defined);
                 collect_defined_vars_expr(else_, defined);
             }
-            _ => {}
+            IrStmtKind::Comment { .. } => {}
         }
     }
 }
