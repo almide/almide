@@ -295,6 +295,15 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             // FanLoweringPass will strip auto-try from these later
             exprs: exprs.into_iter().map(|e| rewrite_expr(e)).collect(),
         },
+        // Codegen wrapper nodes — must recurse into inner expressions
+        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(rewrite_expr(*expr)), as_str, mutable },
+        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
+            name, args: args.into_iter().map(|a| rewrite_expr(a)).collect(),
+        },
         other => other,
     };
 
