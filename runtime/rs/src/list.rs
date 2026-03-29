@@ -105,7 +105,10 @@ pub fn almide_rt_list_window<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
 // Uses std::thread::scope for work-stealing parallelism.
 // Falls back to sequential below PARALLEL_THRESHOLD elements.
 
-const PARALLEL_THRESHOLD: usize = 1024;
+// Parallel when there are at least 2 elements.
+// Each element may represent arbitrarily heavy work (e.g., fan { list.map(chunks, heavy_fn) }).
+// Using a high threshold would skip parallelism for small lists with expensive per-element work.
+const PARALLEL_THRESHOLD: usize = 2;
 
 pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send + Sync>(xs: Vec<A>, f: impl Fn(A) -> B + Send + Sync) -> Vec<B> {
     if xs.len() < PARALLEL_THRESHOLD {
