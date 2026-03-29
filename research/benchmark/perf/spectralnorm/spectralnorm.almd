@@ -1,0 +1,74 @@
+// spectral-norm — The Computer Language Benchmarks Game
+// Calculate eigenvalue using the power method.
+// Usage: almide run spectralnorm.almd -- 5500
+
+import math
+import env
+import int
+
+fn eval_a(i: Int, j: Int) -> Float = {
+  let ij = i + j
+  1.0 / float.from_int(ij * (ij + 1) / 2 + i + 1)
+}
+
+fn multiply_av(v: List[Float], n: Int) -> List[Float] = {
+  var result: List[Float] = []
+  for i in 0..n {
+    var sum = 0.0
+    for j in 0..n {
+      sum = sum + eval_a(i, j) * v[j]
+    }
+    result = result + [sum]
+  }
+  result
+}
+
+fn multiply_atv(v: List[Float], n: Int) -> List[Float] = {
+  var result: List[Float] = []
+  for i in 0..n {
+    var sum = 0.0
+    for j in 0..n {
+      sum = sum + eval_a(j, i) * v[j]
+    }
+    result = result + [sum]
+  }
+  result
+}
+
+fn multiply_atav(v: List[Float], n: Int) -> List[Float] = {
+  let tmp = multiply_av(v, n)
+  multiply_atv(tmp, n)
+}
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = if list.len(args) > 0 then {
+    match list.get(args, 0) {
+      some(s) => match int.parse(s) { ok(v) => v, err(_) => 100 },
+      none => 100,
+    }
+  } else 100
+
+  var u: List[Float] = []
+  for _ in 0..n {
+    u = u + [1.0]
+  }
+  var v: List[Float] = []
+  for _ in 0..n {
+    v = v + [0.0]
+  }
+
+  for _ in 0..10 {
+    v = multiply_atav(u, n)
+    u = multiply_atav(v, n)
+  }
+
+  var vbv = 0.0
+  var vv = 0.0
+  for i in 0..n {
+    vbv = vbv + u[i] * v[i]
+    vv = vv + v[i] * v[i]
+  }
+
+  println(float.to_fixed(math.sqrt(vbv / vv), 9))
+}

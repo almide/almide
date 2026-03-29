@@ -23,8 +23,8 @@ fn format_output(pairs: List[(String, String)]) -> String =
   pairs |> list.map((p) => "${p.0}: ${p.1}") |> string.join("\n")
 
 effect fn run_pipeline(input: String) -> Result[String, String] = {
-  let pairs = parse_pairs(input)
-  let validated = validate_keys(pairs)
+  let pairs = parse_pairs(input)!
+  let validated = validate_keys(pairs)!
   let transformed = transform(validated)
   ok(format_output(transformed))
 }

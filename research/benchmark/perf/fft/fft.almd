@@ -10,8 +10,8 @@ fn pi() -> Float = 3.14159265358979323846
 
 effect fn main() -> Unit = {
   let args = env.args()
-  let size = if list.len(args) > 1 then {
-    match list.get(args, 1) {
+  let size = if list.len(args) > 0 then {
+    match list.get(args, 0) {
       some(s) => match int.parse(s) { ok(v) => v, err(_) => 20 }
       none => 20
     }

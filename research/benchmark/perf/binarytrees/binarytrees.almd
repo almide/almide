@@ -1,0 +1,70 @@
+// binary-trees — The Computer Language Benchmarks Game
+// Allocate and deallocate binary trees, measuring allocation performance.
+// Usage: almide run binarytrees.almd -- 21
+//
+// Function-heavy: fan.map for parallel tree iteration.
+
+import math
+import env
+import int
+
+type Tree = Leaf | Node(Tree, Tree)
+
+fn make(depth: Int) -> Tree =
+  if depth == 0 then Leaf
+  else Node(make(depth - 1), make(depth - 1))
+
+fn check(tree: Tree) -> Int = match tree {
+  Leaf => 1,
+  Node(left, right) => check(left) + check(right) + 1,
+}
+
+// Pure function: create and check n trees of given depth, sum their checksums
+fn check_trees(iterations: Int, depth: Int) -> Int = {
+  var total = 0
+  for _ in 0..iterations {
+    total = total + check(make(depth))
+  }
+  total
+}
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = if list.len(args) > 0 then {
+    match list.get(args, 0) {
+      some(s) => match int.parse(s) { ok(v) => v, err(_) => 10 },
+      none => 10,
+    }
+  } else 10
+
+  let min_depth = 4
+  let max_depth = if n > min_depth + 2 then n else min_depth + 2
+
+  // Stretch tree
+  let stretch_depth = max_depth + 1
+  println("stretch tree of depth ${int.to_string(stretch_depth)}\t check: ${int.to_string(check(make(stretch_depth)))}")
+
+  // Long-lived tree
+  let long_lived = make(max_depth)
+
+  // Parallel tree iterations — each depth level runs in parallel
+  var depths: List[Int] = []
+  var d = min_depth
+  while d <= max_depth {
+    list.push(depths, d)
+    d = d + 2
+  }
+
+  let results = fan.map(depths, (depth) => {
+    let iterations = math.pow(2, max_depth - depth + min_depth)
+    let total = check_trees(iterations, depth)
+    ok((iterations, depth, total))
+  })
+
+  for r in results {
+    let (iterations, depth, total) = r
+    println("${int.to_string(iterations)}\t trees of depth ${int.to_string(depth)}\t check: ${int.to_string(total)}")
+  }
+
+  println("long lived tree of depth ${int.to_string(max_depth)}\t check: ${int.to_string(check(long_lived))}")
+}
