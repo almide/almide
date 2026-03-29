@@ -480,6 +480,41 @@ impl Checker {
     }
 
     fn infer_pipe(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
+        // Unwrap postfix operators (??, !, ?) on the RHS so the pipe targets the inner Call.
+        // e.g. `xs |> list.find(pred) ?? fallback` → pipe into list.find, then apply ??
+        match right.as_mut() {
+            ast::Expr::UnwrapOr { expr: inner, fallback, .. } => {
+                let inner_ty = self.infer_pipe(left, inner);
+                let fb_ty = self.infer_expr(fallback);
+                self.unify_infer(&inner_ty, &fb_ty);
+                // UnwrapOr unwraps Option[T]/Result[T,E] → T
+                match &inner_ty {
+                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+                    _ => inner_ty,
+                }
+            }
+            ast::Expr::Unwrap { expr: inner, .. } => {
+                let inner_ty = self.infer_pipe(left, inner);
+                match &inner_ty {
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
+                    _ => inner_ty,
+                }
+            }
+            ast::Expr::Try { expr: inner, .. } => {
+                let inner_ty = self.infer_pipe(left, inner);
+                match &inner_ty {
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 =>
+                        Ty::Applied(TypeConstructorId::Option, vec![args[0].clone()]),
+                    _ => Ty::Applied(TypeConstructorId::Option, vec![inner_ty]),
+                }
+            }
+            _ => self.infer_pipe_direct(left, right),
+        }
+    }
+
+    fn infer_pipe_direct(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
         let left_ty = self.infer_expr(left);
         match right.as_mut() {
             ast::Expr::Call { callee, args, .. } => {
