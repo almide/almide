@@ -233,11 +233,21 @@ impl Checker {
                 if crate::stdlib::is_any_stdlib(&name) {
                     self.env.imported_stdlib.insert(sym(&name));
                 }
+                // For 'import self', resolve canonical to the actual registered module name
+                // (the module was loaded under its alias or package name, not "self")
+                let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
+                let resolved_canonical = if is_self_import && path.len() == 1 {
+                    self.env.module_aliases.get(&sym(&name))
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| canonical.clone())
+                } else {
+                    canonical.clone()
+                };
                 // Track directly imported user modules (including submodules via pkg.sub)
-                if self.env.user_modules.contains(&sym(&canonical)) {
-                    self.env.imported_user_modules.insert(sym(&canonical));
+                if self.env.user_modules.contains(&sym(&resolved_canonical)) {
+                    self.env.imported_user_modules.insert(sym(&resolved_canonical));
                     // Also mark submodules as accessible (import pkg → pkg.sub.* accessible)
-                    let prefix = format!("{}.", canonical);
+                    let prefix = format!("{}.", resolved_canonical);
                     let subs: Vec<Sym> = self.env.user_modules.iter()
                         .filter(|m| m.as_str().starts_with(&prefix))
                         .cloned().collect();
@@ -250,8 +260,8 @@ impl Checker {
                         self.env.imported_user_modules.insert(sym(&dotted));
                     }
                 }
-                // Register alias mapping
-                if alias.is_some() {
+                // Register alias mapping (don't override aliases already set by register_alias)
+                if alias.is_some() && !self.env.module_aliases.contains_key(&sym(&name)) {
                     self.env.module_aliases.insert(sym(&name), sym(&canonical));
                 }
             }
