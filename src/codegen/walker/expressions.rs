@@ -9,7 +9,7 @@ use super::helpers::{template_or, terminate_stmt, contains_loop_control, ty_has_
 
 /// Render a statement list. Peephole patterns are detected at IR level
 /// by PeepholePass; this just renders the resulting IR nodes.
-pub fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
+fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
     stmts.iter().map(|s| render_stmt(ctx, s)).collect()
 }
 

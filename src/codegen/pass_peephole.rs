@@ -68,14 +68,6 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
         _ => {}
     }
 
-    // Detect: while lo < hi { swap(xs,lo,hi); lo++; hi-- } → Block with ListReverse
-    if let IrExprKind::While { cond, body } = &expr.kind {
-        if let Some(rev) = try_detect_reverse(cond, body) {
-            *expr = rev;
-            return true;
-        }
-    }
-
     // Detect: for i in 0..n { xs[i] = ys[i] } → ListCopySlice
     if let IrExprKind::ForIn { var, var_tuple, iterable, body } = &expr.kind {
         if var_tuple.is_none() && body.len() == 1 {
@@ -247,13 +239,6 @@ fn try_detect_reverse_block(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrS
         kind: IrStmtKind::ListReverse { target: *xs_id, end: hi_val.clone() },
         span: s1.span,
     })
-}
-
-/// reverse (while): detected as While expr directly
-fn try_detect_reverse(cond: &IrExpr, body: &[IrStmt]) -> Option<IrExpr> {
-    // Same logic as reverse_block but returns an Expr (Unit) wrapping the stmt
-    // This handles cases where the while is an expression, not inside a block
-    None // block version handles the common case
 }
 
 /// rotate: p0=xs[0]; for i in 0..r { xs[i]=xs[i+1] }; xs[r]=p0

@@ -278,6 +278,18 @@ fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>) {
             for (v, _) in params { defined.insert(*v); }
             collect_defined_vars_expr(body, defined);
         }
+        // Mutating stdlib calls: first BorrowMut arg is the target variable
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } => {
+            if let Some(info) = arg_transforms::lookup(module, func) {
+                for (i, arg) in args.iter().enumerate() {
+                    if info.args.get(i) == Some(&arg_transforms::ArgTransform::BorrowMut) {
+                        if let IrExprKind::Var { id } = &arg.kind {
+                            defined.insert(*id);
+                        }
+                    }
+                }
+            }
+        }
         _ => {}
     }
 }

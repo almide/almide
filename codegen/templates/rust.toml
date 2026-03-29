@@ -184,7 +184,7 @@ template = "{value}"
 # ── Declarations ──
 
 [fn_decl]
-template = "#[inline(always)]\npub fn {name}({params}) -> {return_type} {{ {body} }}"
+template = "#[inline]\npub fn {name}({params}) -> {return_type} {{ {body} }}"
 
 # Effect fn: ret_ty in IR is already Result<T, String>, so use it directly
 [effect_fn_decl]

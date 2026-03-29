@@ -1,0 +1,71 @@
+// Clone optimization tests: verify IndexAccess borrow, use_count skip, push opt.
+
+type Tree = Leaf | Node(Tree, Tree)
+
+fn make(d: Int) -> Tree =
+  if d == 0 then Leaf else Node(make(d - 1), make(d - 1))
+
+fn check(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r) => check(l) + check(r) + 1,
+}
+
+// use_count == 1: no clone on match subject (ownership moves)
+test "tree check no clone" {
+  assert_eq(check(make(4)), 31)
+  assert_eq(check(Leaf), 1)
+  assert_eq(check(Node(Leaf, Leaf)), 3)
+}
+
+// IndexAccess: container not cloned, element cloned if needed
+test "list index int (no clone needed)" {
+  let xs = [10, 20, 30, 40, 50]
+  var sum = 0
+  for i in 0..5 { sum = sum + xs[i] }
+  assert_eq(sum, 150)
+}
+
+test "list index string (element clone)" {
+  let names = ["Alice", "Bob", "Charlie"]
+  assert_eq(names[0], "Alice")
+  assert_eq(names[2], "Charlie")
+}
+
+// push optimization: xs = xs + [v] → xs.push(v)
+test "push optimization" {
+  var xs: List[Int] = []
+  for i in 0..100 {
+    xs = xs + [i]
+  }
+  assert_eq(list.len(xs), 100)
+  assert_eq(xs[0], 0)
+  assert_eq(xs[99], 99)
+}
+
+// var list read after mutation
+test "list read after index assign" {
+  var xs = [1, 2, 3]
+  xs[1] = 99
+  assert_eq(xs[0], 1)
+  assert_eq(xs[1], 99)
+  assert_eq(xs[2], 3)
+}
+
+// Nested for: both lists survive
+test "nested for with list access" {
+  let rows = [[1, 2], [3, 4]]
+  var total = 0
+  for row in rows {
+    for val in row {
+      total = total + val
+    }
+  }
+  assert_eq(total, 10)
+}
+
+// par_map small list: should still work (threshold = 2)
+test "par_map with 2 elements" {
+  let xs = [10, 20]
+  let result = list.map(xs, (x) => x * 2)
+  assert_eq(result, [20, 40])
+}
