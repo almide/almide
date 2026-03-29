@@ -10,6 +10,9 @@ struct FnDef {
     ret: String,
     #[serde(default)]
     effect: bool,
+    /// Explicitly mark as impure for LICM (default: auto-derived from effect + BorrowMut)
+    #[serde(default)]
+    impure: bool,
     #[serde(default)]
     #[allow(dead_code)]
     ufcs: bool,
@@ -523,13 +526,18 @@ pub fn generate_stdlib() {
                 };
 
                 let effect_suffix = if def.effect { "true" } else { "false" };
+                // Pure = not effect, not impure, no BorrowMut args
+                let has_mut = transforms.iter().any(|t| t.contains("BorrowMut"));
+                let is_pure = !def.effect && !def.impure && !has_mut;
+                let pure_suffix = if is_pure { "true" } else { "false" };
                 let required_count = def.params.iter().filter(|p| !p.optional).count();
                 arg_transform_arms.push_str(&format!(
-                    "            (\"{module}\", \"{func}\") => Some(StdlibCallInfo {{ args: &[{transforms}], effect: {effect}, name: \"{rt_name}\", required: {required} }}),\n",
+                    "            (\"{module}\", \"{func}\") => Some(StdlibCallInfo {{ args: &[{transforms}], effect: {effect}, pure_: {pure_}, name: \"{rt_name}\", required: {required} }}),\n",
                     module = module_name,
                     func = fn_name,
                     transforms = transforms.join(", "),
                     effect = effect_suffix,
+                    pure_ = pure_suffix,
                     required = required_count,
                 ));
             }
@@ -772,6 +780,7 @@ pub fn generate_stdlib() {
          pub struct StdlibCallInfo {{\n\
          \x20   pub args: &'static [ArgTransform],\n\
          \x20   pub effect: bool,\n\
+         \x20   pub pure_: bool,\n\
          \x20   pub name: &'static str,\n\
          \x20   pub required: usize,\n\
          }}\n\n\

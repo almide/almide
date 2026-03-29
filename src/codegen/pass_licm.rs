@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 use crate::intern::Sym;
 use crate::ir::*;
+use crate::generated::arg_transforms;
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -529,8 +530,17 @@ fn is_pure(expr: &IrExpr) -> bool {
         | IrExprKind::Var { .. } | IrExprKind::FnRef { .. } | IrExprKind::Hole
         | IrExprKind::Break | IrExprKind::Continue | IrExprKind::EmptyMap => true,
 
-        // Any function call is potentially impure — never hoist
-        IrExprKind::Call { .. } | IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
+        // Function calls: pure only if provably side-effect-free.
+        // Stdlib Module calls: derive purity from TOML metadata (no effect, no BorrowMut).
+        // All other calls (Named, Method, Computed, user-defined): conservatively impure.
+        IrExprKind::Call { target, args, .. } => {
+            let call_pure = match target {
+                CallTarget::Module { module, func } => is_pure_stdlib_call(module, func),
+                _ => false,
+            };
+            call_pure && args.iter().all(|a| is_pure(a))
+        }
+        IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
 
         // Operators: pure if operands are pure
         IrExprKind::BinOp { left, right, .. } => is_pure(left) && is_pure(right),
@@ -689,4 +699,11 @@ fn refs_are_outside_loop_stmt(stmt: &IrStmt, loop_defined: &HashSet<VarId>) -> b
         IrStmtKind::Expr { expr } => refs_are_outside_loop(expr, loop_defined),
         IrStmtKind::Comment { .. } => true,
     }
+}
+
+/// Derive purity of a stdlib call from its TOML-generated metadata.
+/// The `pure_` field is auto-derived at build time:
+/// pure = not effect, not impure, no BorrowMut args.
+fn is_pure_stdlib_call(module: &str, func: &str) -> bool {
+    arg_transforms::lookup(module, func).is_some_and(|info| info.pure_)
 }

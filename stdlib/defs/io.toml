@@ -27,6 +27,7 @@ description = "Write raw bytes to stdout (no UTF-8 conversion)"
 example = 'io.write_bytes([0x50, 0x34, 0x0A])'
 params = [{ name = "data", type = "List[Int]" }]
 return = "Unit"
+impure = true
 rust = "almide_rt_io_write_bytes(&{data})"
 
 [write]
@@ -34,4 +35,5 @@ description = "Write a Bytes buffer to stdout (zero-copy, buffered)"
 example = 'io.write(buf)'
 params = [{ name = "data", type = "Bytes" }]
 return = "Unit"
+impure = true
 rust = "almide_rt_io_write(&{data})"
