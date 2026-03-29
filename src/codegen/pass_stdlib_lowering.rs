@@ -295,6 +295,15 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             // FanLoweringPass will strip auto-try from these later
             exprs: exprs.into_iter().map(|e| rewrite_expr(e)).collect(),
         },
+        // Codegen wrapper nodes — must recurse into inner expressions
+        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(rewrite_expr(*expr)), as_str, mutable },
+        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
+            name, args: args.into_iter().map(|a| rewrite_expr(a)).collect(),
+        },
         other => other,
     };
 
@@ -336,6 +345,15 @@ fn rewrite_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {
             },
             IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
                 pattern, value: rewrite_expr(value),
+            },
+            IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
+                target, index: rewrite_expr(index), value: rewrite_expr(value),
+            },
+            IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
+                target, field, value: rewrite_expr(value),
+            },
+            IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
+                target, key: rewrite_expr(key), value: rewrite_expr(value),
             },
             other => other,
         };

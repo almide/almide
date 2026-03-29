@@ -201,6 +201,15 @@ fn insert_clone_stmts(stmts: Vec<IrStmt>, clone_ids: &HashSet<VarId>) -> Vec<IrS
             IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
                 pattern, value: insert_clones(value, clone_ids),
             },
+            IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
+                target, index: insert_clones(index, clone_ids), value: insert_clones(value, clone_ids),
+            },
+            IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
+                target, field, value: insert_clones(value, clone_ids),
+            },
+            IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
+                target, key: insert_clones(key, clone_ids), value: insert_clones(value, clone_ids),
+            },
             other => other,
         };
         IrStmt { kind, span: s.span }

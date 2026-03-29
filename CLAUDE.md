@@ -110,6 +110,124 @@ When modifying codegen:
 - Test effect fn: `fs.read_text()` inside effect fn must compile without manual `?`
 - Test that generated Rust compiles without warnings
 
+## Writing Idiomatic Almide
+
+When writing `.almd` code (stdlib, packages, examples), follow these idioms:
+
+### Prefer match over if/else chains
+```almide
+// ✗ avoid
+if kind == "int" then "i64"
+else if kind == "float" then "f64"
+else if kind == "string" then "String"
+else "unknown"
+
+// ✓ use match
+match kind {
+  "int"    => "i64",
+  "float"  => "f64",
+  "string" => "String",
+  _        => "unknown",
+}
+```
+
+### Prefer list combinators over var + for
+```almide
+// ✗ avoid
+var result: List[String] = []
+for item in items {
+  result = result + [transform(item)]
+}
+result
+
+// ✓ use map / flat_map / filter_map
+items |> list.map((item) => transform(item))
+
+// ✓ with index: list.enumerate
+cases |> list.enumerate |> list.map((entry) => {
+  let (idx, case) = entry
+  "${int.to_string(idx)}: ${case}"
+})
+```
+
+### Prefer list.find over var + for search
+```almide
+// ✗ avoid
+var result = json.null()
+for t in types {
+  if get_str(t, "name") == name then result = t else result = result
+}
+result
+
+// ✓ use list.find
+types |> list.find((t) => get_str(t, "name") == name) ?? json.null()
+```
+
+### Prefer recursion over var + while + flag
+```almide
+// ✗ avoid
+var i = p
+var go = true
+while i < len and go {
+  let c = peek(t, i)
+  if is_ws(c) then { i = i + 1 }
+  else { go = false }
+}
+i
+
+// ✓ use recursion
+fn skip_ws(t: String, p: Int) -> Int =
+  if p < string.len(t) and is_ws(peek(t, p)) then skip_ws(t, p + 1)
+  else p
+
+// ✓ or use scan_while for common patterns
+fn scan_while(t: String, p: Int, pred: (String) -> Bool) -> Int =
+  if p < string.len(t) and pred(peek(t, p)) then scan_while(t, p + 1, pred)
+  else p
+```
+
+### Use heredoc for static text blocks
+```almide
+// ✗ avoid: array of strings joined
+let code = [
+  "#[no_mangle]",
+  "pub extern \"C\" fn alloc(len: i32) -> *mut u8 {",
+  "    let buf = Vec::<u8>::with_capacity(len as usize);",
+  "    buf.as_mut_ptr()",
+  "}",
+] |> list.join("\n")
+
+// ✓ use heredoc: no escapes, reads like actual code
+let code = """
+  #[no_mangle]
+  pub extern "C" fn alloc(len: i32) -> *mut u8 {
+      let buf = Vec::<u8>::with_capacity(len as usize);
+      buf.as_mut_ptr()
+  }
+  """
+```
+
+### Use pipe for data transformation chains
+```almide
+// ✓ pipe chains
+fields
+  |> list.map((f) => "${get_str(f, "name")}: ${go_type(get_type(f))}")
+  |> list.join(", ")
+```
+
+### Use ?? for fallback, ? for Result→Option, ! for unwrap
+```almide
+value.get(v, key) ?? default_val      // Result/Option fallback
+json.get(v, "field")?                  // Result → Option
+parse_int(s)!                          // unwrap, propagate err (effect fn only)
+```
+
+### Imports
+- Stdlib modules (`string`, `int`, `float`, `list`, `value`, `map`, `set`, etc.) are auto-imported — do NOT write `import string`
+- `json` requires explicit `import json`
+- External packages require `import pkg_name`
+- Package self-reference: `import self as pkg_name`
+
 ## Key Design Decisions
 
 - **Multi-target**: Same IR emits to Rust or WASM via `--target rust|wasm` (TS codegen は削除済み)
