@@ -7,6 +7,97 @@ use super::types::render_type;
 use super::statements::{render_stmt, render_match_arm};
 use super::helpers::{template_or, terminate_stmt, contains_loop_control, ty_has_named_typevar, erase_named_typevars, ty_contains_name};
 
+/// Render a statement list with peephole optimizations (swap, copy_from_slice).
+pub fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
+    let is_rust = ctx.target == super::super::pass::Target::Rust;
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i < stmts.len() {
+        if is_rust {
+            // Detect swap: let tmp = xs[a]; xs[a] = xs[b]; xs[b] = tmp → xs.swap(a, b)
+            if i + 2 < stmts.len() {
+                if let Some(swap_str) = try_detect_swap(ctx, &stmts[i], &stmts[i + 1], &stmts[i + 2]) {
+                    result.push(swap_str);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        // Detect self-assignment: xs = xs → skip
+        if let IrStmtKind::Assign { var, value } = &stmts[i].kind {
+            if matches!(&value.kind, IrExprKind::Var { id } if id == var)
+                || matches!(&value.kind, IrExprKind::Clone { expr } if matches!(&expr.kind, IrExprKind::Var { id } if id == var))
+            {
+                i += 1;
+                continue;
+            }
+        }
+        result.push(render_stmt(ctx, &stmts[i]));
+        i += 1;
+    }
+    result
+}
+
+/// Detect: let tmp = xs[a]; xs[a] = xs[b]; xs[b] = tmp → xs.swap(a, b)
+fn try_detect_swap(ctx: &RenderContext, s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<String> {
+    // s1: Bind { var: tmp_var, value: IndexAccess(Var(xs), idx_a) }
+    let IrStmtKind::Bind { var: tmp_var, value: bind_val, .. } = &s1.kind else { return None; };
+    let IrExprKind::IndexAccess { object: obj1, index: idx_a } = &bind_val.kind else { return None; };
+    let IrExprKind::Var { id: xs_id } = &obj1.kind else { return None; };
+
+    // s2: IndexAssign { target: xs, index: idx_a2, value: IndexAccess(Var(xs), idx_b) }
+    let IrStmtKind::IndexAssign { target: xs_id2, index: idx_a2, value: assign_val } = &s2.kind else { return None; };
+    if xs_id2 != xs_id { return None; }
+    let IrExprKind::IndexAccess { object: obj2, index: idx_b } = &assign_val.kind else { return None; };
+    let IrExprKind::Var { id: xs_id3 } = &obj2.kind else { return None; };
+    if xs_id3 != xs_id { return None; }
+
+    // s3: IndexAssign { target: xs, index: idx_b2, value: Var(tmp_var) }
+    let IrStmtKind::IndexAssign { target: xs_id4, index: idx_b2, value: tmp_val } = &s3.kind else { return None; };
+    if xs_id4 != xs_id { return None; }
+    let IrExprKind::Var { id: tmp_id } = &tmp_val.kind else { return None; };
+    if tmp_id != tmp_var { return None; }
+
+    // Verify indices match: idx_a == idx_a2, idx_b == idx_b2
+    // (structural equality on rendered strings for simplicity)
+    let a_str = render_expr(ctx, idx_a);
+    let a2_str = render_expr(ctx, idx_a2);
+    let b_str = render_expr(ctx, idx_b);
+    let b2_str = render_expr(ctx, idx_b2);
+    if a_str != a2_str || b_str != b2_str { return None; }
+
+    let xs_str = ctx.var_name(*xs_id);
+    Some(format!("{}.swap({} as usize, {} as usize);", xs_str, a_str, b_str))
+}
+
+/// Detect: for i in 0..n { xs[i] = ys[i] } → xs[..n].copy_from_slice(&ys[..n])
+/// Only for Copy element types (Int, Float, Bool).
+fn try_detect_copy_loop(ctx: &RenderContext, loop_var: VarId, iterable: &IrExpr, body_stmt: &IrStmt) -> Option<String> {
+    // iterable must be Range { start: 0, end: n, inclusive: false }
+    let IrExprKind::Range { start, end, inclusive } = &iterable.kind else { return None; };
+    if *inclusive { return None; }
+    let IrExprKind::LitInt { value: 0 } = &start.kind else { return None; };
+
+    // body must be IndexAssign { target: xs, index: Var(loop_var), value: IndexAccess(Var(ys), Var(loop_var)) }
+    let IrStmtKind::IndexAssign { target: xs_id, index: idx_expr, value } = &body_stmt.kind else { return None; };
+    // index must be Var(loop_var)
+    let IrExprKind::Var { id: idx_var } = &idx_expr.kind else { return None; };
+    if *idx_var != loop_var { return None; }
+    // value must be IndexAccess { object: Var(ys), index: Var(loop_var) }
+    // (or the index might be a more complex expr using loop_var — skip those)
+    let IrExprKind::IndexAccess { object, index: val_idx } = &value.kind else { return None; };
+    let IrExprKind::Var { id: ys_id } = &object.kind else { return None; };
+    let IrExprKind::Var { id: val_idx_var } = &val_idx.kind else { return None; };
+    if *val_idx_var != loop_var { return None; }
+    // xs and ys must be different variables
+    if xs_id == ys_id { return None; }
+
+    let n_str = render_expr(ctx, end);
+    let xs_str = ctx.var_name(*xs_id);
+    let ys_str = ctx.var_name(*ys_id);
+    Some(format!("{}[..{} as usize].copy_from_slice(&{}[..{} as usize]);", xs_str, n_str, ys_str, n_str))
+}
+
 pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
     match &expr.kind {
         // ── Literals ──
@@ -91,8 +182,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         IrExprKind::Block { stmts, expr } => {
-            let mut parts: Vec<String> = stmts.iter()
-                .map(|s| terminate_stmt(ctx, render_stmt(ctx, s)))
+            let mut parts: Vec<String> = render_stmts(ctx, stmts).into_iter()
+                .map(|s| terminate_stmt(ctx, s))
                 .collect();
             if let Some(e) = expr {
                 let expr_str = render_expr(ctx, e);
@@ -122,6 +213,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Loops ──
         IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+            // Peephole: for i in 0..n { xs[i] = ys[i] } → xs[..n].copy_from_slice(&ys[..n])
+            if ctx.target == super::super::pass::Target::Rust && var_tuple.is_none() && body.len() == 1 {
+                if let Some(copy_str) = try_detect_copy_loop(ctx, *var, iterable, &body[0]) {
+                    return copy_str;
+                }
+            }
             let var_name = if let Some(tuple_vars) = var_tuple {
                 let names: Vec<String> = tuple_vars.iter().map(|id| ctx.var_name(*id).to_string()).collect();
                 let vars_s = names.join(", ");
@@ -131,14 +228,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 ctx.var_name(*var).to_string()
             };
             let iter = render_expr(ctx, iterable);
-            let body_str = body.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
+            let body_str = render_stmts(ctx, body).join("\n");
             ctx.templates.render_with("for_loop", None, &[], &[("var", var_name.as_str()), ("iter", iter.as_str()), ("body", body_str.as_str())])
                 .unwrap_or_else(|| format!("for _ in _ {{ }}"))
         }
 
         IrExprKind::While { cond, body } => {
             let cond_str = render_expr(ctx, cond);
-            let body_str = body.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
+            let body_str = render_stmts(ctx, body).join("\n");
             ctx.templates.render_with("while_loop", None, &[], &[("cond", cond_str.as_str()), ("body", body_str.as_str())])
                 .unwrap_or_else(|| format!("while _ {{ }}"))
         }
