@@ -56,8 +56,12 @@ fn run_tco(functions: &mut [IrFunction], var_table: &mut VarTable) {
 /// - Has at least one self-recursive call
 /// - ALL self-recursive calls are in tail position
 /// - Not a test helper (name starts with `__test_`)
+/// - Return type can be default-initialized (primitives, tuples of primitives, etc.)
 fn is_tco_candidate(func: &IrFunction) -> bool {
     if func.name.starts_with("__test_") {
+        return false;
+    }
+    if !can_default_init(&func.ret_ty) {
         return false;
     }
     let (has_any, all_in_tail) = all_self_calls_in_tail_pos(&func.body, &func.name);
@@ -576,6 +580,8 @@ fn emit_base_case(expr: IrExpr, result_var: VarId) -> IrExpr {
 }
 
 /// Produce a default value for a given type (used to initialize the result variable).
+/// The value is never observed — every control path assigns before reading — but
+/// Rust's type checker requires a valid expression of the correct type.
 fn default_for_type(ty: &Ty) -> IrExpr {
     let kind = match ty {
         Ty::Int => IrExprKind::LitInt { value: 0 },
@@ -583,8 +589,10 @@ fn default_for_type(ty: &Ty) -> IrExpr {
         Ty::Bool => IrExprKind::LitBool { value: false },
         Ty::String => IrExprKind::LitStr { value: String::new() },
         Ty::Unit => IrExprKind::Unit,
-        Ty::Applied(TypeConstructorId::Result, _) => {
-            IrExprKind::ResultOk { expr: Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None }) }
+        Ty::Applied(TypeConstructorId::Result, args) => {
+            let inner_ty = args.first().cloned().unwrap_or(Ty::Unit);
+            let inner = default_for_type(&inner_ty);
+            IrExprKind::ResultOk { expr: Box::new(inner) }
         }
         Ty::Applied(TypeConstructorId::Option, _) => {
             IrExprKind::OptionNone
@@ -592,14 +600,39 @@ fn default_for_type(ty: &Ty) -> IrExpr {
         Ty::Applied(TypeConstructorId::List, _) => {
             IrExprKind::List { elements: vec![] }
         }
-        // For other complex types, use Unit as placeholder -- the result var is always
-        // assigned before it is read (every control path ends in assign+break or
-        // assign params+continue).
+        Ty::Applied(TypeConstructorId::Map, _) => {
+            IrExprKind::MapLiteral { entries: vec![] }
+        }
+        Ty::Tuple(elems) => {
+            IrExprKind::Tuple {
+                elements: elems.iter().map(|t| default_for_type(t)).collect(),
+            }
+        }
+        // Named types and other complex types: cannot synthesize a default value.
+        // TCO should not be applied to functions returning these types.
+        // Return Unit as unreachable placeholder (guarded by can_default_init check).
         _ => IrExprKind::Unit,
     };
     IrExpr {
         kind,
         ty: ty.clone(),
         span: None,
+    }
+}
+
+/// Returns true if we can produce a valid default value for this type.
+/// Types that fail this check should not be TCO'd (the result variable
+/// cannot be initialized without unsafe code).
+fn can_default_init(ty: &Ty) -> bool {
+    match ty {
+        Ty::Int | Ty::Float | Ty::Bool | Ty::String | Ty::Unit => true,
+        Ty::Applied(TypeConstructorId::Result, args) => {
+            args.first().map_or(true, |inner| can_default_init(inner))
+        }
+        Ty::Applied(TypeConstructorId::Option, _) => true,
+        Ty::Applied(TypeConstructorId::List, _) => true,
+        Ty::Applied(TypeConstructorId::Map, _) => true,
+        Ty::Tuple(elems) => elems.iter().all(|t| can_default_init(t)),
+        _ => false,
     }
 }
