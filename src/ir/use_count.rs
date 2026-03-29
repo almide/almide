@@ -258,11 +258,38 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
             bump_vars_in_expr(object, locals, table);
             bump_vars_in_expr(key, locals, table);
         }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
+        | IrExprKind::Fan { exprs: elements } => {
             for e in elements { bump_vars_in_expr(e, locals, table); }
         }
         IrExprKind::Record { fields, .. } => {
             for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            bump_vars_in_expr(base, locals, table);
+            for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
+        }
+        // Nested loops: bump outer vars in iterable AND body.
+        // The iterable is re-evaluated each iteration of the enclosing loop.
+        IrExprKind::ForIn { iterable, body, .. } => {
+            bump_vars_in_expr(iterable, locals, table);
+            for s in body { bump_vars_in_stmt(s, locals, table); }
+        }
+        IrExprKind::While { cond, body } => {
+            bump_vars_in_expr(cond, locals, table);
+            for s in body { bump_vars_in_stmt(s, locals, table); }
+        }
+        IrExprKind::Range { start, end, .. } => {
+            bump_vars_in_expr(start, locals, table);
+            bump_vars_in_expr(end, locals, table);
+        }
+        IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
+            bump_vars_in_expr(expr, locals, table);
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries { bump_vars_in_expr(k, locals, table); bump_vars_in_expr(v, locals, table); }
         }
         _ => {}
     }

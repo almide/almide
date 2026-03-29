@@ -72,6 +72,24 @@ fn stmt_references_var(stmt: &IrStmt, var: VarId) -> bool {
     }
 }
 
+/// Detect `xs = xs + [v]` and render as `xs.push(v);`
+fn try_render_push(ctx: &RenderContext, var: VarId, value: &IrExpr) -> Option<String> {
+    // Match: BinOp(ConcatList, left, List([element]))
+    let IrExprKind::BinOp { op: BinOp::ConcatList, left, right } = &value.kind else { return None; };
+    let IrExprKind::List { elements } = &right.kind else { return None; };
+    if elements.len() != 1 { return None; }
+    // Left must be Var(var) or Clone(Var(var))
+    let is_self = match &left.kind {
+        IrExprKind::Var { id } => *id == var,
+        IrExprKind::Clone { expr } => matches!(&expr.kind, IrExprKind::Var { id } if *id == var),
+        _ => false,
+    };
+    if !is_self { return None; }
+    let target_s = ctx.var_name(var);
+    let elem_s = render_expr(ctx, &elements[0]);
+    Some(format!("{}.push({});", target_s, elem_s))
+}
+
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, mutability } => {
@@ -117,6 +135,12 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 .unwrap_or_else(|| format!("let _ = _;"))
         }
         IrStmtKind::Assign { var, value } => {
+            // Optimize: xs = xs + [v] → xs.push(v) (Rust only)
+            if ctx.target == super::super::pass::Target::Rust {
+                if let Some(push_str) = try_render_push(ctx, *var, value) {
+                    return push_str;
+                }
+            }
             let target_s = ctx.var_name(*var).to_string();
             let value_s = render_expr(ctx, value);
             ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
