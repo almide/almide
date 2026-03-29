@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 use crate::intern::Sym;
 use crate::ir::*;
+use crate::generated::arg_transforms::{self, ArgTransform};
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -522,12 +523,14 @@ fn is_trivial(expr: &IrExpr) -> bool {
 /// Returns true if the expression contains any function call that could have side effects.
 /// Uses the effect_fn_names set populated from TypeEnv during lowering.
 /// Method/Computed calls are conservatively considered effectful.
+/// Stdlib calls with BorrowMut args (list.push, list.pop, etc.) are effectful.
 fn has_effect_call(expr: &IrExpr, efns: &HashSet<Sym>) -> bool {
     match &expr.kind {
         IrExprKind::Call { target, args, .. } => {
             let call_is_effectful = match target {
                 CallTarget::Module { module, func } => {
                     efns.contains(&crate::intern::sym(&format!("{}.{}", module, func)))
+                        || has_mutable_arg(module, func)
                 }
                 CallTarget::Named { name } => efns.contains(name),
                 // Method/Computed calls are conservatively considered effectful
@@ -753,4 +756,10 @@ fn refs_are_outside_loop_stmt(stmt: &IrStmt, loop_defined: &HashSet<VarId>) -> b
         IrStmtKind::Expr { expr } => refs_are_outside_loop(expr, loop_defined),
         IrStmtKind::Comment { .. } => true,
     }
+}
+
+/// Returns true if a stdlib Module call has any BorrowMut argument (mutating call).
+fn has_mutable_arg(module: &str, func: &str) -> bool {
+    arg_transforms::lookup(module, func)
+        .is_some_and(|info| info.args.iter().any(|a| matches!(a, ArgTransform::BorrowMut)))
 }
