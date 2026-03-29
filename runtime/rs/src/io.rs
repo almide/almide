@@ -35,3 +35,9 @@ pub fn almide_rt_io_write_bytes(data: &Vec<i64>) {
         w.write_all(&bytes).unwrap();
     });
 }
+
+pub fn almide_rt_io_write(data: &Vec<u8>) {
+    STDOUT_BUF.with(|buf| {
+        buf.borrow_mut().write_all(data).unwrap();
+    });
+}

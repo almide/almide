@@ -9,7 +9,6 @@
 use std::collections::HashSet;
 use crate::intern::Sym;
 use crate::ir::*;
-use crate::generated::arg_transforms::{self, ArgTransform};
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -410,11 +409,11 @@ fn try_hoist_expr(
 /// 2. It contains no calls to effect functions (side effects)
 /// 3. It is not trivially cheap (skip Var, Lit*, Unit)
 /// 4. It contains no control flow (loops, continue, break, return)
-fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, efns: &HashSet<Sym>) -> bool {
+fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, _efns: &HashSet<Sym>) -> bool {
     if is_trivial(expr) {
         return false;
     }
-    if has_effect_call(expr, efns) {
+    if !is_pure(expr) {
         return false;
     }
     if has_control_flow(expr) {
@@ -519,120 +518,54 @@ fn is_trivial(expr: &IrExpr) -> bool {
         | IrExprKind::Lambda { .. }
     )
 }
-
-/// Returns true if the expression contains any function call that could have side effects.
-/// Uses the effect_fn_names set populated from TypeEnv during lowering.
-/// Method/Computed calls are conservatively considered effectful.
-/// Stdlib calls with BorrowMut args (list.push, list.pop, etc.) are effectful.
-fn has_effect_call(expr: &IrExpr, efns: &HashSet<Sym>) -> bool {
+/// Returns true if the expression is pure (no function calls, no I/O, no mutation).
+/// Only pure expressions can be hoisted out of loops.
+/// Conservative: any function call makes the expression impure.
+fn is_pure(expr: &IrExpr) -> bool {
     match &expr.kind {
-        IrExprKind::Call { target, args, .. } => {
-            let call_is_effectful = match target {
-                CallTarget::Module { module, func } => {
-                    efns.contains(&crate::intern::sym(&format!("{}.{}", module, func)))
-                        || has_mutable_arg(module, func)
-                }
-                CallTarget::Named { name } => efns.contains(name),
-                // Method/Computed calls are conservatively considered effectful
-                CallTarget::Method { .. } | CallTarget::Computed { .. } => true,
-            };
-            if call_is_effectful {
-                return true;
-            }
-            args.iter().any(|a| has_effect_call(a, efns))
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            has_effect_call(left, efns) || has_effect_call(right, efns)
-        }
-        IrExprKind::UnOp { operand, .. } => has_effect_call(operand, efns),
-        IrExprKind::If { cond, then, else_ } => {
-            has_effect_call(cond, efns) || has_effect_call(then, efns) || has_effect_call(else_, efns)
-        }
-        IrExprKind::Block { stmts, expr } => {
-            stmts.iter().any(|s| has_effect_call_stmt(s, efns))
-                || expr.as_ref().is_some_and(|e| has_effect_call(e, efns))
-        }
-        IrExprKind::Match { subject, arms } => {
-            has_effect_call(subject, efns)
-                || arms.iter().any(|a| {
-                    a.guard.as_ref().is_some_and(|g| has_effect_call(g, efns))
-                        || has_effect_call(&a.body, efns)
-                })
-        }
-        IrExprKind::Lambda { body, .. } => has_effect_call(body, efns),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            elements.iter().any(|e| has_effect_call(e, efns))
-        }
-        IrExprKind::Record { fields, .. } => fields.iter().any(|(_, v)| has_effect_call(v, efns)),
-        IrExprKind::SpreadRecord { base, fields } => {
-            has_effect_call(base, efns) || fields.iter().any(|(_, v)| has_effect_call(v, efns))
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            has_effect_call(object, efns)
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            has_effect_call(object, efns) || has_effect_call(index, efns)
-        }
-        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr }
-        | IrExprKind::ResultErr { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
-            has_effect_call(expr, efns)
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            has_effect_call(expr, efns) || has_effect_call(fallback, efns)
-        }
-        IrExprKind::StringInterp { parts } => {
-            parts.iter().any(|p| matches!(p, IrStringPart::Expr { expr } if has_effect_call(expr, efns)))
-        }
-        IrExprKind::MapLiteral { entries } => {
-            entries.iter().any(|(k, v)| has_effect_call(k, efns) || has_effect_call(v, efns))
-        }
-        IrExprKind::Range { start, end, .. } => {
-            has_effect_call(start, efns) || has_effect_call(end, efns)
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            has_effect_call(iterable, efns) || body.iter().any(|s| has_effect_call_stmt(s, efns))
-        }
-        IrExprKind::While { cond, body } => {
-            has_effect_call(cond, efns) || body.iter().any(|s| has_effect_call_stmt(s, efns))
-        }
-        IrExprKind::RustMacro { args, .. } => args.iter().any(|a| has_effect_call(a, efns)),
-        // Leaf nodes are pure
-        _ => false,
-    }
-}
+        // Leaf nodes: always pure
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
+        | IrExprKind::Var { .. } | IrExprKind::FnRef { .. } | IrExprKind::Hole
+        | IrExprKind::Break | IrExprKind::Continue | IrExprKind::EmptyMap => true,
 
-fn has_effect_call_stmt(stmt: &IrStmt, efns: &HashSet<Sym>) -> bool {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-            has_effect_call(value, efns)
+        // Any function call is potentially impure — never hoist
+        IrExprKind::Call { .. } | IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
+
+        // Operators: pure if operands are pure
+        IrExprKind::BinOp { left, right, .. } => is_pure(left) && is_pure(right),
+        IrExprKind::UnOp { operand, .. } => is_pure(operand),
+
+        // Collection constructors: pure if elements are pure
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => elements.iter().all(|e| is_pure(e)),
+        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| is_pure(v)),
+        IrExprKind::SpreadRecord { base, fields } => is_pure(base) && fields.iter().all(|(_, v)| is_pure(v)),
+        IrExprKind::MapLiteral { entries } => entries.iter().all(|(k, v)| is_pure(k) && is_pure(v)),
+        IrExprKind::Range { start, end, .. } => is_pure(start) && is_pure(end),
+
+        // Access: pure if sub-exprs are pure
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => is_pure(object),
+        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
+            is_pure(object) && is_pure(index)
         }
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            has_effect_call(index, efns) || has_effect_call(value, efns)
+
+        // Wrappers: pure if inner is pure
+        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr }
+        | IrExprKind::ResultErr { expr } | IrExprKind::Clone { expr }
+        | IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. }
+        | IrExprKind::BoxNew { expr } | IrExprKind::ToVec { expr } => is_pure(expr),
+        IrExprKind::UnwrapOr { expr, fallback } => is_pure(expr) && is_pure(fallback),
+
+        // String interpolation: pure if all parts are pure
+        IrExprKind::StringInterp { parts } => {
+            parts.iter().all(|p| match p {
+                IrStringPart::Expr { expr } => is_pure(expr),
+                _ => true,
+            })
         }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            has_effect_call(key, efns) || has_effect_call(value, efns)
-        }
-        IrStmtKind::ListSwap { a, b, .. } => {
-            has_effect_call(a, efns) || has_effect_call(b, efns)
-        }
-        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            has_effect_call(end, efns)
-        }
-        IrStmtKind::ListCopySlice { len, .. } => {
-            has_effect_call(len, efns)
-        }
-        IrStmtKind::Guard { cond, else_ } => {
-            has_effect_call(cond, efns) || has_effect_call(else_, efns)
-        }
-        IrStmtKind::Expr { expr } => has_effect_call(expr, efns),
-        IrStmtKind::Comment { .. } => false,
+
+        // Everything else: conservatively impure
+        _ => false,
     }
 }
 
@@ -756,10 +689,4 @@ fn refs_are_outside_loop_stmt(stmt: &IrStmt, loop_defined: &HashSet<VarId>) -> b
         IrStmtKind::Expr { expr } => refs_are_outside_loop(expr, loop_defined),
         IrStmtKind::Comment { .. } => true,
     }
-}
-
-/// Returns true if a stdlib Module call has any BorrowMut argument (mutating call).
-fn has_mutable_arg(module: &str, func: &str) -> bool {
-    arg_transforms::lookup(module, func)
-        .is_some_and(|info| info.args.iter().any(|a| matches!(a, ArgTransform::BorrowMut)))
 }
