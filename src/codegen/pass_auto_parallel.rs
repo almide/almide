@@ -286,7 +286,9 @@ fn is_pure_stmt(
         IrStmtKind::BindDestructure { value, .. } => is_pure_expr(value, local_vars, effect_fns, mutable_vars),
         // Assignment to a variable: impure (mutation)
         IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. } |
-        IrStmtKind::MapInsert { .. } | IrStmtKind::FieldAssign { .. } => false,
+        IrStmtKind::MapInsert { .. } | IrStmtKind::FieldAssign { .. } |
+        IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. } |
+        IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => false,
         IrStmtKind::Expr { expr } => is_pure_expr(expr, local_vars, effect_fns, mutable_vars),
         IrStmtKind::Guard { cond, else_ } => {
             is_pure_expr(cond, local_vars, effect_fns, mutable_vars) &&

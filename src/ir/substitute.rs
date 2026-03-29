@@ -284,6 +284,18 @@ pub fn substitute_var_in_stmt(stmt: &IrStmt, var: VarId, replacement: &IrExpr) -
         IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
             cond: sub(cond), else_: sub(else_),
         },
+        IrStmtKind::ListSwap { target, a, b } => IrStmtKind::ListSwap {
+            target: *target, a: sub(a), b: sub(b),
+        },
+        IrStmtKind::ListReverse { target, end } => IrStmtKind::ListReverse {
+            target: *target, end: sub(end),
+        },
+        IrStmtKind::ListRotateLeft { target, end } => IrStmtKind::ListRotateLeft {
+            target: *target, end: sub(end),
+        },
+        IrStmtKind::ListCopySlice { dst, src, len } => IrStmtKind::ListCopySlice {
+            dst: *dst, src: *src, len: sub(len),
+        },
         IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: sub(expr) },
         IrStmtKind::Comment { .. } => stmt.kind.clone(),
     };

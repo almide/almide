@@ -311,6 +311,15 @@ pub enum IrStmtKind {
     Guard { cond: IrExpr, else_: IrExpr },
     Expr { expr: IrExpr },
     Comment { text: String },
+    // ── Peephole-optimized list operations (inserted by PeepholePass) ──
+    /// xs.swap(a, b)
+    ListSwap { target: VarId, a: IrExpr, b: IrExpr },
+    /// xs[..=end].reverse()
+    ListReverse { target: VarId, end: IrExpr },
+    /// xs[..=end].rotate_left(1)
+    ListRotateLeft { target: VarId, end: IrExpr },
+    /// dst[..n].copy_from_slice(&src[..n])
+    ListCopySlice { dst: VarId, src: VarId, len: IrExpr },
 }
 
 // ── Type declarations ────────────────────────────────────────────

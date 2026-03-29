@@ -208,6 +208,10 @@ impl FuncCompiler<'_> {
                     }
                 }
             }
+            IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+            | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => {
+                // TODO: emit optimized WASM for list operations
+            }
             IrStmtKind::MapInsert { target, key, value } => {
                 // m[k] = v  →  target = map.set(target, key, value)
                 if let Some(&local_idx) = self.var_map.get(&target.0) {

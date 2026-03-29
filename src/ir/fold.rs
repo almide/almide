@@ -147,6 +147,16 @@ fn fold_stmt(stmt: &mut IrStmt) {
             fold_expr(cond);
             fold_expr(else_);
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            fold_expr(a);
+            fold_expr(b);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            fold_expr(end);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            fold_expr(len);
+        }
         IrStmtKind::Expr { expr } => fold_expr(expr),
         IrStmtKind::Comment { .. } => {}
     }

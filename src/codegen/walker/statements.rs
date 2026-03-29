@@ -64,6 +64,15 @@ fn stmt_references_var(stmt: &IrStmt, var: VarId) -> bool {
         IrStmtKind::MapInsert { key, value, .. } => {
             expr_references_var(key, var) || expr_references_var(value, var)
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            expr_references_var(a, var) || expr_references_var(b, var)
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            expr_references_var(end, var)
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            expr_references_var(len, var)
+        }
         IrStmtKind::Expr { expr } => expr_references_var(expr, var),
         IrStmtKind::Guard { cond, else_ } => {
             expr_references_var(cond, var) || expr_references_var(else_, var)
@@ -238,6 +247,32 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let val_str = render_expr(ctx, value);
             ctx.templates.render_with("bind_destructure", None, &[], &[("pattern", pat_str.as_str()), ("value", val_str.as_str())])
                 .unwrap_or_else(|| format!("let _ = _;"))
+        }
+        IrStmtKind::ListSwap { target, a, b } => {
+            let t = ctx.var_name(*target).to_string();
+            let a_s = render_expr(ctx, a);
+            let b_s = render_expr(ctx, b);
+            ctx.templates.render_with("peep_swap", None, &[], &[("target", &t), ("a", &a_s), ("b", &b_s)])
+                .unwrap_or_else(|| format!("{}.swap({}, {});", t, a_s, b_s))
+        }
+        IrStmtKind::ListReverse { target, end } => {
+            let t = ctx.var_name(*target).to_string();
+            let e = render_expr(ctx, end);
+            ctx.templates.render_with("peep_reverse", None, &[], &[("target", &t), ("end", &e)])
+                .unwrap_or_else(|| format!("{}[..={}].reverse();", t, e))
+        }
+        IrStmtKind::ListRotateLeft { target, end } => {
+            let t = ctx.var_name(*target).to_string();
+            let e = render_expr(ctx, end);
+            ctx.templates.render_with("peep_rotate_left", None, &[], &[("target", &t), ("end", &e)])
+                .unwrap_or_else(|| format!("{}[..={}].rotate_left(1);", t, e))
+        }
+        IrStmtKind::ListCopySlice { dst, src, len } => {
+            let d = ctx.var_name(*dst).to_string();
+            let s = ctx.var_name(*src).to_string();
+            let n = render_expr(ctx, len);
+            ctx.templates.render_with("peep_copy_slice", None, &[], &[("dst", &d), ("src", &s), ("n", &n)])
+                .unwrap_or_else(|| format!("{}[..{}].copy_from_slice(&{}[..{}]);", d, n, s, n))
         }
         IrStmtKind::Comment { text } => format!("// {}", text),
     }

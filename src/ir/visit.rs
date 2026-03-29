@@ -168,6 +168,16 @@ pub fn walk_stmt<V: IrVisitor>(v: &mut V, stmt: &IrStmt) {
             v.visit_expr(cond);
             v.visit_expr(else_);
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            v.visit_expr(a);
+            v.visit_expr(b);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            v.visit_expr(end);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            v.visit_expr(len);
+        }
         IrStmtKind::Expr { expr } => {
             v.visit_expr(expr);
         }

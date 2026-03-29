@@ -115,6 +115,15 @@ fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, efns: &HashSet<Sym>) -
         IrStmtKind::MapInsert { key, value, .. } => {
             hoist_loops(key, vt, efns) | hoist_loops(value, vt, efns)
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            hoist_loops(a, vt, efns) | hoist_loops(b, vt, efns)
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            hoist_loops(end, vt, efns)
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            hoist_loops(len, vt, efns)
+        }
         IrStmtKind::Guard { cond, else_ } => {
             hoist_loops(cond, vt, efns) | hoist_loops(else_, vt, efns)
         }
@@ -188,6 +197,19 @@ fn collect_defined_vars_stmts(stmts: &[IrStmt], defined: &mut HashSet<VarId>) {
                 defined.insert(*target);
                 collect_defined_vars_expr(key, defined);
                 collect_defined_vars_expr(value, defined);
+            }
+            IrStmtKind::ListSwap { target, a, b } => {
+                defined.insert(*target);
+                collect_defined_vars_expr(a, defined);
+                collect_defined_vars_expr(b, defined);
+            }
+            IrStmtKind::ListReverse { target, end } | IrStmtKind::ListRotateLeft { target, end } => {
+                defined.insert(*target);
+                collect_defined_vars_expr(end, defined);
+            }
+            IrStmtKind::ListCopySlice { dst, len, .. } => {
+                defined.insert(*dst);
+                collect_defined_vars_expr(len, defined);
             }
             IrStmtKind::Expr { expr } => collect_defined_vars_expr(expr, defined),
             IrStmtKind::Guard { cond, else_ } => {
@@ -594,6 +616,15 @@ fn has_effect_call_stmt(stmt: &IrStmt, efns: &HashSet<Sym>) -> bool {
         IrStmtKind::MapInsert { key, value, .. } => {
             has_effect_call(key, efns) || has_effect_call(value, efns)
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            has_effect_call(a, efns) || has_effect_call(b, efns)
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            has_effect_call(end, efns)
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            has_effect_call(len, efns)
+        }
         IrStmtKind::Guard { cond, else_ } => {
             has_effect_call(cond, efns) || has_effect_call(else_, efns)
         }
@@ -706,6 +737,15 @@ fn refs_are_outside_loop_stmt(stmt: &IrStmt, loop_defined: &HashSet<VarId>) -> b
         }
         IrStmtKind::MapInsert { key, value, .. } => {
             refs_are_outside_loop(key, loop_defined) && refs_are_outside_loop(value, loop_defined)
+        }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            refs_are_outside_loop(a, loop_defined) && refs_are_outside_loop(b, loop_defined)
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            refs_are_outside_loop(end, loop_defined)
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            refs_are_outside_loop(len, loop_defined)
         }
         IrStmtKind::Guard { cond, else_ } => {
             refs_are_outside_loop(cond, loop_defined) && refs_are_outside_loop(else_, loop_defined)

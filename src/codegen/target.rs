@@ -25,6 +25,7 @@ use super::pass_effect_inference::EffectInferencePass;
 use super::pass_stream_fusion::StreamFusionPass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
+use super::pass_peephole::PeepholePass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -74,6 +75,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(ResultPropagationPass)
             // 3. Builtin last: Named calls (assert_eq, println, etc.) → RustMacro
             .add(BuiltinLoweringPass)
+            // Peephole: swap/reverse/rotate/copy → specialized IR nodes
+            .add(PeepholePass)
             // Shared passes
             .add(FanLoweringPass),
 
@@ -101,6 +104,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(EffectInferencePass)
             // StreamFusion not included: WASM emitter has its own lowering paths
             .add(ResultPropagationPass)
+            // Peephole: swap/reverse/rotate/copy → specialized IR nodes
+            .add(PeepholePass)
             .add(FanLoweringPass),
     }
 }
