@@ -1,6 +1,6 @@
 //! Collection construction and access emission — records, lists, tuples, maps.
 
-use crate::ir::IrExpr;
+use crate::ir::{IrExpr, IrExprKind};
 use crate::types::Ty;
 use super::FuncCompiler;
 use super::values;
@@ -260,6 +260,14 @@ impl FuncCompiler<'_> {
         let elem_size = values::byte_size(result_ty);
 
         self.emit_expr(object); // list ptr
+
+        // Optimize constant index: compute offset at compile time
+        if let IrExprKind::LitInt { value } = &index.kind {
+            let offset = 4 + (*value as u32) * (elem_size as u32);
+            self.emit_load_at(result_ty, offset);
+            return;
+        }
+
         wasm!(self.func, {
             i32_const(4);
             i32_add;
@@ -267,7 +275,6 @@ impl FuncCompiler<'_> {
 
         // Add index * elem_size
         self.emit_expr(index);
-        // Index might be i64 (Int), convert to i32
         if matches!(&index.ty, Ty::Int) {
             wasm!(self.func, { i32_wrap_i64; });
         }

@@ -149,12 +149,14 @@ impl FuncCompiler<'_> {
 
                 self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
 
-                // if !cond, break
-                self.emit_expr(cond);
-                wasm!(self.func, {
-                    i32_eqz;
-                    br_if(self.depth - break_depth - 1);
-                });
+                // if !cond, break — try to invert condition to avoid i32_eqz
+                if !self.try_emit_inverted_br_if(cond, self.depth - break_depth - 1) {
+                    self.emit_expr(cond);
+                    wasm!(self.func, {
+                        i32_eqz;
+                        br_if(self.depth - break_depth - 1);
+                    });
+                }
 
                 // body
                 for stmt in body {
@@ -1003,6 +1005,71 @@ impl FuncCompiler<'_> {
                 self.var_table.get(*id).ty.clone()
             }
             _ => Ty::Int, // conservative fallback
+        }
+    }
+
+    /// Try to emit an inverted condition + br_if, avoiding a redundant i32_eqz.
+    /// Returns true if successfully handled, false if caller should fall back.
+    pub(super) fn try_emit_inverted_br_if(&mut self, cond: &IrExpr, br_depth: u32) -> bool {
+        match &cond.kind {
+            // k != 0 → emit k; i64.eqz; br_if (break when k == 0)
+            IrExprKind::BinOp { op: BinOp::Neq, left, right } => {
+                // Special case: x != 0 → i64.eqz
+                if matches!(&right.kind, IrExprKind::LitInt { value: 0 }) && matches!(&left.ty, Ty::Int) {
+                    self.emit_expr(left);
+                    wasm!(self.func, { i64_eqz; br_if(br_depth); });
+                    return true;
+                }
+                // General: x != y → emit eq, br_if (break when equal)
+                self.emit_eq(left, right, false); // emit eq (no negate)
+                wasm!(self.func, { br_if(br_depth); });
+                true
+            }
+            // x < y → emit x, y, ge_s, br_if (break when x >= y)
+            IrExprKind::BinOp { op: BinOp::Lt, left, right } => {
+                self.emit_expr(left);
+                self.emit_expr(right);
+                self.emit_cmp_instruction(&left.ty, CmpKind::Gte);
+                wasm!(self.func, { br_if(br_depth); });
+                true
+            }
+            // x > y → emit x, y, le_s, br_if
+            IrExprKind::BinOp { op: BinOp::Gt, left, right } => {
+                self.emit_expr(left);
+                self.emit_expr(right);
+                self.emit_cmp_instruction(&left.ty, CmpKind::Lte);
+                wasm!(self.func, { br_if(br_depth); });
+                true
+            }
+            // x <= y → emit x, y, gt_s, br_if
+            IrExprKind::BinOp { op: BinOp::Lte, left, right } => {
+                self.emit_expr(left);
+                self.emit_expr(right);
+                self.emit_cmp_instruction(&left.ty, CmpKind::Gt);
+                wasm!(self.func, { br_if(br_depth); });
+                true
+            }
+            // x >= y → emit x, y, lt_s, br_if
+            IrExprKind::BinOp { op: BinOp::Gte, left, right } => {
+                self.emit_expr(left);
+                self.emit_expr(right);
+                self.emit_cmp_instruction(&left.ty, CmpKind::Lt);
+                wasm!(self.func, { br_if(br_depth); });
+                true
+            }
+            // x == y → emit neq, br_if
+            IrExprKind::BinOp { op: BinOp::Eq, left, right } => {
+                self.emit_eq(left, right, true); // emit neq
+                wasm!(self.func, { br_if(br_depth); });
+                true
+            }
+            // not(x) → emit x, br_if (no inversion needed)
+            IrExprKind::UnOp { op: UnOp::Not, operand } => {
+                self.emit_expr(operand);
+                wasm!(self.func, { br_if(br_depth); });
+                true
+            }
+            _ => false,
         }
     }
 }

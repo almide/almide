@@ -208,25 +208,31 @@ impl FuncCompiler<'_> {
             IrStmtKind::IndexAssign { target, index, value } => {
                 // xs[i] = v → store value at list_ptr + 4 + i * elem_size
                 let elem_size = super::values::byte_size(&value.ty);
-                // Compute address: target + 4 + index * elem_size
                 if let Some(&local_idx) = self.var_map.get(&target.0) {
-                    wasm!(self.func, {
-                        local_get(local_idx); // list ptr
-                        i32_const(4);
-                        i32_add;
-                    });
-                    self.emit_expr(index);
-                    if matches!(&index.ty, crate::types::Ty::Int) {
-                        wasm!(self.func, { i32_wrap_i64; });
+                    // Optimize constant index: compute offset at compile time
+                    if let IrExprKind::LitInt { value: idx_val } = &index.kind {
+                        let offset = 4 + (*idx_val as u32) * (elem_size as u32);
+                        wasm!(self.func, { local_get(local_idx); });
+                        self.emit_expr(value);
+                        self.emit_store_at(&value.ty, offset);
+                    } else {
+                        wasm!(self.func, {
+                            local_get(local_idx);
+                            i32_const(4);
+                            i32_add;
+                        });
+                        self.emit_expr(index);
+                        if matches!(&index.ty, crate::types::Ty::Int) {
+                            wasm!(self.func, { i32_wrap_i64; });
+                        }
+                        wasm!(self.func, {
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                        });
+                        self.emit_expr(value);
+                        self.emit_store_at(&value.ty, 0);
                     }
-                    wasm!(self.func, {
-                        i32_const(elem_size as i32);
-                        i32_mul;
-                        i32_add;
-                    });
-                    // Value
-                    self.emit_expr(value);
-                    self.emit_store_at(&value.ty, 0);
                 }
             }
             IrStmtKind::FieldAssign { target, field, value } => {
@@ -287,8 +293,11 @@ impl FuncCompiler<'_> {
             }
             IrStmtKind::ListReverse { target, end } => {
                 // xs[..=end].reverse(): swap from both ends inward
+                // Optimized: use shl for power-of-2 elem sizes, local.tee for addr reuse
                 let elem_ty = self.list_elem_ty_var(*target);
                 let elem_size = values::byte_size(&elem_ty) as i32;
+                let elem_shift = (elem_size as u32).trailing_zeros();
+                let use_shift = (elem_size as u32).is_power_of_two() && elem_shift > 0;
                 if let Some(&list_local) = self.var_map.get(&target.0) {
                     let lo = self.scratch.alloc_i32();
                     let hi = self.scratch.alloc_i32();
@@ -302,20 +311,32 @@ impl FuncCompiler<'_> {
                     if matches!(&end.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
                     wasm!(self.func, { local_set(hi); });
 
-                    // while (lo < hi)
                     let base_ptr = self.scratch.alloc_i32();
                     wasm!(self.func, { local_get(list_local); i32_const(4); i32_add; local_set(base_ptr); });
                     wasm!(self.func, {
                         block_empty;
                         loop_empty;
-                        // break if lo >= hi
                         local_get(lo); local_get(hi); i32_ge_s; br_if(1);
-                        // addr_lo = base + lo * elem_size
-                        local_get(base_ptr); local_get(lo); i32_const(elem_size); i32_mul; i32_add; local_set(addr_lo);
-                        // addr_hi = base + hi * elem_size
-                        local_get(base_ptr); local_get(hi); i32_const(elem_size); i32_mul; i32_add; local_set(addr_hi);
                     });
-                    // tmp = *addr_lo
+                    // addr_lo = base + lo << shift (using local.tee)
+                    wasm!(self.func, { local_get(base_ptr); local_get(lo); });
+                    if use_shift {
+                        wasm!(self.func, { i32_const(elem_shift as i32); i32_shl; });
+                    } else {
+                        wasm!(self.func, { i32_const(elem_size); i32_mul; });
+                    }
+                    wasm!(self.func, { i32_add; local_tee(addr_lo); });
+                    // addr_hi = base + hi << shift
+                    wasm!(self.func, { local_get(base_ptr); local_get(hi); });
+                    if use_shift {
+                        wasm!(self.func, { i32_const(elem_shift as i32); i32_shl; });
+                    } else {
+                        wasm!(self.func, { i32_const(elem_size); i32_mul; });
+                    }
+                    wasm!(self.func, { i32_add; local_tee(addr_hi); });
+                    // tmp = *addr_lo (addr_hi still on stack — save it, load from addr_lo)
+                    // Stack: [addr_hi]. Save addr_hi, load *addr_lo
+                    wasm!(self.func, { drop; }); // clear stack from tee
                     wasm!(self.func, { local_get(addr_lo); });
                     self.emit_load_at(&elem_ty, 0);
                     self.emit_set_scratch(tmp, &elem_ty);
