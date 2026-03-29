@@ -20,16 +20,17 @@ impl NanoPass for LICMPass {
     fn targets(&self) -> Option<Vec<Target>> { None }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        let effect_fns = &program.effect_fn_names;
+        // Analyze user function purity (fixpoint computation)
+        let pure_fns = analyze_pure_functions(&program);
         let mut changed = false;
         for func in &mut program.functions {
-            if hoist_loops(&mut func.body, &mut program.var_table, effect_fns) {
+            if hoist_loops(&mut func.body, &mut program.var_table, &pure_fns) {
                 changed = true;
             }
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
-                if hoist_loops(&mut func.body, &mut module.var_table, effect_fns) {
+                if hoist_loops(&mut func.body, &mut module.var_table, &pure_fns) {
                     changed = true;
                 }
             }
@@ -40,18 +41,18 @@ impl NanoPass for LICMPass {
 
 /// Recursively walk the expression tree looking for loops, hoisting invariants.
 /// Returns true if any hoisting was performed.
-fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<Sym>) -> bool {
+fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>) -> bool {
     let mut changed = false;
     match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
             let mut new_stmts: Vec<IrStmt> = Vec::new();
             for mut stmt in std::mem::take(stmts) {
-                if hoist_loops_stmt(&mut stmt, vt, efns) {
+                if hoist_loops_stmt(&mut stmt, vt, pure_fns) {
                     changed = true;
                 }
                 // If this stmt is an Expr containing a loop, try to hoist invariants
                 if let IrStmtKind::Expr { expr: ref mut loop_expr } = stmt.kind {
-                    let hoisted = try_hoist_from_loop(loop_expr, vt, efns);
+                    let hoisted = try_hoist_from_loop(loop_expr, vt, pure_fns);
                     if !hoisted.is_empty() {
                         changed = true;
                         new_stmts.extend(hoisted);
@@ -61,42 +62,42 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<Sym>) -> boo
             }
             *stmts = new_stmts;
             if let Some(e) = tail {
-                if hoist_loops(e, vt, efns) {
+                if hoist_loops(e, vt, pure_fns) {
                     changed = true;
                 }
             }
         }
 
         IrExprKind::If { cond, then, else_ } => {
-            if hoist_loops(cond, vt, efns) { changed = true; }
-            if hoist_loops(then, vt, efns) { changed = true; }
-            if hoist_loops(else_, vt, efns) { changed = true; }
+            if hoist_loops(cond, vt, pure_fns) { changed = true; }
+            if hoist_loops(then, vt, pure_fns) { changed = true; }
+            if hoist_loops(else_, vt, pure_fns) { changed = true; }
         }
         IrExprKind::Match { subject, arms } => {
-            if hoist_loops(subject, vt, efns) { changed = true; }
+            if hoist_loops(subject, vt, pure_fns) { changed = true; }
             for arm in arms {
                 if let Some(g) = &mut arm.guard {
-                    if hoist_loops(g, vt, efns) { changed = true; }
+                    if hoist_loops(g, vt, pure_fns) { changed = true; }
                 }
-                if hoist_loops(&mut arm.body, vt, efns) { changed = true; }
+                if hoist_loops(&mut arm.body, vt, pure_fns) { changed = true; }
             }
         }
         IrExprKind::Lambda { body, .. } => {
-            if hoist_loops(body, vt, efns) { changed = true; }
+            if hoist_loops(body, vt, pure_fns) { changed = true; }
         }
         // ForIn/While at the top level of an expression (not inside a Block stmt):
         // We can't hoist before them here since there's no statement list to insert into.
         // They're handled when they appear as Expr stmts inside blocks.
         IrExprKind::ForIn { body, iterable, .. } => {
-            if hoist_loops(iterable, vt, efns) { changed = true; }
+            if hoist_loops(iterable, vt, pure_fns) { changed = true; }
             for s in body {
-                if hoist_loops_stmt(s, vt, efns) { changed = true; }
+                if hoist_loops_stmt(s, vt, pure_fns) { changed = true; }
             }
         }
         IrExprKind::While { cond, body } => {
-            if hoist_loops(cond, vt, efns) { changed = true; }
+            if hoist_loops(cond, vt, pure_fns) { changed = true; }
             for s in body {
-                if hoist_loops_stmt(s, vt, efns) { changed = true; }
+                if hoist_loops_stmt(s, vt, pure_fns) { changed = true; }
             }
         }
         _ => {}
@@ -104,31 +105,31 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<Sym>) -> boo
     changed
 }
 
-fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, efns: &HashSet<Sym>) -> bool {
+fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, pure_fns: &HashSet<Sym>) -> bool {
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-            hoist_loops(value, vt, efns)
+            hoist_loops(value, vt, pure_fns)
         }
         IrStmtKind::IndexAssign { index, value, .. } => {
-            hoist_loops(index, vt, efns) | hoist_loops(value, vt, efns)
+            hoist_loops(index, vt, pure_fns) | hoist_loops(value, vt, pure_fns)
         }
         IrStmtKind::MapInsert { key, value, .. } => {
-            hoist_loops(key, vt, efns) | hoist_loops(value, vt, efns)
+            hoist_loops(key, vt, pure_fns) | hoist_loops(value, vt, pure_fns)
         }
         IrStmtKind::ListSwap { a, b, .. } => {
-            hoist_loops(a, vt, efns) | hoist_loops(b, vt, efns)
+            hoist_loops(a, vt, pure_fns) | hoist_loops(b, vt, pure_fns)
         }
         IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            hoist_loops(end, vt, efns)
+            hoist_loops(end, vt, pure_fns)
         }
         IrStmtKind::ListCopySlice { len, .. } => {
-            hoist_loops(len, vt, efns)
+            hoist_loops(len, vt, pure_fns)
         }
         IrStmtKind::Guard { cond, else_ } => {
-            hoist_loops(cond, vt, efns) | hoist_loops(else_, vt, efns)
+            hoist_loops(cond, vt, pure_fns) | hoist_loops(else_, vt, pure_fns)
         }
-        IrStmtKind::Expr { expr } => hoist_loops(expr, vt, efns),
+        IrStmtKind::Expr { expr } => hoist_loops(expr, vt, pure_fns),
         IrStmtKind::Comment { .. } => false,
     }
 }
@@ -136,7 +137,7 @@ fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, efns: &HashSet<Sym>) -
 /// Given a loop expression (ForIn or While), extract loop-invariant expressions
 /// from its body and return them as `let` binding statements to insert before
 /// the loop. The original expressions in the body are replaced with Var references.
-fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<Sym>) -> Vec<IrStmt> {
+fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>) -> Vec<IrStmt> {
     let mut hoisted = Vec::new();
 
     match &mut expr.kind {
@@ -153,7 +154,7 @@ fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<Sym>
 
             // Scan body statements for invariant expressions to hoist
             for stmt in body.iter_mut() {
-                extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, efns);
+                extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, pure_fns);
             }
         }
         IrExprKind::While { cond: _, body } => {
@@ -161,7 +162,7 @@ fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<Sym>
             collect_defined_vars_stmts(body, &mut loop_defined);
 
             for stmt in body.iter_mut() {
-                extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, efns);
+                extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, pure_fns);
             }
         }
         _ => {}
@@ -288,26 +289,26 @@ fn extract_invariants_from_stmt(
     loop_defined: &HashSet<VarId>,
     vt: &mut VarTable,
     hoisted: &mut Vec<IrStmt>,
-    efns: &HashSet<Sym>,
+    pure_fns: &HashSet<Sym>,
 ) {
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } => {
-            try_hoist_expr(value, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(value, loop_defined, vt, hoisted, pure_fns);
         }
         IrStmtKind::Expr { expr } => {
-            try_hoist_expr(expr, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(expr, loop_defined, vt, hoisted, pure_fns);
         }
         // Don't hoist the whole RHS of assignments — the assignment itself
         // is a side effect (mutates a var). Only recurse into sub-expressions
         // if the RHS is complex enough to have hoistable sub-parts.
-        IrStmtKind::Assign { .. } => {
-            // Skip: assignment targets are loop-modified vars.
-            // The RHS often references the target var (e.g., count = count + 1)
-            // which is in loop_defined, so hoisting would be wrong anyway.
+        IrStmtKind::Assign { value, .. } => {
+            // The assignment itself stays in the loop, but sub-expressions of
+            // the RHS may be hoistable (e.g., total = total + square(n) → hoist square(n)).
+            try_hoist_expr(value, loop_defined, vt, hoisted, pure_fns);
         }
         IrStmtKind::Guard { cond, else_ } => {
-            try_hoist_expr(cond, loop_defined, vt, hoisted, efns);
-            try_hoist_expr(else_, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(cond, loop_defined, vt, hoisted, pure_fns);
+            try_hoist_expr(else_, loop_defined, vt, hoisted, pure_fns);
         }
         _ => {}
     }
@@ -321,10 +322,10 @@ fn try_hoist_expr(
     loop_defined: &HashSet<VarId>,
     vt: &mut VarTable,
     hoisted: &mut Vec<IrStmt>,
-    efns: &HashSet<Sym>,
+    pure_fns: &HashSet<Sym>,
 ) {
     // Check if the whole expression is hoistable
-    if is_hoistable(expr, loop_defined, efns) {
+    if is_hoistable(expr, loop_defined, pure_fns) {
         let ty = expr.ty.clone();
         let var = vt.alloc("__licm".into(), ty.clone(), Mutability::Let, None);
         let original = std::mem::replace(expr, IrExpr {
@@ -348,58 +349,58 @@ fn try_hoist_expr(
     match &mut expr.kind {
         IrExprKind::Call { target, args, .. } => {
             match target {
-                CallTarget::Method { object, .. } => try_hoist_expr(object, loop_defined, vt, hoisted, efns),
-                CallTarget::Computed { callee } => try_hoist_expr(callee, loop_defined, vt, hoisted, efns),
+                CallTarget::Method { object, .. } => try_hoist_expr(object, loop_defined, vt, hoisted, pure_fns),
+                CallTarget::Computed { callee } => try_hoist_expr(callee, loop_defined, vt, hoisted, pure_fns),
                 _ => {}
             }
             for arg in args {
-                try_hoist_expr(arg, loop_defined, vt, hoisted, efns);
+                try_hoist_expr(arg, loop_defined, vt, hoisted, pure_fns);
             }
         }
         IrExprKind::BinOp { left, right, .. } => {
-            try_hoist_expr(left, loop_defined, vt, hoisted, efns);
-            try_hoist_expr(right, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(left, loop_defined, vt, hoisted, pure_fns);
+            try_hoist_expr(right, loop_defined, vt, hoisted, pure_fns);
         }
         IrExprKind::UnOp { operand, .. } => {
-            try_hoist_expr(operand, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(operand, loop_defined, vt, hoisted, pure_fns);
         }
         IrExprKind::If { cond, then, else_ } => {
-            try_hoist_expr(cond, loop_defined, vt, hoisted, efns);
-            try_hoist_expr(then, loop_defined, vt, hoisted, efns);
-            try_hoist_expr(else_, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(cond, loop_defined, vt, hoisted, pure_fns);
+            try_hoist_expr(then, loop_defined, vt, hoisted, pure_fns);
+            try_hoist_expr(else_, loop_defined, vt, hoisted, pure_fns);
         }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements {
-                try_hoist_expr(e, loop_defined, vt, hoisted, efns);
+                try_hoist_expr(e, loop_defined, vt, hoisted, pure_fns);
             }
         }
         IrExprKind::Record { fields, .. } => {
             for (_, v) in fields {
-                try_hoist_expr(v, loop_defined, vt, hoisted, efns);
+                try_hoist_expr(v, loop_defined, vt, hoisted, pure_fns);
             }
         }
         IrExprKind::Member { object, .. }
         | IrExprKind::OptionalChain { expr: object, .. } => {
-            try_hoist_expr(object, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(object, loop_defined, vt, hoisted, pure_fns);
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            try_hoist_expr(object, loop_defined, vt, hoisted, efns);
-            try_hoist_expr(index, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(object, loop_defined, vt, hoisted, pure_fns);
+            try_hoist_expr(index, loop_defined, vt, hoisted, pure_fns);
         }
         IrExprKind::StringInterp { parts } => {
             for part in parts {
                 if let IrStringPart::Expr { expr: e } = part {
-                    try_hoist_expr(e, loop_defined, vt, hoisted, efns);
+                    try_hoist_expr(e, loop_defined, vt, hoisted, pure_fns);
                 }
             }
         }
         IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
         | IrExprKind::ResultErr { expr: e } => {
-            try_hoist_expr(e, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(e, loop_defined, vt, hoisted, pure_fns);
         }
         IrExprKind::Range { start, end, .. } => {
-            try_hoist_expr(start, loop_defined, vt, hoisted, efns);
-            try_hoist_expr(end, loop_defined, vt, hoisted, efns);
+            try_hoist_expr(start, loop_defined, vt, hoisted, pure_fns);
+            try_hoist_expr(end, loop_defined, vt, hoisted, pure_fns);
         }
         _ => {}
     }
@@ -410,11 +411,11 @@ fn try_hoist_expr(
 /// 2. It contains no calls to effect functions (side effects)
 /// 3. It is not trivially cheap (skip Var, Lit*, Unit)
 /// 4. It contains no control flow (loops, continue, break, return)
-fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, _efns: &HashSet<Sym>) -> bool {
+fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, pure_fns: &HashSet<Sym>) -> bool {
     if is_trivial(expr) {
         return false;
     }
-    if !is_pure(expr) {
+    if !is_pure(expr, pure_fns) {
         return false;
     }
     if has_control_flow(expr) {
@@ -522,7 +523,7 @@ fn is_trivial(expr: &IrExpr) -> bool {
 /// Returns true if the expression is pure (no function calls, no I/O, no mutation).
 /// Only pure expressions can be hoisted out of loops.
 /// Conservative: any function call makes the expression impure.
-fn is_pure(expr: &IrExpr) -> bool {
+fn is_pure(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
     match &expr.kind {
         // Leaf nodes: always pure
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
@@ -530,46 +531,45 @@ fn is_pure(expr: &IrExpr) -> bool {
         | IrExprKind::Var { .. } | IrExprKind::FnRef { .. } | IrExprKind::Hole
         | IrExprKind::Break | IrExprKind::Continue | IrExprKind::EmptyMap => true,
 
-        // Function calls: pure only if provably side-effect-free.
-        // Stdlib Module calls: derive purity from TOML metadata (no effect, no BorrowMut).
-        // All other calls (Named, Method, Computed, user-defined): conservatively impure.
+        // Function calls: pure if target is known-pure and all args are pure.
         IrExprKind::Call { target, args, .. } => {
             let call_pure = match target {
                 CallTarget::Module { module, func } => is_pure_stdlib_call(module, func),
+                CallTarget::Named { name } => pure_fns.contains(name),
                 _ => false,
             };
-            call_pure && args.iter().all(|a| is_pure(a))
+            call_pure && args.iter().all(|a| is_pure(a, pure_fns))
         }
         IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
 
         // Operators: pure if operands are pure
-        IrExprKind::BinOp { left, right, .. } => is_pure(left) && is_pure(right),
-        IrExprKind::UnOp { operand, .. } => is_pure(operand),
+        IrExprKind::BinOp { left, right, .. } => is_pure(left, pure_fns) && is_pure(right, pure_fns),
+        IrExprKind::UnOp { operand, .. } => is_pure(operand, pure_fns),
 
         // Collection constructors: pure if elements are pure
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => elements.iter().all(|e| is_pure(e)),
-        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| is_pure(v)),
-        IrExprKind::SpreadRecord { base, fields } => is_pure(base) && fields.iter().all(|(_, v)| is_pure(v)),
-        IrExprKind::MapLiteral { entries } => entries.iter().all(|(k, v)| is_pure(k) && is_pure(v)),
-        IrExprKind::Range { start, end, .. } => is_pure(start) && is_pure(end),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => elements.iter().all(|e| is_pure(e, pure_fns)),
+        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| is_pure(v, pure_fns)),
+        IrExprKind::SpreadRecord { base, fields } => is_pure(base, pure_fns) && fields.iter().all(|(_, v)| is_pure(v, pure_fns)),
+        IrExprKind::MapLiteral { entries } => entries.iter().all(|(k, v)| is_pure(k, pure_fns) && is_pure(v, pure_fns)),
+        IrExprKind::Range { start, end, .. } => is_pure(start, pure_fns) && is_pure(end, pure_fns),
 
         // Access: pure if sub-exprs are pure
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => is_pure(object),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => is_pure(object, pure_fns),
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            is_pure(object) && is_pure(index)
+            is_pure(object, pure_fns) && is_pure(index, pure_fns)
         }
 
         // Wrappers: pure if inner is pure
         IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr }
         | IrExprKind::ResultErr { expr } | IrExprKind::Clone { expr }
         | IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. }
-        | IrExprKind::BoxNew { expr } | IrExprKind::ToVec { expr } => is_pure(expr),
-        IrExprKind::UnwrapOr { expr, fallback } => is_pure(expr) && is_pure(fallback),
+        | IrExprKind::BoxNew { expr } | IrExprKind::ToVec { expr } => is_pure(expr, pure_fns),
+        IrExprKind::UnwrapOr { expr, fallback } => is_pure(expr, pure_fns) && is_pure(fallback, pure_fns),
 
         // String interpolation: pure if all parts are pure
         IrExprKind::StringInterp { parts } => {
             parts.iter().all(|p| match p {
-                IrStringPart::Expr { expr } => is_pure(expr),
+                IrStringPart::Expr { expr } => is_pure(expr, pure_fns),
                 _ => true,
             })
         }
@@ -706,4 +706,122 @@ fn refs_are_outside_loop_stmt(stmt: &IrStmt, loop_defined: &HashSet<VarId>) -> b
 /// pure = not effect, not impure, no BorrowMut args.
 fn is_pure_stdlib_call(module: &str, func: &str) -> bool {
     arg_transforms::lookup(module, func).is_some_and(|info| info.pure_)
+}
+
+// ── User function purity analysis (fixpoint) ──────────────────
+
+/// Analyze all user functions and return the set of names that are pure.
+/// A function is pure if its body contains no impure operations.
+/// Uses fixpoint iteration: mark impure functions, propagate, repeat until stable.
+fn analyze_pure_functions(program: &IrProgram) -> HashSet<Sym> {
+    use crate::intern::sym;
+
+    // Collect all function names
+    let mut all_fns: HashSet<Sym> = HashSet::new();
+    let mut fn_bodies: Vec<(Sym, &IrExpr)> = Vec::new();
+    for func in &program.functions {
+        all_fns.insert(func.name);
+        fn_bodies.push((func.name, &func.body));
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            all_fns.insert(func.name);
+            fn_bodies.push((func.name, &func.body));
+        }
+    }
+
+    // Start: assume all functions are pure
+    let mut pure_set = all_fns.clone();
+
+    // Fixpoint: remove functions whose body is impure, repeat until stable
+    loop {
+        let mut changed = false;
+        for &(name, body) in &fn_bodies {
+            if !pure_set.contains(&name) { continue; }
+            if !expr_is_pure_with(body, &pure_set) {
+                pure_set.remove(&name);
+                changed = true;
+            }
+        }
+        if !changed { break; }
+    }
+
+    pure_set
+}
+
+/// Check if an expression is pure given a current set of known-pure user functions.
+/// Similar to `is_pure` but works on immutable IR (no VarTable needed).
+fn expr_is_pure_with(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
+    match &expr.kind {
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
+        | IrExprKind::Var { .. } | IrExprKind::FnRef { .. } | IrExprKind::Hole
+        | IrExprKind::Break | IrExprKind::Continue | IrExprKind::EmptyMap => true,
+
+        IrExprKind::Call { target, args, .. } => {
+            let call_pure = match target {
+                CallTarget::Module { module, func } => is_pure_stdlib_call(module, func),
+                CallTarget::Named { name } => pure_fns.contains(name),
+                _ => false,
+            };
+            call_pure && args.iter().all(|a| expr_is_pure_with(a, pure_fns))
+        }
+        IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
+
+        IrExprKind::BinOp { left, right, .. } => expr_is_pure_with(left, pure_fns) && expr_is_pure_with(right, pure_fns),
+        IrExprKind::UnOp { operand, .. } => expr_is_pure_with(operand, pure_fns),
+        IrExprKind::If { cond, then, else_ } => {
+            expr_is_pure_with(cond, pure_fns) && expr_is_pure_with(then, pure_fns) && expr_is_pure_with(else_, pure_fns)
+        }
+        IrExprKind::Match { subject, arms } => {
+            expr_is_pure_with(subject, pure_fns) && arms.iter().all(|a| expr_is_pure_with(&a.body, pure_fns))
+        }
+        IrExprKind::Block { stmts, expr } => {
+            stmts.iter().all(|s| stmt_is_pure_with(s, pure_fns))
+                && expr.as_ref().map_or(true, |e| expr_is_pure_with(e, pure_fns))
+        }
+        IrExprKind::Lambda { body, .. } => expr_is_pure_with(body, pure_fns),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            elements.iter().all(|e| expr_is_pure_with(e, pure_fns))
+        }
+        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| expr_is_pure_with(v, pure_fns)),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => expr_is_pure_with(object, pure_fns),
+        IrExprKind::IndexAccess { object, index } => {
+            expr_is_pure_with(object, pure_fns) && expr_is_pure_with(index, pure_fns)
+        }
+        IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+        | IrExprKind::ResultErr { expr: e } | IrExprKind::Clone { expr: e }
+        | IrExprKind::Deref { expr: e } | IrExprKind::Borrow { expr: e, .. }
+        | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => expr_is_pure_with(e, pure_fns),
+        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
+            expr_is_pure_with(e, pure_fns) && expr_is_pure_with(f, pure_fns)
+        }
+        IrExprKind::Range { start, end, .. } => expr_is_pure_with(start, pure_fns) && expr_is_pure_with(end, pure_fns),
+        IrExprKind::StringInterp { parts } => {
+            parts.iter().all(|p| match p {
+                IrStringPart::Expr { expr } => expr_is_pure_with(expr, pure_fns),
+                _ => true,
+            })
+        }
+        // ForIn, While, Fan, Await, etc. — conservatively impure
+        _ => false,
+    }
+}
+
+fn stmt_is_pure_with(stmt: &IrStmt, pure_fns: &HashSet<Sym>) -> bool {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
+            expr_is_pure_with(value, pure_fns)
+        }
+        // Assignments are mutations → impure
+        IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. }
+        | IrStmtKind::FieldAssign { .. } | IrStmtKind::MapInsert { .. }
+        | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+        | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => false,
+        IrStmtKind::Expr { expr } => expr_is_pure_with(expr, pure_fns),
+        IrStmtKind::Guard { cond, else_ } => {
+            expr_is_pure_with(cond, pure_fns) && expr_is_pure_with(else_, pure_fns)
+        }
+        IrStmtKind::Comment { .. } => true,
+    }
 }
