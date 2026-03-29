@@ -65,6 +65,7 @@ impl<'a> RenderContext<'a> {
     pub(crate) fn var_name(&self, id: VarId) -> String {
         let name = &self.var_table.get(id).name;
         let kw = [
+            // Rust keywords
             "as", "async", "await", "break", "const", "continue", "crate",
             "dyn", "else", "enum", "extern", "false", "fn", "for", "if",
             "impl", "in", "let", "loop", "match", "mod", "move", "mut",
@@ -72,9 +73,6 @@ impl<'a> RenderContext<'a> {
             "super", "trait", "true", "type", "unsafe", "use", "where", "while",
             "abstract", "become", "box", "do", "final", "macro", "override",
             "priv", "try", "typeof", "unsized", "virtual", "yield",
-            "default", "switch", "case", "class", "new", "delete", "void",
-            "with", "export", "import", "catch", "finally", "throw",
-            "eval", "arguments", "extends",
         ];
         if kw.contains(&name.as_str()) {
             self.templates.render_with("keyword_escape", None, &[], &[("name", name.as_str())])
@@ -202,10 +200,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     let target_keywords = ["while", "for", "if", "else", "match", "loop", "break", "continue",
         "return", "fn", "let", "mut", "use", "mod", "pub", "struct", "enum", "impl", "trait",
         "type", "where", "as", "in", "ref", "self", "super", "crate", "const", "static",
-        "unsafe", "async", "await", "dyn", "move", "true", "false",
-        "default", "switch", "case", "class", "extends", "new", "delete", "typeof",
-        "void", "with", "yield", "export", "import", "try", "catch", "finally", "throw",
-        "eval", "arguments"];
+        "unsafe", "async", "await", "dyn", "move", "true", "false", "try", "yield"];
     if target_keywords.contains(&safe_name.as_str()) {
         safe_name = ctx.templates.render_with("keyword_escape", None, &[], &[("name", safe_name.as_str())])
             .unwrap_or(safe_name);

@@ -1,0 +1,119 @@
+// fasta — The Computer Language Benchmarks Game
+// Generate DNA sequences using repeat and weighted random selection.
+// Usage: almide run fasta.almd -- 25000000
+//
+// Uses Bytes type for zero-copy I/O and buffer reuse.
+
+import env
+import int
+import io
+import bytes
+
+let ALU = "GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGATCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAGGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCGCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA"
+
+let IM = 139968
+let IA = 3877
+let IC = 29573
+
+// Unrolled decision trees for character selection
+fn hs_select(r: Float) -> Int =
+  if r < 0.3029549426680 then 97
+  else if r < 0.5009432431601 then 99
+  else if r < 0.6984905497992 then 103
+  else 116
+
+fn iub_select(r: Float) -> Int =
+  if r < 0.51 then {
+    if r < 0.27 then 97
+    else if r < 0.39 then 99
+    else 103
+  } else if r < 0.78 then 116
+  else if r < 0.88 then {
+    if r < 0.80 then 66
+    else if r < 0.82 then 68
+    else if r < 0.84 then 72
+    else if r < 0.86 then 75
+    else 77
+  } else {
+    if r < 0.90 then 78
+    else if r < 0.92 then 82
+    else if r < 0.94 then 83
+    else if r < 0.96 then 86
+    else if r < 0.98 then 87
+    else 89
+  }
+
+fn im_float() -> Float = 139968.0
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = if list.len(args) > 0 then {
+    match list.get(args, 0) {
+      some(s) => match int.parse(s) { ok(v) => v, err(_) => 1000 },
+      none => 1000,
+    }
+  } else 1000
+
+  var seed = 42
+
+  let alu_bytes = string.to_bytes(ALU)
+  let alu_len = list.len(alu_bytes)
+  let newline = 10
+
+  // Reusable buffer
+  var buf = bytes.new(64)
+
+  // ONE: repeat ALU
+  io.write(bytes.from_string(">ONE Homo sapiens alu\n"))
+  var pos = 0
+  var remaining = n * 2
+  while remaining > 0 {
+    let line_len = if remaining < 60 then remaining else 60
+    bytes.clear(buf)
+    var i = 0
+    while i < line_len {
+      bytes.push(buf, alu_bytes[pos])
+      pos = (pos + 1) % alu_len
+      i = i + 1
+    }
+    bytes.push(buf, newline)
+    io.write(buf)
+    remaining = remaining - line_len
+  }
+
+  // TWO: IUB ambiguity codes
+  io.write(bytes.from_string(">TWO IUB ambiguity codes\n"))
+  remaining = n * 3
+  while remaining > 0 {
+    let line_len = if remaining < 60 then remaining else 60
+    bytes.clear(buf)
+    var i = 0
+    while i < line_len {
+      seed = (seed * IA + IC) % IM
+      let r = float.from_int(seed) / im_float()
+      bytes.push(buf, iub_select(r))
+      i = i + 1
+    }
+    bytes.push(buf, newline)
+    io.write(buf)
+    remaining = remaining - line_len
+  }
+
+  // THREE: Homo sapiens frequency
+  io.write(bytes.from_string(">THREE Homo sapiens frequency\n"))
+  remaining = n * 5
+  while remaining > 0 {
+    let line_len = if remaining < 60 then remaining else 60
+    bytes.clear(buf)
+    var i = 0
+    while i < line_len {
+      seed = (seed * IA + IC) % IM
+      let r = float.from_int(seed) / im_float()
+      bytes.push(buf, hs_select(r))
+      i = i + 1
+    }
+    bytes.push(buf, newline)
+    io.write(buf)
+    remaining = remaining - line_len
+  }
+}

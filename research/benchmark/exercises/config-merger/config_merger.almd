@@ -89,7 +89,7 @@ fn serialize_config(pairs: List[List[String]]) -> String = {
 // Read and parse a config file
 // Errors: file read errors propagate, parse errors prefixed with filename
 effect fn load_config(path: String) -> Result[List[List[String]], String] = {
-  let text = fs.read_text(path)
+  let text = fs.read_text(path)!
   match parse_config(text) {
     ok(pairs) => ok(pairs),
     err(e) => err("${path}: ${e}")
@@ -111,7 +111,7 @@ effect fn merge_files(paths: List[String]) -> Result[List[List[String]], String]
   var i = 0
   while i < list.len(paths) {
     let path = match list.get(paths, i) { some(p) => p, none => "" }
-    let overlay = load_config(path)
+    let overlay = load_config(path)!
     result = merge_configs(result, overlay)
     i = i + 1
   }
@@ -124,7 +124,7 @@ effect fn merge_and_save(paths: List[String], output: String) -> Result[Int, Str
   match merge_files(paths) {
     err(e) => err(e),
     ok(pairs) => {
-      save_config(output, pairs);
+      save_config(output, pairs)!;
       ok(list.len(pairs))
     }
   }

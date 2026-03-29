@@ -85,3 +85,24 @@ params = [{ name = "len", type = "Int" }]
 return = "Bytes"
 rust = "almide_rt_bytes_new({len})"
 ts = "__almd_bytes.new_bytes({len})"
+
+[push]
+description = "Append a single byte (0-255) to the buffer (mutates in place)."
+example = 'bytes.push(buf, 65)'
+params = [{ name = "b", type = "Bytes" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_push(&mut {b}, {val})"
+
+[clear]
+description = "Remove all bytes from the buffer (mutates in place, keeps capacity)."
+example = 'bytes.clear(buf)'
+params = [{ name = "b", type = "Bytes" }]
+return = "Unit"
+rust = "almide_rt_bytes_clear(&mut {b})"
+
+[from_string]
+description = "Convert a string to its UTF-8 byte representation."
+example = 'bytes.from_string("Hello") // => <72, 101, 108, 108, 111>'
+params = [{ name = "s", type = "String" }]
+return = "Bytes"
+rust = "almide_rt_bytes_from_string(&*{s})"

@@ -232,6 +232,15 @@ fn transform_stmt(stmt: &mut IrStmt, vt: &mut VarTable, scope_vars: &HashSet<Var
         IrStmtKind::MapInsert { key, value, .. } => {
             transform_expr(key, vt, scope_vars) | transform_expr(value, vt, scope_vars)
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            transform_expr(a, vt, scope_vars) | transform_expr(b, vt, scope_vars)
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            transform_expr(end, vt, scope_vars)
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            transform_expr(len, vt, scope_vars)
+        }
         IrStmtKind::Guard { cond, else_ } => {
             transform_expr(cond, vt, scope_vars) | transform_expr(else_, vt, scope_vars)
         }
@@ -421,6 +430,16 @@ fn collect_free_vars_stmt(stmt: &IrStmt, bound: &HashSet<VarId>, free: &mut Hash
             collect_free_vars(key, bound, free);
             collect_free_vars(value, bound, free);
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            collect_free_vars(a, bound, free);
+            collect_free_vars(b, bound, free);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            collect_free_vars(end, bound, free);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            collect_free_vars(len, bound, free);
+        }
         IrStmtKind::Guard { cond, else_ } => {
             collect_free_vars(cond, bound, free);
             collect_free_vars(else_, bound, free);
@@ -541,6 +560,15 @@ fn replace_vars_stmt(stmt: &mut IrStmt, renames: &std::collections::HashMap<VarI
         }
         IrStmtKind::MapInsert { key, value, .. } => {
             replace_vars(key, renames); replace_vars(value, renames);
+        }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            replace_vars(a, renames); replace_vars(b, renames);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            replace_vars(end, renames);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            replace_vars(len, renames);
         }
         IrStmtKind::Guard { cond, else_ } => {
             replace_vars(cond, renames); replace_vars(else_, renames);

@@ -166,6 +166,16 @@ fn count_uses_in_stmt(stmt: &IrStmt, table: &mut VarTable) {
         IrStmtKind::FieldAssign { value, .. } => {
             count_uses_in_expr(value, table);
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            count_uses_in_expr(a, table);
+            count_uses_in_expr(b, table);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            count_uses_in_expr(end, table);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            count_uses_in_expr(len, table);
+        }
         IrStmtKind::Expr { expr } => {
             count_uses_in_expr(expr, table);
         }
@@ -258,11 +268,38 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
             bump_vars_in_expr(object, locals, table);
             bump_vars_in_expr(key, locals, table);
         }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
+        | IrExprKind::Fan { exprs: elements } => {
             for e in elements { bump_vars_in_expr(e, locals, table); }
         }
         IrExprKind::Record { fields, .. } => {
             for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            bump_vars_in_expr(base, locals, table);
+            for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
+        }
+        // Nested loops: bump outer vars in iterable AND body.
+        // The iterable is re-evaluated each iteration of the enclosing loop.
+        IrExprKind::ForIn { iterable, body, .. } => {
+            bump_vars_in_expr(iterable, locals, table);
+            for s in body { bump_vars_in_stmt(s, locals, table); }
+        }
+        IrExprKind::While { cond, body } => {
+            bump_vars_in_expr(cond, locals, table);
+            for s in body { bump_vars_in_stmt(s, locals, table); }
+        }
+        IrExprKind::Range { start, end, .. } => {
+            bump_vars_in_expr(start, locals, table);
+            bump_vars_in_expr(end, locals, table);
+        }
+        IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
+            bump_vars_in_expr(expr, locals, table);
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries { bump_vars_in_expr(k, locals, table); bump_vars_in_expr(v, locals, table); }
         }
         _ => {}
     }
@@ -281,6 +318,16 @@ fn bump_vars_in_stmt(stmt: &IrStmt, locals: &HashSet<u32>, table: &mut VarTable)
             bump_vars_in_expr(value, locals, table);
         }
         IrStmtKind::FieldAssign { value, .. } => bump_vars_in_expr(value, locals, table),
+        IrStmtKind::ListSwap { a, b, .. } => {
+            bump_vars_in_expr(a, locals, table);
+            bump_vars_in_expr(b, locals, table);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            bump_vars_in_expr(end, locals, table);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            bump_vars_in_expr(len, locals, table);
+        }
         IrStmtKind::Expr { expr } => bump_vars_in_expr(expr, locals, table),
         IrStmtKind::Guard { cond, else_ } => {
             bump_vars_in_expr(cond, locals, table);
@@ -356,6 +403,19 @@ fn collect_assigned_vars_stmt(stmt: &IrStmt, assigned: &mut HashSet<u32>) {
         }
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
             collect_assigned_vars(value, assigned);
+        }
+        IrStmtKind::ListSwap { target, a, b } => {
+            assigned.insert(target.0);
+            collect_assigned_vars(a, assigned);
+            collect_assigned_vars(b, assigned);
+        }
+        IrStmtKind::ListReverse { target, end } | IrStmtKind::ListRotateLeft { target, end } => {
+            assigned.insert(target.0);
+            collect_assigned_vars(end, assigned);
+        }
+        IrStmtKind::ListCopySlice { dst, len, .. } => {
+            assigned.insert(dst.0);
+            collect_assigned_vars(len, assigned);
         }
         IrStmtKind::Expr { expr } => collect_assigned_vars(expr, assigned),
         IrStmtKind::Guard { cond, else_ } => {

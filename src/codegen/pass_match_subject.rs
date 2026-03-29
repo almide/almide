@@ -116,6 +116,9 @@ fn rewrite_stmt(stmt: &mut IrStmt) {
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => rewrite_expr(value),
         IrStmtKind::IndexAssign { index, value, .. } => { rewrite_expr(index); rewrite_expr(value); }
         IrStmtKind::MapInsert { key, value, .. } => { rewrite_expr(key); rewrite_expr(value); }
+        IrStmtKind::ListSwap { a, b, .. } => { rewrite_expr(a); rewrite_expr(b); }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => { rewrite_expr(end); }
+        IrStmtKind::ListCopySlice { len, .. } => { rewrite_expr(len); }
         IrStmtKind::Guard { cond, else_ } => { rewrite_expr(cond); rewrite_expr(else_); }
         IrStmtKind::Expr { expr } => rewrite_expr(expr),
         IrStmtKind::Comment { .. } => {}

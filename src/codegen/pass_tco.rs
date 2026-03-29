@@ -294,6 +294,18 @@ fn scan_non_tail_stmt(stmt: &IrStmt, fn_name: &str) -> (bool, bool) {
         IrStmtKind::FieldAssign { value, .. } => {
             scan_non_tail(value, fn_name)
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            let (a_has, _) = scan_non_tail(a, fn_name);
+            let (b_has, _) = scan_non_tail(b, fn_name);
+            let has = a_has || b_has;
+            (has, !has)
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            scan_non_tail(end, fn_name)
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            scan_non_tail(len, fn_name)
+        }
         IrStmtKind::Comment { .. } => (false, true),
     }
 }

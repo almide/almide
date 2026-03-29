@@ -155,6 +155,9 @@ fn update_stmt_var_types(stmt: &IrStmt, bindings: &HashMap<String, Ty>, vt: &mut
         IrStmtKind::IndexAssign { index, value, .. } => { update_var_table_types(index, bindings, vt); update_var_table_types(value, bindings, vt); }
         IrStmtKind::MapInsert { key, value, .. } => { update_var_table_types(key, bindings, vt); update_var_table_types(value, bindings, vt); }
         IrStmtKind::FieldAssign { value, .. } => update_var_table_types(value, bindings, vt),
+        IrStmtKind::ListSwap { a, b, .. } => { update_var_table_types(a, bindings, vt); update_var_table_types(b, bindings, vt); }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => { update_var_table_types(end, bindings, vt); }
+        IrStmtKind::ListCopySlice { len, .. } => { update_var_table_types(len, bindings, vt); }
         IrStmtKind::Expr { expr } => update_var_table_types(expr, bindings, vt),
         IrStmtKind::Guard { cond, else_ } => { update_var_table_types(cond, bindings, vt); update_var_table_types(else_, bindings, vt); }
         IrStmtKind::Comment { .. } => {}
@@ -294,6 +297,16 @@ fn substitute_stmt_types(stmt: &mut IrStmt, bindings: &HashMap<String, Ty>) {
             substitute_expr_types(value, bindings);
         }
         IrStmtKind::FieldAssign { value, .. } => substitute_expr_types(value, bindings),
+        IrStmtKind::ListSwap { a, b, .. } => {
+            substitute_expr_types(a, bindings);
+            substitute_expr_types(b, bindings);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            substitute_expr_types(end, bindings);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            substitute_expr_types(len, bindings);
+        }
         IrStmtKind::Expr { expr } => substitute_expr_types(expr, bindings),
         IrStmtKind::Guard { cond, else_ } => {
             substitute_expr_types(cond, bindings);

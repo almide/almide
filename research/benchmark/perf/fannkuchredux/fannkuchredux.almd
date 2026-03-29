@@ -1,0 +1,126 @@
+// fannkuch-redux — The Computer Language Benchmarks Game
+// Parallel: split permutation space into n chunks via factoradic decomposition.
+// Usage: almide run fannkuchredux.almd -- 12
+
+import env
+import math
+
+fn factorial(n: Int) -> Int =
+  if n <= 1 then 1 else n * factorial(n - 1)
+
+fn process_chunk(n: Int, start_idx: Int, chunk_size: Int) -> (Int, Int) = {
+  // Compute initial perm1 via factoradic
+  var perm1: List[Int] = []
+  var fac_digits: List[Int] = []
+  for i in 0..n { list.push(perm1, i); list.push(fac_digits, 0) }
+
+  var temp = start_idx
+  var k = n - 1
+  while k > 0 {
+    let f = factorial(k)
+    fac_digits[k] = temp / f
+    temp = temp % f
+    k = k - 1
+  }
+
+  k = n - 1
+  while k > 0 {
+    var rotations = fac_digits[k]
+    while rotations > 0 {
+      let p0 = perm1[0]
+      for j in 0..(k) { perm1[j] = perm1[j + 1] }
+      perm1[k] = p0
+      rotations = rotations - 1
+    }
+    k = k - 1
+  }
+
+  var perm: List[Int] = []
+  var count: List[Int] = []
+  for i in 0..n { list.push(perm, 0); list.push(count, 0) }
+
+  var checksum = 0
+  var max_flips = 0
+  var perm_count = start_idx
+  var r = n
+  var processed = 0
+
+  var running = true
+  while running {
+    while r > 1 { count[r - 1] = r; r = r - 1 }
+    for i in 0..n { perm[i] = perm1[i] }
+
+    var flips = 0
+    var kk = perm[0]
+    while kk != 0 {
+      var lo = 0
+      var hi = kk
+      while lo < hi {
+        let tmp = perm[lo]
+        perm[lo] = perm[hi]
+        perm[hi] = tmp
+        lo = lo + 1
+        hi = hi - 1
+      }
+      flips = flips + 1
+      kk = perm[0]
+    }
+
+    if perm_count % 2 == 0 then checksum = checksum + flips
+    else checksum = checksum - flips
+    if flips > max_flips then max_flips = flips else max_flips = max_flips
+
+    processed = processed + 1
+    if processed >= chunk_size then running = false
+    else {
+      var found_next = false
+      while not found_next {
+        if r == n then { found_next = true; running = false }
+        else {
+          let p0 = perm1[0]
+          for i in 0..r { perm1[i] = perm1[i + 1] }
+          perm1[r] = p0
+          count[r] = count[r] - 1
+          if count[r] > 0 then found_next = true
+          else r = r + 1
+        }
+      }
+      perm_count = perm_count + 1
+    }
+  }
+  (checksum, max_flips)
+}
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = if list.len(args) > 0 then {
+    match list.get(args, 0) {
+      some(s) => match int.parse(s) { ok(v) => v, err(_) => 7 },
+      none => 7,
+    }
+  } else 7
+
+  let total = factorial(n)
+  let n_chunks = n
+  let per_chunk = total / n_chunks
+
+  // Parallel: fan over chunks
+  let results = fan {
+    list.map(list.range(0, n_chunks), (chunk) => {
+      let start = chunk * per_chunk
+      let size = if chunk == n_chunks - 1 then total - start else per_chunk
+      process_chunk(n, start, size)
+    })
+  }
+
+  var checksum = 0
+  var max_flips = 0
+  for i in 0..list.len(results) {
+    let (cs, mf) = results[i]
+    checksum = checksum + cs
+    if mf > max_flips then max_flips = mf else max_flips = max_flips
+  }
+
+  println(int.to_string(checksum))
+  println("Pfannkuchen(${int.to_string(n)}) = ${int.to_string(max_flips)}")
+}

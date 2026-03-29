@@ -5,13 +5,16 @@ use crate::intern::{Sym, sym};
 pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
     let s = |n: &str| -> Sym { sym(n) };
     let sig = match (module, func) {
+        ("bytes", "clear") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes)], ret: Ty::Unit, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "concat") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Bytes), (s("b"), Ty::Bytes)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "from_list") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::list(Ty::Int))], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
+        ("bytes", "from_string") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "get") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("i"), Ty::Int)], ret: Ty::option(Ty::Int), is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "get_or") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("i"), Ty::Int), (s("default"), Ty::Int)], ret: Ty::Int, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "is_empty") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes)], ret: Ty::Bool, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "len") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes)], ret: Ty::Int, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "new") => FnSig { generics: vec![], params: vec![(s("len"), Ty::Int)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
+        ("bytes", "push") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("val"), Ty::Int)], ret: Ty::Unit, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "repeat") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("n"), Ty::Int)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "set") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("i"), Ty::Int), (s("val"), Ty::Int)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "slice") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("start"), Ty::Int), (s("end"), Ty::Int)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
@@ -133,6 +136,8 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
         ("io", "print") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Unit, is_effect: true, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("io", "read_all") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: true, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("io", "read_line") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: true, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
+        ("io", "write") => FnSig { generics: vec![], params: vec![(s("data"), Ty::Bytes)], ret: Ty::Unit, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
+        ("io", "write_bytes") => FnSig { generics: vec![], params: vec![(s("data"), Ty::list(Ty::Int))], ret: Ty::Unit, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("json", "array") => FnSig { generics: vec![], params: vec![(s("items"), Ty::list(Ty::Named(s("Value"), vec![])))], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("json", "as_array") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Value"), vec![]))], ret: Ty::option(Ty::list(Ty::Named(s("Value"), vec![]))), is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("json", "as_bool") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Value"), vec![]))], ret: Ty::option(Ty::Bool), is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
@@ -427,7 +432,7 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
 
 pub fn generated_module_functions(module: &str) -> Vec<&'static str> {
     match module {
-        "bytes" => vec!["concat", "from_list", "get", "get_or", "is_empty", "len", "new", "repeat", "set", "slice", "to_list"],
+        "bytes" => vec!["clear", "concat", "from_list", "from_string", "get", "get_or", "is_empty", "len", "new", "push", "repeat", "set", "slice", "to_list"],
         "datetime" => vec!["add_days", "add_hours", "add_minutes", "add_seconds", "day", "diff_seconds", "format", "from_parts", "from_unix", "hour", "is_after", "is_before", "minute", "month", "now", "parse_iso", "second", "to_iso", "to_unix", "weekday", "year"],
         "env" => vec!["args", "cwd", "get", "millis", "os", "set", "sleep_ms", "temp_dir", "unix_timestamp"],
         "error" => vec!["chain", "context", "message"],
@@ -435,7 +440,7 @@ pub fn generated_module_functions(module: &str) -> Vec<&'static str> {
         "fs" => vec!["append", "copy", "create_temp_dir", "create_temp_file", "exists", "file_size", "glob", "is_dir", "is_file", "is_symlink", "list_dir", "mkdir_p", "modified_at", "read_bytes", "read_lines", "read_text", "remove", "remove_all", "rename", "stat", "temp_dir", "walk", "write", "write_bytes"],
         "http" => vec!["body", "delete", "get", "get_header", "json", "patch", "post", "put", "query_params", "redirect", "req_body", "req_header", "req_method", "req_path", "request", "response", "serve", "set_header", "status", "with_headers"],
         "int" => vec!["abs", "band", "bnot", "bor", "bshl", "bshr", "bxor", "clamp", "from_hex", "max", "min", "parse", "rotate_left", "rotate_right", "to_float", "to_hex", "to_string", "to_u32", "to_u8", "wrap_add", "wrap_mul"],
-        "io" => vec!["print", "read_all", "read_line"],
+        "io" => vec!["print", "read_all", "read_line", "write", "write_bytes"],
         "json" => vec!["array", "as_array", "as_bool", "as_float", "as_int", "as_string", "field", "from_bool", "from_float", "from_int", "from_string", "get", "get_array", "get_bool", "get_float", "get_int", "get_path", "get_string", "index", "keys", "null", "object", "parse", "remove_path", "root", "set_path", "stringify", "stringify_pretty"],
         "list" => vec!["all", "any", "chunk", "clear", "contains", "count", "dedup", "drop", "drop_end", "drop_while", "each", "enumerate", "filter", "filter_map", "find", "find_index", "first", "flat_map", "flatten", "fold", "get", "get_or", "group_by", "index_of", "insert", "intersperse", "is_empty", "join", "last", "len", "map", "max", "min", "partition", "pop", "product", "push", "range", "reduce", "remove_at", "repeat", "reverse", "scan", "set", "shuffle", "slice", "sort", "sort_by", "sum", "swap", "take", "take_end", "take_while", "unique", "unique_by", "update", "window", "windows", "zip", "zip_with"],
         "log" => vec!["debug", "debug_with", "error", "error_with", "info", "info_with", "warn", "warn_with"],

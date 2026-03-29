@@ -222,6 +222,16 @@ fn fold_stmt(stmt: &mut IrStmt) {
             fold_expr(key);
             fold_expr(value);
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            fold_expr(a);
+            fold_expr(b);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            fold_expr(end);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            fold_expr(len);
+        }
         IrStmtKind::Guard { cond, else_ } => {
             fold_expr(cond);
             fold_expr(else_);

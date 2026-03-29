@@ -4321,6 +4321,59 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(capacity);
                 self.scratch.free_i32(buf);
             }
+            "write" | "write_bytes" => {
+                // io.write(data: Bytes) — layout [len:i32][u8 data...], same as print
+                // io.write_bytes(data: List[Int]) — layout [len:i32][i64 elements...]
+                if func == "write" {
+                    let s = self.scratch.alloc_i32();
+                    self.emit_expr(&args[0]);
+                    wasm!(self.func, {
+                        local_set(s);
+                        i32_const(0);
+                        local_get(s); i32_const(4); i32_add;
+                        i32_store(0);
+                        i32_const(4);
+                        local_get(s); i32_load(0);
+                        i32_store(0);
+                        i32_const(1); i32_const(0); i32_const(1); i32_const(8);
+                        call(self.emitter.rt.fd_write);
+                        drop;
+                    });
+                    self.scratch.free_i32(s);
+                } else {
+                    // write_bytes: List[Int] → convert i64 to u8 then write
+                    let list_ptr = self.scratch.alloc_i32();
+                    let len = self.scratch.alloc_i32();
+                    let tmp_buf = self.scratch.alloc_i32();
+                    let i = self.scratch.alloc_i32();
+                    self.emit_expr(&args[0]);
+                    wasm!(self.func, {
+                        local_set(list_ptr);
+                        local_get(list_ptr); i32_load(0); local_set(len);
+                        local_get(len); call(self.emitter.rt.alloc); local_set(tmp_buf);
+                        i32_const(0); local_set(i);
+                        block_empty; loop_empty;
+                          local_get(i); local_get(len); i32_ge_u; br_if(1);
+                          local_get(tmp_buf); local_get(i); i32_add;
+                          local_get(list_ptr); i32_const(4); i32_add;
+                          local_get(i); i32_const(8); i32_mul; i32_add;
+                          i64_load(0); i32_wrap_i64;
+                          i32_store8(0);
+                          local_get(i); i32_const(1); i32_add; local_set(i);
+                          br(0);
+                        end; end;
+                        i32_const(0); local_get(tmp_buf); i32_store(0);
+                        i32_const(4); local_get(len); i32_store(0);
+                        i32_const(1); i32_const(0); i32_const(1); i32_const(8);
+                        call(self.emitter.rt.fd_write);
+                        drop;
+                    });
+                    self.scratch.free_i32(i);
+                    self.scratch.free_i32(tmp_buf);
+                    self.scratch.free_i32(len);
+                    self.scratch.free_i32(list_ptr);
+                }
+            }
             _ => {
                 self.emit_stub_call(args);
             }

@@ -184,7 +184,7 @@ template = "{value}"
 # ── Declarations ──
 
 [fn_decl]
-template = "pub fn {name}({params}) -> {return_type} {{ {body} }}"
+template = "#[inline]\npub fn {name}({params}) -> {return_type} {{ {body} }}"
 
 # Effect fn: ret_ty in IR is already Result<T, String>, so use it directly
 [effect_fn_decl]
@@ -473,3 +473,17 @@ template = "{name}: Clone"
 
 [optional_chain_expr]
 template = "{inner}.as_ref().map(|__v| __v.{field}.clone())"
+
+# ── Peephole optimization templates ──
+
+[peep_swap]
+template = "{target}.swap({a} as usize, {b} as usize);"
+
+[peep_copy_slice]
+template = "{dst}[..{n} as usize].copy_from_slice(&{src}[..{n} as usize]);"
+
+[peep_reverse]
+template = "{target}[..={end} as usize].reverse();"
+
+[peep_rotate_left]
+template = "{target}[..={end} as usize].rotate_left(1);"

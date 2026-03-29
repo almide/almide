@@ -1,0 +1,94 @@
+// Peephole optimization tests: verify swap, reverse, rotate, copy patterns
+// are correctly detected and produce correct results.
+
+test "swap pattern" {
+  var xs = [10, 20, 30, 40, 50]
+  let tmp = xs[1]
+  xs[1] = xs[3]
+  xs[3] = tmp
+  assert_eq(xs, [10, 40, 30, 20, 50])
+}
+
+test "reverse pattern (while lo < hi swap)" {
+  var xs = [1, 2, 3, 4, 5]
+  var lo = 0
+  var hi = 4
+  while lo < hi {
+    let tmp = xs[lo]
+    xs[lo] = xs[hi]
+    xs[hi] = tmp
+    lo = lo + 1
+    hi = hi - 1
+  }
+  assert_eq(xs, [5, 4, 3, 2, 1])
+}
+
+test "reverse single element" {
+  var xs = [42]
+  var lo = 0
+  var hi = 0
+  while lo < hi {
+    let tmp = xs[lo]
+    xs[lo] = xs[hi]
+    xs[hi] = tmp
+    lo = lo + 1
+    hi = hi - 1
+  }
+  assert_eq(xs, [42])
+}
+
+test "rotate left pattern" {
+  var xs = [1, 2, 3, 4, 5]
+  let p0 = xs[0]
+  for i in 0..4 { xs[i] = xs[i + 1] }
+  xs[4] = p0
+  assert_eq(xs, [2, 3, 4, 5, 1])
+}
+
+test "rotate left partial" {
+  var xs = [10, 20, 30, 40, 50]
+  let p0 = xs[0]
+  for i in 0..2 { xs[i] = xs[i + 1] }
+  xs[2] = p0
+  assert_eq(xs[0], 20)
+  assert_eq(xs[1], 30)
+  assert_eq(xs[2], 10)
+  assert_eq(xs[3], 40)
+}
+
+test "copy pattern" {
+  var src = [100, 200, 300, 400]
+  var dst = [0, 0, 0, 0]
+  for i in 0..4 { dst[i] = src[i] }
+  assert_eq(dst, [100, 200, 300, 400])
+}
+
+test "self-assignment eliminated" {
+  var x = 42
+  x = x  // should be eliminated, not cause issues
+  assert_eq(x, 42)
+}
+
+test "push optimization" {
+  var xs: List[Int] = []
+  xs = xs + [1]
+  xs = xs + [2]
+  xs = xs + [3]
+  assert_eq(xs, [1, 2, 3])
+}
+
+test "combined: fannkuch-style flip" {
+  var perm = [3, 1, 0, 2]
+  let k = perm[0]
+  // reverse perm[0..=k]
+  var lo = 0
+  var hi = k
+  while lo < hi {
+    let tmp = perm[lo]
+    perm[lo] = perm[hi]
+    perm[hi] = tmp
+    lo = lo + 1
+    hi = hi - 1
+  }
+  assert_eq(perm, [2, 0, 1, 3])
+}

@@ -170,6 +170,9 @@ fn propagate_stmt(stmt: &mut IrStmt, vt: &mut VarTable) {
         IrStmtKind::IndexAssign { index, value, .. } => { propagate_expr(index, vt); propagate_expr(value, vt); }
         IrStmtKind::MapInsert { key, value, .. } => { propagate_expr(key, vt); propagate_expr(value, vt); }
         IrStmtKind::FieldAssign { value, .. } => propagate_expr(value, vt),
+        IrStmtKind::ListSwap { a, b, .. } => { propagate_expr(a, vt); propagate_expr(b, vt); }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => { propagate_expr(end, vt); }
+        IrStmtKind::ListCopySlice { len, .. } => { propagate_expr(len, vt); }
         IrStmtKind::Expr { expr } => propagate_expr(expr, vt),
         IrStmtKind::Guard { cond, else_ } => { propagate_expr(cond, vt); propagate_expr(else_, vt); }
         IrStmtKind::Comment { .. } => {}

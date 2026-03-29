@@ -1,0 +1,88 @@
+// LICM (Loop-Invariant Code Motion) tests: verify correct hoisting behavior.
+
+fn square(x: Int) -> Int = x * x
+fn add(a: Int, b: Int) -> Int = a + b
+
+// Pure stdlib calls should be hoisted
+test "list.len hoisted" {
+  let xs = [1, 2, 3, 4, 5]
+  var total = 0
+  for i in 0..100 {
+    if i < list.len(xs) then total = total + 1
+    else total = total
+  }
+  assert_eq(total, 5)
+}
+
+// Pure user functions should be hoisted
+test "pure user fn hoisted" {
+  let n = 7
+  var total = 0
+  for i in 0..10 {
+    total = total + square(n)
+  }
+  assert_eq(total, 490)
+}
+
+// Impure: list.push must NOT be hoisted
+test "list.push not hoisted" {
+  var xs: List[Int] = []
+  for i in 0..5 {
+    list.push(xs, i)
+  }
+  assert_eq(list.len(xs), 5)
+  assert_eq(xs[0], 0)
+  assert_eq(xs[4], 4)
+}
+
+// Impure: bytes.push must NOT be hoisted
+test "bytes.push not hoisted" {
+  var buf = bytes.new(0)
+  for i in 0..3 {
+    bytes.push(buf, 65 + i)
+  }
+  assert_eq(bytes.len(buf), 3)
+}
+
+// IndexAssign target must be in loop_defined
+test "index assign on loop-mutated list" {
+  var perm = [3, 2, 1, 0]
+  var k = perm[0]
+  while k != 0 {
+    var lo = 0
+    var hi = k
+    while lo < hi {
+      let tmp = perm[lo]
+      perm[lo] = perm[hi]
+      perm[hi] = tmp
+      lo = lo + 1
+      hi = hi - 1
+    }
+    k = perm[0]
+  }
+  assert_eq(perm[0], 0)
+}
+
+// Nested for loops: inner iterable must be cloned
+test "nested for loops" {
+  let as_ = [1, 2]
+  let bs = [10, 20]
+  var total = 0
+  for a in as_ {
+    for b in bs {
+      total = total + a + b
+    }
+  }
+  assert_eq(total, 66)
+}
+
+// Pure stdlib call with loop-defined args: NOT hoisted
+test "list.len with loop-modified list" {
+  var xs: List[Int] = []
+  var lengths: List[Int] = []
+  for i in 0..3 {
+    list.push(xs, i)
+    lengths = lengths + [list.len(xs)]
+  }
+  assert_eq(lengths, [1, 2, 3])
+}

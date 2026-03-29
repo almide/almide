@@ -64,12 +64,39 @@ fn stmt_references_var(stmt: &IrStmt, var: VarId) -> bool {
         IrStmtKind::MapInsert { key, value, .. } => {
             expr_references_var(key, var) || expr_references_var(value, var)
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            expr_references_var(a, var) || expr_references_var(b, var)
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            expr_references_var(end, var)
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            expr_references_var(len, var)
+        }
         IrStmtKind::Expr { expr } => expr_references_var(expr, var),
         IrStmtKind::Guard { cond, else_ } => {
             expr_references_var(cond, var) || expr_references_var(else_, var)
         }
         IrStmtKind::Comment { .. } => false,
     }
+}
+
+/// Detect `xs = xs + [v]` and render as `xs.push(v);`
+fn try_render_push(ctx: &RenderContext, var: VarId, value: &IrExpr) -> Option<String> {
+    // Match: BinOp(ConcatList, left, List([element]))
+    let IrExprKind::BinOp { op: BinOp::ConcatList, left, right } = &value.kind else { return None; };
+    let IrExprKind::List { elements } = &right.kind else { return None; };
+    if elements.len() != 1 { return None; }
+    // Left must be Var(var) or Clone(Var(var))
+    let is_self = match &left.kind {
+        IrExprKind::Var { id } => *id == var,
+        IrExprKind::Clone { expr } => matches!(&expr.kind, IrExprKind::Var { id } if *id == var),
+        _ => false,
+    };
+    if !is_self { return None; }
+    let target_s = ctx.var_name(var);
+    let elem_s = render_expr(ctx, &elements[0]);
+    Some(format!("{}.push({});", target_s, elem_s))
 }
 
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
@@ -117,6 +144,12 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 .unwrap_or_else(|| format!("let _ = _;"))
         }
         IrStmtKind::Assign { var, value } => {
+            // Optimize: xs = xs + [v] → xs.push(v) (Rust only)
+            if ctx.target == super::super::pass::Target::Rust {
+                if let Some(push_str) = try_render_push(ctx, *var, value) {
+                    return push_str;
+                }
+            }
             let target_s = ctx.var_name(*var).to_string();
             let value_s = render_expr(ctx, value);
             ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
@@ -214,6 +247,32 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let val_str = render_expr(ctx, value);
             ctx.templates.render_with("bind_destructure", None, &[], &[("pattern", pat_str.as_str()), ("value", val_str.as_str())])
                 .unwrap_or_else(|| format!("let _ = _;"))
+        }
+        IrStmtKind::ListSwap { target, a, b } => {
+            let t = ctx.var_name(*target).to_string();
+            let a_s = render_expr(ctx, a);
+            let b_s = render_expr(ctx, b);
+            ctx.templates.render_with("peep_swap", None, &[], &[("target", &t), ("a", &a_s), ("b", &b_s)])
+                .unwrap_or_else(|| format!("{}.swap({}, {});", t, a_s, b_s))
+        }
+        IrStmtKind::ListReverse { target, end } => {
+            let t = ctx.var_name(*target).to_string();
+            let e = render_expr(ctx, end);
+            ctx.templates.render_with("peep_reverse", None, &[], &[("target", &t), ("end", &e)])
+                .unwrap_or_else(|| format!("{}[..={}].reverse();", t, e))
+        }
+        IrStmtKind::ListRotateLeft { target, end } => {
+            let t = ctx.var_name(*target).to_string();
+            let e = render_expr(ctx, end);
+            ctx.templates.render_with("peep_rotate_left", None, &[], &[("target", &t), ("end", &e)])
+                .unwrap_or_else(|| format!("{}[..={}].rotate_left(1);", t, e))
+        }
+        IrStmtKind::ListCopySlice { dst, src, len } => {
+            let d = ctx.var_name(*dst).to_string();
+            let s = ctx.var_name(*src).to_string();
+            let n = render_expr(ctx, len);
+            ctx.templates.render_with("peep_copy_slice", None, &[], &[("dst", &d), ("src", &s), ("n", &n)])
+                .unwrap_or_else(|| format!("{}[..{}].copy_from_slice(&{}[..{}]);", d, n, s, n))
         }
         IrStmtKind::Comment { text } => format!("// {}", text),
     }

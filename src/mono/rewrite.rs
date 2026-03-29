@@ -175,23 +175,18 @@ fn rewrite_stmt_calls(
     fn_generics: &HashMap<String, Vec<String>>,
     fn_ret_types: &HashMap<String, Ty>,
 ) {
+    let rw = |e: &mut IrExpr| rewrite_expr_calls(e, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } => rewrite_expr_calls(value, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types),
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            rewrite_expr_calls(index, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
-            rewrite_expr_calls(value, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
-        }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            rewrite_expr_calls(key, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
-            rewrite_expr_calls(value, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
-        }
-        IrStmtKind::FieldAssign { value, .. } => rewrite_expr_calls(value, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types),
-        IrStmtKind::Expr { expr } => rewrite_expr_calls(expr, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types),
-        IrStmtKind::Guard { cond, else_ } => {
-            rewrite_expr_calls(cond, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
-            rewrite_expr_calls(else_, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
-        }
+        | IrStmtKind::Assign { value, .. } => rw(value),
+        IrStmtKind::IndexAssign { index, value, .. } => { rw(index); rw(value); }
+        IrStmtKind::MapInsert { key, value, .. } => { rw(key); rw(value); }
+        IrStmtKind::FieldAssign { value, .. } => rw(value),
+        IrStmtKind::ListSwap { a, b, .. } => { rw(a); rw(b); }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => { rw(end); }
+        IrStmtKind::ListCopySlice { len, .. } => { rw(len); }
+        IrStmtKind::Expr { expr } => rw(expr),
+        IrStmtKind::Guard { cond, else_ } => { rw(cond); rw(else_); }
         IrStmtKind::Comment { .. } => {}
     }
 }

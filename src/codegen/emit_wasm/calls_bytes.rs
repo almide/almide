@@ -342,6 +342,59 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(n);
                 self.scratch.free_i32(src);
             }
+            "push" => {
+                // bytes.push(b, val): append 1 byte to buf
+                // Layout: [len:i32][data...] → store val at buf+4+len, len++
+                // NOTE: this mutates in-place. For simplicity, realloc to len+1.
+                let buf = self.scratch.alloc_i32();
+                let old_len = self.scratch.alloc_i32();
+                let new_buf = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]); // buf ptr
+                wasm!(self.func, { local_set(buf); });
+                self.emit_expr(&args[1]); // val (i64)
+                wasm!(self.func, { i32_wrap_i64; }); // val as i32
+                let val = self.scratch.alloc_i32();
+                wasm!(self.func, { local_set(val); });
+                wasm!(self.func, {
+                    // old_len = buf[0]
+                    local_get(buf); i32_load(0); local_set(old_len);
+                    // new_buf = alloc(4 + old_len + 1)
+                    local_get(old_len); i32_const(5); i32_add;
+                    call(self.emitter.rt.alloc);
+                    local_set(new_buf);
+                    // new_buf[0] = old_len + 1
+                    local_get(new_buf); local_get(old_len); i32_const(1); i32_add; i32_store(0);
+                    // copy old data: new_buf+4 <- buf+4, old_len bytes
+                    local_get(new_buf); i32_const(4); i32_add;
+                    local_get(buf); i32_const(4); i32_add;
+                    local_get(old_len);
+                    memory_copy;
+                    // new_buf[4 + old_len] = val
+                    local_get(new_buf); i32_const(4); i32_add; local_get(old_len); i32_add;
+                    local_get(val); i32_store8(0);
+                });
+                // Update the variable: need to store new_buf back
+                // The buf variable is the first arg — if it's a Var, update the local
+                if let crate::ir::IrExprKind::Var { id } = &args[0].kind {
+                    if let Some(&local_idx) = self.var_map.get(&id.0) {
+                        wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
+                    }
+                }
+                self.scratch.free_i32(val);
+                self.scratch.free_i32(new_buf);
+                self.scratch.free_i32(old_len);
+                self.scratch.free_i32(buf);
+            }
+            "clear" => {
+                // bytes.clear(b): set len to 0
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_const(0); i32_store(0); });
+            }
+            "from_string" => {
+                // bytes.from_string(s): String and Bytes have same layout [len:i32][data:u8...]
+                // Just return the string pointer (effectively a cast)
+                self.emit_expr(&args[0]);
+            }
             _ => return false,
         }
         true

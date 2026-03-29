@@ -216,6 +216,16 @@ pub(super) fn discover_in_stmt(
             discover_in_expr(value, bound_fns, program_functions, instances);
         }
         IrStmtKind::FieldAssign { value, .. } => discover_in_expr(value, bound_fns, program_functions, instances),
+        IrStmtKind::ListSwap { a, b, .. } => {
+            discover_in_expr(a, bound_fns, program_functions, instances);
+            discover_in_expr(b, bound_fns, program_functions, instances);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            discover_in_expr(end, bound_fns, program_functions, instances);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            discover_in_expr(len, bound_fns, program_functions, instances);
+        }
         IrStmtKind::Expr { expr } => discover_in_expr(expr, bound_fns, program_functions, instances),
         IrStmtKind::Guard { cond, else_ } => {
             discover_in_expr(cond, bound_fns, program_functions, instances);

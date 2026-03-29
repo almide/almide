@@ -153,6 +153,16 @@ fn propagate_stmt(stmt: &mut IrStmt, constants: &HashMap<VarId, IrExpr>) {
             propagate_expr(key, constants);
             propagate_expr(value, constants);
         }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            propagate_expr(a, constants);
+            propagate_expr(b, constants);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            propagate_expr(end, constants);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => {
+            propagate_expr(len, constants);
+        }
         IrStmtKind::Guard { cond, else_ } => {
             propagate_expr(cond, constants);
             propagate_expr(else_, constants);

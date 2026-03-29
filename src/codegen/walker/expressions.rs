@@ -7,6 +7,12 @@ use super::types::render_type;
 use super::statements::{render_stmt, render_match_arm};
 use super::helpers::{template_or, terminate_stmt, contains_loop_control, ty_has_named_typevar, erase_named_typevars, ty_contains_name};
 
+/// Render a statement list. Peephole patterns are detected at IR level
+/// by PeepholePass; this just renders the resulting IR nodes.
+fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
+    stmts.iter().map(|s| render_stmt(ctx, s)).collect()
+}
+
 pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
     match &expr.kind {
         // ── Literals ──
@@ -91,8 +97,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         IrExprKind::Block { stmts, expr } => {
-            let mut parts: Vec<String> = stmts.iter()
-                .map(|s| terminate_stmt(ctx, render_stmt(ctx, s)))
+            let mut parts: Vec<String> = render_stmts(ctx, stmts).into_iter()
+                .map(|s| terminate_stmt(ctx, s))
                 .collect();
             if let Some(e) = expr {
                 let expr_str = render_expr(ctx, e);
@@ -131,14 +137,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 ctx.var_name(*var).to_string()
             };
             let iter = render_expr(ctx, iterable);
-            let body_str = body.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
+            let body_str = render_stmts(ctx, body).join("\n");
             ctx.templates.render_with("for_loop", None, &[], &[("var", var_name.as_str()), ("iter", iter.as_str()), ("body", body_str.as_str())])
                 .unwrap_or_else(|| format!("for _ in _ {{ }}"))
         }
 
         IrExprKind::While { cond, body } => {
             let cond_str = render_expr(ctx, cond);
-            let body_str = body.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
+            let body_str = render_stmts(ctx, body).join("\n");
             ctx.templates.render_with("while_loop", None, &[], &[("cond", cond_str.as_str()), ("body", body_str.as_str())])
                 .unwrap_or_else(|| format!("while _ {{ }}"))
         }

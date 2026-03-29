@@ -235,6 +235,38 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
                 other => other,
             }).collect(),
         },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(insert_derefs(*expr, deref_ids)) },
+        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(insert_derefs(*expr, deref_ids)) },
+        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(insert_derefs(*expr, deref_ids)),
+            fallback: Box::new(insert_derefs(*fallback, deref_ids)),
+        },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(insert_derefs(*expr, deref_ids)) },
+        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(insert_derefs(*expr, deref_ids)) },
+        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(insert_derefs(*expr, deref_ids)) },
+        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(insert_derefs(*expr, deref_ids)) },
+        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
+            elements: elements.into_iter().map(|e| insert_derefs(e, deref_ids)).collect(),
+        },
+        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
+            op, operand: Box::new(insert_derefs(*operand, deref_ids)),
+        },
+        IrExprKind::Fan { exprs } => IrExprKind::Fan {
+            exprs: exprs.into_iter().map(|e| insert_derefs(e, deref_ids)).collect(),
+        },
+        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
+            object: Box::new(insert_derefs(*object, deref_ids)),
+            index: Box::new(insert_derefs(*index, deref_ids)),
+        },
+        IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
+            start: Box::new(insert_derefs(*start, deref_ids)),
+            end: Box::new(insert_derefs(*end, deref_ids)),
+            inclusive,
+        },
+        IrExprKind::While { cond, body } => IrExprKind::While {
+            cond: Box::new(insert_derefs(*cond, deref_ids)),
+            body: insert_deref_stmts(body, deref_ids),
+        },
         other => other,
     };
 

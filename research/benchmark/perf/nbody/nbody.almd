@@ -11,8 +11,8 @@ let DAYS_PER_YEAR = 365.24
 
 effect fn main() -> Unit = {
   let args = env.args()
-  let n = if list.len(args) > 1 then {
-    match list.get(args, 1) {
+  let n = if list.len(args) > 0 then {
+    match list.get(args, 0) {
       some(s) => match int.parse(s) { ok(v) => v, err(_) => 1000 }
       none => 1000
     }

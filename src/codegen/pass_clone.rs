@@ -22,7 +22,11 @@ impl NanoPass for CloneInsertionPass {
     fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        let clone_ids = collect_clone_ids(&program.var_table);
+        // Recompute use-counts: earlier passes may have changed the IR
+        compute_use_counts(&mut program);
+        // Collect top-level let VarIds: always clone (they're behind LazyLock, can't move out)
+        let top_let_vars: HashSet<VarId> = program.top_lets.iter().map(|tl| tl.var).collect();
+        let clone_ids = collect_clone_ids(&program.var_table, &top_let_vars);
         for func in &mut program.functions {
             func.body = insert_clones(std::mem::take(&mut func.body), &clone_ids);
         }
@@ -31,7 +35,8 @@ impl NanoPass for CloneInsertionPass {
         }
         // Process module functions (each module has its own var_table)
         for module in &mut program.modules {
-            let module_clone_ids = collect_clone_ids(&module.var_table);
+            let module_top_lets: HashSet<VarId> = module.top_lets.iter().map(|tl| tl.var).collect();
+            let module_clone_ids = collect_clone_ids(&module.var_table, &module_top_lets);
             for func in &mut module.functions {
                 func.body = insert_clones(std::mem::take(&mut func.body), &module_clone_ids);
             }
@@ -43,11 +48,21 @@ impl NanoPass for CloneInsertionPass {
     }
 }
 
-fn collect_clone_ids(vt: &VarTable) -> HashSet<VarId> {
+fn collect_clone_ids(vt: &VarTable, always_clone: &HashSet<VarId>) -> HashSet<VarId> {
     let mut ids = HashSet::new();
     for i in 0..vt.len() {
         let id = VarId(i as u32);
-        if needs_clone(&vt.get(id).ty) {
+        let info = vt.get(id);
+        if !needs_clone(&info.ty) { continue; }
+        // Top-level lets (LazyLock statics): always clone — can't move out of LazyLock
+        // Fn/TypeVar: always clone (closure mutability, generic type erasure)
+        if always_clone.contains(&id) || matches!(&info.ty, Ty::Fn { .. } | Ty::TypeVar(_)) {
+            ids.insert(id);
+            continue;
+        }
+        // Other heap types: only clone if used more than once.
+        // Single-use variables can transfer ownership directly (move semantics).
+        if info.use_count > 1 {
             ids.insert(id);
         }
     }
@@ -162,14 +177,52 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
             base: Box::new(insert_clones(*base, clone_ids)),
             fields: fields.into_iter().map(|(k, v)| (k, insert_clones(v, clone_ids))).collect(),
         },
-        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
-            object: Box::new(insert_clones(*object, clone_ids)),
-            index: Box::new(insert_clones(*index, clone_ids)),
-        },
-        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
-            object: Box::new(insert_clones(*object, clone_ids)),
-            key: Box::new(insert_clones(*key, clone_ids)),
-        },
+        IrExprKind::IndexAccess { object, index } => {
+            // Indexing borrows the container — never clone it.
+            // Clone only the element if the element type is a heap type.
+            let mut processed_object = insert_clones(*object, clone_ids);
+            // Strip top-level Clone wrapper from the container
+            if let IrExprKind::Clone { expr } = processed_object.kind {
+                processed_object = *expr;
+            }
+            let processed_index = insert_clones(*index, clone_ids);
+            let access = IrExpr {
+                kind: IrExprKind::IndexAccess {
+                    object: Box::new(processed_object),
+                    index: Box::new(processed_index),
+                },
+                ty: ty.clone(), span,
+            };
+            if needs_clone(&ty) {
+                return IrExpr {
+                    kind: IrExprKind::Clone { expr: Box::new(access) },
+                    ty, span,
+                };
+            }
+            return access;
+        }
+        IrExprKind::MapAccess { object, key } => {
+            // Map lookup borrows the container — never clone it.
+            let mut processed_object = insert_clones(*object, clone_ids);
+            if let IrExprKind::Clone { expr } = processed_object.kind {
+                processed_object = *expr;
+            }
+            let processed_key = insert_clones(*key, clone_ids);
+            let access = IrExpr {
+                kind: IrExprKind::MapAccess {
+                    object: Box::new(processed_object),
+                    key: Box::new(processed_key),
+                },
+                ty: ty.clone(), span,
+            };
+            if needs_clone(&ty) {
+                return IrExpr {
+                    kind: IrExprKind::Clone { expr: Box::new(access) },
+                    ty, span,
+                };
+            }
+            return access;
+        }
         IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
             start: Box::new(insert_clones(*start, clone_ids)),
             end: Box::new(insert_clones(*end, clone_ids)),
