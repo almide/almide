@@ -346,6 +346,15 @@ fn rewrite_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {
             IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
                 pattern, value: rewrite_expr(value),
             },
+            IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
+                target, index: rewrite_expr(index), value: rewrite_expr(value),
+            },
+            IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
+                target, field, value: rewrite_expr(value),
+            },
+            IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
+                target, key: rewrite_expr(key), value: rewrite_expr(value),
+            },
             other => other,
         };
         IrStmt { kind, span: s.span }

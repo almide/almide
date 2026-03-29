@@ -8,6 +8,70 @@ use super::types::render_type;
 use super::expressions::render_expr;
 use super::helpers::{template_or, terminate_stmt, ty_has_named_typevar, erase_named_typevars};
 
+/// Check if an expression references a specific variable (any depth).
+fn expr_references_var(expr: &IrExpr, var: VarId) -> bool {
+    match &expr.kind {
+        IrExprKind::Var { id } => *id == var,
+        IrExprKind::BinOp { left, right, .. } => {
+            expr_references_var(left, var) || expr_references_var(right, var)
+        }
+        IrExprKind::UnOp { operand, .. } => expr_references_var(operand, var),
+        IrExprKind::Call { target, args, .. } => {
+            let t = match target {
+                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => expr_references_var(object, var),
+                _ => false,
+            };
+            t || args.iter().any(|a| expr_references_var(a, var))
+        }
+        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
+            expr_references_var(object, var) || expr_references_var(index, var)
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+            expr_references_var(object, var)
+        }
+        IrExprKind::Clone { expr: e } | IrExprKind::Borrow { expr: e, .. }
+        | IrExprKind::Deref { expr: e } | IrExprKind::ToVec { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e } => {
+            expr_references_var(e, var)
+        }
+        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
+            expr_references_var(e, var) || expr_references_var(f, var)
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            elements.iter().any(|e| expr_references_var(e, var))
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            expr_references_var(cond, var) || expr_references_var(then, var) || expr_references_var(else_, var)
+        }
+        IrExprKind::Block { stmts, expr: tail } => {
+            stmts.iter().any(|s| stmt_references_var(s, var))
+                || tail.as_ref().is_some_and(|e| expr_references_var(e, var))
+        }
+        _ => false,
+    }
+}
+
+fn stmt_references_var(stmt: &IrStmt, var: VarId) -> bool {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. }
+        | IrStmtKind::FieldAssign { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
+            expr_references_var(value, var)
+        }
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            expr_references_var(index, var) || expr_references_var(value, var)
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            expr_references_var(key, var) || expr_references_var(value, var)
+        }
+        IrStmtKind::Expr { expr } => expr_references_var(expr, var),
+        IrStmtKind::Guard { cond, else_ } => {
+            expr_references_var(cond, var) || expr_references_var(else_, var)
+        }
+        IrStmtKind::Comment { .. } => false,
+    }
+}
+
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, mutability } => {
@@ -87,8 +151,15 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let target_str = ctx.var_name(*target).to_string();
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
-            ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
-                .unwrap_or_else(|| "idx[...] = ...;".into())
+            // Rust borrow conflict: `xs[f(xs)] = v` borrows xs mutably (assignment)
+            // and immutably (index expr) in the same statement.
+            // Extract index to a let binding when the index expr references the target var.
+            if ctx.target == super::super::pass::Target::Rust && expr_references_var(index, *target) {
+                format!("{{ let __idx = ({}) as usize; {}[__idx] = {}; }}", idx_str, target_str, val_str)
+            } else {
+                ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| "idx[...] = ...;".into())
+            }
         }
         IrStmtKind::MapInsert { target, key, value } => {
             let target_str = ctx.var_name(*target).to_string();
