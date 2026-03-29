@@ -330,7 +330,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         // Bundled .almd modules use minimal generic bounds (Clone only)
         // because their functions don't require PartialEq/PartialOrd/Debug.
         let is_bundled = crate::stdlib::get_bundled_source(&module.name).is_some();
-        let mod_ctx = RenderContext {
+        let mut mod_ctx = RenderContext {
             templates: ctx.templates,
             var_table: &module.var_table,
             indent: ctx.indent,
@@ -349,6 +349,22 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         let mod_ident = module.versioned_name
             .map(|v| v.replace('.', "_"))
             .unwrap_or_else(|| module.name.replace('.', "_"));
+        // Module top-level lets (names already prefixed during lowering)
+        for tl in &module.top_lets {
+            let name = mod_ctx.var_table.get(tl.var).name.to_string();
+            let ty_str = render_type_fn(&mod_ctx, &tl.ty);
+            let val_str = render_expr_fn(&mod_ctx, &tl.value);
+            if matches!(tl.kind, TopLetKind::Lazy) {
+                mod_ctx.ann.lazy_vars.insert(tl.var);
+            }
+            let construct = match tl.kind {
+                TopLetKind::Const => "top_let_const",
+                TopLetKind::Lazy => "top_let_lazy",
+            };
+            let rendered = mod_ctx.templates.render_with(construct, None, &[], &[("name", name.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
+                .unwrap_or_else(|| format!("const {} = {};", name, val_str));
+            parts.push(rendered);
+        }
         for func in &module.functions {
             let rendered = render_function(&mod_ctx, func);
             let prefixed = rendered.replacen(

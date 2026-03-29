@@ -439,7 +439,9 @@ pub fn reclassify_top_lets(program: &mut IrProgram) {
 fn is_const_expr(expr: &IrExpr, const_vars: &std::collections::HashSet<u32>) -> bool {
     match &expr.kind {
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::LitStr { .. } => true,
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit => true,
+        // String requires heap allocation — not const-compatible in Rust
+        IrExprKind::LitStr { .. } => false,
         IrExprKind::UnOp { operand, .. } => is_const_expr(operand, const_vars),
         IrExprKind::BinOp { left, right, .. } => is_const_expr(left, const_vars) && is_const_expr(right, const_vars),
         IrExprKind::Var { id } => const_vars.contains(&id.0),
