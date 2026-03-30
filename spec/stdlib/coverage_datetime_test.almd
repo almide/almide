@@ -44,3 +44,8 @@ test "datetime.is_before and is_after" {
   assert(datetime.is_after(d2, d1))
   assert(not datetime.is_before(d2, d1))
 }
+
+test "datetime.now returns positive timestamp" {
+  let ts = datetime.now()
+  assert(ts > 0)
+}

@@ -16,3 +16,9 @@ test "bytes.repeat" {
   let b2 = bytes.repeat(b, 3)
   assert_eq(bytes.len(b2), 6)
 }
+
+test "bytes.clear" {
+  var b = bytes.from_list([1, 2, 3])
+  bytes.clear(b)
+  assert_eq(bytes.len(b), 0)
+}
