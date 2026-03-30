@@ -1,4 +1,6 @@
 from __future__ import annotations
+# ========== V1 SOLUTION (working code — all tests pass) ==========
+
 from dataclasses import dataclass
 
 
@@ -27,8 +29,6 @@ class Div:
     right: 'Expr'
 
 # Expr is one of: Lit, Add, Mul, Sub, Div
-
-Expr = Lit | Add | Mul | Sub | Div
 
 
 def eval_expr(e: Expr) -> int:
@@ -61,7 +61,8 @@ assert eval_expr(Add(Mul(Lit(2), Lit(3)), Sub(Lit(10), Lit(1)))) == 15, "eval ma
 assert eval_expr(Sub(Mul(Add(Lit(1), Lit(2)), Lit(5)), Add(Lit(3), Lit(4)))) == 8, "deeply nested"
 assert eval_expr(Sub(Lit(0), Lit(5))) == -5, "single negative via sub"
 
-# V2 Tests
+# ========== V2 TESTS (must also pass after modification) ==========
+
 assert eval_expr(Div(Lit(10), Lit(3))) == 3, "eval div"
 assert eval_expr(Div(Lit(10), Lit(2))) == 5, "eval div exact"
 assert to_string(Div(Lit(10), Lit(3))) == "(10 / 3)", "to_string div"

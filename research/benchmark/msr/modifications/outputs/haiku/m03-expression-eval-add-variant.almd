@@ -43,7 +43,6 @@ test "deeply nested eval" {
 test "single negative via sub" {
   assert_eq(eval(Sub(Lit(0), Lit(5))), -5)
 }
-
 test "eval div" { assert_eq(eval(Div(Lit(10), Lit(3))), 3) }
 test "eval div exact" { assert_eq(eval(Div(Lit(10), Lit(2))), 5) }
 test "to_string div" { assert_eq(to_string(Div(Lit(10), Lit(3))), "(10 / 3)") }

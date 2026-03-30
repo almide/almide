@@ -1,4 +1,6 @@
 from __future__ import annotations
+# ========== V1 SOLUTION (working code — all tests pass) ==========
+
 from enum import Enum, auto
 
 
@@ -40,7 +42,8 @@ assert duration(Light.Yellow) == 5, "duration yellow"
 assert duration(Light.Green) == 45, "duration green"
 assert describe(Light.Red) == "stop", "describe"
 
-# V2 Tests
+# ========== V2 TESTS (must also pass after modification) ==========
+
 assert next_light(Light.Broken) == Light.Red, "next broken"
 assert describe(Light.Broken) == "out of order", "describe broken"
 assert duration(Light.Broken) is None, "duration broken"

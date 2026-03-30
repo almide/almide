@@ -1,6 +1,7 @@
 from __future__ import annotations
+# ========== V1 SOLUTION (working code — all tests pass) ==========
+
 from dataclasses import dataclass
-from typing import Union
 
 
 @dataclass
@@ -31,7 +32,7 @@ class Pow:
     base: 'Expr'
     exp: 'Expr'
 
-Expr = Union[Lit, Add, Mul, Sub, Neg, Pow]
+# Expr is one of: Lit, Add, Mul, Sub, Neg, Pow
 
 
 def eval_expr(e: Expr) -> int:

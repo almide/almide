@@ -118,14 +118,12 @@ def top_students(input: str, n: int) -> list[str]:
     """Return the names of the top N students by average score (descending).
     Ties in average are broken alphabetically (ascending).
     If N exceeds the number of students, return all students sorted by score desc.
-    Uses `parse_all` and `average` internally.
+    Uses parse_all and average internally.
     Raises ValueError on parse errors (propagated from parse_all).
     """
     students = parse_all(input)
-    student_avgs = [(s[0], average(s)) for s in students]
-    sorted_students = sorted(student_avgs, key=lambda x: (-x[1], x[0]))
-    top_n = sorted_students[:n]
-    return [name for name, avg in top_n]
+    sorted_students = sorted(students, key=lambda s: (-average(s), s[0]))
+    return [s[0] for s in sorted_students[:n]]
 
 
 # Tests
@@ -222,12 +220,15 @@ try:
 except ValueError as e:
     assert str(e) == "empty input", "generate report empty"
 
+
+# ========== V2 TESTS ==========
+
 assert top_students("Alice:90,95\nBob:70,80\nCarol:85,88", 2) == ["Alice", "Carol"], "top students basic"
 assert top_students("Bob:85,85\nAlice:85,85", 2) == ["Alice", "Bob"], "top students tie breaking"
 assert top_students("Alice:90,95", 5) == ["Alice"], "top students n exceeds count"
 try:
     top_students("", 3)
-    assert False, "top students empty should raise"
+    assert False
 except ValueError as e:
-    assert str(e) == "empty input", "top students error propagation"
+    assert str(e) == "empty input", "top students empty should raise"
 assert top_students("Alice:90,95\nBob:70,80\nCarol:85,88", 1) == ["Alice"], "top students single"

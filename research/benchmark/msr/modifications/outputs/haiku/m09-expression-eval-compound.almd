@@ -6,19 +6,19 @@ type Expr =
   | Neg(Expr)
   | Pow(Expr, Expr)
 
+fn power(base: Int, exp: Int) -> Int =
+  if exp == 0 then 1
+  else base * power(base, exp - 1)
+
 fn eval(e: Expr) -> Int =
   match e {
     Lit(n) => n
     Add(l, r) => eval(l) + eval(r)
     Mul(l, r) => eval(l) * eval(r)
     Sub(l, r) => eval(l) - eval(r)
-    Neg(e) => 0 - eval(e)
-    Pow(base, exp) => pow(eval(base), eval(exp))
+    Neg(x) => 0 - eval(x)
+    Pow(base, exp) => power(eval(base), eval(exp))
   }
-
-fn pow(base: Int, exp: Int) -> Int =
-  if exp == 0 then 1
-  else base * pow(base, exp - 1)
 
 fn to_string(e: Expr) -> String =
   match e {
@@ -26,7 +26,7 @@ fn to_string(e: Expr) -> String =
     Add(l, r) => "(${to_string(l)} + ${to_string(r)})"
     Mul(l, r) => "(${to_string(l)} * ${to_string(r)})"
     Sub(l, r) => "(${to_string(l)} - ${to_string(r)})"
-    Neg(e) => "(-${to_string(e)})"
+    Neg(x) => "(-${to_string(x)})"
     Pow(a, b) => "(${to_string(a)} ^ ${to_string(b)})"
   }
 
