@@ -168,6 +168,7 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(insert_clones(*expr, clone_ids)) },
         IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(insert_clones(*expr, clone_ids)) },
         IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(insert_clones(*expr, clone_ids)) },
+        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(insert_clones(*expr, clone_ids)) },
         IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
             expr: Box::new(insert_clones(*expr, clone_ids)),
             fallback: Box::new(insert_clones(*fallback, clone_ids)),
