@@ -1,0 +1,34 @@
+// Tests for string methods that had WASM codegen gaps
+
+test "starts_with" {
+  assert("hello world".starts_with("hello"))
+  assert(not "hello world".starts_with("world"))
+  assert("abc".starts_with(""))
+  assert(not "".starts_with("x"))
+  assert("a".starts_with("a"))
+  assert(not "a".starts_with("ab"))
+}
+
+test "ends_with" {
+  assert("hello world".ends_with("world"))
+  assert(not "hello world".ends_with("hello"))
+  assert("abc".ends_with(""))
+  assert(not "".ends_with("x"))
+  assert("a".ends_with("a"))
+  assert(not "a".ends_with("ba"))
+}
+
+test "starts_with and ends_with in conditions" {
+  let path = "/api/v2/patients"
+  let is_api = path.starts_with("/api")
+  let is_patients = path.ends_with("/patients")
+  assert(is_api)
+  assert(is_patients)
+  assert(not path.starts_with("api"))
+  assert(not path.ends_with("patient"))
+}
+
+test "starts_with with module prefix" {
+  assert(string.starts_with("hello", "he"))
+  assert(string.ends_with("hello", "lo"))
+}
