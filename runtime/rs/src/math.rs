@@ -53,17 +53,18 @@ pub fn almide_rt_math_choose(n: i64, k: i64) -> i64 {
     result as i64
 }
 pub fn almide_rt_math_log_gamma(x: f64) -> f64 {
-    // Stirling approximation
-    let t = x + 6.5;
-    (2.5066282746310005_f64).ln()
-        + (x - 0.5) * t.ln()
-        - t
-        + (1.000000000190015
-            + 76.18009172947146 / x
-            + -86.50532032941677 / (x + 1.0)
-            + 24.01409824083091 / (x + 2.0)
-            + -1.231739572450155 / (x + 3.0)
-            + 0.001208650973866179 / (x + 4.0)
-            + -0.000005395239384953 / (x + 5.0))
-            .ln()
+    // Lanczos approximation (g=7, n=9 coefficients)
+    // Lanczos computes Γ(x+1), so shift input by -1 to get Γ(x)
+    let x = x - 1.0;
+    let coeffs = [
+        0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+        771.32342877765313, -176.61502916214059, 12.507343278686905,
+        -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
+    ];
+    let mut ag = coeffs[0];
+    for (i, &c) in coeffs[1..].iter().enumerate() {
+        ag += c / (x + (i + 1) as f64);
+    }
+    let t = x + 7.5;
+    0.5 * (2.0 * std::f64::consts::PI).ln() + (x + 0.5) * t.ln() - t + ag.ln()
 }
