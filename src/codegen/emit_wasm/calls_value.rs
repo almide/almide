@@ -122,8 +122,8 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.value_stringify); });
             }
             "get" => {
-                // value.get(v: Value, key: String) -> Option[Value] (for json.get compat)
-                self.emit_value_get(args);
+                // value.get(v: Value, key: String) -> Result[Value, String]
+                self.emit_value_field_result(args);
             }
             "field" => {
                 // value.field(v: Value, key: String) -> Result[Value, String] (for Codec decode)
