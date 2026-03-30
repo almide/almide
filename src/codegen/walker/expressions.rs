@@ -515,7 +515,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             format!("{}!({})", name, args_str)
         }
         IrExprKind::ToVec { expr: inner } => {
-            format!("({}).to_vec()", render_expr(ctx, inner))
+            if matches!(&inner.kind, IrExprKind::Range { .. }) {
+                format!("({}).collect::<Vec<_>>()", render_expr(ctx, inner))
+            } else {
+                format!("({}).to_vec()", render_expr(ctx, inner))
+            }
         }
 
         // ── Hole / Todo ──
