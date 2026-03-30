@@ -24,10 +24,26 @@ pub fn almide_rt_int_bxor(a: i64, b: i64) -> i64 { a ^ b }
 pub fn almide_rt_int_bnot(n: i64) -> i64 { !n }
 pub fn almide_rt_int_bshl(n: i64, bits: i64) -> i64 { n << bits }
 pub fn almide_rt_int_bshr(n: i64, bits: i64) -> i64 { n >> bits }
-pub fn almide_rt_int_rotate_left(n: i64, bits: i64) -> i64 { (n as u64).rotate_left(bits as u32) as i64 }
-pub fn almide_rt_int_rotate_right(n: i64, bits: i64) -> i64 { (n as u64).rotate_right(bits as u32) as i64 }
-pub fn almide_rt_int_wrap_add(a: i64, b: i64) -> i64 { a.wrapping_add(b) }
-pub fn almide_rt_int_wrap_mul(a: i64, b: i64) -> i64 { a.wrapping_mul(b) }
+pub fn almide_rt_int_rotate_left(a: i64, n: i64, bits: i64) -> i64 {
+    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+    let v = (a as u64) & mask;
+    let n = (n % bits) as u32;
+    ((v << n) | (v >> (bits as u32 - n))) as i64 & mask as i64
+}
+pub fn almide_rt_int_rotate_right(a: i64, n: i64, bits: i64) -> i64 {
+    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+    let v = (a as u64) & mask;
+    let n = (n % bits) as u32;
+    ((v >> n) | (v << (bits as u32 - n))) as i64 & mask as i64
+}
+pub fn almide_rt_int_wrap_add(a: i64, b: i64, bits: i64) -> i64 {
+    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+    ((a as u64).wrapping_add(b as u64) & mask) as i64
+}
+pub fn almide_rt_int_wrap_mul(a: i64, b: i64, bits: i64) -> i64 {
+    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+    ((a as u64).wrapping_mul(b as u64) & mask) as i64
+}
 
 #[cfg(test)]
 mod tests {

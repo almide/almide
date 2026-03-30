@@ -342,8 +342,54 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.int_from_hex); });
             }
             "rotate_right" | "rotate_left" => {
-                self.emit_stub_call(args);
-                return true;
+                // rotate_{left,right}(a, n, bits)
+                // mask = (1 << bits) - 1; v = a & mask
+                // rotate_left:  ((v << n) | (v >> (bits - n))) & mask
+                // rotate_right: ((v >> n) | (v << (bits - n))) & mask
+                let is_left = method == "rotate_left";
+                let a = self.scratch.alloc_i64();
+                let n = self.scratch.alloc_i64();
+                let bits = self.scratch.alloc_i64();
+                let mask = self.scratch.alloc_i64();
+                let v = self.scratch.alloc_i64();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(a); });
+                self.emit_expr(&args[1]);
+                // n = n % bits (needs bits first)
+                wasm!(self.func, { local_set(n); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, {
+                    local_set(bits);
+                    // mask = (1 << bits) - 1
+                    i64_const(1); local_get(bits); i64_shl; i64_const(1); i64_sub;
+                    local_set(mask);
+                    // v = a & mask
+                    local_get(a); local_get(mask); i64_and; local_set(v);
+                    // n = n % bits
+                    local_get(n); local_get(bits); i64_rem_s; local_set(n);
+                });
+                if is_left {
+                    wasm!(self.func, {
+                        // (v << n) | (v >> (bits - n))
+                        local_get(v); local_get(n); i64_shl;
+                        local_get(v); local_get(bits); local_get(n); i64_sub; i64_shr_u;
+                        i64_or;
+                        local_get(mask); i64_and;
+                    });
+                } else {
+                    wasm!(self.func, {
+                        // (v >> n) | (v << (bits - n))
+                        local_get(v); local_get(n); i64_shr_u;
+                        local_get(v); local_get(bits); local_get(n); i64_sub; i64_shl;
+                        i64_or;
+                        local_get(mask); i64_and;
+                    });
+                }
+                self.scratch.free_i64(v);
+                self.scratch.free_i64(mask);
+                self.scratch.free_i64(bits);
+                self.scratch.free_i64(n);
+                self.scratch.free_i64(a);
             }
             _ => return false,
         }
