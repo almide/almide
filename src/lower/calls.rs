@@ -104,9 +104,12 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                 if ctx.lookup_var(module).is_none() && (module == "fan"
                     || crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module)
                     || ctx.env.user_modules.contains(module)
-                    || ctx.env.module_aliases.contains_key(module))
+                    || ctx.env.module_aliases.contains_key(module)
+                    || ctx.extra_module_aliases.contains_key(module))
                 {
-                    let resolved = ctx.env.module_aliases.get(module).copied().unwrap_or(*module);
+                    let resolved = ctx.env.module_aliases.get(module).copied()
+                        .or_else(|| ctx.extra_module_aliases.get(module).copied())
+                        .unwrap_or(*module);
                     return CallTarget::Module { module: resolved, func: *field };
                 }
                 // Ident that's not a module: check if Type.method (protocol impl, e.g. Val.double)
