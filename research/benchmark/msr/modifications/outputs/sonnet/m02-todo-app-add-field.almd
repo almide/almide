@@ -1,0 +1,121 @@
+type Status = | Pending | Done | Cancelled
+
+type Todo = { id: Int, title: String, status: Status, priority: Int }
+
+fn create(id: Int, title: String, priority: Int) -> Todo =
+  Todo { id: id, title: title, status: Pending, priority: priority }
+
+fn complete(t: Todo) -> Todo = { ...t, status: Done }
+
+fn cancel(t: Todo) -> Todo = { ...t, status: Cancelled }
+
+fn is_done(t: Todo) -> Bool = match t.status { Done => true, _ => false }
+
+fn pending_count(todos: List[Todo]) -> Int =
+  todos |> list.filter((t) => match t.status { Pending => true, _ => false }) |> list.len
+
+fn titles(todos: List[Todo]) -> List[String] = list.map(todos, (t) => t.title)
+
+fn find_by_title(todos: List[Todo], title: String) -> Option[Todo] =
+  list.find(todos, (t) => t.title == title)
+
+fn status_label(s: Status) -> String =
+  match s { Pending => "pending", Done => "done", Cancelled => "cancelled" }
+
+fn summary(t: Todo) -> String = "[${status_label(t.status)}/p${int.to_string(t.priority)}] ${t.title}"
+
+fn high_priority(todos: List[Todo]) -> List[Todo] =
+  todos
+    |> list.filter((t) => t.priority >= 3)
+    |> list.sort_by((t) => 0 - t.priority)
+
+test "create todo" {
+  let t = create(1, "Buy milk", 1)
+  assert_eq(t.title, "Buy milk")
+  assert_eq(t.id, 1)
+}
+
+test "complete todo" {
+  let t = create(1, "Buy milk", 1) |> complete
+  assert_eq(is_done(t), true)
+}
+
+test "cancel todo" {
+  let t = create(1, "Buy milk", 1) |> cancel
+  assert_eq(status_label(t.status), "cancelled")
+}
+
+test "pending count" {
+  let todos = [create(1, "A", 1), create(2, "B", 1) |> complete, create(3, "C", 1)]
+  assert_eq(pending_count(todos), 2)
+}
+
+test "titles" {
+  let todos = [create(1, "A", 1), create(2, "B", 1), create(3, "C", 1)]
+  assert_eq(titles(todos), ["A", "B", "C"])
+}
+
+test "find by title found" {
+  let todos = [create(1, "Buy milk", 1), create(2, "Walk dog", 1)]
+  match find_by_title(todos, "Walk dog") {
+    some(t) => assert_eq(t.id, 2)
+    none => assert(false)
+  }
+}
+
+test "find by title not found" {
+  let todos = [create(1, "Buy milk", 1)]
+  assert_eq(find_by_title(todos, "nope"), none)
+}
+
+test "summary" {
+  assert_eq(summary(create(1, "Buy milk", 1)), "[pending/p1] Buy milk")
+  assert_eq(summary(create(1, "Done", 1) |> complete), "[done/p1] Done")
+}
+
+test "pipe chain: create filter map" {
+  let todos = [create(1, "A", 1), create(2, "B", 1) |> complete, create(3, "C", 1) |> cancel]
+  let pending_titles = todos
+    |> list.filter((t) => match t.status { Pending => true, _ => false })
+    |> list.map((t) => t.title)
+  assert_eq(pending_titles, ["A"])
+}
+
+test "multiple operations" {
+  var todos = [create(1, "A", 1), create(2, "B", 1), create(3, "C", 1)]
+  let updated = list.map(todos, (t) => if t.id == 2 then complete(t) else t)
+  assert_eq(pending_count(updated), 2)
+  assert(is_done(list.get_or(updated, 1, create(0, "", 1))))
+}
+
+test "create with priority" {
+  let t = create(1, "Buy milk", 3)
+  assert_eq(t.priority, 3)
+}
+
+test "high priority filter" {
+  let todos = [create(1, "A", 5), create(2, "B", 1), create(3, "C", 3)]
+  let hp = high_priority(todos)
+  assert_eq(list.len(hp), 2)
+  assert_eq(list.map(hp, (t) => t.title), ["A", "C"])
+}
+
+test "high priority empty" {
+  let todos = [create(1, "A", 1), create(2, "B", 2)]
+  assert_eq(high_priority(todos), [])
+}
+
+test "complete preserves priority" {
+  let t = create(1, "A", 5) |> complete
+  assert_eq(t.priority, 5)
+}
+
+test "cancel preserves priority" {
+  let t = create(1, "A", 3) |> cancel
+  assert_eq(t.priority, 3)
+}
+
+test "summary with priority" {
+  assert_eq(summary(create(1, "Buy milk", 3)), "[pending/p3] Buy milk")
+  assert_eq(summary(create(1, "Done", 2) |> complete), "[done/p2] Done")
+}

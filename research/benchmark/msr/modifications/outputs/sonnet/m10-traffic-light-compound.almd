@@ -1,0 +1,25 @@
+type Light = | Red | Yellow | Green | Broken
+
+fn next(l: Light) -> Light =
+  match l { Red => Green, Green => Yellow, Yellow => Red, Broken => Red }
+
+fn duration(l: Light) -> Result[Int, String] =
+  match l { Red => ok(60), Yellow => ok(5), Green => ok(45), Broken => err("broken light has no duration") }
+
+fn describe(l: Light) -> String =
+  match l { Red => "stop", Yellow => "caution", Green => "go", Broken => "out of order" }
+
+test "next red" { assert_eq(next(Red), Green) }
+test "next green" { assert_eq(next(Green), Yellow) }
+test "next yellow" { assert_eq(next(Yellow), Red) }
+test "full cycle" { assert_eq(next(next(next(Red))), Red) }
+test "duration red" { assert_eq(duration(Red), ok(60)) }
+test "duration yellow" { assert_eq(duration(Yellow), ok(5)) }
+test "duration green" { assert_eq(duration(Green), ok(45)) }
+test "describe" { assert_eq(describe(Red), "stop") }
+
+test "next broken" { assert_eq(next(Broken), Red) }
+test "describe broken" { assert_eq(describe(Broken), "out of order") }
+test "duration broken" { assert_eq(duration(Broken), err("broken light has no duration")) }
+test "cycle from broken" { assert_eq(next(next(Broken)), Green) }
+test "describe after broken" { assert_eq(describe(next(Broken)), "stop") }
