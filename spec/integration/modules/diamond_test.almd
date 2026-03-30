@@ -6,6 +6,8 @@
 import dmod_b
 import dmod_c
 import dmod_d
+import dmod_d.utils as utils
+import dmod_d.nested.deep as deep
 
 // ── Phase 1: Symbol resolution — no collisions ──
 
@@ -58,15 +60,15 @@ test "diamond: direct D Logger works with both B and C" {
 
 // ── Phase 3: Submodule through diamond ──
 
-test "diamond: D submodule called directly" {
-  assert_eq(dmod_d.utils.format_level(0), "DEBUG")
-  assert_eq(dmod_d.utils.format_level(1), "INFO")
-  assert_eq(dmod_d.utils.format_level(2), "WARN")
-  assert_eq(dmod_d.utils.format_level(99), "ERROR")
+test "diamond: D submodule called via explicit import" {
+  assert_eq(utils.format_level(0), "DEBUG")
+  assert_eq(utils.format_level(1), "INFO")
+  assert_eq(utils.format_level(2), "WARN")
+  assert_eq(utils.format_level(99), "ERROR")
 }
 
-// ── Phase 4: Deep nested submodule (4-level dot: pkg.dir.file.func) ──
+// ── Phase 4: Deep nested submodule via explicit import ──
 
-test "diamond: 4-level dot call through nested dir" {
-  assert_eq(dmod_d.nested.deep.greet("world"), "hello from deep: world")
+test "diamond: deep nested via explicit import" {
+  assert_eq(deep.greet("world"), "hello from deep: world")
 }

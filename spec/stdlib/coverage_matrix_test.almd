@@ -1,0 +1,13 @@
+// Coverage tests for matrix.map
+
+test "matrix.map squares elements" {
+  let m = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let squared = matrix.map(m, (x: Float) => x * x)
+  let result = matrix.to_lists(squared)
+  let row0 = list.get_or(result, 0, [])
+  let row1 = list.get_or(result, 1, [])
+  assert_eq(list.get_or(row0, 0, 0.0), 1.0)
+  assert_eq(list.get_or(row0, 1, 0.0), 4.0)
+  assert_eq(list.get_or(row1, 0, 0.0), 9.0)
+  assert_eq(list.get_or(row1, 1, 0.0), 16.0)
+}

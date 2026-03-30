@@ -48,6 +48,179 @@ fn comma_sep<T>(out: &mut String, items: &[T], f: impl Fn(&mut String, &T)) {
     }
 }
 
+/// Auto-manage imports: add missing stdlib/dependency imports, remove unused ones.
+/// `dep_names`: dependency names from almide.toml (empty if no project file).
+/// `dep_submodules`: map of short_name → full dotted path for dependency submodules.
+/// Returns messages describing changes made.
+pub fn auto_imports(program: &mut Program, dep_names: &[String], dep_submodules: &std::collections::HashMap<String, String>) -> Vec<String> {
+    use std::collections::HashSet;
+    let mut messages = Vec::new();
+
+    // Collect existing import names (canonical paths)
+    let existing: HashSet<String> = program.imports.iter()
+        .filter_map(|d| match d {
+            Decl::Import { path, .. } =>
+                Some(path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")),
+            _ => None,
+        })
+        .collect();
+
+    // Collect module identifiers used in member access patterns (module.func)
+    let mut used = HashSet::new();
+    for decl in &program.decls {
+        collect_module_refs_decl(decl, &mut used);
+    }
+
+    // Also check auto-imported stdlib (Tier 1) — these don't need explicit import
+    let auto_imported: HashSet<&str> = crate::stdlib::AUTO_IMPORT_BUNDLED.iter().copied().collect();
+    // Tier 1 hardcoded stdlib modules that don't need import (matches types/env.rs)
+    let tier1: HashSet<&str> = ["string", "list", "int", "float", "bytes", "matrix", "map", "set",
+        "value", "option", "result"].iter().copied().collect();
+
+    let dep_set: HashSet<&str> = dep_names.iter().map(|s| s.as_str()).collect();
+
+    // Add missing imports (stdlib Tier 2 + dependencies + dependency submodules)
+    let mut to_add: Vec<(String, Vec<String>)> = Vec::new(); // (display_name, path_segments)
+    for name in &used {
+        if existing.contains(name.as_str()) { continue; }
+        if auto_imported.contains(name.as_str()) || tier1.contains(name.as_str()) { continue; }
+        if crate::stdlib::is_any_stdlib(name) {
+            to_add.push((name.clone(), vec![name.clone()]));
+        } else if dep_set.contains(name.as_str()) {
+            to_add.push((name.clone(), vec![name.clone()]));
+        } else if let Some(full_path) = dep_submodules.get(name.as_str()) {
+            // Submodule: python → bindgen.bindings.python
+            to_add.push((full_path.clone(), full_path.split('.').map(String::from).collect()));
+        }
+    }
+    to_add.sort_by(|a, b| a.0.cmp(&b.0));
+    for (display, segments) in to_add {
+        let path: Vec<Sym> = segments.iter().map(|s| crate::intern::sym(s)).collect();
+        program.imports.push(Decl::Import {
+            path, names: None, alias: None, span: None,
+        });
+        messages.push(format!("Added `import {}`", display));
+    }
+
+    // Remove unused imports (keep _ prefixed, self imports, and auto-imported)
+    let before_len = program.imports.len();
+    program.imports.retain(|d| match d {
+        Decl::Import { path, alias, .. } => {
+            let name = alias.as_ref()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| path.last().map(|s| s.to_string()).unwrap_or_default());
+            if name.starts_with('_') { return true; }
+            if path.first().map(|s| s.as_str()) == Some("self") { return true; }
+            used.contains(&name)
+        }
+        _ => true,
+    });
+    let removed = before_len - program.imports.len();
+    if removed > 0 {
+        messages.push(format!("Removed {} unused import(s)", removed));
+    }
+
+    messages
+}
+
+fn collect_module_refs_decl(decl: &Decl, used: &mut std::collections::HashSet<String>) {
+    match decl {
+        Decl::Fn { body, .. } => {
+            if let Some(body) = body { collect_module_refs_expr(body, used); }
+        }
+        Decl::Test { body, .. } => collect_module_refs_expr(body, used),
+        Decl::TopLet { value, .. } => collect_module_refs_expr(value, used),
+        _ => {}
+    }
+}
+
+fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<String>) {
+    match expr {
+        Expr::Member { object, .. } => {
+            if let Expr::Ident { name, .. } = object.as_ref() {
+                used.insert(name.to_string());
+            }
+            collect_module_refs_expr(object, used);
+        }
+        Expr::Call { callee, args, .. } => {
+            collect_module_refs_expr(callee, used);
+            for a in args { collect_module_refs_expr(a, used); }
+        }
+        Expr::Binary { left, right, .. } => {
+            collect_module_refs_expr(left, used);
+            collect_module_refs_expr(right, used);
+        }
+        Expr::If { cond, then, else_, .. } => {
+            collect_module_refs_expr(cond, used);
+            collect_module_refs_expr(then, used);
+            collect_module_refs_expr(else_, used);
+        }
+        Expr::Block { stmts, .. } => {
+            for s in stmts { collect_module_refs_stmt(s, used); }
+        }
+        Expr::Match { subject, arms, .. } => {
+            collect_module_refs_expr(subject, used);
+            for arm in arms {
+                collect_module_refs_expr(&arm.body, used);
+                if let Some(g) = &arm.guard { collect_module_refs_expr(g, used); }
+            }
+        }
+        Expr::Lambda { body, .. } => collect_module_refs_expr(body, used),
+        Expr::List { elements, .. } | Expr::Tuple { elements, .. } => {
+            for e in elements { collect_module_refs_expr(e, used); }
+        }
+        Expr::Pipe { left, right, .. } => {
+            collect_module_refs_expr(left, used);
+            collect_module_refs_expr(right, used);
+        }
+        Expr::InterpolatedString { parts, .. } => {
+            for p in parts {
+                if let StringPart::Expr { expr } = p { collect_module_refs_expr(expr, used); }
+            }
+        }
+        Expr::Record { fields, .. } => {
+            for f in fields { collect_module_refs_expr(&f.value, used); }
+        }
+        Expr::IndexAccess { object, index, .. } => {
+            collect_module_refs_expr(object, used);
+            collect_module_refs_expr(index, used);
+        }
+        Expr::Unary { operand, .. } => collect_module_refs_expr(operand, used),
+        Expr::Unwrap { expr, .. } | Expr::Try { expr, .. } | Expr::ToOption { expr, .. }
+        | Expr::Await { expr, .. } => {
+            collect_module_refs_expr(expr, used);
+        }
+        Expr::UnwrapOr { expr, fallback, .. } => {
+            collect_module_refs_expr(expr, used);
+            collect_module_refs_expr(fallback, used);
+        }
+        Expr::ForIn { iterable, body, .. } => {
+            collect_module_refs_expr(iterable, used);
+            for s in body { collect_module_refs_stmt(s, used); }
+        }
+        Expr::While { cond, body, .. } => {
+            collect_module_refs_expr(cond, used);
+            for s in body { collect_module_refs_stmt(s, used); }
+        }
+        _ => {}
+    }
+}
+
+fn collect_module_refs_stmt(stmt: &Stmt, used: &mut std::collections::HashSet<String>) {
+    match stmt {
+        Stmt::Let { value, .. } | Stmt::Var { value, .. } => {
+            collect_module_refs_expr(&value, used);
+        }
+        Stmt::Assign { value, .. } => collect_module_refs_expr(value, used),
+        Stmt::Expr { expr, .. } => collect_module_refs_expr(expr, used),
+        Stmt::Guard { cond, else_, .. } => {
+            collect_module_refs_expr(cond, used);
+            collect_module_refs_expr(else_, used);
+        }
+        _ => {}
+    }
+}
+
 pub fn format_program(program: &Program) -> String {
     let mut out = String::new();
     let cm = &program.comment_map;

@@ -20,8 +20,6 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
     let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
-    let import_aliases = crate::build_import_aliases(&program, &resolved);
-
     // Run checker if needed (always for emit_ir, otherwise when !no_check && !emit_ast)
     let run_check = emit_ir || (!no_check && !emit_ast);
     let mut checker_opt: Option<check::Checker> = None;
@@ -31,9 +29,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
         }
-        for (alias, target) in &import_aliases {
-            checker.register_alias(alias, target);
-        }
+        checker.install_import_table(&program);
         let diagnostics = checker.check_program(&mut program);
         let errors: Vec<_> = diagnostics.iter()
             .filter(|d| d.level == diagnostic::Level::Error)
@@ -59,7 +55,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
     if let Some(checker) = &mut checker_opt {
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
-            let mod_types = checker.check_module_bodies(mod_prog);
+            let mod_types = checker.check_module_bodies(mod_prog, name);
             let versioned = pkg_id.as_ref().map(|pid| {
                 let base = pid.mod_name();
                 if let Some(suffix) = name.strip_prefix(&pid.name) {
@@ -68,8 +64,13 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
                     base
                 }
             });
+            let self_name = checker.env.self_module_name.map(|s| s.to_string());
+            let import_table_name = self_name.as_deref().unwrap_or(name);
+            let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
+            let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
             let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
             let mod_ir = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
+            checker.env.import_table = saved_table;
             module_irs.insert(name.clone(), mod_ir);
             if let Some(ref mut ir) = ir_program {
                 ir.modules.push(mod_ir_module);

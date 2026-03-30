@@ -1,6 +1,6 @@
 # Module System Specification
 
-> Last updated: 2026-03-29. Verified by `spec/integration/modules/` (25 tests + 4 error tests).
+> Last updated: 2026-03-31. Verified by `spec/integration/modules/` (25 tests + 4 error tests).
 
 ---
 
@@ -31,40 +31,102 @@ mypackage/
 
 ## 2. Import
 
+### 2.1 構文
+
 ```almide
-import pkg                    // パッケージ全体 + 全サブモジュール
-import pkg.sub                // 特定のサブモジュールのみ
+import pkg                    // パッケージ全体
+import pkg.sub                // 特定のサブモジュール → sub.func() で呼べる
 import pkg as p               // エイリアス
 import self                   // 自パッケージの mod.almd
 import self.sub               // 自パッケージのサブモジュール
 ```
 
-- `import pkg` でサブモジュール含め全て自動ロード。個別 import 不要
 - `import pkg.sub` は最後のセグメント名で参照可能: `sub.func()`
 - ワイルドカード `import pkg.*` は不可
 - 循環インポートはコンパイルエラー
+
+### 2.2 stdlib の auto-import 層
+
+stdlib モジュールは2層に分かれる。
+
+**Tier 1 (auto-imported — import 文不要):**
+`string`, `list`, `map`, `set`, `int`, `float`, `value`, `result`, `option`
+
+これらは言語の基本型を操作するモジュール。全ファイルで暗黙的にスコープに入る。
+
+**Tier 2 (import 必須):**
+`json`, `math`, `regex`, `datetime`, `bytes`, `matrix`, `testing`, `error`, `path`, `args`, `fs`, `env`, `process`, `io`, `http`, `random`
+
+これらは具体的なドメイン機能。使用するファイルで `import json` 等を明示する。
+
+**設計根拠:** Tier 1 は言語のコア（型、コレクション、エラーハンドリング）。Tier 2 は具体フォーマット（JSON）、数学、I/O 等の機能モジュール。Swift の「標準ライブラリは auto-import、Foundation は import 必要」と同じ設計。
+
+### 2.3 import ヒントと自動修正
+
+未 import のモジュールを使った場合、コンパイラが候補を提示する。
+
+```
+error[E003]: undefined variable 'json'
+  --> app.almd:3:11
+  hint: Add `import json` (stdlib: JSON parsing and querying)
+        Or run `almide fmt` to auto-add missing imports
+```
+
+外部パッケージ（`almide.toml` に依存あり）の場合:
+```
+error[E003]: undefined variable 'yaml'
+  --> app.almd:5:11
+  hint: Add `import yaml` (dependency: almide/yaml)
+        Or run `almide fmt` to auto-add missing imports
+```
+
+### 2.4 `almide fmt` の auto-import
+
+`almide fmt` は import 文を自動管理する（Go の `goimports` と同等）。
+
+**自動追加:**
+- 使用されているのに import がない Tier 2 stdlib モジュール → `import` を挿入
+- `almide.toml` の依存パッケージ名と一致する識別子 → `import pkg` を挿入
+- 依存パッケージのサブモジュール（`python.generate()` 等）→ `import pkg.bindings.python` を挿入
+
+**自動削除:**
+- import されているが使われていないモジュール → `import` を削除
+
+**保持:**
+- `_` prefix の import、`import self` は削除しない
+- Tier 1 は対象外（既にスコープにあるため追加しない）
+
+**サブモジュール発見:**
+依存パッケージのキャッシュディレクトリ (`~/.almide/cache/{name}/{version}/src/`) を再帰スキャンし、`.almd` ファイルの末尾セグメントと使用中の識別子を照合する。ローカルディレクトリ（`{name}/`）も検索対象。
+
+```bash
+$ almide fmt app.almd
+app.almd: Added `import json`
+app.almd: Added `import bindgen.bindings.python`
+app.almd: Removed 2 unused import(s)
+Formatted app.almd
+```
 
 ---
 
 ## 3. 呼び出し
 
 ```almide
-import mypackage
+import bindgen
+import bindgen.scaffolding
+import bindgen.bindings.python
 
-// 1段: トップレベル関数
-mypackage.version()
+// トップレベル関数
+bindgen.version()
 
-// 2段: サブモジュール関数
-mypackage.utils.format(x)
+// サブモジュール関数（最後のセグメント名で呼ぶ）
+scaffolding.generate(iface)
 
-// 3段: ディレクトリ内サブモジュール
-mypackage.bindings.python.generate(iface)
-
-// N段: 任意の深さ
-mypackage.bindings.internal.helpers.escape(s)
+// 深いサブモジュール
+python.generate(iface)
 ```
 
-AST の `Member` チェーン（`a.b.c.func()`）を末尾から辿り、`imported_user_modules` に登録されたモジュール名またはその子が存在する名前空間に一致する最長パスを見つけ、残りを関数名として解決する。
+import したモジュールの直接の関数のみアクセス可能。サブモジュールにアクセスするには別途 import する（Go, Gleam と同じ方式）。
 
 ---
 
@@ -280,9 +342,9 @@ fn my_max(a: Int, b: Int) -> Int   // body なし: 全ターゲットに @extern
 
 | ファイル | テスト数 | カバー範囲 |
 |---|---|---|
-| `spec/integration/modules/diamond_test.almd` | 11 | ダイヤモンド依存、型同一性、サブモジュール、4段ドット |
-| `spec/integration/modules/alias_test.almd` | 5 | import alias: トップレベル、サブモジュール、4段ネスト、型生成 |
-| `spec/integration/modules/submodule_call_test.almd` | 7 | サブモジュール直接呼び出し: 2段/3段/4段、ダイヤモンド経由 |
+| `spec/integration/modules/diamond_test.almd` | 11 | ダイヤモンド依存、型同一性、サブモジュール（個別import） |
+| `spec/integration/modules/alias_test.almd` | 5 | import alias: トップレベル、サブモジュール、深いネスト、型生成 |
+| `spec/integration/modules/submodule_call_test.almd` | 7 | サブモジュール（Go方式: 個別import + 最後セグメント名で呼び出し） |
 | `spec/integration/modules/vis_effect_test.almd` | 2 | effect fn のクロスモジュール呼び出し |
 | `spec/integration/modules/vis_mod_error_test.almd` | error | `mod fn` の外部アクセス拒否 |
 | `spec/integration/modules/vis_local_error_test.almd` | error | `local fn` の外部アクセス拒否 |
