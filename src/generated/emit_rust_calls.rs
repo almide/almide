@@ -194,10 +194,6 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_list_drop_while(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
-            ("list", "each") => {
-                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                format!("almide_rt_list_each(&{}, |{}| {{{{ {}{} ; }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
-            },
             ("list", "enumerate") => format!("almide_rt_list_enumerate(({}).to_vec())", args_str[0]),
             ("list", "filter") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
@@ -310,10 +306,6 @@ pub fn gen_generated_call(
                 format!("almide_rt_map_count(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
             },
             ("map", "delete") => format!("almide_rt_map_delete(&mut {}, &{})", args_str[0], args_str[1]),
-            ("map", "each") => {
-                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
-                format!("almide_rt_map_each(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
-            },
             ("map", "entries") => format!("almide_rt_map_entries(&{})", args_str[0]),
             ("map", "filter") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
@@ -463,10 +455,6 @@ pub fn gen_generated_call(
             },
             ("set", "contains") => format!("almide_rt_set_contains(&{}, &{})", args_str[0], args_str[1]),
             ("set", "difference") => format!("almide_rt_set_difference(&{}, &{})", args_str[0], args_str[1]),
-            ("set", "each") => {
-                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                format!("almide_rt_set_each(&{}, |{}| {{{{ {}{} ; }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
-            },
             ("set", "filter") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_set_filter(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)

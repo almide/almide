@@ -1,0 +1,47 @@
+// Coverage tests for various uncovered stdlib functions
+
+test "value.as_string" {
+  let v = value.str("hello")
+  let r = value.as_string(v)!
+  assert_eq(r, "hello")
+}
+
+test "value.as_int" {
+  let v = value.int(42)
+  let r = value.as_int(v)!
+  assert_eq(r, 42)
+}
+
+test "value.as_float" {
+  let v = value.float(3.14)
+  let r = value.as_float(v)!
+  assert(r > 3.13)
+}
+
+test "value.as_bool" {
+  let v = value.bool(true)
+  let r = value.as_bool(v)!
+  assert(r)
+}
+
+// TODO: value.as_array traps in WASM — needs implementation
+
+test "option.or_else" {
+  let a: Option[Int] = none
+  let b = option.or_else(a, () => some(42))
+  assert_eq(b, some(42))
+
+  let c = some(10)
+  let d = option.or_else(c, () => some(42))
+  assert_eq(d, some(10))
+}
+
+test "option.unwrap_or_else" {
+  let a: Option[Int] = none
+  let b = option.unwrap_or_else(a, () => 99)
+  assert_eq(b, 99)
+
+  let c = some(10)
+  let d = option.unwrap_or_else(c, () => 99)
+  assert_eq(d, 10)
+}

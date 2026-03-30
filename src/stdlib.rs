@@ -82,7 +82,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "shuffle" | "window" => vec!["list"],
 
         // ── list + map + set ──
-        "each" | "fold" | "any" | "all" => vec!["list", "map", "set"],
+        "fold" | "any" | "all" => vec!["list", "map", "set"],
 
         // ── list + map ──
         "find" | "partition" | "update" => vec!["list", "map"],

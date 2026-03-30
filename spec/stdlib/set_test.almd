@@ -123,7 +123,7 @@ test "set.insert duplicate" {
   assert_eq(set.len(s2), 3)
 }
 
-test "set.each side effect" {
+test "set.fold count" {
   let s = set.from_list([1, 2, 3]);
   let result = set.fold(s, 0, (acc, x) => acc + 1);
   assert_eq(result, 3)

@@ -163,18 +163,6 @@ return = "B"
 rust = "almide_rt_set_fold({s}, {init}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_set.fold({s}, {init}, ({f.args}) => {f.body})"
 
-[each]
-description = "Execute a function for each element (side effects only)."
-example = "set.each(s, fn(x) => println(int.to_string(x)))"
-type_params = ["A"]
-params = [
-    { name = "s", type = "Set[A]" },
-    { name = "f", type = "Fn[A] -> Unit" },
-]
-return = "Unit"
-rust = "almide_rt_set_each(&{s}, |{f.args}| {{ {f.clone_bindings}{f.body} ; }})"
-ts = "__almd_set.each({s}, {f.args} => {f.body})"
-
 [any]
 description = "Check if any element satisfies a predicate."
 example = "set.any(s, fn(x) => x > 2)"

@@ -274,18 +274,6 @@ return = "Bool"
 rust = "almide_rt_list_all(&{xs}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.all({xs}, {f.args} => {f.body})"
 
-[each]
-description = "Execute a function for each element (side effects only)."
-example = '[1, 2, 3].each(fn(x) => println(to_string(x)))'
-type_params = ["A"]
-params = [
-    { name = "xs", type = "List[A]" },
-    { name = "f", type = "Fn[A] -> Unit" },
-]
-return = "Unit"
-rust = "almide_rt_list_each(&{xs}, |{f.args}| {{ {f.clone_bindings}{f.body} ; }})"
-ts = "__almd_list.each({xs}, {f.args} => {f.body})"
-
 [sort_by]
 description = "Sort by a key-extraction function (not a comparator). f extracts the sort key from each element."
 example = '["bb", "a", "ccc"].sort_by((s) => string.len(s)) // => ["a", "bb", "ccc"]'
