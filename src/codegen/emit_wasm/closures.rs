@@ -414,8 +414,9 @@ fn scan_closures_stmt(
             scan_closures_expr(cond, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
             scan_closures_expr(else_, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
-        IrStmtKind::BindDestructure { value, .. } => {
+        IrStmtKind::BindDestructure { pattern, value, .. } => {
             scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            collect_pattern_var_ids(pattern, scope_vars);
         }
         IrStmtKind::IndexAssign { index, value, .. } => {
             scan_closures_expr(index, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
@@ -427,6 +428,23 @@ fn scan_closures_stmt(
         }
         IrStmtKind::FieldAssign { value, .. } => {
             scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        _ => {}
+    }
+}
+
+/// Collect all VarIds bound by an IrPattern into a set.
+fn collect_pattern_var_ids(pattern: &crate::ir::IrPattern, out: &mut HashSet<u32>) {
+    use crate::ir::IrPattern;
+    match pattern {
+        IrPattern::Bind { var, .. } => { out.insert(var.0); }
+        IrPattern::Constructor { args, .. } => { for a in args { collect_pattern_var_ids(a, out); } }
+        IrPattern::Tuple { elements } => { for e in elements { collect_pattern_var_ids(e, out); } }
+        IrPattern::Some { inner, .. } | IrPattern::Ok { inner, .. } | IrPattern::Err { inner, .. } => {
+            collect_pattern_var_ids(inner, out);
+        }
+        IrPattern::RecordPattern { fields, .. } => {
+            for f in fields { if let Some(p) = &f.pattern { collect_pattern_var_ids(p, out); } }
         }
         _ => {}
     }
