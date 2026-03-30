@@ -56,7 +56,10 @@ fn collect_clone_ids(vt: &VarTable, always_clone: &HashSet<VarId>) -> HashSet<Va
         if !needs_clone(&info.ty) { continue; }
         // Top-level lets (LazyLock statics): always clone — can't move out of LazyLock
         // Fn/TypeVar: always clone (closure mutability, generic type erasure)
-        if always_clone.contains(&id) || matches!(&info.ty, Ty::Fn { .. } | Ty::TypeVar(_)) {
+        // Capture clones (__cap_N): always clone — used inside FnMut closures called multiple times
+        let name = crate::intern::resolve(info.name);
+        if always_clone.contains(&id) || matches!(&info.ty, Ty::Fn { .. } | Ty::TypeVar(_))
+            || name.starts_with("__cap_") || name.starts_with("__licm") {
             ids.insert(id);
             continue;
         }
