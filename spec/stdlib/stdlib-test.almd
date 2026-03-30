@@ -532,6 +532,12 @@ test "list.sort_by string length" {
   assert_eq(result, ["a", "bb", "ccc"])
 }
 
+test "list.sort_by string key" {
+  let xs = [["b", "2"], ["a", "1"], ["c", "3"]]
+  let sorted = list.sort_by(xs, (x) => match list.get(x, 0) { some(v) => v, none => "" })
+  assert_eq(list.map(sorted, (x) => match list.get(x, 0) { some(v) => v, none => "" }), ["a", "b", "c"])
+}
+
 // ============================================================
 // list.unique
 // ============================================================
