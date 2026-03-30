@@ -1,0 +1,72 @@
+type Expr =
+  | Lit(Int)
+  | Add(Expr, Expr)
+  | Mul(Expr, Expr)
+  | Sub(Expr, Expr)
+  | Div(Expr, Expr)
+
+effect fn eval(e: Expr) -> Result[Int, String] =
+  match e {
+    Lit(n) => ok(n)
+    Add(l, r) => {
+      let left = eval(l)!
+      let right = eval(r)!
+      ok(left + right)
+    }
+    Mul(l, r) => {
+      let left = eval(l)!
+      let right = eval(r)!
+      ok(left * right)
+    }
+    Sub(l, r) => {
+      let left = eval(l)!
+      let right = eval(r)!
+      ok(left - right)
+    }
+    Div(l, r) => {
+      let left = eval(l)!
+      let right = eval(r)!
+      if right == 0 then err("division by zero") else ok(left / right)
+    }
+  }
+
+fn to_string(e: Expr) -> String =
+  match e {
+    Lit(n) => int.to_string(n)
+    Add(l, r) => "(${to_string(l)} + ${to_string(r)})"
+    Mul(l, r) => "(${to_string(l)} * ${to_string(r)})"
+    Sub(l, r) => "(${to_string(l)} - ${to_string(r)})"
+    Div(l, r) => "(${to_string(l)} / ${to_string(r)})"
+  }
+
+test "literal" { assert_eq(eval(Lit(5)), ok(5)) }
+test "add" { assert_eq(eval(Add(Lit(2), Lit(3))), ok(5)) }
+test "mul" { assert_eq(eval(Mul(Lit(4), Lit(5))), ok(20)) }
+test "sub" { assert_eq(eval(Sub(Lit(10), Lit(3))), ok(7)) }
+test "nested add mul" { assert_eq(eval(Add(Lit(1), Mul(Lit(2), Lit(3)))), ok(7)) }
+test "deep nesting" { assert_eq(eval(Mul(Add(Lit(1), Lit(2)), Sub(Lit(10), Lit(4)))), ok(18)) }
+test "to_string literal" { assert_eq(to_string(Lit(42)), "42") }
+test "to_string add" { assert_eq(to_string(Add(Lit(1), Lit(2))), "(1 + 2)") }
+test "to_string nested" { assert_eq(to_string(Mul(Add(Lit(1), Lit(2)), Lit(3))), "((1 + 2) * 3)") }
+test "eval matches to_string" {
+  let e = Add(Mul(Lit(2), Lit(3)), Sub(Lit(10), Lit(1)))
+  assert_eq(eval(e), ok(15))
+}
+test "deeply nested eval" {
+  let e = Sub(Mul(Add(Lit(1), Lit(2)), Lit(5)), Add(Lit(3), Lit(4)))
+  assert_eq(eval(e), ok(8))
+}
+test "single negative via sub" {
+  assert_eq(eval(Sub(Lit(0), Lit(5))), ok(-5))
+}
+test "eval div" { assert_eq(eval(Div(Lit(10), Lit(3))), ok(3)) }
+test "eval div by zero" { assert_eq(eval(Div(Lit(5), Lit(0))), err("division by zero")) }
+test "to_string div" { assert_eq(to_string(Div(Lit(10), Lit(3))), "(10 / 3)") }
+test "nested div" {
+  let e = Add(Lit(1), Div(Lit(10), Lit(2)))
+  assert_eq(eval(e), ok(6))
+}
+test "div by zero propagates" {
+  let e = Add(Lit(1), Div(Lit(5), Lit(0)))
+  assert_eq(eval(e), err("division by zero"))
+}

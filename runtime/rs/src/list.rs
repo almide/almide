@@ -57,7 +57,7 @@ pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> { vec![x; n as us
 pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> { (start..end).collect() }
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, mut f: impl FnMut(A, A) -> A) -> Option<A> { xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, mut f: impl FnMut(B, A) -> B) -> Vec<B> { let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
-pub fn almide_rt_list_sort_by<A: Clone>(mut xs: Vec<A>, mut f: impl FnMut(A) -> i64) -> Vec<A> { xs.sort_by_key(|x| f(x.clone())); xs }
+pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, mut f: impl FnMut(A) -> B) -> Vec<A> { xs.sort_by_key(|x| f(x.clone())); xs }
 pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, mut f: impl FnMut(B, A) -> Result<B, String>) -> Result<B, String> { let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) }
 pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, mut f: impl FnMut(A) -> Result<B, String>) -> Result<Vec<B>, String> { xs.into_iter().map(f).collect() }
 

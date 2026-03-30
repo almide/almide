@@ -1,0 +1,69 @@
+// ========== V1 SOLUTION (working code — all tests pass) ==========
+
+type Expr =
+  | Lit(Int)
+  | Add(Expr, Expr)
+  | Mul(Expr, Expr)
+  | Sub(Expr, Expr)
+
+fn eval(e: Expr) -> Int =
+  match e {
+    Lit(n) => n
+    Add(l, r) => eval(l) + eval(r)
+    Mul(l, r) => eval(l) * eval(r)
+    Sub(l, r) => eval(l) - eval(r)
+  }
+
+fn to_string(e: Expr) -> String =
+  match e {
+    Lit(n) => int.to_string(n)
+    Add(l, r) => "(${to_string(l)} + ${to_string(r)})"
+    Mul(l, r) => "(${to_string(l)} * ${to_string(r)})"
+    Sub(l, r) => "(${to_string(l)} - ${to_string(r)})"
+  }
+
+test "literal" { assert_eq(eval(Lit(5)), 5) }
+test "add" { assert_eq(eval(Add(Lit(2), Lit(3))), 5) }
+test "mul" { assert_eq(eval(Mul(Lit(4), Lit(5))), 20) }
+test "sub" { assert_eq(eval(Sub(Lit(10), Lit(3))), 7) }
+test "nested add mul" { assert_eq(eval(Add(Lit(1), Mul(Lit(2), Lit(3)))), 7) }
+test "deep nesting" { assert_eq(eval(Mul(Add(Lit(1), Lit(2)), Sub(Lit(10), Lit(4)))), 18) }
+test "to_string literal" { assert_eq(to_string(Lit(42)), "42") }
+test "to_string add" { assert_eq(to_string(Add(Lit(1), Lit(2))), "(1 + 2)") }
+test "to_string nested" { assert_eq(to_string(Mul(Add(Lit(1), Lit(2)), Lit(3))), "((1 + 2) * 3)") }
+test "eval matches to_string" {
+  let e = Add(Mul(Lit(2), Lit(3)), Sub(Lit(10), Lit(1)))
+  assert_eq(eval(e), 15)
+}
+test "deeply nested eval" {
+  let e = Sub(Mul(Add(Lit(1), Lit(2)), Lit(5)), Add(Lit(3), Lit(4)))
+  assert_eq(eval(e), 8)
+}
+test "single negative via sub" {
+  assert_eq(eval(Sub(Lit(0), Lit(5))), -5)
+}
+
+// ========== MODIFICATION INSTRUCTION ==========
+// Add a `Div(Expr, Expr)` variant to the `Expr` type.
+// Change `eval` from a pure function returning `Int` to an effect function:
+//   `effect fn eval(e: Expr) -> Result[Int, String]`
+// Division by zero returns `err("division by zero")`.
+// Errors propagate through nested expressions (use `!` operator).
+// Update `to_string` to handle `Div`: `to_string(Div(a, b))` produces `"(a / b)"`.
+//
+// UPDATE EXISTING TESTS: All `assert_eq(eval(...), N)` must become
+// `assert_eq(eval(...), ok(N))` because eval now returns Result.
+
+// ========== V2 TESTS (must also pass after modification) ==========
+
+test "eval div" { assert_eq(eval(Div(Lit(10), Lit(3))), ok(3)) }
+test "eval div by zero" { assert_eq(eval(Div(Lit(5), Lit(0))), err("division by zero")) }
+test "to_string div" { assert_eq(to_string(Div(Lit(10), Lit(3))), "(10 / 3)") }
+test "nested div" {
+  let e = Add(Lit(1), Div(Lit(10), Lit(2)))
+  assert_eq(eval(e), ok(6))
+}
+test "div by zero propagates" {
+  let e = Add(Lit(1), Div(Lit(5), Lit(0)))
+  assert_eq(eval(e), err("division by zero"))
+}

@@ -1,0 +1,52 @@
+// Regression: CloneInsertionPass must recurse into Deref nodes.
+// Without this, multi-use of Box'd pattern vars produces use-after-move in Rust.
+
+type Expr =
+  | Lit(Int)
+  | Add(Expr, Expr)
+
+// --- fn: multi-use of boxed var ---
+
+fn eval(e: Expr) -> Int =
+  match e {
+    Lit(n) => n
+    Add(l, r) => eval(l) + eval(l) + eval(r)
+  }
+
+test "fn: boxed var used twice" {
+  assert_eq(eval(Add(Lit(1), Lit(2))), 4)
+}
+
+test "fn: nested recursive" {
+  // eval(l) + eval(l) + eval(r) where l=Add(1,2)→4, r=Lit(3)→3 ⇒ 4+4+3=11
+  assert_eq(eval(Add(Add(Lit(1), Lit(2)), Lit(3))), 11)
+}
+
+// --- effect fn: multi-use of boxed var ---
+
+effect fn eval_e(e: Expr) -> Result[Int, String] =
+  match e {
+    Lit(n) => ok(n)
+    Add(l, r) => {
+      let lv = eval_e(l)!
+      let lv2 = eval_e(l)!
+      let rv = eval_e(r)!
+      ok(lv + lv2 + rv)
+    }
+  }
+
+test "effect fn: boxed var used twice" {
+  assert_eq(eval_e(Add(Lit(1), Lit(2))), ok(4))
+}
+
+// --- single use (no clone needed, deref only) ---
+
+fn eval_once(e: Expr) -> Int =
+  match e {
+    Lit(n) => n
+    Add(l, r) => eval_once(l) + eval_once(r)
+  }
+
+test "single use: no clone needed" {
+  assert_eq(eval_once(Add(Lit(10), Lit(20))), 30)
+}

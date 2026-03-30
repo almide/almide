@@ -313,7 +313,7 @@ ts = "__almd_list.flat_map({xs}, {f.args} => {f.body})"
 
 [filter_map]
 description = "Map and filter in one pass: keep only some values."
-example = '["1", "x", "3"].filter_map(fn(s) => string.to_int(s)) // => [1, 3]'
+example = '["1", "x", "3"].filter_map(fn(s) => int.parse(s)) // => [1, 3]'
 type_params = ["A", "B"]
 params = [
     { name = "xs", type = "List[A]" },

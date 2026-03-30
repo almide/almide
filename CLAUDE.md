@@ -43,7 +43,15 @@ Almide is a programming language (.almd files) compiled via a pure-Rust compiler
 - **Module system**: [docs/specs/module-system.md](./docs/specs/module-system.md) — import, サブモジュール, ダイヤモンド依存
 - **Package system**: [docs/specs/package-system.md](./docs/specs/package-system.md) — 依存管理, MVS, バージョン共存
 
-## Building & Usage
+## Building & Installing
+
+After modifying compiler source, always rebuild and install so the PATH binary is up to date:
+
+```bash
+make install   # cargo build --release + install to ~/.local/bin/almide
+```
+
+## Usage
 
 ```bash
 cargo build --release

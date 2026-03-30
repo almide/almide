@@ -2,7 +2,7 @@ VERSION := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'
 INSTALL_DIR := $(HOME)/.local/almide
 BIN := target/release/almide
 
-.PHONY: build install test test-wasm test-ts check clean fmt release parity cross-target
+.PHONY: build install test test-wasm test-ts check clean fmt release parity cross-target cheatsheet
 
 ## Build
 
@@ -14,8 +14,11 @@ build:
 install: build
 	@mkdir -p $(INSTALL_DIR)
 	cp $(BIN) $(INSTALL_DIR)/almide
-	@echo "Installed almide $(VERSION) to $(INSTALL_DIR)/almide"
-	@$(INSTALL_DIR)/almide --version
+	@mkdir -p $(HOME)/.local/bin
+	rm -f $(HOME)/.local/bin/almide
+	cp $(BIN) $(HOME)/.local/bin/almide
+	@echo "Installed almide $(VERSION) to $(INSTALL_DIR)/almide and ~/.local/bin/almide"
+	@almide --version
 
 ## Test
 
@@ -41,6 +44,17 @@ parity:
 cross-target: build
 	bash tools/cross-target-check.sh spec/lang
 	bash tools/cross-target-check.sh spec/stdlib
+
+## Docs
+
+cheatsheet:
+	@bash tools/generate-stdlib-cheatsheet.sh > /tmp/stdlib-section.md
+	@echo "Generated stdlib section. Review and update docs/CHEATSHEET.md manually, or run:"
+	@echo "  make cheatsheet-update"
+
+cheatsheet-update:
+	@python3 tools/update-cheatsheet-stdlib.py
+	@echo "Updated docs/CHEATSHEET.md stdlib section from TOML definitions."
 
 ## Check
 

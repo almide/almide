@@ -732,7 +732,13 @@ impl Checker {
                 }
             }
             ast::Pattern::Tuple { elements } => {
-                if let Ty::Tuple(tys) = ty { for (i, e) in elements.iter().enumerate() { self.bind_pattern(e, tys.get(i).unwrap_or(&Ty::Unknown)); } }
+                let resolved = resolve_ty(ty, &self.uf);
+                if let Ty::Tuple(tys) = &resolved {
+                    for (i, e) in elements.iter().enumerate() { self.bind_pattern(e, tys.get(i).unwrap_or(&Ty::Unknown)); }
+                } else {
+                    // Type not yet resolved — bind each element as Unknown so variables are in scope
+                    for e in elements { self.bind_pattern(e, &Ty::Unknown); }
+                }
             }
             ast::Pattern::Some { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
             ast::Pattern::Ok { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }

@@ -66,7 +66,7 @@ ts_min = "__almd_string.slice({s}, {start})"
 
 [pad_start]
 description = "Pad a string on the left to reach a target length."
-example = 'string.pad_left("42", 5, "0") // => "00042"'
+example = 'string.pad_start("42", 5, "0") // => "00042"'
 params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }, { name = "ch", type = "String" }]
 return = "String"
 rust = "almide_rt_string_pad_left(&*{s}, {n}, &*{ch})"
@@ -226,7 +226,7 @@ ts = "String.fromCodePoint({n})"
 
 [pad_end]
 description = "Pad a string on the right to reach a target length."
-example = 'string.pad_right("hi", 5, ".") // => "hi..."'
+example = 'string.pad_end("hi", 5, ".") // => "hi..."'
 params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }, { name = "ch", type = "String" }]
 return = "String"
 rust = "almide_rt_string_pad_right(&*{s}, {n}, &*{ch})"

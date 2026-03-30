@@ -56,7 +56,10 @@ fn collect_clone_ids(vt: &VarTable, always_clone: &HashSet<VarId>) -> HashSet<Va
         if !needs_clone(&info.ty) { continue; }
         // Top-level lets (LazyLock statics): always clone — can't move out of LazyLock
         // Fn/TypeVar: always clone (closure mutability, generic type erasure)
-        if always_clone.contains(&id) || matches!(&info.ty, Ty::Fn { .. } | Ty::TypeVar(_)) {
+        // Capture clones (__cap_N): always clone — used inside FnMut closures called multiple times
+        let name = crate::intern::resolve(info.name);
+        if always_clone.contains(&id) || matches!(&info.ty, Ty::Fn { .. } | Ty::TypeVar(_))
+            || name.starts_with("__cap_") || name.starts_with("__licm") {
             ids.insert(id);
             continue;
         }
@@ -165,6 +168,7 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(insert_clones(*expr, clone_ids)) },
         IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(insert_clones(*expr, clone_ids)) },
         IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(insert_clones(*expr, clone_ids)) },
+        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(insert_clones(*expr, clone_ids)) },
         IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
             expr: Box::new(insert_clones(*expr, clone_ids)),
             fallback: Box::new(insert_clones(*fallback, clone_ids)),

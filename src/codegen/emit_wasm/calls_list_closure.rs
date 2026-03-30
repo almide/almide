@@ -861,6 +861,12 @@ impl FuncCompiler<'_> {
                 let elem_ty = self.list_elem_ty(&args[0].ty);
                 let es = values::byte_size(&elem_ty) as i32;
                 let elem_vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
+                // Infer key type from closure return type (Int or String)
+                let key_ty = if let Ty::Fn { ret, .. } = &args[1].ty {
+                    (**ret).clone()
+                } else { Ty::Int };
+                let key_is_str = matches!(&key_ty, Ty::String);
+                let ks: i32 = if key_is_str { 4 } else { 8 }; // key byte size
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
@@ -868,7 +874,7 @@ impl FuncCompiler<'_> {
                 let keys = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 let j = self.scratch.alloc_i32();
-                let tmp_key = self.scratch.alloc_i64();
+                let tmp_key = if key_is_str { self.scratch.alloc_i32() } else { self.scratch.alloc_i64() };
                 let tmp_elem = self.scratch.alloc(elem_vt);
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(xs); });
@@ -895,9 +901,9 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                 });
-                // Alloc keys array: len * 8 (i64 keys)
+                // Alloc keys array: len * ks
                 wasm!(self.func, {
-                    local_get(len); i32_const(8); i32_mul;
+                    local_get(len); i32_const(ks); i32_mul;
                     call(self.emitter.rt.alloc); local_set(keys);
                     // Compute keys for all elements
                     i32_const(0); local_set(i);
@@ -911,12 +917,23 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                       local_get(closure); i32_load(0); // table_idx
                 });
-                self.emit_closure_call(&elem_ty, &Ty::Int); // key fn returns Int (i64)
+                self.emit_closure_call(&elem_ty, &key_ty);
+                if key_is_str {
+                    wasm!(self.func, {
+                          local_set(tmp_key);
+                          local_get(keys);
+                          local_get(i); i32_const(ks); i32_mul; i32_add;
+                          local_get(tmp_key); i32_store(0);
+                    });
+                } else {
+                    wasm!(self.func, {
+                          local_set(tmp_key);
+                          local_get(keys);
+                          local_get(i); i32_const(ks); i32_mul; i32_add;
+                          local_get(tmp_key); i64_store(0);
+                    });
+                }
                 wasm!(self.func, {
-                      local_set(tmp_key);
-                      local_get(keys);
-                      local_get(i); i32_const(8); i32_mul; i32_add;
-                      local_get(tmp_key); i64_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
@@ -933,25 +950,57 @@ impl FuncCompiler<'_> {
                         local_get(j); i32_le_u; br_if(1);
                         // Compare keys[j] > keys[j+1]
                         local_get(keys);
-                        local_get(j); i32_const(8); i32_mul; i32_add;
+                        local_get(j); i32_const(ks); i32_mul; i32_add;
+                });
+                if key_is_str {
+                    wasm!(self.func, {
+                        i32_load(0);
+                        local_get(keys);
+                        local_get(j); i32_const(1); i32_add; i32_const(ks); i32_mul; i32_add;
+                        i32_load(0);
+                        call(self.emitter.rt.string.cmp); i32_const(0); i32_gt_s;
+                    });
+                } else {
+                    wasm!(self.func, {
                         i64_load(0);
                         local_get(keys);
-                        local_get(j); i32_const(1); i32_add; i32_const(8); i32_mul; i32_add;
+                        local_get(j); i32_const(1); i32_add; i32_const(ks); i32_mul; i32_add;
                         i64_load(0);
                         i64_gt_s;
+                    });
+                }
+                wasm!(self.func, {
                         if_empty;
                           // Swap keys[j] and keys[j+1]
                           local_get(keys);
-                          local_get(j); i32_const(8); i32_mul; i32_add;
-                          i64_load(0); local_set(tmp_key); // temp_key
+                          local_get(j); i32_const(ks); i32_mul; i32_add;
+                });
+                if key_is_str {
+                    wasm!(self.func, {
+                          i32_load(0); local_set(tmp_key);
                           local_get(keys);
-                          local_get(j); i32_const(8); i32_mul; i32_add;
+                          local_get(j); i32_const(ks); i32_mul; i32_add;
                           local_get(keys);
-                          local_get(j); i32_const(1); i32_add; i32_const(8); i32_mul; i32_add;
+                          local_get(j); i32_const(1); i32_add; i32_const(ks); i32_mul; i32_add;
+                          i32_load(0); i32_store(0);
+                          local_get(keys);
+                          local_get(j); i32_const(1); i32_add; i32_const(ks); i32_mul; i32_add;
+                          local_get(tmp_key); i32_store(0);
+                    });
+                } else {
+                    wasm!(self.func, {
+                          i64_load(0); local_set(tmp_key);
+                          local_get(keys);
+                          local_get(j); i32_const(ks); i32_mul; i32_add;
+                          local_get(keys);
+                          local_get(j); i32_const(1); i32_add; i32_const(ks); i32_mul; i32_add;
                           i64_load(0); i64_store(0);
                           local_get(keys);
-                          local_get(j); i32_const(1); i32_add; i32_const(8); i32_mul; i32_add;
+                          local_get(j); i32_const(1); i32_add; i32_const(ks); i32_mul; i32_add;
                           local_get(tmp_key); i64_store(0);
+                    });
+                }
+                wasm!(self.func, {
                           // Swap dst[j] and dst[j+1] using typed scratch local
                           // tmp_elem = dst[j]
                           local_get(dst); i32_const(4); i32_add;
@@ -985,7 +1034,7 @@ impl FuncCompiler<'_> {
                     local_get(dst);
                 });
                 self.scratch.free(tmp_elem, elem_vt);
-                self.scratch.free_i64(tmp_key);
+                if key_is_str { self.scratch.free_i32(tmp_key); } else { self.scratch.free_i64(tmp_key); }
                 self.scratch.free_i32(j);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(keys);

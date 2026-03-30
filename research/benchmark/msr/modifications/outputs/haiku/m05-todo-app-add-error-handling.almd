@@ -1,0 +1,120 @@
+type Status = | Pending | Done | Cancelled
+
+type Todo = { id: Int, title: String, status: Status }
+
+fn create(id: Int, title: String) -> Todo =
+  Todo { id: id, title: title, status: Pending }
+
+fn complete(t: Todo) -> Result[Todo, String] =
+  match t.status {
+    Done => err("already done"),
+    Cancelled => err("cannot complete cancelled"),
+    Pending => ok({ ...t, status: Done }),
+  }
+
+fn cancel(t: Todo) -> Result[Todo, String] =
+  match t.status {
+    Cancelled => err("already cancelled"),
+    Done => err("cannot cancel done"),
+    Pending => ok({ ...t, status: Cancelled }),
+  }
+
+fn is_done(t: Todo) -> Bool = match t.status { Done => true, _ => false }
+
+fn pending_count(todos: List[Todo]) -> Int =
+  todos |> list.filter((t) => match t.status { Pending => true, _ => false }) |> list.len
+
+fn titles(todos: List[Todo]) -> List[String] = list.map(todos, (t) => t.title)
+
+fn find_by_title(todos: List[Todo], title: String) -> Option[Todo] =
+  list.find(todos, (t) => t.title == title)
+
+fn status_label(s: Status) -> String =
+  match s { Pending => "pending", Done => "done", Cancelled => "cancelled" }
+
+fn summary(t: Todo) -> String = "[${status_label(t.status)}] ${t.title}"
+
+test "create todo" {
+  let t = create(1, "Buy milk")
+  assert_eq(t.title, "Buy milk")
+  assert_eq(t.id, 1)
+}
+
+test "complete todo" {
+  assert_eq(complete(create(1, "Buy milk")), ok(Todo { id: 1, title: "Buy milk", status: Done }))
+}
+
+test "cancel todo" {
+  assert_eq(cancel(create(1, "Buy milk")), ok(Todo { id: 1, title: "Buy milk", status: Cancelled }))
+}
+
+test "pending count" {
+  let todos = [create(1, "A"), Todo { id: 2, title: "B", status: Done }, create(3, "C")]
+  assert_eq(pending_count(todos), 2)
+}
+
+test "titles" {
+  let todos = [create(1, "A"), create(2, "B"), create(3, "C")]
+  assert_eq(titles(todos), ["A", "B", "C"])
+}
+
+test "find by title found" {
+  let todos = [create(1, "Buy milk"), create(2, "Walk dog")]
+  match find_by_title(todos, "Walk dog") {
+    some(t) => assert_eq(t.id, 2),
+    none => assert(false),
+  }
+}
+
+test "find by title not found" {
+  let todos = [create(1, "Buy milk")]
+  assert_eq(find_by_title(todos, "nope"), none)
+}
+
+test "summary" {
+  assert_eq(summary(create(1, "Buy milk")), "[pending] Buy milk")
+  assert_eq(summary(Todo { id: 1, title: "Done", status: Done }), "[done] Done")
+}
+
+test "pipe chain: create filter map" {
+  let todos = [create(1, "A"), Todo { id: 2, title: "B", status: Done }, Todo { id: 3, title: "C", status: Cancelled }]
+  let pending_titles = todos
+    |> list.filter((t) => match t.status { Pending => true, _ => false })
+    |> list.map((t) => t.title)
+  assert_eq(pending_titles, ["A"])
+}
+
+test "multiple operations" {
+  var todos = [create(1, "A"), create(2, "B"), create(3, "C")]
+  let updated = list.map(todos, (t) => if t.id == 2 then Todo { id: t.id, title: t.title, status: Done } else t)
+  assert_eq(pending_count(updated), 2)
+  assert(is_done(list.get_or(updated, 1, create(0, ""))))
+}
+
+test "complete pending succeeds" {
+  assert_eq(complete(create(1, "A")), ok(Todo { id: 1, title: "A", status: Done }))
+}
+
+test "complete already done" {
+  let t = Todo { id: 1, title: "A", status: Done }
+  assert_eq(complete(t), err("already done"))
+}
+
+test "complete cancelled" {
+  let t = Todo { id: 1, title: "A", status: Cancelled }
+  assert_eq(complete(t), err("cannot complete cancelled"))
+}
+
+test "cancel pending succeeds" {
+  assert_eq(cancel(create(1, "A")), ok(Todo { id: 1, title: "A", status: Cancelled }))
+}
+
+test "cancel already cancelled" {
+  let t = Todo { id: 1, title: "A", status: Cancelled }
+  assert_eq(cancel(t), err("already cancelled"))
+}
+
+test "cancel done" {
+  let t = Todo { id: 1, title: "A", status: Done }
+  assert_eq(cancel(t), err("cannot cancel done"))
+}
