@@ -25,7 +25,6 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
         checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
     }
-    checker.install_import_table(&program);
     let diagnostics = checker.check_program(&mut program);
 
     // Lower to IR for unused variable analysis (only if no parse errors)
@@ -109,7 +108,6 @@ pub fn cmd_check_json(file: &str) {
     for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
         checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
     }
-    checker.install_import_table(&program);
     let diagnostics = checker.check_program(&mut program);
 
     // Output each diagnostic as JSON (one per line)
@@ -163,7 +161,6 @@ pub fn cmd_check_effects(file: &str) {
     for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
         checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
     }
-    checker.install_import_table(&program);
     let diagnostics = checker.check_program(&mut program);
 
     let errors: Vec<_> = diagnostics.iter()

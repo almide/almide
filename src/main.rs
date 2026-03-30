@@ -238,7 +238,6 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
         }
-        checker.install_import_table(&program);
         let diagnostics = checker.check_program(&mut program);
         // Combine parse errors + checker errors
         let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();

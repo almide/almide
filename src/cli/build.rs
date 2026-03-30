@@ -139,7 +139,6 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
         checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
     }
-    checker.install_import_table(&program);
     let diagnostics = checker.check_program(&mut program);
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
         for d in &diagnostics {
@@ -219,7 +218,6 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
     for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
         checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
     }
-    checker.install_import_table(&program);
     let diagnostics = checker.check_program(&mut program);
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
         for d in &diagnostics {

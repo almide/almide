@@ -9,7 +9,6 @@ fn check(input: &str) -> Vec<(Level, String)> {
     let mut prog = parser.parse().expect("parse failed");
     let diags = {
         let mut checker = Checker::new();
-        checker.install_import_table(&prog);
         checker.check_program(&mut prog)
     };
     diags.into_iter().map(|d| (d.level, d.message)).collect()
@@ -21,7 +20,6 @@ fn check_with_hints(input: &str) -> Vec<(Level, String, String)> {
     let mut prog = parser.parse().expect("parse failed");
     let diags = {
         let mut checker = Checker::new();
-        checker.install_import_table(&prog);
         checker.check_program(&mut prog)
     };
     diags.into_iter().map(|d| (d.level, d.message, d.hint)).collect()
