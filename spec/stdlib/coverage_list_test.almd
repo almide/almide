@@ -1,0 +1,22 @@
+// Coverage tests for list.group_by
+
+test "list.group_by by parity" {
+  let items = [1, 2, 3, 4, 5, 6]
+  let groups = items |> list.group_by((x) => int.to_string(x % 2))
+  assert(map.contains(groups, "0"))
+  assert(map.contains(groups, "1"))
+  assert_eq(map.get(groups, "0") ?? [], [2, 4, 6])
+  assert_eq(map.get(groups, "1") ?? [], [1, 3, 5])
+}
+
+test "list.group_by empty" {
+  let items: List[Int] = []
+  let groups = items |> list.group_by((x) => int.to_string(x))
+  assert_eq(map.len(groups), 0)
+}
+
+test "list.group_by single group" {
+  let items = [2, 4, 6]
+  let groups = items |> list.group_by((_) => "even")
+  assert_eq(map.len(groups), 1)
+}
