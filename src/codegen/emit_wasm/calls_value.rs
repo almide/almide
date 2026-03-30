@@ -248,7 +248,8 @@ impl FuncCompiler<'_> {
                 self.emit_value_call("stringify", args);
             }
             "get" => {
-                self.emit_value_call("get", args);
+                // json.get returns Option[Value], not Result
+                self.emit_value_get(args);
             }
             "parse" => {
                 self.emit_expr(&args[0]);

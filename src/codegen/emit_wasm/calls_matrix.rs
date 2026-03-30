@@ -518,6 +518,50 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(outer);
                 self.scratch.free_i32(m);
             }
+            "map" => {
+                // matrix.map(m, f) → Matrix: apply f(Float) -> Float to each element
+                let m = self.scratch.alloc_i32();
+                let closure = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
+                let total = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(m); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(closure);
+                    local_get(m); i32_load(0); local_get(m); i32_load(4); i32_mul; local_set(total);
+                    local_get(total); i32_const(8); i32_mul; i32_const(8); i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    local_get(dst); local_get(m); i32_load(0); i32_store(0);
+                    local_get(dst); local_get(m); i32_load(4); i32_store(4);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(total); i32_ge_u; br_if(1);
+                      // dst[i] = f(m[i])
+                      local_get(dst); i32_const(8); i32_add;
+                      local_get(i); i32_const(8); i32_mul; i32_add;
+                      // call closure: env, arg, table_idx
+                      local_get(closure); i32_load(4); // env
+                      local_get(m); i32_const(8); i32_add;
+                      local_get(i); i32_const(8); i32_mul; i32_add;
+                      f64_load(0); // element value
+                      local_get(closure); i32_load(0); // table_idx
+                });
+                self.emit_closure_call(&crate::types::Ty::Float, &crate::types::Ty::Float);
+                wasm!(self.func, {
+                      f64_store(0);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(dst);
+                });
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(total);
+                self.scratch.free_i32(dst);
+                self.scratch.free_i32(closure);
+                self.scratch.free_i32(m);
+            }
             _ => return false,
         }
         true
