@@ -13,7 +13,7 @@ Fill gaps that make Almide less capable than Python/Go for everyday tasks.
 
 ### string module ✅
 
-- [x] `string.pad_right(s, n, ch)` → `String`
+- [x] `string.pad_end(s, n, ch)` → `String`
 - [x] `string.trim_start(s)` / `string.trim_end(s)` → `String`
 - [x] `string.count(s, sub)` → `Int`
 

@@ -111,7 +111,7 @@ test "string.slice empty result" {
   assert_eq(string.slice("hello", 5), "")
 }
 
-// ── pad_left / pad_right ──
+// ── pad_start / pad_end ──
 test "string.pad_start shorter string" {
   assert_eq(string.pad_start("42", 5, "0"), "00042")
 }

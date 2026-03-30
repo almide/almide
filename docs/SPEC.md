@@ -1076,7 +1076,7 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 ### 18.1 Auto-Imported Modules
 
 **string** (41 functions):
-`trim`, `trim_start`, `trim_end`, `split`, `join`, `len`, `lines`, `pad_left`, `pad_right`, `starts_with`, `ends_with`, `slice`, `to_bytes`, `from_bytes`, `contains`, `to_upper`, `to_lower`, `to_int`, `replace`, `char_at`, `chars`, `index_of`, `repeat`, `count`, `reverse`, `is_empty`, `is_digit`, `is_alpha`, `is_alphanumeric`, `is_whitespace`, `strip_prefix`, `strip_suffix`, `capitalize`, `is_upper`, `is_lower`, `codepoint`, `from_codepoint`, `pad_end`, `replace_first`, `last_index_of`, `to_float`
+`trim`, `trim_start`, `trim_end`, `split`, `join`, `len`, `lines`, `pad_start`, `pad_end`, `starts_with`, `ends_with`, `slice`, `to_bytes`, `from_bytes`, `contains`, `to_upper`, `to_lower`, `to_int`, `replace`, `char_at`, `chars`, `index_of`, `repeat`, `count`, `reverse`, `is_empty`, `is_digit`, `is_alpha`, `is_alphanumeric`, `is_whitespace`, `strip_prefix`, `strip_suffix`, `capitalize`, `is_upper`, `is_lower`, `codepoint`, `from_codepoint`, `replace_first`, `last_index_of`, `to_float`
 
 **list** (54 functions):
 `len`, `get`, `get_or`, `first`, `last`, `sort`, `sort_by`, `reverse`, `contains`, `index_of`, `any`, `all`, `each`, `map`, `flat_map`, `filter`, `find`, `fold`, `enumerate`, `zip`, `flatten`, `take`, `drop`, `chunk`, `unique`, `join`, `sum`, `product`, `min`, `max`, `is_empty`, `push`, `pop`, `insert`, `remove`, `concat`, `slice`, `range`, `count`, `find_index`, `partition`, `scan`, `window`, `zip_with`, `unzip`, `group_by`, `frequencies`, `intersperse`, `reduce`, `take_while`, `drop_while`, `dedup`, `rotate`, `transpose`

@@ -147,12 +147,12 @@ test "string slice" {
   assert_eq(string.slice("abcdef", 2, 4), "cd")
 }
 
-test "string pad_left" {
+test "string pad_start" {
   assert_eq(string.pad_start("42", 5, "0"), "00042");
   assert_eq(string.pad_start("hello", 3, " "), "hello")
 }
 
-test "string pad_right" {
+test "string pad_end" {
   assert_eq(string.pad_end("hi", 5, "."), "hi...");
   assert_eq(string.pad_end("hello", 3, " "), "hello")
 }

@@ -108,7 +108,7 @@ let r = "hello".split(" ").reverse()  // chaining works too
 ```
 AUTO-IMPORTED (no import needed):
   string: len trim split join lines contains? starts_with? ends_with? replace
-          index_of slice to_upper to_lower to_int chars pad_left pad_right
+          index_of slice to_upper to_lower to_int chars pad_start pad_end
   list:   len get get_or first last map flat_map filter find fold enumerate
           zip sort sort_by reverse any? all? take drop unique join sum
   map:    new get set contains? remove keys values entries from_list merge len
