@@ -829,6 +829,19 @@ impl Checker {
                 return Some(key);
             }
         }
+        // Detect dot-chain submodule access (for pipe context)
+        if let Some(dotted) = self.resolve_dotted_module_path(object) {
+            let key = format!("{}.{}", dotted, field);
+            if self.env.functions.contains_key(&sym(&key)) {
+                let last_seg = dotted.rsplit('.').next().unwrap_or(&dotted);
+                self.emit(super::err(
+                    format!("dot-chain submodule access is no longer supported"),
+                    format!("Add `import {}` and call `{}.{}()` instead", dotted, last_seg, field),
+                    format!("call to {}.{}", dotted, field),
+                ));
+                return Some(key);
+            }
+        }
         // TypeName.method (e.g. Val.double in pipe)
         if let ast::Expr::TypeName { name: type_name, .. } = object {
             let key = format!("{}.{}", type_name, field);

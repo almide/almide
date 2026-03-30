@@ -48,7 +48,21 @@ impl Checker {
     /// Resolve a member call statically (module.func, alias, TypeName.method, codec).
     /// Returns Some(Ty) if resolved, None to fall through to UFCS/convention dispatch.
     pub(super) fn resolve_static_member(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
-        // Go-style: no dot-chain submodule access. Each module must be imported individually.
+        // Detect dot-chain submodule access and emit helpful error
+        if let Some(dotted) = self.resolve_dotted_module(object) {
+            let key = format!("{}.{}", dotted, field);
+            if self.env.functions.contains_key(&sym(&key)) {
+                // Extract the last segment of the dotted path for the import suggestion
+                let last_seg = dotted.rsplit('.').next().unwrap_or(&dotted);
+                self.emit(super::err(
+                    format!("dot-chain submodule access is no longer supported"),
+                    format!("Add `import {}` and call `{}.{}()` instead", dotted, last_seg, field),
+                    format!("call to {}.{}", dotted, field),
+                ));
+                // Still resolve so codegen doesn't break
+                return Some(self.check_named_call(&key, arg_tys));
+            }
+        }
 
         let module_name = match object {
             ast::Expr::Ident { name, .. } => Some(name.as_str()),

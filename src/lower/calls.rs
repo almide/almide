@@ -119,7 +119,11 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                     }
                 }
             }
-            // Go-style: no dot-chain submodule access. Each module must be imported individually.
+            // Dot-chain submodule fallback: still resolve so codegen doesn't break
+            // (checker emits error for these, but lowering must still produce valid IR)
+            if let Some(dotted) = resolve_dotted_module_path(object, ctx) {
+                return CallTarget::Module { module: sym(&dotted), func: *field };
+            }
             // TypeName.method(args) → direct named call (not UFCS, no object prepend)
             if let ast::Expr::TypeName { name: type_name, .. } = object.as_ref() {
                 let key = format!("{}.{}", type_name, field);
