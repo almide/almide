@@ -2,7 +2,7 @@ VERSION := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'
 INSTALL_DIR := $(HOME)/.local/almide
 BIN := target/release/almide
 
-.PHONY: build install test test-wasm test-ts check clean fmt release parity cross-target cheatsheet
+.PHONY: build install test test-wasm test-ts check clean fmt release parity cross-target cheatsheet stdlib-docs
 
 ## Build
 
@@ -55,6 +55,10 @@ cheatsheet:
 cheatsheet-update:
 	@python3 tools/update-cheatsheet-stdlib.py
 	@echo "Updated docs/CHEATSHEET.md stdlib section from TOML definitions."
+
+stdlib-docs:
+	@python3 tools/generate-stdlib-docs.py --write
+	@echo "Regenerated docs-site/src/content/docs/stdlib/ from TOML definitions."
 
 ## Check
 
