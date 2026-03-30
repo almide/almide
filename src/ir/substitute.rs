@@ -241,7 +241,8 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
         | IrExprKind::Unit | IrExprKind::EmptyMap | IrExprKind::OptionNone
         | IrExprKind::Break | IrExprKind::Continue
         | IrExprKind::Hole | IrExprKind::Todo { .. }
-        | IrExprKind::RenderedCall { .. } => expr.clone(),
+        | IrExprKind::RenderedCall { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::ClosureCreate { .. } => expr.clone(),
     }
 }
 

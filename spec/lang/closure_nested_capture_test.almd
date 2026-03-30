@@ -1,0 +1,57 @@
+// Nested closure capture tests — verifying that function parameters
+// captured through multiple lambda levels work correctly.
+
+fn make(n: Int) -> List[List[Int]] =
+  0..2 |> list.map((i) =>
+    0..n |> list.map((j) => i + j)
+  )
+
+test "nested capture of function param" {
+  let result = make(3)
+  assert_eq(list.len(result), 2)
+  let strs = result |> list.map((row) =>
+    row |> list.map((x) => int.to_string(x)) |> list.join(",")
+  )
+  assert_eq(list.join(strs, ";"), "0,1,2;1,2,3")
+}
+
+fn wave(w: Int) -> List[String] =
+  0..3 |> list.map((row) =>
+    0..w |> list.map((col) => {
+      let v = (row + col) % 4
+      if v == 0 then "A" else if v == 1 then "B" else if v == 2 then "C" else "D"
+    }) |> list.join("")
+  )
+
+test "nested capture: wave pattern" {
+  let rows = wave(4)
+  assert_eq(list.len(rows), 3)
+  assert_eq(list.join(rows, "|"), "ABCD|BCDA|CDAB")
+}
+
+fn grid(rows: Int, cols: Int) -> List[String] =
+  0..rows |> list.map((r) =>
+    0..cols |> list.map((c) => int.to_string(r * cols + c)) |> list.join(",")
+  )
+
+test "nested capture: two params" {
+  let g = grid(2, 3)
+  assert_eq(list.join(g, ";"), "0,1,2;3,4,5")
+}
+
+fn triple_nest(n: Int) -> List[List[List[Int]]] =
+  0..2 |> list.map((i) =>
+    0..2 |> list.map((j) =>
+      0..n |> list.map((k) => i + j + k)
+    )
+  )
+
+test "triple nested capture" {
+  let result = triple_nest(3)
+  let flat = result |> list.flat_map((rows) =>
+    rows |> list.map((row) =>
+      row |> list.map((x) => int.to_string(x)) |> list.join(",")
+    )
+  )
+  assert_eq(list.join(flat, "|"), "0,1,2|1,2,3|1,2,3|2,3,4")
+}

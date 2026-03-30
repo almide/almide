@@ -26,6 +26,7 @@ use super::pass_stream_fusion::StreamFusionPass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
+use super::pass_closure_conversion::ClosureConversionPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -106,6 +107,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(ResultPropagationPass)
             // Peephole: swap/reverse/rotate/copy → specialized IR nodes
             .add(PeepholePass)
+            // Closure conversion: lift lambdas to top-level functions with explicit env
+            .add(ClosureConversionPass)
             .add(FanLoweringPass),
     }
 }
