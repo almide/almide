@@ -18,7 +18,7 @@ pub fn almide_rt_process_exec(cmd: String, args: Vec<String>) -> Result<String, 
     }
 }
 
-pub fn almide_rt_process_exit(code: i64) {
+pub fn almide_rt_process_exit(code: i64) -> ! {
     std::process::exit(code as i32);
 }
 
