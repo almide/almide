@@ -1,0 +1,285 @@
+// ========== V1 SOLUTION (working code — all tests pass) ==========
+
+import env
+import fs
+import string
+import list
+
+fn parse_config(content: String) -> Result[List[List[String]], String] = {
+  if string.len(content) == 0 then ok([])
+  else {
+    let lines = string.split(content, "\n");
+    let indexed = list.fold(lines, [], (acc, line) => {
+      let idx = list.len(acc) + 1;
+      acc + [[int.to_string(idx), line]]
+    });
+    list.fold(indexed, ok([]), (acc, entry) => {
+      match acc {
+        err(e) => err(e),
+        ok(pairs) => {
+          let line_num = match list.get(entry, 0) { some(v) => v, none => "0" };
+          let line = match list.get(entry, 1) { some(v) => v, none => "" };
+          let trimmed = string.trim(line);
+          if trimmed == "" then ok(pairs)
+          else if string.starts_with(trimmed, "#") then ok(pairs)
+          else if string.contains(trimmed, "=") then {
+            let parts = string.split(trimmed, "=");
+            let key = match list.get(parts, 0) { some(v) => v, none => "" };
+            if key == "" then err("line ${line_num}: empty key")
+            else {
+              let indexed_parts = list.fold(parts, [], (a, p) => a + [[int.to_string(list.len(a)), p]]);
+              let rest = list.filter(indexed_parts, (ip) => {
+                match list.get(ip, 0) { some(v) => v != "0", none => false }
+              });
+              let rest_vals = list.map(rest, (ip) => match list.get(ip, 1) { some(v) => v, none => "" });
+              let value = string.join(rest_vals, "=");
+              let existing_keys = list.map(pairs, (p) => match list.get(p, 0) { some(v) => v, none => "" });
+              if list.contains(existing_keys, key) then err("line ${line_num}: duplicate key: ${key}")
+              else ok(pairs + [[key, value]])
+            }
+          }
+          else err("line ${line_num}: missing '='")
+        }
+      }
+    })
+  }
+}
+
+fn merge_configs(base: List[List[String]], overlay: List[List[String]]) -> List[List[String]] = {
+  let overlay_keys = list.map(overlay, (p) => match list.get(p, 0) { some(v) => v, none => "" });
+  let overlay_for_find = overlay;
+  let merged_base = list.map(base, (pair) => {
+    let key = match list.get(pair, 0) { some(v) => v, none => "" };
+    if list.contains(overlay_keys, key) then {
+      match list.find(overlay_for_find, (op) => match list.get(op, 0) { some(v) => v == key, none => false }) {
+        some(found) => found,
+        none => pair
+      }
+    } else pair
+  });
+  let base_keys = list.map(base, (p) => match list.get(p, 0) { some(v) => v, none => "" });
+  let new_overlay = list.filter(overlay, (p) => {
+    let key = match list.get(p, 0) { some(v) => v, none => "" };
+    not list.contains(base_keys, key)
+  });
+  merged_base + new_overlay
+}
+
+fn serialize_config(pairs: List[List[String]]) -> String = {
+  let lines = list.map(pairs, (pair) => {
+    let key = match list.get(pair, 0) { some(v) => v, none => "" };
+    let value = match list.get(pair, 1) { some(v) => v, none => "" };
+    key + "=" + value
+  });
+  string.join(lines, "\n")
+}
+
+effect fn load_config(path: String) -> Result[List[List[String]], String] = {
+  let text = fs.read_text(path)!
+  match parse_config(text) {
+    ok(pairs) => ok(pairs),
+    err(e) => err("${path}: ${e}")
+  }
+}
+
+effect fn save_config(path: String, pairs: List[List[String]]) -> Result[Unit, String] = {
+  let content = serialize_config(pairs);
+  fs.write(path, content);
+  ok(())
+}
+
+effect fn merge_files(paths: List[String]) -> Result[List[List[String]], String] = {
+  var result = []
+  var i = 0
+  while i < list.len(paths) {
+    let path = match list.get(paths, i) { some(p) => p, none => "" }
+    let overlay = load_config(path)!
+    result = merge_configs(result, overlay)
+    i = i + 1
+  }
+  ok(result)
+}
+
+effect fn merge_and_save(paths: List[String], output: String) -> Result[Int, String] = {
+  match merge_files(paths) {
+    err(e) => err(e),
+    ok(pairs) => {
+      save_config(output, pairs)!;
+      ok(list.len(pairs))
+    }
+  }
+}
+
+fn lookup(pairs: List[List[String]], key: String) -> Option[String] = {
+  match list.find(pairs, (pair) => match list.get(pair, 0) { some(v) => v == key, none => false }) {
+    some(pair) => match list.get(pair, 1) { some(v) => some(v), none => none },
+    none => none
+  }
+}
+
+fn filter_by_prefix(pairs: List[List[String]], prefix: String) -> List[List[String]] = {
+  list.filter(pairs, (pair) => {
+    let key = match list.get(pair, 0) { some(v) => v, none => "" };
+    string.starts_with(key, prefix)
+  })
+}
+
+test "parse basic config" {
+  let content = "host=localhost\nport=8080"
+  assert_eq(parse_config(content), ok([["host", "localhost"], ["port", "8080"]]))
+}
+
+test "parse with comments and blanks" {
+  let content = "# this is a comment\n\nhost=localhost\n# another comment\nport=8080"
+  assert_eq(parse_config(content), ok([["host", "localhost"], ["port", "8080"]]))
+}
+
+test "parse empty string" {
+  assert_eq(parse_config(""), ok([]))
+}
+
+test "parse only comments" {
+  assert_eq(parse_config("# comment\n# another"), ok([]))
+}
+
+test "parse missing equals" {
+  assert_eq(parse_config("host=ok\nbadline"), err("line 2: missing '='"))
+}
+
+test "parse empty key" {
+  assert_eq(parse_config("=value"), err("line 1: empty key"))
+}
+
+test "parse duplicate key" {
+  assert_eq(parse_config("host=a\nhost=b"), err("line 2: duplicate key: host"))
+}
+
+test "parse value with equals" {
+  let content = "formula=a=b+c"
+  assert_eq(parse_config(content), ok([["formula", "a=b+c"]]))
+}
+
+test "merge no overlap" {
+  let base = [["host", "localhost"]]
+  let overlay = [["port", "8080"]]
+  assert_eq(merge_configs(base, overlay), [["host", "localhost"], ["port", "8080"]])
+}
+
+test "merge with override" {
+  let base = [["host", "localhost"], ["port", "3000"]]
+  let overlay = [["port", "8080"]]
+  assert_eq(merge_configs(base, overlay), [["host", "localhost"], ["port", "8080"]])
+}
+
+test "merge empty base" {
+  let overlay = [["port", "8080"]]
+  assert_eq(merge_configs([], overlay), [["port", "8080"]])
+}
+
+test "merge empty overlay" {
+  let base = [["host", "localhost"]]
+  assert_eq(merge_configs(base, []), [["host", "localhost"]])
+}
+
+test "serialize config" {
+  let pairs = [["host", "localhost"], ["port", "8080"]]
+  assert_eq(serialize_config(pairs), "host=localhost\nport=8080")
+}
+
+test "serialize empty" {
+  assert_eq(serialize_config([]), "")
+}
+
+test "lookup found" {
+  let pairs = [["host", "localhost"], ["port", "8080"]]
+  assert_eq(lookup(pairs, "port"), some("8080"))
+}
+
+test "lookup not found" {
+  let pairs = [["host", "localhost"]]
+  assert_eq(lookup(pairs, "port"), none)
+}
+
+test "filter by prefix" {
+  let pairs = [["db_host", "localhost"], ["db_port", "5432"], ["app_port", "8080"]]
+  assert_eq(filter_by_prefix(pairs, "db_"), [["db_host", "localhost"], ["db_port", "5432"]])
+}
+
+test "filter by prefix no match" {
+  let pairs = [["app_port", "8080"]]
+  assert_eq(filter_by_prefix(pairs, "db_"), [])
+}
+
+test "load and parse config file" {
+  let td = env.temp_dir()
+  let f = td + "/almide_test_m06_base.conf"
+  fs.write(f, "host=localhost\nport=3000")
+  let result = load_config(f)
+  assert_eq(result, ok([["host", "localhost"], ["port", "3000"]]))
+}
+
+test "load config file not found" {
+  let td = env.temp_dir()
+  assert(match load_config(td + "/almide_test_m06_nonexistent.conf") { err(_e) => true, _ => false })
+}
+
+test "merge two files" {
+  let td = env.temp_dir()
+  let f1 = td + "/almide_test_m06_f1.conf"
+  let f2 = td + "/almide_test_m06_f2.conf"
+  fs.write(f1, "host=localhost\nport=3000")
+  fs.write(f2, "port=8080\ndebug=true")
+  let result = merge_files([f1, f2])
+  assert_eq(result, ok([["host", "localhost"], ["port", "8080"], ["debug", "true"]]))
+}
+
+// ========== MODIFICATION INSTRUCTION ==========
+// Add two new functions (do NOT modify any existing functions or tests):
+//
+// 1. `fn validate_keys(pairs: List[List[String]], required: List[String]) -> Result[Unit, String]`
+//    Checks that all keys in `required` are present in `pairs`.
+//    If a key is missing, return `err("missing required key: KEY")` for the first missing key.
+//    If all required keys are present, return `ok(())`.
+//
+// 2. `effect fn load_and_validate(path: String, required: List[String]) -> Result[List[List[String]], String]`
+//    Loads a config file and validates that all required keys are present.
+//    File read errors and parse errors propagate as usual.
+//    If validation fails, return the validation error.
+//    If everything succeeds, return the parsed pairs.
+//
+// All existing tests must still pass unchanged.
+
+// ========== V2 TESTS (must also pass after modification) ==========
+
+test "validate keys all present" {
+  let pairs = [["host", "localhost"], ["port", "8080"]]
+  assert_eq(validate_keys(pairs, ["host", "port"]), ok(()))
+}
+
+test "validate keys missing" {
+  let pairs = [["host", "localhost"]]
+  assert_eq(validate_keys(pairs, ["host", "port"]), err("missing required key: port"))
+}
+
+test "validate keys empty required" {
+  assert_eq(validate_keys([["a", "b"]], []), ok(()))
+}
+
+test "validate keys first missing reported" {
+  let pairs = [["host", "localhost"]]
+  assert_eq(validate_keys(pairs, ["port", "debug"]), err("missing required key: port"))
+}
+
+test "load and validate success" {
+  let td = env.temp_dir()
+  let f = td + "/almide_test_m06_valid.conf"
+  fs.write(f, "host=localhost\nport=8080")
+  assert_eq(load_and_validate(f, ["host"]), ok([["host", "localhost"], ["port", "8080"]]))
+}
+
+test "load and validate missing key" {
+  let td = env.temp_dir()
+  let f = td + "/almide_test_m06_partial.conf"
+  fs.write(f, "host=localhost")
+  assert_eq(load_and_validate(f, ["host", "port"]), err("missing required key: port"))
+}

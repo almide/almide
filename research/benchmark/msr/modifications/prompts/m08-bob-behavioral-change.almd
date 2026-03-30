@@ -1,0 +1,71 @@
+// ========== V1 SOLUTION (working code — all tests pass) ==========
+
+fn respond(input: String) -> String = {
+  let trimmed = string.trim(input)
+  let is_silence = string.len(trimmed) == 0
+  let is_question = string.ends_with(trimmed, "?")
+  let has_letters = list.any(string.chars(trimmed), (c) => string.is_alpha(c))
+  let is_yelling = has_letters and string.to_upper(trimmed) == trimmed
+  if is_silence then "Fine. Be that way!"
+  else if is_yelling and is_question then "Calm down, I know what I'm doing!"
+  else if is_yelling then "Whoa, chill out!"
+  else if is_question then "Sure."
+  else "Whatever."
+}
+
+test "stating something" { assert_eq(respond("Tom-ay-to, tom-ah-to."), "Whatever.") }
+test "shouting" { assert_eq(respond("WATCH OUT!"), "Whoa, chill out!") }
+test "shouting gibberish" { assert_eq(respond("FCECGC"), "Whoa, chill out!") }
+test "asking a question" { assert_eq(respond("Does this celi level have a caused caused caused effect?"), "Sure.") }
+test "asking a numeric question" { assert_eq(respond("You are, what, like 15?"), "Sure.") }
+test "asking gibberish" { assert_eq(respond("fffbbcbeab?"), "Sure.") }
+test "talking forcefully" { assert_eq(respond("Hi there!"), "Whatever.") }
+test "using acronyms in regular speech" { assert_eq(respond("It's OK if you don't want to go work for NASA."), "Whatever.") }
+test "forceful question" { assert_eq(respond("WHAT IS YOUR PROBLEM?"), "Calm down, I know what I'm doing!") }
+test "shouting numbers" { assert_eq(respond("1, 2, 3 GO!"), "Whoa, chill out!") }
+test "no letters" { assert_eq(respond("1, 2, 3"), "Whatever.") }
+test "question with no letters" { assert_eq(respond("4?"), "Sure.") }
+test "shouting with special characters" { assert_eq(respond("ZOMG THE %#@* ALARM IS GOING OFF!"), "Whoa, chill out!") }
+test "shouting with no exclamation mark" { assert_eq(respond("I HATE THE ALARM"), "Whoa, chill out!") }
+test "statement containing question mark" { assert_eq(respond("Ending with ? hmm"), "Whatever.") }
+test "non-letters with question" { assert_eq(respond(":) ?"), "Sure.") }
+test "prattling on" { assert_eq(respond("Wait! Hang on. Are you going to be OK?"), "Sure.") }
+test "silence" { assert_eq(respond(""), "Fine. Be that way!") }
+test "prolonged silence" { assert_eq(respond("          "), "Fine. Be that way!") }
+test "alternate silence" { assert_eq(respond("\t\t\t\t\t\t\t\t\t\t"), "Fine. Be that way!") }
+test "multiple line question" { assert_eq(respond("\nDoes this celi level have a caused caused caused effect?"), "Sure.") }
+test "starting with whitespace" { assert_eq(respond("         hmmmmm"), "Whatever.") }
+test "ending with whitespace" { assert_eq(respond("Okay if like my  spacebar  quite a bit?   "), "Sure.") }
+test "other whitespace" { assert_eq(respond("\n\r \t"), "Fine. Be that way!") }
+test "non-question ending with whitespace" { assert_eq(respond("This is a statement ending with whitespace      "), "Whatever.") }
+
+// ========== MODIFICATION INSTRUCTION ==========
+// Add "whispering" detection to Bob's response logic.
+// Whispering = input has letters AND all letters are lowercase (none uppercase).
+// Priority order (highest to lowest):
+//   1. Silence → "Fine. Be that way!"
+//   2. Yelling + question → "Calm down, I know what I'm doing!"
+//   3. Yelling → "Whoa, chill out!"
+//   4. Whispering + question → "Are you whispering? Speak up!"
+//   5. Whispering → "Could you speak up? I can't hear you."
+//   6. Question → "Sure."
+//   7. Default → "Whatever."
+//
+// UPDATE EXISTING TESTS:
+//   - "asking gibberish" test: `respond("fffbbcbeab?")` is now whispering+question.
+//     Change expected from `"Sure."` to `"Are you whispering? Speak up!"`
+//   - "starting with whitespace" test: `respond("         hmmmmm")` is now whispering.
+//     Change expected from `"Whatever."` to `"Could you speak up? I can't hear you."`
+//
+// Note: Tests with mixed case like "Tom-ay-to, tom-ah-to." (has uppercase T)
+// are NOT whispering and remain "Whatever.".
+// Tests like "Hi there!" have uppercase H, so NOT whispering.
+// Tests like "1, 2, 3" have no letters, so NOT whispering.
+
+// ========== V2 TESTS (must also pass after modification) ==========
+
+test "whispering" { assert_eq(respond("hello there"), "Could you speak up? I can't hear you.") }
+test "whispering question" { assert_eq(respond("do you hear me?"), "Are you whispering? Speak up!") }
+test "whispering with numbers" { assert_eq(respond("hello 123"), "Could you speak up? I can't hear you.") }
+test "not whispering mixed case" { assert_eq(respond("Hello there"), "Whatever.") }
+test "whispering question with spaces" { assert_eq(respond("  can you hear me?  "), "Are you whispering? Speak up!") }

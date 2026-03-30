@@ -1,0 +1,418 @@
+// ========== V1 SOLUTION (working code — all tests pass) ==========
+
+fn str_to_int(s: String) -> Result[Int, String] = {
+  let bytes = string.to_bytes(s)
+  let len = list.len(bytes)
+  if len == 0 then err("invalid integer")
+  else {
+    let first = match list.get(bytes, 0) {
+      some(v) => v,
+      none => 0,
+    }
+    let is_negative = first == 45
+    let start_index = if is_negative then 1 else 0
+    if is_negative and len == 1 then err("invalid integer")
+    else {
+      let digit_bytes = if is_negative then {
+        let indices = list.fold(bytes, [], (acc, _b) => acc + [list.len(acc)])
+        list.fold(indices, [], (acc, i) => {
+          if i >= start_index then {
+            match list.get(bytes, i) {
+              some(v) => acc + [v],
+              none => acc,
+            }
+          } else acc
+        })
+      } else bytes
+      if list.len(digit_bytes) == 0 then err("invalid integer")
+      else {
+        let result = list.fold(digit_bytes, ok(0), (acc, b) => {
+          match acc {
+            ok(n) => {
+              if b >= 48 and b <= 57 then ok(n * 10 + (b - 48))
+              else err("invalid integer")
+            },
+            err(e) => err(e),
+          }
+        })
+        match result {
+          ok(n) => if is_negative then ok(0 - n) else ok(n),
+          err(e) => err(e),
+        }
+      }
+    }
+  }
+}
+
+fn parse_student(line: String) -> Result[List[String], String] = {
+  let parts = string.split(line, ":")
+  let num_parts = list.len(parts)
+  if num_parts < 2 then err("invalid format")
+  else {
+    let name = match list.get(parts, 0) { some(v) => v, none => "" }
+    if string.len(name) == 0 then err("empty name")
+    else {
+      let scores_str = match list.get(parts, 1) { some(v) => v, none => "" }
+      if string.len(scores_str) == 0 then err("no scores")
+      else {
+        let score_strs = string.split(scores_str, ",")
+        let validation = list.fold(score_strs, ok([]), (acc, s) => {
+          match acc {
+            err(e) => err(e),
+            ok(validated) => {
+              match str_to_int(s) {
+                err(_e) => err("invalid score: " + s),
+                ok(n) => {
+                  if n < 0 or n > 100 then err("score out of range: " + s)
+                  else ok(validated + [s])
+                },
+              }
+            },
+          }
+        })
+        match validation {
+          err(e) => err(e),
+          ok(scores) => ok([name] + scores),
+        }
+      }
+    }
+  }
+}
+
+fn parse_all(input: String) -> Result[List[List[String]], String] = {
+  if string.len(input) == 0 then err("empty input")
+  else {
+    let lines = string.split(input, "\n")
+    let indexed_lines = list.fold(lines, [], (acc, line) => {
+      let idx = list.len(acc) + 1
+      acc + [[int.to_string(idx), line]]
+    })
+    list.fold(indexed_lines, ok([]), (acc, entry) => {
+      match acc {
+        err(e) => err(e),
+        ok(students) => {
+          let line_num = match list.get(entry, 0) { some(v) => v, none => "0" }
+          let line = match list.get(entry, 1) { some(v) => v, none => "" }
+          match parse_student(line) {
+            err(e) => err("line " + line_num + ": " + e),
+            ok(student) => {
+              let name = match list.get(student, 0) { some(v) => v, none => "" }
+              let names = list.map(students, (s) => {
+                match list.get(s, 0) { some(v) => v, none => "" }
+              })
+              if list.contains(names, name) then err("duplicate name: " + name)
+              else ok(students + [student])
+            },
+          }
+        },
+      }
+    })
+  }
+}
+
+fn average(student: List[String]) -> Result[Int, String] = {
+  let len = list.len(student)
+  if len <= 1 then err("no scores")
+  else {
+    let indices = list.fold(student, [], (acc, _s) => acc + [list.len(acc)])
+    let score_indices = list.filter(indices, (i) => i >= 1)
+    let sum_result = list.fold(score_indices, ok(0), (acc, i) => {
+      match acc {
+        err(e) => err(e),
+        ok(total) => {
+          match list.get(student, i) {
+            none => err("missing score"),
+            some(s) => {
+              match str_to_int(s) {
+                err(e) => err(e),
+                ok(n) => ok(total + n),
+              }
+            },
+          }
+        },
+      }
+    })
+    let num_scores = len - 1
+    match sum_result {
+      err(e) => err(e),
+      ok(total) => ok(total / num_scores),
+    }
+  }
+}
+
+fn letter_grade(avg: Int) -> String = {
+  if avg >= 90 then "A"
+  else if avg >= 80 then "B"
+  else if avg >= 70 then "C"
+  else if avg >= 60 then "D"
+  else "F"
+}
+
+fn honor_roll(students: List[List[String]]) -> Result[List[String], String] = {
+  let result = list.fold(students, ok([]), (acc, student) => {
+    match acc {
+      err(e) => err(e),
+      ok(names) => {
+        match average(student) {
+          err(e) => err(e),
+          ok(avg) => {
+            if avg >= 85 then {
+              let name = match list.get(student, 0) { some(v) => v, none => "" }
+              ok(names + [name])
+            } else ok(names)
+          },
+        }
+      },
+    }
+  })
+  match result {
+    err(e) => err(e),
+    ok(names) => ok(list.sort(names)),
+  }
+}
+
+fn class_average(students: List[List[String]]) -> Result[Int, String] = {
+  let num_students = list.len(students)
+  if num_students == 0 then err("no students")
+  else {
+    let sum_result = list.fold(students, ok(0), (acc, student) => {
+      match acc {
+        err(e) => err(e),
+        ok(total) => {
+          match average(student) {
+            err(e) => err(e),
+            ok(avg) => ok(total + avg),
+          }
+        },
+      }
+    })
+    match sum_result {
+      err(e) => err(e),
+      ok(total) => ok(total / num_students),
+    }
+  }
+}
+
+fn format_student(student: List[String]) -> Result[String, String] = {
+  let name = match list.get(student, 0) { some(v) => v, none => "" }
+  match average(student) {
+    err(e) => err(e),
+    ok(avg) => {
+      let grade = letter_grade(avg)
+      ok(name + ": " + int.to_string(avg) + " (" + grade + ")")
+    },
+  }
+}
+
+fn generate_report(input: String) -> Result[String, String] = {
+  match parse_all(input) {
+    err(e) => err(e),
+    ok(students) => {
+      let formatted_result = list.fold(students, ok([]), (acc, student) => {
+        match acc {
+          err(e) => err(e),
+          ok(lines) => {
+            match format_student(student) {
+              err(e) => err(e),
+              ok(line) => ok(lines + [line]),
+            }
+          },
+        }
+      })
+      match formatted_result {
+        err(e) => err(e),
+        ok(lines) => {
+          match class_average(students) {
+            err(e) => err(e),
+            ok(cavg) => {
+              match honor_roll(students) {
+                err(e) => err(e),
+                ok(honors) => {
+                  let student_lines = string.join(lines, "\n")
+                  let class_line = "class average: " + int.to_string(cavg)
+                  let honor_line = "honor roll: " + string.join(honors, ", ")
+                  ok(student_lines + "\n" + class_line + "\n" + honor_line)
+                },
+              }
+            },
+          }
+        },
+      }
+    },
+  }
+}
+
+fn pad3(n: Int) -> String = {
+  let s = int.to_string(n)
+  if n < 10 then "00" + s
+  else if n < 100 then "0" + s
+  else s
+}
+
+fn top_students(input: String, n: Int) -> Result[List[String], String] = {
+  match parse_all(input) {
+    err(e) => err(e),
+    ok(students) => {
+      let pairs_result = list.fold(students, ok([]), (acc, student) => {
+        match acc {
+          err(e) => err(e),
+          ok(pairs) => {
+            match average(student) {
+              err(e) => err(e),
+              ok(avg) => {
+                let name = match list.get(student, 0) { some(v) => v, none => "" }
+                // Higher avg => smaller inverted key => sorts first
+                // Name appended for alphabetical tie-breaking
+                let sort_key = pad3(100 - avg) + ":" + name
+                ok(pairs + [[sort_key, name]])
+              }
+            }
+          }
+        }
+      })
+      match pairs_result {
+        err(e) => err(e),
+        ok(pairs) => {
+          let sorted = list.sort(pairs)
+          let taken = list.take(sorted, n)
+          ok(list.map(taken, (p) => match list.get(p, 1) { some(v) => v, none => "" }))
+        }
+      }
+    }
+  }
+}
+
+// ========== V1 TESTS ==========
+
+test "parse single student" {
+  assert_eq(parse_student("Alice:85,92,78"), ok(["Alice", "85", "92", "78"]))
+}
+
+test "parse student with single score" {
+  assert_eq(parse_student("Bob:100"), ok(["Bob", "100"]))
+}
+
+test "parse student empty name" {
+  assert_eq(parse_student(":85,92"), err("empty name"))
+}
+
+test "parse student invalid score" {
+  assert_eq(parse_student("Alice:85,abc,78"), err("invalid score: abc"))
+}
+
+test "parse student score too high" {
+  assert_eq(parse_student("Alice:85,101,78"), err("score out of range: 101"))
+}
+
+test "parse student score negative" {
+  assert_eq(parse_student("Alice:85,-1,78"), err("score out of range: -1"))
+}
+
+test "parse student no scores" {
+  assert_eq(parse_student("Alice:"), err("no scores"))
+}
+
+test "parse student no colon" {
+  assert_eq(parse_student("Alice"), err("invalid format"))
+}
+
+test "parse all basic" {
+  let result = parse_all("Alice:85,92\nBob:70,80")
+  assert_eq(result, ok([["Alice", "85", "92"], ["Bob", "70", "80"]]))
+}
+
+test "parse all empty input" {
+  assert_eq(parse_all(""), err("empty input"))
+}
+
+test "parse all duplicate names" {
+  assert_eq(parse_all("Alice:85\nAlice:90"), err("duplicate name: Alice"))
+}
+
+test "parse all error with line number" {
+  assert_eq(parse_all("Alice:85\n:90"), err("line 2: empty name"))
+}
+
+test "average basic" {
+  assert_eq(average(["Alice", "80", "90", "100"]), ok(90))
+}
+
+test "average single score" {
+  assert_eq(average(["Bob", "75"]), ok(75))
+}
+
+test "average rounds down" {
+  assert_eq(average(["Carol", "80", "81"]), ok(80))
+}
+
+test "letter grade A" { assert_eq(letter_grade(95), "A") }
+test "letter grade B" { assert_eq(letter_grade(85), "B") }
+test "letter grade C" { assert_eq(letter_grade(75), "C") }
+test "letter grade D" { assert_eq(letter_grade(65), "D") }
+test "letter grade F" { assert_eq(letter_grade(55), "F") }
+test "letter grade boundary 90" { assert_eq(letter_grade(90), "A") }
+test "letter grade boundary 80" { assert_eq(letter_grade(80), "B") }
+
+test "honor roll basic" {
+  let students = [["Alice", "90", "95"], ["Bob", "70", "80"], ["Carol", "85", "90"]]
+  assert_eq(honor_roll(students), ok(["Alice", "Carol"]))
+}
+
+test "honor roll none qualify" {
+  let students = [["Alice", "70", "75"], ["Bob", "60", "65"]]
+  assert_eq(honor_roll(students), ok([]))
+}
+
+test "honor roll sorted" {
+  let students = [["Zara", "90", "95"], ["Alice", "85", "90"]]
+  assert_eq(honor_roll(students), ok(["Alice", "Zara"]))
+}
+
+test "class average basic" {
+  let students = [["Alice", "80", "90"], ["Bob", "70", "80"]]
+  assert_eq(class_average(students), ok(80))
+}
+
+test "format student" {
+  assert_eq(format_student(["Alice", "85", "92", "78"]), ok("Alice: 85 (B)"))
+}
+
+test "generate report" {
+  let input = "Alice:90,95,100\nBob:70,75,80"
+  let expected = "Alice: 95 (A)\nBob: 75 (C)\nclass average: 85\nhonor roll: Alice"
+  assert_eq(generate_report(input), ok(expected))
+}
+
+test "generate report error propagation" {
+  assert_eq(generate_report("Alice:90\n:bad"), err("line 2: empty name"))
+}
+
+test "generate report empty" {
+  assert_eq(generate_report(""), err("empty input"))
+}
+
+// ========== V2 TESTS ==========
+
+test "top students basic" {
+  let input = "Alice:90,95\nBob:70,80\nCarol:85,88"
+  assert_eq(top_students(input, 2), ok(["Alice", "Carol"]))
+}
+
+test "top students tie breaking" {
+  let input = "Bob:85,85\nAlice:85,85"
+  assert_eq(top_students(input, 2), ok(["Alice", "Bob"]))
+}
+
+test "top students n exceeds count" {
+  let input = "Alice:90,95"
+  assert_eq(top_students(input, 5), ok(["Alice"]))
+}
+
+test "top students error propagation" {
+  assert_eq(top_students("", 3), err("empty input"))
+}
+
+test "top students single" {
+  let input = "Alice:90,95\nBob:70,80\nCarol:85,88"
+  assert_eq(top_students(input, 1), ok(["Alice"]))
+}

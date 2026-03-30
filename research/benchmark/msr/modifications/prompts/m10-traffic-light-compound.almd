@@ -1,0 +1,47 @@
+// ========== V1 SOLUTION (working code — all tests pass) ==========
+
+type Light = | Red | Yellow | Green
+
+fn next(l: Light) -> Light =
+  match l { Red => Green, Green => Yellow, Yellow => Red }
+
+fn duration(l: Light) -> Int =
+  match l { Red => 60, Yellow => 5, Green => 45 }
+
+fn describe(l: Light) -> String =
+  match l { Red => "stop", Yellow => "caution", Green => "go" }
+
+test "next red" { assert_eq(next(Red), Green) }
+test "next green" { assert_eq(next(Green), Yellow) }
+test "next yellow" { assert_eq(next(Yellow), Red) }
+test "full cycle" { assert_eq(next(next(next(Red))), Red) }
+test "duration red" { assert_eq(duration(Red), 60) }
+test "duration yellow" { assert_eq(duration(Yellow), 5) }
+test "duration green" { assert_eq(duration(Green), 45) }
+test "describe" { assert_eq(describe(Red), "stop") }
+
+// ========== MODIFICATION INSTRUCTION ==========
+// Make TWO changes simultaneously:
+//
+// 1. Add a `Broken` variant to the `Light` type.
+//    - `next(Broken)` returns `Red` (reset to red when repaired)
+//    - `describe(Broken)` returns `"out of order"`
+//
+// 2. Change `duration` to return `Result[Int, String]` instead of `Int`.
+//    - `duration(Red)` returns `ok(60)`
+//    - `duration(Yellow)` returns `ok(5)`
+//    - `duration(Green)` returns `ok(45)`
+//    - `duration(Broken)` returns `err("broken light has no duration")`
+//
+// UPDATE EXISTING TESTS:
+//   - "duration red": change `assert_eq(duration(Red), 60)` to `assert_eq(duration(Red), ok(60))`
+//   - "duration yellow": change `assert_eq(duration(Yellow), 5)` to `assert_eq(duration(Yellow), ok(5))`
+//   - "duration green": change `assert_eq(duration(Green), 45)` to `assert_eq(duration(Green), ok(45))`
+
+// ========== V2 TESTS (must also pass after modification) ==========
+
+test "next broken" { assert_eq(next(Broken), Red) }
+test "describe broken" { assert_eq(describe(Broken), "out of order") }
+test "duration broken" { assert_eq(duration(Broken), err("broken light has no duration")) }
+test "cycle from broken" { assert_eq(next(next(Broken)), Green) }
+test "describe after broken" { assert_eq(describe(next(Broken)), "stop") }
