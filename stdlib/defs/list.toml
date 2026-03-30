@@ -287,8 +287,8 @@ rust = "almide_rt_list_each(&{xs}, |{f.args}| {{ {f.clone_bindings}{f.body} ; }}
 ts = "__almd_list.each({xs}, {f.args} => {f.body})"
 
 [sort_by]
-description = "Sort by a key function."
-example = '["bb", "a", "ccc"].sort_by(fn(s) => string.len(s)) // => ["a", "bb", "ccc"]'
+description = "Sort by a key-extraction function (not a comparator). f extracts the sort key from each element."
+example = '["bb", "a", "ccc"].sort_by((s) => string.len(s)) // => ["a", "bb", "ccc"]'
 type_params = ["A", "B"]
 params = [
     { name = "xs", type = "List[A]" },

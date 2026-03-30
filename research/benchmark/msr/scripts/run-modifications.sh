@@ -51,6 +51,7 @@ IMPORTANT RULES:
 - effect fn returns Result, auto-unwraps with !
 - When adding a variant to a type, update ALL match expressions on that type.
 - When changing a return type, update ALL callers and test assertions.
+- list.sort_by takes a KEY function (element -> sort key), NOT a comparator. Example: list.sort_by(items, (x) => x.score)
 "
 
 # Extract sections from a prompt file (macOS compatible — no head -n -1)
