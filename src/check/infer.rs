@@ -806,23 +806,19 @@ impl Checker {
     }
 
     /// Resolve a module.func Member expression to a qualified call key.
-    fn resolve_module_call(&self, object: &ast::Expr, field: &str) -> Option<String> {
+    fn resolve_module_call(&mut self, object: &ast::Expr, field: &str) -> Option<String> {
         if let ast::Expr::Ident { name: module, .. } = object {
             if self.env.imported_stdlib.contains(&sym(module)) || self.env.imported_user_modules.contains(&sym(module)) {
+                self.env.used_modules.insert(sym(module));
                 return Some(format!("{}.{}", module, field));
             }
             if let Some(target) = self.env.module_aliases.get(&sym(module)) {
+                let target = target.to_string();
+                self.env.used_modules.insert(sym(module));
                 return Some(format!("{}.{}", target, field));
             }
             // Check if Ident.field is a Type.method (protocol implementation)
             let key = format!("{}.{}", module, field);
-            if self.env.functions.contains_key(&sym(&key)) {
-                return Some(key);
-            }
-        }
-        // Nested module path: bindgen.scaffolding.func(...)
-        if let Some(dotted) = self.resolve_dotted_module_path(object) {
-            let key = format!("{}.{}", dotted, field);
             if self.env.functions.contains_key(&sym(&key)) {
                 return Some(key);
             }

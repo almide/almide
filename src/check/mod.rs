@@ -246,15 +246,9 @@ impl Checker {
                 } else {
                     canonical.clone()
                 };
-                // Track directly imported user modules (including submodules via pkg.sub)
+                // Track directly imported user modules (Go-style: only the specific module, no sub-access)
                 if self.env.user_modules.contains(&sym(&resolved_canonical)) {
                     self.env.imported_user_modules.insert(sym(&resolved_canonical));
-                    // Also mark submodules as accessible (import pkg → pkg.sub.* accessible)
-                    let prefix = format!("{}.", resolved_canonical);
-                    let subs: Vec<Sym> = self.env.user_modules.iter()
-                        .filter(|m| m.as_str().starts_with(&prefix))
-                        .cloned().collect();
-                    for s in subs { self.env.imported_user_modules.insert(s); }
                 }
                 // import pkg.sub → mark as imported
                 if path.len() > 1 {
@@ -263,9 +257,15 @@ impl Checker {
                         self.env.imported_user_modules.insert(sym(&dotted));
                     }
                 }
-                // Register alias mapping (don't override aliases already set by register_alias)
+                // Register alias mapping (explicit or implicit from last path segment)
                 if alias.is_some() && !self.env.module_aliases.contains_key(&sym(&name)) {
                     self.env.module_aliases.insert(sym(&name), sym(&canonical));
+                } else if path.len() > 1 && alias.is_none() {
+                    // Go-style: import pkg.sub → "sub" becomes implicit alias for "pkg.sub"
+                    let last = path.last().unwrap().to_string();
+                    if !self.env.module_aliases.contains_key(&sym(&last)) {
+                        self.env.module_aliases.insert(sym(&last), sym(&canonical));
+                    }
                 }
             }
         }
@@ -314,14 +314,9 @@ impl Checker {
                 if crate::stdlib::is_any_stdlib(&name) {
                     self.env.imported_stdlib.insert(sym(&name));
                 }
-                // Track imported user modules for this submodule
+                // Track imported user modules for this submodule (Go-style: only specific module)
                 if self.env.user_modules.contains(&sym(&name)) {
                     self.env.imported_user_modules.insert(sym(&name));
-                    let prefix = format!("{}.", name);
-                    let subs: Vec<Sym> = self.env.user_modules.iter()
-                        .filter(|m| m.as_str().starts_with(&prefix))
-                        .cloned().collect();
-                    for s in subs { self.env.imported_user_modules.insert(s); }
                 }
                 if path.len() > 1 {
                     let dotted = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");

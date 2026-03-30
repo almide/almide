@@ -48,14 +48,7 @@ impl Checker {
     /// Resolve a member call statically (module.func, alias, TypeName.method, codec).
     /// Returns Some(Ty) if resolved, None to fall through to UFCS/convention dispatch.
     pub(super) fn resolve_static_member(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
-        // Resolve nested module paths: bindgen.scaffolding.generate(...)
-        // object = Member(Ident("bindgen"), "scaffolding"), field = "generate"
-        if let Some(dotted) = self.resolve_dotted_module(object) {
-            let key = format!("{}.{}", dotted, field);
-            if self.env.functions.contains_key(&sym(&key)) {
-                return Some(self.check_named_call(&key, arg_tys));
-            }
-        }
+        // Go-style: no dot-chain submodule access. Each module must be imported individually.
 
         let module_name = match object {
             ast::Expr::Ident { name, .. } => Some(name.as_str()),
@@ -176,9 +169,13 @@ impl Checker {
             // Only imported modules are accessible (no phantom dependencies)
             let resolved_module = if self.env.imported_stdlib.contains(&sym(module))
                 || self.env.imported_user_modules.contains(&sym(module)) {
+                self.env.used_modules.insert(sym(module));
                 Some(module.to_string())
             } else {
-                self.env.module_aliases.get(&sym(module)).map(|s| s.to_string())
+                self.env.module_aliases.get(&sym(module)).map(|s| {
+                    self.env.used_modules.insert(sym(module));
+                    s.to_string()
+                })
             };
             if let Some(m) = resolved_module {
                 return Some(self.check_named_call(&format!("{}.{}", m, field), arg_tys));

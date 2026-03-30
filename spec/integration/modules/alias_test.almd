@@ -1,7 +1,9 @@
-// Import alias tests
-// Verify that `import pkg as alias` works for packages, submodules, and nested paths.
+// Import alias tests (Go-style: each module imported individually)
+// Verify that `import pkg as alias` works for packages and submodules.
 
 import dmod_d as d
+import dmod_d.utils as u
+import dmod_d.nested.deep as deep
 
 // ── Basic alias ──
 
@@ -16,16 +18,16 @@ test "alias: top-level value via alias" {
 // ── Alias + submodule ──
 
 test "alias: submodule function via alias" {
-  assert_eq(d.utils.format_level(0), "DEBUG")
-  assert_eq(d.utils.format_level(1), "INFO")
-  assert_eq(d.utils.format_level(2), "WARN")
-  assert_eq(d.utils.format_level(99), "ERROR")
+  assert_eq(u.format_level(0), "DEBUG")
+  assert_eq(u.format_level(1), "INFO")
+  assert_eq(u.format_level(2), "WARN")
+  assert_eq(u.format_level(99), "ERROR")
 }
 
-// ── Alias + deeply nested submodule (4-level dot) ──
+// ── Alias + deeply nested submodule ──
 
 test "alias: nested submodule via alias" {
-  assert_eq(d.nested.deep.greet("alias"), "hello from deep: alias")
+  assert_eq(deep.greet("alias"), "hello from deep: alias")
 }
 
 // ── Alias + type creation ──
