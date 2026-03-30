@@ -225,9 +225,13 @@ impl Checker {
     // ── Main entry point ──
 
     pub fn check_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
+        // Track alias → canonical mappings for collision detection
+        let mut alias_to_canonical: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        // Track canonical → first alias for duplicate import detection
+        let mut imported_canonicals: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         // Register explicitly imported modules (stdlib Tier 2 + user modules)
         for imp in &program.imports {
-            if let ast::Decl::Import { path, alias, .. } = imp {
+            if let ast::Decl::Import { path, alias, span, .. } = imp {
                 let name = alias.as_ref().cloned()
                     .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
                 // Use the canonical name (from path) for user_modules lookup,
@@ -257,15 +261,38 @@ impl Checker {
                         self.env.imported_user_modules.insert(sym(&dotted));
                     }
                 }
-                // Register alias mapping (explicit or implicit from last path segment)
-                if alias.is_some() && !self.env.module_aliases.contains_key(&sym(&name)) {
-                    self.env.module_aliases.insert(sym(&name), sym(&canonical));
-                } else if path.len() > 1 && alias.is_none() {
-                    // Go-style: import pkg.sub → "sub" becomes implicit alias for "pkg.sub"
-                    let last = path.last().unwrap().to_string();
-                    if !self.env.module_aliases.contains_key(&sym(&last)) {
-                        self.env.module_aliases.insert(sym(&last), sym(&canonical));
+                // Detect duplicate import of the same module with a different alias → warning
+                if let Some(existing_alias) = imported_canonicals.get(&canonical) {
+                    if existing_alias.as_str() != name {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!("module '{}' is already imported as '{}'", canonical, existing_alias),
+                            format!("Remove the duplicate import"),
+                            format!("import at line {}", span.as_ref().map(|s| s.line).unwrap_or(0)),
+                        ));
                     }
+                } else {
+                    imported_canonicals.insert(canonical.clone(), name.to_string());
+                }
+                // Register alias mapping (explicit or implicit from last path segment)
+                let used_name = if alias.is_some() {
+                    name.to_string()
+                } else if path.len() > 1 {
+                    path.last().unwrap().to_string()
+                } else {
+                    name.to_string()
+                };
+                // Detect name collision: two different modules trying to use the same local name
+                if let Some(existing_canonical) = alias_to_canonical.get(&used_name) {
+                    if existing_canonical.as_str() != canonical {
+                        self.diagnostics.push(Diagnostic::error(
+                            format!("ambiguous import: '{}' could refer to '{}' or '{}'", used_name, existing_canonical, canonical),
+                            format!("Use `import {} as <alias>` to disambiguate", canonical),
+                            format!("import at line {}", span.as_ref().map(|s| s.line).unwrap_or(0)),
+                        ));
+                    }
+                } else {
+                    alias_to_canonical.insert(used_name.clone(), canonical.clone());
+                    self.env.module_aliases.insert(sym(&used_name), sym(&canonical));
                 }
             }
         }
