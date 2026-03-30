@@ -107,7 +107,7 @@ def filter_by_prefix(pairs: list[list[str]], prefix: str) -> list[list[str]]:
 
 
 def validate_keys(pairs: list[list[str]], required: list[str]) -> None:
-    """Checks that all keys in `required` are present in `pairs`.
+    """Checks that all keys in required are present in pairs.
     If a key is missing, raise ValueError("missing required key: KEY") for the first missing key.
     If all required keys are present, return None.
     """

@@ -1,5 +1,4 @@
 from __future__ import annotations
-# ========== V2 SOLUTION (working code — all tests pass) ==========
 
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -48,13 +47,9 @@ def find_by_title(todos: list[Todo], title: str) -> object:
 
 
 def status_label(s: Status) -> str:
-    match s:
-        case Status.Pending:
-            return "pending"
-        case Status.Done:
-            return "done"
-        case Status.Cancelled:
-            return "cancelled"
+    if s == Status.Pending: return "pending"
+    elif s == Status.Done: return "done"
+    elif s == Status.Cancelled: return "cancelled"
 
 
 def summary(t: Todo) -> str:
@@ -101,8 +96,7 @@ updated = [complete(t) if t.id == 2 else t for t in todos]
 assert pending_count(updated) == 2, "multiple operations pending"
 assert is_done(updated[1]), "multiple operations done"
 
-# ========== V2 TESTS ==========
-
+# V2 Tests
 t = create(1, "Buy milk", 3)
 assert t.priority == 3, "create with priority"
 

@@ -12,24 +12,27 @@ class Light(Enum):
 
 
 def next_light(l: Light) -> Light:
-    if l == Light.Red: return Light.Green
-    elif l == Light.Green: return Light.Yellow
-    elif l == Light.Yellow: return Light.Red
-    elif l == Light.Broken: return Light.Red
+    match l:
+        case Light.Red: return Light.Green
+        case Light.Green: return Light.Yellow
+        case Light.Yellow: return Light.Red
+        case Light.Broken: return Light.Red
 
 
 def duration(l: Light) -> int | None:
-    if l == Light.Red: return 60
-    elif l == Light.Yellow: return 5
-    elif l == Light.Green: return 45
-    elif l == Light.Broken: return None
+    match l:
+        case Light.Red: return 60
+        case Light.Yellow: return 5
+        case Light.Green: return 45
+        case Light.Broken: return None
 
 
 def describe(l: Light) -> str:
-    if l == Light.Red: return "stop"
-    elif l == Light.Yellow: return "caution"
-    elif l == Light.Green: return "go"
-    elif l == Light.Broken: return "out of order"
+    match l:
+        case Light.Red: return "stop"
+        case Light.Yellow: return "caution"
+        case Light.Green: return "go"
+        case Light.Broken: return "out of order"
 
 
 # Tests
@@ -41,6 +44,22 @@ assert duration(Light.Red) == 60, "duration red"
 assert duration(Light.Yellow) == 5, "duration yellow"
 assert duration(Light.Green) == 45, "duration green"
 assert describe(Light.Red) == "stop", "describe"
+
+# ========== MODIFICATION INSTRUCTION ==========
+# Make TWO changes simultaneously:
+#
+# 1. Add a `Broken` member to the `Light` enum.
+#    - `next_light(Light.Broken)` returns `Light.Red` (reset when repaired)
+#    - `describe(Light.Broken)` returns `"out of order"`
+#
+# 2. Change `duration` to return `int | None` instead of `int`.
+#    - `duration(Light.Red)` returns `60`
+#    - `duration(Light.Yellow)` returns `5`
+#    - `duration(Light.Green)` returns `45`
+#    - `duration(Light.Broken)` returns `None`
+#
+# UPDATE EXISTING TESTS: duration tests remain the same (60, 5, 45 are still valid
+# since int is a valid `int | None`). No changes needed to existing duration tests.
 
 # ========== V2 TESTS (must also pass after modification) ==========
 

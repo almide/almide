@@ -220,7 +220,7 @@ except ValueError as e:
     assert str(e) == "empty input", "generate report empty"
 
 
-# ========== V2 TESTS ==========
+# ========== V2 TESTS (must also pass after modification) ==========
 
 assert top_students("Alice:90,95\nBob:70,80\nCarol:85,88", 2) == ["Alice", "Carol"], "top students basic"
 assert top_students("Bob:85,85\nAlice:85,85", 2) == ["Alice", "Bob"], "top students tie breaking"

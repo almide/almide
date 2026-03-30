@@ -240,6 +240,22 @@ fn generate_report(input: String) -> Result[String, String] = {
   }
 }
 
+local fn insert_pair(sorted: List[(String, Int)], pair: (String, Int)) -> List[(String, Int)] = {
+  let (name, avg) = pair
+  match list.find_index(sorted, (s) => {
+    let (sname, savg) = s
+    if avg > savg then true
+    else if avg == savg then name < sname
+    else false
+  }) {
+    none => sorted + [pair],
+    some(i) => list.insert(sorted, i, pair),
+  }
+}
+
+local fn sort_pairs_by_avg(pairs: List[(String, Int)]) -> List[(String, Int)] =
+  list.fold(pairs, [], (acc, p) => insert_pair(acc, p))
+
 fn top_students(input: String, n: Int) -> Result[List[String], String] = {
   match parse_all(input) {
     err(e) => err(e),
@@ -252,7 +268,7 @@ fn top_students(input: String, n: Int) -> Result[List[String], String] = {
               err(e) => err(e),
               ok(avg) => {
                 let name = match list.get(student, 0) { some(v) => v, none => "" }
-                ok(pairs + [[name, int.to_string(avg)]])
+                ok(pairs + [(name, avg)])
               },
             }
           },
@@ -261,15 +277,12 @@ fn top_students(input: String, n: Int) -> Result[List[String], String] = {
       match pairs_result {
         err(e) => err(e),
         ok(pairs) => {
-          let sorted = list.sort_by(pairs, (pair) => {
-            let name = match list.get(pair, 0) { some(v) => v, none => "" }
-            let avg_str = match list.get(pair, 1) { some(v) => v, none => "0" }
-            let avg = match str_to_int(avg_str) { ok(v) => v, err(_e) => 0 }
-            string.pad_start(int.to_string(1000 - avg), 4, "0") + name
+          let sorted = sort_pairs_by_avg(pairs)
+          let names = list.map(sorted, (p) => {
+            let (name, _) = p
+            name
           })
-          let limit = int.min(n, list.len(sorted))
-          let top = list.take(sorted, limit)
-          ok(list.map(top, (pair) => match list.get(pair, 0) { some(v) => v, none => "" }))
+          ok(list.take(names, n))
         },
       }
     },
