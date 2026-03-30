@@ -705,6 +705,9 @@ impl FuncCompiler<'_> {
         // Unimplemented function: trap immediately rather than returning a default value.
         // Returning silent defaults (0, empty string, etc.) is dangerous in medical contexts
         // where incorrect results could go unnoticed.
+        if std::env::var("ALMIDE_WASM_STUB_WARN").is_ok() {
+            eprintln!("[WASM] stub call reached — will trap at runtime");
+        }
         for arg in args {
             self.emit_expr(arg);
             if values::ty_to_valtype(&arg.ty).is_some() {

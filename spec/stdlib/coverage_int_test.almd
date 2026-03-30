@@ -1,0 +1,33 @@
+// Coverage tests for int stdlib functions
+
+test "int.wrap_add" {
+  assert(int.wrap_add(255, 1, 8) == 0)
+  assert(int.wrap_add(100, 200, 16) == 300)
+}
+
+test "int.wrap_mul" {
+  assert(int.wrap_mul(2, 3, 8) == 6)
+  assert(int.wrap_mul(16, 16, 8) == 0)
+}
+
+test "int.rotate_right" {
+  assert_eq(int.rotate_right(1, 1, 8), 128)
+  assert_eq(int.rotate_right(128, 1, 8), 64)
+}
+
+test "int.rotate_left" {
+  assert_eq(int.rotate_left(1, 1, 8), 2)
+  assert_eq(int.rotate_left(128, 1, 8), 1)
+}
+
+test "int.to_u32" {
+  assert_eq(int.to_u32(255), 255)
+  assert_eq(int.to_u32(0), 0)
+  assert_eq(int.to_u32(4294967296), 0)
+}
+
+test "int.to_u8" {
+  assert_eq(int.to_u8(255), 255)
+  assert_eq(int.to_u8(256), 0)
+  assert_eq(int.to_u8(300), 44)
+}
