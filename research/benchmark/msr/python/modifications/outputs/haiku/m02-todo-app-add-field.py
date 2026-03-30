@@ -54,13 +54,11 @@ def status_label(s: Status) -> str:
 
 
 def summary(t: Todo) -> str:
-    label = status_label(t.status)
-    return f"[{label}/p{t.priority}] {t.title}"
+    return f"[{status_label(t.status)}/p{t.priority}] {t.title}"
 
 
 def high_priority(todos: list[Todo]) -> list[Todo]:
-    hp = [t for t in todos if t.priority >= 3]
-    return sorted(hp, key=lambda t: t.priority, reverse=True)
+    return sorted([t for t in todos if t.priority >= 3], key=lambda t: t.priority, reverse=True)
 
 
 # Tests
@@ -99,7 +97,7 @@ updated = [complete(t) if t.id == 2 else t for t in todos]
 assert pending_count(updated) == 2, "multiple operations pending"
 assert is_done(updated[1]), "multiple operations done"
 
-# ========== V2 TESTS ==========
+# ========== V2 TESTS (must also pass after modification) ==========
 
 t = create(1, "Buy milk", 3)
 assert t.priority == 3, "create with priority"

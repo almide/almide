@@ -51,6 +51,7 @@ IMPORTANT RULES:
 - effect fn returns Result, auto-unwraps with !
 - When adding a variant to a type, update ALL match expressions on that type.
 - When changing a return type, update ALL callers and test assertions.
+- list.sort_by takes a KEY function (element -> sort key), NOT a comparator. Example: list.sort_by(items, (x) => x.score)
 "
 
 # Extract sections from a prompt file (macOS compatible — no head -n -1)
@@ -183,7 +184,13 @@ mkdir -p "$RESULTS_DIR"
 DATE=$(date +%Y-%m-%d)
 RESULTS="${RESULTS%,}"
 
-cat > "$RESULTS_DIR/${MODEL}_${DATE}.json" <<ENDJSON
+# Find next run number for today
+RUN=1
+while [ -f "$RESULTS_DIR/${MODEL}_${DATE}_run${RUN}.json" ]; do
+  RUN=$((RUN + 1))
+done
+
+cat > "$RESULTS_DIR/${MODEL}_${DATE}_run${RUN}.json" <<ENDJSON
 {
   "date": "$DATE",
   "language": "almide",
@@ -200,5 +207,5 @@ cat > "$RESULTS_DIR/${MODEL}_${DATE}.json" <<ENDJSON
 ENDJSON
 
 echo ""
-echo "Results saved: $RESULTS_DIR/${MODEL}_${DATE}.json"
+echo "Results saved: $RESULTS_DIR/${MODEL}_${DATE}_run${RUN}.json"
 echo "Solutions:     $OUTPUT_DIR/"

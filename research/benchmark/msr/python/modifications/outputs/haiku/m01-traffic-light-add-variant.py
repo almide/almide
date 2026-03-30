@@ -42,14 +42,6 @@ assert duration(Light.Yellow) == 5, "duration yellow"
 assert duration(Light.Green) == 45, "duration green"
 assert describe(Light.Red) == "stop", "describe"
 
-# ========== MODIFICATION INSTRUCTION ==========
-# Add a `FlashingRed` member to the `Light` enum.
-# FlashingRed is used at intersections late at night.
-# - `next_light(Light.FlashingRed)` returns `Light.Red`
-# - `duration(Light.FlashingRed)` returns `2`
-# - `describe(Light.FlashingRed)` returns `"caution"`
-# All existing tests must still pass unchanged.
-
 # ========== V2 TESTS (must also pass after modification) ==========
 
 assert next_light(Light.FlashingRed) == Light.Red, "next flashing red"

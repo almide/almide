@@ -99,8 +99,7 @@ updated = [complete(t) if t.id == 2 else t for t in todos]
 assert pending_count(updated) == 2, "multiple operations pending"
 assert is_done(updated[1]), "multiple operations done"
 
-# ========== V2 TESTS (must also pass after modification) ==========
-
+# V2 Tests
 assert complete(create(1, "A")) == Todo(id=1, title="A", status=Status.Done), "complete pending succeeds"
 
 try:

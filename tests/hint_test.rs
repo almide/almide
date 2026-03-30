@@ -4,7 +4,7 @@ use almide::parser::hints::*;
 // ---- Helpers ----
 
 fn tok(tt: TokenType, value: &str) -> Token {
-    Token { token_type: tt, value: value.to_string(), line: 1, col: 1 }
+    Token { token_type: tt, value: value.to_string(), line: 1, col: 1, end_col: 1 + value.len() }
 }
 
 fn assert_hint_match(ctx: &HintContext, expected_substr: &str) {

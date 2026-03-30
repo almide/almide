@@ -91,6 +91,9 @@ impl Diagnostic {
         self.file = Some(file.to_string());
         self.line = Some(span.line);
         self.col = Some(span.col);
+        if span.end_col > span.col {
+            self.end_col = Some(span.end_col);
+        }
         self
     }
 

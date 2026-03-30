@@ -639,8 +639,68 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(scratch);
             }
 
+            // ── Range → materialize as List[Int] ──
+            // In Almide, 0..n has type List[Int]. For-in optimizes this to a loop counter,
+            // but anywhere else a Range appears as a value, it must produce a list pointer.
+            IrExprKind::Range { start, end, inclusive } => {
+                let s = self.scratch.alloc_i64();
+                let e = self.scratch.alloc_i64();
+                let len = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                self.emit_expr(start);
+                wasm!(self.func, { local_set(s); });
+                self.emit_expr(end);
+                wasm!(self.func, { local_set(e); });
+                // len = max(0, end - start [+ 1 if inclusive])
+                wasm!(self.func, {
+                    local_get(e); local_get(s); i64_sub;
+                });
+                if *inclusive {
+                    wasm!(self.func, { i64_const(1); i64_add; });
+                }
+                wasm!(self.func, {
+                    i64_const(0); i64_gt_s;
+                    if_i32;
+                      local_get(e); local_get(s); i64_sub;
+                });
+                if *inclusive {
+                    wasm!(self.func, { i64_const(1); i64_add; });
+                }
+                wasm!(self.func, {
+                      i32_wrap_i64;
+                    else_;
+                      i32_const(0);
+                    end;
+                    local_set(len);
+                    // alloc: 4 + len * 8
+                    i32_const(4); local_get(len); i32_const(8); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    local_get(dst); local_get(len); i32_store(0);
+                    // fill elements
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      local_get(dst); i32_const(4); i32_add;
+                      local_get(i); i32_const(8); i32_mul; i32_add;
+                      // value = start + i
+                      local_get(s); local_get(i); i64_extend_i32_u; i64_add;
+                      i64_store(0);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(dst);
+                });
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(dst);
+                self.scratch.free_i32(len);
+                self.scratch.free_i64(e);
+                self.scratch.free_i64(s);
+            }
+
             // ── Codegen-specific nodes (pass-through or ignore) ──
-            IrExprKind::Clone { expr: inner } | IrExprKind::Deref { expr: inner } => {
+            IrExprKind::Clone { expr: inner } | IrExprKind::Deref { expr: inner }
+            | IrExprKind::ToVec { expr: inner } => {
                 self.emit_expr(inner);
             }
 

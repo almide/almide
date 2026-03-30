@@ -107,18 +107,18 @@ def filter_by_prefix(pairs: list[list[str]], prefix: str) -> list[list[str]]:
 
 
 def validate_keys(pairs: list[list[str]], required: list[str]) -> None:
-    """Validate that all required keys are present in pairs.
-    Raises ValueError("missing required key: KEY") for the first missing key.
-    Returns None if all required keys are present.
+    """Checks that all keys in `required` are present in `pairs`.
+    If a key is missing, raise ValueError("missing required key: KEY") for the first missing key.
+    If all required keys are present, return None.
     """
-    pairs_keys = {pair[0] for pair in pairs}
+    pair_keys = {pair[0] for pair in pairs}
     for key in required:
-        if key not in pairs_keys:
+        if key not in pair_keys:
             raise ValueError(f"missing required key: {key}")
 
 
 def load_and_validate(path: str, required: list[str]) -> list[list[str]]:
-    """Load a config file and validate that all required keys are present.
+    """Loads a config file and validates that all required keys are present.
     File read errors and parse errors propagate as usual.
     If validation fails, raise the validation error.
     If everything succeeds, return the parsed pairs.
@@ -260,7 +260,7 @@ except Exception:
     pass
 assert not os.path.exists(out), "merge and save error should not create output"
 
-# ========== V2 TESTS (must also pass after modification) ==========
+# ========== V2 TESTS ==========
 
 assert validate_keys([["host", "localhost"], ["port", "8080"]], ["host", "port"]) is None, "validate keys all present"
 

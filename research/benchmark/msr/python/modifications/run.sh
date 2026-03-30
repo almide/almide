@@ -112,7 +112,13 @@ mkdir -p "$RESULTS_DIR"
 DATE=$(date +%Y-%m-%d)
 RESULTS="${RESULTS%,}"
 
-cat > "$RESULTS_DIR/${MODEL}_${DATE}.json" <<ENDJSON
+# Find next run number for today
+RUN=1
+while [ -f "$RESULTS_DIR/${MODEL}_${DATE}_run${RUN}.json" ]; do
+  RUN=$((RUN + 1))
+done
+
+cat > "$RESULTS_DIR/${MODEL}_${DATE}_run${RUN}.json" <<ENDJSON
 {
   "date": "$DATE",
   "language": "python",
@@ -127,5 +133,5 @@ cat > "$RESULTS_DIR/${MODEL}_${DATE}.json" <<ENDJSON
 ENDJSON
 
 echo ""
-echo "Results saved: $RESULTS_DIR/${MODEL}_${DATE}.json"
+echo "Results saved: $RESULTS_DIR/${MODEL}_${DATE}_run${RUN}.json"
 echo "Solutions:     $OUTPUT_DIR/"

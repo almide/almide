@@ -63,6 +63,7 @@ pub struct Token {
     pub value: std::string::String,
     pub line: usize,
     pub col: usize,
+    pub end_col: usize,
 }
 
 // ── Lexer ───────────────────────────────────────────────────────
@@ -96,7 +97,7 @@ impl Lexer {
 
             // Newline
             if ch == '\n' {
-                tokens.push(Token { token_type: TokenType::Newline, value: String::new(), line, col });
+                tokens.push(Token { token_type: TokenType::Newline, value: String::new(), line, col, end_col: col + 1 });
                 pos += 1; line += 1; col = 1;
                 continue;
             }
@@ -163,7 +164,7 @@ impl Lexer {
             pos += len; col += len;
         }
 
-        tokens.push(Token { token_type: TokenType::EOF, value: String::new(), line, col });
+        tokens.push(Token { token_type: TokenType::EOF, value: String::new(), line, col, end_col: col });
         tokens
     }
 }
@@ -174,7 +175,8 @@ fn lex_line_comment(chars: &[char], start: usize, line: usize, col: usize) -> (T
     let mut pos = start;
     while pos < chars.len() && chars[pos] != '\n' { pos += 1; }
     let text: String = chars[start..pos].iter().collect();
-    (Token { token_type: TokenType::Comment, value: text, line, col }, pos)
+    let end_col = col + (pos - start);
+    (Token { token_type: TokenType::Comment, value: text, line, col, end_col }, pos)
 }
 
 // ── Block comment skipping ──────────────────────────────────────
@@ -219,7 +221,7 @@ fn lex_raw_string(chars: &[char], start: usize, line: usize, col: usize) -> (Tok
         }
         let value: String = chars[content_start..pos].iter().collect();
         if pos + 2 < chars.len() { pos += 3; cl += 3; } // skip closing """
-        let tok = Token { token_type: TokenType::String, value, line, col };
+        let tok = Token { token_type: TokenType::String, value, line, col, end_col: cl };
         (tok, pos, ln, cl)
     } else {
         // Single-quote r"..."
@@ -231,7 +233,7 @@ fn lex_raw_string(chars: &[char], start: usize, line: usize, col: usize) -> (Tok
         }
         let value: String = chars[content_start..pos].iter().collect();
         if pos < chars.len() { pos += 1; cl += 1; } // skip closing "
-        let tok = Token { token_type: TokenType::String, value, line, col };
+        let tok = Token { token_type: TokenType::String, value, line, col, end_col: cl };
         (tok, pos, ln, cl)
     }
 }
@@ -255,7 +257,8 @@ fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
 
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
     let len = pos - start;
-    (Token { token_type: tt, value, line, col }, pos, line, col + len)
+    let end_col = col + len;
+    (Token { token_type: tt, value, line, col, end_col }, pos, line, end_col)
 }
 
 /// Single-quote string: `'...'` — no interpolation.
@@ -283,7 +286,8 @@ fn lex_single_quote_string(chars: &[char], start: usize, line: usize, col: usize
     if pos < chars.len() { pos += 1; } // skip closing '
 
     let len = pos - start;
-    (Token { token_type: TokenType::String, value, line, col }, pos, line, col + len)
+    let end_col = col + len;
+    (Token { token_type: TokenType::String, value, line, col, end_col }, pos, line, end_col)
 }
 
 fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
@@ -310,7 +314,7 @@ fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token,
 
     let value = strip_heredoc_indent(&raw);
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
-    (Token { token_type: tt, value, line, col }, pos, cur_line, cur_col)
+    (Token { token_type: tt, value, line, col, end_col: cur_col }, pos, cur_line, cur_col)
 }
 
 /// Process one character (or escape / interpolation) inside a string body.
@@ -399,7 +403,8 @@ fn lex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
         pos += 2;
         while pos < chars.len() && (chars[pos].is_ascii_hexdigit() || chars[pos] == '_') { pos += 1; }
         let raw: String = chars[start..pos].iter().collect();
-        return (Token { token_type: TokenType::Int, value: raw, line, col }, pos);
+        let end_col = col + (pos - start);
+        return (Token { token_type: TokenType::Int, value: raw, line, col, end_col }, pos);
     }
 
     while pos < chars.len() && (chars[pos].is_ascii_digit() || chars[pos] == '_') { pos += 1; }
@@ -420,7 +425,8 @@ fn lex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
 
     let raw: String = chars[start..pos].iter().collect();
     let tt = if is_float { TokenType::Float } else { TokenType::Int };
-    (Token { token_type: tt, value: raw, line, col }, pos)
+    let end_col = col + (pos - start);
+    (Token { token_type: tt, value: raw, line, col, end_col }, pos)
 }
 
 // ── Identifier / keyword lexing ─────────────────────────────────
@@ -443,7 +449,8 @@ fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, u
         else { TokenType::Ident }
     });
 
-    (Token { token_type, value, line, col }, pos)
+    let end_col = col + (pos - start);
+    (Token { token_type, value, line, col, end_col }, pos)
 }
 
 fn keyword(s: &str) -> Option<TokenType> {
@@ -526,7 +533,7 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
         _ => (TokenType::EOF, "", 1), // skip unknown char
     };
 
-    (Token { token_type: tt, value: val.to_string(), line, col }, len)
+    (Token { token_type: tt, value: val.to_string(), line, col, end_col: col + len }, len)
 }
 
 fn peek(chars: &[char], pos: usize) -> Option<char> {

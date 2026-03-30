@@ -1,4 +1,5 @@
 from __future__ import annotations
+# ========== V1 SOLUTION (working code — all tests pass) ==========
 
 
 def respond(input: str) -> str:
@@ -52,7 +53,8 @@ assert respond("Okay if like my  spacebar  quite a bit?   ") == "Sure.", "ending
 assert respond("\n\r \t") == "Fine. Be that way!", "other whitespace"
 assert respond("This is a statement ending with whitespace      ") == "Whatever.", "non-question ending with ws"
 
-# V2 Tests
+# ========== V2 TESTS (must also pass after modification) ==========
+
 assert respond("hello there") == "Could you speak up? I can't hear you.", "whispering"
 assert respond("do you hear me?") == "Are you whispering? Speak up!", "whispering question"
 assert respond("hello 123") == "Could you speak up? I can't hear you.", "whispering with numbers"

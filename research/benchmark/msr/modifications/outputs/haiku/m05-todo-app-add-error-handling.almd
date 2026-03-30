@@ -7,16 +7,16 @@ fn create(id: Int, title: String) -> Todo =
 
 fn complete(t: Todo) -> Result[Todo, String] =
   match t.status {
+    Pending => ok({ ...t, status: Done }),
     Done => err("already done"),
     Cancelled => err("cannot complete cancelled"),
-    Pending => ok({ ...t, status: Done }),
   }
 
 fn cancel(t: Todo) -> Result[Todo, String] =
   match t.status {
+    Pending => ok({ ...t, status: Cancelled }),
     Cancelled => err("already cancelled"),
     Done => err("cannot cancel done"),
-    Pending => ok({ ...t, status: Cancelled }),
   }
 
 fn is_done(t: Todo) -> Bool = match t.status { Done => true, _ => false }
@@ -41,11 +41,13 @@ test "create todo" {
 }
 
 test "complete todo" {
-  assert_eq(complete(create(1, "Buy milk")), ok(Todo { id: 1, title: "Buy milk", status: Done }))
+  let t = create(1, "Buy milk")
+  assert_eq(complete(t), ok(Todo { id: 1, title: "Buy milk", status: Done }))
 }
 
 test "cancel todo" {
-  assert_eq(cancel(create(1, "Buy milk")), ok(Todo { id: 1, title: "Buy milk", status: Cancelled }))
+  let t = create(1, "Buy milk")
+  assert_eq(cancel(t), ok(Todo { id: 1, title: "Buy milk", status: Cancelled }))
 }
 
 test "pending count" {
@@ -61,8 +63,8 @@ test "titles" {
 test "find by title found" {
   let todos = [create(1, "Buy milk"), create(2, "Walk dog")]
   match find_by_title(todos, "Walk dog") {
-    some(t) => assert_eq(t.id, 2),
-    none => assert(false),
+    some(t) => assert_eq(t.id, 2)
+    none => assert(false)
   }
 }
 

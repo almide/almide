@@ -123,7 +123,7 @@ fn filter_by_prefix(pairs: List[List[String]], prefix: String) -> List[List[Stri
 }
 
 fn validate_keys(pairs: List[List[String]], required: List[String]) -> Result[Unit, String] = {
-  let pair_keys = list.map(pairs, (pair) => match list.get(pair, 0) { some(v) => v, none => "" });
+  let pair_keys = list.map(pairs, (p) => match list.get(p, 0) { some(v) => v, none => "" });
   match list.find(required, (key) => not list.contains(pair_keys, key)) {
     some(missing_key) => err("missing required key: ${missing_key}"),
     none => ok(())

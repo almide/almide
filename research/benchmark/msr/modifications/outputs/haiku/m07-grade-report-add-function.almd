@@ -1,8 +1,6 @@
 import string
 import list
 
-type StudentAvg = { name: String, avg: Int }
-
 fn str_to_int(s: String) -> Result[Int, String] = {
   let bytes = string.to_bytes(s)
   let len = list.len(bytes)
@@ -245,51 +243,44 @@ fn generate_report(input: String) -> Result[String, String] = {
   }
 }
 
-fn insert_sorted_student_avg(sorted: List[StudentAvg], pair: StudentAvg) -> List[StudentAvg] = {
-  match list.get(sorted, 0) {
-    none => [pair],
-    some(first) => {
-      let rest = list.drop(sorted, 1)
-      
-      if pair.avg > first.avg then
-        [pair] + sorted
-      else if pair.avg == first.avg and pair.name < first.name then
-        [pair] + sorted
-      else
-        [first] + insert_sorted_student_avg(rest, pair)
-    },
-  }
-}
-
 fn top_students(input: String, n: Int) -> Result[List[String], String] = {
   match parse_all(input) {
     err(e) => err(e),
     ok(students) => {
-      let with_avgs_result = list.fold(students, ok([]), (acc, student) => {
+      let result = list.fold(students, ok([]), (acc, student) => {
         match acc {
           err(e) => err(e),
-          ok(pairs) => {
+          ok(sorted_list) => {
             match average(student) {
               err(e) => err(e),
               ok(avg) => {
                 let name = match list.get(student, 0) { some(v) => v, none => "" }
-                ok(pairs + [{ name: name, avg: avg }])
+                let insert_position = match list.find_index(sorted_list, (existing) => {
+                  let existing_name = match list.get(existing, 0) { some(v) => v, none => "" }
+                  let existing_avg_str = match list.get(existing, 1) { some(v) => v, none => "0" }
+                  match str_to_int(existing_avg_str) {
+                    err(_) => false,
+                    ok(existing_avg) => {
+                      avg > existing_avg or (avg == existing_avg and name < existing_name)
+                    },
+                  }
+                }) {
+                  some(idx) => idx,
+                  none => list.len(sorted_list),
+                }
+                ok(list.insert(sorted_list, insert_position, [name, int.to_string(avg)]))
               },
             }
           },
         }
       })
-      
-      match with_avgs_result {
+      match result {
         err(e) => err(e),
-        ok(pairs) => {
-          let sorted_pairs = list.fold(pairs, [], (sorted, pair) => {
-            insert_sorted_student_avg(sorted, pair)
+        ok(sorted_list) => {
+          let top = list.take(sorted_list, n)
+          let names = list.map(top, (pair) => {
+            match list.get(pair, 0) { some(v) => v, none => "" }
           })
-          
-          let top_n_pairs = list.take(sorted_pairs, n)
-          let names = list.map(top_n_pairs, (pair) => pair.name)
-          
           ok(names)
         },
       }

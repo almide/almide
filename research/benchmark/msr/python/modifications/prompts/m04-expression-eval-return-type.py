@@ -23,12 +23,7 @@ class Sub:
     left: 'Expr'
     right: 'Expr'
 
-@dataclass
-class Div:
-    left: 'Expr'
-    right: 'Expr'
-
-# Expr is one of: Lit, Add, Mul, Sub, Div
+# Expr is one of: Lit, Add, Mul, Sub
 
 
 def eval_expr(e: Expr) -> int:
@@ -36,7 +31,6 @@ def eval_expr(e: Expr) -> int:
     elif isinstance(e, Add): return eval_expr(e.left) + eval_expr(e.right)
     elif isinstance(e, Mul): return eval_expr(e.left) * eval_expr(e.right)
     elif isinstance(e, Sub): return eval_expr(e.left) - eval_expr(e.right)
-    elif isinstance(e, Div): return eval_expr(e.left) // eval_expr(e.right)
 
 
 def to_string(e: Expr) -> str:
@@ -44,7 +38,6 @@ def to_string(e: Expr) -> str:
     elif isinstance(e, Add): return f"({to_string(e.left)} + {to_string(e.right)})"
     elif isinstance(e, Mul): return f"({to_string(e.left)} * {to_string(e.right)})"
     elif isinstance(e, Sub): return f"({to_string(e.left)} - {to_string(e.right)})"
-    elif isinstance(e, Div): return f"({to_string(e.left)} / {to_string(e.right)})"
 
 
 # Tests
@@ -61,10 +54,22 @@ assert eval_expr(Add(Mul(Lit(2), Lit(3)), Sub(Lit(10), Lit(1)))) == 15, "eval ma
 assert eval_expr(Sub(Mul(Add(Lit(1), Lit(2)), Lit(5)), Add(Lit(3), Lit(4)))) == 8, "deeply nested"
 assert eval_expr(Sub(Lit(0), Lit(5))) == -5, "single negative via sub"
 
+# ========== MODIFICATION INSTRUCTION ==========
+# Add a `Div` dataclass to represent integer division.
+# Change `eval_expr` to return a tuple `(bool, value)` instead of plain int:
+#   - Success: `(True, int_value)`
+#   - Error: `(False, error_string)`
+# Division by zero returns `(False, "division by zero")`.
+# Errors must propagate: if a sub-expression fails, the parent returns the error.
+# Update `to_string` to handle `Div`: `to_string(Div(a, b))` produces `"(a / b)"`.
+#
+# UPDATE EXISTING TESTS: All `assert eval_expr(...) == N` must become
+# `assert eval_expr(...) == (True, N)` because eval_expr now returns a tuple.
+
 # ========== V2 TESTS (must also pass after modification) ==========
 
-assert eval_expr(Div(Lit(10), Lit(3))) == 3, "eval div"
-assert eval_expr(Div(Lit(10), Lit(2))) == 5, "eval div exact"
+assert eval_expr(Div(Lit(10), Lit(3))) == (True, 3), "eval div"
+assert eval_expr(Div(Lit(5), Lit(0))) == (False, "division by zero"), "eval div by zero"
 assert to_string(Div(Lit(10), Lit(3))) == "(10 / 3)", "to_string div"
-assert eval_expr(Add(Lit(1), Div(Lit(10), Lit(3)))) == 4, "nested with div"
-assert eval_expr(Mul(Div(Lit(20), Lit(4)), Sub(Lit(10), Lit(7)))) == 15, "div in complex expr"
+assert eval_expr(Add(Lit(1), Div(Lit(10), Lit(2)))) == (True, 6), "nested div"
+assert eval_expr(Add(Lit(1), Div(Lit(5), Lit(0)))) == (False, "division by zero"), "div by zero propagates"

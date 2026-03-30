@@ -23,6 +23,8 @@ impl ExprIdGen {
 pub struct Span {
     pub line: usize,
     pub col: usize,
+    #[serde(default)]
+    pub end_col: usize,
 }
 
 /// Simplified type tag resolved by the checker.
