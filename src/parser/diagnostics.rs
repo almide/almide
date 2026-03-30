@@ -41,6 +41,9 @@ impl Parser {
         }
         d.line = Some(tok.line);
         d.col = Some(tok.col);
+        if tok.end_col > tok.col {
+            d.end_col = Some(tok.end_col);
+        }
         d
     }
 

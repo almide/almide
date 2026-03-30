@@ -174,6 +174,9 @@ impl Checker {
                 }
                 diag.line = Some(span.line);
                 diag.col = Some(span.col);
+                if span.end_col > span.col {
+                    diag.end_col = Some(span.end_col);
+                }
             }
         }
         self.diagnostics.push(diag);

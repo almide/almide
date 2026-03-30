@@ -145,7 +145,7 @@ fn diagnostic_secondary_in_source() {
 
 #[test]
 fn diagnostic_at_span() {
-    let span = almide::ast::Span { line: 10, col: 3 };
+    let span = almide::ast::Span { line: 10, col: 3, end_col: 8 };
     let d = Diagnostic::error("err", "hint", "ctx")
         .at_span("file.almd", span);
     assert_eq!(d.file, Some("file.almd".into()));

@@ -20,7 +20,7 @@ fn var_table_alloc_and_get() {
 fn var_table_multiple_vars() {
     let mut vt = VarTable::new();
     let id0 = vt.alloc("a".into(), Ty::Int, Mutability::Let, None);
-    let id1 = vt.alloc("b".into(), Ty::String, Mutability::Var, Some(Span { line: 5, col: 3 }));
+    let id1 = vt.alloc("b".into(), Ty::String, Mutability::Var, Some(Span { line: 5, col: 3, end_col: 4 }));
     let id2 = vt.alloc("c".into(), Ty::Bool, Mutability::Let, None);
     assert_eq!(id0, VarId(0));
     assert_eq!(id1, VarId(1));
@@ -96,7 +96,7 @@ fn ir_expr_lit_int() {
     let expr = IrExpr {
         kind: IrExprKind::LitInt { value: 42 },
         ty: Ty::Int,
-        span: Some(Span { line: 1, col: 1 }),
+        span: Some(Span { line: 1, col: 1, end_col: 2 }),
     };
     assert_eq!(expr.ty, Ty::Int);
     assert!(matches!(expr.kind, IrExprKind::LitInt { value: 42 }));
@@ -538,7 +538,7 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
 #[test]
 fn unused_var_warning_basic() {
     let mut prog = make_program_with_vars(vec![
-        ("x", Some(Span { line: 3, col: 7 }), false),
+        ("x", Some(Span { line: 3, col: 7, end_col: 8 }), false),
     ]);
     compute_use_counts(&mut prog);
     let warnings = collect_unused_var_warnings(&prog, "test.almd");
@@ -550,7 +550,7 @@ fn unused_var_warning_basic() {
 #[test]
 fn unused_var_warning_underscore_suppressed() {
     let mut prog = make_program_with_vars(vec![
-        ("_x", Some(Span { line: 3, col: 7 }), false),
+        ("_x", Some(Span { line: 3, col: 7, end_col: 8 }), false),
     ]);
     compute_use_counts(&mut prog);
     let warnings = collect_unused_var_warnings(&prog, "test.almd");
@@ -560,7 +560,7 @@ fn unused_var_warning_underscore_suppressed() {
 #[test]
 fn unused_var_warning_used_var_no_warning() {
     let mut var_table = VarTable::new();
-    let x_id = var_table.alloc("x".into(), Ty::Int, Mutability::Let, Some(Span { line: 2, col: 7 }));
+    let x_id = var_table.alloc("x".into(), Ty::Int, Mutability::Let, Some(Span { line: 2, col: 7, end_col: 8 }));
 
     let bind_stmt = IrStmt {
         kind: IrStmtKind::Bind {
@@ -569,7 +569,7 @@ fn unused_var_warning_used_var_no_warning() {
             ty: Ty::Int,
             value: IrExpr { kind: IrExprKind::LitInt { value: 42 }, ty: Ty::Int, span: None },
         },
-        span: Some(Span { line: 2, col: 7 }),
+        span: Some(Span { line: 2, col: 7, end_col: 8 }),
     };
     let use_expr = IrExpr {
         kind: IrExprKind::Var { id: x_id },
@@ -615,7 +615,7 @@ fn unused_var_warning_used_var_no_warning() {
 #[test]
 fn unused_var_warning_param_excluded() {
     let mut prog = make_program_with_vars(vec![
-        ("arg", Some(Span { line: 1, col: 10 }), true),
+        ("arg", Some(Span { line: 1, col: 10, end_col: 11 }), true),
     ]);
     compute_use_counts(&mut prog);
     let warnings = collect_unused_var_warnings(&prog, "test.almd");
@@ -635,10 +635,10 @@ fn unused_var_warning_no_span_excluded() {
 #[test]
 fn unused_var_warning_multiple() {
     let mut prog = make_program_with_vars(vec![
-        ("a", Some(Span { line: 2, col: 7 }), false),
-        ("_b", Some(Span { line: 3, col: 7 }), false),
-        ("c", Some(Span { line: 4, col: 7 }), false),
-        ("param", Some(Span { line: 1, col: 10 }), true),
+        ("a", Some(Span { line: 2, col: 7, end_col: 8 }), false),
+        ("_b", Some(Span { line: 3, col: 7, end_col: 8 }), false),
+        ("c", Some(Span { line: 4, col: 7, end_col: 8 }), false),
+        ("param", Some(Span { line: 1, col: 10, end_col: 11 }), true),
     ]);
     compute_use_counts(&mut prog);
     let warnings = collect_unused_var_warnings(&prog, "test.almd");

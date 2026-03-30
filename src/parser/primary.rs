@@ -6,7 +6,7 @@ use super::Parser;
 impl Parser {
     pub(crate) fn parse_primary(&mut self) -> Result<Expr, String> {
         let tok = self.current().clone();
-        let span = Some(Span { line: tok.line, col: tok.col });
+        let span = Some(Span { line: tok.line, col: tok.col, end_col: tok.end_col });
 
         if self.check(TokenType::Int) {
             self.advance();
@@ -183,7 +183,7 @@ impl Parser {
 
     fn parse_type_name_expr(&mut self) -> Result<Expr, String> {
         let tok = self.current().clone();
-        let span = Some(Span { line: tok.line, col: tok.col });
+        let span = Some(Span { line: tok.line, col: tok.col, end_col: tok.end_col });
         let name = sym(&tok.value);
         self.advance();
 

@@ -8,7 +8,7 @@ use super::Parser;
 impl Parser {
     pub(crate) fn current_span(&self) -> Span {
         let tok = self.current();
-        Span { line: tok.line, col: tok.col }
+        Span { line: tok.line, col: tok.col, end_col: tok.end_col }
     }
 
     pub(crate) fn current(&self) -> &Token {
@@ -22,6 +22,7 @@ impl Parser {
                 value: String::new(),
                 line: 0,
                 col: 0,
+                end_col: 0,
             };
             &EOF_TOKEN
         }
