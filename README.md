@@ -54,13 +54,6 @@ cp target/release/almide ~/.local/bin/
 sudo cp target/release/almide /usr/local/bin/
 ```
 
-Verify the installation:
-
-```bash
-almide --version
-# almide 0.9.5
-```
-
 ### Hello World
 
 ```almd
