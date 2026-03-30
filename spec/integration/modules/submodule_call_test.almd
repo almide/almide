@@ -2,8 +2,8 @@
 // Verify that submodules must be explicitly imported to use.
 
 import dmod_d
-import dmod_d.utils as utils
-import dmod_d.nested.deep as deep
+import dmod_d.utils
+import dmod_d.nested.deep
 import dmod_b
 
 // ── Direct package function ──
