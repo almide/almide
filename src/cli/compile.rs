@@ -123,7 +123,6 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
     for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
         checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
     }
-    checker.install_import_table(&program);
     let diagnostics = checker.check_program(&mut program);
     let errors: Vec<_> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Error)

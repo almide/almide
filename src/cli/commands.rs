@@ -223,7 +223,6 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
         }
-        checker.install_import_table(&program);
         let diagnostics = checker.check_program(&mut program);
         if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
             eprintln!("SKIP {} (type errors)", test_file);
@@ -429,7 +428,6 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
         }
-        checker.install_import_table(&program);
         let diagnostics = checker.check_program(&mut program);
         if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
             eprintln!("SKIP {} (type errors)", test_file);

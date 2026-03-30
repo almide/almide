@@ -29,7 +29,6 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
         }
-        checker.install_import_table(&program);
         let diagnostics = checker.check_program(&mut program);
         let errors: Vec<_> = diagnostics.iter()
             .filter(|d| d.level == diagnostic::Level::Error)

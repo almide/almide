@@ -226,7 +226,7 @@ impl Checker {
 
     /// Build and install an ImportTable for the main program.
     /// Called by CLI pipelines before check_program.
-    pub fn install_import_table(&mut self, program: &ast::Program) {
+    fn install_import_table(&mut self, program: &ast::Program) {
         let self_name = self.env.self_module_name.map(|s| s.to_string());
         let (table, diags) = build_import_table(program, self_name.as_deref(), &self.env.user_modules);
         self.env.import_table = table;
@@ -234,6 +234,7 @@ impl Checker {
     }
 
     pub fn check_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
+        self.install_import_table(program);
         self.register_decls(&program.decls, None);
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
