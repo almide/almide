@@ -1,4 +1,5 @@
 // Coverage tests for various uncovered stdlib functions
+import json
 
 test "value.as_string" {
   let v = value.str("hello")
@@ -24,7 +25,30 @@ test "value.as_bool" {
   assert(r)
 }
 
-// TODO: value.as_array traps in WASM — needs implementation
+test "value.as_array" {
+  let v = value.array([value.int(1), value.int(2)])
+  let r = value.as_array(v)!
+  assert_eq(list.len(r), 2)
+}
+
+test "value.get" {
+  let v = json.parse("{\"key\": \"val\"}")!
+  let r = value.get(v, "key")
+  assert(result.is_ok(r))
+}
+
+test "map.filter" {
+  let m = map.from_list([("a", 1), ("b", 2), ("c", 3)])
+  let filtered = map.filter(m, (k, v) => v > 1)
+  assert_eq(map.len(filtered), 2)
+}
+
+test "map.map" {
+  let m = map.from_list([("a", 1), ("b", 2)])
+  let mapped = map.map(m, (v) => v * 10)
+  assert_eq(map.get(mapped, "a") ?? 0, 10)
+  assert_eq(map.get(mapped, "b") ?? 0, 20)
+}
 
 test "option.or_else" {
   let a: Option[Int] = none
