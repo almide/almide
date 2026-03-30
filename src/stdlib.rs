@@ -17,6 +17,36 @@ pub fn is_stdlib_module(name: &str) -> bool {
     STDLIB_MODULES.contains(&name)
 }
 
+/// Short description of a stdlib module (for error hints).
+pub fn module_description(name: &str) -> &'static str {
+    match name {
+        "string" => "string manipulation",
+        "list" => "list operations",
+        "int" => "integer utilities",
+        "float" => "floating-point utilities",
+        "bytes" => "byte buffer operations",
+        "matrix" => "matrix operations",
+        "fs" => "file system operations",
+        "env" => "environment variables",
+        "map" => "hash map operations",
+        "json" => "JSON parsing and querying",
+        "http" => "HTTP client",
+        "process" => "process execution",
+        "math" => "mathematical functions",
+        "random" => "random number generation",
+        "regex" => "regular expressions",
+        "io" => "input/output",
+        "result" => "Result type utilities",
+        "option" => "Option type utilities",
+        "error" => "error handling",
+        "datetime" => "date and time operations",
+        "testing" => "test assertion utilities",
+        "value" => "dynamic value operations",
+        "set" => "hash set operations",
+        _ => "standard library module",
+    }
+}
+
 /// Bundled stdlib packages written in Almide (.almd files embedded in the compiler binary).
 /// These are loaded as user modules — no hardcoded type signatures or codegen needed.
 pub fn get_bundled_source(name: &str) -> Option<&'static str> {

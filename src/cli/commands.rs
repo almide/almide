@@ -586,7 +586,12 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
 
 pub fn cmd_fmt(files: &[String], write_back: bool) {
     for file in files {
-        let (program, _, _) = parse_file(file);
+        let (mut program, _, _) = parse_file(file);
+        // Auto-manage imports: add missing, remove unused
+        let import_changes = fmt::auto_imports(&mut program);
+        for msg in &import_changes {
+            eprintln!("{}: {}", file, msg);
+        }
         let formatted = fmt::format_program(&program);
         if write_back {
             std::fs::write(file, &formatted)

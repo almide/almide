@@ -47,7 +47,13 @@ impl Checker {
                     }
                 }
                 else {
-                    self.emit(super::err(format!("undefined variable '{}'", name), "Check the variable name", format!("variable {}", name)).with_code("E003"));
+                    let hint = if crate::stdlib::is_any_stdlib(name) {
+                        let desc = crate::stdlib::module_description(name);
+                        format!("Add `import {}` (stdlib: {})\nOr run `almide fmt` to auto-add missing imports", name, desc)
+                    } else {
+                        "Check the variable name".to_string()
+                    };
+                    self.emit(super::err(format!("undefined variable '{}'", name), hint, format!("variable {}", name)).with_code("E003"));
                     Ty::Unknown
                 }
             }
