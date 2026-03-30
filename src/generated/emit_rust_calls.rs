@@ -194,10 +194,6 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_list_drop_while(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
-            ("list", "each") => {
-                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                format!("almide_rt_list_each(&{}, |{}| {{{{ {}{} ; }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
-            },
             ("list", "enumerate") => format!("almide_rt_list_enumerate(({}).to_vec())", args_str[0]),
             ("list", "filter") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
@@ -295,14 +291,6 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(2, 2);
                 format!("almide_rt_list_zip_with(({}).to_vec(), ({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
             },
-            ("log", "debug") => format!("almide_rt_log_debug(&*{})", args_str[0]),
-            ("log", "debug_with") => format!("almide_rt_log_debug_with(&*{}, &{})", args_str[0], args_str[1]),
-            ("log", "error") => format!("almide_rt_log_error(&*{})", args_str[0]),
-            ("log", "error_with") => format!("almide_rt_log_error_with(&*{}, &{})", args_str[0], args_str[1]),
-            ("log", "info") => format!("almide_rt_log_info(&*{})", args_str[0]),
-            ("log", "info_with") => format!("almide_rt_log_info_with(&*{}, &{})", args_str[0], args_str[1]),
-            ("log", "warn") => format!("almide_rt_log_warn(&*{})", args_str[0]),
-            ("log", "warn_with") => format!("almide_rt_log_warn_with(&*{}, &{})", args_str[0], args_str[1]),
             ("map", "all") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
                 format!("almide_rt_map_all(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
@@ -318,10 +306,6 @@ pub fn gen_generated_call(
                 format!("almide_rt_map_count(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
             },
             ("map", "delete") => format!("almide_rt_map_delete(&mut {}, &{})", args_str[0], args_str[1]),
-            ("map", "each") => {
-                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
-                format!("almide_rt_map_each(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
-            },
             ("map", "entries") => format!("almide_rt_map_entries(&{})", args_str[0]),
             ("map", "filter") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
@@ -471,10 +455,6 @@ pub fn gen_generated_call(
             },
             ("set", "contains") => format!("almide_rt_set_contains(&{}, &{})", args_str[0], args_str[1]),
             ("set", "difference") => format!("almide_rt_set_difference(&{}, &{})", args_str[0], args_str[1]),
-            ("set", "each") => {
-                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                format!("almide_rt_set_each(&{}, |{}| {{{{ {}{} ; }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
-            },
             ("set", "filter") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_set_filter(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)

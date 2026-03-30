@@ -1,0 +1,33 @@
+// Coverage tests for json accessor functions
+
+import json
+
+test "json.get_string" {
+  let v = json.parse("{\"name\": \"Alice\"}")!
+  assert_eq(json.get_string(v, "name"), some("Alice"))
+  assert_eq(json.get_string(v, "missing"), none)
+}
+
+test "json.get_int" {
+  let v = json.parse("{\"age\": 30}")!
+  assert_eq(json.get_int(v, "age"), some(30))
+  assert_eq(json.get_int(v, "missing"), none)
+}
+
+test "json.get_bool" {
+  let v = json.parse("{\"active\": true}")!
+  assert_eq(json.get_bool(v, "active"), some(true))
+  assert_eq(json.get_bool(v, "missing"), none)
+}
+
+test "json.get_float" {
+  let v = json.parse("{\"score\": 3.14}")!
+  let r = json.get_float(v, "score")
+  assert(r != none)
+}
+
+test "json.get_array" {
+  let v = json.parse("{\"items\": [1, 2, 3]}")!
+  let r = json.get_array(v, "items")
+  assert(r != none)
+}

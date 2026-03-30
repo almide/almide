@@ -1,0 +1,71 @@
+// Coverage tests for various uncovered stdlib functions
+import json
+
+test "value.as_string" {
+  let v = value.str("hello")
+  let r = value.as_string(v)!
+  assert_eq(r, "hello")
+}
+
+test "value.as_int" {
+  let v = value.int(42)
+  let r = value.as_int(v)!
+  assert_eq(r, 42)
+}
+
+test "value.as_float" {
+  let v = value.float(3.14)
+  let r = value.as_float(v)!
+  assert(r > 3.13)
+}
+
+test "value.as_bool" {
+  let v = value.bool(true)
+  let r = value.as_bool(v)!
+  assert(r)
+}
+
+test "value.as_array" {
+  let v = value.array([value.int(1), value.int(2)])
+  let r = value.as_array(v)!
+  assert_eq(list.len(r), 2)
+}
+
+test "value.get" {
+  let v = json.parse("{\"key\": \"val\"}")!
+  let r = value.get(v, "key")
+  assert(result.is_ok(r))
+}
+
+test "map.filter" {
+  let m = map.from_list([("a", 1), ("b", 2), ("c", 3)])
+  let filtered = map.filter(m, (k, v) => v > 1)
+  assert_eq(map.len(filtered), 2)
+}
+
+test "map.map" {
+  let m = map.from_list([("a", 1), ("b", 2)])
+  let mapped = map.map(m, (v) => v * 10)
+  assert_eq(map.get(mapped, "a") ?? 0, 10)
+  assert_eq(map.get(mapped, "b") ?? 0, 20)
+}
+
+test "option.or_else" {
+  let a: Option[Int] = none
+  let b = option.or_else(a, () => some(42))
+  assert_eq(b, some(42))
+
+  let c = some(10)
+  let d = option.or_else(c, () => some(42))
+  assert_eq(d, some(10))
+}
+
+test "option.unwrap_or_else" {
+  let a: Option[Int] = none
+  let b = option.unwrap_or_else(a, () => 99)
+  assert_eq(b, 99)
+
+  let c = some(10)
+  let d = option.unwrap_or_else(c, () => 99)
+  assert_eq(d, 10)
+}

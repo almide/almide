@@ -4,12 +4,7 @@ fn next(l: Light) -> Light =
   match l { Red => Green, Green => Yellow, Yellow => Red, Broken => Red }
 
 fn duration(l: Light) -> Result[Int, String] =
-  match l { 
-    Red => ok(60), 
-    Yellow => ok(5), 
-    Green => ok(45),
-    Broken => err("broken light has no duration")
-  }
+  match l { Red => ok(60), Yellow => ok(5), Green => ok(45), Broken => err("broken light has no duration") }
 
 fn describe(l: Light) -> String =
   match l { Red => "stop", Yellow => "caution", Green => "go", Broken => "out of order" }

@@ -564,9 +564,174 @@ impl FuncCompiler<'_> {
             }
             "group_by" => {
                 // group_by(xs, f) → Map[B, List[A]]
-                // Very complex (requires Map construction). Stub for now.
-                self.emit_stub_call(args);
-                return true;
+                // Two-phase: compute keys, then build map with linear scan
+                let elem_ty = self.resolve_list_elem(&args[0], args.get(1));
+                let key_ty = if let Ty::Fn { ret, .. } = &args[1].ty {
+                    (**ret).clone()
+                } else { Ty::String };
+                let es = values::byte_size(&elem_ty) as i32;
+                let ks = values::byte_size(&key_ty) as i32;
+                let entry_size = ks + 4; // key + list_ptr(i32)
+                let key_is_i64 = matches!(&key_ty, Ty::Int);
+
+                let xs = self.scratch.alloc_i32();
+                let closure = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let keys_arr = self.scratch.alloc_i32();
+                let map_ptr = self.scratch.alloc_i32();
+                let map_len = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let j = self.scratch.alloc_i32();
+                let found_idx = self.scratch.alloc_i32();
+                let old_list = self.scratch.alloc_i32();
+                let new_list = self.scratch.alloc_i32();
+                let old_len = self.scratch.alloc_i32();
+                let cur_key = if key_is_i64 { self.scratch.alloc_i64() } else { self.scratch.alloc_i32() };
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(xs); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(closure);
+                    local_get(xs); i32_load(0); local_set(len);
+                });
+
+                // Phase 1: Compute keys
+                wasm!(self.func, {
+                    local_get(len); i32_const(ks); i32_mul;
+                    call(self.emitter.rt.alloc); local_set(keys_arr);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      local_get(closure); i32_load(4);
+                      local_get(xs); i32_const(4); i32_add;
+                      local_get(i); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, { local_get(closure); i32_load(0); });
+                self.emit_closure_call(&elem_ty, &key_ty);
+                wasm!(self.func, { local_set(cur_key); });
+                wasm!(self.func, {
+                      local_get(keys_arr);
+                      local_get(i); i32_const(ks); i32_mul; i32_add;
+                      local_get(cur_key);
+                });
+                if key_is_i64 { wasm!(self.func, { i64_store(0); }); }
+                else { wasm!(self.func, { i32_store(0); }); }
+                wasm!(self.func, {
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                });
+
+                // Phase 2: Build map
+                wasm!(self.func, {
+                    i32_const(4); local_get(len); i32_const(entry_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(map_ptr);
+                    i32_const(0); local_set(map_len);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      local_get(keys_arr);
+                      local_get(i); i32_const(ks); i32_mul; i32_add;
+                });
+                if key_is_i64 { wasm!(self.func, { i64_load(0); local_set(cur_key); }); }
+                else { wasm!(self.func, { i32_load(0); local_set(cur_key); }); }
+                // Search map for cur_key → found_idx (-1 if not found)
+                wasm!(self.func, {
+                      i32_const(-1); local_set(found_idx);
+                      i32_const(0); local_set(j);
+                      block_empty; loop_empty;
+                        local_get(j); local_get(map_len); i32_ge_u; br_if(1);
+                        local_get(map_ptr); i32_const(4); i32_add;
+                        local_get(j); i32_const(entry_size); i32_mul; i32_add;
+                });
+                if key_is_i64 { wasm!(self.func, { i64_load(0); local_get(cur_key); i64_eq; }); }
+                else {
+                    wasm!(self.func, { i32_load(0); local_get(cur_key); });
+                    self.emit_key_eq(&key_ty);
+                }
+                wasm!(self.func, {
+                        if_empty; local_get(j); local_set(found_idx); end;
+                        local_get(j); i32_const(1); i32_add; local_set(j);
+                        br(0);
+                      end; end;
+                      local_get(found_idx); i32_const(-1); i32_ne;
+                      if_empty;
+                        // === Found: append element to existing list ===
+                        local_get(map_ptr); i32_const(4); i32_add;
+                        local_get(found_idx); i32_const(entry_size); i32_mul; i32_add;
+                        i32_const(ks); i32_add;
+                        i32_load(0);
+                        local_set(old_list);
+                        local_get(old_list); i32_load(0); local_set(old_len);
+                        i32_const(4);
+                        local_get(old_len); i32_const(1); i32_add;
+                        i32_const(es); i32_mul; i32_add;
+                        call(self.emitter.rt.alloc); local_set(new_list);
+                        local_get(new_list);
+                        local_get(old_len); i32_const(1); i32_add; i32_store(0);
+                        local_get(new_list); i32_const(4); i32_add;
+                        local_get(old_list); i32_const(4); i32_add;
+                        local_get(old_len); i32_const(es); i32_mul;
+                        memory_copy;
+                        local_get(new_list); i32_const(4); i32_add;
+                        local_get(old_len); i32_const(es); i32_mul; i32_add;
+                        local_get(xs); i32_const(4); i32_add;
+                        local_get(i); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                self.emit_store_at(&elem_ty, 0);
+                wasm!(self.func, {
+                        local_get(map_ptr); i32_const(4); i32_add;
+                        local_get(found_idx); i32_const(entry_size); i32_mul; i32_add;
+                        i32_const(ks); i32_add;
+                        local_get(new_list); i32_store(0);
+                      else_;
+                        // === Not found: create new entry ===
+                        i32_const(4); i32_const(es); i32_add;
+                        call(self.emitter.rt.alloc); local_set(new_list);
+                        local_get(new_list); i32_const(1); i32_store(0);
+                        local_get(new_list); i32_const(4); i32_add;
+                        local_get(xs); i32_const(4); i32_add;
+                        local_get(i); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                self.emit_store_at(&elem_ty, 0);
+                wasm!(self.func, {
+                        local_get(map_ptr); i32_const(4); i32_add;
+                        local_get(map_len); i32_const(entry_size); i32_mul; i32_add;
+                        local_get(cur_key);
+                });
+                if key_is_i64 { wasm!(self.func, { i64_store(0); }); }
+                else { wasm!(self.func, { i32_store(0); }); }
+                wasm!(self.func, {
+                        local_get(map_ptr); i32_const(4); i32_add;
+                        local_get(map_len); i32_const(entry_size); i32_mul; i32_add;
+                        i32_const(ks); i32_add;
+                        local_get(new_list); i32_store(0);
+                        local_get(map_len); i32_const(1); i32_add; local_set(map_len);
+                      end;
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(map_ptr); local_get(map_len); i32_store(0);
+                    local_get(map_ptr);
+                });
+
+                if key_is_i64 { self.scratch.free_i64(cur_key); } else { self.scratch.free_i32(cur_key); }
+                self.scratch.free_i32(old_len);
+                self.scratch.free_i32(new_list);
+                self.scratch.free_i32(old_list);
+                self.scratch.free_i32(found_idx);
+                self.scratch.free_i32(j);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(map_len);
+                self.scratch.free_i32(map_ptr);
+                self.scratch.free_i32(keys_arr);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(closure);
+                self.scratch.free_i32(xs);
             }
             "shuffle" => {
                 // shuffle(xs) → List[A]: delegate to random.shuffle implementation

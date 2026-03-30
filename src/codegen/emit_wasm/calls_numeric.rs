@@ -342,8 +342,54 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.int_from_hex); });
             }
             "rotate_right" | "rotate_left" => {
-                self.emit_stub_call(args);
-                return true;
+                // rotate_{left,right}(a, n, bits)
+                // mask = (1 << bits) - 1; v = a & mask
+                // rotate_left:  ((v << n) | (v >> (bits - n))) & mask
+                // rotate_right: ((v >> n) | (v << (bits - n))) & mask
+                let is_left = method == "rotate_left";
+                let a = self.scratch.alloc_i64();
+                let n = self.scratch.alloc_i64();
+                let bits = self.scratch.alloc_i64();
+                let mask = self.scratch.alloc_i64();
+                let v = self.scratch.alloc_i64();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(a); });
+                self.emit_expr(&args[1]);
+                // n = n % bits (needs bits first)
+                wasm!(self.func, { local_set(n); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, {
+                    local_set(bits);
+                    // mask = (1 << bits) - 1
+                    i64_const(1); local_get(bits); i64_shl; i64_const(1); i64_sub;
+                    local_set(mask);
+                    // v = a & mask
+                    local_get(a); local_get(mask); i64_and; local_set(v);
+                    // n = n % bits
+                    local_get(n); local_get(bits); i64_rem_s; local_set(n);
+                });
+                if is_left {
+                    wasm!(self.func, {
+                        // (v << n) | (v >> (bits - n))
+                        local_get(v); local_get(n); i64_shl;
+                        local_get(v); local_get(bits); local_get(n); i64_sub; i64_shr_u;
+                        i64_or;
+                        local_get(mask); i64_and;
+                    });
+                } else {
+                    wasm!(self.func, {
+                        // (v >> n) | (v << (bits - n))
+                        local_get(v); local_get(n); i64_shr_u;
+                        local_get(v); local_get(bits); local_get(n); i64_sub; i64_shl;
+                        i64_or;
+                        local_get(mask); i64_and;
+                    });
+                }
+                self.scratch.free_i64(v);
+                self.scratch.free_i64(mask);
+                self.scratch.free_i64(bits);
+                self.scratch.free_i64(n);
+                self.scratch.free_i64(a);
             }
             _ => return false,
         }
@@ -575,8 +621,52 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(k);
             }
             "log_gamma" => {
-                self.emit_stub_call(args);
-                return true;
+                // Lanczos approximation (g=7, n=9 coefficients)
+                // log_gamma(x) = 0.5*ln(2π) + (x+0.5)*ln(t) - t + ln(Ag(x))
+                // where t = x+g+0.5, Ag(x) = c0 + c1/(x+1) + ... + c8/(x+8)
+                let x = self.scratch.alloc_f64();
+                let t = self.scratch.alloc_f64();
+                let ag = self.scratch.alloc_f64();
+                self.emit_expr(&args[0]);
+                // Lanczos computes Γ(x+1), shift by -1 to get Γ(x)
+                wasm!(self.func, { f64_const(1.0); f64_sub; local_set(x); });
+                let coeffs: [f64; 9] = [
+                    0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+                    771.32342877765313, -176.61502916214059, 12.507343278686905,
+                    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
+                ];
+                wasm!(self.func, { f64_const(coeffs[0]); local_set(ag); });
+                for (i, &c) in coeffs[1..].iter().enumerate() {
+                    wasm!(self.func, {
+                        local_get(ag);
+                        f64_const(c);
+                        local_get(x); f64_const((i + 1) as f64); f64_add;
+                        f64_div;
+                        f64_add;
+                        local_set(ag);
+                    });
+                }
+                wasm!(self.func, {
+                    local_get(x); f64_const(7.5); f64_add; local_set(t);
+                });
+                // Reuse ag as final result: ag = ln(ag)
+                wasm!(self.func, {
+                    local_get(ag); call(self.emitter.rt.math_log); local_set(ag);
+                });
+                // result = 0.5*ln(2π) + (x+0.5)*ln(t) - t + ag
+                // Reuse t slot: compute ln(t) and store back
+                wasm!(self.func, {
+                    f64_const(0.9189385332046727);
+                    local_get(x); f64_const(0.5); f64_add;
+                    local_get(t); call(self.emitter.rt.math_log);
+                    f64_mul;
+                    f64_add;
+                    local_get(t); f64_sub;
+                    local_get(ag); f64_add;
+                });
+                self.scratch.free_f64(ag);
+                self.scratch.free_f64(t);
+                self.scratch.free_f64(x);
             }
             _ => return false,
         }

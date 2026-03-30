@@ -1,0 +1,51 @@
+// Coverage tests for datetime functions
+import datetime
+
+test "datetime.from_unix and to_unix roundtrip" {
+  let d = datetime.from_unix(1000000)
+  let ts = datetime.to_unix(d)
+  assert_eq(ts, 1000000)
+}
+
+test "datetime.add_days" {
+  let d = datetime.from_unix(0)
+  let d2 = datetime.add_days(d, 1)
+  assert_eq(datetime.to_unix(d2), 86400)
+}
+
+test "datetime.add_hours" {
+  let d = datetime.from_unix(0)
+  let d2 = datetime.add_hours(d, 2)
+  assert_eq(datetime.to_unix(d2), 7200)
+}
+
+test "datetime.add_minutes" {
+  let d = datetime.from_unix(0)
+  let d2 = datetime.add_minutes(d, 30)
+  assert_eq(datetime.to_unix(d2), 1800)
+}
+
+test "datetime.add_seconds" {
+  let d = datetime.from_unix(0)
+  let d2 = datetime.add_seconds(d, 45)
+  assert_eq(datetime.to_unix(d2), 45)
+}
+
+test "datetime.diff_seconds" {
+  let d1 = datetime.from_unix(1000)
+  let d2 = datetime.from_unix(2000)
+  assert_eq(datetime.diff_seconds(d2, d1), 1000)
+}
+
+test "datetime.is_before and is_after" {
+  let d1 = datetime.from_unix(1000)
+  let d2 = datetime.from_unix(2000)
+  assert(datetime.is_before(d1, d2))
+  assert(datetime.is_after(d2, d1))
+  assert(not datetime.is_before(d2, d1))
+}
+
+test "datetime.now returns positive timestamp" {
+  let ts = datetime.now()
+  assert(ts > 0)
+}

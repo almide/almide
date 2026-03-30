@@ -1,0 +1,24 @@
+// Coverage tests for bytes functions
+
+test "bytes.from_string" {
+  let b = bytes.from_string("Hi")
+  assert_eq(bytes.len(b), 2)
+}
+
+test "bytes.set" {
+  var b = bytes.from_list([10, 20, 30])
+  b = bytes.set(b, 1, 99)
+  assert_eq(bytes.get_or(b, 1, 0), 99)
+}
+
+test "bytes.repeat" {
+  let b = bytes.from_list([1, 2])
+  let b2 = bytes.repeat(b, 3)
+  assert_eq(bytes.len(b2), 6)
+}
+
+test "bytes.clear" {
+  var b = bytes.from_list([1, 2, 3])
+  bytes.clear(b)
+  assert_eq(bytes.len(b), 0)
+}

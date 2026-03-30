@@ -37,6 +37,7 @@ pub struct RenderContext<'a> {
     pub indent: usize,
     pub target: Target,
     pub auto_unwrap: bool,
+    pub is_test: bool,
     pub ann: CodegenAnnotations,
     pub type_aliases: std::collections::HashMap<crate::intern::Sym, crate::types::Ty>,
     /// Use minimal generic bounds (Clone only) for bundled .almd module functions.
@@ -47,7 +48,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), minimal_generic_bounds: false, repr_c: false }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), minimal_generic_bounds: false, repr_c: false }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -93,6 +94,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         indent: ctx.indent,
         target: ctx.target,
         auto_unwrap: func.is_effect && !func.is_test,
+        is_test: func.is_test,
         ann: ctx.ann.clone(),
         type_aliases: ctx.type_aliases.clone(),
         minimal_generic_bounds: ctx.minimal_generic_bounds,
@@ -235,6 +237,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         indent: ctx.indent,
         target: ctx.target,
         auto_unwrap: ctx.auto_unwrap,
+        is_test: ctx.is_test,
         ann: ctx.ann.clone(),
         type_aliases,
         minimal_generic_bounds: false,
@@ -331,6 +334,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             indent: ctx.indent,
             target: ctx.target,
             auto_unwrap: false,
+            is_test: false,
             ann: ctx.ann.clone(),
             type_aliases: ctx.type_aliases.clone(),
             minimal_generic_bounds: is_bundled,

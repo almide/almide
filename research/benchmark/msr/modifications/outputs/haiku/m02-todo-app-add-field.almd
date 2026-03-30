@@ -27,8 +27,7 @@ fn summary(t: Todo) -> String = "[${status_label(t.status)}/p${int.to_string(t.p
 fn high_priority(todos: List[Todo]) -> List[Todo] =
   todos
     |> list.filter((t) => t.priority >= 3)
-    |> list.sort_by((t) => t.priority)
-    |> list.reverse
+    |> list.sort_by((t) => -t.priority)
 
 test "create todo" {
   let t = create(1, "Buy milk", 1)

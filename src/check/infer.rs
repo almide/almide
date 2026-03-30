@@ -153,6 +153,25 @@ impl Checker {
                         lt
                     }
                     "==" | "!=" | "<" | ">" | "<=" | ">=" => {
+                        // Check none comparison: only valid with Option types
+                        let left_is_none = matches!(left.as_ref(), ast::Expr::None { .. });
+                        let right_is_none = matches!(right.as_ref(), ast::Expr::None { .. });
+                        if right_is_none && !left_is_none {
+                            let lc = resolve_ty(&lt, &self.uf);
+                            if !lc.is_option() && !matches!(lc, Ty::Unknown | Ty::TypeVar(_)) {
+                                self.emit(super::err(
+                                    format!("cannot compare {} with none — only Option types support none comparison", lc.display()),
+                                    "Use Option type or check with is_ok()/is_err() for Result", "comparison with none"));
+                            }
+                        }
+                        if left_is_none && !right_is_none {
+                            let rc = resolve_ty(&rt, &self.uf);
+                            if !rc.is_option() && !matches!(rc, Ty::Unknown | Ty::TypeVar(_)) {
+                                self.emit(super::err(
+                                    format!("cannot compare none with {} — only Option types support none comparison", rc.display()),
+                                    "Use Option type or check with is_ok()/is_err() for Result", "comparison with none"));
+                            }
+                        }
                         // Unify left/right types so TypeVars in none/err/constructors get resolved
                         self.unify_infer(&lt, &rt);
                         Ty::Bool

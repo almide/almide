@@ -21,7 +21,7 @@ effect fn main() -> Result[Unit, String] = {
     let content = fs.read_text(file)
     let lines = string.lines(content)
     let matches = grep_lines(file, lines, pattern)
-    list.each(matches, (line) => println(line))
+    for line in matches { println(line) }
   }
   ok(())
 }

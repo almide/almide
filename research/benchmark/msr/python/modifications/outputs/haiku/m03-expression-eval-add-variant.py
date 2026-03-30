@@ -29,6 +29,7 @@ class Div:
     right: 'Expr'
 
 # Expr is one of: Lit, Add, Mul, Sub, Div
+Expr = Lit | Add | Mul | Sub | Div
 
 
 def eval_expr(e: Expr) -> int:

@@ -546,10 +546,10 @@ impl FuncCompiler<'_> {
                         self.emit_str_case_convert(false);
                     }
                     "starts_with" | "string.starts_with" | "ends_with" | "string.ends_with" if matches!(object.ty, Ty::String) => {
-                        // Delegate to Module call handler
-                        self.emit_expr(object);
-                        for arg in args { self.emit_expr(arg); }
-                        wasm!(self.func, { unreachable; }); // TODO: wire up properly
+                        let m = method.strip_prefix("string.").unwrap_or(method);
+                        let mut full_args = vec![(**object).clone()];
+                        full_args.extend(args.iter().cloned());
+                        self.emit_string_call(m, &full_args);
                     }
                     "contains" | "string.contains" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
@@ -702,16 +702,19 @@ impl FuncCompiler<'_> {
     }
 
     pub(super) fn emit_stub_call(&mut self, args: &[IrExpr]) {
-        // Evaluate args for side effects, then return typed default instead of trapping.
+        // Unimplemented function: trap immediately rather than returning a default value.
+        // Returning silent defaults (0, empty string, etc.) is dangerous in medical contexts
+        // where incorrect results could go unnoticed.
+        if std::env::var("ALMIDE_WASM_STUB_WARN").is_ok() {
+            eprintln!("[WASM] stub call reached — will trap at runtime");
+        }
         for arg in args {
             self.emit_expr(arg);
             if values::ty_to_valtype(&arg.ty).is_some() {
                 wasm!(self.func, { drop; });
             }
         }
-        // Return safe typed default based on return type context.
-        let ret_ty = self.stub_ret_ty.clone();
-        self.emit_typed_default(&ret_ty);
+        wasm!(self.func, { unreachable; });
     }
 
     /// Emit a safe default value for a given type.

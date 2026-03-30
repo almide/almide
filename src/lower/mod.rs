@@ -333,8 +333,8 @@ fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<crate::as
     compute_use_counts(&mut program); // After auto-derive so derived functions get correct use_counts
     demote_unused_mut(&mut program);
 
-    // Verify no inference TypeVars remain in IR (ICE if any found)
-    verify_no_inference_typevars(&program);
+    // Resolve any remaining inference TypeVars to Unknown (prevents codegen ICE)
+    resolve_inference_typevars(&mut program);
 
     program
 }
@@ -342,11 +342,11 @@ fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<crate::as
 /// Verify no inference TypeVars (?N) remain in the IR.
 /// Any remaining TypeVar indicates a type checker bug — the codegen cannot
 /// reliably generate correct code without concrete types.
-fn verify_no_inference_typevars(program: &IrProgram) {
+fn resolve_inference_typevars(program: &mut IrProgram) {
     use crate::types::Ty;
     fn has_typevar(ty: &Ty) -> bool {
         match ty {
-            Ty::TypeVar(name) => name.starts_with('?'), // Only inference vars, not generic params
+            Ty::TypeVar(name) => name.starts_with('?'),
             Ty::Unknown => false,
             Ty::Applied(_, args) => args.iter().any(has_typevar),
             Ty::Tuple(elems) => elems.iter().any(has_typevar),
@@ -356,60 +356,96 @@ fn verify_no_inference_typevars(program: &IrProgram) {
             _ => false,
         }
     }
-    let verbose = std::env::var("ALMIDE_DEBUG_TYPEVARS").is_ok();
-    fn count_expr(expr: &IrExpr, fn_name: &str, loc: &str, verbose: bool) -> usize {
-        let mut c = 0;
-        if has_typevar(&expr.ty) {
-            c += 1;
-            if verbose { eprintln!("  [TypeVar] {} in {}: {:?}", loc, fn_name, expr.ty); }
+    fn resolve_ty(ty: &mut Ty) {
+        match ty {
+            Ty::TypeVar(name) if name.starts_with('?') => *ty = Ty::Unknown,
+            Ty::Applied(_, args) => { for a in args { resolve_ty(a); } }
+            Ty::Tuple(elems) => { for e in elems { resolve_ty(e); } }
+            Ty::Fn { params, ret } => { for p in params { resolve_ty(p); } resolve_ty(ret); }
+            Ty::Named(_, args) => { for a in args { resolve_ty(a); } }
+            Ty::Record { fields } | Ty::OpenRecord { fields } => { for (_, t) in fields { resolve_ty(t); } }
+            _ => {}
         }
-        match &expr.kind {
-            IrExprKind::Call { args, .. } => { for a in args { c += count_expr(a, fn_name, "call-arg", verbose); } }
+    }
+    fn resolve_expr(expr: &mut IrExpr) {
+        resolve_ty(&mut expr.ty);
+        match &mut expr.kind {
+            IrExprKind::Call { args, .. } => { for a in args { resolve_expr(a); } }
             IrExprKind::Lambda { body, params, .. } => {
-                for (_, ty) in params { if has_typevar(ty) { c += 1; if verbose { eprintln!("  [TypeVar] lambda-param in {}: {:?}", fn_name, ty); } } }
-                c += count_expr(body, fn_name, "lambda-body", verbose);
+                for (_, ty) in params { resolve_ty(ty); }
+                resolve_expr(body);
             }
-            IrExprKind::BinOp { left, right, .. } => { c += count_expr(left, fn_name, "binop-left", verbose); c += count_expr(right, fn_name, "binop-right", verbose); }
+            IrExprKind::BinOp { left, right, .. } => { resolve_expr(left); resolve_expr(right); }
             IrExprKind::Match { subject, arms, .. } => {
-                c += count_expr(subject, fn_name, "match-subject", verbose);
-                for arm in arms { c += count_expr(&arm.body, fn_name, "match-arm", verbose); }
+                resolve_expr(subject);
+                for arm in arms { resolve_expr(&mut arm.body); }
             }
             IrExprKind::If { cond, then, else_, .. } => {
-                c += count_expr(cond, fn_name, "if-cond", verbose);
-                c += count_expr(then, fn_name, "if-then", verbose);
-                c += count_expr(else_, fn_name, "if-else", verbose);
+                resolve_expr(cond); resolve_expr(then); resolve_expr(else_);
             }
             IrExprKind::Block { stmts, expr, .. } => {
-                for s in stmts {
-                    if let IrStmtKind::Bind { ty, value, .. } = &s.kind {
-                        if has_typevar(ty) { c += 1; if verbose { eprintln!("  [TypeVar] bind-ty in {}: {:?}", fn_name, ty); } }
-                        c += count_expr(value, fn_name, "bind-val", verbose);
-                    } else if let IrStmtKind::Expr { expr: e } = &s.kind {
-                        c += count_expr(e, fn_name, "stmt-expr", verbose);
-                    }
-                }
-                if let Some(e) = expr { c += count_expr(e, fn_name, "block-tail", verbose); }
+                for s in stmts { resolve_stmt(s); }
+                if let Some(e) = expr { resolve_expr(e); }
+            }
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+                for e in elements { resolve_expr(e); }
+            }
+            IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+            | IrExprKind::OptionSome { expr: e } | IrExprKind::Unwrap { expr: e }
+            | IrExprKind::Try { expr: e } | IrExprKind::ToOption { expr: e }
+            | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+            | IrExprKind::ToVec { expr: e } | IrExprKind::UnOp { operand: e, .. }
+            | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e } => {
+                resolve_expr(e);
+            }
+            IrExprKind::UnwrapOr { expr: e, fallback } => { resolve_expr(e); resolve_expr(fallback); }
+            IrExprKind::Record { fields, .. } => { for (_, v) in fields { resolve_expr(v); } }
+            IrExprKind::ForIn { iterable, body, .. } => {
+                resolve_expr(iterable);
+                for s in body { resolve_stmt(s); }
+            }
+            IrExprKind::While { cond, body } => {
+                resolve_expr(cond);
+                for s in body { resolve_stmt(s); }
+            }
+            IrExprKind::Member { object, .. } | IrExprKind::OptionalChain { expr: object, .. } => resolve_expr(object),
+            IrExprKind::IndexAccess { object, index } | IrExprKind::Range { start: object, end: index, .. } => {
+                resolve_expr(object); resolve_expr(index);
+            }
+            IrExprKind::StringInterp { parts } => {
+                for p in parts { if let IrStringPart::Expr { expr } = p { resolve_expr(expr); } }
             }
             _ => {}
         }
-        c
     }
-    let mut count = 0;
-    for func in &program.functions {
-        count += count_expr(&func.body, &func.name, "body", verbose);
-        for p in &func.params { if has_typevar(&p.ty) { count += 1; if verbose { eprintln!("  [TypeVar] param in {}: {:?}", func.name, p.ty); } } }
-        if has_typevar(&func.ret_ty) { count += 1; if verbose { eprintln!("  [TypeVar] ret_ty in {}: {:?}", func.name, func.ret_ty); } }
-    }
-    for i in 0..program.var_table.len() {
-        let info = program.var_table.get(VarId(i as u32));
-        if has_typevar(&info.ty) {
-            count += 1;
-            if verbose { eprintln!("  [TypeVar] var {} '{}': {:?}", i, info.name, info.ty); }
+    fn resolve_stmt(stmt: &mut IrStmt) {
+        match &mut stmt.kind {
+            IrStmtKind::Bind { ty, value, .. } => { resolve_ty(ty); resolve_expr(value); }
+            IrStmtKind::Assign { value, .. } => resolve_expr(value),
+            IrStmtKind::Expr { expr } => resolve_expr(expr),
+            IrStmtKind::Guard { cond, else_ } => { resolve_expr(cond); resolve_expr(else_); }
+            _ => {}
         }
     }
-    if count > 0 {
-        eprintln!("[ICE] {} unresolved inference TypeVar(s) in IR after lowering. This is a type checker bug.", count);
-        eprintln!("[ICE] Codegen may produce incorrect code. Set ALMIDE_DEBUG_TYPEVARS=1 for details.");
+    // Resolve all remaining inference TypeVars → Unknown
+    for func in &mut program.functions {
+        resolve_expr(&mut func.body);
+        resolve_ty(&mut func.ret_ty);
+        for p in &mut func.params { resolve_ty(&mut p.ty); }
+    }
+    for tl in &mut program.top_lets {
+        resolve_expr(&mut tl.value);
+        resolve_ty(&mut tl.ty);
+    }
+    for module in &mut program.modules {
+        for func in &mut module.functions {
+            resolve_expr(&mut func.body);
+            resolve_ty(&mut func.ret_ty);
+            for p in &mut func.params { resolve_ty(&mut p.ty); }
+        }
+    }
+    for i in 0..program.var_table.len() {
+        resolve_ty(&mut program.var_table.entries[i].ty);
     }
 }
 

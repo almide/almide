@@ -1,0 +1,16 @@
+// Coverage tests for math.log_gamma
+
+import math
+
+test "math.log_gamma of 1" {
+  let r = math.log_gamma(1.0)
+  assert(r > -0.01)
+  assert(r < 0.01)
+}
+
+test "math.log_gamma of 5" {
+  // Gamma(5) = 4! = 24, log(24) ≈ 3.178
+  let r = math.log_gamma(5.0)
+  assert(r > 3.17)
+  assert(r < 3.19)
+}

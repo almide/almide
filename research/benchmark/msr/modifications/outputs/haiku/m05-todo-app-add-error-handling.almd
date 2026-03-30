@@ -7,16 +7,16 @@ fn create(id: Int, title: String) -> Todo =
 
 fn complete(t: Todo) -> Result[Todo, String] =
   match t.status {
-    Pending => ok({ ...t, status: Done }),
     Done => err("already done"),
     Cancelled => err("cannot complete cancelled"),
+    Pending => ok({ ...t, status: Done })
   }
 
 fn cancel(t: Todo) -> Result[Todo, String] =
   match t.status {
-    Pending => ok({ ...t, status: Cancelled }),
     Cancelled => err("already cancelled"),
     Done => err("cannot cancel done"),
+    Pending => ok({ ...t, status: Cancelled })
   }
 
 fn is_done(t: Todo) -> Bool = match t.status { Done => true, _ => false }
@@ -41,18 +41,17 @@ test "create todo" {
 }
 
 test "complete todo" {
-  let t = create(1, "Buy milk")
-  assert_eq(complete(t), ok(Todo { id: 1, title: "Buy milk", status: Done }))
+  assert_eq(complete(create(1, "Buy milk")), ok(Todo { id: 1, title: "Buy milk", status: Done }))
 }
 
 test "cancel todo" {
-  let t = create(1, "Buy milk")
-  assert_eq(cancel(t), ok(Todo { id: 1, title: "Buy milk", status: Cancelled }))
+  assert_eq(cancel(create(1, "Buy milk")), ok(Todo { id: 1, title: "Buy milk", status: Cancelled }))
 }
 
 test "pending count" {
-  let todos = [create(1, "A"), Todo { id: 2, title: "B", status: Done }, create(3, "C")]
-  assert_eq(pending_count(todos), 2)
+  let todos = [create(1, "A"), create(2, "B"), create(3, "C")]
+  let updated = list.map(todos, (t) => if t.id == 2 then { ...t, status: Done } else t)
+  assert_eq(pending_count(updated), 2)
 }
 
 test "titles" {
@@ -88,7 +87,7 @@ test "pipe chain: create filter map" {
 
 test "multiple operations" {
   var todos = [create(1, "A"), create(2, "B"), create(3, "C")]
-  let updated = list.map(todos, (t) => if t.id == 2 then Todo { id: t.id, title: t.title, status: Done } else t)
+  let updated = list.map(todos, (t) => if t.id == 2 then { ...t, status: Done } else t)
   assert_eq(pending_count(updated), 2)
   assert(is_done(list.get_or(updated, 1, create(0, ""))))
 }

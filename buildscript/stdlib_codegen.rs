@@ -174,6 +174,25 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
                 parse_type(ret_str, type_params)
             )
         }
+        other if other.starts_with("fn(") && other.contains(") -> ") => {
+            // fn(A, B) -> C  (lowercase notation)
+            let paren_close = other.find(") -> ").unwrap();
+            let params_str = &other[3..paren_close];
+            let ret_str = &other[paren_close + 5..];
+            let param_types: Vec<String> = if params_str.is_empty() {
+                vec![]
+            } else {
+                params_str
+                    .split(", ")
+                    .map(|t| parse_type(t.trim(), type_params))
+                    .collect()
+            };
+            format!(
+                "Ty::Fn {{ params: vec![{}], ret: Box::new({}) }}",
+                param_types.join(", "),
+                parse_type(ret_str, type_params)
+            )
+        }
         other if other.starts_with('(') && other.ends_with(')') => {
             // Tuple type: (A, B, C)
             let inner = &other[1..other.len() - 1];

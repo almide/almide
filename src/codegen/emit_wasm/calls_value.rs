@@ -122,8 +122,8 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.value_stringify); });
             }
             "get" => {
-                // value.get(v: Value, key: String) -> Option[Value] (for json.get compat)
-                self.emit_value_get(args);
+                // value.get(v: Value, key: String) -> Result[Value, String]
+                self.emit_value_field_result(args);
             }
             "field" => {
                 // value.field(v: Value, key: String) -> Result[Value, String] (for Codec decode)
@@ -183,6 +183,33 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(v);
             }
+            "as_array" => {
+                // value.as_array(v: Value) -> Result[List[Value], String]
+                // tag 5 = array, payload i32 (list ptr) at +4
+                let v = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(v);
+                    local_get(v); i32_load(0); i32_const(5); i32_eq;
+                    if_i32;
+                      i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                      local_get(result); i32_const(0); i32_store(0); // ok
+                      local_get(result); local_get(v); i32_load(4); i32_store(4);
+                      local_get(result);
+                    else_;
+                });
+                let err_msg = self.emitter.intern_string("expected array");
+                wasm!(self.func, {
+                      i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                      local_get(result); i32_const(1); i32_store(0);
+                      local_get(result); i32_const(err_msg as i32); i32_store(4);
+                      local_get(result);
+                    end;
+                });
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(v);
+            }
             _ => {
                 self.emit_stub_call(args);
             }
@@ -221,7 +248,8 @@ impl FuncCompiler<'_> {
                 self.emit_value_call("stringify", args);
             }
             "get" => {
-                self.emit_value_call("get", args);
+                // json.get returns Option[Value], not Result
+                self.emit_value_get(args);
             }
             "parse" => {
                 self.emit_expr(&args[0]);
@@ -539,6 +567,7 @@ impl FuncCompiler<'_> {
     }
 
     /// json.as_string / as_int / as_bool / as_float / as_array → Option[T]
+    /// (json module returns Option, value module returns Result — handled separately)
     fn emit_json_as_typed(&mut self, func: &str, args: &[IrExpr]) {
         let expected_tag: i32 = match func {
             "as_string" => 4,

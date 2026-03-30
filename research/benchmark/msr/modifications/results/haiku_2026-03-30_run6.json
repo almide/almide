@@ -1,0 +1,13 @@
+{
+  "date": "2026-03-30",
+  "language": "almide",
+  "type": "modification",
+  "model": "haiku",
+  "tasks": 10,
+  "passed": 9,
+  "failed": 1,
+  "check_failures": 1,
+  "test_failures": 0,
+  "msr": .9000,
+  "results": [{"name":"m01-traffic-light-add-variant","passed":true,"tests_passed":12,"v1_tests":8,"v2_tests":4},{"name":"m02-todo-app-add-field","passed":true,"tests_passed":16,"v1_tests":10,"v2_tests":6},{"name":"m03-expression-eval-add-variant","passed":false,"error":"type_check","v1_tests":12,"v2_tests":5,"output_tests":17},{"name":"m04-expression-eval-return-type","passed":true,"tests_passed":17,"v1_tests":12,"v2_tests":5},{"name":"m05-todo-app-add-error-handling","passed":true,"tests_passed":8,"v1_tests":10,"v2_tests":6},{"name":"m06-config-merger-add-function","passed":true,"tests_passed":27,"v1_tests":21,"v2_tests":6},{"name":"m07-grade-report-add-function","passed":true,"tests_passed":0,"v1_tests":30,"v2_tests":5},{"name":"m08-bob-behavioral-change","passed":true,"tests_passed":30,"v1_tests":25,"v2_tests":5},{"name":"m09-expression-eval-compound","passed":true,"tests_passed":21,"v1_tests":12,"v2_tests":9},{"name":"m10-traffic-light-compound","passed":true,"tests_passed":13,"v1_tests":8,"v2_tests":5}]
+}
