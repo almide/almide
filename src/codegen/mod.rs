@@ -146,6 +146,10 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
                     needed.insert(name);
                 }
             }
+            // testing module uses almide_rt_test_ prefix (not almide_rt_testing_)
+            if user_code.contains("almide_rt_test_") {
+                needed.insert("testing");
+            }
             // Also check for direct type references (Value, AlmideJsonPath, etc.)
             if user_code.contains("Value::") || user_code.contains(": Value") || user_code.contains("<Value") {
                 needed.insert("value");
