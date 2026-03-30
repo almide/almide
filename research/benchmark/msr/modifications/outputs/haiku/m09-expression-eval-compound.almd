@@ -6,9 +6,9 @@ type Expr =
   | Neg(Expr)
   | Pow(Expr, Expr)
 
-fn power(base: Int, exp: Int) -> Int =
+fn pow_helper(base: Int, exp: Int) -> Int =
   if exp == 0 then 1
-  else base * power(base, exp - 1)
+  else base * pow_helper(base, exp - 1)
 
 fn eval(e: Expr) -> Int =
   match e {
@@ -16,8 +16,8 @@ fn eval(e: Expr) -> Int =
     Add(l, r) => eval(l) + eval(r)
     Mul(l, r) => eval(l) * eval(r)
     Sub(l, r) => eval(l) - eval(r)
-    Neg(x) => 0 - eval(x)
-    Pow(base, exp) => power(eval(base), eval(exp))
+    Neg(e) => 0 - eval(e)
+    Pow(base, exp) => pow_helper(eval(base), eval(exp))
   }
 
 fn to_string(e: Expr) -> String =
@@ -26,7 +26,7 @@ fn to_string(e: Expr) -> String =
     Add(l, r) => "(${to_string(l)} + ${to_string(r)})"
     Mul(l, r) => "(${to_string(l)} * ${to_string(r)})"
     Sub(l, r) => "(${to_string(l)} - ${to_string(r)})"
-    Neg(x) => "(-${to_string(x)})"
+    Neg(e) => "(-${to_string(e)})"
     Pow(a, b) => "(${to_string(a)} ^ ${to_string(b)})"
   }
 
@@ -50,7 +50,6 @@ test "deeply nested eval" {
 test "single negative via sub" {
   assert_eq(eval(Sub(Lit(0), Lit(5))), -5)
 }
-
 test "neg literal" { assert_eq(eval(Neg(Lit(5))), -5) }
 test "neg of neg" { assert_eq(eval(Neg(Neg(Lit(3)))), 3) }
 test "to_string neg" { assert_eq(to_string(Neg(Lit(5))), "(-5)") }

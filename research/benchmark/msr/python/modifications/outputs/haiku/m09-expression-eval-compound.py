@@ -25,7 +25,7 @@ class Sub:
 
 @dataclass
 class Neg:
-    operand: 'Expr'
+    expr: 'Expr'
 
 @dataclass
 class Pow:
@@ -40,7 +40,7 @@ def eval_expr(e: Expr) -> int:
     elif isinstance(e, Add): return eval_expr(e.left) + eval_expr(e.right)
     elif isinstance(e, Mul): return eval_expr(e.left) * eval_expr(e.right)
     elif isinstance(e, Sub): return eval_expr(e.left) - eval_expr(e.right)
-    elif isinstance(e, Neg): return -eval_expr(e.operand)
+    elif isinstance(e, Neg): return -eval_expr(e.expr)
     elif isinstance(e, Pow): return eval_expr(e.base) ** eval_expr(e.exp)
 
 
@@ -49,7 +49,7 @@ def to_string(e: Expr) -> str:
     elif isinstance(e, Add): return f"({to_string(e.left)} + {to_string(e.right)})"
     elif isinstance(e, Mul): return f"({to_string(e.left)} * {to_string(e.right)})"
     elif isinstance(e, Sub): return f"({to_string(e.left)} - {to_string(e.right)})"
-    elif isinstance(e, Neg): return f"(-{to_string(e.operand)})"
+    elif isinstance(e, Neg): return f"(-{to_string(e.expr)})"
     elif isinstance(e, Pow): return f"({to_string(e.base)} ^ {to_string(e.exp)})"
 
 

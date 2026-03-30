@@ -17,7 +17,6 @@ test "duration red" { assert_eq(duration(Red), 60) }
 test "duration yellow" { assert_eq(duration(Yellow), 5) }
 test "duration green" { assert_eq(duration(Green), 45) }
 test "describe" { assert_eq(describe(Red), "stop") }
-
 test "next flashing red" { assert_eq(next(FlashingRed), Red) }
 test "duration flashing red" { assert_eq(duration(FlashingRed), 2) }
 test "describe flashing red" { assert_eq(describe(FlashingRed), "caution") }

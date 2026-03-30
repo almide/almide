@@ -9,7 +9,6 @@ def respond(input: str) -> str:
     has_letters = any(c.isalpha() for c in trimmed)
     is_yelling = has_letters and trimmed == trimmed.upper()
     is_whispering = has_letters and trimmed == trimmed.lower()
-    
     if is_silence:
         return "Fine. Be that way!"
     elif is_yelling and is_question:

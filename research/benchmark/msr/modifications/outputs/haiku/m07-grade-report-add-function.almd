@@ -194,6 +194,39 @@ fn class_average(students: List[List[String]]) -> Result[Int, String] = {
   }
 }
 
+fn top_students(input: String, n: Int) -> Result[List[String], String] = {
+  match parse_all(input) {
+    err(e) => err(e),
+    ok(students) => {
+      let with_averages_result = list.fold(students, ok([]), (acc, student) => {
+        match acc {
+          err(e) => err(e),
+          ok(pairs) => {
+            match average(student) {
+              err(e) => err(e),
+              ok(avg) => {
+                let name = match list.get(student, 0) { some(v) => v, none => "" }
+                ok(pairs + [{ name: name, avg: avg }])
+              }
+            }
+          }
+        }
+      })
+      match with_averages_result {
+        err(e) => err(e),
+        ok(pairs) => {
+          let by_name = list.sort_by(pairs, (p) => p.name)
+          let sorted = list.sort_by(by_name, (p) => 0 - p.avg)
+          let take_n = if n > list.len(sorted) then list.len(sorted) else n
+          let top_n_records = list.take(sorted, take_n)
+          let names = list.map(top_n_records, (p) => p.name)
+          ok(names)
+        }
+      }
+    }
+  }
+}
+
 fn format_student(student: List[String]) -> Result[String, String] = {
   let name = match list.get(student, 0) { some(v) => v, none => "" }
   match average(student) {
@@ -237,51 +270,6 @@ fn generate_report(input: String) -> Result[String, String] = {
               }
             },
           }
-        },
-      }
-    },
-  }
-}
-
-fn top_students(input: String, n: Int) -> Result[List[String], String] = {
-  match parse_all(input) {
-    err(e) => err(e),
-    ok(students) => {
-      let result = list.fold(students, ok([]), (acc, student) => {
-        match acc {
-          err(e) => err(e),
-          ok(sorted_list) => {
-            match average(student) {
-              err(e) => err(e),
-              ok(avg) => {
-                let name = match list.get(student, 0) { some(v) => v, none => "" }
-                let insert_position = match list.find_index(sorted_list, (existing) => {
-                  let existing_name = match list.get(existing, 0) { some(v) => v, none => "" }
-                  let existing_avg_str = match list.get(existing, 1) { some(v) => v, none => "0" }
-                  match str_to_int(existing_avg_str) {
-                    err(_) => false,
-                    ok(existing_avg) => {
-                      avg > existing_avg or (avg == existing_avg and name < existing_name)
-                    },
-                  }
-                }) {
-                  some(idx) => idx,
-                  none => list.len(sorted_list),
-                }
-                ok(list.insert(sorted_list, insert_position, [name, int.to_string(avg)]))
-              },
-            }
-          },
-        }
-      })
-      match result {
-        err(e) => err(e),
-        ok(sorted_list) => {
-          let top = list.take(sorted_list, n)
-          let names = list.map(top, (pair) => {
-            match list.get(pair, 0) { some(v) => v, none => "" }
-          })
-          ok(names)
         },
       }
     },

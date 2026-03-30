@@ -1,5 +1,4 @@
 from __future__ import annotations
-# ========== V1 SOLUTION (working code — all tests pass) ==========
 
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -97,7 +96,7 @@ updated = [complete(t) if t.id == 2 else t for t in todos]
 assert pending_count(updated) == 2, "multiple operations pending"
 assert is_done(updated[1]), "multiple operations done"
 
-# ========== V2 TESTS (must also pass after modification) ==========
+# ========== V2 TESTS ==========
 
 t = create(1, "Buy milk", 3)
 assert t.priority == 3, "create with priority"

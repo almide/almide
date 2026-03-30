@@ -260,7 +260,7 @@ except Exception:
     pass
 assert not os.path.exists(out), "merge and save error should not create output"
 
-# ========== V2 TESTS ==========
+# ========== V2 TESTS (must also pass after modification) ==========
 
 assert validate_keys([["host", "localhost"], ["port", "8080"]], ["host", "port"]) is None, "validate keys all present"
 
