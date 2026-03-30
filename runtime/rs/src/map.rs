@@ -14,12 +14,12 @@ pub fn almide_rt_map_values<K, V: Clone>(m: &HashMap<K, V>) -> Vec<V> { m.values
 pub fn almide_rt_map_entries<K: Clone, V: Clone>(m: &HashMap<K, V>) -> Vec<(K, V)> { m.iter().map(|(k, v)| (k.clone(), v.clone())).collect() }
 pub fn almide_rt_map_merge<K: Eq + std::hash::Hash + Clone, V: Clone>(a: &HashMap<K, V>, b: &HashMap<K, V>) -> HashMap<K, V> { let mut r = a.clone(); for (k, v) in b { r.insert(k.clone(), v.clone()); } r }
 
-pub fn almide_rt_map_filter<K: Eq + std::hash::Hash + Clone, V: Clone>(m: HashMap<K, V>, f: impl Fn(K, V) -> bool) -> HashMap<K, V> {
-    m.into_iter().filter(|(k, v)| f(k.clone(), v.clone())).collect()
+pub fn almide_rt_map_filter<K: Eq + std::hash::Hash + Clone, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V) -> bool) -> HashMap<K, V> {
+    m.iter().filter(|(k, v)| f((*k).clone(), (*v).clone())).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
-pub fn almide_rt_map_map_values<K: Eq + std::hash::Hash + Clone, V: Clone, W>(m: HashMap<K, V>, f: impl Fn(V) -> W) -> HashMap<K, W> {
-    m.into_iter().map(|(k, v)| (k, f(v))).collect()
+pub fn almide_rt_map_map_values<K: Eq + std::hash::Hash + Clone, V: Clone, W>(m: &HashMap<K, V>, f: impl Fn(V) -> W) -> HashMap<K, W> {
+    m.iter().map(|(k, v)| (k.clone(), f((*v).clone()))).collect()
 }
 
 pub fn almide_rt_map_from_entries<K: Eq + std::hash::Hash, V>(entries: Vec<(K, V)>) -> HashMap<K, V> { entries.into_iter().collect() }
