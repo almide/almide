@@ -143,4 +143,88 @@ impl FuncCompiler<'_> {
             self.scratch.free_i32(env_scratch);
         }
     }
+
+    /// Emit a ClosureCreate node (from closure conversion pass).
+    /// Allocates env, stores captures, creates [table_idx, env_ptr] pair.
+    pub(super) fn emit_closure_create(&mut self, func_name: &crate::intern::Sym, captures: &[(VarId, Ty)]) {
+        // Find the lifted function's index in the function table
+        let name_str = func_name.to_string();
+        let func_idx = self.emitter.func_map.get(&name_str).copied();
+        let table_idx = func_idx.and_then(|fi| self.emitter.func_to_table_idx.get(&fi).copied());
+
+        let table_idx = match table_idx {
+            Some(ti) => ti as i32,
+            None => {
+                eprintln!("WARNING: ClosureCreate: lifted function '{}' not in table", name_str);
+                wasm!(self.func, { unreachable; });
+                return;
+            }
+        };
+
+        let scratch = self.scratch.alloc_i32();
+
+        if captures.is_empty() {
+            // No captures: closure = [table_idx, 0]
+            wasm!(self.func, {
+                i32_const(8);
+                call(self.emitter.rt.alloc);
+                local_set(scratch);
+                local_get(scratch);
+                i32_const(table_idx);
+                i32_store(0);
+                local_get(scratch);
+                i32_const(0);
+                i32_store(4);
+                local_get(scratch);
+            });
+        } else {
+            // Allocate env
+            let env_size = (captures.len() as u32) * 8;
+            let env_scratch = self.scratch.alloc_i32();
+            wasm!(self.func, {
+                i32_const(env_size as i32);
+                call(self.emitter.rt.alloc);
+                local_set(env_scratch);
+            });
+
+            // Store each captured variable into env
+            for (ci, (vid, ty)) in captures.iter().enumerate() {
+                let offset = (ci as u32) * 8;
+                wasm!(self.func, { local_get(env_scratch); });
+                if let Some(&local_idx) = self.var_map.get(&vid.0) {
+                    wasm!(self.func, { local_get(local_idx); });
+                    self.emit_store_at(ty, offset);
+                } else {
+                    // This should not happen after closure conversion —
+                    // all captured vars should be in var_map (as locals or env-loaded params)
+                    eprintln!("WARNING: ClosureCreate capture var {} not in var_map", vid.0);
+                    match values::ty_to_valtype(ty) {
+                        Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }
+                        Some(ValType::F64) => { wasm!(self.func, { f64_const(0.0); }); }
+                        _ => { wasm!(self.func, { i32_const(0); }); }
+                    }
+                    self.emit_store_at(ty, offset);
+                }
+            }
+
+            // Allocate closure pair [table_idx, env_ptr]
+            let closure_scratch = self.scratch.alloc_i32();
+            wasm!(self.func, {
+                i32_const(8);
+                call(self.emitter.rt.alloc);
+                local_set(closure_scratch);
+                local_get(closure_scratch);
+                i32_const(table_idx);
+                i32_store(0);
+                local_get(closure_scratch);
+                local_get(env_scratch);
+                i32_store(4);
+                local_get(closure_scratch);
+            });
+            self.scratch.free_i32(closure_scratch);
+            self.scratch.free_i32(env_scratch);
+        }
+
+        self.scratch.free_i32(scratch);
+    }
 }

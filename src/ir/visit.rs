@@ -27,7 +27,8 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
         | IrExprKind::FnRef { .. } | IrExprKind::EmptyMap | IrExprKind::OptionNone
         | IrExprKind::Break | IrExprKind::Continue | IrExprKind::Hole
-        | IrExprKind::Todo { .. } | IrExprKind::RenderedCall { .. } => {}
+        | IrExprKind::Todo { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::ClosureCreate { .. } => {}
 
         // ── Operators ──
         IrExprKind::BinOp { left, right, .. } => {

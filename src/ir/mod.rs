@@ -283,6 +283,18 @@ pub enum IrExprKind {
     /// Walker outputs this verbatim — no further processing.
     RenderedCall { code: String },
 
+    // ── Closure Conversion (inserted by ClosureConversionPass, WASM target) ──
+    /// Create a closure object: lifted function + captured environment.
+    ClosureCreate {
+        func_name: Sym,
+        captures: Vec<(VarId, Ty)>,
+    },
+    /// Load a captured variable from the closure environment pointer (first param of lifted fn).
+    EnvLoad {
+        env_var: VarId,
+        index: u32,
+    },
+
     // ── Misc ──
     Hole,
     Todo { message: String },

@@ -90,6 +90,40 @@ impl FuncCompiler<'_> {
                 self.emit_lambda_closure(params, body, *lambda_id);
             }
 
+            // ── ClosureCreate (from closure conversion pass) ──
+            IrExprKind::ClosureCreate { func_name, captures } => {
+                self.emit_closure_create(func_name, captures);
+            }
+
+            // ── EnvLoad (read captured var from env pointer) ──
+            IrExprKind::EnvLoad { env_var, index } => {
+                let offset = (*index) * 8;
+                if let Some(&local_idx) = self.var_map.get(&env_var.0) {
+                    wasm!(self.func, { local_get(local_idx); });
+                } else {
+                    // env_var should be local 0 in lifted functions (first param)
+                    wasm!(self.func, { local_get(0); });
+                }
+                // Load value from env at offset
+                match super::values::ty_to_valtype(&expr.ty) {
+                    Some(wasm_encoder::ValType::I64) => {
+                        self.func.instruction(&wasm_encoder::Instruction::I64Load(
+                            wasm_encoder::MemArg { offset: offset as u64, align: 3, memory_index: 0 }
+                        ));
+                    }
+                    Some(wasm_encoder::ValType::F64) => {
+                        self.func.instruction(&wasm_encoder::Instruction::F64Load(
+                            wasm_encoder::MemArg { offset: offset as u64, align: 3, memory_index: 0 }
+                        ));
+                    }
+                    _ => {
+                        self.func.instruction(&wasm_encoder::Instruction::I32Load(
+                            wasm_encoder::MemArg { offset: offset as u64, align: 2, memory_index: 0 }
+                        ));
+                    }
+                }
+            }
+
             // ── Binary operators ──
             IrExprKind::BinOp { op, left, right } => {
                 self.emit_binop(*op, left, right);

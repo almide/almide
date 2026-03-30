@@ -31,7 +31,8 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
         | IrExprKind::Hole | IrExprKind::Todo { .. }
         | IrExprKind::Break | IrExprKind::Continue
-        | IrExprKind::EmptyMap => {}
+        | IrExprKind::EmptyMap
+        | IrExprKind::EnvLoad { .. } | IrExprKind::ClosureCreate { .. } => {}
 
         IrExprKind::BinOp { left, right, .. } => {
             count_uses_in_expr(left, table);

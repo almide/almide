@@ -575,8 +575,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
         }
 
-        // ── Fallback ──
-        // _ => format!("/* TODO: unhandled IR node */"),
+        // ── Closure conversion nodes (WASM-only, never reached by Rust walker) ──
+        IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } => {
+            unreachable!("ClosureCreate/EnvLoad should only appear in WASM pipeline")
+        }
     }
 }
 
