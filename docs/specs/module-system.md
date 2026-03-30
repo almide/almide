@@ -1,6 +1,6 @@
 # Module System Specification
 
-> Last updated: 2026-03-30. Verified by `spec/integration/modules/` (25 tests + 4 error tests).
+> Last updated: 2026-03-31. Verified by `spec/integration/modules/` (25 tests + 4 error tests).
 
 ---
 
@@ -84,14 +84,25 @@ error[E003]: undefined variable 'yaml'
 
 `almide fmt` は import 文を自動管理する（Go の `goimports` と同等）。
 
-- **自動追加:** 使用されているのに import がない Tier 2 stdlib モジュール → `import` を挿入
-- **自動削除:** import されているが使われていないモジュール → `import` を削除
-- **保持:** `_` prefix の import、`import self` は削除しない
-- **Tier 1 は対象外:** 既にスコープにあるため追加しない
+**自動追加:**
+- 使用されているのに import がない Tier 2 stdlib モジュール → `import` を挿入
+- `almide.toml` の依存パッケージ名と一致する識別子 → `import pkg` を挿入
+- 依存パッケージのサブモジュール（`python.generate()` 等）→ `import pkg.bindings.python` を挿入
+
+**自動削除:**
+- import されているが使われていないモジュール → `import` を削除
+
+**保持:**
+- `_` prefix の import、`import self` は削除しない
+- Tier 1 は対象外（既にスコープにあるため追加しない）
+
+**サブモジュール発見:**
+依存パッケージのキャッシュディレクトリ (`~/.almide/cache/{name}/{version}/src/`) を再帰スキャンし、`.almd` ファイルの末尾セグメントと使用中の識別子を照合する。ローカルディレクトリ（`{name}/`）も検索対象。
 
 ```bash
 $ almide fmt app.almd
 app.almd: Added `import json`
+app.almd: Added `import bindgen.bindings.python`
 app.almd: Removed 2 unused import(s)
 Formatted app.almd
 ```
@@ -331,9 +342,9 @@ fn my_max(a: Int, b: Int) -> Int   // body なし: 全ターゲットに @extern
 
 | ファイル | テスト数 | カバー範囲 |
 |---|---|---|
-| `spec/integration/modules/diamond_test.almd` | 11 | ダイヤモンド依存、型同一性、サブモジュール、4段ドット |
-| `spec/integration/modules/alias_test.almd` | 5 | import alias: トップレベル、サブモジュール、4段ネスト、型生成 |
-| `spec/integration/modules/submodule_call_test.almd` | 7 | サブモジュール直接呼び出し: 2段/3段/4段、ダイヤモンド経由 |
+| `spec/integration/modules/diamond_test.almd` | 11 | ダイヤモンド依存、型同一性、サブモジュール（個別import） |
+| `spec/integration/modules/alias_test.almd` | 5 | import alias: トップレベル、サブモジュール、深いネスト、型生成 |
+| `spec/integration/modules/submodule_call_test.almd` | 7 | サブモジュール（Go方式: 個別import + 最後セグメント名で呼び出し） |
 | `spec/integration/modules/vis_effect_test.almd` | 2 | effect fn のクロスモジュール呼び出し |
 | `spec/integration/modules/vis_mod_error_test.almd` | error | `mod fn` の外部アクセス拒否 |
 | `spec/integration/modules/vis_local_error_test.almd` | error | `local fn` の外部アクセス拒否 |
