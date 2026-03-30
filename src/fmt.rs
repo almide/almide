@@ -48,9 +48,11 @@ fn comma_sep<T>(out: &mut String, items: &[T], f: impl Fn(&mut String, &T)) {
     }
 }
 
-/// Auto-manage imports: add missing stdlib imports, remove unused ones.
+/// Auto-manage imports: add missing stdlib/dependency imports, remove unused ones.
+/// `dep_names`: dependency names from almide.toml (empty if no project file).
+/// `dep_submodules`: map of short_name → full dotted path for dependency submodules.
 /// Returns messages describing changes made.
-pub fn auto_imports(program: &mut Program) -> Vec<String> {
+pub fn auto_imports(program: &mut Program, dep_names: &[String], dep_submodules: &std::collections::HashMap<String, String>) -> Vec<String> {
     use std::collections::HashSet;
     let mut messages = Vec::new();
 
@@ -75,22 +77,29 @@ pub fn auto_imports(program: &mut Program) -> Vec<String> {
     let tier1: HashSet<&str> = ["string", "list", "int", "float", "bytes", "matrix", "map", "set",
         "value", "option", "result"].iter().copied().collect();
 
-    // Add missing stdlib imports (only Tier 2 — modules that need explicit import)
-    let mut to_add: Vec<String> = Vec::new();
+    let dep_set: HashSet<&str> = dep_names.iter().map(|s| s.as_str()).collect();
+
+    // Add missing imports (stdlib Tier 2 + dependencies + dependency submodules)
+    let mut to_add: Vec<(String, Vec<String>)> = Vec::new(); // (display_name, path_segments)
     for name in &used {
         if existing.contains(name.as_str()) { continue; }
         if auto_imported.contains(name.as_str()) || tier1.contains(name.as_str()) { continue; }
         if crate::stdlib::is_any_stdlib(name) {
-            to_add.push(name.clone());
+            to_add.push((name.clone(), vec![name.clone()]));
+        } else if dep_set.contains(name.as_str()) {
+            to_add.push((name.clone(), vec![name.clone()]));
+        } else if let Some(full_path) = dep_submodules.get(name.as_str()) {
+            // Submodule: python → bindgen.bindings.python
+            to_add.push((full_path.clone(), full_path.split('.').map(String::from).collect()));
         }
     }
-    to_add.sort();
-    for name in to_add {
+    to_add.sort_by(|a, b| a.0.cmp(&b.0));
+    for (display, segments) in to_add {
+        let path: Vec<Sym> = segments.iter().map(|s| crate::intern::sym(s)).collect();
         program.imports.push(Decl::Import {
-            path: vec![crate::intern::sym(&name)],
-            names: None, alias: None, span: None,
+            path, names: None, alias: None, span: None,
         });
-        messages.push(format!("Added `import {}`", name));
+        messages.push(format!("Added `import {}`", display));
     }
 
     // Remove unused imports (keep _ prefixed, self imports, and auto-imported)

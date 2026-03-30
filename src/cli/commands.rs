@@ -584,11 +584,77 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
     }
 }
 
+/// Load dependency names and submodule map from almide.toml for fmt auto-import.
+fn load_dep_info_for_fmt() -> (Vec<String>, std::collections::HashMap<String, String>) {
+    let toml_path = std::path::Path::new("almide.toml");
+    if !toml_path.exists() {
+        return (vec![], std::collections::HashMap::new());
+    }
+    let project = match crate::project::parse_toml(toml_path) {
+        Ok(p) => p,
+        Err(_) => return (vec![], std::collections::HashMap::new()),
+    };
+    let dep_names: Vec<String> = project.dependencies.iter().map(|d| d.name.clone()).collect();
+
+    // Discover submodules for each dependency by scanning cached source directories
+    let mut submodules = std::collections::HashMap::new();
+    let cache = crate::project::cache_dir();
+    for dep in &project.dependencies {
+        // Check cache dir: ~/.almide/cache/{name}/{tag_or_latest}/
+        let dep_cache = cache.join(&dep.name);
+        if dep_cache.is_dir() {
+            // Use the first subdirectory (version) found
+            if let Ok(entries) = std::fs::read_dir(&dep_cache) {
+                if let Some(version_dir) = entries.flatten().find(|e| e.path().is_dir()) {
+                    scan_submodules(&version_dir.path(), &dep.name, &mut submodules);
+                }
+            }
+        }
+        // Also check local: {name}/ next to almide.toml
+        let local_dir = std::path::Path::new(&dep.name);
+        if local_dir.is_dir() {
+            scan_submodules(local_dir, &dep.name, &mut submodules);
+        }
+    }
+    (dep_names, submodules)
+}
+
+/// Recursively scan a package's src/ directory to discover submodules.
+/// Maps last path segment → full dotted path (e.g., "python" → "bindgen.bindings.python").
+fn scan_submodules(base_dir: &std::path::Path, pkg_name: &str, out: &mut std::collections::HashMap<String, String>) {
+    let src_dir = base_dir.join("src");
+    let scan_dir = if src_dir.is_dir() { &src_dir } else { base_dir };
+    scan_submodules_recursive(scan_dir, pkg_name, out);
+}
+
+fn scan_submodules_recursive(dir: &std::path::Path, prefix: &str, out: &mut std::collections::HashMap<String, String>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if path.is_file() && name.ends_with(".almd") {
+            let stem = name.trim_end_matches(".almd");
+            if stem == "mod" || stem == "lib" || stem == "main" { continue; }
+            let full = format!("{}.{}", prefix, stem);
+            out.insert(stem.to_string(), full);
+        } else if path.is_dir() && !name.starts_with('.') {
+            let sub_prefix = format!("{}.{}", prefix, name);
+            scan_submodules_recursive(&path, &sub_prefix, out);
+        }
+    }
+}
+
 pub fn cmd_fmt(files: &[String], write_back: bool) {
+    // Load dependency info from almide.toml (if present)
+    let (dep_names, dep_submodules) = load_dep_info_for_fmt();
+
     for file in files {
         let (mut program, _, _) = parse_file(file);
         // Auto-manage imports: add missing, remove unused
-        let import_changes = fmt::auto_imports(&mut program);
+        let import_changes = fmt::auto_imports(&mut program, &dep_names, &dep_submodules);
         for msg in &import_changes {
             eprintln!("{}: {}", file, msg);
         }
