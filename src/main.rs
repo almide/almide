@@ -8,6 +8,7 @@ pub use almide::parser;
 pub use almide::stdlib;
 pub use almide::types;
 pub use almide::intern;
+pub use almide::import_table;
 
 // CLI-only modules
 mod check;
@@ -229,8 +230,6 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
     let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .map_err(|e| { eprintln!("{}", e); e.clone() })?;
 
-    let import_aliases = build_import_aliases(&program, &resolved);
-
     let mut ir_program = None;
     let mut module_irs = std::collections::HashMap::new();
     if !no_check {
@@ -239,9 +238,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
         }
-        for (alias, target) in &import_aliases {
-            checker.register_alias(alias, target);
-        }
+        checker.install_import_table(&program);
         let diagnostics = checker.check_program(&mut program);
         // Combine parse errors + checker errors
         let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();
@@ -272,19 +269,23 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         // Lower user modules to IR (skip TOML-defined stdlib — they use generated codegen)
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
-            let mod_types = checker.check_module_bodies(mod_prog);
+            let mod_types = checker.check_module_bodies(mod_prog, name);
             let versioned = pkg_id.as_ref().map(|pid| {
-                let base = pid.mod_name(); // e.g. "bindgen_v0"
-                // For submodules (e.g. name="bindgen.scaffolding"), append the suffix
+                let base = pid.mod_name();
                 if let Some(suffix) = name.strip_prefix(&pid.name) {
-                    format!("{}{}", base, suffix) // "bindgen_v0.scaffolding"
+                    format!("{}{}", base, suffix)
                 } else {
                     base
                 }
             });
+            // Set module's import table for lowering, then restore
+            let self_name = checker.env.self_module_name.map(|s| s.to_string());
+            let import_table_name = self_name.as_deref().unwrap_or(name);
+            let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
+            let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
             let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
-            // Also keep in module_irs for backward compat (borrow analysis, etc.)
             let mod_ir_program = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
+            checker.env.import_table = saved_table;
             module_irs.insert(name.clone(), mod_ir_program);
             if let Some(ref mut ir) = ir_program {
                 ir.modules.push(mod_ir_module);
@@ -353,35 +354,6 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
     }
 }
 
-/// Build import alias mappings from a program's import declarations.
-/// Used by check, emit, and compile pipelines to register module aliases.
-pub(crate) fn build_import_aliases(program: &ast::Program, resolved: &resolve::ResolvedModules) -> Vec<(String, String)> {
-    program.imports.iter().filter_map(|imp| {
-        if let ast::Decl::Import { path, alias, .. } = imp {
-            if let Some(a) = alias {
-                let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
-                let target = if is_self_import && path.len() >= 2 {
-                    path.last().map(|s| s.to_string()).unwrap_or_default()
-                } else if is_self_import {
-                    resolved.modules.iter()
-                        .find(|(_, _, _, is_self)| *is_self)
-                        .map(|(name, _, _, _)| name.clone())
-                        .unwrap_or_else(|| path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
-                } else {
-                    path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
-                };
-                Some((a.to_string(), target))
-            } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
-                let last = path.last().expect("path.len() > 1").to_string();
-                Some((last, path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }).collect()
-}
 
 fn resolve_file(file: Option<String>) -> String {
     file.unwrap_or_else(|| {

@@ -73,7 +73,7 @@ pub fn resolve_imports_with_deps(
                     if !loaded_names.contains(mod_name) {
                         let src_dir = root.join("src");
                         let mod_path = vec![crate::intern::sym("mod")];
-                        load_self_module(mod_name, &mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                        load_self_module(mod_name, &mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading, true)?;
                     }
                 } else {
                     // self.xxx → local module within the project
@@ -90,7 +90,7 @@ pub fn resolve_imports_with_deps(
                         format!("cannot resolve 'import self.{}': no almide.toml found in parent directories", display_name)
                     })?;
                     let src_dir = root.join("src");
-                    load_self_module(mod_name, mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                    load_self_module(mod_name, mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading, false)?;
                 }
             } else if path.len() == 1 {
                 let name = &path[0];
@@ -186,6 +186,7 @@ fn load_self_module(
     loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
     loaded_names: &mut HashSet<String>,
     loading: &mut HashSet<String>,
+    is_package_root: bool,
 ) -> Result<(), String> {
     if loaded_names.contains(mod_name) {
         return Ok(());
@@ -215,7 +216,7 @@ fn load_self_module(
                 if path.len() >= 2 {
                     let sub_mod_path = &path[1..];
                     let sub_mod_name = alias.as_deref().unwrap_or_else(|| sub_mod_path.last().expect("guarded by path.len() >= 2"));
-                    load_self_module(sub_mod_name, sub_mod_path, src_dir, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                    load_self_module(sub_mod_name, sub_mod_path, src_dir, base_dir, dep_paths, loaded, loaded_names, loading, false)?;
                 }
             } else {
                 let dep_name = &path[0];
@@ -228,7 +229,7 @@ fn load_self_module(
 
     loading.remove(mod_name);
     loaded_names.insert(mod_name.to_string());
-    loaded.push((mod_name.to_string(), program, None, true));
+    loaded.push((mod_name.to_string(), program, None, is_package_root));
     Ok(())
 }
 

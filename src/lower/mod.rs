@@ -48,8 +48,6 @@ pub struct LowerCtx<'a> {
     /// Set during function lowering for protocol-bounded generics.
     protocol_bounds: HashMap<Sym, Vec<Sym>>,
     lambda_id_counter: u32,
-    /// Module-local aliases rebuilt from imports (for modules whose aliases were discarded by check_module_bodies)
-    pub extra_module_aliases: HashMap<Sym, Sym>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -63,7 +61,6 @@ impl<'a> LowerCtx<'a> {
             type_conventions: HashMap::new(),
             protocol_bounds: HashMap::new(),
             lambda_id_counter: 0,
-            extra_module_aliases: HashMap::new(),
         }
     }
 
@@ -248,15 +245,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
 }
 
 fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprId, Ty>, env: &TypeEnv, module_prefix: Option<&str>) -> IrProgram {
-    lower_program_with_prefix_and_aliases(prog, expr_types, env, module_prefix, &HashMap::new())
-}
-
-fn lower_program_with_prefix_and_aliases(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprId, Ty>, env: &TypeEnv, module_prefix: Option<&str>, extra_aliases: &HashMap<Sym, Sym>) -> IrProgram {
     let mut ctx = LowerCtx::new(expr_types, env);
-    // Inject module-local aliases that check_module_bodies discarded after type checking
-    for (alias, canonical) in extra_aliases {
-        ctx.extra_module_aliases.insert(*alias, *canonical);
-    }
 
     // Collect type conventions (deriving Eq, Repr, etc.)
     for decl in &prog.decls {
@@ -467,24 +456,7 @@ pub fn lower_module(
     env: &TypeEnv,
     versioned_name: Option<String>,
 ) -> IrModule {
-    // Rebuild module-local aliases from imports (check_module_bodies restores aliases
-    // after type checking, so lowering doesn't see them — inject them here)
-    let extra_aliases: HashMap<Sym, Sym> = prog.imports.iter()
-        .filter_map(|imp| {
-            if let crate::ast::Decl::Import { path, alias, .. } = imp {
-                let canonical = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-                let key = if let Some(a) = alias {
-                    a.to_string()
-                } else if path.len() > 1 {
-                    path.last().unwrap().to_string()
-                } else {
-                    return None;
-                };
-                Some((sym(&key), sym(&canonical)))
-            } else { None }
-        })
-        .collect();
-    let mut ir_prog = lower_program_with_prefix_and_aliases(prog, expr_types, env, Some(name), &extra_aliases);
+    let mut ir_prog = lower_program_with_prefix(prog, expr_types, env, Some(name));
     // Rename top_let variables with module prefix so codegen emits globally unique names.
     // Functions reference these via VarId, so renaming in the VarTable propagates everywhere.
     let mod_ident = versioned_name.as_deref().unwrap_or(name).replace('.', "_");

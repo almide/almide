@@ -814,14 +814,9 @@ impl Checker {
     /// Resolve a module.func Member expression to a qualified call key.
     fn resolve_module_call(&mut self, object: &ast::Expr, field: &str) -> Option<String> {
         if let ast::Expr::Ident { name: module, .. } = object {
-            if self.env.imported_stdlib.contains(&sym(module)) || self.env.imported_user_modules.contains(&sym(module)) {
-                self.env.used_modules.insert(sym(module));
-                return Some(format!("{}.{}", module, field));
-            }
-            if let Some(target) = self.env.module_aliases.get(&sym(module)) {
-                let target = target.to_string();
-                self.env.used_modules.insert(sym(module));
-                return Some(format!("{}.{}", target, field));
+            if let Some(canonical) = self.env.import_table.resolve(module) {
+                self.env.import_table.mark_used(module);
+                return Some(format!("{}.{}", canonical, field));
             }
             // Check if Ident.field is a Type.method (protocol implementation)
             let key = format!("{}.{}", module, field);
@@ -857,27 +852,25 @@ impl Checker {
         match expr {
             ast::Expr::Member { object, field, .. } => {
                 if let ast::Expr::Ident { name: root, .. } = object.as_ref() {
-                    // Resolve alias: if root is an alias (e.g. "d" → "dmod_d"), use the target
-                    let resolved_root = self.env.module_aliases.get(&sym(root))
+                    let resolved_root = self.env.import_table.resolve(root)
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| root.to_string());
                     let candidate = format!("{}.{}", resolved_root, field);
-                    if self.env.imported_user_modules.contains(&sym(&candidate)) {
+                    if self.env.import_table.accessible.contains(&sym(&candidate)) {
                         return Some(candidate);
                     }
-                    // Namespace prefix: dir without mod.almd but has children
                     let prefix = format!("{}.", candidate);
-                    if self.env.imported_user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                    if self.env.import_table.accessible.iter().any(|m| m.as_str().starts_with(&prefix)) {
                         return Some(candidate);
                     }
                 }
                 if let Some(parent) = self.resolve_dotted_module_path(object) {
                     let candidate = format!("{}.{}", parent, field);
-                    if self.env.imported_user_modules.contains(&sym(&candidate)) {
+                    if self.env.import_table.accessible.contains(&sym(&candidate)) {
                         return Some(candidate);
                     }
                     let prefix = format!("{}.", candidate);
-                    if self.env.imported_user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                    if self.env.import_table.accessible.iter().any(|m| m.as_str().starts_with(&prefix)) {
                         return Some(candidate);
                     }
                 }

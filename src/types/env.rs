@@ -1,5 +1,6 @@
 use super::{Ty, VariantCase, substitute, ProtocolDef};
 use crate::intern::{Sym, sym};
+use crate::import_table::ImportTable;
 
 pub struct TypeEnv {
     /// User-defined type declarations: name -> Ty
@@ -20,18 +21,14 @@ pub struct TypeEnv {
     pub constructors: std::collections::HashMap<Sym, (Sym, VariantCase)>,
     /// User-defined module names (for distinguishing from stdlib in module calls)
     pub user_modules: std::collections::HashSet<Sym>,
-    /// User modules directly imported by the current compilation unit.
-    /// Subset of user_modules. Used to enforce module boundaries (no phantom deps).
-    pub imported_user_modules: std::collections::HashSet<Sym>,
-    /// Stdlib modules available in scope (Tier 1 implicit + explicitly imported)
-    pub imported_stdlib: std::collections::HashSet<Sym>,
+    /// The package's own module name (set when `register_module` is called with `is_self: true`).
+    /// Used to resolve `import self` in the main file.
+    pub self_module_name: Option<Sym>,
+    /// Single source of truth for import resolution (aliases, accessible modules, stdlib, usage tracking).
+    pub import_table: ImportTable,
 
     /// Track used variables (for unused variable warnings)
     pub used_vars: std::collections::HashSet<Sym>,
-    /// Track used modules (for unused import warnings)
-    pub used_modules: std::collections::HashSet<Sym>,
-    /// Maps import name ("json") to qualified name ("json_v2") for versioned deps
-    pub module_aliases: std::collections::HashMap<Sym, Sym>,
     /// Symbols that are local (file-private) in their module: "module.func" -> true
     pub local_symbols: std::collections::HashSet<Sym>,
     /// Temporarily suppress auto-unwrap of Result (for match on ok/err)
@@ -78,19 +75,10 @@ impl TypeEnv {
             effect_fns: std::collections::HashSet::new(),
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
-            imported_user_modules: std::collections::HashSet::new(),
-            imported_stdlib: {
-                let mut s = std::collections::HashSet::new();
-                // Tier 1: implicit imports (core type modules)
-                for m in &["string", "int", "float", "list", "bytes", "matrix", "map", "set", "option", "result", "value"] {
-                    s.insert(sym(m));
-                }
-                s
-            },
+            self_module_name: None,
+            import_table: ImportTable::new(),
 
             used_vars: std::collections::HashSet::new(),
-            used_modules: std::collections::HashSet::new(),
-            module_aliases: std::collections::HashMap::new(),
             local_symbols: std::collections::HashSet::new(),
             skip_auto_unwrap: false,
             mutable_vars: std::collections::HashSet::new(),

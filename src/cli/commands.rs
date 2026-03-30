@@ -223,6 +223,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
         }
+        checker.install_import_table(&program);
         let diagnostics = checker.check_program(&mut program);
         if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
             eprintln!("SKIP {} (type errors)", test_file);
@@ -234,12 +235,17 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         // Lower user modules to IR
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
-            let mod_types = checker.check_module_bodies(mod_prog);
+            let mod_types = checker.check_module_bodies(mod_prog, name);
             let versioned = pkg_id.as_ref().map(|pid| {
                 let base = pid.mod_name();
                 if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base }
             });
+            let self_name = checker.env.self_module_name.map(|s| s.to_string());
+            let import_table_name = self_name.as_deref().unwrap_or(name);
+            let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
+            let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
             let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
+            checker.env.import_table = saved_table;
             ir_program.modules.push(mod_ir_module);
         }
         almide::optimize::optimize_program(&mut ir_program);
@@ -324,7 +330,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
 }
 
 pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
-    use crate::{parse_file, check, diagnostic, resolve, project, project_fetch, ast};
+    use crate::{parse_file, check, diagnostic, resolve, project, project_fetch};
 
     let test_files: Vec<String> = if !file.is_empty() {
         let path = std::path::Path::new(file);
@@ -418,41 +424,12 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
             }
         };
 
-        // Extract import aliases
-        let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
-            if let ast::Decl::Import { path, alias, .. } = imp {
-                if let Some(a) = alias {
-                    let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
-                    let target = if is_self_import && path.len() >= 2 {
-                        path.last().map(|s| s.to_string()).unwrap_or_default()
-                    } else if is_self_import {
-                        resolved.modules.iter()
-                            .find(|(_, _, _, is_self)| *is_self)
-                            .map(|(name, _, _, _)| name.clone())
-                            .unwrap_or_else(|| path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
-                    } else {
-                        path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
-                    };
-                    Some((a.to_string(), target))
-                } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
-                    let last = path.last().expect("path.len() > 1 checked above").to_string();
-                    Some((last, path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }).collect();
-
         let mut checker = check::Checker::new();
         checker.set_source(test_file, &source_text);
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
         }
-        for (alias, target) in &import_aliases {
-            checker.register_alias(alias, target);
-        }
+        checker.install_import_table(&program);
         let diagnostics = checker.check_program(&mut program);
         if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
             eprintln!("SKIP {} (type errors)", test_file);
@@ -468,9 +445,14 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
         // Lower user modules to IR
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
-            let mod_types = checker.check_module_bodies(mod_prog);
+            let mod_types = checker.check_module_bodies(mod_prog, name);
             let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
+            let self_name = checker.env.self_module_name.map(|s| s.to_string());
+            let import_table_name = self_name.as_deref().unwrap_or(name);
+            let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
+            let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
             let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
+            checker.env.import_table = saved_table;
             ir_program.modules.push(mod_ir_module);
         }
 

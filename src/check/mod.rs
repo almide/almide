@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use crate::ast;
 use crate::ast::ExprId;
 use crate::diagnostic::Diagnostic;
+use crate::import_table::{ImportTable, build_import_table};
 use crate::intern::{sym, Sym};
 use crate::types::{Ty, TypeEnv, VariantCase, VariantPayload, ProtocolDef, ProtocolMethodSig};
 use types::{TyVarId, Constraint, UnionFind, resolve_ty};
@@ -213,89 +214,26 @@ impl Checker {
 
     pub fn set_source(&mut self, file: &str, text: &str) { self.source_file = Some(file.into()); self.source_text = Some(text.into()); }
 
-    pub fn register_module(&mut self, name: &str, prog: &ast::Program, _pkg_id: Option<&crate::project::PkgId>, _is_self: bool) {
+    pub fn register_module(&mut self, name: &str, prog: &ast::Program, _pkg_id: Option<&crate::project::PkgId>, is_self: bool) {
         self.env.user_modules.insert(name.into());
+        if is_self {
+            self.env.self_module_name = Some(sym(name));
+        }
         self.register_decls(&prog.decls, Some(name));
-    }
-
-    pub fn register_alias(&mut self, alias: &str, target: &str) {
-        self.env.module_aliases.insert(alias.into(), target.into());
     }
 
     // ── Main entry point ──
 
+    /// Build and install an ImportTable for the main program.
+    /// Called by CLI pipelines before check_program.
+    pub fn install_import_table(&mut self, program: &ast::Program) {
+        let self_name = self.env.self_module_name.map(|s| s.to_string());
+        let (table, diags) = build_import_table(program, self_name.as_deref(), &self.env.user_modules);
+        self.env.import_table = table;
+        self.diagnostics.extend(diags);
+    }
+
     pub fn check_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
-        // Track alias → canonical mappings for collision detection
-        let mut alias_to_canonical: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        // Track canonical → first alias for duplicate import detection
-        let mut imported_canonicals: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        // Register explicitly imported modules (stdlib Tier 2 + user modules)
-        for imp in &program.imports {
-            if let ast::Decl::Import { path, alias, span, .. } = imp {
-                let name = alias.as_ref().cloned()
-                    .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
-                // Use the canonical name (from path) for user_modules lookup,
-                // since user_modules stores canonical names, not aliases.
-                let canonical = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-                if crate::stdlib::is_any_stdlib(&name) {
-                    self.env.imported_stdlib.insert(sym(&name));
-                }
-                // For 'import self', resolve canonical to the actual registered module name
-                // (the module was loaded under its alias or package name, not "self")
-                let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
-                let resolved_canonical = if is_self_import && path.len() == 1 {
-                    self.env.module_aliases.get(&sym(&name))
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| canonical.clone())
-                } else {
-                    canonical.clone()
-                };
-                // Track directly imported user modules (Go-style: only the specific module, no sub-access)
-                if self.env.user_modules.contains(&sym(&resolved_canonical)) {
-                    self.env.imported_user_modules.insert(sym(&resolved_canonical));
-                }
-                // import pkg.sub → mark as imported
-                if path.len() > 1 {
-                    let dotted = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-                    if self.env.user_modules.contains(&sym(&dotted)) {
-                        self.env.imported_user_modules.insert(sym(&dotted));
-                    }
-                }
-                // Detect duplicate import of the same module with a different alias → warning
-                if let Some(existing_alias) = imported_canonicals.get(&canonical) {
-                    if existing_alias.as_str() != name {
-                        self.diagnostics.push(Diagnostic::warning(
-                            format!("module '{}' is already imported as '{}'", canonical, existing_alias),
-                            format!("Remove the duplicate import"),
-                            format!("import at line {}", span.as_ref().map(|s| s.line).unwrap_or(0)),
-                        ));
-                    }
-                } else {
-                    imported_canonicals.insert(canonical.clone(), name.to_string());
-                }
-                // Register alias mapping (explicit or implicit from last path segment)
-                let used_name = if alias.is_some() {
-                    name.to_string()
-                } else if path.len() > 1 {
-                    path.last().unwrap().to_string()
-                } else {
-                    name.to_string()
-                };
-                // Detect name collision: two different modules trying to use the same local name
-                if let Some(existing_canonical) = alias_to_canonical.get(&used_name) {
-                    if existing_canonical.as_str() != canonical {
-                        self.diagnostics.push(Diagnostic::error(
-                            format!("ambiguous import: '{}' could refer to '{}' or '{}'", used_name, existing_canonical, canonical),
-                            format!("Use `import {} as <alias>` to disambiguate", canonical),
-                            format!("import at line {}", span.as_ref().map(|s| s.line).unwrap_or(0)),
-                        ));
-                    }
-                } else {
-                    alias_to_canonical.insert(used_name.clone(), canonical.clone());
-                    self.env.module_aliases.insert(sym(&used_name), sym(&canonical));
-                }
-            }
-        }
         self.register_decls(&program.decls, None);
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
@@ -311,7 +249,7 @@ impl Checker {
             let import_name = alias.as_ref().cloned()
                 .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
             if import_name.is_empty()
-                || self.env.used_modules.contains(&sym(&import_name))
+                || self.env.import_table.used.contains(&sym(&import_name))
                 || import_name.starts_with('_')
                 || path.first().map(|s| s.as_str()) == Some("self")
             { continue; }
@@ -325,43 +263,17 @@ impl Checker {
         std::mem::take(&mut self.diagnostics)
     }
 
-    pub fn check_module_bodies(&mut self, prog: &mut ast::Program) -> HashMap<ExprId, Ty> {
+    pub fn check_module_bodies(&mut self, prog: &mut ast::Program, module_name: &str) -> HashMap<ExprId, Ty> {
         let saved = (std::mem::take(&mut self.expr_types), std::mem::take(&mut self.infer_types),
             std::mem::take(&mut self.constraints), std::mem::replace(&mut self.uf, UnionFind::new()));
-        // Register this module's imports so resolve_module_call can find them.
-        // Save and restore to avoid leaking into other modules.
-        let saved_stdlib = self.env.imported_stdlib.clone();
-        let saved_aliases = self.env.module_aliases.clone();
-        let saved_imported_user = self.env.imported_user_modules.clone();
-        self.env.imported_user_modules.clear();
-        for imp in &prog.imports {
-            if let ast::Decl::Import { path, alias, .. } = imp {
-                let name = alias.as_ref().cloned()
-                    .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
-                if crate::stdlib::is_any_stdlib(&name) {
-                    self.env.imported_stdlib.insert(sym(&name));
-                }
-                // Track imported user modules for this submodule (Go-style: only specific module)
-                if self.env.user_modules.contains(&sym(&name)) {
-                    self.env.imported_user_modules.insert(sym(&name));
-                }
-                if path.len() > 1 {
-                    let dotted = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-                    if self.env.user_modules.contains(&sym(&dotted)) {
-                        self.env.imported_user_modules.insert(sym(&dotted));
-                    }
-                }
-                // Register import aliases (import X as Y)
-                if let Some(a) = alias {
-                    let target = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-                    self.env.module_aliases.insert(sym(a), sym(&target));
-                } else if path.len() > 1 {
-                    let last = path.last().expect("path.len() > 1").to_string();
-                    let target = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-                    self.env.module_aliases.insert(sym(&last), sym(&target));
-                }
-            }
-        }
+        // Build a fresh ImportTable for this module's imports.
+        // `import self` always resolves to the package root, not to the current module.
+        let self_name = self.env.self_module_name.map(|s| s.to_string());
+        let import_table_name = self_name.as_deref().unwrap_or(module_name);
+        let saved_import_table = std::mem::replace(&mut self.env.import_table, ImportTable::new());
+        let (mod_table, diags) = build_import_table(prog, Some(import_table_name), &self.env.user_modules);
+        self.env.import_table = mod_table;
+        self.diagnostics.extend(diags);
         // Register the module's own declarations WITHOUT prefix so that
         // intra-module calls (e.g. get_str() inside bindgen.bindings_c) resolve.
         // Track which keys were added so we can remove them after checking.
@@ -378,9 +290,7 @@ impl Checker {
         }
         let module_types = std::mem::take(&mut self.expr_types);
         self.expr_types = saved.0; self.infer_types = saved.1; self.constraints = saved.2; self.uf = saved.3;
-        self.env.imported_stdlib = saved_stdlib;
-        self.env.module_aliases = saved_aliases;
-        self.env.imported_user_modules = saved_imported_user;
+        self.env.import_table = saved_import_table;
         // Remove the unprefixed declarations we temporarily added
         for key in self.env.functions.keys().cloned().collect::<Vec<_>>() {
             if !fn_keys_before.contains(&key) { self.env.functions.remove(&key); }

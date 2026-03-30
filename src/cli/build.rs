@@ -139,6 +139,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
         checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
     }
+    checker.install_import_table(&program);
     let diagnostics = checker.check_program(&mut program);
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
         for d in &diagnostics {
@@ -153,7 +154,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     // Lower user modules to IR
     for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
         if almide::stdlib::is_stdlib_module(name) { continue; }
-        let mod_types = checker.check_module_bodies(mod_prog);
+        let mod_types = checker.check_module_bodies(mod_prog, name);
         let versioned = pkg_id.as_ref().map(|pid| {
             let base = pid.mod_name();
             if let Some(suffix) = name.strip_prefix(&pid.name) {
@@ -162,7 +163,12 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
                 base
             }
         });
+        let self_name = checker.env.self_module_name.map(|s| s.to_string());
+        let import_table_name = self_name.as_deref().unwrap_or(name);
+        let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
+        let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
         let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
+        checker.env.import_table = saved_table;
         ir_program.modules.push(mod_ir_module);
     }
 
@@ -213,6 +219,7 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
     for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
         checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
     }
+    checker.install_import_table(&program);
     let diagnostics = checker.check_program(&mut program);
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
         for d in &diagnostics {
@@ -225,9 +232,14 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
     let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
     for (name, mod_prog, pkg_id, _) in &resolved.modules {
         if almide::stdlib::is_stdlib_module(name) { continue; }
-        let mod_types = checker.check_module_bodies(&mut mod_prog.clone());
+        let mod_types = checker.check_module_bodies(&mut mod_prog.clone(), name);
         let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
+        let self_name = checker.env.self_module_name.map(|s| s.to_string());
+        let import_table_name = self_name.as_deref().unwrap_or(name);
+        let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
+        let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
         let mod_ir_module = almide::lower::lower_module(name, &mod_prog, &mod_types, &checker.env, versioned);
+        checker.env.import_table = saved_table;
         ir_program.modules.push(mod_ir_module);
     }
 

@@ -117,41 +117,13 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
     let resolved = resolve::resolve_imports_with_deps(&file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
-    let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
-        if let crate::ast::Decl::Import { path, alias, .. } = imp {
-            if let Some(a) = alias {
-                let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
-                let target = if is_self_import && path.len() >= 2 {
-                    path.last().map(|s| s.to_string()).unwrap_or_default()
-                } else if is_self_import {
-                    resolved.modules.iter()
-                        .find(|(_, _, _, is_self)| *is_self)
-                        .map(|(name, _, _, _)| name.clone())
-                        .unwrap_or_else(|| path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
-                } else {
-                    path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
-                };
-                Some((a.to_string(), target))
-            } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
-                let last = path.last().expect("path.len() > 1 checked above").to_string();
-                Some((last, path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }).collect();
-
     // Type check
     let mut checker = check::Checker::new();
     checker.set_source(&file, &source_text);
     for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
         checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
     }
-    for (alias, target) in &import_aliases {
-        checker.register_alias(alias, target);
-    }
+    checker.install_import_table(&program);
     let diagnostics = checker.check_program(&mut program);
     let errors: Vec<_> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Error)

@@ -104,11 +104,9 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                 if ctx.lookup_var(module).is_none() && (module == "fan"
                     || crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module)
                     || ctx.env.user_modules.contains(module)
-                    || ctx.env.module_aliases.contains_key(module)
-                    || ctx.extra_module_aliases.contains_key(module))
+                    || ctx.env.import_table.aliases.contains_key(module))
                 {
-                    let resolved = ctx.env.module_aliases.get(module).copied()
-                        .or_else(|| ctx.extra_module_aliases.get(module).copied())
+                    let resolved = ctx.env.import_table.aliases.get(module).copied()
                         .unwrap_or(*module);
                     return CallTarget::Module { module: resolved, func: *field };
                 }
@@ -211,7 +209,7 @@ fn resolve_dotted_module_path(expr: &ast::Expr, ctx: &LowerCtx) -> Option<String
         ast::Expr::Member { object, field, .. } => {
             if let ast::Expr::Ident { name: root, .. } = object.as_ref() {
                 // Resolve alias: if root is an alias (e.g. "d" → "dmod_d"), use the target
-                let resolved_root = ctx.env.module_aliases.get(root)
+                let resolved_root = ctx.env.import_table.aliases.get(root)
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| root.to_string());
                 let candidate = format!("{}.{}", resolved_root, field);

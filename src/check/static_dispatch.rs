@@ -181,16 +181,10 @@ impl Checker {
 
             // Direct stdlib/user module call, or resolved alias
             // Only imported modules are accessible (no phantom dependencies)
-            let resolved_module = if self.env.imported_stdlib.contains(&sym(module))
-                || self.env.imported_user_modules.contains(&sym(module)) {
-                self.env.used_modules.insert(sym(module));
-                Some(module.to_string())
-            } else {
-                self.env.module_aliases.get(&sym(module)).map(|s| {
-                    self.env.used_modules.insert(sym(module));
-                    s.to_string()
-                })
-            };
+            let resolved_module = self.env.import_table.resolve(module).map(|s| {
+                self.env.import_table.mark_used(module);
+                s.to_string()
+            });
             if let Some(m) = resolved_module {
                 return Some(self.check_named_call(&format!("{}.{}", m, field), arg_tys));
             }
@@ -214,28 +208,25 @@ impl Checker {
         match expr {
             ast::Expr::Member { object, field, .. } => {
                 if let ast::Expr::Ident { name: root, .. } = object.as_ref() {
-                    // Resolve alias: if root is an alias (e.g. "d" → "dmod_d"), use the target
-                    let resolved_root = self.env.module_aliases.get(&sym(root))
+                    let resolved_root = self.env.import_table.resolve(root)
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| root.to_string());
                     let candidate = format!("{}.{}", resolved_root, field);
-                    if self.env.imported_user_modules.contains(&sym(&candidate)) {
+                    if self.env.import_table.accessible.contains(&sym(&candidate)) {
                         return Some(candidate);
                     }
-                    // Check if candidate is a namespace prefix (e.g. "bindgen.bindings"
-                    // has children like "bindgen.bindings.python" even without mod.almd)
                     let prefix = format!("{}.", candidate);
-                    if self.env.imported_user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                    if self.env.import_table.accessible.iter().any(|m| m.as_str().starts_with(&prefix)) {
                         return Some(candidate);
                     }
                 }
                 if let Some(parent) = self.resolve_dotted_module(object) {
                     let candidate = format!("{}.{}", parent, field);
-                    if self.env.imported_user_modules.contains(&sym(&candidate)) {
+                    if self.env.import_table.accessible.contains(&sym(&candidate)) {
                         return Some(candidate);
                     }
                     let prefix = format!("{}.", candidate);
-                    if self.env.imported_user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                    if self.env.import_table.accessible.iter().any(|m| m.as_str().starts_with(&prefix)) {
                         return Some(candidate);
                     }
                 }
