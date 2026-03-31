@@ -22,7 +22,7 @@ impl Parser {
             return self.parse_spread_record(span, open);
         }
         // Record literal: { field: value, ... }
-        if (self.check(TokenType::Ident) || self.check(TokenType::IdentQ))
+        if self.check(TokenType::Ident)
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Colon)
         {
             return self.parse_record_literal(span, open);
