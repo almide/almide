@@ -131,9 +131,20 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             if fn_ctx.target == Target::Rust && fn_ctx.var_table.get(p.var).mutability == Mutability::Var {
                 param_name = format!("mut {}", param_name);
             }
-            let type_s = render_type_fn(&fn_ctx, &p.ty);
+            let type_s = match p.borrow {
+                ParamBorrow::Own => render_type_fn(&fn_ctx, &p.ty),
+                ParamBorrow::Ref => format!("&{}", render_type_fn(&fn_ctx, &p.ty)),
+                ParamBorrow::RefStr => "&str".to_string(),
+                ParamBorrow::RefSlice => {
+                    if let crate::types::Ty::Applied(_, args) = &p.ty {
+                        if let Some(inner) = args.first() {
+                            format!("&[{}]", render_type_fn(&fn_ctx, inner))
+                        } else { format!("&{}", render_type_fn(&fn_ctx, &p.ty)) }
+                    } else { format!("&{}", render_type_fn(&fn_ctx, &p.ty)) }
+                }
+            };
             fn_ctx.templates.render_with("fn_param", None, &[], &[("name", param_name.as_str()), ("type", type_s.as_str())])
-                .unwrap_or_else(|| format!("{}: {}", p.name, render_type_fn(&fn_ctx, &p.ty)))
+                .unwrap_or_else(|| format!("{}: {}", p.name, type_s))
         })
         .collect::<Vec<_>>()
         .join(", ");

@@ -5,6 +5,7 @@
 //!
 //! NO string rendering. All decisions are structural IR transformations.
 
+use std::collections::{HashSet, HashMap};
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
 use crate::generated::arg_transforms::{self, ArgTransform};
@@ -110,6 +111,18 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
 
             // Recurse into args first (fan auto-try is handled by FanLoweringPass)
             let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
+
+            // Try to lower list operations to iterator chains (Rust-only optimization)
+            if module.as_ref() == "list" {
+                if let Some(iter_expr) = try_lower_to_iter_chain(&func, args.clone(), &ty, span) {
+                    return iter_expr;
+                }
+            }
+
+            // Inline math/float/int intrinsics as native Rust expressions
+            if let Some(inlined) = try_inline_intrinsic(&module, &func, &args, &ty, span) {
+                return inlined;
+            }
 
             // Look up per-function transform table
             let info = arg_transforms::lookup(&module, &func);
@@ -528,6 +541,345 @@ fn resolve_ufcs_stmts(stmts: Vec<IrStmt>, siblings: &[String]) -> Vec<IrStmt> {
     }).collect()
 }
 
+// ── Iterator chain lowering ────────────────────────────────────────
+
+/// Inline math/float/int intrinsics as native Rust expressions.
+/// Eliminates runtime function call overhead for hot-path numeric operations.
+fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span: Option<crate::ast::Span>) -> Option<IrExpr> {
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span };
+
+    match (module, func) {
+        // ── math.sqrt(x) → x.sqrt() via RenderedCall ──
+        // These are the highest-impact: called in tight loops (nbody, spectralnorm)
+        ("math", "sqrt") | ("float", "sqrt") if args.len() >= 1 => {
+            Some(mk(IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(args[0].clone()),
+                    method: crate::intern::sym("sqrt"),
+                },
+                args: vec![],
+                type_args: vec![],
+            }))
+        }
+        ("math", "abs") | ("float", "abs") if args.len() >= 1 => {
+            Some(mk(IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(args[0].clone()),
+                    method: crate::intern::sym("abs"),
+                },
+                args: vec![],
+                type_args: vec![],
+            }))
+        }
+        ("math", "floor") | ("float", "floor") if args.len() >= 1 => {
+            Some(mk(IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(args[0].clone()),
+                    method: crate::intern::sym("floor"),
+                },
+                args: vec![],
+                type_args: vec![],
+            }))
+        }
+        ("math", "ceil") | ("float", "ceil") if args.len() >= 1 => {
+            Some(mk(IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(args[0].clone()),
+                    method: crate::intern::sym("ceil"),
+                },
+                args: vec![],
+                type_args: vec![],
+            }))
+        }
+        ("math", "round") | ("float", "round") if args.len() >= 1 => {
+            Some(mk(IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(args[0].clone()),
+                    method: crate::intern::sym("round"),
+                },
+                args: vec![],
+                type_args: vec![],
+            }))
+        }
+        ("math", "sin") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("sin") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "cos") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("cos") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "tan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("tan") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "asin") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("asin") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "acos") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("acos") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "atan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("atan") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "atan2") if args.len() >= 2 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("atan2") },
+            args: vec![args[1].clone()], type_args: vec![],
+        })),
+        ("math", "exp") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("exp") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "log") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("ln") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "log2") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("log2") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "log10") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("log10") },
+            args: vec![], type_args: vec![],
+        })),
+        // float.from_int / int.to_float / float.to_int: walker handles inline cast
+        // math.pow: Int exponentiation — keep as runtime call (i64.pow needs u32 cast)
+        // ── math.fpow(base, exp) → base.powf(exp) ──
+        ("math", "fpow") if args.len() >= 2 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("powf") },
+            args: vec![args[1].clone()], type_args: vec![],
+        })),
+        // ── Constants ──
+        ("math", "pi") => Some(mk(IrExprKind::LitFloat { value: std::f64::consts::PI })),
+        ("math", "e") => Some(mk(IrExprKind::LitFloat { value: std::f64::consts::E })),
+        ("math", "inf") => Some(mk(IrExprKind::LitFloat { value: f64::INFINITY })),
+        ("float", "is_nan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("is_nan") },
+            args: vec![], type_args: vec![],
+        })),
+        ("float", "is_infinite") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("is_infinite") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "is_nan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("is_nan") },
+            args: vec![], type_args: vec![],
+        })),
+        _ => None,
+    }
+}
+
+/// Try to lower a list.* call into an IterChain IR node.
+/// Returns None if the operation isn't iterator-eligible.
+fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Option<crate::ast::Span>) -> Option<IrExpr> {
+    match func {
+        // ── Consuming operations (into_iter) → produce Vec ──
+        "map" if args.len() >= 2 => {
+            let lambda = prepare_lambda(args.remove(1));
+            let source = args.remove(0);
+            Some(IrExpr {
+                kind: IrExprKind::IterChain {
+                    source: Box::new(source),
+                    consume: true,
+                    steps: vec![IterStep::Map { lambda: Box::new(lambda) }],
+                    collector: IterCollector::Collect,
+                },
+                ty: ty.clone(), span,
+            })
+        }
+        "filter" if args.len() >= 2 && matches!(args[1].kind, IrExprKind::Lambda { .. }) => {
+            let lambda = prepare_lambda_borrowed(args.remove(1));
+            let source = args.remove(0);
+            Some(IrExpr {
+                kind: IrExprKind::IterChain {
+                    source: Box::new(source),
+                    consume: true,
+                    steps: vec![IterStep::Filter { lambda: Box::new(lambda) }],
+                    collector: IterCollector::Collect,
+                },
+                ty: ty.clone(), span,
+            })
+        }
+        "flat_map" if args.len() >= 2 => {
+            let lambda = prepare_lambda(args.remove(1));
+            let source = args.remove(0);
+            Some(IrExpr {
+                kind: IrExprKind::IterChain {
+                    source: Box::new(source),
+                    consume: true,
+                    steps: vec![IterStep::FlatMap { lambda: Box::new(lambda) }],
+                    collector: IterCollector::Collect,
+                },
+                ty: ty.clone(), span,
+            })
+        }
+        "filter_map" if args.len() >= 2 => {
+            let lambda = prepare_lambda(args.remove(1));
+            let source = args.remove(0);
+            Some(IrExpr {
+                kind: IrExprKind::IterChain {
+                    source: Box::new(source),
+                    consume: true,
+                    steps: vec![IterStep::FilterMap { lambda: Box::new(lambda) }],
+                    collector: IterCollector::Collect,
+                },
+                ty: ty.clone(), span,
+            })
+        }
+        "fold" if args.len() >= 3 => {
+            let lambda = prepare_lambda(args.remove(2));
+            let init = args.remove(1);
+            let source = args.remove(0);
+            Some(IrExpr {
+                kind: IrExprKind::IterChain {
+                    source: Box::new(source),
+                    consume: true,
+                    steps: vec![],
+                    collector: IterCollector::Fold { init: Box::new(init), lambda: Box::new(lambda) },
+                },
+                ty: ty.clone(), span,
+            })
+        }
+        "find" if args.len() >= 2 && matches!(args[1].kind, IrExprKind::Lambda { .. }) => {
+            let lambda = prepare_lambda_borrowed(args.remove(1));
+            let source = args.remove(0);
+            Some(IrExpr {
+                kind: IrExprKind::IterChain {
+                    source: Box::new(source),
+                    consume: true,
+                    steps: vec![],
+                    collector: IterCollector::Find { lambda: Box::new(lambda) },
+                },
+                ty: ty.clone(), span,
+            })
+        }
+        // ── Borrowing operations (iter) → produce scalar ──
+        "any" if args.len() >= 2 => {
+            let lambda = prepare_lambda(args.remove(1));
+            let source = args.remove(0);
+            Some(IrExpr {
+                kind: IrExprKind::IterChain {
+                    source: Box::new(source),
+                    consume: true,
+                    steps: vec![],
+                    collector: IterCollector::Any { lambda: Box::new(lambda) },
+                },
+                ty: ty.clone(), span,
+            })
+        }
+        "all" if args.len() >= 2 => {
+            let lambda = prepare_lambda(args.remove(1));
+            let source = args.remove(0);
+            Some(IrExpr {
+                kind: IrExprKind::IterChain {
+                    source: Box::new(source),
+                    consume: true,
+                    steps: vec![],
+                    collector: IterCollector::All { lambda: Box::new(lambda) },
+                },
+                ty: ty.clone(), span,
+            })
+        }
+        "count" if args.len() >= 2 && matches!(args[1].kind, IrExprKind::Lambda { .. }) => {
+            let lambda = prepare_lambda_borrowed(args.remove(1));
+            let source = args.remove(0);
+            Some(IrExpr {
+                kind: IrExprKind::IterChain {
+                    source: Box::new(source),
+                    consume: true,
+                    steps: vec![],
+                    collector: IterCollector::Count { lambda: Box::new(lambda) },
+                },
+                ty: ty.clone(), span,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Prepare a lambda for consuming iterator ops (map, fold, flat_map, filter_map).
+/// Callback gets `T` (owned) — apply LambdaClone with smart single-use skip.
+fn prepare_lambda(arg: IrExpr) -> IrExpr {
+    let ty = arg.ty.clone();
+    let span = arg.span;
+    match arg.kind {
+        IrExprKind::Lambda { params, body, lambda_id } => {
+            let clone_stmts = build_clone_stmts_for_lambda(&params, &body);
+            let wrapped_body = if clone_stmts.is_empty() {
+                *body
+            } else {
+                let body_ty = body.ty.clone();
+                let body_span = body.span;
+                IrExpr {
+                    kind: IrExprKind::Block { stmts: clone_stmts, expr: Some(body) },
+                    ty: body_ty, span: body_span,
+                }
+            };
+            IrExpr {
+                kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
+                ty, span,
+            }
+        }
+        _ => arg,
+    }
+}
+
+/// Prepare a lambda for borrowing iterator ops (filter, find, any, all, count).
+/// Callback gets `&T` — need deref/clone bindings to convert to owned `T`.
+fn prepare_lambda_borrowed(arg: IrExpr) -> IrExpr {
+    let ty = arg.ty.clone();
+    let span = arg.span;
+    match arg.kind {
+        IrExprKind::Lambda { params, body, lambda_id } => {
+            // For &T params, always add binding: Copy types get `let x = *x;`, heap types get `let x = x.clone();`
+            let deref_stmts: Vec<IrStmt> = params.iter()
+                .map(|(id, param_ty)| {
+                    let is_copy = matches!(param_ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit);
+                    let value = if is_copy {
+                        // *x (deref the reference)
+                        IrExpr {
+                            kind: IrExprKind::Deref {
+                                expr: Box::new(IrExpr { kind: IrExprKind::Var { id: *id }, ty: param_ty.clone(), span: None }),
+                            },
+                            ty: param_ty.clone(), span: None,
+                        }
+                    } else {
+                        // x.clone() (clone from reference)
+                        IrExpr {
+                            kind: IrExprKind::Clone {
+                                expr: Box::new(IrExpr { kind: IrExprKind::Var { id: *id }, ty: param_ty.clone(), span: None }),
+                            },
+                            ty: param_ty.clone(), span: None,
+                        }
+                    };
+                    IrStmt {
+                        kind: IrStmtKind::Bind { var: *id, mutability: Mutability::Let, ty: param_ty.clone(), value },
+                        span: None,
+                    }
+                }).collect();
+
+            let wrapped_body = if deref_stmts.is_empty() {
+                *body
+            } else {
+                let body_ty = body.ty.clone();
+                let body_span = body.span;
+                IrExpr {
+                    kind: IrExprKind::Block { stmts: deref_stmts, expr: Some(body) },
+                    ty: body_ty, span: body_span,
+                }
+            };
+            IrExpr {
+                kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
+                ty, span,
+            }
+        }
+        _ => arg,
+    }
+}
+
 /// Decorate a single argument based on the per-function transform.
 fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
     let ty = arg.ty.clone();
@@ -537,17 +889,25 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
         ArgTransform::Direct => arg,
 
         ArgTransform::BorrowStr => {
-            // &*expr
+            // &*expr — strip Clone wrapper (borrow doesn't consume ownership)
+            let inner = match arg.kind {
+                IrExprKind::Clone { expr } => *expr,
+                _ => arg,
+            };
             IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true, mutable: false },
+                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: true, mutable: false },
                 ty, span,
             }
         }
 
         ArgTransform::BorrowRef => {
-            // &expr
+            // &expr — strip Clone wrapper (borrow doesn't consume ownership)
+            let inner = match arg.kind {
+                IrExprKind::Clone { expr } => *expr,
+                _ => arg,
+            };
             IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: false },
+                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: false, mutable: false },
                 ty, span,
             }
         }
@@ -573,32 +933,10 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
         }
 
         ArgTransform::LambdaClone => {
-            // Lambda: add clone bindings for each param
+            // Lambda: add clone bindings only for params used more than once
             match arg.kind {
                 IrExprKind::Lambda { params, body, lambda_id } => {
-                    let clone_stmts: Vec<IrStmt> = params.iter()
-                        .filter(|(_, t)| !matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit))
-                        .map(|(id, param_ty)| {
-                            IrStmt {
-                                kind: IrStmtKind::Bind {
-                                    var: *id,
-                                    mutability: Mutability::Let,
-                                    ty: param_ty.clone(),
-                                    value: IrExpr {
-                                        kind: IrExprKind::Clone {
-                                            expr: Box::new(IrExpr {
-                                                kind: IrExprKind::Var { id: *id },
-                                                ty: param_ty.clone(),
-                                                span: None,
-                                            }),
-                                        },
-                                        ty: param_ty.clone(),
-                                        span: None,
-                                    },
-                                },
-                                span: None,
-                            }
-                        }).collect();
+                    let clone_stmts = build_clone_stmts_for_lambda(&params, &body);
 
                     let wrapped_body = if clone_stmts.is_empty() {
                         *body
@@ -642,30 +980,8 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
             // Lambda with Ok(body) wrapping: callback body gets wrapped in ResultOk
             match arg.kind {
                 IrExprKind::Lambda { params, body, lambda_id } => {
-                    // Clone bindings (same as LambdaClone)
-                    let clone_stmts: Vec<IrStmt> = params.iter()
-                        .filter(|(_, t)| !matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit))
-                        .map(|(id, param_ty)| {
-                            IrStmt {
-                                kind: IrStmtKind::Bind {
-                                    var: *id,
-                                    mutability: Mutability::Let,
-                                    ty: param_ty.clone(),
-                                    value: IrExpr {
-                                        kind: IrExprKind::Clone {
-                                            expr: Box::new(IrExpr {
-                                                kind: IrExprKind::Var { id: *id },
-                                                ty: param_ty.clone(),
-                                                span: None,
-                                            }),
-                                        },
-                                        ty: param_ty.clone(),
-                                        span: None,
-                                    },
-                                },
-                                span: None,
-                            }
-                        }).collect();
+                    // Clone bindings (only for multi-use params)
+                    let clone_stmts = build_clone_stmts_for_lambda(&params, &body);
 
                     // Wrap body in ResultOk
                     let body_ty = body.ty.clone();
@@ -1009,4 +1325,194 @@ fn rewrite_module_names_stmt(stmt: IrStmt, map: &std::collections::HashMap<Strin
         other => other,
     };
     IrStmt { kind, span: stmt.span }
+}
+
+// ── Lambda clone optimization: only clone multi-use params ─────────
+
+/// Types that need explicit annotation in lambda rebinding to help Rust type inference.
+fn needs_type_annotation(ty: &Ty) -> bool {
+    matches!(ty, Ty::Applied(_, _) | Ty::Named(_, _) | Ty::Record { .. } | Ty::OpenRecord { .. }
+        | Ty::Variant { .. } | Ty::TypeVar(_))
+}
+
+/// Build clone stmts for lambda params, skipping single-use params (they can move).
+fn build_clone_stmts_for_lambda(params: &[(VarId, Ty)], body: &IrExpr) -> Vec<IrStmt> {
+    let non_copy: HashSet<VarId> = params.iter()
+        .filter(|(_, t)| !matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit))
+        .map(|(id, _)| *id)
+        .collect();
+    if non_copy.is_empty() { return Vec::new(); }
+
+    let uses = count_lambda_body_uses(body, &non_copy);
+
+    params.iter()
+        .filter(|(_, t)| !matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit))
+        .filter_map(|(id, param_ty)| {
+            let count = uses.get(id).copied().unwrap_or(0);
+            if count > 1 {
+                // Multi-use: clone binding (let x: T = x.clone())
+                Some(IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: *id,
+                        mutability: Mutability::Let,
+                        ty: param_ty.clone(),
+                        value: IrExpr {
+                            kind: IrExprKind::Clone {
+                                expr: Box::new(IrExpr {
+                                    kind: IrExprKind::Var { id: *id },
+                                    ty: param_ty.clone(),
+                                    span: None,
+                                }),
+                            },
+                            ty: param_ty.clone(),
+                            span: None,
+                        },
+                    },
+                    span: None,
+                })
+            } else if count == 1 && needs_type_annotation(param_ty) {
+                // Single-use but complex type: rebind for type annotation (let x: T = x)
+                Some(IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: *id,
+                        mutability: Mutability::Let,
+                        ty: param_ty.clone(),
+                        value: IrExpr {
+                            kind: IrExprKind::Var { id: *id },
+                            ty: param_ty.clone(),
+                            span: None,
+                        },
+                    },
+                    span: None,
+                })
+            } else {
+                None
+            }
+        }).collect()
+}
+
+/// Count uses of target VarIds within a lambda body.
+/// Uses inside loops or nested lambdas are counted as 2 (conservative: forces clone).
+fn count_lambda_body_uses(expr: &IrExpr, targets: &HashSet<VarId>) -> HashMap<VarId, u32> {
+    let mut counts = HashMap::new();
+    count_lbu_expr(expr, targets, &mut counts, false);
+    counts
+}
+
+fn count_lbu_expr(expr: &IrExpr, targets: &HashSet<VarId>, counts: &mut HashMap<VarId, u32>, in_multi: bool) {
+    match &expr.kind {
+        IrExprKind::Var { id } if targets.contains(id) => {
+            *counts.entry(*id).or_insert(0) += if in_multi { 2 } else { 1 };
+        }
+        IrExprKind::Block { stmts, expr } => {
+            for s in stmts { count_lbu_stmt(s, targets, counts, in_multi); }
+            if let Some(e) = expr { count_lbu_expr(e, targets, counts, in_multi); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            count_lbu_expr(cond, targets, counts, in_multi);
+            count_lbu_expr(then, targets, counts, in_multi);
+            count_lbu_expr(else_, targets, counts, in_multi);
+        }
+        IrExprKind::Match { subject, arms } => {
+            count_lbu_expr(subject, targets, counts, in_multi);
+            for arm in arms {
+                if let Some(g) = &arm.guard { count_lbu_expr(g, targets, counts, in_multi); }
+                count_lbu_expr(&arm.body, targets, counts, in_multi);
+            }
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            count_lbu_expr(iterable, targets, counts, in_multi);
+            for s in body { count_lbu_stmt(s, targets, counts, true); }
+        }
+        IrExprKind::While { cond, body } => {
+            count_lbu_expr(cond, targets, counts, true);
+            for s in body { count_lbu_stmt(s, targets, counts, true); }
+        }
+        IrExprKind::Lambda { body, .. } => {
+            count_lbu_expr(body, targets, counts, true);
+        }
+        IrExprKind::Call { target, args, .. } => {
+            match target {
+                CallTarget::Method { object, .. } => count_lbu_expr(object, targets, counts, in_multi),
+                CallTarget::Computed { callee } => count_lbu_expr(callee, targets, counts, in_multi),
+                _ => {}
+            }
+            for a in args { count_lbu_expr(a, targets, counts, in_multi); }
+        }
+        IrExprKind::BinOp { left, right, .. } => {
+            count_lbu_expr(left, targets, counts, in_multi);
+            count_lbu_expr(right, targets, counts, in_multi);
+        }
+        IrExprKind::UnOp { operand, .. } => count_lbu_expr(operand, targets, counts, in_multi),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
+        | IrExprKind::Fan { exprs: elements } => {
+            for e in elements { count_lbu_expr(e, targets, counts, in_multi); }
+        }
+        IrExprKind::Record { fields, .. } => {
+            for (_, e) in fields { count_lbu_expr(e, targets, counts, in_multi); }
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            count_lbu_expr(base, targets, counts, in_multi);
+            for (_, e) in fields { count_lbu_expr(e, targets, counts, in_multi); }
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => count_lbu_expr(object, targets, counts, in_multi),
+        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
+            count_lbu_expr(object, targets, counts, in_multi);
+            count_lbu_expr(index, targets, counts, in_multi);
+        }
+        IrExprKind::Range { start, end, .. } => {
+            count_lbu_expr(start, targets, counts, in_multi);
+            count_lbu_expr(end, targets, counts, in_multi);
+        }
+        IrExprKind::StringInterp { parts } => {
+            for p in parts { if let IrStringPart::Expr { expr } = p { count_lbu_expr(expr, targets, counts, in_multi); } }
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries { count_lbu_expr(k, targets, counts, in_multi); count_lbu_expr(v, targets, counts, in_multi); }
+        }
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
+            count_lbu_expr(expr, targets, counts, in_multi);
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            count_lbu_expr(expr, targets, counts, in_multi);
+            count_lbu_expr(fallback, targets, counts, in_multi);
+        }
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { count_lbu_expr(a, targets, counts, in_multi); }
+        }
+        _ => {}
+    }
+}
+
+fn count_lbu_stmt(stmt: &IrStmt, targets: &HashSet<VarId>, counts: &mut HashMap<VarId, u32>, in_multi: bool) {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
+        | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
+            count_lbu_expr(value, targets, counts, in_multi);
+        }
+        IrStmtKind::IndexAssign { index, value, .. } | IrStmtKind::MapInsert { key: index, value, .. } => {
+            count_lbu_expr(index, targets, counts, in_multi);
+            count_lbu_expr(value, targets, counts, in_multi);
+        }
+        IrStmtKind::Expr { expr } => count_lbu_expr(expr, targets, counts, in_multi),
+        IrStmtKind::Guard { cond, else_ } => {
+            count_lbu_expr(cond, targets, counts, in_multi);
+            count_lbu_expr(else_, targets, counts, in_multi);
+        }
+        IrStmtKind::ListSwap { a, b, .. } => {
+            count_lbu_expr(a, targets, counts, in_multi);
+            count_lbu_expr(b, targets, counts, in_multi);
+        }
+        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+            count_lbu_expr(end, targets, counts, in_multi);
+        }
+        IrStmtKind::ListCopySlice { len, .. } => count_lbu_expr(len, targets, counts, in_multi),
+        IrStmtKind::Comment { .. } => {}
+    }
 }

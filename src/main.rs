@@ -9,6 +9,7 @@ pub use almide::stdlib;
 pub use almide::types;
 pub use almide::intern;
 pub use almide::import_table;
+pub use almide::canonicalize;
 
 // CLI-only modules
 mod check;

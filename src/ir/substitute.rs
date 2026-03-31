@@ -233,6 +233,30 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             ty: expr.ty.clone(), span: expr.span,
         },
 
+        IrExprKind::IterChain { source, consume, steps, collector } => IrExpr {
+            kind: IrExprKind::IterChain {
+                source: Box::new(sub(source)),
+                consume: *consume,
+                steps: steps.iter().map(|step| match step {
+                    IterStep::Map { lambda } => IterStep::Map { lambda: Box::new(sub(lambda)) },
+                    IterStep::Filter { lambda } => IterStep::Filter { lambda: Box::new(sub(lambda)) },
+                    IterStep::FlatMap { lambda } => IterStep::FlatMap { lambda: Box::new(sub(lambda)) },
+                    IterStep::FilterMap { lambda } => IterStep::FilterMap { lambda: Box::new(sub(lambda)) },
+                }).collect(),
+                collector: match collector {
+                    IterCollector::Collect => IterCollector::Collect,
+                    IterCollector::Fold { init, lambda } => IterCollector::Fold {
+                        init: Box::new(sub(init)), lambda: Box::new(sub(lambda)),
+                    },
+                    IterCollector::Any { lambda } => IterCollector::Any { lambda: Box::new(sub(lambda)) },
+                    IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(sub(lambda)) },
+                    IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(sub(lambda)) },
+                    IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(sub(lambda)) },
+                },
+            },
+            ty: expr.ty.clone(), span: expr.span,
+        },
+
         // ── True leaf nodes ──
         IrExprKind::Var { .. }
         | IrExprKind::FnRef { .. }

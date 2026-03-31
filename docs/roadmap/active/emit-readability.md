@@ -70,6 +70,10 @@ Highly readable generated code:
 
 ### Phase 4: Formatting Quality
 
+- [x] Iterator chain emission: `list.map/filter/fold` → `.into_iter().map().collect()` (v0.10.4)
+- [x] Math intrinsics inline: `math.sqrt(x)` → `x.sqrt()` instead of `almide_rt_math_sqrt(x)` (v0.10.4)
+- [x] Numeric cast inline: `float.from_int(n)` → `(n as f64)` (v0.10.4)
+- [x] Borrow parameter inference: read-only String/List params → `&str` / `&[T]` (v0.10.4)
 - [ ] Improve line break rules for long expressions (builder chains, long argument lists)
 - [ ] Alignment of match/when arms
 - [ ] Target readability level where `rustfmt` / `prettier` aren't needed to read the output

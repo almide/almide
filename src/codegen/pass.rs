@@ -195,10 +195,13 @@ impl NanoPass for BorrowInsertionPass {
     fn targets(&self) -> Option<Vec<Target>> {
         Some(vec![Target::Rust])
     }
-    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
-        // Rust: analyze parameter usage, mark &T vs T
-        // TODO: implement during Phase 2 migration (move from borrow.rs)
-        PassResult { program, changed: false }
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        let sigs = super::pass_borrow_inference::infer_borrow_signatures(&mut program);
+        let changed = !sigs.is_empty();
+        if changed {
+            super::pass_borrow_inference::insert_borrows_at_call_sites(&mut program, &sigs);
+        }
+        PassResult { program, changed }
     }
 }
 
