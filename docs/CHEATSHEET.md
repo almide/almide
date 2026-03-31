@@ -267,15 +267,15 @@ assert(cond)               // assert true
 
 ## Entry point
 ```
-effect fn main(args: List[String]) -> Result[Unit, String] = {
-  // args[0] = program name, args[1] = first argument
+effect fn main() -> Unit = {
+  let args = process.args()              // command-line args (Go-style)
   let name = list.get(args, 1) ?? "world"
   let content = fs.read_text("config.txt")!   // propagate error with !
   println("Hello, ${name}: ${content}")
-  ok(())
 }
 ```
-The runtime calls `main(args)` where `args` includes the program name at index 0.
+`effect fn main()` is auto-wrapped to return `Result<(), String>`. No need to write `ok(())` or `-> Result[...]`.
+Command-line arguments are accessed via `process.args()` (not main parameters).
 
 ## Operators (precedence high→low)
 `. () ! ?? ?` > `not -` > `^` (power) > `* / %` > `+ -` > `== != < > <= >=` (non-assoc) > `and` > `or` > `|>` `>>`
@@ -356,7 +356,8 @@ effect fn greet(name: String) -> Result[Unit, AppError] = {
   ok(())
 }
 
-effect fn main(args: List[String]) -> Result[Unit, AppError] = {
+effect fn main() -> Result[Unit, AppError] = {
+  let args = process.args()
   let cmd = list.get(args, 1) ?? "help"
   match cmd {
     "greet" => {

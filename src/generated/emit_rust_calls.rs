@@ -400,6 +400,7 @@ pub fn gen_generated_call(
                 format!("almide_rt_option_unwrap_or_else({}, || {{{{ {} }}}})", args_str[0], __cl_f_body)
             },
             ("option", "zip") => format!("almide_rt_option_zip({}, {})", args_str[0], args_str[1]),
+            ("process", "args") => "almide_rt_process_args()".to_string(),
             ("process", "exec") => if auto_unwrap { format!("almide_rt_process_exec(&*{}, &{{ let __a: Vec<String> = {}; __a }})?", args_str[0], args_str[1]) } else { format!("almide_rt_process_exec(&*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1]) },
             ("process", "exec_in") => if auto_unwrap { format!("almide_rt_process_exec_in(&*{}, &*{}, &{{ let __a: Vec<String> = {}; __a }})?", args_str[0], args_str[1], args_str[2]) } else { format!("almide_rt_process_exec_in(&*{}, &*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1], args_str[2]) },
             ("process", "exec_status") => if auto_unwrap { format!("almide_rt_process_exec_status(&*{}, &{{ let __a: Vec<String> = {}; __a }})?", args_str[0], args_str[1]) } else { format!("almide_rt_process_exec_status(&*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1]) },

@@ -40,7 +40,7 @@ fn User.to_json(u: User) -> String =
 // ── API helpers ──
 
 effect fn api_get(base_url: String, path: String) -> Result[Value, String] = {
-  let body = http.get(base_url + path)
+  let body = http.get(base_url + path)!
   json.parse(body)
 }
 

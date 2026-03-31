@@ -79,17 +79,27 @@ effect fn read_file(path: String) -> String = fs.read_text(path)!
 
 ## 4. fn main
 
-| Almide | Rust | 備考 |
+| Almide | Rust codegen | 備考 |
 |---|---|---|
-| `fn main() -> Unit` | `fn main()` | 純粋。副作用なし |
-| `effect fn main() -> Unit` | `fn main() -> Result<(), String>` | Rust の Termination trait で動作 |
-| `effect fn main(args: List[String]) -> Unit` | 未定義 | args の受け渡し方法を決める必要あり |
+| `fn main() = ...` | `fn main()` | 純粋。副作用なし |
+| `effect fn main() -> Unit = ...` | `fn main() -> Result<(), String>` | 自動リフト。Termination trait で動作 |
 
-### 現状
+### 仕様
 
-- `effect fn main()` は `Result<(), String>` を返す Rust main として生成される
-- Rust の Termination trait がこれを受け付けるので動作する
+- `effect fn main()` は `pass_result_propagation` により戻り値が `Unit` → `Result<(), String>` に自動リフトされる
+- ユーザーが `-> Result[Unit, String]` を明示的に書いても動作するが、不要
 - エラー時は `Err(msg)` で終了し、Rust ランタイムがメッセージを stderr に出力
+- **main は引数を取らない。** コマンドライン引数は `process.args()` で取得する（Go 方式）
+
+テスト: `spec/lang/result_option_matrix_test.almd`
+
+```almide
+effect fn main() -> Unit = {
+  let args = process.args()
+  let name = list.get(args, 1) ?? "world"
+  println("Hello, ${name}!")
+}
+```
 
 ## 5. test ブロック
 
@@ -151,32 +161,28 @@ guard condition else { diverge_expr }
 | # | 仕様 | 現状 | ステータス |
 |---|---|---|---|
 | 1 | `??` は Option/Result を正しく判別 | `Ty::Unknown` → Result 扱い | ⚠ 型推論が壊れると誤生成 |
-| 2 | Never 型がある | 型システムに存在しない | ❌ 未実装 |
+| 2 | Never 型がある | `Ty::Never` 実装済み (v0.10.3) | ✅ |
 | 3 | effect fn の戻り値変換は暗黙 | pass_result_propagation で変換 | ✅ 動作中 |
 | 4 | test 内の `!` は `.unwrap()` | 実装済み | ✅ |
 | 5 | guard else は Never/戻り値型を受け入れる | Rust codegen レベルで解決 | ⚠ 型チェッカーは未対応 |
 | 6 | auto-unwrap は無効、`!` で明示 | コメントアウト済み | ✅ 意図的 |
 | 7 | `effect fn main()` → `Result<(), String>` | Termination trait で動作 | ✅ |
-| 8 | args パラメータの受け渡し | 未定義 | ❌ |
-| 9 | `?` 演算子のパース | `r?` → 変数名扱い、`r ?` → OK | ⚠ パーサーの空白依存 |
+| 8 | args は `process.args()` で取得 | `process.args()` 実装済み (v0.10.3) | ✅ |
+| 9 | `?` 演算子のパース | `IdentQ` 廃止、`?` は常に独立トークン (v0.10.3) | ✅ |
 | 10 | test 内で effect fn を `!` で呼ぶ | 不要（test は直接呼べる） | ✅ だが非直感的 |
 
 ## 9. 決定が必要な事項
 
-### 9.1 `?` のパース: `r?` vs `r ?`
-- 現状: `r?` が変数名 `r?` として解釈される
-- 提案: `?` を後置演算子としてパーサーで認識し、空白不要にする
+### ~~9.1 `?` のパース~~ → 解決済み (v0.10.3)
+`IdentQ` トークンを廃止。`?` は常に独立した後置演算子。`r?` は空白なしで動作する。
 
 ### 9.2 test 内での effect fn 呼び出し
 - 現状: test は `is_effect=true` なので effect fn を直接呼べる。結果の型は T（Result 包装前）
 - 問題: `!` を付けるとエラー（「String に ! は使えない」）
 - 提案: test 内での effect fn 呼び出しは暗黙的に unwrap される仕様を明文化
 
-### 9.3 Never 型の導入
-- 現状: `process.exit()` は Rust 側で `-> !` だが、Almide の型システムに Never がない
-- 提案: `Ty::Never` を追加し、型チェッカーで bottom type として扱う
-- 影響: guard else, if then, match arm の型整合性チェックが改善
+### ~~9.3 Never 型~~ → 解決済み (v0.10.3)
+`Ty::Never` を追加。bottom type として全ての型と互換。`process.exit()` は `Never` を返す。
 
-### 9.4 `effect fn main(args: List[String])`
-- 現状: 未定義
-- 提案: `process.args()` で取得する方式（Go 式）。main の引数は使わない
+### ~~9.4 `effect fn main(args: List[String])`~~ → 解決済み (v0.10.3)
+main は引数を取らない。コマンドライン引数は `process.args()` で取得する（Go 方式）。

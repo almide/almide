@@ -170,11 +170,10 @@ fn pure_() -> String = "pure"
 // consumer:
 import effectlib
 
-effect fn main(_args: List[String]) -> Result[Unit, String] = {
+effect fn main() -> Unit = {
   let config = effectlib.read_config()  // ok: effect context
   assert_eq(config, "config_value")
   assert_eq(effectlib.pure_(), "pure")  // pure fn also callable
-  ok(())
 }
 ```
 

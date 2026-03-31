@@ -312,6 +312,7 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("option", "unwrap_or") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, pure_: true, name: "almide_rt_option_unwrap_or", required: 2 }),
             ("option", "unwrap_or_else") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::LambdaClone], effect: false, pure_: true, name: "almide_rt_option_unwrap_or_else", required: 2 }),
             ("option", "zip") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, pure_: true, name: "almide_rt_option_zip", required: 2 }),
+            ("process", "args") => Some(StdlibCallInfo { args: &[], effect: false, pure_: true, name: "almide_rt_process_args", required: 0 }),
             ("process", "exec") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: true, pure_: false, name: "almide_rt_process_exec", required: 2 }),
             ("process", "exec_in") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct, ArgTransform::Direct], effect: true, pure_: false, name: "almide_rt_process_exec_in", required: 3 }),
             ("process", "exec_status") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: true, pure_: false, name: "almide_rt_process_exec_status", required: 2 }),

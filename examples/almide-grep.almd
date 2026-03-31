@@ -7,23 +7,22 @@ import fs
 fn is_searchable(path: String) -> Bool =
   string.ends_with(path, ".almd") or string.ends_with(path, ".txt") or string.ends_with(path, ".md") or string.ends_with(path, ".toml") or string.ends_with(path, ".rs") or string.ends_with(path, ".ts")
 
-effect fn main() -> Result[Unit, String] = {
+effect fn main() -> Unit = {
   let args = env.args()
   guard list.len(args) >= 1 else err("usage: almide-grep <pattern> [path]")
 
   let pattern = list.get(args, 0) |> option.unwrap_or("")
   let search_path = list.get(args, 1) |> option.unwrap_or(".")
 
-  let all_files = fs.walk(search_path)
+  let all_files = fs.walk(search_path)!
   let files = list.filter(all_files, (f) => is_searchable(f))
 
   for file in files {
-    let content = fs.read_text(file)
+    let content = fs.read_text(file)!
     let lines = string.lines(content)
     let matches = grep_lines(file, lines, pattern)
     for line in matches { println(line) }
   }
-  ok(())
 }
 
 fn grep_lines(path: String, lines: List[String], pattern: String) -> List[String] =

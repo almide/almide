@@ -4,14 +4,13 @@
 import env
 import fs
 
-effect fn main() -> Result[Unit, String] = {
-  let args = env.args();
-  guard list.len(args) >= 1 else err("usage: csv-to-json <file.csv>");
-  let path = list.get(args, 0) |> option.unwrap_or("");
-  let content = fs.read_text(path);
-  let result = csv_to_json(content);
-  println(result);
-  ok(())
+effect fn main() -> Unit = {
+  let args = env.args()
+  guard list.len(args) >= 1 else err("usage: csv-to-json <file.csv>")
+  let path = list.get(args, 0) |> option.unwrap_or("")
+  let content = fs.read_text(path)!
+  let result = csv_to_json(content)
+  println(result)
 }
 
 fn csv_to_json(input: String) -> String = {

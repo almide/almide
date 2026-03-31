@@ -34,10 +34,9 @@ effect fn read(path: String) -> Result[String, String] = {
   ok(text)
 }
 
-// Main entry point
-effect fn main(args: List[String]) -> Result[Unit, String] = {
+// Main entry point (args via process.args(), Result is auto-wrapped)
+effect fn main() -> Unit = {
   println("hello")
-  ok(())
 }
 
 // If-then-else (else is MANDATORY)

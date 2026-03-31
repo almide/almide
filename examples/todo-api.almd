@@ -5,7 +5,7 @@
 //        curl -X POST -d '{"name":"alice"}' localhost:3000/greet
 //        curl localhost:3000/time
 
-effect fn main() -> Result[Unit, String] = {
+effect fn main() -> Unit = {
   println("API listening on http://localhost:3000")
 
   http.serve(3000, (req) => {
