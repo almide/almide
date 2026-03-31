@@ -708,7 +708,20 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
             if let Some(full) = render_method_call_full(ctx, object, method, args) {
                 return full;
             }
-            format!("{}.{}", render_expr(ctx, object), method)
+            {
+                let obj_str = render_expr(ctx, object);
+                // Wrap in parens if the object expression needs it for method call precedence
+                let needs_parens = matches!(&object.kind,
+                    IrExprKind::UnOp { .. } | IrExprKind::BinOp { .. }
+                    | IrExprKind::If { .. } | IrExprKind::Match { .. }
+                ) || matches!(&object.kind, IrExprKind::LitFloat { value } if *value < 0.0)
+                  || matches!(&object.kind, IrExprKind::LitInt { value } if *value < 0);
+                if needs_parens {
+                    format!("({}).{}", obj_str, method)
+                } else {
+                    format!("{}.{}", obj_str, method)
+                }
+            }
         }
         CallTarget::Computed { callee } => {
             let s = render_expr(ctx, callee);
@@ -730,10 +743,14 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         | "contains" | "iter" | "into_iter" | "collect" | "map"
         | "filter" | "to_vec" | "join" | "split" | "trim"
         | "starts_with" | "ends_with" | "replace" | "chars"
-        | "as_str" | "get" | "keys" | "values" | "abs" | "powi"
+        | "as_str" | "get" | "keys" | "values" | "abs" | "powi" | "powf"
         | "is_empty" | "contains_key" | "entry" | "or_insert"
         | "expect" | "ok" | "err" | "and_then" | "map_err"
         | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref" | "as_deref"
+        // math intrinsics (inlined by StdlibLowering)
+        | "sqrt" | "floor" | "ceil" | "round" | "sin" | "cos" | "tan"
+        | "asin" | "acos" | "atan" | "atan2" | "exp" | "ln" | "log2" | "log10"
+        | "is_nan" | "is_infinite"
     );
     // User-defined UFCS: plain method name (no dots) → func(object, args)
     if !method.contains('.') && !is_rust_intrinsic {

@@ -119,6 +119,11 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                 }
             }
 
+            // Inline math/float/int intrinsics as native Rust expressions
+            if let Some(inlined) = try_inline_intrinsic(&module, &func, &args, &ty, span) {
+                return inlined;
+            }
+
             // Look up per-function transform table
             let info = arg_transforms::lookup(&module, &func);
             let rt_name = info.as_ref().map(|i| i.name.to_string())
@@ -537,6 +542,136 @@ fn resolve_ufcs_stmts(stmts: Vec<IrStmt>, siblings: &[String]) -> Vec<IrStmt> {
 }
 
 // ── Iterator chain lowering ────────────────────────────────────────
+
+/// Inline math/float/int intrinsics as native Rust expressions.
+/// Eliminates runtime function call overhead for hot-path numeric operations.
+fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span: Option<crate::ast::Span>) -> Option<IrExpr> {
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span };
+
+    match (module, func) {
+        // ── math.sqrt(x) → x.sqrt() via RenderedCall ──
+        // These are the highest-impact: called in tight loops (nbody, spectralnorm)
+        ("math", "sqrt") | ("float", "sqrt") if args.len() >= 1 => {
+            Some(mk(IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(args[0].clone()),
+                    method: crate::intern::sym("sqrt"),
+                },
+                args: vec![],
+                type_args: vec![],
+            }))
+        }
+        ("math", "abs") | ("float", "abs") if args.len() >= 1 => {
+            Some(mk(IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(args[0].clone()),
+                    method: crate::intern::sym("abs"),
+                },
+                args: vec![],
+                type_args: vec![],
+            }))
+        }
+        ("math", "floor") | ("float", "floor") if args.len() >= 1 => {
+            Some(mk(IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(args[0].clone()),
+                    method: crate::intern::sym("floor"),
+                },
+                args: vec![],
+                type_args: vec![],
+            }))
+        }
+        ("math", "ceil") | ("float", "ceil") if args.len() >= 1 => {
+            Some(mk(IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(args[0].clone()),
+                    method: crate::intern::sym("ceil"),
+                },
+                args: vec![],
+                type_args: vec![],
+            }))
+        }
+        ("math", "round") | ("float", "round") if args.len() >= 1 => {
+            Some(mk(IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(args[0].clone()),
+                    method: crate::intern::sym("round"),
+                },
+                args: vec![],
+                type_args: vec![],
+            }))
+        }
+        ("math", "sin") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("sin") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "cos") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("cos") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "tan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("tan") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "asin") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("asin") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "acos") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("acos") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "atan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("atan") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "atan2") if args.len() >= 2 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("atan2") },
+            args: vec![args[1].clone()], type_args: vec![],
+        })),
+        ("math", "exp") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("exp") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "log") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("ln") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "log2") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("log2") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "log10") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("log10") },
+            args: vec![], type_args: vec![],
+        })),
+        // float.from_int / int.to_float / float.to_int: keep as runtime calls
+        // (they're #[inline(always)], LLVM inlines them)
+        // math.pow: Int exponentiation — keep as runtime call (i64.pow needs u32 cast)
+        // ── math.fpow(base, exp) → base.powf(exp) ──
+        ("math", "fpow") if args.len() >= 2 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("powf") },
+            args: vec![args[1].clone()], type_args: vec![],
+        })),
+        // ── Constants ──
+        ("math", "pi") => Some(mk(IrExprKind::LitFloat { value: std::f64::consts::PI })),
+        ("math", "e") => Some(mk(IrExprKind::LitFloat { value: std::f64::consts::E })),
+        ("math", "inf") => Some(mk(IrExprKind::LitFloat { value: f64::INFINITY })),
+        ("float", "is_nan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("is_nan") },
+            args: vec![], type_args: vec![],
+        })),
+        ("float", "is_infinite") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("is_infinite") },
+            args: vec![], type_args: vec![],
+        })),
+        ("math", "is_nan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
+            target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("is_nan") },
+            args: vec![], type_args: vec![],
+        })),
+        _ => None,
+    }
+}
 
 /// Try to lower a list.* call into an IterChain IR node.
 /// Returns None if the operation isn't iterator-eligible.
