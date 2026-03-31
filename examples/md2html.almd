@@ -2,7 +2,7 @@
 //
 // Usage: almide run showcase/md2html.almd -- README.md
 
-effect fn main() -> Result[Unit, String] = {
+effect fn main() -> Unit = {
   let args = env.args()
   guard list.len(args) >= 1 else err("usage: md2html <file.md>")
   let path = list.get(args, 0) |> option.unwrap_or("")
@@ -10,7 +10,6 @@ effect fn main() -> Result[Unit, String] = {
   let content = fs.read_text(path)
   let html = md_to_html(content)
   println(html)
-  ok(())
 }
 
 fn md_to_html(input: String) -> String = {

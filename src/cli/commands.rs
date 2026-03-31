@@ -27,7 +27,7 @@ pub fn cmd_init() {
     }
 
     if !std::path::Path::new("src/main.almd").exists() {
-        if let Err(e) = std::fs::write("src/main.almd", "effect fn main(args: List[String]) -> Result[Unit, String] = {\n  println(\"Hello, Almide!\")\n  ok(())\n}\n") {
+        if let Err(e) = std::fs::write("src/main.almd", "effect fn main() -> Unit = {\n  println(\"Hello, Almide!\")\n}\n") {
             eprintln!("Failed to write src/main.almd: {}", e);
             std::process::exit(1);
         }

@@ -2,7 +2,7 @@
 //
 // Usage: almide run showcase/dotenv-check.almd -- .env .env.example
 
-effect fn main() -> Result[Unit, String] = {
+effect fn main() -> Unit = {
   let args = env.args()
   guard list.len(args) >= 2 else err("usage: dotenv-check <.env> <.env.example>")
 
@@ -23,7 +23,6 @@ effect fn main() -> Result[Unit, String] = {
     println("Missing keys:")
     for k in missing { println("  - " + k) }
   }
-  ok(())
 }
 
 fn parse_dotenv(content: String) -> Map[String, String] = {

@@ -1078,14 +1078,14 @@ There is no `print` function -- use `println` for all output.
 ## 12. Entry Point
 
 ```
-effect fn main(args: List[String]) -> Result[Unit, String] = {
+effect fn main() -> Unit = {
+  let args = process.args()
   let name = list.get(args, 1) ?? "world"
   println("Hello, ${name}!")
-  ok(())
 }
 ```
 
-`main` receives `args` where `args[0]` is the program name. It must be an `effect fn` returning `Result[Unit, E]`.
+`main` takes no parameters. Command-line arguments are accessed via `process.args()`. `effect fn main()` is auto-wrapped to return `Result<(), String>` — no need to write `ok(())` or explicit `Result` type.
 
 ---
 

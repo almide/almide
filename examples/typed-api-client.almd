@@ -16,7 +16,7 @@ type Post: Codec = { id: Int, title: String, body: String }
 // Error handling: match on Result directly to replace the error message.
 // (let binding would auto-unwrap and propagate the original error)
 effect fn get_user(base_url: String, id: Int) -> Result[User, String] = {
-  let response = http.get(base_url + "/users/" + int.to_string(id))
+  let response = http.get(base_url + "/users/" + int.to_string(id))!
   match json.parse(response) {
     ok(data) => User.decode(data)
     err(_) => err("invalid JSON from user API")
@@ -25,14 +25,14 @@ effect fn get_user(base_url: String, id: Int) -> Result[User, String] = {
 
 effect fn create_user(base_url: String, req: CreateUserRequest) -> Result[User, String] = {
   let body = json.stringify(req.encode())
-  let response = http.post(base_url + "/users", body)
-  let data = json.parse(response)
+  let response = http.post(base_url + "/users", body)!
+  let data = json.parse(response)!
   User.decode(data)
 }
 
 effect fn get_post(base_url: String, id: Int) -> Result[Post, String] = {
-  let response = http.get(base_url + "/posts/" + int.to_string(id))
-  let data = json.parse(response)
+  let response = http.get(base_url + "/posts/" + int.to_string(id))!
+  let data = json.parse(response)!
   Post.decode(data)
 }
 

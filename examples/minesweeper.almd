@@ -164,7 +164,7 @@ fn make_zeros() -> List[Int] = {
   xs
 }
 
-effect fn main() -> Result[Unit, String] = {
+effect fn main() -> Unit = {
   println("=== MINESWEEPER ===")
   println("9x9 grid, 10 mines")
   println("Commands: r,c to reveal | f r,c to flag/unflag")
@@ -236,5 +236,4 @@ effect fn main() -> Result[Unit, String] = {
     println(render_board(adj, rev, flg, true))
     println("BOOM! You hit a mine. Game over.")
   }
-  ok(())
 }
