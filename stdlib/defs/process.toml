@@ -11,10 +11,19 @@ ts = "__almd_process.exec({cmd}, {args})"
 description = "Exit the process with the given status code"
 example = 'process.exit(1)'
 params = [{ name = "code", type = "Int" }]
-return = "Unit"
+return = "Never"
 effect = true
 rust = "almide_rt_process_exit({code})"
 ts = "__almd_process.exit({code})"
+
+[args]
+description = "Get command-line arguments as a list of strings"
+example = 'let args = process.args()'
+params = []
+return = "List[String]"
+effect = false
+rust = "almide_rt_process_args()"
+ts = "__almd_process.args()"
 
 [stdin_lines]
 description = "Read all lines from standard input"

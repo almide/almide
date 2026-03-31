@@ -33,6 +33,9 @@ pub enum Ty {
     Union(Vec<Ty>),
     /// Type variable for user-defined generics (e.g., T, U, A, B)
     TypeVar(Sym),
+    /// Bottom type — returned by functions that never return (process.exit, panic).
+    /// Unifies with any type (subtype of all types).
+    Never,
     /// Error recovery — unifies with everything to prevent cascade errors
     Unknown,
 }
@@ -168,6 +171,7 @@ impl Ty {
                 ms.join(" | ")
             }
             Ty::TypeVar(n) => n.to_string(),
+            Ty::Never => "Never".into(),
             Ty::Unknown => "Unknown".into(),
         }
     }
@@ -206,9 +210,10 @@ impl Ty {
         }
     }
 
-    /// Check if two types are compatible (Unknown matches everything)
+    /// Check if two types are compatible (Unknown and Never match everything)
     pub fn compatible(&self, other: &Ty) -> bool {
-        if *self == Ty::Unknown || *other == Ty::Unknown {
+        if *self == Ty::Unknown || *other == Ty::Unknown
+            || *self == Ty::Never || *other == Ty::Never {
             return true;
         }
         // TypeVars are compatible with anything (they represent polymorphic types)
@@ -310,7 +315,7 @@ impl Ty {
         match self {
             // Leaf types — no children
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix
-            | Ty::TypeVar(_) | Ty::Unknown => vec![],
+            | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => vec![],
 
             // Parameterized types (List, Option, Result, Map, user-defined)
             Ty::Applied(_, args) => args.iter().collect(),
@@ -357,7 +362,7 @@ impl Ty {
     {
         match self {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix
-            | Ty::TypeVar(_) | Ty::Unknown => self.clone(),
+            | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => self.clone(),
 
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
 
@@ -403,7 +408,7 @@ impl Ty {
     {
         match self {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix
-            | Ty::TypeVar(_) | Ty::Unknown => self.clone(),
+            | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => self.clone(),
 
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
 

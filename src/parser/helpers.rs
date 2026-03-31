@@ -198,7 +198,7 @@ impl Parser {
     }
 
     pub(crate) fn expect_any_name(&mut self) -> Result<Sym, String> {
-        if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) || self.check(TokenType::TypeName) {
+        if self.check(TokenType::Ident) || self.check(TokenType::Ident) || self.check(TokenType::TypeName) {
             return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
@@ -224,7 +224,7 @@ impl Parser {
         {
             let type_name = self.advance_and_get_value();
             self.advance(); // skip .
-            let method = if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
+            let method = if self.check(TokenType::Ident) || self.check(TokenType::Ident) {
                 self.advance_and_get_value()
             } else {
                 let tok = self.current();
@@ -232,7 +232,7 @@ impl Parser {
             };
             return Ok(sym(&format!("{}.{}", type_name, method)));
         }
-        if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
+        if self.check(TokenType::Ident) || self.check(TokenType::Ident) {
             return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();

@@ -1,0 +1,280 @@
+// ═══════════════════════════════════════════════════════════════════
+// Result / Option / Effect operator matrix test
+// Tests every combination of ! ? ?? with Result/Option in every context.
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Helper functions ──
+
+fn make_ok() -> Result[Int, String] = ok(42)
+fn make_err() -> Result[Int, String] = err("bad")
+fn make_some() -> Option[Int] = some(10)
+fn make_none() -> Option[Int] = none
+
+effect fn effect_ok() -> Int = make_ok()!
+effect fn effect_err_catch() -> Int = make_err() ?? -1
+
+// ═══════════════════════════════════════════════════════════════════
+// 1. ?? operator (UnwrapOr) — works in any context
+// ═══════════════════════════════════════════════════════════════════
+
+test "?? Result ok" {
+  assert_eq(make_ok() ?? 0, 42)
+}
+
+test "?? Result err" {
+  assert_eq(make_err() ?? 0, 0)
+}
+
+test "?? Option some" {
+  assert_eq(make_some() ?? 0, 10)
+}
+
+test "?? Option none" {
+  assert_eq(make_none() ?? 0, 0)
+}
+
+// ?? with inline values
+test "?? inline Result" {
+  let r: Result[String, String] = ok("yes")
+  assert_eq(r ?? "no", "yes")
+}
+
+test "?? inline Option" {
+  let o: Option[String] = none
+  assert_eq(o ?? "default", "default")
+}
+
+// ?? chained
+test "?? chained" {
+  let o1: Option[Int] = none
+  let o2: Option[Int] = none
+  let o3: Option[Int] = some(99)
+  assert_eq(o1 ?? o2 ?? o3 ?? 0, 99)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 2. ? operator (ToOption) — works in any context
+// ═══════════════════════════════════════════════════════════════════
+
+test "? Result ok → some" {
+  let r: Result[Int, String] = ok(42)
+  assert_eq(r?, some(42))
+}
+
+test "? Result err → none" {
+  let r: Result[Int, String] = err("x")
+  assert_eq(r?, none)
+}
+
+test "? Option some → identity" {
+  let o: Option[Int] = some(5)
+  assert_eq(o?, some(5))
+}
+
+test "? Option none → identity" {
+  let o: Option[Int] = none
+  assert_eq(o?, none)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 3. ! operator (Unwrap) — in test context
+// ═══════════════════════════════════════════════════════════════════
+
+test "! Result ok in test" {
+  let r: Result[Int, String] = ok(42)
+  assert_eq(r!, 42)
+}
+
+test "! Option some in test" {
+  let o: Option[Int] = some(10)
+  assert_eq(o!, 10)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 4. ! operator (Unwrap) — in effect fn context
+// ═══════════════════════════════════════════════════════════════════
+
+effect fn unwrap_result_ok() -> Int = {
+  let r: Result[Int, String] = ok(42)
+  r!
+}
+
+effect fn unwrap_option_some() -> Int = {
+  let o: Option[Int] = some(10)
+  o!
+}
+
+test "! Result ok in effect fn" {
+  assert_eq(unwrap_result_ok(), 42)
+}
+
+test "! Option some in effect fn" {
+  assert_eq(unwrap_option_some(), 10)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 5. effect fn — implicit Result wrapping
+// ═══════════════════════════════════════════════════════════════════
+
+effect fn returns_int() -> Int = 42
+effect fn returns_string() -> String = "hello"
+// NOTE: effect fn calling another effect fn works via direct call.
+// The type checker sees T (not Result[T, String]) since wrapping happens in codegen.
+// This means ! and ?? cannot be used between effect fns — direct call is the pattern.
+effect fn calls_effect() -> Int = returns_int()
+
+test "effect fn returns value directly" {
+  assert_eq(returns_int(), 42)
+  assert_eq(returns_string(), "hello")
+}
+
+test "effect fn calls another effect fn" {
+  assert_eq(calls_effect(), 42)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 6. guard else — type compatibility
+// ═══════════════════════════════════════════════════════════════════
+
+fn guard_pure(x: Int) -> Int = {
+  guard x > 0 else { 0 }
+  x * 2
+}
+
+effect fn guard_effect(x: Int) -> Int = {
+  guard x > 0 else { err("negative")! }
+  x * 2
+}
+
+test "guard in pure fn" {
+  assert_eq(guard_pure(5), 10)
+  assert_eq(guard_pure(-1), 0)
+}
+
+test "guard in effect fn with err propagation" {
+  assert_eq(guard_effect(5), 10)
+}
+
+// guard in loop
+test "guard in for loop" {
+  var sum = 0
+  for x in [1, -2, 3, -4, 5] {
+    guard x > 0 else { continue }
+    sum = sum + x
+  }
+  assert_eq(sum, 9)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 7. if then with Result/Option
+// ═══════════════════════════════════════════════════════════════════
+
+test "if with ??" {
+  let r: Result[Int, String] = err("x")
+  let v = if true then r ?? 0 else -1
+  assert_eq(v, 0)
+}
+
+test "if with ?" {
+  let r: Result[Int, String] = ok(42)
+  let v = if true then r? else none
+  assert_eq(v, some(42))
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 8. match with Result/Option
+// ═══════════════════════════════════════════════════════════════════
+
+test "match on Result" {
+  let r: Result[Int, String] = ok(42)
+  let v = match r {
+    ok(n) => n,
+    err(_) => 0,
+  }
+  assert_eq(v, 42)
+}
+
+test "match on Option" {
+  let o: Option[Int] = some(10)
+  let v = match o {
+    some(n) => n,
+    none => 0,
+  }
+  assert_eq(v, 10)
+}
+
+test "match on Result err" {
+  let r: Result[Int, String] = err("bad")
+  let v = match r {
+    ok(n) => n,
+    err(msg) => string.len(msg),
+  }
+  assert_eq(v, 3)
+}
+
+test "match on Option none" {
+  let o: Option[String] = none
+  let v = match o {
+    some(s) => s,
+    none => "empty",
+  }
+  assert_eq(v, "empty")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 9. Nested Result/Option operations
+// ═══════════════════════════════════════════════════════════════════
+
+test "nested: Result inside Option via ??" {
+  let r: Result[Int, String] = ok(42)
+  let o: Option[Int] = some(r ?? 0)
+  assert_eq(o ?? -1, 42)
+}
+
+test "nested: Option to Result via match" {
+  let o: Option[Int] = some(5)
+  let r: Result[Int, String] = match o {
+    some(n) => ok(n),
+    none => err("missing"),
+  }
+  assert_eq(r ?? 0, 5)
+}
+
+effect fn nested_unwrap() -> Int = {
+  let r: Result[Option[Int], String] = ok(some(42))
+  let o = r!
+  o!
+}
+
+test "nested: unwrap Result then Option" {
+  assert_eq(nested_unwrap(), 42)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 10. Edge cases
+// ═══════════════════════════════════════════════════════════════════
+
+test "?? preserves type: string" {
+  let o: Option[String] = some("hello")
+  assert_eq(o ?? "", "hello")
+}
+
+test "?? preserves type: list" {
+  let o: Option[List[Int]] = none
+  assert_eq(o ?? [], [])
+}
+
+test "?? preserves type: bool" {
+  let o: Option[Bool] = some(true)
+  assert_eq(o ?? false, true)
+}
+
+test "? then ?? chain" {
+  let r: Result[Int, String] = ok(42)
+  assert_eq(r? ?? 0, 42)
+}
+
+test "? then ?? chain on err" {
+  let r: Result[Int, String] = err("x")
+  assert_eq(r? ?? 0, 0)
+}

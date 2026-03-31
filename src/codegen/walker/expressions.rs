@@ -464,6 +464,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let s = render_expr(ctx, inner);
             let f = render_expr(ctx, fallback);
             let when_type = if inner.ty.is_option() { Some("Option") } else { None };
+            // When inner.ty is Unknown, defaults to Result template.
+            // This is correct if type inference produced Unknown due to a bug;
+            // the Rust compiler will catch any mismatch.
             ctx.templates.render_with("unwrap_or_expr", when_type, &[], &[("inner", s.as_str()), ("fallback", f.as_str())])
                 .unwrap_or_else(|| format!("{}.unwrap_or({})", s, f))
         }

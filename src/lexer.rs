@@ -17,7 +17,7 @@ pub enum TokenType {
     // Literals
     Int, Float, String, InterpolatedString,
     // Identifiers
-    Ident, TypeName, IdentQ,
+    Ident, TypeName,
     // Keywords
     Module, Import, Type, Protocol, Impl, For, In, Fn, Let, Var,
     If, Then, Else, Match, Ok, Err, Some, None, Todo,
@@ -435,17 +435,11 @@ fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, u
     let mut pos = start;
     while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') { pos += 1; }
 
-    // Trailing ? for query methods (e.g., is_empty?)
-    if pos < chars.len() && chars[pos] == '?' {
-        pos += 1;
-    }
-
     let value: String = chars[start..pos].iter().collect();
 
     // Check if it's a keyword
     let token_type = keyword(&value).unwrap_or_else(|| {
-        if value.ends_with('?') { TokenType::IdentQ }
-        else if value.chars().next().map_or(false, |c| c.is_uppercase()) { TokenType::TypeName }
+        if value.chars().next().map_or(false, |c| c.is_uppercase()) { TokenType::TypeName }
         else { TokenType::Ident }
     });
 

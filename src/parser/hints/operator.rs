@@ -59,7 +59,7 @@ fn check_standalone(ctx: &HintContext) -> Option<HintResult> {
         // `|x|` closure syntax — detected via lookahead
         (TokenType::Pipe, _) => {
             if let Some(next) = ctx.next {
-                if matches!(next.token_type, TokenType::Ident | TokenType::IdentQ | TokenType::Underscore) {
+                if matches!(next.token_type, TokenType::Ident | TokenType::Underscore) {
                     return Some(HintResult {
                         message: Some("'|x|' closure syntax is not valid in Almide".into()),
                         hint: "Use '(x) => expr' for lambdas. Example: list.map(xs, (x) => x + 1)".into(),

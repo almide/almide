@@ -610,8 +610,7 @@ fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
             // Resolve bind type.
             // For Try(Call(...)) (effect fn unwrap), use the Result's inner type, not Result itself.
             let effective_ty = if let IrExprKind::Try { expr: inner }
-                | IrExprKind::Unwrap { expr: inner }
-                | IrExprKind::ToOption { expr: inner } = &value.kind {
+                | IrExprKind::Unwrap { expr: inner } = &value.kind {
                 if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) = &value.ty {
                     args.first().cloned().unwrap_or(value.ty.clone())
                 } else if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) = &inner.ty {

@@ -143,7 +143,7 @@ impl Parser {
             let msg = result.message.unwrap_or_else(|| format!("'{}' is not valid here", tok.value));
             return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
         }
-        if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
+        if self.check(TokenType::Ident) || self.check(TokenType::Ident) {
             let name = sym(&tok.value);
             self.advance();
             return Ok(Expr::Ident { name, id: self.next_id(), span, resolved_type: None });
