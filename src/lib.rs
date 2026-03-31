@@ -2,6 +2,7 @@
 pub mod almdi;
 pub mod intern;
 pub mod ast;
+pub mod canonicalize;
 pub mod check;
 pub mod codegen;
 pub mod lexer;

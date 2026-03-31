@@ -493,37 +493,7 @@ impl Checker {
     // ── Type resolution ──
 
     pub fn resolve_type_expr(&self, te: &ast::TypeExpr) -> Ty {
-        match te {
-            ast::TypeExpr::Simple { name } => match name.as_str() {
-                "Int" => Ty::Int, "Float" => Ty::Float, "String" => Ty::String,
-                "Bool" => Ty::Bool, "Unit" => Ty::Unit, "Bytes" => Ty::Bytes, "Matrix" => Ty::Matrix, "Path" => Ty::String,
-                other => self.env.types.get(&sym(other)).cloned().unwrap_or(Ty::Named(other.into(), vec![])),
-            },
-            ast::TypeExpr::Generic { name, args } => {
-                let ra: Vec<Ty> = args.iter().map(|a| self.resolve_type_expr(a)).collect();
-                match name.as_str() {
-                    "List" => Ty::list(ra.first().cloned().unwrap_or(Ty::Unknown)),
-                    "Option" => Ty::option(ra.first().cloned().unwrap_or(Ty::Unknown)),
-                    "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
-                    "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
-                    "Set" => Ty::set_of(ra.first().cloned().unwrap_or(Ty::Unknown)),
-                    _ => Ty::Named(sym(name), ra),
-                }
-            },
-            ast::TypeExpr::Record { fields } => Ty::Record { fields: fields.iter().map(|f| (sym(&f.name), self.resolve_type_expr(&f.ty))).collect() },
-            ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord { fields: fields.iter().map(|f| (sym(&f.name), self.resolve_type_expr(&f.ty))).collect() },
-            ast::TypeExpr::Fn { params, ret } => Ty::Fn { params: params.iter().map(|p| self.resolve_type_expr(p)).collect(), ret: Box::new(self.resolve_type_expr(ret)) },
-            ast::TypeExpr::Tuple { elements } => Ty::Tuple(elements.iter().map(|e| self.resolve_type_expr(e)).collect()),
-            ast::TypeExpr::Union { members } => Ty::union(members.iter().map(|m| self.resolve_type_expr(m)).collect()),
-            ast::TypeExpr::Variant { cases } => {
-                let cs = cases.iter().map(|c| match c {
-                    ast::VariantCase::Unit { name } => VariantCase { name: sym(name), payload: VariantPayload::Unit },
-                    ast::VariantCase::Tuple { name, fields } => VariantCase { name: sym(name), payload: VariantPayload::Tuple(fields.iter().map(|f| self.resolve_type_expr(f)).collect()) },
-                    ast::VariantCase::Record { name, fields } => VariantCase { name: sym(name), payload: VariantPayload::Record(fields.iter().map(|f| (sym(&f.name), self.resolve_type_expr(&f.ty), f.default.clone())).collect()) },
-                }).collect();
-                Ty::Variant { name: sym(""), cases: cs }
-            },
-        }
+        crate::canonicalize::resolve::resolve_type_expr(te, Some(&self.env.types))
     }
 
     pub(crate) fn resolve_field_type(&mut self, ty: &Ty, field: &str) -> Ty {
