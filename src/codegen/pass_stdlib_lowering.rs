@@ -645,8 +645,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: crate::intern::sym("log10") },
             args: vec![], type_args: vec![],
         })),
-        // float.from_int / int.to_float / float.to_int: keep as runtime calls
-        // (they're #[inline(always)], LLVM inlines them)
+        // float.from_int / int.to_float / float.to_int: walker handles inline cast
         // math.pow: Int exponentiation — keep as runtime call (i64.pow needs u32 cast)
         // ── math.fpow(base, exp) → base.powf(exp) ──
         ("math", "fpow") if args.len() >= 2 => Some(mk(IrExprKind::Call {

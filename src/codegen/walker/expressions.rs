@@ -694,6 +694,16 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
 fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]) -> String {
     let callee = match target {
         CallTarget::Named { name } => {
+            // Inline numeric casts: runtime function → Rust `as` cast
+            match name.as_str() {
+                "almide_rt_float_from_int" | "almide_rt_int_to_float" if args.len() == 1 => {
+                    return format!("({} as f64)", render_expr(ctx, &args[0]));
+                }
+                "almide_rt_float_to_int" if args.len() == 1 => {
+                    return format!("({} as i64)", render_expr(ctx, &args[0]));
+                }
+                _ => {}
+            }
             if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
                 return render_enum_constructor(ctx, name, enum_name, args);
             }
