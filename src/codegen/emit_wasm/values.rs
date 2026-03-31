@@ -13,7 +13,7 @@ pub fn ty_to_valtype(ty: &Ty) -> Option<ValType> {
         Ty::String => Some(ValType::I32), // pointer to [len:i32][data:u8...]
         Ty::Bytes => Some(ValType::I32),  // pointer to [len:i32][data:u8...]
         Ty::Matrix => Some(ValType::I32), // pointer to heap-allocated matrix
-        Ty::Unit => None,
+        Ty::Unit | Ty::Never => None,
         // All heap types (Record, Variant, List, etc.) use i32 pointers
         _ => Some(ValType::I32),
     }

@@ -125,6 +125,7 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
         "Unit" => "Ty::Unit".to_string(),
         "Bytes" => "Ty::Bytes".to_string(),
         "Matrix" => "Ty::Matrix".to_string(),
+        "Never" => "Ty::Never".to_string(),
         "Unknown" => "Ty::Unknown".to_string(),
         other if other.starts_with("List[") => {
             let inner = &other[5..other.len() - 1];
