@@ -18,7 +18,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
     let mut sigs: HashMap<String, Vec<ParamBorrow>> = HashMap::new();
 
     for func in &mut program.functions {
-        if func.is_test || is_derive_fn(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
+        if func.is_test || is_derive_fn(&func.name) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
         let borrows = infer_function_borrows(func);
         if borrows.iter().any(|b| !matches!(b, ParamBorrow::Own)) {
             sigs.insert(func.name.to_string(), borrows.clone());
@@ -30,7 +30,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
 
     for module in &mut program.modules {
         for func in &mut module.functions {
-            if func.is_test || is_derive_fn(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
+            if func.is_test || is_derive_fn(&func.name) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
             let borrows = infer_function_borrows(func);
             if borrows.iter().any(|b| !matches!(b, ParamBorrow::Own)) {
                 sigs.insert(func.name.to_string(), borrows.clone());
@@ -73,6 +73,10 @@ fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
 fn is_derive_fn(name: &str) -> bool {
     name.contains("_encode") || name.contains("_decode") || name.contains("_eq")
         || name.contains("_display") || name.contains("_to_string") || name.contains("_from_")
+}
+
+fn is_monomorphized(name: &str) -> bool {
+    name.contains("__")
 }
 
 /// Only String and List are eligible for borrow inference.
@@ -138,6 +142,7 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             if is_var(base, var) { *needs = true; return; }
             for (_, v) in fields { if is_var(v, var) { *needs = true; return; } }
             check_needs_ownership(base, var, needs);
+            for (_, v) in fields { check_needs_ownership(v, var, needs); }
         }
         IrExprKind::MapLiteral { entries } => {
             for (k, v) in entries { if is_var(k, var) || is_var(v, var) { *needs = true; return; } }
