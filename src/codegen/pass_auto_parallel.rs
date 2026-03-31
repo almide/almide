@@ -272,6 +272,7 @@ fn is_pure_expr(
         IrExprKind::EmptyMap => true,
         IrExprKind::Todo { .. } => false,
         IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } => true,
+        IrExprKind::IterChain { .. } => true,
     }
 }
 

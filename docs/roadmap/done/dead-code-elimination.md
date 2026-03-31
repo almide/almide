@@ -1,4 +1,5 @@
 <!-- description: Dependency-graph-based dead code elimination for smaller WASM binaries -->
+<!-- done: 2026-03-31 -->
 # Dead Code Elimination
 
 エクスポートされた関数から依存グラフを辿り、到達不能な定義を削除する。WASM バイナリサイズの削減に直結。

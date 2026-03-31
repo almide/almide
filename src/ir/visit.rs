@@ -141,6 +141,25 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         IrExprKind::RustMacro { args, .. } => {
             for a in args { v.visit_expr(a); }
         }
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            v.visit_expr(source);
+            for step in steps {
+                match step {
+                    IterStep::Map { lambda } | IterStep::Filter { lambda }
+                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                        v.visit_expr(lambda);
+                    }
+                }
+            }
+            match collector {
+                IterCollector::Collect => {}
+                IterCollector::Fold { init, lambda } => { v.visit_expr(init); v.visit_expr(lambda); }
+                IterCollector::Any { lambda } | IterCollector::All { lambda }
+                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+                    v.visit_expr(lambda);
+                }
+            }
+        }
     }
 }
 

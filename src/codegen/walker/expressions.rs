@@ -578,10 +578,42 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
         }
 
+        // ── Iterator chain (Rust-only) ──
+        IrExprKind::IterChain { source, consume, steps, collector } => {
+            render_iter_chain(ctx, source, *consume, steps, collector)
+        }
+
         // ── Closure conversion nodes (WASM-only, never reached by Rust walker) ──
         IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } => {
             unreachable!("ClosureCreate/EnvLoad should only appear in WASM pipeline")
         }
+    }
+}
+
+fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps: &[IterStep], collector: &IterCollector) -> String {
+    let src = render_expr(ctx, source);
+    let mut chain = if consume {
+        format!("({}).into_iter()", src)
+    } else {
+        format!("({}).iter()", src)
+    };
+
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } => chain = format!("{}.map({})", chain, render_expr(ctx, lambda)),
+            IterStep::Filter { lambda } => chain = format!("{}.filter({})", chain, render_expr(ctx, lambda)),
+            IterStep::FlatMap { lambda } => chain = format!("{}.flat_map({})", chain, render_expr(ctx, lambda)),
+            IterStep::FilterMap { lambda } => chain = format!("{}.filter_map({})", chain, render_expr(ctx, lambda)),
+        }
+    }
+
+    match collector {
+        IterCollector::Collect => format!("{}.collect::<Vec<_>>()", chain),
+        IterCollector::Fold { init, lambda } => format!("{}.fold({}, {})", chain, render_expr(ctx, init), render_expr(ctx, lambda)),
+        IterCollector::Any { lambda } => format!("{}.any({})", chain, render_expr(ctx, lambda)),
+        IterCollector::All { lambda } => format!("{}.all({})", chain, render_expr(ctx, lambda)),
+        IterCollector::Find { lambda } => format!("{}.find({})", chain, render_expr(ctx, lambda)),
+        IterCollector::Count { lambda } => format!("{}.filter({}).count() as i64", chain, render_expr(ctx, lambda)),
     }
 }
 
@@ -662,6 +694,16 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
 fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]) -> String {
     let callee = match target {
         CallTarget::Named { name } => {
+            // Inline numeric casts: runtime function → Rust `as` cast
+            match name.as_str() {
+                "almide_rt_float_from_int" | "almide_rt_int_to_float" if args.len() == 1 => {
+                    return format!("({} as f64)", render_expr(ctx, &args[0]));
+                }
+                "almide_rt_float_to_int" if args.len() == 1 => {
+                    return format!("({} as i64)", render_expr(ctx, &args[0]));
+                }
+                _ => {}
+            }
             if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
                 return render_enum_constructor(ctx, name, enum_name, args);
             }
@@ -676,7 +718,20 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
             if let Some(full) = render_method_call_full(ctx, object, method, args) {
                 return full;
             }
-            format!("{}.{}", render_expr(ctx, object), method)
+            {
+                let obj_str = render_expr(ctx, object);
+                // Wrap in parens if the object expression needs it for method call precedence
+                let needs_parens = matches!(&object.kind,
+                    IrExprKind::UnOp { .. } | IrExprKind::BinOp { .. }
+                    | IrExprKind::If { .. } | IrExprKind::Match { .. }
+                ) || matches!(&object.kind, IrExprKind::LitFloat { value } if *value < 0.0)
+                  || matches!(&object.kind, IrExprKind::LitInt { value } if *value < 0);
+                if needs_parens {
+                    format!("({}).{}", obj_str, method)
+                } else {
+                    format!("{}.{}", obj_str, method)
+                }
+            }
         }
         CallTarget::Computed { callee } => {
             let s = render_expr(ctx, callee);
@@ -698,10 +753,14 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         | "contains" | "iter" | "into_iter" | "collect" | "map"
         | "filter" | "to_vec" | "join" | "split" | "trim"
         | "starts_with" | "ends_with" | "replace" | "chars"
-        | "as_str" | "get" | "keys" | "values" | "abs" | "powi"
+        | "as_str" | "get" | "keys" | "values" | "abs" | "powi" | "powf"
         | "is_empty" | "contains_key" | "entry" | "or_insert"
         | "expect" | "ok" | "err" | "and_then" | "map_err"
         | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref" | "as_deref"
+        // math intrinsics (inlined by StdlibLowering)
+        | "sqrt" | "floor" | "ceil" | "round" | "sin" | "cos" | "tan"
+        | "asin" | "acos" | "atan" | "atan2" | "exp" | "ln" | "log2" | "log10"
+        | "is_nan" | "is_infinite"
     );
     // User-defined UFCS: plain method name (no dots) → func(object, args)
     if !method.contains('.') && !is_rust_intrinsic {
