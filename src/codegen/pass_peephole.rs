@@ -218,54 +218,15 @@ fn try_detect_vec_init(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrStmt> 
     // But we need to render `val` and `n`. Use a hack: store them in the RenderedCall.
     // Actually, cleanest: emit `(0..n).map(|_| val).collect::<Vec<_>>()`  via IterChain!
 
-    // Use RenderedCall to emit `vec![val; n as usize]` directly
-    // This avoids the lambda param issue with iterator-based approach
-    let iter_expr = IrExpr {
-        kind: IrExprKind::RenderedCall {
-            code: String::new(), // placeholder — filled by walker for vec_repeat
-        },
-        ty: ty.clone(),
-        span: s1.span,
-    };
-
-    // Actually, we need the val and n expressions to be renderable.
-    // Store them in a special IterChain with a dedicated pattern:
-    // Use IterChain { source: Range(0,n), steps: [Map(lambda with 1 param)], collector: Collect }
-    // The lambda needs a dummy param that matches the range element type (i64).
-
-    // Get the ForIn loop var for the dummy param
-    let IrExprKind::ForIn { var: loop_var, .. } = &for_expr.kind else { unreachable!() };
-
-    // The body value might reference captured variables — wrap in Clone for safety
-    let body_val = if matches!(&single_val.kind, IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitBool { .. } | IrExprKind::LitStr { .. } | IrExprKind::Unit) {
-        // Literals: no clone needed
-        single_val.clone()
-    } else {
-        // Non-literal: wrap in Clone to ensure the value can be produced n times
-        IrExpr {
-            kind: IrExprKind::Clone { expr: Box::new(single_val.clone()) },
-            ty: single_val.ty.clone(),
-            span: None,
-        }
-    };
-
-    let iter_expr = IrExpr {
-        kind: IrExprKind::IterChain {
-            source: Box::new((**iterable).clone()),
-            consume: true,
-            steps: vec![IterStep::Map {
-                lambda: Box::new(IrExpr {
-                    kind: IrExprKind::Lambda {
-                        params: vec![(*loop_var, crate::types::Ty::Int)],
-                        body: Box::new(body_val),
-                        lambda_id: None,
-                    },
-                    ty: single_val.ty.clone(),
-                    span: None,
-                }),
-            }],
-            collector: IterCollector::Collect,
+    // Emit list.repeat(val, n) — target-agnostic, StdlibLowering handles Rust vs WASM
+    let repeat_expr = IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module {
+                module: crate::intern::sym("list"),
+                func: crate::intern::sym("repeat"),
+            },
+            args: vec![single_val.clone(), (**end).clone()],
+            type_args: vec![],
         },
         ty: ty.clone(),
         span: s1.span,
@@ -276,7 +237,7 @@ fn try_detect_vec_init(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrStmt> 
             var: *x_var,
             mutability: Mutability::Var,
             ty: ty.clone(),
-            value: iter_expr,
+            value: repeat_expr,
         },
         span: s1.span,
     })
