@@ -198,6 +198,8 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
         .replace('<', "_lt_").replace('>', "_gt_").replace('[', "_").replace(']', "_")
         .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
+    // Strip any remaining non-ASCII characters (e.g., →, ★, etc.)
+    safe_name = safe_name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
     // Escape target-specific keywords via template
     let target_keywords = ["while", "for", "if", "else", "match", "loop", "break", "continue",
         "return", "fn", "let", "mut", "use", "mod", "pub", "struct", "enum", "impl", "trait",

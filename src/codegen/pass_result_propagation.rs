@@ -23,16 +23,16 @@ impl NanoPass for ResultPropagationPass {
     fn run(&self, mut program: IrProgram, target: Target) -> PassResult {
         // Result wrapping is Rust-only: Rust requires `?` which needs Result return type.
         // TS uses async/await (ResultErasurePass handles it). WASM uses traps.
-        let wrap_non_result = matches!(target, Target::Rust);
+        // All targets wrap effect fn return types in Result.
+        // This ensures ! (unwrap) propagates errors consistently across Rust and WASM.
+        let wrap_non_result = matches!(target, Target::Rust | Target::Wasm);
 
-        // Phase 1: Lift effect fn return types from T to Result<T, String>.
-        // Collect fn_name → new Result type so call sites can be updated.
+        // Phase 1a: Collect all effect fn names and lift return types.
         let mut lifted_fns: HashMap<String, Ty> = HashMap::new();
         for func in &mut program.functions {
             if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result() {
                 let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                 func.ret_ty = Ty::result(orig, Ty::String);
-                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body));
                 lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
             }
         }
@@ -41,8 +41,20 @@ impl NanoPass for ResultPropagationPass {
                 if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result() {
                     let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                     func.ret_ty = Ty::result(orig, Ty::String);
-                    func.body = wrap_tail_in_ok(std::mem::take(&mut func.body));
                     lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
+                }
+            }
+        }
+        // Phase 1b: Wrap bodies in Ok(...), skipping calls to other lifted effect fns.
+        for func in &mut program.functions {
+            if lifted_fns.contains_key(func.name.as_str()) {
+                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns);
+            }
+        }
+        for module in &mut program.modules {
+            for func in &mut module.functions {
+                if lifted_fns.contains_key(func.name.as_str()) {
+                    func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns);
                 }
             }
         }
@@ -76,12 +88,12 @@ impl NanoPass for ResultPropagationPass {
 
 /// Wrap the tail expression of an effect fn body in Ok(...).
 /// Called when ret_ty is lifted from T to Result<T, String>.
-fn wrap_tail_in_ok(expr: IrExpr) -> IrExpr {
+fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
     match expr.kind {
         IrExprKind::Block { stmts, expr: Some(tail) } => {
-            let wrapped = wrap_tail_in_ok(*tail);
+            let wrapped = wrap_tail_in_ok(*tail, lifted);
             IrExpr {
                 kind: IrExprKind::Block { stmts, expr: Some(Box::new(wrapped)) },
                 ty: Ty::result(ty, Ty::String), span,
@@ -90,8 +102,8 @@ fn wrap_tail_in_ok(expr: IrExpr) -> IrExpr {
         IrExprKind::If { cond, then, else_ } => IrExpr {
             kind: IrExprKind::If {
                 cond,
-                then: Box::new(wrap_tail_in_ok(*then)),
-                else_: Box::new(wrap_tail_in_ok(*else_)),
+                then: Box::new(wrap_tail_in_ok(*then, lifted)),
+                else_: Box::new(wrap_tail_in_ok(*else_, lifted)),
             },
             ty: Ty::result(ty, Ty::String), span,
         },
@@ -100,13 +112,32 @@ fn wrap_tail_in_ok(expr: IrExpr) -> IrExpr {
                 subject,
                 arms: arms.into_iter().map(|arm| IrMatchArm {
                     pattern: arm.pattern, guard: arm.guard,
-                    body: wrap_tail_in_ok(arm.body),
+                    body: wrap_tail_in_ok(arm.body, lifted),
                 }).collect(),
             },
             ty: Ty::result(ty, Ty::String), span,
         },
         // Already Result — don't double-wrap
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => expr,
+        // Call to another lifted effect fn — already returns Result, don't wrap
+        IrExprKind::Call { ref target, .. } => {
+            let callee_name = match target {
+                CallTarget::Named { name } => Some(name.to_string()),
+                _ => None,
+            };
+            if callee_name.as_ref().is_some_and(|n| lifted.contains_key(n)) {
+                // Already returns Result — just pass through
+                expr
+            } else {
+                let result_ty = Ty::result(ty.clone(), Ty::String);
+                IrExpr {
+                    kind: IrExprKind::ResultOk {
+                        expr: Box::new(IrExpr { kind: expr.kind, ty, span }),
+                    },
+                    ty: result_ty, span,
+                }
+            }
+        }
         // Everything else: wrap in Ok(expr)
         other => {
             let result_ty = Ty::result(ty.clone(), Ty::String);
@@ -244,15 +275,10 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                     _ => ty.clone(),
                 };
                 let call_with_result_ty = IrExpr { kind: expr.kind, ty: result_ty.clone(), span };
-                // In tests, use .unwrap() instead of ? (tests return (), not Result)
+                // In tests, unwrap the Result (Rust: .unwrap(), WASM: Unwrap IR node)
                 return IrExpr {
-                    kind: IrExprKind::Call {
-                        target: CallTarget::Method {
-                            object: Box::new(call_with_result_ty),
-                            method: "unwrap".into(),
-                        },
-                        args: vec![],
-                        type_args: vec![],
+                    kind: IrExprKind::Unwrap {
+                        expr: Box::new(call_with_result_ty),
                     },
                     ty: inner_ty, span,
                 };

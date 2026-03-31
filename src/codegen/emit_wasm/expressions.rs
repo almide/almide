@@ -526,6 +526,7 @@ impl FuncCompiler<'_> {
                         i32_const(0);
                         i32_ne;
                         if_empty;
+                        // Err path: propagate the Result pointer (early return)
                         local_get(scratch);
                         return_;
                         end;
