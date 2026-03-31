@@ -129,6 +129,9 @@ fn rewrite_stmts(stmts: &mut Vec<IrStmt>) -> bool {
     while i < len {
         // 3-stmt patterns
         if i + 2 < len {
+            if let Some(s) = try_detect_vec_init(&slice[i], &slice[i + 1], &slice[i + 2]) {
+                result.push(s); i += 3; changed = true; continue;
+            }
             if let Some(s) = try_detect_reverse_block(&slice[i], &slice[i + 1], &slice[i + 2]) {
                 result.push(s); i += 3; changed = true; continue;
             }
@@ -159,6 +162,125 @@ fn rewrite_stmts(stmts: &mut Vec<IrStmt>) -> bool {
 }
 
 // ── Pattern detectors ──────────────────────────────────────────
+
+/// Vec init: `var x = []; let __licm = [val]; for _ in 0..n { x = x + __licm }`
+/// → `var x = vec![val; n]` (O(n) instead of O(n²))
+fn try_detect_vec_init(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrStmt> {
+    // s1: Bind { var: x, mutability: Var, value: List { [] } }
+    let IrStmtKind::Bind { var: x_var, mutability: Mutability::Var, value: init_val, ty } = &s1.kind else { return None; };
+    let IrExprKind::List { elements } = &init_val.kind else { return None; };
+    if !elements.is_empty() { return None; }
+
+    // s2: Bind { var: __licm, value: List { [val] } } OR value: Clone { List { [val] } }
+    let IrStmtKind::Bind { var: licm_var, value: licm_val, .. } = &s2.kind else { return None; };
+    let single_val = match &licm_val.kind {
+        IrExprKind::List { elements } if elements.len() == 1 => &elements[0],
+        _ => return None,
+    };
+
+    // s3: Expr { ForIn { var: _, iterable: Range { 0, n }, body: [Assign { var: x, value: Concat(x, __licm) }] } }
+    let IrStmtKind::Expr { expr: for_expr } = &s3.kind else { return None; };
+    let IrExprKind::ForIn { var_tuple, iterable, body, .. } = &for_expr.kind else { return None; };
+    let IrExprKind::Range { start, end, inclusive: false } = &iterable.kind else { return None; };
+    if !matches!(&start.kind, IrExprKind::LitInt { value: 0 }) { return None; }
+    if body.len() != 1 { return None; }
+
+    // body[0]: Assign { var: x, value: BinOp { ConcatList, Clone(x), Clone(__licm) } }
+    let IrStmtKind::Assign { var: assign_var, value: assign_val } = &body[0].kind else { return None; };
+    if assign_var != x_var { return None; }
+
+    // Unwrap the concat: ConcatList(left, right) where left contains x and right contains __licm
+    let (left, right) = match &assign_val.kind {
+        IrExprKind::BinOp { op: BinOp::ConcatList, left, right } => (left.as_ref(), right.as_ref()),
+        _ => return None,
+    };
+
+    // left should be Var(x) or Clone(Var(x))
+    let left_var = match &left.kind {
+        IrExprKind::Var { id } => *id,
+        IrExprKind::Clone { expr } => match &expr.kind { IrExprKind::Var { id } => *id, _ => return None },
+        _ => return None,
+    };
+    if left_var != *x_var { return None; }
+
+    // right should be Var(__licm) or Clone(Var(__licm))
+    let right_var = match &right.kind {
+        IrExprKind::Var { id } => *id,
+        IrExprKind::Clone { expr } => match &expr.kind { IrExprKind::Var { id } => *id, _ => return None },
+        _ => return None,
+    };
+    if right_var != *licm_var { return None; }
+
+    // Match! Replace with: Bind { var: x, value: RenderedCall { "vec![val; n as usize]" } }
+    // We can't render here, so use a Call to a synthetic runtime function
+    // Better: use List { elements } with n copies... no, that's not possible at IR level.
+    // Use RenderedCall as a placeholder that the walker outputs verbatim.
+    // But we need to render `val` and `n`. Use a hack: store them in the RenderedCall.
+    // Actually, cleanest: emit `(0..n).map(|_| val).collect::<Vec<_>>()`  via IterChain!
+
+    // Use RenderedCall to emit `vec![val; n as usize]` directly
+    // This avoids the lambda param issue with iterator-based approach
+    let iter_expr = IrExpr {
+        kind: IrExprKind::RenderedCall {
+            code: String::new(), // placeholder — filled by walker for vec_repeat
+        },
+        ty: ty.clone(),
+        span: s1.span,
+    };
+
+    // Actually, we need the val and n expressions to be renderable.
+    // Store them in a special IterChain with a dedicated pattern:
+    // Use IterChain { source: Range(0,n), steps: [Map(lambda with 1 param)], collector: Collect }
+    // The lambda needs a dummy param that matches the range element type (i64).
+
+    // Get the ForIn loop var for the dummy param
+    let IrExprKind::ForIn { var: loop_var, .. } = &for_expr.kind else { unreachable!() };
+
+    // The body value might reference captured variables — wrap in Clone for safety
+    let body_val = if matches!(&single_val.kind, IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::LitStr { .. } | IrExprKind::Unit) {
+        // Literals: no clone needed
+        single_val.clone()
+    } else {
+        // Non-literal: wrap in Clone to ensure the value can be produced n times
+        IrExpr {
+            kind: IrExprKind::Clone { expr: Box::new(single_val.clone()) },
+            ty: single_val.ty.clone(),
+            span: None,
+        }
+    };
+
+    let iter_expr = IrExpr {
+        kind: IrExprKind::IterChain {
+            source: Box::new((**iterable).clone()),
+            consume: true,
+            steps: vec![IterStep::Map {
+                lambda: Box::new(IrExpr {
+                    kind: IrExprKind::Lambda {
+                        params: vec![(*loop_var, crate::types::Ty::Int)],
+                        body: Box::new(body_val),
+                        lambda_id: None,
+                    },
+                    ty: single_val.ty.clone(),
+                    span: None,
+                }),
+            }],
+            collector: IterCollector::Collect,
+        },
+        ty: ty.clone(),
+        span: s1.span,
+    };
+
+    Some(IrStmt {
+        kind: IrStmtKind::Bind {
+            var: *x_var,
+            mutability: Mutability::Var,
+            ty: ty.clone(),
+            value: iter_expr,
+        },
+        span: s1.span,
+    })
+}
 
 /// swap: let tmp = xs[a]; xs[a] = xs[b]; xs[b] = tmp
 fn try_detect_swap(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrStmt> {
