@@ -139,9 +139,9 @@ fn lex_type_name() {
 }
 
 #[test]
-fn lex_predicate_identifier() {
+fn lex_question_as_separate_token() {
     let toks = tokens("empty?");
-    assert_eq!(toks, vec![(TokenType::IdentQ, "empty?".into())]);
+    assert_eq!(toks, vec![(TokenType::Ident, "empty".into()), (TokenType::Question, "?".into())]);
 }
 
 #[test]
