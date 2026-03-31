@@ -193,12 +193,57 @@ fn collect_bound_vars(stmts: &[IrStmt]) -> HashSet<u32> {
     let mut locals = HashSet::new();
     for s in stmts {
         match &s.kind {
-            IrStmtKind::Bind { var, .. } => { locals.insert(var.0); }
-            IrStmtKind::BindDestructure { pattern, .. } => collect_pattern_vars(pattern, &mut locals),
+            IrStmtKind::Bind { var, value, .. } => {
+                locals.insert(var.0);
+                collect_bound_vars_in_expr(value, &mut locals);
+            }
+            IrStmtKind::BindDestructure { pattern, value, .. } => {
+                collect_pattern_vars(pattern, &mut locals);
+                collect_bound_vars_in_expr(value, &mut locals);
+            }
+            IrStmtKind::Expr { expr } => collect_bound_vars_in_expr(expr, &mut locals),
+            IrStmtKind::Guard { cond, else_ } => {
+                collect_bound_vars_in_expr(cond, &mut locals);
+                collect_bound_vars_in_expr(else_, &mut locals);
+            }
             _ => {}
         }
     }
     locals
+}
+
+/// Collect VarIds bound inside expressions (match arm patterns, nested blocks).
+fn collect_bound_vars_in_expr(expr: &IrExpr, vars: &mut HashSet<u32>) {
+    match &expr.kind {
+        IrExprKind::Match { subject, arms } => {
+            collect_bound_vars_in_expr(subject, vars);
+            for arm in arms {
+                collect_pattern_vars(&arm.pattern, vars);
+                if let Some(g) = &arm.guard { collect_bound_vars_in_expr(g, vars); }
+                collect_bound_vars_in_expr(&arm.body, vars);
+            }
+        }
+        IrExprKind::Block { stmts, expr } => {
+            vars.extend(collect_bound_vars(stmts));
+            if let Some(e) = expr { collect_bound_vars_in_expr(e, vars); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_bound_vars_in_expr(cond, vars);
+            collect_bound_vars_in_expr(then, vars);
+            collect_bound_vars_in_expr(else_, vars);
+        }
+        IrExprKind::ForIn { iterable, body, var, var_tuple, .. } => {
+            collect_bound_vars_in_expr(iterable, vars);
+            vars.insert(var.0);
+            if let Some(vt) = var_tuple { for v in vt { vars.insert(v.0); } }
+            vars.extend(collect_bound_vars(body));
+        }
+        IrExprKind::While { cond, body } => {
+            collect_bound_vars_in_expr(cond, vars);
+            vars.extend(collect_bound_vars(body));
+        }
+        _ => {}
+    }
 }
 
 fn collect_pattern_vars(pat: &IrPattern, vars: &mut HashSet<u32>) {
