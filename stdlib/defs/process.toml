@@ -16,6 +16,15 @@ effect = true
 rust = "almide_rt_process_exit({code})"
 ts = "__almd_process.exit({code})"
 
+[args]
+description = "Get command-line arguments as a list of strings"
+example = 'let args = process.args()'
+params = []
+return = "List[String]"
+effect = false
+rust = "almide_rt_process_args()"
+ts = "__almd_process.args()"
+
 [stdin_lines]
 description = "Read all lines from standard input"
 example = 'let lines = process.stdin_lines()'

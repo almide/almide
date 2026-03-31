@@ -22,6 +22,10 @@ pub fn almide_rt_process_exit(code: i64) -> ! {
     std::process::exit(code as i32);
 }
 
+pub fn almide_rt_process_args() -> Vec<String> {
+    std::env::args().collect()
+}
+
 pub fn almide_rt_process_stdin_lines() -> Result<Vec<String>, String> {
     use std::io::BufRead;
     std::io::stdin()
