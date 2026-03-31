@@ -798,7 +798,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     compile_variant_eq_funcs(&mut emitter, &program.var_table);
 
     // Phase 2.5: Dead Code Elimination
-    let _dce_count = dce::eliminate_dead_code(&mut emitter);
+    let dce_count = dce::eliminate_dead_code(&mut emitter);
 
     // Collect public user functions for WASM export
     for func in &program.functions {
@@ -809,7 +809,8 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         emitter.user_exports.push(func.name.to_string());
     }
 
-    // Phase 3: Assemble
+    // Phase 3: Assemble (DCE already ran in Phase 2.5: {} functions eliminated)
+    let _ = dce_count;
     assemble(&emitter)
 }
 
