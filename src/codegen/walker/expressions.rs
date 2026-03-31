@@ -578,10 +578,42 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
         }
 
+        // ── Iterator chain (Rust-only) ──
+        IrExprKind::IterChain { source, consume, steps, collector } => {
+            render_iter_chain(ctx, source, *consume, steps, collector)
+        }
+
         // ── Closure conversion nodes (WASM-only, never reached by Rust walker) ──
         IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } => {
             unreachable!("ClosureCreate/EnvLoad should only appear in WASM pipeline")
         }
+    }
+}
+
+fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps: &[IterStep], collector: &IterCollector) -> String {
+    let src = render_expr(ctx, source);
+    let mut chain = if consume {
+        format!("({}).into_iter()", src)
+    } else {
+        format!("({}).iter()", src)
+    };
+
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } => chain = format!("{}.map({})", chain, render_expr(ctx, lambda)),
+            IterStep::Filter { lambda } => chain = format!("{}.filter({})", chain, render_expr(ctx, lambda)),
+            IterStep::FlatMap { lambda } => chain = format!("{}.flat_map({})", chain, render_expr(ctx, lambda)),
+            IterStep::FilterMap { lambda } => chain = format!("{}.filter_map({})", chain, render_expr(ctx, lambda)),
+        }
+    }
+
+    match collector {
+        IterCollector::Collect => format!("{}.collect::<Vec<_>>()", chain),
+        IterCollector::Fold { init, lambda } => format!("{}.fold({}, {})", chain, render_expr(ctx, init), render_expr(ctx, lambda)),
+        IterCollector::Any { lambda } => format!("{}.any({})", chain, render_expr(ctx, lambda)),
+        IterCollector::All { lambda } => format!("{}.all({})", chain, render_expr(ctx, lambda)),
+        IterCollector::Find { lambda } => format!("{}.find({})", chain, render_expr(ctx, lambda)),
+        IterCollector::Count { lambda } => format!("{}.filter({}).count() as i64", chain, render_expr(ctx, lambda)),
     }
 }
 

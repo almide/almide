@@ -147,6 +147,28 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
             for a in args { count_uses_in_expr(a, table); }
         }
         IrExprKind::RenderedCall { .. } => {}
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            count_uses_in_expr(source, table);
+            for step in steps {
+                match step {
+                    IterStep::Map { lambda } | IterStep::Filter { lambda }
+                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                        count_uses_in_expr(lambda, table);
+                    }
+                }
+            }
+            match collector {
+                IterCollector::Collect => {}
+                IterCollector::Fold { init, lambda } => {
+                    count_uses_in_expr(init, table);
+                    count_uses_in_expr(lambda, table);
+                }
+                IterCollector::Any { lambda } | IterCollector::All { lambda }
+                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+                    count_uses_in_expr(lambda, table);
+                }
+            }
+        }
     }
 }
 

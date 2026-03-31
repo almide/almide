@@ -295,9 +295,46 @@ pub enum IrExprKind {
         index: u32,
     },
 
+    // ── Iterator chain (inserted by StdlibLoweringPass, Rust target) ──
+    /// Replaces runtime function calls for list operations with Rust iterator chains.
+    /// `source.into_iter().step1().step2()...collector()`
+    IterChain {
+        source: Box<IrExpr>,
+        /// true = into_iter() (consumes Vec), false = iter() (borrows Vec)
+        consume: bool,
+        steps: Vec<IterStep>,
+        collector: IterCollector,
+    },
+
     // ── Misc ──
     Hole,
     Todo { message: String },
+}
+
+/// A single step in an iterator chain (map, filter, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum IterStep {
+    Map { lambda: Box<IrExpr> },
+    Filter { lambda: Box<IrExpr> },
+    FlatMap { lambda: Box<IrExpr> },
+    FilterMap { lambda: Box<IrExpr> },
+}
+
+/// The terminal operation of an iterator chain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum IterCollector {
+    /// `.collect::<Vec<_>>()` — materialize into Vec
+    Collect,
+    /// `.fold(init, |acc, x| body)`
+    Fold { init: Box<IrExpr>, lambda: Box<IrExpr> },
+    /// `.any(|x| body)` — returns bool
+    Any { lambda: Box<IrExpr> },
+    /// `.all(|x| body)` — returns bool
+    All { lambda: Box<IrExpr> },
+    /// `.find(|x| body)` — returns Option<T>
+    Find { lambda: Box<IrExpr> },
+    /// `.filter(|x| body).count() as i64`
+    Count { lambda: Box<IrExpr> },
 }
 
 // ── Statements ──────────────────────────────────────────────────
