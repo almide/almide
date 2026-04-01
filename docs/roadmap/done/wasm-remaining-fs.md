@@ -1,4 +1,5 @@
 <!-- description: Implement remaining filesystem operations for the WASM target -->
+<!-- done: 2026-04-01 -->
 # WASM Remaining FS Operations
 
 **Priority:** Medium — read_text/write/exists are implemented. Remaining operations added as needed

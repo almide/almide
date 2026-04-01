@@ -6,7 +6,7 @@
 
 ## Active
 
-11 items
+10 items
 
 | Item | Description |
 |------|-------------|
@@ -20,7 +20,6 @@
 | [Nanopass Debug Dump](active/nanopass-debug-dump.md) | Environment-variable-controlled IR dump for each nanopass stage |
 | [Purity Exploitation — Leveraging fn/effect fn Distinction](active/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | [WASM HTTP Client](active/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
-| [WASM Remaining FS Operations](active/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
 
 ## On Hold
 
@@ -68,13 +67,14 @@
 
 ## Done
 
-169 items
+170 items
 
 <details>
-<summary>Show all 169 completed items</summary>
+<summary>Show all 170 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-04-01 | [WASM Remaining FS Operations](done/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
 | 2026-04-01 | [Compiler Fragility Hotspots](done/compiler-fragility-hotspots.md) | Fix fragile compiler internals: visitor pattern, ExprId duplication, UF isolation, Ty clone cost |
 | 2026-04-01 | [Canonical AST](done/canonical-ast.md) | Introduce Canonical AST phase to separate name resolution from type checking |
