@@ -6,10 +6,11 @@
 
 ## On Hold
 
-22 items
+23 items
 
 | Item | Description |
 |------|-------------|
+| [Almide-to-Almide FFI via almide-lander](on-hold/almide-to-almide-ffi.md) | Use almide-lander to call compiled Almide libraries from Almide via shared library FFI |
 | [Almide UI — Reactive Web Framework as Almide Library](on-hold/almide-ui.md) | SolidJS-like reactive UI framework built as a pure Almide library |
 | [API Diff & Automatic Versioning](on-hold/api-diff-auto-versioning.md) | Automatic semver bump detection via public API diffing |
 | [LLM Benchmark: Next Phase](on-hold/benchmark-next-phase.md) | LLM benchmark Phase 2-3: cross-language comparison, harder problems, publication |
