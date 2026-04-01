@@ -6,13 +6,16 @@
 
 ## Active
 
-3 items
+6 items
 
 | Item | Description |
 |------|-------------|
 | [C FFI — Call C Libraries from Almide](active/c-ffi.md) | Call C libraries from Almide via @extern(c, ...) and extern "C" codegen |
 | [Exhaustiveness Strengthening — Nested Patterns](active/exhaustiveness-strengthening.md) | Nested pattern exhaustiveness via Maranget's algorithm |
+| [Fan Async Backend](active/fan-async-backend.md) | Migrate fan runtime from std::thread to tokio async |
+| [Flexible Error Types](active/flexible-error-types.md) | Allow user-defined error types in Result and effect fn |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
+| [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 
 ## On Hold
 
