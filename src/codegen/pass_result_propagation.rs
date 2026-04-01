@@ -5,7 +5,7 @@
 //!
 //! Exception: match subjects are NOT wrapped (you match on Ok/Err, not unwrap).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, PassResult, Target};
@@ -255,6 +255,79 @@ fn update_call_types_stmt(stmt: IrStmt, lifted: &HashMap<String, Ty>) -> IrStmt 
     IrStmt { kind, span: stmt.span }
 }
 
+/// Check if a match has at least one Ok or Err pattern arm.
+fn match_has_result_arms(arms: &[IrMatchArm]) -> bool {
+    arms.iter().any(|arm| matches!(&arm.pattern, IrPattern::Ok { .. } | IrPattern::Err { .. }))
+}
+
+/// Collect VarIds that are used as match subjects with ok/err arms.
+/// Scans a list of statements and an optional tail expression.
+fn collect_result_match_vars(stmts: &[IrStmt], tail: Option<&IrExpr>) -> HashSet<u32> {
+    let mut vars = HashSet::new();
+    for s in stmts {
+        collect_result_match_vars_expr_stmt(s, &mut vars);
+    }
+    if let Some(e) = tail {
+        collect_result_match_vars_expr(e, &mut vars);
+    }
+    vars
+}
+
+fn collect_result_match_vars_expr(expr: &IrExpr, vars: &mut HashSet<u32>) {
+    match &expr.kind {
+        IrExprKind::Match { subject, arms } => {
+            if match_has_result_arms(arms) {
+                if let IrExprKind::Var { id } = &subject.kind {
+                    vars.insert(id.0);
+                }
+            }
+            // Recurse into arm bodies
+            for arm in arms {
+                collect_result_match_vars_expr(&arm.body, vars);
+            }
+            collect_result_match_vars_expr(subject, vars);
+        }
+        IrExprKind::Block { stmts, expr: tail } => {
+            for s in stmts {
+                collect_result_match_vars_expr_stmt(s, vars);
+            }
+            if let Some(e) = tail {
+                collect_result_match_vars_expr(e, vars);
+            }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_result_match_vars_expr(cond, vars);
+            collect_result_match_vars_expr(then, vars);
+            collect_result_match_vars_expr(else_, vars);
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            collect_result_match_vars_expr(iterable, vars);
+            for s in body {
+                collect_result_match_vars_expr_stmt(s, vars);
+            }
+        }
+        IrExprKind::While { cond, body } => {
+            collect_result_match_vars_expr(cond, vars);
+            for s in body {
+                collect_result_match_vars_expr_stmt(s, vars);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_result_match_vars_expr_stmt(stmt: &IrStmt, vars: &mut HashSet<u32>) {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } => collect_result_match_vars_expr(value, vars),
+        IrStmtKind::Expr { expr } => collect_result_match_vars_expr(expr, vars),
+        IrStmtKind::Guard { cond, else_ } => {
+            collect_result_match_vars_expr(cond, vars);
+            collect_result_match_vars_expr(else_, vars);
+        }
+        _ => {}
+    }
+}
+
 /// Insert Try around calls to lifted effect fns in test functions.
 /// Test functions don't go through insert_try_body, but they still need to
 /// unwrap Result values from lifted effect fn calls.
@@ -294,7 +367,10 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
             }
         }
         IrExprKind::Block { stmts, expr: tail } => {
-            let stmts = stmts.into_iter().map(|s| insert_try_for_lifted_stmt(s, lifted)).collect();
+            // Collect VarIds that are used as match subjects with ok/err arms.
+            // These bindings must keep their Result type (no unwrap).
+            let skip_unwrap = collect_result_match_vars(&stmts, tail.as_deref());
+            let stmts = stmts.into_iter().map(|s| insert_try_for_lifted_stmt(s, lifted, &skip_unwrap)).collect();
             let tail = tail.map(|e| Box::new(insert_try_for_lifted(*e, lifted)));
             IrExpr { kind: IrExprKind::Block { stmts, expr: tail }, ty, span }
         }
@@ -330,8 +406,8 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
 }
 
 /// Like insert_try_for_lifted, but does NOT unwrap calls to lifted effect fns.
-/// Used for match subjects when the arms use Ok/Err patterns — the user is
-/// explicitly matching on the Result, so the subject must remain a Result.
+/// Used for match subjects and let bindings where the user explicitly handles
+/// the Result with ok/err arms.
 fn insert_try_for_lifted_no_unwrap(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
@@ -344,8 +420,6 @@ fn insert_try_for_lifted_no_unwrap(expr: IrExpr, lifted: &HashMap<String, Ty>) -
                 _ => None,
             };
             if let Some(result_ty) = lifted_ty {
-                // Don't unwrap — return the call with its Result type so
-                // the match arms can handle Ok/Err directly.
                 let _ = args;
                 match expr.kind {
                     IrExprKind::Call { target, args, type_args } => {
@@ -355,7 +429,6 @@ fn insert_try_for_lifted_no_unwrap(expr: IrExpr, lifted: &HashMap<String, Ty>) -
                     _ => unreachable!()
                 }
             }
-            // Not a lifted call — recurse normally
             let _ = args;
             match expr.kind {
                 IrExprKind::Call { target, args, type_args } => {
@@ -365,17 +438,23 @@ fn insert_try_for_lifted_no_unwrap(expr: IrExpr, lifted: &HashMap<String, Ty>) -
                 _ => unreachable!()
             }
         }
-        // For non-call subjects, delegate to normal processing
         _ => insert_try_for_lifted(expr, lifted),
     }
 }
 
-fn insert_try_for_lifted_stmt(stmt: IrStmt, lifted: &HashMap<String, Ty>) -> IrStmt {
+fn insert_try_for_lifted_stmt(stmt: IrStmt, lifted: &HashMap<String, Ty>, skip_unwrap_vars: &HashSet<u32>) -> IrStmt {
     let kind = match stmt.kind {
         IrStmtKind::Bind { var, mutability, ty, value } => {
-            let new_value = insert_try_for_lifted(value, lifted);
-            let new_ty = if matches!(&new_value.kind, IrExprKind::Try { .. }) { new_value.ty.clone() } else { ty };
-            IrStmtKind::Bind { var, mutability, ty: new_ty, value: new_value }
+            if skip_unwrap_vars.contains(&var.0) {
+                // This variable is later matched with ok/err arms — keep Result type, don't unwrap
+                let new_value = insert_try_for_lifted_no_unwrap(value, lifted);
+                let new_ty = new_value.ty.clone();
+                IrStmtKind::Bind { var, mutability, ty: new_ty, value: new_value }
+            } else {
+                let new_value = insert_try_for_lifted(value, lifted);
+                let new_ty = if matches!(&new_value.kind, IrExprKind::Try { .. }) { new_value.ty.clone() } else { ty };
+                IrStmtKind::Bind { var, mutability, ty: new_ty, value: new_value }
+            }
         }
         IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: insert_try_for_lifted(expr, lifted) },
         IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: insert_try_for_lifted(value, lifted) },
