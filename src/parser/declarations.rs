@@ -207,6 +207,7 @@ impl Parser {
         } else {
             None
         };
+        self.skip_newlines();
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
         let ty = self.parse_type_expr()?;

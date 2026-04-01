@@ -17,6 +17,7 @@ impl Parser {
         let name = self.expect_type_name()?;
         if self.check(TokenType::LBracket) {
             let args = self.parse_type_args()?;
+            self.skip_newlines_if_followed_by(TokenType::Pipe);
             if self.check(TokenType::Pipe) {
                 return self.try_parse_inline_variant(name, Vec::new());
             }
@@ -33,11 +34,13 @@ impl Parser {
                 }
             }
             self.expect(TokenType::RParen)?;
+            self.skip_newlines_if_followed_by(TokenType::Pipe);
             if self.check(TokenType::Pipe) {
                 return self.try_parse_inline_variant(name, fields);
             }
             return Ok(TypeExpr::Simple { name });
         }
+        self.skip_newlines_if_followed_by(TokenType::Pipe);
         if self.check(TokenType::Pipe) {
             return self.try_parse_inline_variant(name, Vec::new());
         }
@@ -119,6 +122,7 @@ impl Parser {
             cases.push(VariantCase::Unit { name: first_name.clone() });
         }
         let mut simple_names = vec![first_name];
+        self.skip_newlines_if_followed_by(TokenType::Pipe);
         while self.check(TokenType::Pipe) {
             self.advance();
             self.skip_newlines();

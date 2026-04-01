@@ -149,6 +149,38 @@ fn parse_variant_type() {
     }
 }
 
+#[test]
+fn parse_multiline_inline_variant() {
+    // Inline variant (no leading |) spanning multiple lines
+    let prog = parse("type Provider\n  = Stripe(String)\n  | PayPal(String, String)\n  | Square(String)");
+    if let Decl::Type { name, ty, .. } = &prog.decls[0] {
+        assert_eq!(name, "Provider");
+        if let TypeExpr::Variant { cases } = ty {
+            assert_eq!(cases.len(), 3);
+            assert!(matches!(&cases[0], VariantCase::Tuple { name, fields } if name == "Stripe" && fields.len() == 1));
+            assert!(matches!(&cases[1], VariantCase::Tuple { name, fields } if name == "PayPal" && fields.len() == 2));
+            assert!(matches!(&cases[2], VariantCase::Tuple { name, fields } if name == "Square" && fields.len() == 1));
+        } else {
+            panic!("expected variant type");
+        }
+    } else {
+        panic!("expected type decl");
+    }
+}
+
+#[test]
+fn parse_multiline_newline_before_eq() {
+    // Newline between type name and `=`
+    let prog = parse("type Color\n  = Red | Green | Blue");
+    if let Decl::Type { name, ty, .. } = &prog.decls[0] {
+        assert_eq!(name, "Color");
+        // Red | Green | Blue with all-uppercase names → Union rewritten to Variant
+        assert!(matches!(ty, TypeExpr::Variant { cases } if cases.len() == 3));
+    } else {
+        panic!("expected type decl");
+    }
+}
+
 // ---- Expressions ----
 
 #[test]
