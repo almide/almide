@@ -1,4 +1,5 @@
 <!-- description: Make codegen bulletproof by learning from Gleam/Roc architecture patterns -->
+<!-- done: 2026-04-01 -->
 # Codegen Perfection
 
 他言語コンパイラ (Elm, Gleam, Roc) の codegen アーキテクチャを分析し、Almide の codegen を「バグが構造的に発生しない」レベルに引き上げる。

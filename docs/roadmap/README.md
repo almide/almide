@@ -6,12 +6,11 @@
 
 ## Active
 
-2 items
+1 items
 
 | Item | Description |
 |------|-------------|
 | [LLM Benchmark Execution](active/benchmark-execution.md) | LLM accuracy benchmarks comparing Almide, Python, and MoonBit |
-| [Codegen Perfection](active/codegen-perfection.md) | Make codegen bulletproof by learning from Gleam/Roc architecture patterns |
 
 ## On Hold
 
@@ -63,10 +62,10 @@
 
 ## Done
 
-178 items
+179 items
 
 <details>
-<summary>Show all 178 completed items</summary>
+<summary>Show all 179 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
@@ -81,6 +80,7 @@
 | 2026-04-01 | [Compiler Fragility Hotspots](done/compiler-fragility-hotspots.md) | Fix fragile compiler internals: visitor pattern, ExprId duplication, UF isolation, Ty clone cost |
 | 2026-04-01 | [Compiler Depth Matrix](done/compiler-depth-matrix.md) | Map Almide's compiler depth against industrial compilers and plan next tiers |
 | 2026-04-01 | [Compiler Architecture: All 10s](done/compiler-architecture-10.md) | Achieve 10/10 on every compiler architecture quality metric |
+| 2026-04-01 | [Codegen Perfection](done/codegen-perfection.md) | Make codegen bulletproof by learning from Gleam/Roc architecture patterns |
 | 2026-04-01 | [Canonical AST](done/canonical-ast.md) | Introduce Canonical AST phase to separate name resolution from type checking |
 | 2026-03-31 | [Rainbow FFI Gate](done/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
 | 2026-03-31 | [Dead Code Elimination](done/dead-code-elimination.md) | Dependency-graph-based dead code elimination for smaller WASM binaries |

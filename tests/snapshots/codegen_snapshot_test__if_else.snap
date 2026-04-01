@@ -1,0 +1,7 @@
+---
+source: tests/codegen_snapshot_test.rs
+expression: code
+---
+pub fn abs(x: i64) -> i64 {
+    if (x < 0i64) { (-x) } else { x }
+}

@@ -26,4 +26,5 @@ lasso = { version = "0.7", features = ["multi-threaded"] }
 
 [dev-dependencies]
 proptest = "1"
+insta = "1"
 

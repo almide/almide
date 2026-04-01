@@ -1,0 +1,11 @@
+---
+source: tests/codegen_snapshot_test.rs
+expression: code
+---
+pub fn origin() -> Point {
+    Point { x: 0i64, y: 0i64 }
+}
+
+pub fn translate(p: Point, dx: i64, dy: i64) -> Point {
+    Point { x: (p.clone().x + dx), y: (p.y + dy) }
+}

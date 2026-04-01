@@ -1,0 +1,11 @@
+---
+source: tests/codegen_snapshot_test.rs
+expression: code
+---
+pub fn to_string(c: Color) -> String {
+    match c {
+        Color::Red => "red".to_string(),
+        Color::Green => "green".to_string(),
+        Color::Blue => "blue".to_string(),
+    }
+}
