@@ -24,6 +24,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 name = "almide"
 version = "0.10.5"
 dependencies = [
+ "almide-base",
  "clap",
  "lasso",
  "proptest",
@@ -32,6 +33,14 @@ dependencies = [
  "serde_json",
  "toml",
  "wasm-encoder 0.225.0",
+]
+
+[[package]]
+name = "almide-base"
+version = "0.10.5"
+dependencies = [
+ "lasso",
+ "serde",
 ]
 
 [[package]]

@@ -19,13 +19,7 @@ impl ExprIdGen {
     pub fn current(&self) -> u32 { self.next }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct Span {
-    pub line: usize,
-    pub col: usize,
-    #[serde(default)]
-    pub end_col: usize,
-}
+pub use almide_base::span::Span;
 
 /// Simplified type tag resolved by the checker.
 /// Emitters use this for correct codegen (e.g. Float vs Int arithmetic).

@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/almide-base"]
+resolver = "3"
+
 [package]
 name = "almide"
 version = "0.10.5"
@@ -5,6 +9,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+almide-base = { path = "crates/almide-base" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
