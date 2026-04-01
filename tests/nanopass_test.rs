@@ -16,7 +16,7 @@ fn mk_fn(name: &str, params: Vec<IrParam>, ret_ty: Ty, body: IrExpr, is_effect: 
     IrFunction {
         name: sym(name), params, ret_ty, body,
         is_effect, is_async: false, is_test: false,
-        generics: None, extern_attrs: vec![], visibility: IrVisibility::Public,
+        generics: None, extern_attrs: vec![], export_attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
     }
 }
