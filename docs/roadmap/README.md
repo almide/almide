@@ -6,10 +6,11 @@
 
 ## Active
 
-1 items
+2 items
 
 | Item | Description |
 |------|-------------|
+| [Almide Native cdylib — Scaffold in Almide, Not Rust](active/almide-native-cdylib.md) | Build .so/.dylib from pure Almide, eliminating Rust scaffolding from lander |
 | [C FFI — Call C Libraries from Almide](active/c-ffi.md) | Call C libraries from Almide via @extern(c, ...) and extern "C" codegen |
 
 ## On Hold
