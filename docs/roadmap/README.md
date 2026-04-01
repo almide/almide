@@ -6,12 +6,13 @@
 
 ## Active
 
-2 items
+3 items
 
 | Item | Description |
 |------|-------------|
 | [Almide Native cdylib — Scaffold in Almide, Not Rust](active/almide-native-cdylib.md) | Build .so/.dylib from pure Almide, eliminating Rust scaffolding from lander |
 | [C FFI — Call C Libraries from Almide](active/c-ffi.md) | Call C libraries from Almide via @extern(c, ...) and extern "C" codegen |
+| [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 
 ## On Hold
 
