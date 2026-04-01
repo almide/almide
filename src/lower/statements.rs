@@ -84,20 +84,20 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
         ast::Pattern::Literal { value } => {
             // Pattern literals may not have expr_types entries (they're patterns,
             // not expressions), so construct IR directly without calling lower_expr.
-            let (kind, ty) = match value.as_ref() {
-                ast::Expr::Int { raw, .. } => {
+            let (kind, ty) = match &value.kind {
+                ast::ExprKind::Int { raw, .. } => {
                     let v = raw.parse::<i64>().unwrap_or(0);
                     (IrExprKind::LitInt { value: v }, Ty::Int)
                 }
-                ast::Expr::Float { value: v, .. } => (IrExprKind::LitFloat { value: *v }, Ty::Float),
-                ast::Expr::String { value: v, .. } => (IrExprKind::LitStr { value: v.clone() }, Ty::String),
-                ast::Expr::Bool { value: v, .. } => (IrExprKind::LitBool { value: *v }, Ty::Bool),
+                ast::ExprKind::Float { value: v, .. } => (IrExprKind::LitFloat { value: *v }, Ty::Float),
+                ast::ExprKind::String { value: v, .. } => (IrExprKind::LitStr { value: v.clone() }, Ty::String),
+                ast::ExprKind::Bool { value: v, .. } => (IrExprKind::LitBool { value: *v }, Ty::Bool),
                 _ => {
                     let ir_expr = lower_expr(ctx, value);
                     return IrPattern::Literal { expr: ir_expr };
                 }
             };
-            let ir_expr = ctx.mk(kind, ty, value.span());
+            let ir_expr = ctx.mk(kind, ty, value.span);
             IrPattern::Literal { expr: ir_expr }
         }
         ast::Pattern::Constructor { name, args } => {

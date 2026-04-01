@@ -131,158 +131,74 @@ pub enum StringPart {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Expr {
-    Int { value: serde_json::Value, raw: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Float { value: f64, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    String { value: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    InterpolatedString { parts: Vec<StringPart>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Bool { value: bool, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Ident { name: Sym, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    TypeName { name: Sym, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    List { elements: Vec<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    MapLiteral { entries: Vec<(Expr, Expr)>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    EmptyMap { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Record { name: Option<Sym>, fields: Vec<FieldInit>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    SpreadRecord { base: Box<Expr>, fields: Vec<FieldInit>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(default, skip_serializing_if = "Vec::is_empty")] named_args: Vec<(Sym, Expr)>, #[serde(default)] type_args: Option<Vec<TypeExpr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Member { object: Box<Expr>, field: Sym, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    TupleIndex { object: Box<Expr>, index: usize, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    IndexAccess { object: Box<Expr>, index: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Pipe { left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Compose { left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    If { cond: Box<Expr>, then: Box<Expr>, else_: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Match { subject: Box<Expr>, arms: Vec<MatchArm>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Fan { exprs: Vec<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    ForIn { var: Sym, var_tuple: Option<Vec<Sym>>, iterable: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    While { cond: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Lambda { params: Vec<LambdaParam>, body: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Hole { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Todo { message: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Try { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Unwrap { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    UnwrapOr { expr: Box<Expr>, fallback: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    ToOption { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    OptionalChain { expr: Box<Expr>, field: Sym, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Await { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Binary { op: Sym, left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Unary { op: Sym, operand: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Paren { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Tuple { elements: Vec<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Range { start: Box<Expr>, end: Box<Expr>, inclusive: bool, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Break { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Continue { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Placeholder { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Unit { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    None { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Some { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Ok { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Err { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    /// Placeholder for a parse error — allows partial AST construction.
-    Error { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+pub struct Expr {
+    #[serde(skip)]
+    pub id: ExprId,
+    #[serde(skip)]
+    pub span: Option<Span>,
+    #[serde(skip)]
+    pub ty: Option<crate::types::Ty>,
+    #[serde(flatten)]
+    pub kind: ExprKind,
 }
 
 impl Expr {
-    pub fn id(&self) -> ExprId {
-        match self {
-            Expr::Int { id, .. } | Expr::Float { id, .. } | Expr::String { id, .. }
-            | Expr::InterpolatedString { id, .. } | Expr::Bool { id, .. }
-            | Expr::Ident { id, .. } | Expr::TypeName { id, .. }
-            | Expr::List { id, .. } | Expr::MapLiteral { id, .. } | Expr::EmptyMap { id, .. }
-            | Expr::Record { id, .. }
-            | Expr::SpreadRecord { id, .. } | Expr::Call { id, .. }
-            | Expr::Member { id, .. } | Expr::TupleIndex { id, .. } | Expr::IndexAccess { id, .. } | Expr::Pipe { id, .. } | Expr::Compose { id, .. }
-            | Expr::If { id, .. } | Expr::Match { id, .. }
-            | Expr::Block { id, .. } | Expr::Fan { id, .. }
-            | Expr::ForIn { id, .. } | Expr::While { id, .. } | Expr::Lambda { id, .. }
-            | Expr::Hole { id, .. } | Expr::Todo { id, .. }
-            | Expr::Try { id, .. } | Expr::Unwrap { id, .. } | Expr::UnwrapOr { id, .. } | Expr::ToOption { id, .. } | Expr::OptionalChain { id, .. } | Expr::Await { id, .. }
-            | Expr::Binary { id, .. } | Expr::Unary { id, .. }
-            | Expr::Paren { id, .. } | Expr::Tuple { id, .. }
-            | Expr::Range { id, .. } | Expr::Placeholder { id, .. }
-            | Expr::Break { id, .. } | Expr::Continue { id, .. }
-            | Expr::Unit { id, .. } | Expr::None { id, .. }
-            | Expr::Some { id, .. } | Expr::Ok { id, .. }
-            | Expr::Err { id, .. }
-            | Expr::Error { id, .. } => *id,
-        }
+    pub fn new(id: ExprId, span: Option<Span>, kind: ExprKind) -> Self {
+        Expr { id, span, ty: None, kind }
     }
+}
 
-    pub fn span(&self) -> Option<Span> {
-        match self {
-            Expr::Int { span, .. } | Expr::Float { span, .. } | Expr::String { span, .. }
-            | Expr::InterpolatedString { span, .. } | Expr::Bool { span, .. }
-            | Expr::Ident { span, .. } | Expr::TypeName { span, .. }
-            | Expr::List { span, .. } | Expr::MapLiteral { span, .. } | Expr::EmptyMap { span, .. }
-            | Expr::Record { span, .. }
-            | Expr::SpreadRecord { span, .. } | Expr::Call { span, .. }
-            | Expr::Member { span, .. } | Expr::TupleIndex { span, .. } | Expr::IndexAccess { span, .. } | Expr::Pipe { span, .. } | Expr::Compose { span, .. }
-            | Expr::If { span, .. } | Expr::Match { span, .. }
-            | Expr::Block { span, .. } | Expr::Fan { span, .. }
-            | Expr::ForIn { span, .. } | Expr::While { span, .. } | Expr::Lambda { span, .. }
-            | Expr::Hole { span, .. } | Expr::Todo { span, .. }
-            | Expr::Try { span, .. } | Expr::Unwrap { span, .. } | Expr::UnwrapOr { span, .. } | Expr::ToOption { span, .. } | Expr::OptionalChain { span, .. } | Expr::Await { span, .. }
-            | Expr::Binary { span, .. } | Expr::Unary { span, .. }
-            | Expr::Paren { span, .. } | Expr::Tuple { span, .. }
-            | Expr::Range { span, .. } | Expr::Placeholder { span, .. }
-            | Expr::Break { span, .. } | Expr::Continue { span, .. }
-            | Expr::Unit { span, .. } | Expr::None { span, .. }
-            | Expr::Some { span, .. } | Expr::Ok { span, .. }
-            | Expr::Err { span, .. }
-            | Expr::Error { span, .. } => *span,
-        }
-    }
-
-    pub fn resolved_type(&self) -> Option<ResolvedType> {
-        match self {
-            Expr::Int { resolved_type, .. } | Expr::Float { resolved_type, .. } | Expr::String { resolved_type, .. }
-            | Expr::InterpolatedString { resolved_type, .. } | Expr::Bool { resolved_type, .. }
-            | Expr::Ident { resolved_type, .. } | Expr::TypeName { resolved_type, .. }
-            | Expr::List { resolved_type, .. } | Expr::MapLiteral { resolved_type, .. } | Expr::EmptyMap { resolved_type, .. }
-            | Expr::Record { resolved_type, .. }
-            | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
-            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. } | Expr::Compose { resolved_type, .. }
-            | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
-            | Expr::Block { resolved_type, .. } | Expr::Fan { resolved_type, .. }
-            | Expr::ForIn { resolved_type, .. } | Expr::While { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
-            | Expr::Hole { resolved_type, .. } | Expr::Todo { resolved_type, .. }
-            | Expr::Try { resolved_type, .. } | Expr::Unwrap { resolved_type, .. } | Expr::UnwrapOr { resolved_type, .. } | Expr::ToOption { resolved_type, .. } | Expr::OptionalChain { resolved_type, .. } | Expr::Await { resolved_type, .. }
-            | Expr::Binary { resolved_type, .. } | Expr::Unary { resolved_type, .. }
-            | Expr::Paren { resolved_type, .. } | Expr::Tuple { resolved_type, .. }
-            | Expr::Range { resolved_type, .. } | Expr::Placeholder { resolved_type, .. }
-            | Expr::Unit { resolved_type, .. } | Expr::None { resolved_type, .. }
-            | Expr::Some { resolved_type, .. } | Expr::Ok { resolved_type, .. }
-            | Expr::Err { resolved_type, .. }
-            | Expr::Break { resolved_type, .. } | Expr::Continue { resolved_type, .. }
-            | Expr::Error { resolved_type, .. } => *resolved_type,
-        }
-    }
-
-    pub fn set_resolved_type(&mut self, ty: ResolvedType) {
-        match self {
-            Expr::Int { resolved_type, .. } | Expr::Float { resolved_type, .. } | Expr::String { resolved_type, .. }
-            | Expr::InterpolatedString { resolved_type, .. } | Expr::Bool { resolved_type, .. }
-            | Expr::Ident { resolved_type, .. } | Expr::TypeName { resolved_type, .. }
-            | Expr::List { resolved_type, .. } | Expr::MapLiteral { resolved_type, .. } | Expr::EmptyMap { resolved_type, .. }
-            | Expr::Record { resolved_type, .. }
-            | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
-            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. } | Expr::Compose { resolved_type, .. }
-            | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
-            | Expr::Block { resolved_type, .. } | Expr::Fan { resolved_type, .. }
-            | Expr::ForIn { resolved_type, .. } | Expr::While { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
-            | Expr::Hole { resolved_type, .. } | Expr::Todo { resolved_type, .. }
-            | Expr::Try { resolved_type, .. } | Expr::Unwrap { resolved_type, .. } | Expr::UnwrapOr { resolved_type, .. } | Expr::ToOption { resolved_type, .. } | Expr::OptionalChain { resolved_type, .. } | Expr::Await { resolved_type, .. }
-            | Expr::Binary { resolved_type, .. } | Expr::Unary { resolved_type, .. }
-            | Expr::Paren { resolved_type, .. } | Expr::Tuple { resolved_type, .. }
-            | Expr::Range { resolved_type, .. } | Expr::Placeholder { resolved_type, .. }
-            | Expr::Unit { resolved_type, .. } | Expr::None { resolved_type, .. }
-            | Expr::Some { resolved_type, .. } | Expr::Ok { resolved_type, .. }
-            | Expr::Err { resolved_type, .. }
-            | Expr::Break { resolved_type, .. } | Expr::Continue { resolved_type, .. }
-            | Expr::Error { resolved_type, .. } => *resolved_type = Some(ty),
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExprKind {
+    Int { value: serde_json::Value, raw: String },
+    Float { value: f64 },
+    String { value: String },
+    InterpolatedString { parts: Vec<StringPart> },
+    Bool { value: bool },
+    Ident { name: Sym },
+    TypeName { name: Sym },
+    List { elements: Vec<Expr> },
+    MapLiteral { entries: Vec<(Expr, Expr)> },
+    EmptyMap,
+    Record { name: Option<Sym>, fields: Vec<FieldInit> },
+    SpreadRecord { base: Box<Expr>, fields: Vec<FieldInit> },
+    Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(default, skip_serializing_if = "Vec::is_empty")] named_args: Vec<(Sym, Expr)>, #[serde(default)] type_args: Option<Vec<TypeExpr>> },
+    Member { object: Box<Expr>, field: Sym },
+    TupleIndex { object: Box<Expr>, index: usize },
+    IndexAccess { object: Box<Expr>, index: Box<Expr> },
+    Pipe { left: Box<Expr>, right: Box<Expr> },
+    Compose { left: Box<Expr>, right: Box<Expr> },
+    If { cond: Box<Expr>, then: Box<Expr>, else_: Box<Expr> },
+    Match { subject: Box<Expr>, arms: Vec<MatchArm> },
+    Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>> },
+    Fan { exprs: Vec<Expr> },
+    ForIn { var: Sym, var_tuple: Option<Vec<Sym>>, iterable: Box<Expr>, body: Vec<Stmt> },
+    While { cond: Box<Expr>, body: Vec<Stmt> },
+    Lambda { params: Vec<LambdaParam>, body: Box<Expr> },
+    Hole,
+    Todo { message: String },
+    Try { expr: Box<Expr> },
+    Unwrap { expr: Box<Expr> },
+    UnwrapOr { expr: Box<Expr>, fallback: Box<Expr> },
+    ToOption { expr: Box<Expr> },
+    OptionalChain { expr: Box<Expr>, field: Sym },
+    Await { expr: Box<Expr> },
+    Binary { op: Sym, left: Box<Expr>, right: Box<Expr> },
+    Unary { op: Sym, operand: Box<Expr> },
+    Paren { expr: Box<Expr> },
+    Tuple { elements: Vec<Expr> },
+    Range { start: Box<Expr>, end: Box<Expr>, inclusive: bool },
+    Break,
+    Continue,
+    Placeholder,
+    Unit,
+    None,
+    Some { expr: Box<Expr> },
+    Ok { expr: Box<Expr> },
+    Err { expr: Box<Expr> },
+    /// Placeholder for a parse error — allows partial AST construction.
+    Error,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -391,4 +307,124 @@ pub struct Program {
     /// - remaining: comments before each decl
     #[serde(skip)]
     pub comment_map: Vec<Vec<String>>,
+}
+
+// ── Generic AST visitor ──
+
+/// Apply `f` to every `Expr` node reachable from a `Program`.
+pub fn visit_exprs_mut(program: &mut Program, f: &mut impl FnMut(&mut Expr)) {
+    for decl in program.decls.iter_mut() { visit_decl_exprs_mut(decl, f); }
+}
+
+pub fn visit_decl_exprs_mut(decl: &mut Decl, f: &mut impl FnMut(&mut Expr)) {
+    match decl {
+        Decl::Fn { params, body, .. } => {
+            for p in params.iter_mut() {
+                if let Some(ref mut default) = p.default { visit_expr_mut(default, f); }
+            }
+            if let Some(b) = body { visit_expr_mut(b, f); }
+        }
+        Decl::TopLet { value, .. } => visit_expr_mut(value, f),
+        Decl::Test { body, .. } => visit_expr_mut(body, f),
+        Decl::Impl { methods, .. } => { for m in methods.iter_mut() { visit_decl_exprs_mut(m, f); } }
+        Decl::Module { .. } | Decl::Import { .. } | Decl::Type { .. } |
+        Decl::Protocol { .. } | Decl::Strict { .. } => {}
+    }
+}
+
+fn visit_stmt_exprs_mut(stmt: &mut Stmt, f: &mut impl FnMut(&mut Expr)) {
+    match stmt {
+        Stmt::Let { value, .. } | Stmt::Var { value, .. } | Stmt::Assign { value, .. } => visit_expr_mut(value, f),
+        Stmt::LetDestructure { pattern, value, .. } => {
+            visit_pattern_exprs_mut(pattern, f);
+            visit_expr_mut(value, f);
+        }
+        Stmt::IndexAssign { index, value, .. } => { visit_expr_mut(index, f); visit_expr_mut(value, f); }
+        Stmt::FieldAssign { value, .. } => visit_expr_mut(value, f),
+        Stmt::Guard { cond, else_, .. } => { visit_expr_mut(cond, f); visit_expr_mut(else_, f); }
+        Stmt::Expr { expr, .. } => visit_expr_mut(expr, f),
+        Stmt::Comment { .. } | Stmt::Error { .. } => {}
+    }
+}
+
+fn visit_pattern_exprs_mut(pat: &mut Pattern, f: &mut impl FnMut(&mut Expr)) {
+    match pat {
+        Pattern::Literal { value } => visit_expr_mut(value, f),
+        Pattern::Constructor { args, .. } => { for a in args.iter_mut() { visit_pattern_exprs_mut(a, f); } }
+        Pattern::RecordPattern { fields, .. } => {
+            for fp in fields.iter_mut() { if let Some(ref mut p) = fp.pattern { visit_pattern_exprs_mut(p, f); } }
+        }
+        Pattern::Tuple { elements } => { for e in elements.iter_mut() { visit_pattern_exprs_mut(e, f); } }
+        Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => visit_pattern_exprs_mut(inner, f),
+        Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}
+    }
+}
+
+pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
+    f(expr);
+    match &mut expr.kind {
+        ExprKind::List { elements } | ExprKind::Tuple { elements } => {
+            for e in elements.iter_mut() { visit_expr_mut(e, f); }
+        }
+        ExprKind::Fan { exprs } => { for e in exprs.iter_mut() { visit_expr_mut(e, f); } }
+        ExprKind::MapLiteral { entries } => {
+            for (k, v) in entries.iter_mut() { visit_expr_mut(k, f); visit_expr_mut(v, f); }
+        }
+        ExprKind::Record { fields, .. } => { for fi in fields.iter_mut() { visit_expr_mut(&mut fi.value, f); } }
+        ExprKind::SpreadRecord { base, fields } => {
+            visit_expr_mut(base, f);
+            for fi in fields.iter_mut() { visit_expr_mut(&mut fi.value, f); }
+        }
+        ExprKind::Call { callee, args, named_args, .. } => {
+            visit_expr_mut(callee, f);
+            for a in args.iter_mut() { visit_expr_mut(a, f); }
+            for (_, a) in named_args.iter_mut() { visit_expr_mut(a, f); }
+        }
+        ExprKind::Member { object, .. } | ExprKind::TupleIndex { object, .. } => visit_expr_mut(object, f),
+        ExprKind::IndexAccess { object, index } => { visit_expr_mut(object, f); visit_expr_mut(index, f); }
+        ExprKind::Binary { left, right, .. } | ExprKind::Pipe { left, right } |
+        ExprKind::Compose { left, right } | ExprKind::UnwrapOr { expr: left, fallback: right } => {
+            visit_expr_mut(left, f); visit_expr_mut(right, f);
+        }
+        ExprKind::Unary { operand, .. } => visit_expr_mut(operand, f),
+        ExprKind::If { cond, then, else_ } => {
+            visit_expr_mut(cond, f); visit_expr_mut(then, f); visit_expr_mut(else_, f);
+        }
+        ExprKind::Match { subject, arms } => {
+            visit_expr_mut(subject, f);
+            for arm in arms.iter_mut() {
+                visit_pattern_exprs_mut(&mut arm.pattern, f);
+                if let Some(ref mut g) = arm.guard { visit_expr_mut(g, f); }
+                visit_expr_mut(&mut arm.body, f);
+            }
+        }
+        ExprKind::Block { stmts, expr: tail } => {
+            for s in stmts.iter_mut() { visit_stmt_exprs_mut(s, f); }
+            if let Some(e) = tail { visit_expr_mut(e, f); }
+        }
+        ExprKind::ForIn { iterable, body, .. } => {
+            visit_expr_mut(iterable, f);
+            for s in body.iter_mut() { visit_stmt_exprs_mut(s, f); }
+        }
+        ExprKind::While { cond, body } => {
+            visit_expr_mut(cond, f);
+            for s in body.iter_mut() { visit_stmt_exprs_mut(s, f); }
+        }
+        ExprKind::Lambda { body, .. } => visit_expr_mut(body, f),
+        ExprKind::Try { expr } | ExprKind::Unwrap { expr } | ExprKind::ToOption { expr } |
+        ExprKind::Await { expr } | ExprKind::Paren { expr } |
+        ExprKind::Some { expr } | ExprKind::Ok { expr } | ExprKind::Err { expr } |
+        ExprKind::OptionalChain { expr, .. } => visit_expr_mut(expr, f),
+        ExprKind::Range { start, end, .. } => { visit_expr_mut(start, f); visit_expr_mut(end, f); }
+        ExprKind::InterpolatedString { parts } => {
+            for part in parts.iter_mut() {
+                if let StringPart::Expr { expr: e } = part { visit_expr_mut(e, f); }
+            }
+        }
+        ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::String { .. } |
+        ExprKind::Bool { .. } | ExprKind::Ident { .. } | ExprKind::TypeName { .. } |
+        ExprKind::EmptyMap | ExprKind::Hole | ExprKind::Todo { .. } |
+        ExprKind::Break | ExprKind::Continue | ExprKind::Placeholder |
+        ExprKind::Unit | ExprKind::None | ExprKind::Error => {}
+    }
 }

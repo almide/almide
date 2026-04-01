@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::ast::ExprKind;
 use crate::intern::sym;
 use super::Parser;
 
@@ -19,12 +20,11 @@ impl Parser {
             self.skip_newlines();
             self.parse_if_branch()?
         } else {
-            Expr::Unit { id: self.next_id(), span: span.clone(), resolved_type: None }
+            Expr::new(self.next_id(), span.clone(), ExprKind::Unit)
         };
-        Ok(Expr::If {
+        Ok(Expr::new(self.next_id(), span, ExprKind::If {
             cond: Box::new(cond), then: Box::new(then), else_: Box::new(else_),
-            id: self.next_id(), span, resolved_type: None,
-        })
+        }))
     }
 
     fn parse_if_branch(&mut self) -> Result<Expr, String> {
@@ -36,11 +36,10 @@ impl Parser {
             self.advance(); // skip =
             self.skip_newlines();
             let value = self.parse_expr()?;
-            return Ok(Expr::Block {
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Block {
                 stmts: vec![Stmt::Assign { name, value, span: None }],
                 expr: None,
-                id: self.next_id(), span, resolved_type: None,
-            });
+            }));
         }
         self.parse_expr()
     }
@@ -67,10 +66,9 @@ impl Parser {
             }
         }
         self.expect_closing(TokenType::RBrace, open.line, open.col, "match block")?;
-        Ok(Expr::Match {
+        Ok(Expr::new(self.next_id(), span, ExprKind::Match {
             subject: Box::new(subject), arms,
-            id: self.next_id(), span, resolved_type: None,
-        })
+        }))
     }
 
     pub(crate) fn parse_match_arm(&mut self) -> Result<MatchArm, String> {
@@ -103,10 +101,9 @@ impl Parser {
         self.expect(TokenType::FatArrow)?;
         self.skip_newlines();
         let body = self.parse_expr()?;
-        Ok(Expr::Lambda {
+        Ok(Expr::new(self.next_id(), span, ExprKind::Lambda {
             params, body: Box::new(body),
-            id: self.next_id(), span, resolved_type: None,
-        })
+        }))
     }
 
 
@@ -162,9 +159,9 @@ impl Parser {
         if exprs.is_empty() {
             return Err(format!("fan block must contain at least one expression at line {}:{}", open.line, open.col));
         }
-        Ok(Expr::Fan {
-            exprs, id: self.next_id(), span, resolved_type: None,
-        })
+        Ok(Expr::new(self.next_id(), span, ExprKind::Fan {
+            exprs,
+        }))
     }
 
 }

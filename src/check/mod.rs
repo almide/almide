@@ -1,14 +1,14 @@
 /// Almide type checker: AST → Typed AST (constraint-based type inference).
 ///
-/// Input:    &mut Program
-/// Output:   expr_types: HashMap<ExprId, Ty>, diagnostics
+/// Input:    &mut Program (with canonicalized TypeEnv)
+/// Output:   Types embedded directly on AST Expr nodes (expr.ty), diagnostics
 /// Owns:     type inference (constraint collect → solve), exhaustiveness, type errors
 /// Does NOT: auto-unwrap (codegen's job), code generation, optimization
 ///
 /// Architecture:
-///   Pass 1: Walk AST, assign fresh type variables, collect constraints (infer.rs)
-///   Pass 2: Solve constraints via unification (mod.rs)
-///   Pass 3: Substitute solved types into expr_types (mod.rs)
+///   Pass 1: Walk AST, assign fresh type variables to expr.ty, collect constraints (infer.rs)
+///   Pass 2: Solve constraints via unification (solving.rs)
+///   Pass 3: Walk AST, resolve TypeVars in expr.ty in-place (mod.rs)
 ///
 /// Split into:
 ///   mod.rs          — Checker struct, public API, declaration checking
@@ -24,17 +24,14 @@ mod infer;
 pub(crate) mod calls;
 mod builtin_calls;
 mod static_dispatch;
-mod registration;
 mod solving;
 mod diagnostics;
 
-use std::collections::HashMap;
 use crate::ast;
-use crate::ast::ExprId;
 use crate::diagnostic::Diagnostic;
 use crate::import_table::{ImportTable, build_import_table};
 use crate::intern::{sym, Sym};
-use crate::types::{Ty, TypeEnv, VariantCase, VariantPayload, ProtocolDef, ProtocolMethodSig};
+use crate::types::{Ty, TypeEnv};
 use types::{TyVarId, Constraint, UnionFind, resolve_ty};
 
 pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
@@ -46,124 +43,20 @@ pub struct Checker {
     pub diagnostics: Vec<Diagnostic>,
     pub source_file: Option<String>,
     pub source_text: Option<String>,
-    pub expr_types: HashMap<ExprId, Ty>,
-    /// Current expression span — set by infer_expr, used to annotate diagnostics
     pub(crate) current_span: Option<crate::ast::Span>,
-    // Inference state
-    pub(crate) infer_types: HashMap<ExprId, Ty>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
 }
 
 impl Checker {
-    pub fn new() -> Self {
-        let mut checker = Checker {
-            env: TypeEnv::new(), diagnostics: Vec::new(),
+    /// Create a Checker from a pre-populated TypeEnv (from canonicalize_program).
+    pub fn from_env(env: TypeEnv) -> Self {
+        Checker {
+            env, diagnostics: Vec::new(),
             source_file: None, source_text: None,
-            expr_types: HashMap::new(), current_span: None,
-            infer_types: HashMap::new(),
+            current_span: None,
             constraints: Vec::new(), uf: UnionFind::new(),
-        };
-        checker.register_builtin_protocols();
-        checker
-    }
-
-    /// Register built-in conventions (Eq, Repr, Ord, Hash, Codec, Encode, Decode) as protocols.
-    fn register_builtin_protocols(&mut self) {
-        let self_ty = Ty::TypeVar(sym("Self"));
-        let value_ty = Ty::Named(sym("Value"), vec![]);
-
-        // Eq: fn eq(a: Self, b: Self) -> Bool
-        self.env.protocols.insert("Eq".into(), ProtocolDef {
-            name: "Eq".into(),
-            generics: vec![],
-            methods: vec![ProtocolMethodSig {
-                name: "eq".into(),
-                params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
-                ret: Ty::Bool,
-                is_effect: false,
-            }],
-        });
-
-        // Repr: fn repr(v: Self) -> String
-        self.env.protocols.insert("Repr".into(), ProtocolDef {
-            name: "Repr".into(),
-            generics: vec![],
-            methods: vec![ProtocolMethodSig {
-                name: "repr".into(),
-                params: vec![("v".into(), self_ty.clone())],
-                ret: Ty::String,
-                is_effect: false,
-            }],
-        });
-
-        // Ord: fn cmp(a: Self, b: Self) -> Int
-        self.env.protocols.insert("Ord".into(), ProtocolDef {
-            name: "Ord".into(),
-            generics: vec![],
-            methods: vec![ProtocolMethodSig {
-                name: "cmp".into(),
-                params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
-                ret: Ty::Int,
-                is_effect: false,
-            }],
-        });
-
-        // Hash: fn hash(v: Self) -> Int
-        self.env.protocols.insert("Hash".into(), ProtocolDef {
-            name: "Hash".into(),
-            generics: vec![],
-            methods: vec![ProtocolMethodSig {
-                name: "hash".into(),
-                params: vec![("v".into(), self_ty.clone())],
-                ret: Ty::Int,
-                is_effect: false,
-            }],
-        });
-
-        // Codec: fn encode(v: Self) -> Value, fn decode(v: Value) -> Result[Self, String]
-        self.env.protocols.insert("Codec".into(), ProtocolDef {
-            name: "Codec".into(),
-            generics: vec![],
-            methods: vec![
-                ProtocolMethodSig {
-                    name: "encode".into(),
-                    params: vec![("v".into(), self_ty.clone())],
-                    ret: value_ty.clone(),
-                    is_effect: false,
-                },
-                ProtocolMethodSig {
-                    name: "decode".into(),
-                    params: vec![("v".into(), value_ty.clone())],
-                    ret: Ty::result(self_ty.clone(), Ty::String),
-                    is_effect: false,
-                },
-            ],
-        });
-
-        // Encode: fn encode(v: Self) -> Value
-        self.env.protocols.insert("Encode".into(), ProtocolDef {
-            name: "Encode".into(),
-            generics: vec![],
-            methods: vec![ProtocolMethodSig {
-                name: "encode".into(),
-                params: vec![("v".into(), self_ty.clone())],
-                ret: value_ty.clone(),
-                is_effect: false,
-            }],
-        });
-
-        // Decode: fn decode(v: Value) -> Result[Self, String]
-        self.env.protocols.insert("Decode".into(), ProtocolDef {
-            name: "Decode".into(),
-            generics: vec![],
-            methods: vec![ProtocolMethodSig {
-                name: "decode".into(),
-                params: vec![("v".into(), value_ty.clone())],
-                ret: Ty::result(self_ty.clone(), Ty::String),
-                is_effect: false,
-            }],
-        });
+        }
     }
 
     /// Push a diagnostic, automatically attaching the current expression's span.
@@ -214,33 +107,14 @@ impl Checker {
 
     pub fn set_source(&mut self, file: &str, text: &str) { self.source_file = Some(file.into()); self.source_text = Some(text.into()); }
 
-    pub fn register_module(&mut self, name: &str, prog: &ast::Program, _pkg_id: Option<&crate::project::PkgId>, is_self: bool) {
-        self.env.user_modules.insert(name.into());
-        if is_self {
-            self.env.self_module_name = Some(sym(name));
-        }
-        self.register_decls(&prog.decls, Some(name));
-    }
-
     // ── Main entry point ──
 
-    /// Build and install an ImportTable for the main program.
-    /// Called by CLI pipelines before check_program.
-    fn install_import_table(&mut self, program: &ast::Program) {
-        let self_name = self.env.self_module_name.map(|s| s.to_string());
-        let (table, diags) = build_import_table(program, self_name.as_deref(), &self.env.user_modules);
-        self.env.import_table = table;
-        self.diagnostics.extend(diags);
-    }
-
-    pub fn check_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
-        self.install_import_table(program);
-        self.register_decls(&program.decls, None);
+    /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
+    /// Skips import table building and declaration registration — inference only.
+    pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
-        for (id, ity) in &self.infer_types {
-            self.expr_types.insert(*id, resolve_ty(ity, &self.uf));
-        }
+        resolve_expr_types_in_program(program, &self.uf);
         // Unused import warnings
         for imp in &program.imports {
             let (path, alias, span) = match imp {
@@ -264,48 +138,38 @@ impl Checker {
         std::mem::take(&mut self.diagnostics)
     }
 
-    pub fn check_module_bodies(&mut self, prog: &mut ast::Program, module_name: &str) -> HashMap<ExprId, Ty> {
-        let saved = (std::mem::take(&mut self.expr_types), std::mem::take(&mut self.infer_types),
-            std::mem::take(&mut self.constraints), std::mem::replace(&mut self.uf, UnionFind::new()));
-        // Build a fresh ImportTable for this module's imports.
-        // `import self` always resolves to the package root, not to the current module.
+    /// Type-check a module's declarations. Sets expr.ty on all expressions.
+    /// Temporarily registers unprefixed declarations for intra-module resolution,
+    /// then cleans them up.
+    pub fn infer_module(&mut self, prog: &mut ast::Program, module_name: &str) {
+        // Isolate module's constraint solving from the main program
+        let saved_constraints = std::mem::take(&mut self.constraints);
+        let saved_uf = std::mem::replace(&mut self.uf, UnionFind::new());
+
+        // Build module's import table
         let self_name = self.env.self_module_name.map(|s| s.to_string());
         let import_table_name = self_name.as_deref().unwrap_or(module_name);
         let saved_import_table = std::mem::replace(&mut self.env.import_table, ImportTable::new());
         let (mod_table, diags) = build_import_table(prog, Some(import_table_name), &self.env.user_modules);
         self.env.import_table = mod_table;
         self.diagnostics.extend(diags);
-        // Register the module's own declarations WITHOUT prefix so that
-        // intra-module calls (e.g. get_str() inside bindgen.bindings_c) resolve.
-        // Track which keys were added so we can remove them after checking.
-        let fn_keys_before: std::collections::HashSet<Sym> = self.env.functions.keys().cloned().collect();
-        let type_keys_before: std::collections::HashSet<Sym> = self.env.types.keys().cloned().collect();
-        let ctor_keys_before: std::collections::HashSet<Sym> = self.env.constructors.keys().cloned().collect();
-        let top_let_keys_before: std::collections::HashSet<Sym> = self.env.top_lets.keys().cloned().collect();
-        self.register_decls(&prog.decls, None);
 
+        // Temporarily register unprefixed declarations for intra-module resolution
+        let snapshot = self.env.snapshot_keys();
+        crate::canonicalize::registration::register_decls(
+            &mut self.env, &mut self.diagnostics, &prog.decls, None,
+        );
+
+        // Infer + solve + resolve
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
-        for (id, ity) in &self.infer_types {
-            self.expr_types.insert(*id, resolve_ty(ity, &self.uf));
-        }
-        let module_types = std::mem::take(&mut self.expr_types);
-        self.expr_types = saved.0; self.infer_types = saved.1; self.constraints = saved.2; self.uf = saved.3;
+        resolve_expr_types_in_program(prog, &self.uf);
+
+        // Restore
+        self.constraints = saved_constraints;
+        self.uf = saved_uf;
         self.env.import_table = saved_import_table;
-        // Remove the unprefixed declarations we temporarily added
-        for key in self.env.functions.keys().cloned().collect::<Vec<_>>() {
-            if !fn_keys_before.contains(&key) { self.env.functions.remove(&key); }
-        }
-        for key in self.env.types.keys().cloned().collect::<Vec<_>>() {
-            if !type_keys_before.contains(&key) { self.env.types.remove(&key); }
-        }
-        for key in self.env.constructors.keys().cloned().collect::<Vec<_>>() {
-            if !ctor_keys_before.contains(&key) { self.env.constructors.remove(&key); }
-        }
-        for key in self.env.top_lets.keys().cloned().collect::<Vec<_>>() {
-            if !top_let_keys_before.contains(&key) { self.env.top_lets.remove(&key); }
-        }
-        module_types
+        self.env.restore_keys(&snapshot);
     }
 
     // ── Declaration checking ──
@@ -485,7 +349,7 @@ impl Checker {
             ast::Pattern::None => { covered.insert("none".into()); }
             ast::Pattern::Ok { .. } => { covered.insert("ok".into()); }
             ast::Pattern::Err { .. } => { covered.insert("err".into()); }
-            ast::Pattern::Literal { value } => { if let ast::Expr::Bool { value: v, .. } = value.as_ref() { covered.insert(if *v { "true" } else { "false" }.into()); } }
+            ast::Pattern::Literal { value } => { if let ast::ExprKind::Bool { value: v, .. } = &value.kind { covered.insert(if *v { "true" } else { "false" }.into()); } }
             _ => {}
         }
     }
@@ -534,12 +398,23 @@ impl Checker {
             _ => Ty::Unknown,
         }
     }
+}
 
-    fn infer_literal_type(&self, expr: &ast::Expr) -> Ty {
-        match expr {
-            ast::Expr::Int { .. } => Ty::Int, ast::Expr::Float { .. } => Ty::Float,
-            ast::Expr::String { .. } => Ty::String, ast::Expr::Bool { .. } => Ty::Bool,
-            ast::Expr::Unit { .. } => Ty::Unit, _ => Ty::Unknown,
+/// Resolve inferred TypeVars on all AST Expr nodes after constraint solving.
+fn resolve_expr_types_in_program(program: &mut ast::Program, uf: &UnionFind) {
+    ast::visit_exprs_mut(program, &mut |expr| {
+        if let Some(ref ty) = expr.ty {
+            expr.ty = Some(resolve_ty(ty, uf));
+        } else {
+            expr.ty = Some(match &expr.kind {
+                ast::ExprKind::Int { .. } => Ty::Int,
+                ast::ExprKind::Float { .. } => Ty::Float,
+                ast::ExprKind::String { .. } | ast::ExprKind::InterpolatedString { .. } => Ty::String,
+                ast::ExprKind::Bool { .. } => Ty::Bool,
+                ast::ExprKind::Unit => Ty::Unit,
+                ast::ExprKind::None => Ty::option(Ty::Unknown),
+                _ => Ty::Unknown,
+            });
         }
-    }
+    });
 }

@@ -1,5 +1,6 @@
 use almide::lexer::Lexer;
 use almide::parser::Parser;
+use almide::canonicalize;
 use almide::check::Checker;
 use almide::lower::lower_program;
 use almide::ir::*;
@@ -8,9 +9,11 @@ fn lower(input: &str) -> IrProgram {
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let mut prog = parser.parse().expect("parse failed");
-    let mut checker = Checker::new();
-    checker.check_program(&mut prog);
-    lower_program(&prog, &checker.expr_types, &checker.env)
+    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let mut checker = Checker::from_env(canon.env);
+    checker.diagnostics = canon.diagnostics;
+    checker.infer_program(&mut prog);
+    lower_program(&prog, &checker.env)
 }
 
 // ---- Basic function lowering ----

@@ -11,9 +11,9 @@
 
 | Area | Start | Current | Target | Status |
 |------|-------|---------|--------|--------|
-| Pipeline Design | 7 | **10** | 10 | ✅ |
+| Pipeline Design | 7 | **10** | 10 | ✅ Canonical AST + Typed AST Cache: Parser→Canonicalize→Checker(inference only)→Lower |
 | Parser | 9 | **10** | 10 | ✅ proptest fuzzing introduced |
-| Type Checker | 7 | **10** | 10 | ✅ |
+| Type Checker | 7 | **10** | 10 | ✅ Canonical AST separation, expr.ty direct embedding, infer_types/expr_types HashMap eliminated |
 | IR Design | 9 | **10** | 10 | ✅ |
 | Nanopass | 8 | **10** | 10 | ✅ |
 | Monomorphization | 7 | **10** | 10 | ✅ |

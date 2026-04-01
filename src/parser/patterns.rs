@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::ast::ExprKind;
 use crate::intern::sym;
 use super::Parser;
 
@@ -57,10 +58,9 @@ impl Parser {
             self.advance(); // skip -
             let operand = self.parse_primary()?;
             return Ok(Pattern::Literal {
-                value: Box::new(Expr::Unary {
+                value: Box::new(Expr::new(self.next_id(), span, ExprKind::Unary {
                     op: sym("-"), operand: Box::new(operand),
-                    id: self.next_id(), span, resolved_type: None,
-                }),
+                })),
             });
         }
         if self.check(TokenType::Int) || self.check(TokenType::Float) || self.check(TokenType::String) {
@@ -71,14 +71,14 @@ impl Parser {
             let span = Some(self.current_span());
             self.advance();
             return Ok(Pattern::Literal {
-                value: Box::new(Expr::Bool { value: true, id: self.next_id(), span, resolved_type: None }),
+                value: Box::new(Expr::new(self.next_id(), span, ExprKind::Bool { value: true })),
             });
         }
         if self.check(TokenType::False) {
             let span = Some(self.current_span());
             self.advance();
             return Ok(Pattern::Literal {
-                value: Box::new(Expr::Bool { value: false, id: self.next_id(), span, resolved_type: None }),
+                value: Box::new(Expr::new(self.next_id(), span, ExprKind::Bool { value: false })),
             });
         }
         if self.check(TokenType::TypeName) {

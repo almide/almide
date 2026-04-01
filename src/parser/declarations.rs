@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::ast::ExprKind;
 use crate::intern::{Sym, sym};
 use super::Parser;
 
@@ -339,7 +340,7 @@ impl Parser {
     }
 
     fn wrap_effect_result_body(&mut self, body: Expr) -> Expr {
-        if let Expr::Block { ref stmts, ref expr, .. } = body {
+        if let ExprKind::Block { ref stmts, ref expr } = body.kind {
             let (effective_stmts, effective_expr) = if expr.is_none() && !stmts.is_empty() {
                 let last_non_comment = stmts.iter().rposition(|s| !matches!(s, Stmt::Comment { .. }));
                 if let Some(idx) = last_non_comment {
@@ -358,26 +359,23 @@ impl Parser {
             };
             let needs_ok = match &effective_expr {
                 None => true,
-                Some(e) => matches!(e.as_ref(), Expr::Unit { .. }),
+                Some(e) => matches!(e.kind, ExprKind::Unit),
             };
             if needs_ok {
                 let mut new_stmts = effective_stmts;
                 if let Some(trailing) = effective_expr {
                     new_stmts.push(Stmt::Expr { expr: *trailing, span: None });
                 }
-                return Expr::Block {
+                return Expr::new(self.next_id(), None, ExprKind::Block {
                     stmts: new_stmts,
-                    expr: Some(Box::new(Expr::Ok {
-                        expr: Box::new(Expr::Unit { id: self.next_id(), span: None, resolved_type: None }),
-                        id: self.next_id(), span: None, resolved_type: None,
-                    })),
-                    id: self.next_id(), span: None, resolved_type: None,
-                };
+                    expr: Some(Box::new(Expr::new(self.next_id(), None, ExprKind::Ok {
+                        expr: Box::new(Expr::new(self.next_id(), None, ExprKind::Unit)),
+                    }))),
+                });
             } else if expr.is_none() {
-                return Expr::Block {
+                return Expr::new(self.next_id(), None, ExprKind::Block {
                     stmts: effective_stmts, expr: effective_expr,
-                    id: self.next_id(), span: None, resolved_type: None,
-                };
+                });
             }
         }
         body

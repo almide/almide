@@ -1,4 +1,4 @@
-use crate::{parse_file, check, diagnostic, resolve, project, project_fetch};
+use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
 
 /// Resolve a module name to a source file path.
 /// If the input looks like a file path (ends with .almd), use it directly.
@@ -118,12 +118,14 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     // Type check
-    let mut checker = check::Checker::new();
+    let canon = canonicalize::canonicalize_program(
+        &program,
+        resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
+    );
+    let mut checker = check::Checker::from_env(canon.env);
     checker.set_source(&file, &source_text);
-    for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
-        checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
-    }
-    let diagnostics = checker.check_program(&mut program);
+    checker.diagnostics = canon.diagnostics;
+    let diagnostics = checker.infer_program(&mut program);
     let errors: Vec<_> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Error)
         .collect();
@@ -139,7 +141,7 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
     }
 
     // Lower to IR
-    let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+    let ir = almide::lower::lower_program(&program, &checker.env);
 
     // Extract interface
     let iface = almide::interface::extract(&ir, &module_name, Some(&source_text));

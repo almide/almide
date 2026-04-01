@@ -25,18 +25,18 @@ const INDENT: &str = "  ";
 fn ind(depth: usize) -> String { INDENT.repeat(depth) }
 
 fn is_short(expr: &Expr) -> bool {
-    match expr {
-        Expr::Int { .. } | Expr::Float { .. } | Expr::Bool { .. }
-        | Expr::Unit { .. } | Expr::None { .. } | Expr::Hole { .. } | Expr::Placeholder { .. }
-        | Expr::Ident { .. } | Expr::TypeName { .. } => true,
-        Expr::String { value, .. } => value.len() < 40,
-        Expr::Some { expr, .. } | Expr::Ok { expr, .. } | Expr::Err { expr, .. }
-        | Expr::Paren { expr, .. } => is_short(expr),
-        Expr::Tuple { elements, .. } => elements.len() <= 4 && elements.iter().all(is_short),
-        Expr::Call { args, .. } => args.len() <= 2 && args.iter().all(is_short),
-        Expr::IndexAccess { object, index, .. } => is_short(object) && is_short(index),
-        Expr::Binary { left, right, .. } => is_short(left) && is_short(right),
-        Expr::Unary { operand, .. } => is_short(operand),
+    match &expr.kind {
+        ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::Bool { .. }
+        | ExprKind::Unit | ExprKind::None | ExprKind::Hole | ExprKind::Placeholder
+        | ExprKind::Ident { .. } | ExprKind::TypeName { .. } => true,
+        ExprKind::String { value, .. } => value.len() < 40,
+        ExprKind::Some { expr, .. } | ExprKind::Ok { expr, .. } | ExprKind::Err { expr, .. }
+        | ExprKind::Paren { expr, .. } => is_short(expr),
+        ExprKind::Tuple { elements, .. } => elements.len() <= 4 && elements.iter().all(is_short),
+        ExprKind::Call { args, .. } => args.len() <= 2 && args.iter().all(is_short),
+        ExprKind::IndexAccess { object, index, .. } => is_short(object) && is_short(index),
+        ExprKind::Binary { left, right, .. } => is_short(left) && is_short(right),
+        ExprKind::Unary { operand, .. } => is_short(operand),
         _ => false,
     }
 }
@@ -135,70 +135,70 @@ fn collect_module_refs_decl(decl: &Decl, used: &mut std::collections::HashSet<St
 }
 
 fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<String>) {
-    match expr {
-        Expr::Member { object, .. } => {
-            if let Expr::Ident { name, .. } = object.as_ref() {
+    match &expr.kind {
+        ExprKind::Member { object, .. } => {
+            if let ExprKind::Ident { name, .. } = &object.kind {
                 used.insert(name.to_string());
             }
             collect_module_refs_expr(object, used);
         }
-        Expr::Call { callee, args, .. } => {
+        ExprKind::Call { callee, args, .. } => {
             collect_module_refs_expr(callee, used);
             for a in args { collect_module_refs_expr(a, used); }
         }
-        Expr::Binary { left, right, .. } => {
+        ExprKind::Binary { left, right, .. } => {
             collect_module_refs_expr(left, used);
             collect_module_refs_expr(right, used);
         }
-        Expr::If { cond, then, else_, .. } => {
+        ExprKind::If { cond, then, else_, .. } => {
             collect_module_refs_expr(cond, used);
             collect_module_refs_expr(then, used);
             collect_module_refs_expr(else_, used);
         }
-        Expr::Block { stmts, .. } => {
+        ExprKind::Block { stmts, .. } => {
             for s in stmts { collect_module_refs_stmt(s, used); }
         }
-        Expr::Match { subject, arms, .. } => {
+        ExprKind::Match { subject, arms, .. } => {
             collect_module_refs_expr(subject, used);
             for arm in arms {
                 collect_module_refs_expr(&arm.body, used);
                 if let Some(g) = &arm.guard { collect_module_refs_expr(g, used); }
             }
         }
-        Expr::Lambda { body, .. } => collect_module_refs_expr(body, used),
-        Expr::List { elements, .. } | Expr::Tuple { elements, .. } => {
+        ExprKind::Lambda { body, .. } => collect_module_refs_expr(body, used),
+        ExprKind::List { elements, .. } | ExprKind::Tuple { elements, .. } => {
             for e in elements { collect_module_refs_expr(e, used); }
         }
-        Expr::Pipe { left, right, .. } => {
+        ExprKind::Pipe { left, right, .. } => {
             collect_module_refs_expr(left, used);
             collect_module_refs_expr(right, used);
         }
-        Expr::InterpolatedString { parts, .. } => {
+        ExprKind::InterpolatedString { parts, .. } => {
             for p in parts {
                 if let StringPart::Expr { expr } = p { collect_module_refs_expr(expr, used); }
             }
         }
-        Expr::Record { fields, .. } => {
+        ExprKind::Record { fields, .. } => {
             for f in fields { collect_module_refs_expr(&f.value, used); }
         }
-        Expr::IndexAccess { object, index, .. } => {
+        ExprKind::IndexAccess { object, index, .. } => {
             collect_module_refs_expr(object, used);
             collect_module_refs_expr(index, used);
         }
-        Expr::Unary { operand, .. } => collect_module_refs_expr(operand, used),
-        Expr::Unwrap { expr, .. } | Expr::Try { expr, .. } | Expr::ToOption { expr, .. }
-        | Expr::Await { expr, .. } => {
+        ExprKind::Unary { operand, .. } => collect_module_refs_expr(operand, used),
+        ExprKind::Unwrap { expr, .. } | ExprKind::Try { expr, .. } | ExprKind::ToOption { expr, .. }
+        | ExprKind::Await { expr, .. } => {
             collect_module_refs_expr(expr, used);
         }
-        Expr::UnwrapOr { expr, fallback, .. } => {
+        ExprKind::UnwrapOr { expr, fallback, .. } => {
             collect_module_refs_expr(expr, used);
             collect_module_refs_expr(fallback, used);
         }
-        Expr::ForIn { iterable, body, .. } => {
+        ExprKind::ForIn { iterable, body, .. } => {
             collect_module_refs_expr(iterable, used);
             for s in body { collect_module_refs_stmt(s, used); }
         }
-        Expr::While { cond, body, .. } => {
+        ExprKind::While { cond, body, .. } => {
             collect_module_refs_expr(cond, used);
             for s in body { collect_module_refs_stmt(s, used); }
         }
@@ -397,10 +397,10 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
 }
 
 fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
-    match expr {
-        Expr::Int { raw, .. } => out.push_str(raw),
-        Expr::Float { value, .. } => { let s = format!("{value}"); if s.contains('.') { out.push_str(&s); } else { out.push_str(&s); out.push_str(".0"); } }
-        Expr::String { value, .. } => {
+    match &expr.kind {
+        ExprKind::Int { raw, .. } => out.push_str(raw),
+        ExprKind::Float { value, .. } => { let s = format!("{value}"); if s.contains('.') { out.push_str(&s); } else { out.push_str(&s); out.push_str(".0"); } }
+        ExprKind::String { value, .. } => {
             let has_dquote = value.contains('"');
             let has_squote = value.contains('\'');
             let use_single = has_dquote && !has_squote;
@@ -425,33 +425,33 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
             }
             out.push(quote);
         }
-        Expr::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
-        Expr::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
-        Expr::Unit { .. } => out.push_str("()"),
-        Expr::None { .. } => out.push_str("none"),
-        Expr::Hole { .. } | Expr::Placeholder { .. } => out.push('_'),
-        Expr::Error { .. } => out.push_str("/* error */"),
-        Expr::Todo { message, .. } => if message.is_empty() { out.push_str("todo"); } else { w!(out, "todo(\"{message}\")"); },
-        Expr::Some { expr: e, .. } => { out.push_str("some("); fmt_expr(out, e, depth); out.push(')'); }
-        Expr::Ok { expr: e, .. } => { out.push_str("ok("); fmt_expr(out, e, depth); out.push(')'); }
-        Expr::Err { expr: e, .. } => { out.push_str("err("); fmt_expr(out, e, depth); out.push(')'); }
-        Expr::Ident { name, .. } | Expr::TypeName { name, .. } => out.push_str(name),
-        Expr::Paren { expr: e, .. } => { out.push('('); fmt_expr(out, e, depth); out.push(')'); }
-        Expr::Tuple { elements, .. } => { out.push('('); comma_sep(out, elements, |out, e| fmt_expr(out, e, depth)); out.push(')'); }
-        Expr::List { elements, .. } => fmt_list(out, elements, depth),
-        Expr::EmptyMap { .. } => out.push_str("[:]"),
-        Expr::MapLiteral { entries, .. } => fmt_map(out, entries, depth),
-        Expr::Record { name, fields, .. } => {
+        ExprKind::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
+        ExprKind::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
+        ExprKind::Unit => out.push_str("()"),
+        ExprKind::None => out.push_str("none"),
+        ExprKind::Hole | ExprKind::Placeholder => out.push('_'),
+        ExprKind::Error => out.push_str("/* error */"),
+        ExprKind::Todo { message, .. } => if message.is_empty() { out.push_str("todo"); } else { w!(out, "todo(\"{message}\")"); },
+        ExprKind::Some { expr: e, .. } => { out.push_str("some("); fmt_expr(out, e, depth); out.push(')'); }
+        ExprKind::Ok { expr: e, .. } => { out.push_str("ok("); fmt_expr(out, e, depth); out.push(')'); }
+        ExprKind::Err { expr: e, .. } => { out.push_str("err("); fmt_expr(out, e, depth); out.push(')'); }
+        ExprKind::Ident { name, .. } | ExprKind::TypeName { name, .. } => out.push_str(name),
+        ExprKind::Paren { expr: e, .. } => { out.push('('); fmt_expr(out, e, depth); out.push(')'); }
+        ExprKind::Tuple { elements, .. } => { out.push('('); comma_sep(out, elements, |out, e| fmt_expr(out, e, depth)); out.push(')'); }
+        ExprKind::List { elements, .. } => fmt_list(out, elements, depth),
+        ExprKind::EmptyMap => out.push_str("[:]"),
+        ExprKind::MapLiteral { entries, .. } => fmt_map(out, entries, depth),
+        ExprKind::Record { name, fields, .. } => {
             if let Some(n) = name { w!(out, "{n} "); }
             if fields.is_empty() { out.push_str("{}"); }
             else { out.push_str("{ "); comma_sep(out, fields, |out, f| { w!(out, "{}: ", f.name); fmt_expr(out, &f.value, depth); }); out.push_str(" }"); }
         }
-        Expr::SpreadRecord { base, fields, .. } => {
+        ExprKind::SpreadRecord { base, fields, .. } => {
             out.push_str("{ ..."); fmt_expr(out, base, depth);
             for f in fields { w!(out, ", {}: ", f.name); fmt_expr(out, &f.value, depth); }
             out.push_str(" }");
         }
-        Expr::Call { callee, args, type_args, named_args, .. } => {
+        ExprKind::Call { callee, args, type_args, named_args, .. } => {
             fmt_expr(out, callee, depth);
             if let Some(ta) = type_args { out.push('['); comma_sep(out, ta, |out, t| fmt_type(out, t, depth)); out.push(']'); }
             out.push('(');
@@ -465,29 +465,29 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
             }
             out.push(')');
         }
-        Expr::Member { object, field, .. } => { fmt_expr(out, object, depth); w!(out, ".{field}"); }
-        Expr::TupleIndex { object, index, .. } => { fmt_expr(out, object, depth); w!(out, ".{index}"); }
-        Expr::IndexAccess { object, index, .. } => { fmt_expr(out, object, depth); out.push('['); fmt_expr(out, index, depth); out.push(']'); }
-        Expr::Pipe { left, right, .. } => { fmt_expr(out, left, depth); out.push_str(" |> "); fmt_expr(out, right, depth); }
-        Expr::Compose { left, right, .. } => { fmt_expr(out, left, depth); out.push_str(" >> "); fmt_expr(out, right, depth); }
-        Expr::Binary { op, left, right, .. } => { fmt_expr(out, left, depth); w!(out, " {op} "); fmt_expr(out, right, depth); }
-        Expr::Unary { op, operand, .. } => { out.push_str(op); if op == "not" { out.push(' '); } fmt_expr(out, operand, depth); }
-        Expr::Break { .. } => out.push_str("break"),
-        Expr::Continue { .. } => out.push_str("continue"),
-        Expr::Try { expr: e, .. } => { out.push_str("try "); fmt_expr(out, e, depth); }
-        Expr::Unwrap { expr: e, .. } => { fmt_expr(out, e, depth); out.push('!'); }
-        Expr::UnwrapOr { expr: e, fallback, .. } => { fmt_expr(out, e, depth); out.push_str(" ?? "); fmt_expr(out, fallback, depth); }
-        Expr::ToOption { expr: e, .. } => { fmt_expr(out, e, depth); out.push('?'); }
-        Expr::OptionalChain { expr: e, field, .. } => { fmt_expr(out, e, depth); out.push_str("?."); out.push_str(field); }
-        Expr::Await { expr: e, .. } => { out.push_str("await "); fmt_expr(out, e, depth); }
-        Expr::If { cond, then, else_, .. } => {
+        ExprKind::Member { object, field, .. } => { fmt_expr(out, object, depth); w!(out, ".{field}"); }
+        ExprKind::TupleIndex { object, index, .. } => { fmt_expr(out, object, depth); w!(out, ".{index}"); }
+        ExprKind::IndexAccess { object, index, .. } => { fmt_expr(out, object, depth); out.push('['); fmt_expr(out, index, depth); out.push(']'); }
+        ExprKind::Pipe { left, right, .. } => { fmt_expr(out, left, depth); out.push_str(" |> "); fmt_expr(out, right, depth); }
+        ExprKind::Compose { left, right, .. } => { fmt_expr(out, left, depth); out.push_str(" >> "); fmt_expr(out, right, depth); }
+        ExprKind::Binary { op, left, right, .. } => { fmt_expr(out, left, depth); w!(out, " {op} "); fmt_expr(out, right, depth); }
+        ExprKind::Unary { op, operand, .. } => { out.push_str(op); if op == "not" { out.push(' '); } fmt_expr(out, operand, depth); }
+        ExprKind::Break => out.push_str("break"),
+        ExprKind::Continue => out.push_str("continue"),
+        ExprKind::Try { expr: e, .. } => { out.push_str("try "); fmt_expr(out, e, depth); }
+        ExprKind::Unwrap { expr: e, .. } => { fmt_expr(out, e, depth); out.push('!'); }
+        ExprKind::UnwrapOr { expr: e, fallback, .. } => { fmt_expr(out, e, depth); out.push_str(" ?? "); fmt_expr(out, fallback, depth); }
+        ExprKind::ToOption { expr: e, .. } => { fmt_expr(out, e, depth); out.push('?'); }
+        ExprKind::OptionalChain { expr: e, field, .. } => { fmt_expr(out, e, depth); out.push_str("?."); out.push_str(field); }
+        ExprKind::Await { expr: e, .. } => { out.push_str("await "); fmt_expr(out, e, depth); }
+        ExprKind::If { cond, then, else_, .. } => {
             out.push_str("if "); fmt_expr(out, cond, depth); out.push_str(" then "); fmt_expr(out, then, depth);
             if is_short(then) && is_short(else_) { out.push(' '); }
             else if out.ends_with('}') { out.push(' '); }
             else { out.push('\n'); out.push_str(&ind(depth)); }
             out.push_str("else "); fmt_expr(out, else_, depth);
         }
-        Expr::Match { subject, arms, .. } => {
+        ExprKind::Match { subject, arms, .. } => {
             out.push_str("match "); fmt_expr(out, subject, depth); out.push_str(" {\n");
             let ai = ind(depth + 1);
             for arm in arms {
@@ -500,32 +500,32 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
             }
             w!(out, "{}}}", ind(depth));
         }
-        Expr::Block { stmts, expr, .. } => {
+        ExprKind::Block { stmts, expr, .. } => {
             if stmts.is_empty() { if let Some(e) = expr { if is_short(e) && depth > 0 { out.push_str("{ "); fmt_expr(out, e, depth); out.push_str(" }"); return; } } }
             fmt_block(out, stmts, expr, depth);
         }
 
-        Expr::Fan { exprs, .. } => {
+        ExprKind::Fan { exprs, .. } => {
             out.push_str("fan {\n");
             for e in exprs {
                 out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
             }
             out.push_str(&ind(depth)); out.push('}');
         }
-        Expr::Range { start, end, inclusive, .. } => { fmt_expr(out, start, depth); out.push_str(if *inclusive { "..=" } else { ".." }); fmt_expr(out, end, depth); }
-        Expr::ForIn { var, var_tuple, iterable, body, .. } => {
+        ExprKind::Range { start, end, inclusive, .. } => { fmt_expr(out, start, depth); out.push_str(if *inclusive { "..=" } else { ".." }); fmt_expr(out, end, depth); }
+        ExprKind::ForIn { var, var_tuple, iterable, body, .. } => {
             out.push_str("for ");
             if let Some(n) = var_tuple { w!(out, "({})", join_syms(n, ", ")); } else { out.push_str(var); }
             out.push_str(" in "); fmt_expr(out, iterable, depth); out.push_str(" {\n");
             for s in body { fmt_stmt(out, s, depth + 1); }
             w!(out, "{}}}", ind(depth));
         }
-        Expr::While { cond, body, .. } => {
+        ExprKind::While { cond, body, .. } => {
             out.push_str("while "); fmt_expr(out, cond, depth); out.push_str(" {\n");
             for s in body { fmt_stmt(out, s, depth + 1); }
             w!(out, "{}}}", ind(depth));
         }
-        Expr::Lambda { params, body, .. } => {
+        ExprKind::Lambda { params, body, .. } => {
             out.push('(');
             comma_sep(out, params, |out, p| {
                 if let Some(n) = &p.tuple_names { w!(out, "({})", join_syms(n, ", ")); } else { out.push_str(&p.name); }

@@ -2,6 +2,13 @@ use super::{Ty, VariantCase, substitute, ProtocolDef};
 use crate::intern::{Sym, sym};
 use crate::import_table::ImportTable;
 
+pub struct EnvKeySnapshot {
+    functions: std::collections::HashSet<Sym>,
+    types: std::collections::HashSet<Sym>,
+    constructors: std::collections::HashSet<Sym>,
+    top_lets: std::collections::HashSet<Sym>,
+}
+
 pub struct TypeEnv {
     /// User-defined type declarations: name -> Ty
     pub types: std::collections::HashMap<Sym, Ty>,
@@ -98,11 +105,26 @@ impl TypeEnv {
         }
     }
 
-    /// Check if a type implements the Eq protocol.
-    /// Primitives are implicitly Eq. Container types are Eq if their elements are.
-    /// User-defined types require `deriving Eq`. Function types are never Eq.
-    /// Check if a type supports equality (`==`, `!=`).
-    /// All value types are Eq by default. Only function types are not.
+    /// Snapshot the current keys in functions/types/constructors/top_lets.
+    /// Used by module body checking to temporarily register unprefixed declarations
+    /// and clean them up afterwards.
+    pub fn snapshot_keys(&self) -> EnvKeySnapshot {
+        EnvKeySnapshot {
+            functions: self.functions.keys().cloned().collect(),
+            types: self.types.keys().cloned().collect(),
+            constructors: self.constructors.keys().cloned().collect(),
+            top_lets: self.top_lets.keys().cloned().collect(),
+        }
+    }
+
+    /// Remove any keys that were added since the snapshot was taken.
+    pub fn restore_keys(&mut self, snapshot: &EnvKeySnapshot) {
+        self.functions.retain(|k, _| snapshot.functions.contains(k));
+        self.types.retain(|k, _| snapshot.types.contains(k));
+        self.constructors.retain(|k, _| snapshot.constructors.contains(k));
+        self.top_lets.retain(|k, _| snapshot.top_lets.contains(k));
+    }
+
     pub fn is_eq(&self, ty: &Ty) -> bool {
         let mut seen = std::collections::HashSet::new();
         self.is_eq_inner(ty, &mut seen)

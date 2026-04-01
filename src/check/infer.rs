@@ -2,6 +2,7 @@
 /// Walks the AST, assigns Ty to each expression, collects constraints.
 
 use crate::ast;
+use crate::ast::ExprKind;
 use crate::intern::{Sym, sym};
 use crate::types::{Ty, TypeConstructorId, VariantPayload};
 use super::types::resolve_ty;
@@ -9,21 +10,20 @@ use super::Checker;
 
 impl Checker {
     pub(crate) fn infer_expr(&mut self, expr: &mut ast::Expr) -> Ty {
-        // Track current span for diagnostic annotation
-        if let Some(span) = expr.span() {
+        if let Some(span) = expr.span {
             self.current_span = Some(span);
         }
         let ity = self.infer_expr_inner(expr);
-        self.infer_types.insert(expr.id(), ity.clone());
+        expr.ty = Some(ity.clone());
         ity
     }
 
     fn infer_expr_inner(&mut self, expr: &mut ast::Expr) -> Ty {
-        match expr {
-            ast::Expr::Int { .. } => Ty::Int,
-            ast::Expr::Float { .. } => Ty::Float,
-            ast::Expr::String { .. } => Ty::String,
-            ast::Expr::InterpolatedString { parts, .. } => {
+        match &mut expr.kind {
+            ExprKind::Int { .. } => Ty::Int,
+            ExprKind::Float { .. } => Ty::Float,
+            ExprKind::String { .. } => Ty::String,
+            ExprKind::InterpolatedString { parts, .. } => {
                 for part in parts.iter_mut() {
                     if let ast::StringPart::Expr { expr } = part {
                         self.infer_expr(expr);
@@ -31,12 +31,12 @@ impl Checker {
                 }
                 Ty::String
             }
-            ast::Expr::Bool { .. } => Ty::Bool,
-            ast::Expr::Unit { .. } => Ty::Unit,
+            ExprKind::Bool { .. } => Ty::Bool,
+            ExprKind::Unit => Ty::Unit,
 
-            ast::Expr::None { .. } => Ty::option(self.fresh_var()),
+            ExprKind::None => Ty::option(self.fresh_var()),
 
-            ast::Expr::Ident { name, .. } => {
+            ExprKind::Ident { name, .. } => {
                 self.env.used_vars.insert(sym(name));
                 if let Some(ty) = self.env.lookup_var(name).cloned() { self.instantiate_ty(&ty) }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { self.instantiate_ty(&ty) }
@@ -58,13 +58,13 @@ impl Checker {
                 }
             }
 
-            ast::Expr::TypeName { name, .. } => {
+            ExprKind::TypeName { name, .. } => {
                 if let Some((type_name, _)) = self.env.constructors.get(&sym(name)) { Ty::Named(*type_name, vec![]) }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
                 else { Ty::Named(sym(name), vec![]) }
             }
 
-            ast::Expr::List { elements, .. } => {
+            ExprKind::List { elements, .. } => {
                 if elements.is_empty() { Ty::list(self.fresh_var()) }
                 else {
                     let first = self.infer_expr(&mut elements[0]);
@@ -73,9 +73,9 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Tuple { elements, .. } => Ty::Tuple(elements.iter_mut().map(|e| self.infer_expr(e)).collect()),
+            ExprKind::Tuple { elements, .. } => Ty::Tuple(elements.iter_mut().map(|e| self.infer_expr(e)).collect()),
 
-            ast::Expr::Record { name, fields, .. } => {
+            ExprKind::Record { name, fields, .. } => {
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
                     // Variant constructor → resolve to parent type name
@@ -86,26 +86,26 @@ impl Checker {
                 }
                 else {
                     let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {
-                        let ty = self.infer_types.get(&f.value.id()).map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
+                        let ty = f.value.ty.as_ref().map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
                         (sym(&f.name), ty)
                     }).collect();
                     Ty::Record { fields: field_tys }
                 }
             }
 
-            ast::Expr::SpreadRecord { base, fields, .. } => {
+            ExprKind::SpreadRecord { base, fields, .. } => {
                 let base_ty = self.infer_expr(base);
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 base_ty
             }
 
-            ast::Expr::Member { object, field, .. } => {
+            ExprKind::Member { object, field, .. } => {
                 let obj_ty = self.infer_expr(object);
                 let concrete = resolve_ty(&obj_ty, &self.uf);
                 self.resolve_field_type(&concrete, field)
             }
 
-            ast::Expr::TupleIndex { object, index, .. } => {
+            ExprKind::TupleIndex { object, index, .. } => {
                 let obj_ty = self.infer_expr(object);
                 match &obj_ty {
                     Ty::Tuple(elems) if *index < elems.len() => elems[*index].clone(),
@@ -116,7 +116,7 @@ impl Checker {
                 }
             }
 
-            ast::Expr::IndexAccess { object, index, .. } => {
+            ExprKind::IndexAccess { object, index, .. } => {
                 let obj_ty = self.infer_expr(object);
                 self.infer_expr(index);
                 let concrete = resolve_ty(&obj_ty, &self.uf);
@@ -127,7 +127,7 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Binary { op, left, right, .. } => {
+            ExprKind::Binary { op, left, right, .. } => {
                 let lt = self.infer_expr(left);
                 let rt = self.infer_expr(right);
                 match op.as_str() {
@@ -160,8 +160,8 @@ impl Checker {
                     }
                     "==" | "!=" | "<" | ">" | "<=" | ">=" => {
                         // Check none comparison: only valid with Option types
-                        let left_is_none = matches!(left.as_ref(), ast::Expr::None { .. });
-                        let right_is_none = matches!(right.as_ref(), ast::Expr::None { .. });
+                        let left_is_none = matches!(left.kind, ExprKind::None);
+                        let right_is_none = matches!(right.kind, ExprKind::None);
                         if right_is_none && !left_is_none {
                             let lc = resolve_ty(&lt, &self.uf);
                             if !lc.is_option() && !matches!(lc, Ty::Unknown | Ty::TypeVar(_)) {
@@ -202,12 +202,12 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Unary { op, operand, .. } => {
+            ExprKind::Unary { op, operand, .. } => {
                 let t = self.infer_expr(operand);
                 match op.as_str() { "not" => Ty::Bool, _ => t }
             }
 
-            ast::Expr::If { cond, then, else_, .. } => {
+            ExprKind::If { cond, then, else_, .. } => {
                 self.infer_expr(cond);
                 let then_ty = self.infer_expr(then);
                 let else_ty = self.infer_expr(else_);
@@ -215,7 +215,7 @@ impl Checker {
                 then_ty
             }
 
-            ast::Expr::Match { subject, arms, .. } => {
+            ExprKind::Match { subject, arms, .. } => {
                 let subject_ty = self.infer_expr(subject);
                 let sc = resolve_ty(&subject_ty, &self.uf);
                 self.check_match_exhaustiveness(&sc, arms);
@@ -241,7 +241,7 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Block { stmts, expr, .. } => {
+            ExprKind::Block { stmts, expr, .. } => {
                 self.env.push_scope();
                 for stmt in stmts.iter_mut() { self.check_stmt(stmt); }
                 let ty = if let Some(e) = expr { self.infer_expr(e) } else { Ty::Unit };
@@ -249,7 +249,7 @@ impl Checker {
                 ty
             }
 
-            ast::Expr::Fan { exprs, .. } => {
+            ExprKind::Fan { exprs, .. } => {
                 if !self.env.can_call_effect {
                     self.emit(super::err(
                         "fan block can only be used inside an effect fn".to_string(),
@@ -283,15 +283,15 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Call { callee, args, named_args, type_args, .. } => {
+            ExprKind::Call { callee, args, named_args, type_args, .. } => {
                 self.infer_call(callee, args, named_args, type_args)
             }
 
-            ast::Expr::Pipe { left, right, .. } => {
+            ExprKind::Pipe { left, right, .. } => {
                 self.infer_pipe(left, right)
             }
 
-            ast::Expr::Compose { left, right, .. } => {
+            ExprKind::Compose { left, right, .. } => {
                 let left_ty = self.infer_expr(left);
                 let right_ty = self.infer_expr(right);
                 // If left is Fn[A] -> B and right is Fn[B] -> C, result is Fn[A] -> C
@@ -305,7 +305,7 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Lambda { params, body, .. } => {
+            ExprKind::Lambda { params, body, .. } => {
                 self.env.push_scope();
                 // Lambda has its own return context — don't leak outer function's current_ret
                 let saved_ret = self.env.current_ret.take();
@@ -323,11 +323,11 @@ impl Checker {
                 Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
             }
 
-            ast::Expr::ForIn { var, var_tuple, iterable, body, .. } => {
+            ExprKind::ForIn { var, var_tuple, iterable, body, .. } => {
                 self.infer_for_in(var, var_tuple, iterable, body)
             }
 
-            ast::Expr::While { cond, body, .. } => {
+            ExprKind::While { cond, body, .. } => {
                 self.infer_expr(cond);
                 self.env.push_scope();
                 for stmt in body.iter_mut() { self.check_stmt(stmt); }
@@ -335,10 +335,10 @@ impl Checker {
                 Ty::Unit
             }
 
-            ast::Expr::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::list(st) }
+            ExprKind::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::list(st) }
 
-            ast::Expr::Some { expr, .. } => { let inner = self.infer_expr(expr); Ty::option(inner) }
-            ast::Expr::Ok { expr, .. } => {
+            ExprKind::Some { expr, .. } => { let inner = self.infer_expr(expr); Ty::option(inner) }
+            ExprKind::Ok { expr, .. } => {
                 let ok_ty = self.infer_expr(expr);
                 let err_ty = match &self.env.current_ret {
                     Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[1].clone(),
@@ -346,7 +346,7 @@ impl Checker {
                 };
                 Ty::result(ok_ty, err_ty)
             }
-            ast::Expr::Err { expr, .. } => {
+            ExprKind::Err { expr, .. } => {
                 let err_ty = self.infer_expr(expr);
                 let ok_ty = match &self.env.current_ret {
                     Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[0].clone(),
@@ -354,7 +354,7 @@ impl Checker {
                 };
                 Ty::result(ok_ty, err_ty)
             }
-            ast::Expr::Try { expr, .. } => {
+            ExprKind::Try { expr, .. } => {
                 let ty = self.infer_expr(expr);
                 match &ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() >= 1 => args[0].clone(),
@@ -362,13 +362,13 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Paren { expr, .. } => self.infer_expr(expr),
-            ast::Expr::Break { .. } | ast::Expr::Continue { .. } => Ty::Unit,
-            ast::Expr::Hole { .. } | ast::Expr::Todo { .. } => self.fresh_var(),
-            ast::Expr::Await { expr, .. } => self.infer_expr(expr),
+            ExprKind::Paren { expr, .. } => self.infer_expr(expr),
+            ExprKind::Break | ExprKind::Continue => Ty::Unit,
+            ExprKind::Hole | ExprKind::Todo { .. } => self.fresh_var(),
+            ExprKind::Await { expr, .. } => self.infer_expr(expr),
 
             // expr! — unwrap with propagation (Option[T] → T, Result[T,E] → T)
-            ast::Expr::Unwrap { expr: inner, .. } => {
+            ExprKind::Unwrap { expr: inner, .. } => {
                 let t = self.infer_expr(inner);
                 let resolved = resolve_ty(&t, &self.uf);
                 if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
@@ -385,7 +385,7 @@ impl Checker {
                 }
             }
             // expr ?? fallback — unwrap with default (Option[T] → T, Result[T,E] → T)
-            ast::Expr::UnwrapOr { expr: inner, fallback, .. } => {
+            ExprKind::UnwrapOr { expr: inner, fallback, .. } => {
                 let t = self.infer_expr(inner);
                 let ft = self.infer_expr(fallback);
                 let resolved = resolve_ty(&t, &self.uf);
@@ -405,7 +405,7 @@ impl Checker {
                 inner_ty
             }
             // expr? — to Option (Result[T,E] → Option[T], Option[T] → Option[T])
-            ast::Expr::ToOption { expr: inner, .. } => {
+            ExprKind::ToOption { expr: inner, .. } => {
                 let t = self.infer_expr(inner);
                 let resolved = resolve_ty(&t, &self.uf);
                 if let Some(ok_ty) = resolved.result_ok_ty() {
@@ -425,7 +425,7 @@ impl Checker {
             }
 
             // expr?.field — optional chaining: Option[T] → access T.field → Option[FieldType]
-            ast::Expr::OptionalChain { expr: inner, field, .. } => {
+            ExprKind::OptionalChain { expr: inner, field, .. } => {
                 let t = self.infer_expr(inner);
                 let resolved = resolve_ty(&t, &self.uf);
                 let inner_ty = if let Some(ty) = resolved.option_inner() {
@@ -470,9 +470,9 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Error { .. } | ast::Expr::Placeholder { .. } => Ty::Unknown,
+            ExprKind::Error | ExprKind::Placeholder => Ty::Unknown,
 
-            ast::Expr::MapLiteral { entries, .. } => {
+            ExprKind::MapLiteral { entries, .. } => {
                 if entries.is_empty() { Ty::map_of(self.fresh_var(), self.fresh_var()) }
                 else {
                     let kt = self.infer_expr(&mut entries[0].0);
@@ -481,7 +481,7 @@ impl Checker {
                     Ty::map_of(kt, vt)
                 }
             }
-            ast::Expr::EmptyMap { .. } => Ty::map_of(self.fresh_var(), self.fresh_var()),
+            ExprKind::EmptyMap => Ty::map_of(self.fresh_var(), self.fresh_var()),
         }
     }
 
@@ -494,21 +494,24 @@ impl Checker {
         named_args: &mut Vec<(crate::intern::Sym, ast::Expr)>,
         type_args: &Option<Vec<ast::TypeExpr>>,
     ) -> Ty {
-        // Combine positional + named args for type checking
-        let named_exprs: Vec<ast::Expr> = named_args.iter().map(|(_, e)| e.clone()).collect();
-        let mut all_flat: Vec<ast::Expr> = args.to_vec();
-        all_flat.extend(named_exprs);
-        // 型引数を解決して渡す
+        // Save named arg names, then flatten into positional args temporarily.
+        let named_names: Vec<crate::intern::Sym> = named_args.iter().map(|(n, _)| *n).collect();
+        let named_start = args.len();
+        args.extend(std::mem::take(named_args).into_iter().map(|(_, e)| e));
         let resolved_type_args: Option<Vec<crate::types::Ty>> = type_args.as_ref().map(|tas|
             tas.iter().map(|te| self.resolve_type_expr(te)).collect());
-        self.check_call_with_type_args(callee, &mut all_flat, resolved_type_args.as_deref())
+        let ret = self.check_call_with_type_args(callee, args, resolved_type_args.as_deref());
+        // Restore named args
+        let named_exprs: Vec<ast::Expr> = args.drain(named_start..).collect();
+        *named_args = named_names.into_iter().zip(named_exprs).collect();
+        ret
     }
 
     fn infer_pipe(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
         // Unwrap postfix operators (??, !, ?) on the RHS so the pipe targets the inner Call.
         // e.g. `xs |> list.find(pred) ?? fallback` → pipe into list.find, then apply ??
-        match right.as_mut() {
-            ast::Expr::UnwrapOr { expr: inner, fallback, .. } => {
+        match &mut right.kind {
+            ExprKind::UnwrapOr { expr: inner, fallback, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
                 let fb_ty = self.infer_expr(fallback);
                 self.unify_infer(&inner_ty, &fb_ty);
@@ -519,7 +522,7 @@ impl Checker {
                     _ => inner_ty,
                 }
             }
-            ast::Expr::Unwrap { expr: inner, .. } => {
+            ExprKind::Unwrap { expr: inner, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
                 match &inner_ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
@@ -527,7 +530,7 @@ impl Checker {
                     _ => inner_ty,
                 }
             }
-            ast::Expr::Try { expr: inner, .. } => {
+            ExprKind::Try { expr: inner, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
                 match &inner_ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 =>
@@ -541,15 +544,15 @@ impl Checker {
 
     fn infer_pipe_direct(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
         let left_ty = self.infer_expr(left);
-        match right.as_mut() {
-            ast::Expr::Call { callee, args, .. } => {
+        match &mut right.kind {
+            ExprKind::Call { callee, args, .. } => {
                 // Pipe inserts left as the first argument
                 let mut all_arg_tys: Vec<Ty> = vec![left_ty];
                 all_arg_tys.extend(args.iter_mut().map(|a| self.infer_expr(a)));
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))
-                match callee.as_mut() {
-                    ast::Expr::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),
-                    ast::Expr::Member { object, field, .. } => {
+                match &mut callee.kind {
+                    ExprKind::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),
+                    ExprKind::Member { object, field, .. } => {
                         let module_key = self.resolve_module_call(object, field);
                         if let Some(key) = module_key {
                             return self.check_named_call(&key, &all_arg_tys);
@@ -568,12 +571,12 @@ impl Checker {
                 }
             }
             // Pipe RHS is a bare function name (e.g. `5 |> double`)
-            ast::Expr::Ident { name, .. } => {
+            ExprKind::Ident { name, .. } => {
                 let all_arg_tys = vec![left_ty];
                 self.check_named_call(name, &all_arg_tys)
             }
             // Pipe RHS is a module-qualified function (e.g. `5 |> int.abs`)
-            ast::Expr::Member { object, field, .. } => {
+            ExprKind::Member { object, field, .. } => {
                 let all_arg_tys = vec![left_ty];
                 if let Some(key) = self.resolve_module_call(object, field) {
                     return self.check_named_call(&key, &all_arg_tys);
@@ -813,7 +816,7 @@ impl Checker {
 
     /// Resolve a module.func Member expression to a qualified call key.
     fn resolve_module_call(&mut self, object: &ast::Expr, field: &str) -> Option<String> {
-        if let ast::Expr::Ident { name: module, .. } = object {
+        if let ExprKind::Ident { name: module, .. } = &object.kind {
             if let Some(canonical) = self.env.import_table.resolve(module) {
                 self.env.import_table.mark_used(module);
                 return Some(format!("{}.{}", canonical, field));
@@ -825,7 +828,7 @@ impl Checker {
             }
         }
         // Detect dot-chain submodule access (for pipe context)
-        if let Some(dotted) = self.resolve_dotted_module_path(object) {
+        if let Some(dotted) = self.resolve_dotted_module_path(&object.kind) {
             let key = format!("{}.{}", dotted, field);
             if self.env.functions.contains_key(&sym(&key)) {
                 let last_seg = dotted.rsplit('.').next().unwrap_or(&dotted);
@@ -838,7 +841,7 @@ impl Checker {
             }
         }
         // TypeName.method (e.g. Val.double in pipe)
-        if let ast::Expr::TypeName { name: type_name, .. } = object {
+        if let ExprKind::TypeName { name: type_name, .. } = &object.kind {
             let key = format!("{}.{}", type_name, field);
             if self.env.functions.contains_key(&sym(&key)) {
                 return Some(key);
@@ -848,10 +851,10 @@ impl Checker {
     }
 
     /// Resolve a nested Member chain to a dotted module path.
-    fn resolve_dotted_module_path(&self, expr: &ast::Expr) -> Option<String> {
-        match expr {
-            ast::Expr::Member { object, field, .. } => {
-                if let ast::Expr::Ident { name: root, .. } = object.as_ref() {
+    fn resolve_dotted_module_path(&self, kind: &ExprKind) -> Option<String> {
+        match kind {
+            ExprKind::Member { object, field, .. } => {
+                if let ExprKind::Ident { name: root, .. } = &object.kind {
                     let resolved_root = self.env.import_table.resolve(root)
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| root.to_string());
@@ -864,7 +867,7 @@ impl Checker {
                         return Some(candidate);
                     }
                 }
-                if let Some(parent) = self.resolve_dotted_module_path(object) {
+                if let Some(parent) = self.resolve_dotted_module_path(&object.kind) {
                     let candidate = format!("{}.{}", parent, field);
                     if self.env.import_table.accessible.contains(&sym(&candidate)) {
                         return Some(candidate);
@@ -883,33 +886,33 @@ impl Checker {
 
 /// Collect all Ident names referenced in an expression (shallow, for var capture check).
 fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
-    match expr {
-        ast::Expr::Ident { name, .. } => out.push(name.to_string()),
-        ast::Expr::Call { callee, args, .. } => {
+    match &expr.kind {
+        ExprKind::Ident { name, .. } => out.push(name.to_string()),
+        ExprKind::Call { callee, args, .. } => {
             collect_idents(callee, out);
             for a in args { collect_idents(a, out); }
         }
-        ast::Expr::Member { object, .. } | ast::Expr::TupleIndex { object, .. }
-        | ast::Expr::IndexAccess { object, .. } => collect_idents(object, out),
-        ast::Expr::Binary { left, right, .. } | ast::Expr::Pipe { left, right, .. } | ast::Expr::Compose { left, right, .. } => {
+        ExprKind::Member { object, .. } | ExprKind::TupleIndex { object, .. }
+        | ExprKind::IndexAccess { object, .. } => collect_idents(object, out),
+        ExprKind::Binary { left, right, .. } | ExprKind::Pipe { left, right, .. } | ExprKind::Compose { left, right, .. } => {
             collect_idents(left, out); collect_idents(right, out);
         }
-        ast::Expr::Unary { operand, .. } | ast::Expr::Paren { expr: operand, .. }
-        | ast::Expr::Some { expr: operand, .. } | ast::Expr::Ok { expr: operand, .. }
-        | ast::Expr::Err { expr: operand, .. } | ast::Expr::Try { expr: operand, .. } => {
+        ExprKind::Unary { operand, .. } | ExprKind::Paren { expr: operand, .. }
+        | ExprKind::Some { expr: operand, .. } | ExprKind::Ok { expr: operand, .. }
+        | ExprKind::Err { expr: operand, .. } | ExprKind::Try { expr: operand, .. } => {
             collect_idents(operand, out);
         }
-        ast::Expr::If { cond, then, else_, .. } => {
+        ExprKind::If { cond, then, else_, .. } => {
             collect_idents(cond, out); collect_idents(then, out); collect_idents(else_, out);
         }
-        ast::Expr::List { elements, .. } | ast::Expr::Tuple { elements, .. } => {
+        ExprKind::List { elements, .. } | ExprKind::Tuple { elements, .. } => {
             for e in elements { collect_idents(e, out); }
         }
-        ast::Expr::Lambda { body, .. } => collect_idents(body, out),
-        ast::Expr::InterpolatedString { parts, .. } => {
+        ExprKind::Lambda { body, .. } => collect_idents(body, out),
+        ExprKind::InterpolatedString { parts, .. } => {
             for p in parts { if let ast::StringPart::Expr { expr } = p { collect_idents(expr, out); } }
         }
-        ast::Expr::Record { fields, .. } => { for f in fields { collect_idents(&f.value, out); } }
+        ExprKind::Record { fields, .. } => { for f in fields { collect_idents(&f.value, out); } }
         _ => {} // literals, none, unit, etc.
     }
 }

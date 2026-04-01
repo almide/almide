@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::ast::ExprKind;
 use crate::intern::sym;
 use super::Parser;
 
@@ -16,52 +17,51 @@ impl Parser {
             } else {
                 clean.parse().unwrap_or(0)
             };
-            return Ok(Expr::Int {
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Int {
                 value: serde_json::Value::Number(
                     serde_json::Number::from_f64(parsed as f64)
                         .unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
                 raw: tok.value.clone(),
-                id: self.next_id(), span, resolved_type: None,
-            });
+            }));
         }
         if self.check(TokenType::Float) {
             self.advance();
             let v: f64 = tok.value.replace('_', "").parse().unwrap_or(0.0);
-            return Ok(Expr::Float { value: v, id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Float { value: v }));
         }
         if self.check(TokenType::String) {
             self.advance();
-            return Ok(Expr::String { value: tok.value.clone(), id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::String { value: tok.value.clone() }));
         }
         if self.check(TokenType::InterpolatedString) {
             self.advance();
             let parts = self.parse_interpolation_parts(&tok.value, tok.line, tok.col)?;
-            return Ok(Expr::InterpolatedString { parts, id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::InterpolatedString { parts }));
         }
         if self.check(TokenType::True) {
             self.advance();
-            return Ok(Expr::Bool { value: true, id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Bool { value: true }));
         }
         if self.check(TokenType::False) {
             self.advance();
-            return Ok(Expr::Bool { value: false, id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Bool { value: false }));
         }
         if self.check(TokenType::Underscore) {
             self.advance();
-            return Ok(Expr::Hole { id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Hole));
         }
         if self.check(TokenType::Break) {
             self.advance();
-            return Ok(Expr::Break { id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Break));
         }
         if self.check(TokenType::Continue) {
             self.advance();
-            return Ok(Expr::Continue { id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Continue));
         }
         if self.check(TokenType::None) {
             self.advance();
-            return Ok(Expr::None { id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::None));
         }
         if self.check(TokenType::Some) {
             self.advance();
@@ -69,7 +69,7 @@ impl Parser {
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
             self.expect_closing(TokenType::RParen, open.line, open.col, "some()")?;
-            return Ok(Expr::Some { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Some { expr: Box::new(expr) }));
         }
         if self.check(TokenType::Ok) {
             self.advance();
@@ -77,7 +77,7 @@ impl Parser {
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
             self.expect_closing(TokenType::RParen, open.line, open.col, "ok()")?;
-            return Ok(Expr::Ok { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Ok { expr: Box::new(expr) }));
         }
         if self.check(TokenType::Err) {
             self.advance();
@@ -85,7 +85,7 @@ impl Parser {
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
             self.expect_closing(TokenType::RParen, open.line, open.col, "err()")?;
-            return Ok(Expr::Err { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Err { expr: Box::new(expr) }));
         }
         if self.check(TokenType::Todo) {
             self.advance();
@@ -94,7 +94,7 @@ impl Parser {
             let msg = self.current().value.clone();
             self.expect(TokenType::String)?;
             self.expect_closing(TokenType::RParen, open.line, open.col, "todo()")?;
-            return Ok(Expr::Todo { message: msg, id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Todo { message: msg }));
         }
         // try and await keywords removed (no implementation)
         if self.check(TokenType::If) {
@@ -121,7 +121,7 @@ impl Parser {
                 // Treat `fan` as an identifier for member access
                 let span = Some(self.current_span());
                 self.advance();
-                return Ok(Expr::Ident { name: sym("fan"), id: self.next_id(), span, resolved_type: None });
+                return Ok(Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") }));
             }
             self.advance();
             return self.parse_fan_block();
@@ -146,7 +146,7 @@ impl Parser {
         if self.check(TokenType::Ident) || self.check(TokenType::Ident) {
             let name = sym(&tok.value);
             self.advance();
-            return Ok(Expr::Ident { name, id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Ident { name }));
         }
 
         Err(format!(
@@ -164,7 +164,7 @@ impl Parser {
         self.advance();
         if self.check(TokenType::RParen) {
             self.advance();
-            return Ok(Expr::Unit { id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Unit));
         }
         let first = self.parse_expr()?;
         if self.check(TokenType::Comma) {
@@ -175,10 +175,10 @@ impl Parser {
                 elements.push(self.parse_expr()?);
             }
             self.expect_closing(TokenType::RParen, open.line, open.col, "tuple")?;
-            return Ok(Expr::Tuple { elements, id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Tuple { elements }));
         }
         self.expect_closing(TokenType::RParen, open.line, open.col, "parenthesized expression")?;
-        Ok(Expr::Paren { expr: Box::new(first), id: self.next_id(), span, resolved_type: None })
+        Ok(Expr::new(self.next_id(), span, ExprKind::Paren { expr: Box::new(first) }))
     }
 
     fn parse_type_name_expr(&mut self) -> Result<Expr, String> {
@@ -194,24 +194,22 @@ impl Parser {
                 self.advance();
                 let (args, named_args) = self.parse_call_args()?;
                 self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
-                return Ok(Expr::Call {
-                    callee: Box::new(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None }),
+                return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
+                    callee: Box::new(Expr::new(self.next_id(), span, ExprKind::TypeName { name })),
                     args, named_args, type_args: Some(ta),
-                    id: self.next_id(), span, resolved_type: None,
-                });
+                }));
             }
-            return Ok(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::TypeName { name }));
         }
         if self.check(TokenType::LParen) {
             let open_call = self.current().clone();
             self.advance();
             let (args, named_args) = self.parse_call_args()?;
             self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
-            return Ok(Expr::Call {
-                callee: Box::new(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None }),
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Call {
+                callee: Box::new(Expr::new(self.next_id(), span, ExprKind::TypeName { name })),
                 args, named_args, type_args: None,
-                id: self.next_id(), span, resolved_type: None,
-            });
+            }));
         }
         // Named record: Foo {x: 1, y: 2} or Foo { ...base, x: 1 }
         // Peek past optional newlines to check for { Ident : or { ...spread
@@ -237,10 +235,9 @@ impl Parser {
                 }
                 self.skip_newlines();
                 self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "spread record")?;
-                return Ok(Expr::SpreadRecord {
+                return Ok(Expr::new(self.next_id(), span, ExprKind::SpreadRecord {
                     base: Box::new(base), fields,
-                    id: self.next_id(), span, resolved_type: None,
-                });
+                }));
             }
             // Regular named record: Foo { x: 1, y: 2 }
             let mut fields = Vec::new();
@@ -255,16 +252,16 @@ impl Parser {
                 } else {
                     fields.push(FieldInit {
                         name: field_name.clone(),
-                        value: Expr::Ident { name: field_name, id: self.next_id(), span: None, resolved_type: None },
+                        value: Expr::new(self.next_id(), None, ExprKind::Ident { name: field_name }),
                     });
                 }
                 self.skip_newlines();
                 if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
             }
             self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "record construction")?;
-            return Ok(Expr::Record { name: Some(name), fields, id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Record { name: Some(name), fields }));
         }
-        Ok(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None })
+        Ok(Expr::new(self.next_id(), span, ExprKind::TypeName { name }))
     }
 
     fn parse_while_expr(&mut self) -> Result<Expr, String> {
@@ -286,10 +283,9 @@ impl Parser {
             }
         }
         self.expect_closing(TokenType::RBrace, open.line, open.col, "while body")?;
-        Ok(Expr::While {
+        Ok(Expr::new(self.next_id(), span, ExprKind::While {
             cond: Box::new(cond), body: stmts,
-            id: self.next_id(), span, resolved_type: None,
-        })
+        }))
     }
 
     fn parse_for_expr(&mut self) -> Result<Expr, String> {
@@ -325,10 +321,9 @@ impl Parser {
             }
         }
         self.expect_closing(TokenType::RBrace, open_for.line, open_for.col, "for body")?;
-        Ok(Expr::ForIn {
+        Ok(Expr::new(self.next_id(), span, ExprKind::ForIn {
             var: var_name, var_tuple, iterable: Box::new(iterable), body: stmts,
-            id: self.next_id(), span, resolved_type: None,
-        })
+        }))
     }
 
     fn parse_interpolation_parts(&mut self, template: &str, str_line: usize, str_col: usize) -> Result<Vec<StringPart>, String> {

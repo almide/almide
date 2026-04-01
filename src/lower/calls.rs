@@ -10,8 +10,8 @@ use super::types::resolve_type_expr;
 
 pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr], named_args: &[(crate::intern::Sym, ast::Expr)], type_args: Option<&Vec<ast::TypeExpr>>, ty: Ty, span: Option<ast::Span>) -> IrExpr {
     // Convenience: json.encode(expr) → json.stringify(T.encode(expr)) when expr is Codec type
-    if let ast::Expr::Member { object, field, .. } = callee {
-        if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+    if let ast::ExprKind::Member { object, field, .. } = &callee.kind {
+        if let ast::ExprKind::Ident { name: module, .. } = &object.kind {
             if field == "encode" && args.len() == 1 {
                 let arg_ty = ctx.expr_ty(&args[0]);
                 if let Some(encode_fn) = ctx.find_convention_fn(&arg_ty, "encode") {
@@ -83,8 +83,8 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
 }
 
 pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallTarget {
-    match callee {
-        ast::Expr::Ident { name, .. } | ast::Expr::TypeName { name, .. } => {
+    match &callee.kind {
+        ast::ExprKind::Ident { name, .. } | ast::ExprKind::TypeName { name, .. } => {
             // If the name resolves to a local variable (e.g., a closure), use Computed
             // so that use-count tracking properly counts this as a use of that variable.
             if let Some(var_id) = ctx.lookup_var(name)
@@ -92,14 +92,14 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             {
                 let ty = ctx.expr_ty(callee);
                 return CallTarget::Computed {
-                    callee: Box::new(ctx.mk(IrExprKind::Var { id: var_id }, ty, callee.span())),
+                    callee: Box::new(ctx.mk(IrExprKind::Var { id: var_id }, ty, callee.span)),
                 };
             }
             CallTarget::Named { name: *name }
         }
-        ast::Expr::Member { object, field, .. } => {
+        ast::ExprKind::Member { object, field, .. } => {
             // Check if this is a module call (e.g., string.trim, list.map)
-            if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+            if let ast::ExprKind::Ident { name: module, .. } = &object.kind {
                 // Local variables take precedence over module names
                 if ctx.lookup_var(module).is_none() && (module == "fan"
                     || crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module)
@@ -126,7 +126,7 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                 return CallTarget::Module { module: sym(&dotted), func: *field };
             }
             // TypeName.method(args) → direct named call (not UFCS, no object prepend)
-            if let ast::Expr::TypeName { name: type_name, .. } = object.as_ref() {
+            if let ast::ExprKind::TypeName { name: type_name, .. } = &object.kind {
                 let key = format!("{}.{}", type_name, field);
                 if ctx.env.functions.contains_key(&sym(&key))
                     || ctx.find_convention_fn(&Ty::Named(sym(type_name), vec![]), field).is_some()
@@ -205,9 +205,9 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
 
 /// Resolve a nested Member chain to a dotted module path for CallTarget::Module.
 fn resolve_dotted_module_path(expr: &ast::Expr, ctx: &LowerCtx) -> Option<String> {
-    match expr {
-        ast::Expr::Member { object, field, .. } => {
-            if let ast::Expr::Ident { name: root, .. } = object.as_ref() {
+    match &expr.kind {
+        ast::ExprKind::Member { object, field, .. } => {
+            if let ast::ExprKind::Ident { name: root, .. } = &object.kind {
                 // Resolve alias: if root is an alias (e.g. "d" → "dmod_d"), use the target
                 let resolved_root = ctx.env.import_table.aliases.get(root)
                     .map(|s| s.to_string())

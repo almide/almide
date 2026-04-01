@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use crate::ast;
+use crate::ast::ExprKind;
 use crate::intern::{Sym, sym};
 use crate::types::Ty;
 use super::types::resolve_ty;
@@ -24,8 +25,8 @@ fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
 impl Checker {
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
         let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
-        match callee {
-            ast::Expr::Ident { name, .. } => {
+        match &mut callee.kind {
+            ExprKind::Ident { name, .. } => {
                 let name = name.clone();
                 // Register callee's type for variables that hold function values
                 // (Skip for builtins/functions — they don't need ExprId registration)
@@ -34,7 +35,7 @@ impl Checker {
                 }
                 self.check_named_call_with_type_args(&name, &arg_tys, type_args)
             }
-            ast::Expr::TypeName { name, .. } => {
+            ExprKind::TypeName { name, .. } => {
                 if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
                     self.check_constructor_args(name, &case, &arg_tys);
                     // Instantiate parent type's generics with fresh inference vars
@@ -64,7 +65,7 @@ impl Checker {
                 } else { Ty::Named(sym(name), vec![]) }
             }
             // Module call: string.trim(s), list.map(xs, f), etc.
-            ast::Expr::Member { object, field, .. } => {
+            ExprKind::Member { object, field, .. } => {
                 // Try static resolution: module.func, alias.func, TypeName.method, codec.encode
                 if let Some(result) = self.resolve_static_member(object, field, &arg_tys) {
                     return result;
@@ -72,12 +73,13 @@ impl Checker {
                 // UFCS method: obj.method(args) -> module.method(obj, args)
                 let obj_ty = self.infer_expr(object);
                 let obj_concrete = resolve_ty(&obj_ty, &self.uf);
+                let field = field.clone();
                 // Built-in generic types -> stdlib module UFCS
                 let builtin_module = builtin_module_for_type(&obj_concrete);
                 if let Some(module) = builtin_module {
                     let key = format!("{}.{}", module, field);
                     if self.env.functions.contains_key(&sym(&key))
-                        || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
+                        || crate::stdlib::resolve_ufcs_candidates(&field).contains(&module)
                     {
                         let mut all_args = vec![obj_ty];
                         all_args.extend(arg_tys.iter().cloned());
@@ -99,7 +101,7 @@ impl Checker {
                     if let Some(proto_names) = self.env.generic_protocol_bounds.get(tv).cloned() {
                         for proto_name in &proto_names {
                             if let Some(proto_def) = self.env.protocols.get(proto_name).cloned() {
-                                if let Some(method_sig) = proto_def.methods.iter().find(|m| m.name == *field) {
+                                if let Some(method_sig) = proto_def.methods.iter().find(|m| m.name == field) {
                                     // Resolve method return type: substitute Self -> T (the TypeVar)
                                     let ret = self.substitute_self_in_ty(&method_sig.ret, &obj_concrete);
                                     return ret;
@@ -109,10 +111,10 @@ impl Checker {
                     }
                 }
                 // UFCS: user-defined function obj.func(args) -> func(obj, args)
-                if self.env.functions.contains_key(&sym(field)) {
+                if self.env.functions.contains_key(&sym(&field)) {
                     let mut all_args = vec![obj_ty];
                     all_args.extend(arg_tys.iter().cloned());
-                    return self.check_named_call(field, &all_args);
+                    return self.check_named_call(&field, &all_args);
                 }
                 let ret = self.fresh_var();
                 self.constrain(obj_ty, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");

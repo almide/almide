@@ -154,13 +154,13 @@ fn parse_variant_type() {
 #[test]
 fn parse_if_expr() {
     let expr = parse_expr("if x then 1 else 2");
-    assert!(matches!(expr, Expr::If { .. }));
+    assert!(matches!(expr.kind, ExprKind::If { .. }));
 }
 
 #[test]
 fn parse_match_expr() {
     let expr = parse_expr("match x {\n  some(v) => v\n  none => 0\n}");
-    if let Expr::Match { arms, .. } = &expr {
+    if let ExprKind::Match { arms, .. } = &expr.kind {
         assert_eq!(arms.len(), 2);
         assert!(matches!(&arms[0].pattern, Pattern::Some { .. }));
         assert!(matches!(&arms[1].pattern, Pattern::None));
@@ -172,7 +172,7 @@ fn parse_match_expr() {
 #[test]
 fn parse_lambda() {
     let expr = parse_expr("(x) => x + 1");
-    if let Expr::Lambda { params, .. } = &expr {
+    if let ExprKind::Lambda { params, .. } = &expr.kind {
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "x");
     } else {
@@ -183,13 +183,13 @@ fn parse_lambda() {
 #[test]
 fn parse_pipe() {
     let expr = parse_expr("xs |> list.map((x) => x + 1)");
-    assert!(matches!(expr, Expr::Pipe { .. }));
+    assert!(matches!(expr.kind, ExprKind::Pipe { .. }));
 }
 
 #[test]
 fn parse_tuple_expr() {
     let expr = parse_expr("(1, 2, 3)");
-    if let Expr::Tuple { elements, .. } = &expr {
+    if let ExprKind::Tuple { elements, .. } = &expr.kind {
         assert_eq!(elements.len(), 3);
     } else {
         panic!("expected tuple, got {:?}", expr);
@@ -199,7 +199,7 @@ fn parse_tuple_expr() {
 #[test]
 fn parse_range_exclusive() {
     let expr = parse_expr("0..5");
-    if let Expr::Range { inclusive, .. } = &expr {
+    if let ExprKind::Range { inclusive, .. } = &expr.kind {
         assert!(!inclusive);
     } else {
         panic!("expected range");
@@ -209,7 +209,7 @@ fn parse_range_exclusive() {
 #[test]
 fn parse_range_inclusive() {
     let expr = parse_expr("1..=10");
-    if let Expr::Range { inclusive, .. } = &expr {
+    if let ExprKind::Range { inclusive, .. } = &expr.kind {
         assert!(inclusive);
     } else {
         panic!("expected inclusive range");
@@ -219,13 +219,13 @@ fn parse_range_inclusive() {
 #[test]
 fn parse_string_interpolation() {
     let expr = parse_expr("\"hello ${name}\"");
-    assert!(matches!(expr, Expr::InterpolatedString { .. }));
+    assert!(matches!(expr.kind, ExprKind::InterpolatedString { .. }));
 }
 
 #[test]
 fn parse_list_literal() {
     let expr = parse_expr("[1, 2, 3]");
-    if let Expr::List { elements, .. } = &expr {
+    if let ExprKind::List { elements, .. } = &expr.kind {
         assert_eq!(elements.len(), 3);
     } else {
         panic!("expected list");
@@ -235,7 +235,7 @@ fn parse_list_literal() {
 #[test]
 fn parse_record_literal() {
     let expr = parse_expr("{ name: \"Alice\", age: 30 }");
-    if let Expr::Record { fields, .. } = &expr {
+    if let ExprKind::Record { fields, .. } = &expr.kind {
         assert_eq!(fields.len(), 2);
         assert_eq!(fields[0].name, "name");
         assert_eq!(fields[1].name, "age");
@@ -255,7 +255,7 @@ fn parse_for_in() {
 #[test]
 fn parse_tuple_pattern() {
     let expr = parse_expr("match p {\n  (a, b) => a + b\n}");
-    if let Expr::Match { arms, .. } = &expr {
+    if let ExprKind::Match { arms, .. } = &expr.kind {
         if let Pattern::Tuple { elements } = &arms[0].pattern {
             assert_eq!(elements.len(), 2);
         } else {
@@ -269,7 +269,7 @@ fn parse_tuple_pattern() {
 #[test]
 fn parse_constructor_pattern() {
     let expr = parse_expr("match c {\n  Custom(r, g, b) => r\n  _ => 0\n}");
-    if let Expr::Match { arms, .. } = &expr {
+    if let ExprKind::Match { arms, .. } = &expr.kind {
         if let Pattern::Constructor { name, args } = &arms[0].pattern {
             assert_eq!(name, "Custom");
             assert_eq!(args.len(), 3);
@@ -300,7 +300,7 @@ fn parse_multiple_fns() {
 fn parse_binary_operators() {
     let expr = parse_expr("1 + 2 * 3");
     // Should parse as 1 + (2 * 3) due to precedence
-    if let Expr::Binary { op, .. } = &expr {
+    if let ExprKind::Binary { op, .. } = &expr.kind {
         assert_eq!(op, "+");
     } else {
         panic!("expected binary");
@@ -310,15 +310,15 @@ fn parse_binary_operators() {
 #[test]
 fn parse_unit_literal() {
     let expr = parse_expr("()");
-    assert!(matches!(expr, Expr::Unit { .. }));
+    assert!(matches!(expr.kind, ExprKind::Unit));
 }
 
 #[test]
 fn parse_ok_err() {
     let ok = parse_expr("ok(42)");
-    assert!(matches!(ok, Expr::Ok { .. }));
+    assert!(matches!(ok.kind, ExprKind::Ok { .. }));
     let err = parse_expr("err(\"bad\")");
-    assert!(matches!(err, Expr::Err { .. }));
+    assert!(matches!(err.kind, ExprKind::Err { .. }));
 }
 
 // ---- Multi-error recovery ----
@@ -461,7 +461,7 @@ fn parse_try_expr() {
 #[test]
 fn parse_todo_expr() {
     let expr = parse_expr("todo(\"not implemented\")");
-    assert!(matches!(expr, Expr::Todo { .. }));
+    assert!(matches!(expr.kind, ExprKind::Todo { .. }));
 }
 
 // ---- Expressions: member access ----
@@ -469,7 +469,7 @@ fn parse_todo_expr() {
 #[test]
 fn parse_member_access() {
     let expr = parse_expr("point.x");
-    assert!(matches!(expr, Expr::Member { .. }));
+    assert!(matches!(expr.kind, ExprKind::Member { .. }));
 }
 
 // ---- Expressions: index access ----
@@ -477,7 +477,7 @@ fn parse_member_access() {
 #[test]
 fn parse_index_access() {
     let expr = parse_expr("xs[0]");
-    assert!(matches!(expr, Expr::IndexAccess { .. }));
+    assert!(matches!(expr.kind, ExprKind::IndexAccess { .. }));
 }
 
 // ---- Expressions: method call ----
@@ -485,8 +485,8 @@ fn parse_index_access() {
 #[test]
 fn parse_method_call() {
     let expr = parse_expr("xs.len()");
-    if let Expr::Call { callee, .. } = &expr {
-        assert!(matches!(callee.as_ref(), Expr::Member { .. }));
+    if let ExprKind::Call { callee, .. } = &expr.kind {
+        assert!(matches!(callee.kind, ExprKind::Member { .. }));
     } else {
         panic!("expected call, got {:?}", expr);
     }
@@ -497,7 +497,7 @@ fn parse_method_call() {
 #[test]
 fn parse_spread_record() {
     let expr = parse_expr("{ ...base, x: 1 }");
-    assert!(matches!(expr, Expr::SpreadRecord { .. }));
+    assert!(matches!(expr.kind, ExprKind::SpreadRecord { .. }));
 }
 
 // ---- Expressions: unary negation ----
@@ -505,7 +505,7 @@ fn parse_spread_record() {
 #[test]
 fn parse_unary_negation() {
     let expr = parse_expr("-x");
-    if let Expr::Unary { op, .. } = &expr {
+    if let ExprKind::Unary { op, .. } = &expr.kind {
         assert_eq!(op, "-");
     } else {
         panic!("expected unary, got {:?}", expr);
@@ -517,7 +517,7 @@ fn parse_unary_negation() {
 #[test]
 fn parse_not_expr() {
     let expr = parse_expr("not true");
-    if let Expr::Unary { op, .. } = &expr {
+    if let ExprKind::Unary { op, .. } = &expr.kind {
         assert_eq!(op, "not");
     } else {
         panic!("expected unary not, got {:?}", expr);
@@ -529,7 +529,7 @@ fn parse_not_expr() {
 #[test]
 fn parse_empty_list() {
     let expr = parse_expr("[]");
-    if let Expr::List { elements, .. } = &expr {
+    if let ExprKind::List { elements, .. } = &expr.kind {
         assert!(elements.is_empty());
     } else {
         panic!("expected list");
@@ -541,7 +541,7 @@ fn parse_empty_list() {
 #[test]
 fn parse_none_literal() {
     let expr = parse_expr("none");
-    assert!(matches!(expr, Expr::None { .. }));
+    assert!(matches!(expr.kind, ExprKind::None));
 }
 
 // ---- Expressions: some literal ----
@@ -549,15 +549,15 @@ fn parse_none_literal() {
 #[test]
 fn parse_some_literal() {
     let expr = parse_expr("some(42)");
-    assert!(matches!(expr, Expr::Some { .. }));
+    assert!(matches!(expr.kind, ExprKind::Some { .. }));
 }
 
 // ---- Expressions: boolean literals ----
 
 #[test]
 fn parse_bool_literals() {
-    assert!(matches!(parse_expr("true"), Expr::Bool { value: true, .. }));
-    assert!(matches!(parse_expr("false"), Expr::Bool { value: false, .. }));
+    assert!(matches!(parse_expr("true").kind, ExprKind::Bool { value: true }));
+    assert!(matches!(parse_expr("false").kind, ExprKind::Bool { value: false }));
 }
 
 // ---- Expressions: string literal ----
@@ -565,7 +565,7 @@ fn parse_bool_literals() {
 #[test]
 fn parse_string_literal() {
     let expr = parse_expr("\"hello\"");
-    assert!(matches!(expr, Expr::String { .. }));
+    assert!(matches!(expr.kind, ExprKind::String { .. }));
 }
 
 // ---- Expressions: float literal ----
@@ -573,7 +573,7 @@ fn parse_string_literal() {
 #[test]
 fn parse_float_literal() {
     let expr = parse_expr("3.14");
-    assert!(matches!(expr, Expr::Float { .. }));
+    assert!(matches!(expr.kind, ExprKind::Float { .. }));
 }
 
 // ---- Expressions: call with no args ----
@@ -581,7 +581,7 @@ fn parse_float_literal() {
 #[test]
 fn parse_call_no_args() {
     let expr = parse_expr("f()");
-    if let Expr::Call { args, .. } = &expr {
+    if let ExprKind::Call { args, .. } = &expr.kind {
         assert!(args.is_empty());
     } else {
         panic!("expected call");
@@ -593,7 +593,7 @@ fn parse_call_no_args() {
 #[test]
 fn parse_nested_calls() {
     let expr = parse_expr("f(g(x))");
-    assert!(matches!(expr, Expr::Call { .. }));
+    assert!(matches!(expr.kind, ExprKind::Call { .. }));
 }
 
 // ---- Expressions: lambda with typed param ----
@@ -601,7 +601,7 @@ fn parse_nested_calls() {
 #[test]
 fn parse_typed_lambda() {
     let expr = parse_expr("(x: Int) => x + 1");
-    if let Expr::Lambda { params, .. } = &expr {
+    if let ExprKind::Lambda { params, .. } = &expr.kind {
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "x");
     } else {
@@ -614,7 +614,7 @@ fn parse_typed_lambda() {
 #[test]
 fn parse_wildcard_pattern() {
     let expr = parse_expr("match x {\n  _ => 0\n}");
-    if let Expr::Match { arms, .. } = &expr {
+    if let ExprKind::Match { arms, .. } = &expr.kind {
         // New parser may parse `_` as Ident instead of Wildcard
         assert!(matches!(&arms[0].pattern, Pattern::Wildcard | Pattern::Ident { .. }));
     } else {
@@ -627,7 +627,7 @@ fn parse_wildcard_pattern() {
 #[test]
 fn parse_literal_pattern() {
     let expr = parse_expr("match x {\n  0 => \"zero\"\n  _ => \"other\"\n}");
-    if let Expr::Match { arms, .. } = &expr {
+    if let ExprKind::Match { arms, .. } = &expr.kind {
         assert!(matches!(&arms[0].pattern, Pattern::Literal { .. }));
     } else {
         panic!("expected match");
@@ -639,7 +639,7 @@ fn parse_literal_pattern() {
 #[test]
 fn parse_ok_err_pattern() {
     let expr = parse_expr("match r {\n  ok(v) => v\n  err(e) => 0\n}");
-    if let Expr::Match { arms, .. } = &expr {
+    if let ExprKind::Match { arms, .. } = &expr.kind {
         assert!(matches!(&arms[0].pattern, Pattern::Ok { .. }));
         assert!(matches!(&arms[1].pattern, Pattern::Err { .. }));
     } else {
@@ -652,9 +652,9 @@ fn parse_ok_err_pattern() {
 #[test]
 fn parse_precedence_mul_over_add() {
     let expr = parse_expr("1 + 2 * 3");
-    if let Expr::Binary { op, right, .. } = &expr {
+    if let ExprKind::Binary { op, right, .. } = &expr.kind {
         assert_eq!(op, "+");
-        assert!(matches!(right.as_ref(), Expr::Binary { op, .. } if op == "*"));
+        assert!(matches!(&right.kind, ExprKind::Binary { op, .. } if op == "*"));
     } else {
         panic!("expected binary");
     }
@@ -663,7 +663,7 @@ fn parse_precedence_mul_over_add() {
 #[test]
 fn parse_precedence_comparison() {
     let expr = parse_expr("a + b > c + d");
-    if let Expr::Binary { op, .. } = &expr {
+    if let ExprKind::Binary { op, .. } = &expr.kind {
         assert_eq!(op, ">");
     } else {
         panic!("expected comparison");
@@ -674,7 +674,7 @@ fn parse_precedence_comparison() {
 fn parse_precedence_and_or() {
     let expr = parse_expr("a and b or c");
     // or has lower precedence than and
-    if let Expr::Binary { op, .. } = &expr {
+    if let ExprKind::Binary { op, .. } = &expr.kind {
         assert_eq!(op, "or");
     } else {
         panic!("expected or");
@@ -686,7 +686,7 @@ fn parse_precedence_and_or() {
 #[test]
 fn parse_chained_pipe() {
     let expr = parse_expr("xs |> f() |> g()");
-    assert!(matches!(expr, Expr::Pipe { .. }));
+    assert!(matches!(expr.kind, ExprKind::Pipe { .. }));
 }
 
 // ---- Import with alias ----
@@ -879,7 +879,7 @@ fn error_recovery_stmt_error_nodes() {
     let mut parser = Parser::new(tokens).with_file("test.almd");
     let prog = parser.parse().expect("should parse");
     if let Decl::Fn { body: Some(body), .. } = &prog.decls[0] {
-        if let Expr::Block { stmts, .. } = body {
+        if let ExprKind::Block { stmts, .. } = &body.kind {
             let has_error = stmts.iter().any(|s| matches!(s, Stmt::Error { .. }));
             assert!(has_error, "block should contain Stmt::Error node, got: {:?}", stmts.iter().map(|s| std::mem::discriminant(s)).collect::<Vec<_>>());
         } else {

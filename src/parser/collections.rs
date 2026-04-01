@@ -1,6 +1,7 @@
 /// Parser methods for brace expressions (records, blocks, maps) and list expressions.
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::ast::ExprKind;
 use super::Parser;
 
 impl Parser {
@@ -12,10 +13,9 @@ impl Parser {
         self.skip_newlines_into_stmts(&mut initial_comments);
         if self.check(TokenType::RBrace) {
             self.advance();
-            return Ok(Expr::Block {
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Block {
                 stmts: Vec::new(), expr: None,
-                id: self.next_id(), span, resolved_type: None,
-            });
+            }));
         }
         // Spread record: { ...base, field: value }
         if self.check(TokenType::DotDotDot) {
@@ -47,10 +47,9 @@ impl Parser {
         }
         self.skip_newlines();
         self.expect_closing(TokenType::RBrace, open.line, open.col, "spread record")?;
-        Ok(Expr::SpreadRecord {
+        Ok(Expr::new(self.next_id(), span, ExprKind::SpreadRecord {
             base: Box::new(base), fields,
-            id: self.next_id(), span, resolved_type: None,
-        })
+        }))
     }
 
     fn parse_record_literal(&mut self, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {
@@ -66,14 +65,14 @@ impl Parser {
             } else {
                 fields.push(FieldInit {
                     name: field_name.clone(),
-                    value: Expr::Ident { name: field_name, id: self.next_id(), span: None, resolved_type: None },
+                    value: Expr::new(self.next_id(), None, ExprKind::Ident { name: field_name }),
                 });
             }
             self.skip_newlines();
             if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
         }
         self.expect_closing(TokenType::RBrace, open.line, open.col, "record literal")?;
-        Ok(Expr::Record { name: None, fields, id: self.next_id(), span, resolved_type: None })
+        Ok(Expr::new(self.next_id(), span, ExprKind::Record { name: None, fields }))
     }
 
     fn parse_block_body(&mut self, initial_comments: Vec<Stmt>, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {
@@ -109,10 +108,9 @@ impl Parser {
             }
         }
         self.expect_closing(TokenType::RBrace, open.line, open.col, "block")?;
-        Ok(Expr::Block {
+        Ok(Expr::new(self.next_id(), span, ExprKind::Block {
             stmts, expr: final_expr,
-            id: self.next_id(), span, resolved_type: None,
-        })
+        }))
     }
 
     pub(crate) fn parse_braceless_block(&mut self) -> Result<Expr, String> {
@@ -151,10 +149,9 @@ impl Parser {
             }
         }
 
-        Ok(Expr::Block {
+        Ok(Expr::new(self.next_id(), span, ExprKind::Block {
             stmts, expr: final_expr,
-            id: self.next_id(), span, resolved_type: None,
-        })
+        }))
     }
 
     fn is_at_braceless_block_end(&self) -> bool {
@@ -176,12 +173,12 @@ impl Parser {
 
         if self.check(TokenType::RBracket) {
             self.advance();
-            return Ok(Expr::List { elements: vec![], id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::List { elements: vec![] }));
         }
         if self.check(TokenType::Colon) {
             self.advance();
             self.expect_closing(TokenType::RBracket, open.line, open.col, "empty map")?;
-            return Ok(Expr::EmptyMap { id: self.next_id(), span, resolved_type: None });
+            return Ok(Expr::new(self.next_id(), span, ExprKind::EmptyMap));
         }
 
         let first = self.parse_expr()?;
@@ -208,7 +205,7 @@ impl Parser {
             }
         }
         self.expect_closing(TokenType::RBracket, open.line, open.col, "list literal")?;
-        Ok(Expr::List { elements, id: self.next_id(), span, resolved_type: None })
+        Ok(Expr::new(self.next_id(), span, ExprKind::List { elements }))
     }
 
     fn parse_map_literal(&mut self, first_key: Expr, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {
@@ -237,6 +234,6 @@ impl Parser {
             }
         }
         self.expect_closing(TokenType::RBracket, open.line, open.col, "map literal")?;
-        Ok(Expr::MapLiteral { entries, id: self.next_id(), span, resolved_type: None })
+        Ok(Expr::new(self.next_id(), span, ExprKind::MapLiteral { entries }))
     }
 }

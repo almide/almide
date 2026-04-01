@@ -12,11 +12,11 @@ use super::types::resolve_type_expr;
 
 pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
     let ty = ctx.expr_ty(expr);
-    let span = expr.span();
+    let span = expr.span;
 
-    match expr {
+    match &expr.kind {
         // ── Literals ──
-        ast::Expr::Int { raw, .. } => {
+        ast::ExprKind::Int { raw, .. } => {
             let value = if raw.starts_with("0x") || raw.starts_with("0X") {
                 i64::from_str_radix(&raw[2..].replace('_', ""), 16).unwrap_or(0)
             } else if raw.starts_with("0b") || raw.starts_with("0B") {
@@ -28,13 +28,13 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             };
             ctx.mk(IrExprKind::LitInt { value }, ty, span)
         }
-        ast::Expr::Float { value, .. } => ctx.mk(IrExprKind::LitFloat { value: *value }, ty, span),
-        ast::Expr::String { value, .. } => ctx.mk(IrExprKind::LitStr { value: value.clone() }, ty, span),
-        ast::Expr::Bool { value, .. } => ctx.mk(IrExprKind::LitBool { value: *value }, ty, span),
-        ast::Expr::Unit { .. } => ctx.mk(IrExprKind::Unit, Ty::Unit, span),
+        ast::ExprKind::Float { value, .. } => ctx.mk(IrExprKind::LitFloat { value: *value }, ty, span),
+        ast::ExprKind::String { value, .. } => ctx.mk(IrExprKind::LitStr { value: value.clone() }, ty, span),
+        ast::ExprKind::Bool { value, .. } => ctx.mk(IrExprKind::LitBool { value: *value }, ty, span),
+        ast::ExprKind::Unit => ctx.mk(IrExprKind::Unit, Ty::Unit, span),
 
         // ── Variables ──
-        ast::Expr::Ident { name, .. } => {
+        ast::ExprKind::Ident { name, .. } => {
             if let Some(var_id) = ctx.lookup_var(name) {
                 ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
             } else if ctx.env.functions.contains_key(&sym(name)) {
@@ -44,7 +44,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 ctx.mk(IrExprKind::Var { id: VarId(0) }, ty, span) // error recovery
             }
         }
-        ast::Expr::TypeName { name, .. } => {
+        ast::ExprKind::TypeName { name, .. } => {
             // Variant constructor used as value (e.g., Red)
             if ctx.env.constructors.contains_key(&sym(name)) {
                 ctx.mk(IrExprKind::Call {
@@ -59,33 +59,33 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
 
         // ── Collections ──
-        ast::Expr::List { elements, .. } => {
+        ast::ExprKind::List { elements, .. } => {
             let elems = elements.iter().map(|e| lower_expr(ctx, e)).collect();
             ctx.mk(IrExprKind::List { elements: elems }, ty, span)
         }
-        ast::Expr::MapLiteral { entries, .. } => {
+        ast::ExprKind::MapLiteral { entries, .. } => {
             let pairs = entries.iter().map(|(k, v)| (lower_expr(ctx, k), lower_expr(ctx, v))).collect();
             ctx.mk(IrExprKind::MapLiteral { entries: pairs }, ty, span)
         }
-        ast::Expr::EmptyMap { .. } => ctx.mk(IrExprKind::EmptyMap, ty, span),
-        ast::Expr::Tuple { elements, .. } => {
+        ast::ExprKind::EmptyMap => ctx.mk(IrExprKind::EmptyMap, ty, span),
+        ast::ExprKind::Tuple { elements, .. } => {
             let elems = elements.iter().map(|e| lower_expr(ctx, e)).collect();
             ctx.mk(IrExprKind::Tuple { elements: elems }, ty, span)
         }
 
         // ── Records ──
-        ast::Expr::Record { name, fields, .. } => {
+        ast::ExprKind::Record { name, fields, .. } => {
             let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
             ctx.mk(IrExprKind::Record { name: *name, fields: fs }, ty, span)
         }
-        ast::Expr::SpreadRecord { base, fields, .. } => {
+        ast::ExprKind::SpreadRecord { base, fields, .. } => {
             let ir_base = lower_expr(ctx, base);
             let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
             ctx.mk(IrExprKind::SpreadRecord { base: Box::new(ir_base), fields: fs }, ty, span)
         }
 
         // ── Operators ──
-        ast::Expr::Binary { op, left, right, .. } => {
+        ast::ExprKind::Binary { op, left, right, .. } => {
             let l = lower_expr(ctx, left);
             let r = lower_expr(ctx, right);
             // Resolve operand types: if expr.ty is Unknown, try VarTable lookup
@@ -136,7 +136,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             };
             ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)
         }
-        ast::Expr::Unary { op, operand, .. } => {
+        ast::ExprKind::Unary { op, operand, .. } => {
             let o = lower_expr(ctx, operand);
             let un_op = match (op.as_str(), &o.ty) {
                 ("not", _) => UnOp::Not,
@@ -147,13 +147,13 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
 
         // ── Control flow ──
-        ast::Expr::If { cond, then, else_, .. } => {
+        ast::ExprKind::If { cond, then, else_, .. } => {
             let c = lower_expr(ctx, cond);
             let t = lower_expr(ctx, then);
             let e = lower_expr(ctx, else_);
             ctx.mk(IrExprKind::If { cond: Box::new(c), then: Box::new(t), else_: Box::new(e) }, ty, span)
         }
-        ast::Expr::Match { subject, arms, .. } => {
+        ast::ExprKind::Match { subject, arms, .. } => {
             let s = lower_expr(ctx, subject);
             // Resolve subject type: if the expression type disagrees with VarTable
             // (e.g., expr_types says Int but VarTable says Result[Int, String]),
@@ -182,7 +182,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             }).collect();
             ctx.mk(IrExprKind::Match { subject: Box::new(s), arms: ir_arms }, ty, span)
         }
-        ast::Expr::Block { stmts, expr, .. } => {
+        ast::ExprKind::Block { stmts, expr, .. } => {
             ctx.push_scope();
             let ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
             let ir_expr = expr.as_ref().map(|e| Box::new(lower_expr(ctx, e)));
@@ -190,13 +190,13 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_expr }, ty, span)
         }
 
-        ast::Expr::Fan { exprs, .. } => {
+        ast::ExprKind::Fan { exprs, .. } => {
             let ir_exprs: Vec<IrExpr> = exprs.iter().map(|e| lower_expr(ctx, e)).collect();
             ctx.mk(IrExprKind::Fan { exprs: ir_exprs }, ty, span)
         }
 
         // ── Loops ──
-        ast::Expr::ForIn { var, var_tuple, iterable, body, .. } => {
+        ast::ExprKind::ForIn { var, var_tuple, iterable, body, .. } => {
             let ir_iter = lower_expr(ctx, iterable);
             ctx.push_scope();
             let elem_ty = match &ir_iter.ty {
@@ -219,33 +219,33 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             ctx.pop_scope();
             ctx.mk(IrExprKind::ForIn { var: var_id, var_tuple: tuple_vars, iterable: Box::new(ir_iter), body: ir_body }, ty, span)
         }
-        ast::Expr::While { cond, body, .. } => {
+        ast::ExprKind::While { cond, body, .. } => {
             let ir_cond = lower_expr(ctx, cond);
             ctx.push_scope();
             let ir_body: Vec<IrStmt> = body.iter().map(|s| lower_stmt(ctx, s)).collect();
             ctx.pop_scope();
             ctx.mk(IrExprKind::While { cond: Box::new(ir_cond), body: ir_body }, ty, span)
         }
-        ast::Expr::Break { .. } => ctx.mk(IrExprKind::Break, Ty::Unit, span),
-        ast::Expr::Continue { .. } => ctx.mk(IrExprKind::Continue, Ty::Unit, span),
-        ast::Expr::Range { start, end, inclusive, .. } => {
+        ast::ExprKind::Break => ctx.mk(IrExprKind::Break, Ty::Unit, span),
+        ast::ExprKind::Continue => ctx.mk(IrExprKind::Continue, Ty::Unit, span),
+        ast::ExprKind::Range { start, end, inclusive, .. } => {
             let s = lower_expr(ctx, start);
             let e = lower_expr(ctx, end);
             ctx.mk(IrExprKind::Range { start: Box::new(s), end: Box::new(e), inclusive: *inclusive }, ty, span)
         }
 
         // ── Calls ──
-        ast::Expr::Call { callee, args, named_args, type_args, .. } => {
+        ast::ExprKind::Call { callee, args, named_args, type_args, .. } => {
             lower_call(ctx, callee, args, named_args, type_args.as_ref(), ty, span)
         }
 
         // ── Pipe: desugar `a |> f(b)` → `f(a, b)` ──
-        ast::Expr::Pipe { left, right, .. } => {
+        ast::ExprKind::Pipe { left, right, .. } => {
             lower_pipe(ctx, left, right, ty, span)
         }
 
         // ── Compose: desugar `f >> g` → `(x) => g(f(x))` ──
-        ast::Expr::Compose { left, right, .. } => {
+        ast::ExprKind::Compose { left, right, .. } => {
             let ir_left = lower_expr(ctx, left);
             let ir_right = lower_expr(ctx, right);
             // Extract types: left is Fn[A] -> B, right is Fn[B] -> C
@@ -284,7 +284,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
 
         // ── Lambda ──
-        ast::Expr::Lambda { params, body, .. } => {
+        ast::ExprKind::Lambda { params, body, .. } => {
             ctx.push_scope();
             // Get lambda type from checker to resolve inferred param types
             let lambda_param_tys: Vec<Ty> = match &ty {
@@ -305,15 +305,15 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
 
         // ── Access ──
-        ast::Expr::Member { object, field, .. } => {
+        ast::ExprKind::Member { object, field, .. } => {
             let obj = lower_expr(ctx, object);
             ctx.mk(IrExprKind::Member { object: Box::new(obj), field: *field }, ty, span)
         }
-        ast::Expr::TupleIndex { object, index, .. } => {
+        ast::ExprKind::TupleIndex { object, index, .. } => {
             let obj = lower_expr(ctx, object);
             ctx.mk(IrExprKind::TupleIndex { object: Box::new(obj), index: *index }, ty, span)
         }
-        ast::Expr::IndexAccess { object, index, .. } => {
+        ast::ExprKind::IndexAccess { object, index, .. } => {
             let obj = lower_expr(ctx, object);
             let idx = lower_expr(ctx, index);
             if obj.ty.is_map() {
@@ -324,7 +324,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
 
         // ── String interpolation ──
-        ast::Expr::InterpolatedString { parts, .. } => {
+        ast::ExprKind::InterpolatedString { parts, .. } => {
             let ir_parts = parts.iter().map(|part| match part {
                 ast::StringPart::Lit { value } => IrStringPart::Lit { value: value.clone() },
                 ast::StringPart::Expr { expr } => {
@@ -343,57 +343,57 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
 
         // ── Result / Option ──
-        ast::Expr::Some { expr, .. } => {
+        ast::ExprKind::Some { expr, .. } => {
             let inner = lower_expr(ctx, expr);
             ctx.mk(IrExprKind::OptionSome { expr: Box::new(inner) }, ty, span)
         }
-        ast::Expr::Ok { expr, .. } => {
+        ast::ExprKind::Ok { expr, .. } => {
             let inner = lower_expr(ctx, expr);
             ctx.mk(IrExprKind::ResultOk { expr: Box::new(inner) }, ty, span)
         }
-        ast::Expr::Err { expr, .. } => {
+        ast::ExprKind::Err { expr, .. } => {
             let inner = lower_expr(ctx, expr);
             ctx.mk(IrExprKind::ResultErr { expr: Box::new(inner) }, ty, span)
         }
-        ast::Expr::None { .. } => ctx.mk(IrExprKind::OptionNone, ty, span),
-        ast::Expr::Try { expr, .. } => {
+        ast::ExprKind::None => ctx.mk(IrExprKind::OptionNone, ty, span),
+        ast::ExprKind::Try { expr, .. } => {
             let inner = lower_expr(ctx, expr);
             ctx.mk(IrExprKind::Try { expr: Box::new(inner) }, ty, span)
         }
-        ast::Expr::Await { expr, .. } => {
+        ast::ExprKind::Await { expr, .. } => {
             let inner = lower_expr(ctx, expr);
             ctx.mk(IrExprKind::Await { expr: Box::new(inner) }, ty, span)
         }
 
         // expr! — keep as Unwrap (distinct from auto-? Try)
-        ast::Expr::Unwrap { expr, .. } => {
+        ast::ExprKind::Unwrap { expr, .. } => {
             let inner = lower_expr(ctx, expr);
             ctx.mk(IrExprKind::Unwrap { expr: Box::new(inner) }, ty, span)
         }
         // expr ?? fallback — lower to match: ok(v)/some(v) → v, else → fallback
-        ast::Expr::UnwrapOr { expr, fallback, .. } => {
+        ast::ExprKind::UnwrapOr { expr, fallback, .. } => {
             let inner = lower_expr(ctx, expr);
             let fb = lower_expr(ctx, fallback);
             // For now, use a dedicated UnwrapOr node if it exists, otherwise fallback to Call
             ctx.mk(IrExprKind::UnwrapOr { expr: Box::new(inner), fallback: Box::new(fb) }, ty, span)
         }
         // expr? — lower to ToOption
-        ast::Expr::ToOption { expr, .. } => {
+        ast::ExprKind::ToOption { expr, .. } => {
             let inner = lower_expr(ctx, expr);
             ctx.mk(IrExprKind::ToOption { expr: Box::new(inner) }, ty, span)
         }
         // expr?.field — keep as IR node for target-specific rendering
-        ast::Expr::OptionalChain { expr: inner_expr, field, .. } => {
+        ast::ExprKind::OptionalChain { expr: inner_expr, field, .. } => {
             let inner = lower_expr(ctx, inner_expr);
             ctx.mk(IrExprKind::OptionalChain { expr: Box::new(inner), field: *field }, ty, span)
         }
 
         // ── Misc ──
-        ast::Expr::Paren { expr, .. } => lower_expr(ctx, expr),
-        ast::Expr::Hole { .. } => ctx.mk(IrExprKind::Hole, ty, span),
-        ast::Expr::Todo { message, .. } => ctx.mk(IrExprKind::Todo { message: message.clone() }, ty, span),
-        ast::Expr::Error { .. } => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
-        ast::Expr::Placeholder { .. } => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
+        ast::ExprKind::Paren { expr, .. } => lower_expr(ctx, expr),
+        ast::ExprKind::Hole => ctx.mk(IrExprKind::Hole, ty, span),
+        ast::ExprKind::Todo { message, .. } => ctx.mk(IrExprKind::Todo { message: message.clone() }, ty, span),
+        ast::ExprKind::Error => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
+        ast::ExprKind::Placeholder => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
     }
 }
 
@@ -401,9 +401,9 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 /// so the pipe targets the inner Call. e.g. `xs |> list.find(p) ?? fallback`
 /// becomes `list.find(xs, p) ?? fallback` rather than treating `??` as part of the pipe target.
 fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> IrExpr {
-    match right {
+    match &right.kind {
         // Transparent postfix: pipe into inner, then wrap with the operator
-        ast::Expr::UnwrapOr { expr: inner, fallback, .. } => {
+        ast::ExprKind::UnwrapOr { expr: inner, fallback, .. } => {
             // The inner pipe result is Option[ty] or Result[ty, _]; codegen needs the wrapper
             // type on the piped expression to generate correct match (Some/None vs Ok/Err).
             // Use the checker's resolved type for the inner expression.
@@ -419,20 +419,20 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             let ir_fallback = lower_expr(ctx, fallback);
             ctx.mk(IrExprKind::UnwrapOr { expr: Box::new(piped), fallback: Box::new(ir_fallback) }, ty, span)
         }
-        ast::Expr::Unwrap { expr: inner, .. } => {
+        ast::ExprKind::Unwrap { expr: inner, .. } => {
             let inner_ty = match &ty {
                 _ => Ty::result(ty.clone(), Ty::String),
             };
             let piped = lower_pipe(ctx, left, inner, inner_ty, span.clone());
             ctx.mk(IrExprKind::Unwrap { expr: Box::new(piped) }, ty, span)
         }
-        ast::Expr::Try { expr: inner, .. } => {
+        ast::ExprKind::Try { expr: inner, .. } => {
             let piped = lower_pipe(ctx, left, inner, ty.clone(), span.clone());
             ctx.mk(IrExprKind::ToOption { expr: Box::new(piped) }, ty, span)
         }
 
         // Direct pipe targets
-        ast::Expr::Call { callee, args, type_args, .. } => {
+        ast::ExprKind::Call { callee, args, type_args, .. } => {
             let ir_left = lower_expr(ctx, left);
             let mut all_args = vec![ir_left];
             all_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
@@ -445,7 +445,7 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             } else { ty };
             ctx.mk(IrExprKind::Call { target, args: all_args, type_args: ta }, resolved_ty, span)
         }
-        ast::Expr::Ident { .. } | ast::Expr::Member { .. } => {
+        ast::ExprKind::Ident { .. } | ast::ExprKind::Member { .. } => {
             let ir_left = lower_expr(ctx, left);
             let target = lower_call_target(ctx, right);
             ctx.mk(IrExprKind::Call { target, args: vec![ir_left], type_args: vec![] }, ty, span)

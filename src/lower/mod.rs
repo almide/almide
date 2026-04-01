@@ -1,16 +1,16 @@
 /// AST + Types → Typed IR lowering pass.
 ///
-/// Input:    Program + expr_types + TypeEnv
+/// Input:    Program (with expr.ty populated) + TypeEnv
 /// Output:   IrProgram
 /// Owns:     desugaring (pipe→call, UFCS, interpolation, operators→BinOp), VarId assignment
 /// Does NOT: type inference (trusts checker), codegen decisions (trusts codegen)
 ///
 /// Principles:
 /// 1. **Checker is the source of truth** — every expression's type comes from
-///    expr_types (populated by the constraint-based checker). Lower never
+///    expr.ty (populated by the constraint-based checker). Lower never
 ///    guesses types or falls back to Unknown.
 /// 2. **No type inference** — lower is a mechanical translation, not a type
-///    checker. If a type is missing from expr_types, that's a checker bug.
+///    checker. If expr.ty is None, that's a checker bug.
 /// 3. **Desugar once** — pipes, UFCS, string interpolation, operators are
 ///    desugared here and nowhere else.
 /// 4. **VarId for everything** — all variable references become VarId lookups.
@@ -38,24 +38,18 @@ use derive::generate_auto_derives;
 pub struct LowerCtx<'a> {
     pub var_table: VarTable,
     scopes: Vec<HashMap<Sym, VarId>>,
-    expr_types: &'a HashMap<crate::ast::ExprId, Ty>,
     env: &'a TypeEnv,
-    /// Default argument expressions for functions: fn_name → vec of defaults (index-aligned with params, None for required)
     fn_defaults: HashMap<Sym, Vec<Option<ast::Expr>>>,
-    /// Type names that derive each convention: convention_name → set of type names
     type_conventions: HashMap<Sym, std::collections::HashSet<Sym>>,
-    /// Protocol bounds for generic type parameters in scope: TypeVar name → list of protocol names
-    /// Set during function lowering for protocol-bounded generics.
     protocol_bounds: HashMap<Sym, Vec<Sym>>,
     lambda_id_counter: u32,
 }
 
 impl<'a> LowerCtx<'a> {
-    pub fn new(expr_types: &'a HashMap<crate::ast::ExprId, Ty>, env: &'a TypeEnv) -> Self {
+    pub fn new(env: &'a TypeEnv) -> Self {
         LowerCtx {
             var_table: VarTable::new(),
             scopes: vec![HashMap::new()],
-            expr_types,
             env,
             fn_defaults: HashMap::new(),
             type_conventions: HashMap::new(),
@@ -118,15 +112,15 @@ impl<'a> LowerCtx<'a> {
         None
     }
 
-    /// Get the type of an expression from the checker's expr_types.
+    /// Get the type of an expression from its AST-embedded `ty` field.
     /// Falls back to field resolution for Member expressions and UFCS call
     /// return types that the checker couldn't determine (e.g., chained method
     /// calls on lambda parameters before constraint solving).
     pub(super) fn expr_ty(&self, expr: &ast::Expr) -> Ty {
-        let ty = self.expr_types.get(&expr.id()).cloned().unwrap_or(Ty::Unknown);
+        let ty = expr.ty.clone().unwrap_or(Ty::Unknown);
         if ty == Ty::Unknown {
             // Resolve Member field types from the parent's known record type
-            if let ast::Expr::Member { object, field, .. } = expr {
+            if let ast::ExprKind::Member { object, field, .. } = &expr.kind {
                 let parent_ty = self.expr_ty(object);
                 let resolved = self.env.resolve_named(&parent_ty);
                 match &resolved {
@@ -143,8 +137,8 @@ impl<'a> LowerCtx<'a> {
         // on lambda parameters (constraints solve the receiver as callable rather than
         // as a collection method). Re-derive the type from the stdlib signature.
         if ty == Ty::Unknown || matches!(&ty, Ty::Fn { .. }) {
-            if let ast::Expr::Call { callee, .. } = expr {
-                if let ast::Expr::Member { object, field, .. } = callee.as_ref() {
+            if let ast::ExprKind::Call { callee, .. } = &expr.kind {
+                if let ast::ExprKind::Member { object, field, .. } = &callee.kind {
                     let obj_ty = self.expr_ty(object);
                     if let Some(module) = crate::check::calls::builtin_module_for_type(&obj_ty) {
                         let key = format!("{}.{}", module, field);
@@ -240,12 +234,12 @@ impl<'a> LowerCtx<'a> {
 
 // ── Public API ──────────────────────────────────────────────────
 
-pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprId, Ty>, env: &TypeEnv) -> IrProgram {
-    lower_program_with_prefix(prog, expr_types, env, None)
+pub fn lower_program(prog: &ast::Program, env: &TypeEnv) -> IrProgram {
+    lower_program_with_prefix(prog, env, None)
 }
 
-fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprId, Ty>, env: &TypeEnv, module_prefix: Option<&str>) -> IrProgram {
-    let mut ctx = LowerCtx::new(expr_types, env);
+fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, module_prefix: Option<&str>) -> IrProgram {
+    let mut ctx = LowerCtx::new(env);
 
     // Collect type conventions (deriving Eq, Repr, etc.)
     for decl in &prog.decls {
@@ -280,7 +274,7 @@ fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<crate::as
             }
             // Extern fn without body: include in IR with Hole body (codegen emits `use` import)
             ast::Decl::Fn { name, params, body: None, effect, r#async, span, generics, extern_attrs, visibility, .. } if !extern_attrs.is_empty() => {
-                let hole_body = ast::Expr::Hole { id: ast::ExprId(0), span: span.clone(), resolved_type: None };
+                let hole_body = ast::Expr::new(ast::ExprId(0), span.clone(), ast::ExprKind::Hole);
                 let f = lower_fn(&mut ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, visibility, module_prefix);
                 functions.push(f);
             }
@@ -452,13 +446,10 @@ fn resolve_inference_typevars(program: &mut IrProgram) {
 pub fn lower_module(
     name: &str,
     prog: &ast::Program,
-    expr_types: &HashMap<crate::ast::ExprId, Ty>,
     env: &TypeEnv,
     versioned_name: Option<String>,
 ) -> IrModule {
-    let mut ir_prog = lower_program_with_prefix(prog, expr_types, env, Some(name));
-    // Rename top_let variables with module prefix so codegen emits globally unique names.
-    // Functions reference these via VarId, so renaming in the VarTable propagates everywhere.
+    let mut ir_prog = lower_program_with_prefix(prog, env, Some(name));
     let mod_ident = versioned_name.as_deref().unwrap_or(name).replace('.', "_");
     for tl in &ir_prog.top_lets {
         let old_name = ir_prog.var_table.get(tl.var).name;
@@ -468,10 +459,10 @@ pub fn lower_module(
     IrModule {
         name: sym(name),
         versioned_name: versioned_name.map(|v| sym(&v)),
-        type_decls: ir_prog.type_decls,
-        functions: ir_prog.functions,
-        top_lets: ir_prog.top_lets,
-        var_table: ir_prog.var_table,
+        type_decls: std::mem::take(&mut ir_prog.type_decls),
+        functions: std::mem::take(&mut ir_prog.functions),
+        top_lets: std::mem::take(&mut ir_prog.top_lets),
+        var_table: std::mem::take(&mut ir_prog.var_table),
     }
 }
 

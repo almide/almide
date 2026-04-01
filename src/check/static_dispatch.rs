@@ -1,6 +1,7 @@
 /// Static member resolution — fan.*, codec.*, module/alias dispatch, TypeName.method.
 
 use crate::ast;
+use crate::ast::ExprKind;
 use crate::intern::sym;
 use crate::types::{Ty, TypeConstructorId};
 use super::types::resolve_ty;
@@ -49,7 +50,7 @@ impl Checker {
     /// Returns Some(Ty) if resolved, None to fall through to UFCS/convention dispatch.
     pub(super) fn resolve_static_member(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
         // Detect dot-chain submodule access and emit helpful error
-        if let Some(dotted) = self.resolve_dotted_module(object) {
+        if let Some(dotted) = self.resolve_dotted_module(&object.kind) {
             let key = format!("{}.{}", dotted, field);
             if self.env.functions.contains_key(&sym(&key)) {
                 // Extract the last segment of the dotted path for the import suggestion
@@ -64,8 +65,8 @@ impl Checker {
             }
         }
 
-        let module_name = match object {
-            ast::Expr::Ident { name, .. } => Some(name.as_str()),
+        let module_name = match &object.kind {
+            ExprKind::Ident { name, .. } => Some(name.as_str()),
             _ => None,
         };
 
@@ -191,7 +192,7 @@ impl Checker {
         }
 
         // TypeName.method() — direct convention call
-        if let ast::Expr::TypeName { name: type_name, .. } = object {
+        if let ExprKind::TypeName { name: type_name, .. } = &object.kind {
             let key = format!("{}.{}", type_name, field);
             if self.env.functions.contains_key(&sym(&key)) {
                 return Some(self.check_named_call(&key, arg_tys));
@@ -204,10 +205,10 @@ impl Checker {
     /// Resolve a nested Member chain to a dotted module path.
     /// e.g. Member(Member(Ident("bindgen"), "bindings"), "python") → "bindgen.bindings.python"
     /// Returns None if the chain doesn't start with a known module name.
-    fn resolve_dotted_module(&self, expr: &ast::Expr) -> Option<String> {
-        match expr {
-            ast::Expr::Member { object, field, .. } => {
-                if let ast::Expr::Ident { name: root, .. } = object.as_ref() {
+    fn resolve_dotted_module(&self, kind: &ExprKind) -> Option<String> {
+        match kind {
+            ExprKind::Member { object, field, .. } => {
+                if let ExprKind::Ident { name: root, .. } = &object.kind {
                     let resolved_root = self.env.import_table.resolve(root)
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| root.to_string());
@@ -220,7 +221,7 @@ impl Checker {
                         return Some(candidate);
                     }
                 }
-                if let Some(parent) = self.resolve_dotted_module(object) {
+                if let Some(parent) = self.resolve_dotted_module(&object.kind) {
                     let candidate = format!("{}.{}", parent, field);
                     if self.env.import_table.accessible.contains(&sym(&candidate)) {
                         return Some(candidate);

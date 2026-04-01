@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::ast::ExprKind;
 use crate::intern::{Sym, sym};
 use super::Parser;
 
@@ -21,13 +22,10 @@ impl Parser {
                 self.advance();
                 self.skip_newlines();
                 let right = self.parse_or()?;
-                left = Expr::Compose {
+                left = Expr::new(self.next_id(), span, ExprKind::Compose {
                     left: Box::new(left),
                     right: Box::new(right),
-                    id: self.next_id(),
-                    span,
-                    resolved_type: None,
-                };
+                });
             } else if self.check(TokenType::PipeArrow) {
                 let span = Some(self.current_span());
                 self.advance();
@@ -49,22 +47,16 @@ impl Parser {
                         }
                     }
                     self.expect(TokenType::RBrace)?;
-                    left = Expr::Match {
+                    left = Expr::new(self.next_id(), span, ExprKind::Match {
                         subject: Box::new(left),
                         arms,
-                        id: self.next_id(),
-                        span,
-                        resolved_type: None,
-                    };
+                    });
                 } else {
                     let right = self.parse_or()?;
-                    left = Expr::Pipe {
+                    left = Expr::new(self.next_id(), span, ExprKind::Pipe {
                         left: Box::new(left),
                         right: Box::new(right),
-                        id: self.next_id(),
-                        span,
-                        resolved_type: None,
-                    };
+                    });
                 }
             } else {
                 break;
@@ -88,14 +80,11 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             let right = self.parse_and()?;
-            left = Expr::Binary {
+            left = Expr::new(self.next_id(), span, ExprKind::Binary {
                 op: sym("or"),
                 left: Box::new(left),
                 right: Box::new(right),
-                id: self.next_id(),
-                span,
-                resolved_type: None,
-            };
+            });
         }
         Ok(left)
     }
@@ -115,14 +104,11 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             let right = self.parse_comparison()?;
-            left = Expr::Binary {
+            left = Expr::new(self.next_id(), span, ExprKind::Binary {
                 op: sym("and"),
                 left: Box::new(left),
                 right: Box::new(right),
-                id: self.next_id(),
-                span,
-                resolved_type: None,
-            };
+            });
         }
         Ok(left)
     }
@@ -141,10 +127,9 @@ impl Parser {
         self.advance();
         self.skip_newlines();
         let right = self.parse_range()?;
-        let result = Expr::Binary {
+        let result = Expr::new(self.next_id(), span, ExprKind::Binary {
             op, left: Box::new(left), right: Box::new(right),
-            id: self.next_id(), span, resolved_type: None,
-        };
+        });
         // Reject chained comparisons: a < b < c
         if self.check(TokenType::EqEq) || self.check(TokenType::BangEq)
             || self.check(TokenType::LAngle) || self.check(TokenType::RAngle)
@@ -166,20 +151,18 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             let right = self.parse_add_sub()?;
-            return Ok(Expr::Range {
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Range {
                 start: Box::new(left), end: Box::new(right), inclusive: false,
-                id: self.next_id(), span, resolved_type: None,
-            });
+            }));
         }
         if self.check(TokenType::DotDotEq) {
             let span = Some(self.current_span());
             self.advance();
             self.skip_newlines();
             let right = self.parse_add_sub()?;
-            return Ok(Expr::Range {
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Range {
                 start: Box::new(left), end: Box::new(right), inclusive: true,
-                id: self.next_id(), span, resolved_type: None,
-            });
+            }));
         }
         Ok(left)
     }
@@ -195,10 +178,9 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             let right = self.parse_mul_div()?;
-            left = Expr::Binary {
+            left = Expr::new(self.next_id(), span, ExprKind::Binary {
                 op, left: Box::new(left), right: Box::new(right),
-                id: self.next_id(), span, resolved_type: None,
-            };
+            });
         }
         Ok(left)
     }
@@ -214,10 +196,9 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             let right = self.parse_power()?;
-            left = Expr::Binary {
+            left = Expr::new(self.next_id(), span, ExprKind::Binary {
                 op, left: Box::new(left), right: Box::new(right),
-                id: self.next_id(), span, resolved_type: None,
-            };
+            });
         }
         Ok(left)
     }
@@ -230,10 +211,9 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             let right = self.parse_power()?;
-            left = Expr::Binary {
+            left = Expr::new(self.next_id(), span, ExprKind::Binary {
                 op: sym("^"), left: Box::new(left), right: Box::new(right),
-                id: self.next_id(), span, resolved_type: None,
-            };
+            });
         }
         Ok(left)
     }
@@ -243,19 +223,17 @@ impl Parser {
             let span = Some(self.current_span());
             self.advance();
             let operand = self.parse_unary()?;
-            return Ok(Expr::Unary {
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Unary {
                 op: sym("-"), operand: Box::new(operand),
-                id: self.next_id(), span, resolved_type: None,
-            });
+            }));
         }
         if self.check(TokenType::Not) {
             let span = Some(self.current_span());
             self.advance();
             let operand = self.parse_unary()?;
-            return Ok(Expr::Unary {
+            return Ok(Expr::new(self.next_id(), span, ExprKind::Unary {
                 op: sym("not"), operand: Box::new(operand),
-                id: self.next_id(), span, resolved_type: None,
-            });
+            }));
         }
         if self.check(TokenType::Bang) {
             let tok = self.current();
@@ -279,16 +257,14 @@ impl Parser {
                     let index = idx_str.parse::<usize>().map_err(|_| {
                         format!("invalid tuple index '{}' at line {:?}", idx_str, span)
                     })?;
-                    expr = Expr::TupleIndex {
+                    expr = Expr::new(self.next_id(), span, ExprKind::TupleIndex {
                         object: Box::new(expr), index,
-                        id: self.next_id(), span, resolved_type: None,
-                    };
+                    });
                 } else {
                     let field = self.expect_any_name()?;
-                    expr = Expr::Member {
+                    expr = Expr::new(self.next_id(), span, ExprKind::Member {
                         object: Box::new(expr), field,
-                        id: self.next_id(), span, resolved_type: None,
-                    };
+                    });
                 }
             } else if self.check(TokenType::LBracket) && self.peek_type_args_call() {
                 let span = Some(self.current_span());
@@ -296,65 +272,58 @@ impl Parser {
                 self.expect(TokenType::LParen)?;
                 let (args, named_args) = self.parse_call_args()?;
                 self.expect(TokenType::RParen)?;
-                expr = Expr::Call {
+                expr = Expr::new(self.next_id(), span, ExprKind::Call {
                     callee: Box::new(expr), args, named_args, type_args: Some(ta),
-                    id: self.next_id(), span, resolved_type: None,
-                };
+                });
             } else if self.check(TokenType::LBracket) && !self.newline_before_current() {
                 let span = Some(self.current_span());
                 let open = self.current().clone();
                 self.advance();
                 let index = self.parse_expr()?;
                 self.expect_closing(TokenType::RBracket, open.line, open.col, "index access")?;
-                expr = Expr::IndexAccess {
+                expr = Expr::new(self.next_id(), span, ExprKind::IndexAccess {
                     object: Box::new(expr), index: Box::new(index),
-                    id: self.next_id(), span, resolved_type: None,
-                };
+                });
             } else if self.check(TokenType::LParen) && !self.newline_before_current() {
                 let span = Some(self.current_span());
                 let open = self.current().clone();
                 self.advance();
                 let (args, named_args) = self.parse_call_args()?;
                 self.expect_closing(TokenType::RParen, open.line, open.col, "function call")?;
-                expr = Expr::Call {
+                expr = Expr::new(self.next_id(), span, ExprKind::Call {
                     callee: Box::new(expr), args, named_args, type_args: None,
-                    id: self.next_id(), span, resolved_type: None,
-                };
+                });
             } else if self.check(TokenType::Bang) && !self.newline_before_current() {
                 // expr! — unwrap with error propagation
                 let span = Some(self.current_span());
                 self.advance();
-                expr = Expr::Unwrap {
+                expr = Expr::new(self.next_id(), span, ExprKind::Unwrap {
                     expr: Box::new(expr),
-                    id: self.next_id(), span, resolved_type: None,
-                };
+                });
             } else if self.check(TokenType::QuestionQuestion) {
                 // expr ?? fallback — unwrap with default
                 let span = Some(self.current_span());
                 self.advance();
                 self.skip_newlines();
                 let fallback = self.parse_unary()?;
-                expr = Expr::UnwrapOr {
+                expr = Expr::new(self.next_id(), span, ExprKind::UnwrapOr {
                     expr: Box::new(expr), fallback: Box::new(fallback),
-                    id: self.next_id(), span, resolved_type: None,
-                };
+                });
             } else if self.check(TokenType::QuestionDot) && !self.newline_before_current() {
                 // expr?.field — optional chaining
                 let span = Some(self.current_span());
                 self.advance();
                 let field = self.expect_any_name()?;
-                expr = Expr::OptionalChain {
+                expr = Expr::new(self.next_id(), span, ExprKind::OptionalChain {
                     expr: Box::new(expr), field,
-                    id: self.next_id(), span, resolved_type: None,
-                };
+                });
             } else if self.check(TokenType::Question) && !self.newline_before_current() {
                 // expr? — convert to Option
                 let span = Some(self.current_span());
                 self.advance();
-                expr = Expr::ToOption {
+                expr = Expr::new(self.next_id(), span, ExprKind::ToOption {
                     expr: Box::new(expr),
-                    id: self.next_id(), span, resolved_type: None,
-                };
+                });
             } else {
                 break;
             }
@@ -389,7 +358,7 @@ impl Parser {
         if self.check(TokenType::Underscore) {
             let span = Some(self.current_span());
             self.advance();
-            args.push(Expr::Placeholder { id: self.next_id(), span, resolved_type: None });
+            args.push(Expr::new(self.next_id(), span, ExprKind::Placeholder));
             return Ok(());
         }
         // Named argument: `name: expr`

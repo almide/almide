@@ -1,5 +1,6 @@
 use almide::lexer::Lexer;
 use almide::parser::Parser;
+use almide::canonicalize;
 use almide::check::Checker;
 use almide::diagnostic::Level;
 
@@ -7,10 +8,10 @@ fn check(input: &str) -> Vec<(Level, String)> {
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let mut prog = parser.parse().expect("parse failed");
-    let diags = {
-        let mut checker = Checker::new();
-        checker.check_program(&mut prog)
-    };
+    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let mut checker = Checker::from_env(canon.env);
+    checker.diagnostics = canon.diagnostics;
+    let diags = checker.infer_program(&mut prog);
     diags.into_iter().map(|d| (d.level, d.message)).collect()
 }
 
@@ -18,10 +19,10 @@ fn check_with_hints(input: &str) -> Vec<(Level, String, String)> {
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let mut prog = parser.parse().expect("parse failed");
-    let diags = {
-        let mut checker = Checker::new();
-        checker.check_program(&mut prog)
-    };
+    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let mut checker = Checker::from_env(canon.env);
+    checker.diagnostics = canon.diagnostics;
+    let diags = checker.infer_program(&mut prog);
     diags.into_iter().map(|d| (d.level, d.message, d.hint)).collect()
 }
 

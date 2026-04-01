@@ -234,12 +234,14 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
     let mut ir_program = None;
     let mut module_irs = std::collections::HashMap::new();
     if !no_check {
-        let mut checker = check::Checker::new();
+        let canon = canonicalize::canonicalize_program(
+            &program,
+            resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
+        );
+        let mut checker = check::Checker::from_env(canon.env);
         checker.set_source(file, &source_text);
-        for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
-            checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
-        }
-        let diagnostics = checker.check_program(&mut program);
+        checker.diagnostics = canon.diagnostics;
+        let diagnostics = checker.infer_program(&mut program);
         // Combine parse errors + checker errors
         let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();
         let checker_errors: Vec<_> = diagnostics.iter()
@@ -258,7 +260,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         }
         // Lower to IR only if no parse errors (partial AST can't produce valid IR)
         if !has_parse_errors {
-            let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+            let ir = almide::lower::lower_program(&program, &checker.env);
             // Emit unused variable warnings
             let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
             for d in &unused_warnings {
@@ -269,7 +271,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         // Lower user modules to IR (skip TOML-defined stdlib — they use generated codegen)
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
-            let mod_types = checker.check_module_bodies(mod_prog, name);
+            checker.infer_module(mod_prog, name);
             let versioned = pkg_id.as_ref().map(|pid| {
                 let base = pid.mod_name();
                 if let Some(suffix) = name.strip_prefix(&pid.name) {
@@ -283,8 +285,8 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
-            let mod_ir_program = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, versioned);
+            let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env);
             checker.env.import_table = saved_table;
             module_irs.insert(name.clone(), mod_ir_program);
             if let Some(ref mut ir) = ir_program {
