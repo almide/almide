@@ -496,7 +496,7 @@ fn collect_assigned_vars_stmt(stmt: &IrStmt, assigned: &mut HashSet<u32>) {
 
 /// Collect warnings for unused variables.
 /// Skips: `_` prefixed names, function parameters, pattern bindings (span is None).
-pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<crate::diagnostic::Diagnostic> {
+pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<almide_base::Diagnostic> {
     // Collect all parameter VarIds to exclude them
     let mut param_ids: HashSet<u32> = HashSet::new();
     for func in &program.functions {
@@ -522,7 +522,7 @@ pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<crate
         if info.use_count > 0 { continue; }
 
         let span = match info.span { Some(s) => s, None => continue };
-        let diag = crate::diagnostic::Diagnostic::warning(
+        let diag = almide_base::Diagnostic::warning(
             format!("unused variable '{}'", info.name),
             format!("Prefix with '_' to suppress: _{}", info.name),
             "",

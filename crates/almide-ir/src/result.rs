@@ -25,7 +25,7 @@ pub fn is_ir_result_expr(e: &IrExpr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Ty;
+    use almide_lang::types::Ty;
 
     fn mk(kind: IrExprKind) -> IrExpr {
         IrExpr { kind, ty: Ty::Unknown, span: None }

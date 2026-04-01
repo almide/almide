@@ -17,40 +17,9 @@ use std::collections::{HashMap, HashSet};
 use crate::ir::*;
 use super::pass::{NanoPass, PassResult, Target};
 
-/// Effect categories — mapped from stdlib module usage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Effect {
-    /// File system operations (fs, path)
-    IO,
-    /// Network operations (http, url)
-    Net,
-    /// Environment and process (env, process)
-    Env,
-    /// Time and datetime (time, datetime)
-    Time,
-    /// Random number generation (math.random)
-    Rand,
-    /// Concurrency (fan)
-    Fan,
-    /// Logging (log)
-    Log,
-}
+// Re-export from almide-ir
+pub use crate::ir::effect::{Effect, FunctionEffects, EffectMap};
 
-impl std::fmt::Display for Effect {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Effect::IO => write!(f, "IO"),
-            Effect::Net => write!(f, "Net"),
-            Effect::Env => write!(f, "Env"),
-            Effect::Time => write!(f, "Time"),
-            Effect::Rand => write!(f, "Rand"),
-            Effect::Fan => write!(f, "Fan"),
-            Effect::Log => write!(f, "Log"),
-        }
-    }
-}
-
-/// Maps stdlib module names to their effect category.
 fn module_to_effect(module: &str) -> Option<Effect> {
     match module {
         "fs" | "path" => Some(Effect::IO),
@@ -63,47 +32,13 @@ fn module_to_effect(module: &str) -> Option<Effect> {
     }
 }
 
-/// Maps runtime function names to their effect category.
-/// Runtime names follow pattern: almide_rt_{module}_{func}
 fn runtime_name_to_effect(name: &str) -> Option<Effect> {
     if !name.starts_with("almide_rt_") {
         return None;
     }
     let rest = &name["almide_rt_".len()..];
-    // Extract module name (everything before the last _func part)
-    // e.g., "fs_read_text" → "fs", "http_get" → "http"
     let module = rest.split('_').next()?;
     module_to_effect(module)
-}
-
-/// Result of effect inference for a single function.
-#[derive(Debug, Clone, Default)]
-pub struct FunctionEffects {
-    /// Direct effects from stdlib calls in this function's body
-    pub direct: HashSet<Effect>,
-    /// Transitive effects (direct + effects from called functions)
-    pub transitive: HashSet<Effect>,
-    /// Whether this is an effect function
-    pub is_effect: bool,
-}
-
-/// Effect analysis results for the entire program.
-#[derive(Debug, Clone, Default)]
-pub struct EffectMap {
-    /// Per-function effect analysis
-    pub functions: HashMap<String, FunctionEffects>,
-}
-
-impl EffectMap {
-    /// Format effects for display (sorted for deterministic output)
-    pub fn format_effects(effects: &HashSet<Effect>) -> String {
-        if effects.is_empty() {
-            return "{}".to_string();
-        }
-        let mut sorted: Vec<_> = effects.iter().collect();
-        sorted.sort();
-        format!("{{{}}}", sorted.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", "))
-    }
 }
 
 #[derive(Debug)]
