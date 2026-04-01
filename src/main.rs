@@ -1,23 +1,11 @@
-// Re-export library modules (shared with playground WASM crate)
-pub use almide::ast;
-pub use almide::codegen;
-pub use almide::diagnostic;
-pub use almide::fmt;
-pub use almide::lexer;
-pub use almide::parser;
-pub use almide::stdlib;
-pub use almide::types;
-pub use almide::intern;
-pub use almide::import_table;
-pub use almide::canonicalize;
-
-// CLI-only modules
-mod check;
 mod cli;
 
-mod project;
-mod project_fetch;
-mod resolve;
+// Bring library modules into binary crate scope so cli/ submodules can use `crate::*`.
+pub use almide::{
+    ast, canonicalize, check, codegen, diagnostic, fmt,
+    import_table, intern, ir, lexer, lower, mono, optimize,
+    parser, project, project_fetch, resolve, stdlib, types,
+};
 
 use std::process::Command;
 use clap::{Parser, Subcommand};
