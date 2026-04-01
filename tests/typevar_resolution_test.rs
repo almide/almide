@@ -17,7 +17,7 @@ fn lower(input: &str) -> almide::ir::IrProgram {
     let mut checker = Checker::from_env(canon.env);
     checker.diagnostics = canon.diagnostics;
     checker.infer_program(&mut prog);
-    almide::lower::lower_program(&prog, &checker.env)
+    almide::lower::lower_program(&prog, &checker.env, &checker.type_map)
 }
 
 fn has_inference_typevar(ty: &Ty) -> bool {

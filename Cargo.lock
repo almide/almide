@@ -87,6 +87,8 @@ name = "almide-lang"
 version = "0.10.5"
 dependencies = [
  "almide-base",
+ "almide-syntax",
+ "almide-types",
  "serde",
  "serde_json",
 ]
@@ -101,12 +103,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-syntax"
+version = "0.10.5"
+dependencies = [
+ "almide-base",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "almide-tools"
 version = "0.10.5"
 dependencies = [
  "almide-base",
  "almide-ir",
  "almide-lang",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "almide-types"
+version = "0.10.5"
+dependencies = [
+ "almide-base",
  "serde",
  "serde_json",
 ]

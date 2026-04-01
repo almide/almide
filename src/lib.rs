@@ -34,10 +34,10 @@ pub use almide_tools::fmt;
 pub use almide_tools::interface;
 pub use almide_tools::almdi;
 
-// ── Types (composite: almide-lang types + frontend TypeEnv) ──
+// ── Types (composite: almide-lang types + frontend TypeEnv + TypeMap) ──
 pub mod types {
     pub use almide_lang::types::*;
-    pub use almide_frontend::types::TypeEnv;
+    pub use almide_frontend::types::{TypeEnv, TypeMap};
 }
 
 // ── CLI-only modules (remain in main crate) ──

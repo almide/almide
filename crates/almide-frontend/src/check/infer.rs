@@ -1,5 +1,5 @@
 /// Expression type inference — Pass 1 of the constraint-based checker.
-/// Walks the AST, assigns Ty to each expression, collects constraints.
+/// Walks the AST, populates TypeMap (ExprId→Ty), collects constraints.
 
 use almide_lang::ast;
 use almide_lang::ast::ExprKind;
@@ -14,7 +14,7 @@ impl Checker {
             self.current_span = Some(span);
         }
         let ity = self.infer_expr_inner(expr);
-        expr.ty = Some(ity.clone());
+        self.type_map.insert(expr.id, ity.clone());
         ity
     }
 
@@ -86,7 +86,7 @@ impl Checker {
                 }
                 else {
                     let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {
-                        let ty = f.value.ty.as_ref().map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
+                        let ty = self.type_map.get(&f.value.id).map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
                         (sym(&f.name), ty)
                     }).collect();
                     Ty::Record { fields: field_tys }
@@ -527,7 +527,7 @@ impl Checker {
                 // Annotate the inner expression with its resolved type so the lowering
                 // can construct the correct IR type (e.g., Result[List[T], List[E]] for
                 // result.collect rather than hardcoding Result[T, String]).
-                inner.ty = Some(inner_ty.clone());
+                self.type_map.insert(inner.id, inner_ty.clone());
                 match &inner_ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                     Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
@@ -750,7 +750,7 @@ impl Checker {
                         cases.iter()
                             .find(|c| c.name == *name)
                             .and_then(|c| match &c.payload {
-                                VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t, _)| (*n, t.clone())).collect()),
+                                VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t)| (*n, t.clone())).collect()),
                                 _ => None,
                             })
                             .unwrap_or_default()

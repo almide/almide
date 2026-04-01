@@ -150,7 +150,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     }
 
     // Lower to IR
-    let mut ir_program = almide::lower::lower_program(&program, &checker.env);
+    let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
 
     // Lower user modules to IR
     for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
@@ -168,7 +168,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
         let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, versioned);
+        let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
         checker.env.import_table = saved_table;
         ir_program.modules.push(mod_ir_module);
     }
@@ -231,7 +231,7 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
     }
 
     // Lower to IR
-    let mut ir_program = almide::lower::lower_program(&program, &checker.env);
+    let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
     for (name, mod_prog, pkg_id, _) in &resolved.modules {
         if almide::stdlib::is_stdlib_module(name) { continue; }
         checker.infer_module(&mut mod_prog.clone(), name);
@@ -240,7 +240,7 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
         let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mod_ir_module = almide::lower::lower_module(name, &mod_prog, &checker.env, versioned);
+        let mod_ir_module = almide::lower::lower_module(name, &mod_prog, &checker.env, &checker.type_map, versioned);
         checker.env.import_table = saved_table;
         ir_program.modules.push(mod_ir_module);
     }

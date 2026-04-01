@@ -31,7 +31,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
 
     // Lower to IR for unused variable analysis (only if no parse errors)
     let unused_warnings = if parse_errors.is_empty() {
-        let ir = almide::lower::lower_program(&program, &checker.env);
+        let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
         almide::ir::collect_unused_var_warnings(&ir, file)
     } else {
         Vec::new()
@@ -74,7 +74,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             if !proj.permissions.is_empty() {
-                let ir = almide::lower::lower_program(&program, &checker.env);
+                let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
                 if let Err(_) = super::check_permissions(&ir, &proj.permissions) {
                     std::process::exit(1);
                 }
@@ -124,7 +124,7 @@ pub fn cmd_check_json(file: &str) {
 
     // Lower to IR for unused variable warnings
     if parse_errors.is_empty() {
-        let ir = almide::lower::lower_program(&program, &checker.env);
+        let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
         let unused = almide::ir::collect_unused_var_warnings(&ir, file);
         for d in &unused {
             println!("{}", d.to_json());
@@ -181,7 +181,7 @@ pub fn cmd_check_effects(file: &str) {
     }
 
     // Lower to IR
-    let ir = almide::lower::lower_program(&program, &checker.env);
+    let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
 
     // Run effect inference
     use almide::codegen::pass_effect_inference::{EffectInferencePass, EffectMap};

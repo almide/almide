@@ -13,7 +13,7 @@ fn lower(input: &str) -> IrProgram {
     let mut checker = Checker::from_env(canon.env);
     checker.diagnostics = canon.diagnostics;
     checker.infer_program(&mut prog);
-    lower_program(&prog, &checker.env)
+    lower_program(&prog, &checker.env, &checker.type_map)
 }
 
 // ---- Basic function lowering ----

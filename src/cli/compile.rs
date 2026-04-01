@@ -141,7 +141,7 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
     }
 
     // Lower to IR
-    let ir = almide::lower::lower_program(&program, &checker.env);
+    let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
 
     // Extract interface
     let iface = almide::interface::extract(&ir, &module_name, Some(&source_text));

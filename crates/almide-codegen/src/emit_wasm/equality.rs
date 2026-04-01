@@ -125,7 +125,7 @@ impl FuncCompiler<'_> {
                 let has_pointers = cases.iter().any(|c| {
                     match &c.payload {
                         almide_lang::types::VariantPayload::Tuple(ts) => ts.iter().any(|t| !self.is_value_type(t)),
-                        almide_lang::types::VariantPayload::Record(fs) => fs.iter().any(|(_, t, _)| !self.is_value_type(t)),
+                        almide_lang::types::VariantPayload::Record(fs) => fs.iter().any(|(_, t)| !self.is_value_type(t)),
                         _ => false,
                     }
                 });
@@ -140,7 +140,7 @@ impl FuncCompiler<'_> {
                                 almide_lang::types::VariantPayload::Tuple(ts) =>
                                     ts.iter().enumerate().map(|(j, t)| (format!("_{}", j), t.clone())).collect(),
                                 almide_lang::types::VariantPayload::Record(fs) =>
-                                    fs.iter().map(|(n, t, _)| (n.to_string(), t.clone())).collect(),
+                                    fs.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
                                 _ => vec![],
                             };
                             super::VariantCase { name: c.name.to_string(), tag: i as u32, fields }
@@ -152,7 +152,7 @@ impl FuncCompiler<'_> {
                         .map(|c| match &c.payload {
                             almide_lang::types::VariantPayload::Unit => 0,
                             almide_lang::types::VariantPayload::Tuple(ts) => ts.iter().map(|t| values::byte_size(t)).sum(),
-                            almide_lang::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t, _)| values::byte_size(t)).sum(),
+                            almide_lang::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t)| values::byte_size(t)).sum(),
                         })
                         .max().unwrap_or(0);
                     let size = 4 + max_payload;

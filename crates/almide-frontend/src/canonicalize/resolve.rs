@@ -73,7 +73,7 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
                 ast::VariantCase::Record { name, fields } => VariantCase {
                     name: sym(name),
                     payload: VariantPayload::Record(
-                        fields.iter().map(|f| (sym(&f.name), resolve_type_expr(&f.ty, known_types), f.default.clone())).collect(),
+                        fields.iter().map(|f| (sym(&f.name), resolve_type_expr(&f.ty, known_types))).collect(),
                     ),
                 },
             }).collect();

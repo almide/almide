@@ -163,7 +163,7 @@ fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, sub
         if let Some(case) = cases.iter().find(|c| c.name == ctor_name) {
             return match &case.payload {
                 crate::types::VariantPayload::Tuple(tys) => tys.clone(),
-                crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t, _)| t.clone()).collect(),
+                crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t)| t.clone()).collect(),
                 crate::types::VariantPayload::Unit => vec![],
             };
         }
@@ -172,7 +172,7 @@ fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, sub
     if let Some((_, case)) = ctx.env.constructors.get(&sym(ctor_name)) {
         match &case.payload {
             crate::types::VariantPayload::Tuple(tys) => tys.clone(),
-            crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t, _)| t.clone()).collect(),
+            crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t)| t.clone()).collect(),
             crate::types::VariantPayload::Unit => vec![],
         }
     } else {
@@ -185,7 +185,7 @@ fn resolve_record_field_ty(ctx: &LowerCtx, record_name: &str, field_name: &str) 
         ctx.resolve_field_ty(type_def, field_name)
     } else if let Some((_, case)) = ctx.env.constructors.get(&sym(record_name)) {
         if let crate::types::VariantPayload::Record(fs) = &case.payload {
-            fs.iter().find(|(n, _, _)| n == field_name).map(|(_, t, _)| t.clone()).unwrap_or(Ty::Unknown)
+            fs.iter().find(|(n, _)| n == field_name).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown)
         } else { Ty::Unknown }
     } else { Ty::Unknown }
 }

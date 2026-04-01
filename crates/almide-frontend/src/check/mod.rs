@@ -1,14 +1,14 @@
-/// Almide type checker: AST → Typed AST (constraint-based type inference).
+/// Almide type checker: AST → TypeMap (constraint-based type inference).
 ///
 /// Input:    &mut Program (with canonicalized TypeEnv)
-/// Output:   Types embedded directly on AST Expr nodes (expr.ty), diagnostics
+/// Output:   TypeMap (ExprId→Ty), diagnostics
 /// Owns:     type inference (constraint collect → solve), exhaustiveness, type errors
 /// Does NOT: auto-unwrap (codegen's job), code generation, optimization
 ///
 /// Architecture:
-///   Pass 1: Walk AST, assign fresh type variables to expr.ty, collect constraints (infer.rs)
+///   Pass 1: Walk AST, assign fresh type variables to TypeMap, collect constraints (infer.rs)
 ///   Pass 2: Solve constraints via unification (solving.rs)
-///   Pass 3: Walk AST, resolve TypeVars in expr.ty in-place (mod.rs)
+///   Pass 3: Resolve TypeVars in TypeMap values (mod.rs)
 ///
 /// Split into:
 ///   mod.rs          — Checker struct, public API, declaration checking
@@ -30,7 +30,7 @@ mod diagnostics;
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
 use crate::import_table::{ImportTable, build_import_table};
-use almide_base::intern::{sym, Sym};
+use almide_base::intern::sym;
 use crate::types::{Ty, TypeEnv};
 use types::{TyVarId, Constraint, UnionFind, resolve_ty};
 
@@ -40,6 +40,7 @@ pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Int
 
 pub struct Checker {
     pub env: TypeEnv,
+    pub type_map: crate::types::TypeMap,
     pub diagnostics: Vec<Diagnostic>,
     pub source_file: Option<String>,
     pub source_text: Option<String>,
@@ -52,7 +53,8 @@ impl Checker {
     /// Create a Checker from a pre-populated TypeEnv (from canonicalize_program).
     pub fn from_env(env: TypeEnv) -> Self {
         Checker {
-            env, diagnostics: Vec::new(),
+            env, type_map: crate::types::TypeMap::new(),
+            diagnostics: Vec::new(),
             source_file: None, source_text: None,
             current_span: None,
             constraints: Vec::new(), uf: UnionFind::new(),
@@ -114,7 +116,7 @@ impl Checker {
     pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
-        resolve_expr_types_in_program(program, &self.uf);
+        resolve_type_map(&mut self.type_map, &self.uf);
         // Unused import warnings
         for imp in &program.imports {
             let (path, alias, span) = match imp {
@@ -138,13 +140,14 @@ impl Checker {
         std::mem::take(&mut self.diagnostics)
     }
 
-    /// Type-check a module's declarations. Sets expr.ty on all expressions.
+    /// Type-check a module's declarations. Populates type_map for all expressions.
     /// Temporarily registers unprefixed declarations for intra-module resolution,
     /// then cleans them up.
     pub fn infer_module(&mut self, prog: &mut ast::Program, module_name: &str) {
-        // Isolate module's constraint solving from the main program
+        // Isolate module's constraint solving and type map from the main program
         let saved_constraints = std::mem::take(&mut self.constraints);
         let saved_uf = std::mem::replace(&mut self.uf, UnionFind::new());
+        self.type_map.clear();
 
         // Build module's import table
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -163,7 +166,7 @@ impl Checker {
         // Infer + solve + resolve
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
-        resolve_expr_types_in_program(prog, &self.uf);
+        resolve_type_map(&mut self.type_map, &self.uf);
 
         // Restore
         self.constraints = saved_constraints;
@@ -400,21 +403,9 @@ impl Checker {
     }
 }
 
-/// Resolve inferred TypeVars on all AST Expr nodes after constraint solving.
-fn resolve_expr_types_in_program(program: &mut ast::Program, uf: &UnionFind) {
-    ast::visit_exprs_mut(program, &mut |expr| {
-        if let Some(ref ty) = expr.ty {
-            expr.ty = Some(resolve_ty(ty, uf));
-        } else {
-            expr.ty = Some(match &expr.kind {
-                ast::ExprKind::Int { .. } => Ty::Int,
-                ast::ExprKind::Float { .. } => Ty::Float,
-                ast::ExprKind::String { .. } | ast::ExprKind::InterpolatedString { .. } => Ty::String,
-                ast::ExprKind::Bool { .. } => Ty::Bool,
-                ast::ExprKind::Unit => Ty::Unit,
-                ast::ExprKind::None => Ty::option(Ty::Unknown),
-                _ => Ty::Unknown,
-            });
-        }
-    });
+/// Resolve inferred TypeVars in the type map after constraint solving.
+fn resolve_type_map(type_map: &mut crate::types::TypeMap, uf: &UnionFind) {
+    for ty in type_map.values_mut() {
+        *ty = resolve_ty(ty, uf);
+    }
 }

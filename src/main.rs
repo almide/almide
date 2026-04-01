@@ -248,7 +248,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         }
         // Lower to IR only if no parse errors (partial AST can't produce valid IR)
         if !has_parse_errors {
-            let ir = almide::lower::lower_program(&program, &checker.env);
+            let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
             // Emit unused variable warnings
             let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
             for d in &unused_warnings {
@@ -273,8 +273,8 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, versioned);
-            let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env);
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
             checker.env.import_table = saved_table;
             module_irs.insert(name.clone(), mod_ir_program);
             if let Some(ref mut ir) = ir_program {

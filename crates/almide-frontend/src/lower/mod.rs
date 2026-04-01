@@ -1,16 +1,16 @@
-/// AST + Types → Typed IR lowering pass.
+/// AST + TypeMap → Typed IR lowering pass.
 ///
-/// Input:    Program (with expr.ty populated) + TypeEnv
+/// Input:    Program + TypeEnv + TypeMap (ExprId→Ty, populated by checker)
 /// Output:   IrProgram
 /// Owns:     desugaring (pipe→call, UFCS, interpolation, operators→BinOp), VarId assignment
 /// Does NOT: type inference (trusts checker), codegen decisions (trusts codegen)
 ///
 /// Principles:
 /// 1. **Checker is the source of truth** — every expression's type comes from
-///    expr.ty (populated by the constraint-based checker). Lower never
+///    the TypeMap (populated by the constraint-based checker). Lower never
 ///    guesses types or falls back to Unknown.
 /// 2. **No type inference** — lower is a mechanical translation, not a type
-///    checker. If expr.ty is None, that's a checker bug.
+///    checker. If an ExprId is missing from the TypeMap, that's a checker bug.
 /// 3. **Desugar once** — pipes, UFCS, string interpolation, operators are
 ///    desugared here and nowhere else.
 /// 4. **VarId for everything** — all variable references become VarId lookups.
@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use almide_lang::ast;
 use almide_base::intern::{Sym, sym};
 use almide_ir::*;
-use crate::types::{Ty, TypeEnv};
+use crate::types::{Ty, TypeEnv, TypeMap};
 
 mod expressions;
 mod calls;
@@ -39,6 +39,7 @@ pub struct LowerCtx<'a> {
     pub var_table: VarTable,
     scopes: Vec<HashMap<Sym, VarId>>,
     env: &'a TypeEnv,
+    type_map: &'a TypeMap,
     fn_defaults: HashMap<Sym, Vec<Option<ast::Expr>>>,
     type_conventions: HashMap<Sym, std::collections::HashSet<Sym>>,
     protocol_bounds: HashMap<Sym, Vec<Sym>>,
@@ -46,11 +47,12 @@ pub struct LowerCtx<'a> {
 }
 
 impl<'a> LowerCtx<'a> {
-    pub fn new(env: &'a TypeEnv) -> Self {
+    pub fn new(env: &'a TypeEnv, type_map: &'a TypeMap) -> Self {
         LowerCtx {
             var_table: VarTable::new(),
             scopes: vec![HashMap::new()],
             env,
+            type_map,
             fn_defaults: HashMap::new(),
             type_conventions: HashMap::new(),
             protocol_bounds: HashMap::new(),
@@ -112,12 +114,22 @@ impl<'a> LowerCtx<'a> {
         None
     }
 
-    /// Get the type of an expression from its AST-embedded `ty` field.
-    /// Falls back to field resolution for Member expressions and UFCS call
-    /// return types that the checker couldn't determine (e.g., chained method
-    /// calls on lambda parameters before constraint solving).
+    /// Get the type of an expression from the TypeMap.
+    /// Falls back to literal defaults, field resolution for Member expressions,
+    /// and UFCS call return types that the checker couldn't determine.
     pub(super) fn expr_ty(&self, expr: &ast::Expr) -> Ty {
-        let ty = expr.ty.clone().unwrap_or(Ty::Unknown);
+        let ty = self.type_map.get(&expr.id).cloned().unwrap_or_else(|| {
+            // Fallback for expressions not in the type map (e.g., pattern literals)
+            match &expr.kind {
+                ast::ExprKind::Int { .. } => Ty::Int,
+                ast::ExprKind::Float { .. } => Ty::Float,
+                ast::ExprKind::String { .. } | ast::ExprKind::InterpolatedString { .. } => Ty::String,
+                ast::ExprKind::Bool { .. } => Ty::Bool,
+                ast::ExprKind::Unit => Ty::Unit,
+                ast::ExprKind::None => Ty::option(Ty::Unknown),
+                _ => Ty::Unknown,
+            }
+        });
         if ty == Ty::Unknown {
             // Resolve Member field types from the parent's known record type
             if let ast::ExprKind::Member { object, field, .. } = &expr.kind {
@@ -234,12 +246,12 @@ impl<'a> LowerCtx<'a> {
 
 // ── Public API ──────────────────────────────────────────────────
 
-pub fn lower_program(prog: &ast::Program, env: &TypeEnv) -> IrProgram {
-    lower_program_with_prefix(prog, env, None)
+pub fn lower_program(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap) -> IrProgram {
+    lower_program_with_prefix(prog, env, type_map, None)
 }
 
-fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, module_prefix: Option<&str>) -> IrProgram {
-    let mut ctx = LowerCtx::new(env);
+fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap, module_prefix: Option<&str>) -> IrProgram {
+    let mut ctx = LowerCtx::new(env, type_map);
 
     // Collect type conventions (deriving Eq, Repr, etc.)
     for decl in &prog.decls {
@@ -457,9 +469,10 @@ pub fn lower_module(
     name: &str,
     prog: &ast::Program,
     env: &TypeEnv,
+    type_map: &TypeMap,
     versioned_name: Option<String>,
 ) -> IrModule {
-    let mut ir_prog = lower_program_with_prefix(prog, env, Some(name));
+    let mut ir_prog = lower_program_with_prefix(prog, env, type_map, Some(name));
     let mod_ident = versioned_name.as_deref().unwrap_or(name).replace('.', "_");
     for tl in &ir_prog.top_lets {
         let old_name = ir_prog.var_table.get(tl.var).name;

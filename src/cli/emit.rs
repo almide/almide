@@ -50,7 +50,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
 
     // Lower to IR if checker ran
     let mut ir_program = checker_opt.as_ref().map(|checker| {
-        almide::lower::lower_program(&program, &checker.env)
+        almide::lower::lower_program(&program, &checker.env, &checker.type_map)
     });
     let mut module_irs = std::collections::HashMap::new();
     if let Some(checker) = &mut checker_opt {
@@ -69,8 +69,8 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, versioned);
-            let mod_ir = almide::lower::lower_program(mod_prog, &checker.env);
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            let mod_ir = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
             checker.env.import_table = saved_table;
             module_irs.insert(name.clone(), mod_ir);
             if let Some(ref mut ir) = ir_program {
