@@ -26,8 +26,11 @@ version = "0.10.5"
 dependencies = [
  "almide-base",
  "almide-codegen",
+ "almide-frontend",
  "almide-ir",
  "almide-lang",
+ "almide-optimize",
+ "almide-tools",
  "clap",
  "lasso",
  "proptest",
@@ -59,6 +62,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-frontend"
+version = "0.10.5"
+dependencies = [
+ "almide-base",
+ "almide-ir",
+ "almide-lang",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "almide-ir"
 version = "0.10.5"
 dependencies = [
@@ -73,6 +87,26 @@ name = "almide-lang"
 version = "0.10.5"
 dependencies = [
  "almide-base",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "almide-optimize"
+version = "0.10.5"
+dependencies = [
+ "almide-base",
+ "almide-ir",
+ "almide-lang",
+]
+
+[[package]]
+name = "almide-tools"
+version = "0.10.5"
+dependencies = [
+ "almide-base",
+ "almide-ir",
+ "almide-lang",
  "serde",
  "serde_json",
 ]

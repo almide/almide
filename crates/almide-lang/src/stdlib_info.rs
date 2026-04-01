@@ -12,6 +12,9 @@ pub const STDLIB_MODULES: &[&str] = &[
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
 pub const BUNDLED_MODULES: &[&str] = &["args", "path", "option", "result"];
 
+/// Bundled modules that should be auto-imported (Tier 1 behavior).
+pub const AUTO_IMPORT_BUNDLED: &[&str] = &["option", "result"];
+
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
     STDLIB_MODULES.contains(&name)

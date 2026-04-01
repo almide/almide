@@ -13,7 +13,6 @@ pub mod types;
 pub mod diagnostic;
 pub mod fmt;
 pub mod import_table;
-pub mod generated;
 pub mod ir;
 pub mod interface;
 pub mod lower;

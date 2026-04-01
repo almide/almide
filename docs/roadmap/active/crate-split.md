@@ -57,7 +57,7 @@ almide            → all
 | 3 | *(merged into Phase 2)* | — |
 | 4 | almide-ir | Done (2026-04-01) |
 | 5 | almide-codegen | Done (2026-04-01) |
-| 6 | almide-frontend, almide-optimize, almide-tools | Pending |
+| 6 | almide-frontend, almide-optimize, almide-tools | Done (2026-04-01) |
 
 ## Phase 5: almide-codegen (done)
 
@@ -69,14 +69,15 @@ The largest extraction (~55k lines). Key decisions:
 - **Dead code removed**: `emit_rust_calls.rs` (unused), `token_table.rs` (unused), `textmate_patterns.txt`, `tree_sitter_*.txt` removed from main crate's generated/.
 - **`#![recursion_limit = "512"]`** needed for `wasm!` macro expansion.
 
-## Phase 6: almide-frontend, almide-optimize, almide-tools (next)
+## Phase 6: almide-frontend, almide-optimize, almide-tools (done)
 
-After codegen is extracted, the remaining `src/` modules split naturally:
+Zero cross-group dependencies — clean three-way split.
 
-- **almide-frontend**: `check/`, `canonicalize/`, `lower/`, `import_table.rs`, `stdlib.rs`, `types/env.rs`, `generated/stdlib_sigs.rs`
-- **almide-optimize**: `optimize/`, `mono/` (note: `mono/propagation.rs` uses `codegen::emit_wasm::values::ty_to_valtype` — may need to move that fn)
-- **almide-tools**: `fmt.rs`, `interface.rs`, `almdi.rs`
-- **almide (CLI)**: `main.rs`, `cli/`, `resolve.rs`, `project.rs`, `project_fetch.rs`
+- **almide-frontend** (~5.7k lines): `check/`, `canonicalize/`, `lower/`, `import_table.rs`, `stdlib.rs`, `type_env.rs`, `generated/stdlib_sigs.rs`. Has own `build.rs` for stdlib_sigs generation. Main crate's build.rs is now empty.
+- **almide-optimize** (~2.5k lines): `optimize/`, `mono/`. `mono/propagation.rs` codegen dependency resolved by adding `wasm_types_compatible()` to almide-ir (no wasm-encoder dep).
+- **almide-tools** (~1.5k lines): `fmt.rs`, `interface.rs`, `almdi.rs`.
+- **almide (CLI)** (remaining): `main.rs`, `cli/`, `resolve.rs`, `project.rs`, `project_fetch.rs`. All re-export stubs.
+- **AUTO_IMPORT_BUNDLED** moved to `almide_lang::stdlib_info`.
 
 ## Future: Breaking ast↔types Cycle
 
