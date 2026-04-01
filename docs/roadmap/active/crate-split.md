@@ -35,7 +35,7 @@ almide-lang       → base
 almide-ir         → base, lang
 almide-frontend   → base, lang, ir
 almide-optimize   → ir, lang (types)
-almide-codegen    → base, lang, ir
+almide-codegen    → base, lang, ir, wasm-encoder, toml
 almide-tools      → base, lang, ir
 almide            → all
 ```
@@ -56,35 +56,25 @@ almide            → all
 | 2 | almide-lang | Done (2026-04-01) |
 | 3 | *(merged into Phase 2)* | — |
 | 4 | almide-ir | Done (2026-04-01) |
-| 5 | almide-codegen | Pending |
+| 5 | almide-codegen | Done (2026-04-01) |
 | 6 | almide-frontend, almide-optimize, almide-tools | Pending |
 
-## Phase 5: almide-codegen (next)
+## Phase 5: almide-codegen (done)
 
-The largest extraction (~30k lines). Key considerations:
+The largest extraction (~55k lines). Key decisions:
 
-- **Dependencies**: almide-base, almide-lang (ast, types), almide-ir. Does NOT depend on check/lower/stdlib.
-- **Internal structure**: `mod.rs` (entry), `pass.rs` (nanopass framework), `target.rs`, `template.rs`, `walker/` (8 files), `emit_wasm/` (38 files), 20 `pass_*.rs` files.
-- **Blockers**: `generated/` files (`emit_rust_calls.rs`, `arg_transforms.rs`, `stdlib_sigs.rs`) are included by codegen. These must either move into almide-codegen or stay in the main crate with codegen referencing them.
-- **build.rs**: Currently generates files into `src/generated/`. Needs to generate into the codegen crate, or codegen includes them via `include!()`.
-- **annotations.rs**: Already moved to almide-ir. codegen re-exports it.
-- **pass_effect_inference.rs**: Effect/FunctionEffects/EffectMap already moved to almide-ir. The pass itself stays in codegen.
+- **Dependencies**: almide-base, almide-lang (ast, types, stdlib_info), almide-ir, wasm-encoder, toml.
+- **stdlib_info moved to almide-lang**: `STDLIB_MODULES`, `is_stdlib_module`, UFCS resolution tables moved from main crate's `stdlib.rs` to `almide_lang::stdlib_info` to break the codegen→main crate circular dependency. Main crate re-exports.
+- **Generated files**: codegen crate has its own `build.rs` generating `arg_transforms.rs` and `rust_runtime.rs` to `src/generated/`. Main crate's build.rs now only generates `stdlib_sigs.rs`.
+- **Dead code removed**: `emit_rust_calls.rs` (unused), `token_table.rs` (unused), `textmate_patterns.txt`, `tree_sitter_*.txt` removed from main crate's generated/.
+- **`#![recursion_limit = "512"]`** needed for `wasm!` macro expansion.
 
-### Steps
-
-1. Create `crates/almide-codegen/` with Cargo.toml depending on base, lang, ir
-2. Move `src/codegen/` contents (except `annotations.rs` re-export)
-3. Handle `generated/` files — either move or use `include!()` from main crate build
-4. Fix `crate::` references → `almide_lang::`, `almide_ir::`, `almide_base::`
-5. Leave re-export stub in main crate: `pub use almide_codegen::*;`
-6. Test all targets (Rust + WASM)
-
-## Phase 6: almide-frontend, almide-optimize, almide-tools
+## Phase 6: almide-frontend, almide-optimize, almide-tools (next)
 
 After codegen is extracted, the remaining `src/` modules split naturally:
 
 - **almide-frontend**: `check/`, `canonicalize/`, `lower/`, `import_table.rs`, `stdlib.rs`, `types/env.rs`, `generated/stdlib_sigs.rs`
-- **almide-optimize**: `optimize/`, `mono/`
+- **almide-optimize**: `optimize/`, `mono/` (note: `mono/propagation.rs` uses `codegen::emit_wasm::values::ty_to_valtype` — may need to move that fn)
 - **almide-tools**: `fmt.rs`, `interface.rs`, `almdi.rs`
 - **almide (CLI)**: `main.rs`, `cli/`, `resolve.rs`, `project.rs`, `project_fetch.rs`
 

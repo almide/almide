@@ -1,0 +1,17 @@
+[package]
+name = "almide-codegen"
+version = "0.10.5"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Almide code generation: nanopass pipeline, walker, WASM emit"
+
+[dependencies]
+almide-base = { path = "../almide-base" }
+almide-lang = { path = "../almide-lang" }
+almide-ir = { path = "../almide-ir" }
+wasm-encoder = "0.225"
+toml = "0.8"
+
+[build-dependencies]
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }

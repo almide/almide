@@ -2,6 +2,7 @@ pub mod ast;
 pub mod lexer;
 pub mod parser;
 pub mod types;
+pub mod stdlib_info;
 
 // Re-export almide-base for convenience
 pub use almide_base;
