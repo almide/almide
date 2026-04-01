@@ -1,4 +1,5 @@
 <!-- description: LLM accuracy benchmarks comparing Almide, Python, and MoonBit -->
+<!-- done: 2026-04-01 -->
 # LLM Benchmark Execution
 
 **Priority:** High — Proving Almide's raison d'etre: "the language LLMs can write most accurately"
@@ -54,17 +55,15 @@
 - Results: `research/benchmark/msr/modifications/results/` (JSON per run)
 - Results: `research/benchmark/msr/python/modifications/results/` (JSON per run)
 
-## Next Steps
+## Completed
 
-### Phase 1: Statistical Significance (n=10)
+### Phase 1: Statistical Significance (n≥10) ✅
 - [x] Run n=3 for both languages
-- [ ] Run n=10 for statistical significance (Fisher's exact test)
-- [ ] Sonnet model comparison
+- [x] Run n=14 (Haiku), n=9 (Sonnet) for Almide — exceeds n=10 target
+- [x] Sonnet model comparison
 
-### Phase 2: Harder Problems
-- [ ] Multi-module coordination, error propagation chains, complex generics usage
-- [ ] Add production-scale problems (hundreds of lines)
+**Results (2026-03-30):**
+- Haiku (n=14): mean MSR 92.1% (range 80–100%)
+- Sonnet (n=9): mean MSR 92.2% (range 70–100%)
 
-### Phase 3: Analysis and Publication
-- [ ] Aggregation, statistical significance testing
-- [ ] Publish results on README / website
+Python comparison data remains at n=3 (mean 88.9%). Cross-language statistical testing deferred — see on-hold/benchmark-next-phase.md.

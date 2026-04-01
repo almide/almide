@@ -4,17 +4,9 @@
 >
 > [GRAND_PLAN.md](GRAND_PLAN.md) — 5-phase strategy
 
-## Active
-
-1 items
-
-| Item | Description |
-|------|-------------|
-| [LLM Benchmark Execution](active/benchmark-execution.md) | LLM accuracy benchmarks comparing Almide, Python, and MoonBit |
-
 ## On Hold
 
-41 items
+42 items
 
 | Item | Description |
 |------|-------------|
@@ -22,6 +14,7 @@
 | [Almide UI — Reactive Web Framework as Almide Library](on-hold/almide-ui.md) | SolidJS-like reactive UI framework built as a pure Almide library |
 | [API Diff & Automatic Versioning](on-hold/api-diff-auto-versioning.md) | Automatic semver bump detection via public API diffing |
 | [Async Backend — tokio opt-in](on-hold/async-backend.md) | Optional tokio-based async backend for high-concurrency workloads |
+| [LLM Benchmark: Next Phase](on-hold/benchmark-next-phase.md) | LLM benchmark Phase 2-3: cross-language comparison, harder problems, publication |
 | [build.rs Runtime Scanner Hardening](on-hold/buildrs-syn-scanner.md) | Replace regex-based runtime scanner with syn crate for robust parsing |
 | [Compile-Time Contracts](on-hold/compile-time-contracts.md) | Compile-time preconditions and type invariants via where clauses |
 | [Contracts — Runtime Validation](on-hold/contracts-runtime-validation.md) | Runtime contracts for value constraints |
@@ -62,10 +55,10 @@
 
 ## Done
 
-179 items
+180 items
 
 <details>
-<summary>Show all 179 completed items</summary>
+<summary>Show all 180 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
@@ -74,6 +67,7 @@
 | 2026-04-01 | [Type Expressiveness: Business Scenario Comparison](done/type-expressiveness-scenarios.md) | Business scenario comparison of type expressiveness across languages |
 | 2026-04-01 | [Purity Exploitation — Leveraging fn/effect fn Distinction](done/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | 2026-04-01 | [Nanopass Debug Dump](done/nanopass-debug-dump.md) | Environment-variable-controlled IR dump for each nanopass stage |
+| 2026-04-01 | [LLM Benchmark Execution](done/benchmark-execution.md) | LLM accuracy benchmarks comparing Almide, Python, and MoonBit |
 | 2026-04-01 | [Error Message Suggestions](done/error-message-suggestions.md) | Fuzzy matching suggestions in error messages (did you mean?) |
 | 2026-04-01 | [Emit Readability](done/emit-readability.md) | Improve readability of generated Rust output |
 | 2026-04-01 | [Crate Split](done/crate-split.md) | Split compiler into workspace crates for build parallelism and API boundaries |
