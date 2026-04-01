@@ -6,7 +6,7 @@
 
 ## On Hold
 
-42 items
+40 items
 
 | Item | Description |
 |------|-------------|
@@ -24,14 +24,12 @@
 | [Go Target](on-hold/go-target.md) | Go codegen target via TOML templates and Go-specific nanopass passes |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [Gradual Typing](on-hold/gradual-typing.md) | Gradual typing with automatic runtime checks at typed/untyped boundaries |
-| [Incremental Compilation](on-hold/incremental-compilation.md) | Skip redundant rustc invocations by hashing generated Rust source |
 | [IR Interpreter](on-hold/ir-interpreter.md) | Direct IR execution for instant REPL, playground, and fast test runs |
 | [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
 | [LLM Integration](on-hold/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
 | [LLM → IR Direct Generation](on-hold/llm-ir-generation.md) | LLM generates typed IR as JSON directly, bypassing parser errors |
 | [LSP Code Actions](on-hold/lsp-code-actions.md) | LSP code actions for auto-fix, refactoring, and import management |
 | [LSP Server](on-hold/lsp.md) | Language Server Protocol for editor completion, diagnostics, and navigation |
-| [Module Export: Almide Libraries for Every Language](on-hold/module-export.md) | Export Almide modules as native packages for Python, JS/TS, Ruby, and WASM |
 | [Package Registry](on-hold/package-registry.md) | Lock file, semver resolution, and central package registry |
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
 | [Phase-Typed AST](on-hold/phase-typed-ast.md) | Phase type parameters for type-safe compiler pipeline transitions |
@@ -55,10 +53,10 @@
 
 ## Done
 
-180 items
+181 items
 
 <details>
-<summary>Show all 180 completed items</summary>
+<summary>Show all 181 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
@@ -67,6 +65,7 @@
 | 2026-04-01 | [Type Expressiveness: Business Scenario Comparison](done/type-expressiveness-scenarios.md) | Business scenario comparison of type expressiveness across languages |
 | 2026-04-01 | [Purity Exploitation — Leveraging fn/effect fn Distinction](done/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | 2026-04-01 | [Nanopass Debug Dump](done/nanopass-debug-dump.md) | Environment-variable-controlled IR dump for each nanopass stage |
+| 2026-04-01 | [Module Export: Almide Libraries for Every Language](done/module-export.md) | Export Almide modules as native packages for Python, JS/TS, Ruby, and WASM |
 | 2026-04-01 | [LLM Benchmark Execution](done/benchmark-execution.md) | LLM accuracy benchmarks comparing Almide, Python, and MoonBit |
 | 2026-04-01 | [Error Message Suggestions](done/error-message-suggestions.md) | Fuzzy matching suggestions in error messages (did you mean?) |
 | 2026-04-01 | [Emit Readability](done/emit-readability.md) | Improve readability of generated Rust output |

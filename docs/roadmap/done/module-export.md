@@ -1,5 +1,8 @@
 <!-- description: Export Almide modules as native packages for Python, JS/TS, Ruby, and WASM -->
+<!-- done: 2026-04-01 -->
 # Module Export: Almide Libraries for Every Language
+
+> **Solved by [almide-lander](https://github.com/almide/almide-lander)** — 20 languages supported via almide-bindgen + shared library export. See that repo for details.
 
 **Goal**: `almide export mylib.almd --lang python` produces a pip-installable package with idiomatic Python types. Same for JS/TS, Ruby, and raw WASM components.
 
