@@ -5,11 +5,13 @@ use almide_base::intern::{Sym, sym};
 pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
     let s = |n: &str| -> Sym { sym(n) };
     let sig = match (module, func) {
-        ("bytes", "as_mut_ptr") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes)], ret: Ty::Named(s("RawPtr"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
-        ("bytes", "as_ptr") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes)], ret: Ty::Named(s("RawPtr"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
+        ("bytes", "as_mut_ptr") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes)], ret: Ty::RawPtr, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
+        ("bytes", "as_ptr") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes)], ret: Ty::RawPtr, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "clear") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes)], ret: Ty::Unit, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "concat") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Bytes), (s("b"), Ty::Bytes)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
+        ("bytes", "copy_to_ptr") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("ptr"), Ty::RawPtr), (s("cap"), Ty::Int)], ret: Ty::Int, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "from_list") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::list(Ty::Int))], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
+        ("bytes", "from_raw_ptr") => FnSig { generics: vec![], params: vec![(s("ptr"), Ty::RawPtr), (s("len"), Ty::Int)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "from_string") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Bytes, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "get") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("i"), Ty::Int)], ret: Ty::option(Ty::Int), is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
         ("bytes", "get_or") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bytes), (s("i"), Ty::Int), (s("default"), Ty::Int)], ret: Ty::Int, is_effect: false, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() },
@@ -436,7 +438,7 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
 
 pub fn generated_module_functions(module: &str) -> Vec<&'static str> {
     match module {
-        "bytes" => vec!["as_mut_ptr", "as_ptr", "clear", "concat", "from_list", "from_string", "get", "get_or", "is_empty", "len", "new", "push", "read_bool", "read_f64_be", "read_i64_be", "read_string_be", "read_u32_be", "read_u8", "repeat", "set", "slice", "to_list", "write_bool", "write_f64_be", "write_i64_be", "write_string_be", "write_u32_be", "write_u8"],
+        "bytes" => vec!["as_mut_ptr", "as_ptr", "clear", "concat", "copy_to_ptr", "from_list", "from_raw_ptr", "from_string", "get", "get_or", "is_empty", "len", "new", "push", "read_bool", "read_f64_be", "read_i64_be", "read_string_be", "read_u32_be", "read_u8", "repeat", "set", "slice", "to_list", "write_bool", "write_f64_be", "write_i64_be", "write_string_be", "write_u32_be", "write_u8"],
         "datetime" => vec!["add_days", "add_hours", "add_minutes", "add_seconds", "day", "diff_seconds", "format", "from_parts", "from_unix", "hour", "is_after", "is_before", "minute", "month", "now", "parse_iso", "second", "to_iso", "to_unix", "weekday", "year"],
         "env" => vec!["args", "cwd", "get", "millis", "os", "set", "sleep_ms", "temp_dir", "unix_timestamp"],
         "error" => vec!["chain", "context", "message"],

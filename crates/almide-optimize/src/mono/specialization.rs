@@ -36,6 +36,7 @@ pub(super) fn specialize_function(
         is_async: orig.is_async,
         is_test: orig.is_test,
         extern_attrs: orig.extern_attrs.clone(),
+        export_attrs: orig.export_attrs.clone(),
         visibility: orig.visibility.clone(),
         doc: None,
         blank_lines_before: 0,

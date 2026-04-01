@@ -192,3 +192,15 @@ description = "Get mutable raw pointer to buffer data (for C FFI)."
 params = [{ name = "b", type = "Bytes" }]
 return = "RawPtr"
 rust = "almide_rt_bytes_as_mut_ptr(&mut {b})"
+
+[from_raw_ptr]
+description = "Create Bytes from a raw pointer and length (unsafe, for C FFI bridge callee)."
+params = [{ name = "ptr", type = "RawPtr" }, { name = "len", type = "Int" }]
+return = "Bytes"
+rust = "almide_rt_bytes_from_raw_ptr({ptr}, {len})"
+
+[copy_to_ptr]
+description = "Copy Bytes to a raw pointer. Returns bytes written."
+params = [{ name = "b", type = "Bytes" }, { name = "ptr", type = "RawPtr" }, { name = "cap", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_copy_to_ptr(&{b}, {ptr}, {cap})"

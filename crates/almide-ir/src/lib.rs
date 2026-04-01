@@ -694,6 +694,8 @@ pub struct IrFunction {
     pub generics: Option<Vec<almide_lang::ast::GenericParam>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extern_attrs: Vec<almide_lang::ast::ExternAttr>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub export_attrs: Vec<almide_lang::ast::ExportAttr>,
     #[serde(default = "default_ir_visibility")]
     pub visibility: IrVisibility,
     /// Doc comment from source (`///` lines).

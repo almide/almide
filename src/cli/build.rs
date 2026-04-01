@@ -1,7 +1,7 @@
 use std::process::Command;
 use crate::{compile_with_ir, parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool) {
+pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool, cdylib: bool) {
     let is_npm = matches!(target, Some("npm"));
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
     let is_wasm_direct = matches!(target, Some("wasm"));
@@ -48,6 +48,24 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
     // WASI target: use bare rustc (no external crate deps needed for WASM)
     if is_wasm {
         cmd_build_wasi_rustc(&rs_code, &output);
+        return;
+    }
+
+    // cdylib target: build shared library (.dylib/.so)
+    if cdylib {
+        let use_release = release || fast;
+        let project_dir = std::env::temp_dir().join("almide-build-cdylib");
+        // Strip fn main() from the code — cdylib has no entry point
+        let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
+        match super::cargo_build_cdylib(&lib_code, &project_dir, &output, use_release) {
+            Ok(lib_path) => {
+                eprintln!("Built {}", lib_path.display());
+            }
+            Err(e) => {
+                eprintln!("Compile error:\n{}", e);
+                std::process::exit(1);
+            }
+        }
         return;
     }
 

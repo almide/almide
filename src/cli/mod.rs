@@ -132,6 +132,57 @@ codegen-units = 1
 
 const BURN_MATRIX_RUNTIME: &str = include_str!("../../runtime/rs/burn/matrix_burn.rs");
 
+/// Build generated Rust code as a cdylib shared library (.dylib/.so).
+fn cargo_build_cdylib(rs_code: &str, project_dir: &std::path::Path, lib_name: &str, release: bool) -> Result<std::path::PathBuf, String> {
+    let src_dir = project_dir.join("src");
+    std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
+    let cargo_toml = format!(r#"[package]
+name = "almide-cdylib"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "{}"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+"#, lib_name.replace('-', "_"));
+    std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
+        .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
+    std::fs::write(src_dir.join("lib.rs"), rs_code)
+        .map_err(|e| format!("failed to write lib.rs: {}", e))?;
+
+    let mut cmd = std::process::Command::new("cargo");
+    cmd.arg("build").current_dir(project_dir).arg("--quiet");
+    if release { cmd.arg("--release"); }
+    let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    let profile = if release { "release" } else { "debug" };
+    let prefix = if cfg!(target_os = "macos") || cfg!(target_os = "linux") { "lib" } else { "" };
+    let ext = if cfg!(target_os = "macos") { "dylib" } else if cfg!(target_os = "windows") { "dll" } else { "so" };
+    let lib_filename = format!("{}{}.{}", prefix, lib_name.replace('-', "_"), ext);
+    let lib_path = project_dir.join("target").join(profile).join(&lib_filename);
+    if !lib_path.exists() {
+        return Err(format!("expected library not found at {}", lib_path.display()));
+    }
+
+    // Copy to current directory
+    let dest = std::path::Path::new(".").join(&lib_filename);
+    std::fs::copy(&lib_path, &dest)
+        .map_err(|e| format!("failed to copy library: {}", e))?;
+    Ok(dest)
+}
+
 /// Build generated Rust code using cargo.
 /// Returns the path to the built binary on success.
 fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {

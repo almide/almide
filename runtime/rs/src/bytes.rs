@@ -63,3 +63,17 @@ pub fn almide_rt_bytes_read_string_be(b: &Vec<u8>, pos: i64) -> String {
 }
 pub fn almide_rt_bytes_as_ptr(b: &Vec<u8>) -> *mut u8 { b.as_ptr() as *mut u8 }
 pub fn almide_rt_bytes_as_mut_ptr(b: &mut Vec<u8>) -> *mut u8 { b.as_mut_ptr() }
+
+/// Create Bytes from a raw pointer + length (unsafe: caller must ensure validity).
+pub fn almide_rt_bytes_from_raw_ptr(ptr: *mut u8, len: i64) -> Vec<u8> {
+    if ptr.is_null() || len <= 0 { return Vec::new(); }
+    unsafe { std::slice::from_raw_parts(ptr, len as usize).to_vec() }
+}
+
+/// Copy Bytes content to a raw pointer. Returns number of bytes written.
+pub fn almide_rt_bytes_copy_to_ptr(b: &Vec<u8>, ptr: *mut u8, cap: i64) -> i64 {
+    if ptr.is_null() { return 0; }
+    let n = b.len().min(cap as usize);
+    unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), ptr, n); }
+    n as i64
+}

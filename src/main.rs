@@ -58,6 +58,9 @@ enum Commands {
         /// Add #[repr(C)] to structs/enums for stable C ABI
         #[arg(long)]
         repr_c: bool,
+        /// Build as shared library (.dylib/.so) instead of executable
+        #[arg(long)]
+        cdylib: bool,
     },
     /// Run tests
     Test {
@@ -410,9 +413,9 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_run(&file, &program_args, no_check);
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib } => {
             let file = resolve_file(file);
-            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c);
+            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib);
         }
         Commands::Test { file, run, no_check, json, target } => {
             let file_str = file.as_deref().unwrap_or("");

@@ -120,6 +120,15 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         }
     }
 
+    // Export fn: render body normally, then wrap with #[no_mangle] pub extern "C"
+    if !func.export_attrs.is_empty() {
+        for attr in &func.export_attrs {
+            if attr.target == "c" && matches!(ctx.target, Target::Rust) {
+                return render_export_c(ctx, func, attr);
+            }
+        }
+    }
+
     let params_str = func.params.iter()
         .map(|p| {
             let mut param_name = p.name.to_string();
@@ -519,4 +528,62 @@ fn wrap_return(mode: &str, c_func: &str, call_args: &str) -> String {
         "ne_zero" => format!("{}({}) != 0", c_func, call_args),
         _         => format!("{}({})", c_func, call_args),
     }
+}
+
+/// Render @export(c, "symbol") — emits normal Almide fn + thin extern "C" wrapper.
+///
+/// ```rust
+/// pub fn my_add(a: i64, b: i64) -> i64 { (a + b) }
+///
+/// #[export_name = "my_add"]
+/// pub extern "C" fn __c_my_add(a: i32, b: i32) -> i32 {
+///     my_add(a as i64, b as i64) as i32
+/// }
+/// ```
+fn render_export_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExportAttr) -> String {
+    use almide_lang::types::Ty;
+
+    let symbol = attr.symbol.as_str();
+    let fn_name = func.name.as_str();
+
+    // 1. Render the normal Almide function (strip export_attrs to avoid recursion)
+    let mut clean_func = func.clone();
+    clean_func.export_attrs.clear();
+    let almide_fn = render_function(ctx, &clean_func);
+
+    // 2. Build C wrapper
+    let mut c_params = Vec::new();
+    let mut call_args = Vec::new();
+
+    for p in &func.params {
+        let name = p.name.as_str();
+        match &p.ty {
+            Ty::Int    => { c_params.push(format!("{}: i32", name)); call_args.push(format!("{} as i64", name)); }
+            Ty::Float  => { c_params.push(format!("{}: f64", name)); call_args.push(name.into()); }
+            Ty::Bool   => { c_params.push(format!("{}: i32", name)); call_args.push(format!("{} != 0", name)); }
+            Ty::RawPtr => { c_params.push(format!("{}: *mut u8", name)); call_args.push(name.into()); }
+            _          => { let t = render_type_fn(ctx, &p.ty); c_params.push(format!("{}: {}", name, t)); call_args.push(name.into()); }
+        }
+    }
+
+    let (c_ret, wrap_open, wrap_close) = match &func.ret_ty {
+        Ty::Int    => ("i32", "(", ") as i32"),
+        Ty::Bool   => ("i32", "if ", " { 1 } else { 0 }"),
+        Ty::RawPtr => ("*mut u8", "", ""),
+        Ty::Float  => ("f64", "", ""),
+        Ty::Unit   => ("()", "", ""),
+        _          => ("i32", "(", ") as i32"),
+    };
+
+    let c_params_str = c_params.join(", ");
+    let call_args_str = call_args.join(", ");
+
+    let wrapper = format!(
+        "#[export_name = \"{symbol}\"]\npub extern \"C\" fn __c_{fn_name}({c_params_str}) -> {c_ret} {{ {wo}{fn_name}({args}){wc} }}",
+        symbol = symbol, fn_name = fn_name,
+        c_params_str = c_params_str, c_ret = c_ret,
+        wo = wrap_open, args = call_args_str, wc = wrap_close,
+    );
+
+    format!("{}\n\n{}", almide_fn, wrapper)
 }

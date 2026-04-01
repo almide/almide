@@ -72,8 +72,8 @@ impl Parser {
 
     pub(crate) fn parse_top_decl(&mut self) -> Result<Decl, String> {
         if self.check(TokenType::At) {
-            let extern_attrs = self.collect_extern_attrs()?;
-            return self.parse_fn_decl_with_attrs(extern_attrs);
+            let (extern_attrs, export_attrs) = self.collect_fn_attrs()?;
+            return self.parse_fn_decl_with_attrs(extern_attrs, export_attrs);
         }
         if self.check(TokenType::Type) {
             return self.parse_type_decl();
@@ -141,49 +141,69 @@ impl Parser {
         Ok(Decl::TopLet { name, ty, value, visibility, span: Some(span) })
     }
 
-    fn collect_extern_attrs(&mut self) -> Result<Vec<ExternAttr>, String> {
-        let mut attrs = Vec::new();
+    fn collect_fn_attrs(&mut self) -> Result<(Vec<ExternAttr>, Vec<ExportAttr>), String> {
+        let mut extern_attrs = Vec::new();
+        let mut export_attrs = Vec::new();
         while self.check(TokenType::At) {
             self.advance();
-            if !self.check_ident("extern") {
+            if self.check_ident("extern") {
+                self.advance();
+                let open_ext = self.current().clone();
+                self.expect(TokenType::LParen)?;
+                let target = self.expect_ident()?;
+                self.expect(TokenType::Comma)?;
+                let module = {
+                    let tok = self.current();
+                    if tok.token_type != TokenType::String {
+                        return Err(format!("Expected string literal for extern module at line {}:{}", tok.line, tok.col));
+                    }
+                    let val = sym(&tok.value);
+                    self.advance();
+                    val
+                };
+                self.expect(TokenType::Comma)?;
+                let function = {
+                    let tok = self.current();
+                    if tok.token_type != TokenType::String {
+                        return Err(format!("Expected string literal for extern function at line {}:{}", tok.line, tok.col));
+                    }
+                    let val = sym(&tok.value);
+                    self.advance();
+                    val
+                };
+                self.expect_closing(TokenType::RParen, open_ext.line, open_ext.col, "@extern annotation")?;
+                extern_attrs.push(ExternAttr { target, module, function });
+            } else if self.check_ident("export") {
+                self.advance();
+                let open_ext = self.current().clone();
+                self.expect(TokenType::LParen)?;
+                let target = self.expect_ident()?;
+                self.expect(TokenType::Comma)?;
+                let symbol = {
+                    let tok = self.current();
+                    if tok.token_type != TokenType::String {
+                        return Err(format!("Expected string literal for export symbol at line {}:{}", tok.line, tok.col));
+                    }
+                    let val = sym(&tok.value);
+                    self.advance();
+                    val
+                };
+                self.expect_closing(TokenType::RParen, open_ext.line, open_ext.col, "@export annotation")?;
+                export_attrs.push(ExportAttr { target, symbol });
+            } else {
                 let tok = self.current();
-                return Err(format!("Expected 'extern' after '@' at line {}:{}", tok.line, tok.col));
+                return Err(format!("Expected 'extern' or 'export' after '@' at line {}:{}", tok.line, tok.col));
             }
-            self.advance();
-            let open_ext = self.current().clone();
-            self.expect(TokenType::LParen)?;
-            let target = self.expect_ident()?;
-            self.expect(TokenType::Comma)?;
-            let module = {
-                let tok = self.current();
-                if tok.token_type != TokenType::String {
-                    return Err(format!("Expected string literal for extern module at line {}:{}", tok.line, tok.col));
-                }
-                let val = sym(&tok.value);
-                self.advance();
-                val
-            };
-            self.expect(TokenType::Comma)?;
-            let function = {
-                let tok = self.current();
-                if tok.token_type != TokenType::String {
-                    return Err(format!("Expected string literal for extern function at line {}:{}", tok.line, tok.col));
-                }
-                let val = sym(&tok.value);
-                self.advance();
-                val
-            };
-            self.expect_closing(TokenType::RParen, open_ext.line, open_ext.col, "@extern annotation")?;
-            attrs.push(ExternAttr { target, module, function });
             self.skip_newlines();
         }
-        Ok(attrs)
+        Ok((extern_attrs, export_attrs))
     }
 
-    fn parse_fn_decl_with_attrs(&mut self, extern_attrs: Vec<ExternAttr>) -> Result<Decl, String> {
+    fn parse_fn_decl_with_attrs(&mut self, extern_attrs: Vec<ExternAttr>, export_attrs: Vec<ExportAttr>) -> Result<Decl, String> {
         let mut decl = self.parse_fn_decl()?;
-        if let Decl::Fn { extern_attrs: ref mut attrs, .. } = decl {
-            *attrs = extern_attrs;
+        if let Decl::Fn { extern_attrs: ref mut ea, export_attrs: ref mut xa, .. } = decl {
+            *ea = extern_attrs;
+            *xa = export_attrs;
         }
         Ok(decl)
     }
@@ -335,6 +355,7 @@ impl Parser {
             effect: if effect { Some(true) } else { None },
             visibility,
             extern_attrs: Vec::new(),
+            export_attrs: Vec::new(),
             generics, params, return_type, body,
             span: Some(span),
         })

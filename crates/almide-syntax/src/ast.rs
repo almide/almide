@@ -259,6 +259,13 @@ pub struct ExternAttr {
     pub function: Sym,   // e.g., "reverse"
 }
 
+/// @export(c, "symbol") annotation — export function with C ABI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportAttr {
+    pub target: Sym,     // "c"
+    pub symbol: Sym,     // e.g., "bridge_add"
+}
+
 impl Default for Visibility {
     fn default() -> Self { Visibility::Public }
 }
@@ -275,6 +282,7 @@ pub enum Decl {
         #[serde(default)] r#async: Option<bool>,
         #[serde(default)] visibility: Visibility,
         #[serde(default)] extern_attrs: Vec<ExternAttr>,
+        #[serde(default)] export_attrs: Vec<ExportAttr>,
         #[serde(default)] generics: Option<Vec<GenericParam>>,
         params: Vec<Param>,
         #[serde(rename = "returnType")] return_type: TypeExpr,

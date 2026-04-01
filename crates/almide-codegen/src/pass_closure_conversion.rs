@@ -191,7 +191,7 @@ fn convert_expr(
                 is_async: false,
                 is_test: false,
                 generics: None,
-                extern_attrs: vec![],
+                extern_attrs: vec![], export_attrs: vec![],
                 visibility: IrVisibility::Private,
                 doc: None,
                 blank_lines_before: 0,
