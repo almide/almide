@@ -11,6 +11,7 @@ almide-lang = { path = "../almide-lang" }
 almide-ir = { path = "../almide-ir" }
 wasm-encoder = "0.225"
 toml = "0.8"
+serde_json = "1"
 
 [build-dependencies]
 toml = "0.8"

@@ -1,4 +1,5 @@
 <!-- description: Fuzzy matching suggestions in error messages (did you mean?) -->
+<!-- done: 2026-04-01 -->
 # Error Message Suggestions
 
 未定義の変数・関数に対して Levenshtein 距離ベースの候補を提示する。

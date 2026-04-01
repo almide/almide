@@ -222,6 +222,27 @@ impl TypeEnv {
         None
     }
 
+    /// Collect all visible names (variables, top_lets, functions, builtins) for "did you mean?" suggestions.
+    pub fn all_visible_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        for scope in &self.scopes {
+            for name in scope.keys() {
+                names.push(name.to_string());
+            }
+        }
+        for name in self.top_lets.keys() {
+            names.push(name.to_string());
+        }
+        for name in self.functions.keys() {
+            names.push(name.to_string());
+        }
+        // Builtins not in env.functions
+        for &b in &["println", "eprintln", "panic", "assert", "assert_eq", "assert_ne", "to_string"] {
+            names.push(b.to_string());
+        }
+        names
+    }
+
     pub fn resolve_named(&self, ty: &Ty) -> Ty {
         self.resolve_named_with_seen(ty, &mut std::collections::HashSet::new())
     }

@@ -57,6 +57,7 @@ dependencies = [
  "almide-ir",
  "almide-lang",
  "serde",
+ "serde_json",
  "toml",
  "wasm-encoder 0.225.0",
 ]

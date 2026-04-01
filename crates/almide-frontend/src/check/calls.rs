@@ -207,7 +207,15 @@ impl Checker {
                 }
                 return ty;
             }
-            self.emit(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)).with_code("E002"));
+            let hint = {
+                let candidates = self.env.all_visible_names();
+                if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
+                    format!("Did you mean `{}`?", suggestion)
+                } else {
+                    "Check the function name".to_string()
+                }
+            };
+            self.emit(super::err(format!("undefined function '{}'", name), hint, format!("call to {}()", name)).with_code("E002"));
             return Ty::Unknown;
         };
 

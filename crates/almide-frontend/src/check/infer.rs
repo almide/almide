@@ -51,7 +51,13 @@ impl Checker {
                         let desc = crate::stdlib::module_description(name);
                         format!("Add `import {}` (stdlib: {})\nOr run `almide fmt` to auto-add missing imports", name, desc)
                     } else {
-                        "Check the variable name".to_string()
+                        // "Did you mean?" suggestion from variables, top_lets, and functions in scope
+                        let candidates = self.env.all_visible_names();
+                        if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
+                            format!("Did you mean `{}`?", suggestion)
+                        } else {
+                            "Check the variable name".to_string()
+                        }
                     };
                     self.emit(super::err(format!("undefined variable '{}'", name), hint, format!("variable {}", name)).with_code("E003"));
                     Ty::Unknown

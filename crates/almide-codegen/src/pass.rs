@@ -115,6 +115,17 @@ impl Pipeline {
     pub fn run(&self, program: IrProgram, target: Target) -> IrProgram {
         let mut program = program;
         let mut executed: Vec<&str> = Vec::new();
+
+        // ALMIDE_DUMP_IR: dump IR after specified passes (comma-separated, or "all")
+        let dump_filter = std::env::var("ALMIDE_DUMP_IR").ok();
+        let dump_all = dump_filter.as_deref() == Some("all");
+        let dump_passes: Vec<&str> = dump_filter.as_deref()
+            .filter(|s| *s != "all")
+            .map(|s| s.split(',').map(str::trim).collect())
+            .unwrap_or_default();
+        let check_ir = std::env::var("ALMIDE_CHECK_IR").is_ok()
+            || std::env::var("ALMIDE_VERIFY_IR").is_ok();
+
         for pass in &self.passes {
             // Skip passes not relevant to this target
             if let Some(targets) = pass.targets() {
@@ -132,22 +143,38 @@ impl Pipeline {
                     );
                 }
             }
+
+            let pass_name = pass.name();
             let result = pass.run(program, target);
             program = result.program;
 
-            // Inter-pass IR verification (opt-in via ALMIDE_VERIFY_IR=1)
-            if std::env::var("ALMIDE_VERIFY_IR").is_ok() {
+            // IR dump (opt-in via ALMIDE_DUMP_IR=all or ALMIDE_DUMP_IR=pass1,pass2)
+            if dump_all || dump_passes.iter().any(|p| p.eq_ignore_ascii_case(pass_name)) {
+                eprintln!("── IR after {} ──{}──",
+                    pass_name,
+                    if result.changed { " (changed) " } else { " (unchanged) " });
+                if let Ok(json) = serde_json::to_string_pretty(&program) {
+                    eprintln!("{}", json);
+                } else {
+                    // Fallback: debug format
+                    eprintln!("{:#?}", program);
+                }
+                eprintln!("── end {} ──\n", pass_name);
+            }
+
+            // Inter-pass IR verification (opt-in via ALMIDE_CHECK_IR=1 or ALMIDE_VERIFY_IR=1)
+            if check_ir {
                 let errors = almide_ir::verify_program(&program);
                 if !errors.is_empty() {
-                    eprintln!("[IR VERIFY] {} error(s) after pass '{}':", errors.len(), pass.name());
+                    eprintln!("[IR CHECK] {} error(s) after pass '{}':", errors.len(), pass_name);
                     for e in &errors {
                         eprintln!("  {}", e);
                     }
-                    panic!("IR verification failed after pass '{}'", pass.name());
+                    panic!("IR verification failed after pass '{}'", pass_name);
                 }
             }
 
-            executed.push(pass.name());
+            executed.push(pass_name);
         }
         program
     }

@@ -6,14 +6,12 @@
 
 ## Active
 
-4 items
+2 items
 
 | Item | Description |
 |------|-------------|
 | [LLM Benchmark Execution](active/benchmark-execution.md) | LLM accuracy benchmarks comparing Almide, Python, and MoonBit |
 | [Codegen Perfection](active/codegen-perfection.md) | Make codegen bulletproof by learning from Gleam/Roc architecture patterns |
-| [Error Message Suggestions](active/error-message-suggestions.md) | Fuzzy matching suggestions in error messages (did you mean?) |
-| [Nanopass Debug Dump](active/nanopass-debug-dump.md) | Environment-variable-controlled IR dump for each nanopass stage |
 
 ## On Hold
 
@@ -65,10 +63,10 @@
 
 ## Done
 
-176 items
+178 items
 
 <details>
-<summary>Show all 176 completed items</summary>
+<summary>Show all 178 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
@@ -76,6 +74,8 @@
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
 | 2026-04-01 | [Type Expressiveness: Business Scenario Comparison](done/type-expressiveness-scenarios.md) | Business scenario comparison of type expressiveness across languages |
 | 2026-04-01 | [Purity Exploitation — Leveraging fn/effect fn Distinction](done/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
+| 2026-04-01 | [Nanopass Debug Dump](done/nanopass-debug-dump.md) | Environment-variable-controlled IR dump for each nanopass stage |
+| 2026-04-01 | [Error Message Suggestions](done/error-message-suggestions.md) | Fuzzy matching suggestions in error messages (did you mean?) |
 | 2026-04-01 | [Emit Readability](done/emit-readability.md) | Improve readability of generated Rust output |
 | 2026-04-01 | [Crate Split](done/crate-split.md) | Split compiler into workspace crates for build parallelism and API boundaries |
 | 2026-04-01 | [Compiler Fragility Hotspots](done/compiler-fragility-hotspots.md) | Fix fragile compiler internals: visitor pattern, ExprId duplication, UF isolation, Ty clone cost |

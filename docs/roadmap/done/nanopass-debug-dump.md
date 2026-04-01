@@ -1,4 +1,5 @@
 <!-- description: Environment-variable-controlled IR dump for each nanopass stage -->
+<!-- done: 2026-04-01 -->
 # Nanopass Debug Dump
 
 環境変数で各 nanopass の中間 IR をダンプし、コンパイラのデバッグと最適化の検証を容易にする。

@@ -2,6 +2,42 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+// ── "Did you mean?" suggestions ────────────────────────────────
+
+/// Levenshtein edit distance between two strings.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (m, n) = (a.len(), b.len());
+    let mut prev = (0..=n).collect::<Vec<_>>();
+    let mut curr = vec![0; n + 1];
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a[i - 1].to_ascii_lowercase() == b[j - 1].to_ascii_lowercase() { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
+/// Find the best "did you mean?" suggestion from a list of candidates.
+/// Returns None if no candidate is close enough (threshold: distance < name.len()/3 + 1).
+pub fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<String> {
+    let threshold = name.len() / 3 + 1;
+    let mut best: Option<(&str, usize)> = None;
+    for c in candidates {
+        let dist = levenshtein(name, c);
+        if dist < threshold && dist > 0 {
+            if best.map_or(true, |(_, d)| dist < d) {
+                best = Some((c, dist));
+            }
+        }
+    }
+    best.map(|(s, _)| s.to_string())
+}
+
 static COLOR_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Call once at startup to enable colors if stderr is a TTY.
