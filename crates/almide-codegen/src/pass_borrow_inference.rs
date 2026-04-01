@@ -29,11 +29,14 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
     }
 
     for module in &mut program.modules {
+        let mod_name = module.name.to_string();
         for func in &mut module.functions {
             if func.is_test || is_derive_fn(&func.name) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
             let borrows = infer_function_borrows(func);
             if borrows.iter().any(|b| !matches!(b, ParamBorrow::Own)) {
-                sigs.insert(func.name.to_string(), borrows.clone());
+                // Use module-scoped key to avoid collisions between identically-named
+                // functions in different modules (e.g. local fn get_str in 21 binding files)
+                sigs.insert(format!("{}::{}", mod_name, func.name), borrows.clone());
             }
             for (param, borrow) in func.params.iter_mut().zip(borrows) {
                 param.borrow = borrow;
@@ -57,6 +60,7 @@ fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
 
         let mut needs_own = false;
         check_needs_ownership(&func.body, param.var, &mut needs_own);
+
 
         if needs_own {
             ParamBorrow::Own
@@ -119,6 +123,10 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             // Passing as argument to a function → needs own (conservative)
             for arg in args {
                 if is_var(arg, var) { *needs = true; return; }
+            }
+            // Method call: object (receiver) is consumed → needs own
+            if let CallTarget::Method { object, .. } = target {
+                if is_var(object, var) { *needs = true; return; }
             }
             // Recurse into non-arg sub-expressions
             match target {
@@ -378,28 +386,29 @@ fn stmt_uses_var(stmt: &IrStmt, var: VarId) -> bool {
 
 pub fn insert_borrows_at_call_sites(program: &mut IrProgram, sigs: &HashMap<String, Vec<ParamBorrow>>) {
     for func in &mut program.functions {
-        func.body = rewrite_calls(std::mem::take(&mut func.body), sigs);
+        func.body = rewrite_calls(std::mem::take(&mut func.body), sigs, None);
     }
     for tl in &mut program.top_lets {
-        tl.value = rewrite_calls(std::mem::take(&mut tl.value), sigs);
+        tl.value = rewrite_calls(std::mem::take(&mut tl.value), sigs, None);
     }
     for module in &mut program.modules {
+        let mod_name = module.name.to_string();
         for func in &mut module.functions {
-            func.body = rewrite_calls(std::mem::take(&mut func.body), sigs);
+            func.body = rewrite_calls(std::mem::take(&mut func.body), sigs, Some(&mod_name));
         }
         for tl in &mut module.top_lets {
-            tl.value = rewrite_calls(std::mem::take(&mut tl.value), sigs);
+            tl.value = rewrite_calls(std::mem::take(&mut tl.value), sigs, Some(&mod_name));
         }
     }
 }
 
-fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>) -> IrExpr {
+fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_scope: Option<&str>) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
 
     let kind = match expr.kind {
         IrExprKind::Call { target, args, type_args } => {
-            let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_calls(a, sigs)).collect();
+            let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect();
 
             let callee_name = match &target {
                 CallTarget::Named { name } => Some(name.to_string()),
@@ -410,7 +419,11 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>) -> IrEx
             };
 
             let args = if let Some(ref name) = callee_name {
-                if let Some(borrows) = sigs.get(name) {
+                // For module-scoped calls, look up with "module::func" key first
+                let borrows = mod_scope
+                    .and_then(|m| sigs.get(&format!("{}::{}", m, name)))
+                    .or_else(|| sigs.get(name));
+                if let Some(borrows) = borrows {
                     args.into_iter().enumerate().map(|(i, arg)| {
                         match borrows.get(i) {
                             Some(ParamBorrow::Ref | ParamBorrow::RefSlice) => {
@@ -429,7 +442,7 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>) -> IrEx
 
             let target = match target {
                 CallTarget::Method { object, method } => {
-                    let mut obj = rewrite_calls(*object, sigs);
+                    let mut obj = rewrite_calls(*object, sigs, mod_scope);
                     if method.contains('.') {
                         if let Some(borrows) = sigs.get(method.as_str()) {
                             if let Some(b) = borrows.first() {
@@ -450,7 +463,7 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>) -> IrEx
                     CallTarget::Method { object: Box::new(obj), method }
                 },
                 CallTarget::Computed { callee } => CallTarget::Computed {
-                    callee: Box::new(rewrite_calls(*callee, sigs)),
+                    callee: Box::new(rewrite_calls(*callee, sigs, mod_scope)),
                 },
                 other => other,
             };
@@ -458,60 +471,60 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>) -> IrEx
         }
 
         IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: stmts.into_iter().map(|s| rewrite_calls_stmt(s, sigs)).collect(),
-            expr: expr.map(|e| Box::new(rewrite_calls(*e, sigs))),
+            stmts: stmts.into_iter().map(|s| rewrite_calls_stmt(s, sigs, mod_scope)).collect(),
+            expr: expr.map(|e| Box::new(rewrite_calls(*e, sigs, mod_scope))),
         },
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(rewrite_calls(*cond, sigs)),
-            then: Box::new(rewrite_calls(*then, sigs)),
-            else_: Box::new(rewrite_calls(*else_, sigs)),
+            cond: Box::new(rewrite_calls(*cond, sigs, mod_scope)),
+            then: Box::new(rewrite_calls(*then, sigs, mod_scope)),
+            else_: Box::new(rewrite_calls(*else_, sigs, mod_scope)),
         },
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(rewrite_calls(*subject, sigs)),
+            subject: Box::new(rewrite_calls(*subject, sigs, mod_scope)),
             arms: arms.into_iter().map(|a| IrMatchArm {
                 pattern: a.pattern,
-                guard: a.guard.map(|g| rewrite_calls(g, sigs)),
-                body: rewrite_calls(a.body, sigs),
+                guard: a.guard.map(|g| rewrite_calls(g, sigs, mod_scope)),
+                body: rewrite_calls(a.body, sigs, mod_scope),
             }).collect(),
         },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple,
-            iterable: Box::new(rewrite_calls(*iterable, sigs)),
-            body: body.into_iter().map(|s| rewrite_calls_stmt(s, sigs)).collect(),
+            iterable: Box::new(rewrite_calls(*iterable, sigs, mod_scope)),
+            body: body.into_iter().map(|s| rewrite_calls_stmt(s, sigs, mod_scope)).collect(),
         },
         IrExprKind::While { cond, body } => IrExprKind::While {
-            cond: Box::new(rewrite_calls(*cond, sigs)),
-            body: body.into_iter().map(|s| rewrite_calls_stmt(s, sigs)).collect(),
+            cond: Box::new(rewrite_calls(*cond, sigs, mod_scope)),
+            body: body.into_iter().map(|s| rewrite_calls_stmt(s, sigs, mod_scope)).collect(),
         },
         IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_calls(*body, sigs)), lambda_id,
+            params, body: Box::new(rewrite_calls(*body, sigs, mod_scope)), lambda_id,
         },
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op, left: Box::new(rewrite_calls(*left, sigs)), right: Box::new(rewrite_calls(*right, sigs)),
+            op, left: Box::new(rewrite_calls(*left, sigs, mod_scope)), right: Box::new(rewrite_calls(*right, sigs, mod_scope)),
         },
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(rewrite_calls(*operand, sigs)),
+            op, operand: Box::new(rewrite_calls(*operand, sigs, mod_scope)),
         },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(rewrite_calls(*expr, sigs)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(rewrite_calls(*expr, sigs)) },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(rewrite_calls(*expr, sigs)) },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_calls(*expr, sigs)) },
-        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_calls(*expr, sigs)) },
+        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
+        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
+        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
+        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
         IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(rewrite_calls(*expr, sigs)),
-            fallback: Box::new(rewrite_calls(*fallback, sigs)),
+            expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)),
+            fallback: Box::new(rewrite_calls(*fallback, sigs, mod_scope)),
         },
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_calls(expr, sigs) },
+                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_calls(expr, sigs, mod_scope) },
                 other => other,
             }).collect(),
         },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| rewrite_calls(e, sigs)).collect(),
+            exprs: exprs.into_iter().map(|e| rewrite_calls(e, sigs, mod_scope)).collect(),
         },
         IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
-            source: Box::new(rewrite_calls(*source, sigs)),
+            source: Box::new(rewrite_calls(*source, sigs, mod_scope)),
             consume, steps, collector,
         },
         other => other,
@@ -520,18 +533,18 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>) -> IrEx
     IrExpr { kind, ty, span }
 }
 
-fn rewrite_calls_stmt(stmt: IrStmt, sigs: &HashMap<String, Vec<ParamBorrow>>) -> IrStmt {
+fn rewrite_calls_stmt(stmt: IrStmt, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_scope: Option<&str>) -> IrStmt {
     let kind = match stmt.kind {
         IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-            var, mutability, ty, value: rewrite_calls(value, sigs),
+            var, mutability, ty, value: rewrite_calls(value, sigs, mod_scope),
         },
-        IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: rewrite_calls(value, sigs) },
-        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: rewrite_calls(expr, sigs) },
+        IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: rewrite_calls(value, sigs, mod_scope) },
+        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: rewrite_calls(expr, sigs, mod_scope) },
         IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-            cond: rewrite_calls(cond, sigs), else_: rewrite_calls(else_, sigs),
+            cond: rewrite_calls(cond, sigs, mod_scope), else_: rewrite_calls(else_, sigs, mod_scope),
         },
         IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-            pattern, value: rewrite_calls(value, sigs),
+            pattern, value: rewrite_calls(value, sigs, mod_scope),
         },
         other => other,
     };

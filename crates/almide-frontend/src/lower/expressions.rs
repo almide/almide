@@ -126,8 +126,6 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 ("/", Ty::Float, _) | ("/", _, Ty::Float) => BinOp::DivFloat, ("/", _, _) => BinOp::DivInt,
                 ("%", Ty::Float, _) | ("%", _, Ty::Float) => BinOp::ModFloat, ("%", _, _) => BinOp::ModInt,
                 ("^", Ty::Float, _) | ("^", _, Ty::Float) => BinOp::PowFloat, ("^", _, _) => BinOp::PowInt,
-                ("++", Ty::String, _) => BinOp::ConcatStr, // legacy
-                ("++", _, _) => BinOp::ConcatList,         // legacy
                 ("==", _, _) => BinOp::Eq, ("!=", _, _) => BinOp::Neq,
                 ("<", _, _) => BinOp::Lt, (">", _, _) => BinOp::Gt,
                 ("<=", _, _) => BinOp::Lte, (">=", _, _) => BinOp::Gte,

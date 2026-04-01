@@ -1,4 +1,5 @@
 <!-- description: Fix versioned module name mismatch in codegen for package dependencies -->
+<!-- done: 2026-04-02 -->
 # Versioned Module Codegen Bug
 
 ## Problem

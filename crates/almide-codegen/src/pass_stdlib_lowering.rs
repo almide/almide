@@ -381,164 +381,68 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
 
-    let kind = match expr.kind {
+    // Special cases: Named calls and Method calls that resolve to stdlib
+    match &expr.kind {
         // Named call: sort(xs) → list.sort(xs) when "sort" is a stdlib function
         // and NOT a sibling module function
-        IrExprKind::Call { target: CallTarget::Named { ref name }, ref args, .. }
+        IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if !args.is_empty()
             && !siblings.iter().any(|s| s == &**name)
             && !almide_lang::stdlib_info::resolve_ufcs_candidates(name).is_empty() =>
         {
             let IrExprKind::Call { target: CallTarget::Named { name }, args, type_args } = expr.kind else { unreachable!() };
             let args: Vec<IrExpr> = args.into_iter().map(|a| resolve_unresolved_ufcs(a, siblings)).collect();
-            // Try type-based first, then fall back to best-guess for Unknown
             let module = resolve_module_from_ty(&args[0].ty, &name)
                 .or_else(|| almide_lang::stdlib_info::resolve_ufcs_module(&name));
             if let Some(module) = module {
-                let module_call = IrExpr {
+                return rewrite_expr(IrExpr {
                     kind: IrExprKind::Call {
                         target: CallTarget::Module { module: module.to_string().into(), func: name },
                         args, type_args,
                     },
-                    ty: ty.clone(), span,
-                };
-                return rewrite_expr(module_call);
+                    ty, span,
+                });
             }
-            IrExprKind::Call { target: CallTarget::Named { name }, args, type_args }
+            return IrExpr {
+                kind: IrExprKind::Call { target: CallTarget::Named { name }, args, type_args },
+                ty, span,
+            };
         }
         // Method call: xs.map(fn) → list.map(xs, fn) when type is known
-        IrExprKind::Call { target: CallTarget::Method { object: ref _obj, ref method }, .. }
+        IrExprKind::Call { target: CallTarget::Method { method, .. }, .. }
             if !method.contains('.')
             && !almide_lang::stdlib_info::resolve_ufcs_candidates(method).is_empty() =>
         {
             let IrExprKind::Call { target: CallTarget::Method { object, method }, args, type_args } = expr.kind else { unreachable!() };
             let object = Box::new(resolve_unresolved_ufcs(*object, siblings));
             let args: Vec<IrExpr> = args.into_iter().map(|a| resolve_unresolved_ufcs(a, siblings)).collect();
-            // Resolve from type, falling back to best-guess when type is unknown or mistyped.
-            // Safe here since resolve_unresolved_ufcs only runs on module function bodies.
             let module = resolve_module_from_ty(&object.ty, &method)
                 .or_else(|| almide_lang::stdlib_info::resolve_ufcs_module(&method));
             if let Some(module) = module {
                 let mut call_args = vec![*object];
                 call_args.extend(args);
-                let module_call = IrExpr {
+                return rewrite_expr(IrExpr {
                     kind: IrExprKind::Call {
                         target: CallTarget::Module { module: module.to_string().into(), func: method },
                         args: call_args, type_args,
                     },
-                    ty: ty.clone(), span,
-                };
-                return rewrite_expr(module_call);
+                    ty, span,
+                });
             }
-            IrExprKind::Call {
-                target: CallTarget::Method { object, method },
-                args, type_args,
-            }
-        }
-        // Recurse into sub-expressions
-        IrExprKind::Call { target, args, type_args } => {
-            let args = args.into_iter().map(|a| resolve_unresolved_ufcs(a, siblings)).collect();
-            let target = match target {
-                CallTarget::Method { object, method } => CallTarget::Method {
-                    object: Box::new(resolve_unresolved_ufcs(*object, siblings)), method,
-                },
-                CallTarget::Computed { callee } => CallTarget::Computed {
-                    callee: Box::new(resolve_unresolved_ufcs(*callee, siblings)),
-                },
-                other => other,
+            return IrExpr {
+                kind: IrExprKind::Call { target: CallTarget::Method { object, method }, args, type_args },
+                ty, span,
             };
-            IrExprKind::Call { target, args, type_args }
         }
-        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(resolve_unresolved_ufcs(*cond, siblings)),
-            then: Box::new(resolve_unresolved_ufcs(*then, siblings)),
-            else_: Box::new(resolve_unresolved_ufcs(*else_, siblings)),
-        },
-        IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: resolve_ufcs_stmts(stmts, siblings),
-            expr: expr.map(|e| Box::new(resolve_unresolved_ufcs(*e, siblings))),
-        },
-        IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(resolve_unresolved_ufcs(*subject, siblings)),
-            arms: arms.into_iter().map(|arm| IrMatchArm {
-                pattern: arm.pattern,
-                guard: arm.guard.map(|g| resolve_unresolved_ufcs(g, siblings)),
-                body: resolve_unresolved_ufcs(arm.body, siblings),
-            }).collect(),
-        },
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op,
-            left: Box::new(resolve_unresolved_ufcs(*left, siblings)),
-            right: Box::new(resolve_unresolved_ufcs(*right, siblings)),
-        },
-        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params, body: Box::new(resolve_unresolved_ufcs(*body, siblings)), lambda_id,
-        },
-        IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| resolve_unresolved_ufcs(e, siblings)).collect(),
-        },
-        IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name, fields: fields.into_iter().map(|(k, v)| (k, resolve_unresolved_ufcs(v, siblings))).collect(),
-        },
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
-            var, var_tuple,
-            iterable: Box::new(resolve_unresolved_ufcs(*iterable, siblings)),
-            body: resolve_ufcs_stmts(body, siblings),
-        },
-        IrExprKind::While { cond, body } => IrExprKind::While {
-            cond: Box::new(resolve_unresolved_ufcs(*cond, siblings)),
-            body: resolve_ufcs_stmts(body, siblings),
-        },
-        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
-            parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: resolve_unresolved_ufcs(expr, siblings) },
-                other => other,
-            }).collect(),
-        },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
-        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
-        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)) },
-        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)),
-            fallback: Box::new(resolve_unresolved_ufcs(*fallback, siblings)),
-        },
-        IrExprKind::Member { object, field } => IrExprKind::Member {
-            object: Box::new(resolve_unresolved_ufcs(*object, siblings)), field,
-        },
-        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
-            expr: Box::new(resolve_unresolved_ufcs(*expr, siblings)), field,
-        },
-        IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| resolve_unresolved_ufcs(e, siblings)).collect(),
-        },
-        other => other,
-    };
-
-    IrExpr { kind, ty, span }
+        _ => {}
+    }
+    // Default: recurse into all children
+    expr.map_children(&mut |e| resolve_unresolved_ufcs(e, siblings))
 }
 
+// Kept for backward compatibility — resolve_ufcs_stmts callers in the pass
 fn resolve_ufcs_stmts(stmts: Vec<IrStmt>, siblings: &[String]) -> Vec<IrStmt> {
-    stmts.into_iter().map(|s| {
-        let kind = match s.kind {
-            IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-                var, mutability, ty, value: resolve_unresolved_ufcs(value, siblings),
-            },
-            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: resolve_unresolved_ufcs(value, siblings) },
-            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: resolve_unresolved_ufcs(expr, siblings) },
-            IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-                cond: resolve_unresolved_ufcs(cond, siblings),
-                else_: resolve_unresolved_ufcs(else_, siblings),
-            },
-            IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-                pattern, value: resolve_unresolved_ufcs(value, siblings),
-            },
-            other => other,
-        };
-        IrStmt { kind, span: s.span }
-    }).collect()
+    stmts.into_iter().map(|s| s.map_exprs(&mut |e| resolve_unresolved_ufcs(e, siblings))).collect()
 }
 
 // ── Iterator chain lowering ────────────────────────────────────────
@@ -1018,11 +922,9 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
 /// Rewrite intra-module `CallTarget::Named` calls that match a sibling function
 /// to use the `almide_rt_{module}_{func}` prefix (matching the walker's definition rename).
 fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) -> IrExpr {
-    let ty = expr.ty.clone();
-    let span = expr.span;
-
-    let kind = match expr.kind {
-        IrExprKind::Call { target: CallTarget::Named { ref name }, .. }
+    // Special cases: Named calls and FnRef to sibling functions get prefixed
+    match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Named { name }, .. }
             if siblings.iter().any(|s| s == &**name) =>
         {
             let IrExprKind::Call { target: CallTarget::Named { name }, args, type_args } = expr.kind else { unreachable!() };
@@ -1030,301 +932,42 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
             let mod_ident = mod_name.replace('.', "_");
             let prefixed = format!("almide_rt_{}_{}", mod_ident, sanitized);
             let args = args.into_iter().map(|a| prefix_intra_module_calls(a, mod_name, siblings)).collect();
-            IrExprKind::Call {
-                target: CallTarget::Named { name: prefixed.into() },
-                args,
-                type_args,
-            }
+            return IrExpr {
+                kind: IrExprKind::Call { target: CallTarget::Named { name: prefixed.into() }, args, type_args },
+                ty: expr.ty, span: expr.span,
+            };
         }
-        IrExprKind::FnRef { ref name } if siblings.iter().any(|s| s == &**name) => {
-            let IrExprKind::FnRef { name } = expr.kind else { unreachable!() };
+        IrExprKind::FnRef { name } if siblings.iter().any(|s| s == &**name) => {
             let sanitized = name.replace(' ', "_").replace('-', "_").replace('.', "_");
             let mod_ident = mod_name.replace('.', "_");
-            IrExprKind::FnRef { name: format!("almide_rt_{}_{}", mod_ident, sanitized).into() }
-        }
-        // Recurse into sub-expressions
-        IrExprKind::Call { target, args, type_args } => {
-            let args = args.into_iter().map(|a| prefix_intra_module_calls(a, mod_name, siblings)).collect();
-            let target = match target {
-                CallTarget::Method { object, method } => CallTarget::Method {
-                    object: Box::new(prefix_intra_module_calls(*object, mod_name, siblings)), method,
-                },
-                CallTarget::Computed { callee } => CallTarget::Computed {
-                    callee: Box::new(prefix_intra_module_calls(*callee, mod_name, siblings)),
-                },
-                other => other,
+            return IrExpr {
+                kind: IrExprKind::FnRef { name: format!("almide_rt_{}_{}", mod_ident, sanitized).into() },
+                ty: expr.ty, span: expr.span,
             };
-            IrExprKind::Call { target, args, type_args }
         }
-        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(prefix_intra_module_calls(*cond, mod_name, siblings)),
-            then: Box::new(prefix_intra_module_calls(*then, mod_name, siblings)),
-            else_: Box::new(prefix_intra_module_calls(*else_, mod_name, siblings)),
-        },
-        IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: prefix_stmts(stmts, mod_name, siblings),
-            expr: expr.map(|e| Box::new(prefix_intra_module_calls(*e, mod_name, siblings))),
-        },
-        IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(prefix_intra_module_calls(*subject, mod_name, siblings)),
-            arms: arms.into_iter().map(|arm| IrMatchArm {
-                pattern: arm.pattern,
-                guard: arm.guard.map(|g| prefix_intra_module_calls(g, mod_name, siblings)),
-                body: prefix_intra_module_calls(arm.body, mod_name, siblings),
-            }).collect(),
-        },
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op,
-            left: Box::new(prefix_intra_module_calls(*left, mod_name, siblings)),
-            right: Box::new(prefix_intra_module_calls(*right, mod_name, siblings)),
-        },
-        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(prefix_intra_module_calls(*operand, mod_name, siblings)),
-        },
-        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params, body: Box::new(prefix_intra_module_calls(*body, mod_name, siblings)), lambda_id,
-        },
-        IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| prefix_intra_module_calls(e, mod_name, siblings)).collect(),
-        },
-        IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name, fields: fields.into_iter().map(|(k, v)| (k, prefix_intra_module_calls(v, mod_name, siblings))).collect(),
-        },
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
-            var, var_tuple,
-            iterable: Box::new(prefix_intra_module_calls(*iterable, mod_name, siblings)),
-            body: prefix_stmts(body, mod_name, siblings),
-        },
-        IrExprKind::While { cond, body } => IrExprKind::While {
-            cond: Box::new(prefix_intra_module_calls(*cond, mod_name, siblings)),
-            body: prefix_stmts(body, mod_name, siblings),
-        },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
-        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
-        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
-        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)),
-            fallback: Box::new(prefix_intra_module_calls(*fallback, mod_name, siblings)),
-        },
-        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
-            parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: prefix_intra_module_calls(expr, mod_name, siblings) },
-                other => other,
-            }).collect(),
-        },
-        IrExprKind::Member { object, field } => IrExprKind::Member {
-            object: Box::new(prefix_intra_module_calls(*object, mod_name, siblings)), field,
-        },
-        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
-            expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)), field,
-        },
-        IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| prefix_intra_module_calls(e, mod_name, siblings)).collect(),
-        },
-        IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
-        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
-        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)), as_str, mutable },
-        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(prefix_intra_module_calls(*expr, mod_name, siblings)) },
-        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter().map(|e| prefix_intra_module_calls(e, mod_name, siblings)).collect(),
-        },
-        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
-            object: Box::new(prefix_intra_module_calls(*object, mod_name, siblings)),
-            index: Box::new(prefix_intra_module_calls(*index, mod_name, siblings)),
-        },
-        IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
-            base: Box::new(prefix_intra_module_calls(*base, mod_name, siblings)),
-            fields: fields.into_iter().map(|(k, v)| (k, prefix_intra_module_calls(v, mod_name, siblings))).collect(),
-        },
-        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter().map(|(k, v)| (prefix_intra_module_calls(k, mod_name, siblings), prefix_intra_module_calls(v, mod_name, siblings))).collect(),
-        },
-        other => other,
-    };
-
-    IrExpr { kind, ty, span }
-}
-
-fn prefix_stmts(stmts: Vec<IrStmt>, mod_name: &str, siblings: &[String]) -> Vec<IrStmt> {
-    stmts.into_iter().map(|s| {
-        let kind = match s.kind {
-            IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-                var, mutability, ty, value: prefix_intra_module_calls(value, mod_name, siblings),
-            },
-            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: prefix_intra_module_calls(value, mod_name, siblings) },
-            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: prefix_intra_module_calls(expr, mod_name, siblings) },
-            IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-                cond: prefix_intra_module_calls(cond, mod_name, siblings),
-                else_: prefix_intra_module_calls(else_, mod_name, siblings),
-            },
-            IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-                pattern, value: prefix_intra_module_calls(value, mod_name, siblings),
-            },
-            other => other,
-        };
-        IrStmt { kind, span: s.span }
-    }).collect()
+        _ => {}
+    }
+    // Default: recurse into all children
+    expr.map_children(&mut |e| prefix_intra_module_calls(e, mod_name, siblings))
 }
 
 /// Rewrite CallTarget::Module names using versioned name mapping.
 /// e.g., CallTarget::Module { module: "json" } → CallTarget::Module { module: "json_v2" }
 fn rewrite_module_names(expr: IrExpr, map: &std::collections::HashMap<String, String>) -> IrExpr {
     use almide_base::intern::sym;
-    let ty = expr.ty.clone();
-    let span = expr.span;
-    let kind = match expr.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
+    // Only CallTarget::Module needs special handling; everything else just recurses.
+    if let IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } = &expr.kind {
+        if map.contains_key(&**module) {
+            let IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } = expr.kind else { unreachable!() };
             let new_module = map.get(&*module).map(|v| sym(v)).unwrap_or(module);
             let args = args.into_iter().map(|a| rewrite_module_names(a, map)).collect();
-            IrExprKind::Call { target: CallTarget::Module { module: new_module, func }, args, type_args }
-        }
-        IrExprKind::Call { target, args, type_args } => {
-            let args = args.into_iter().map(|a| rewrite_module_names(a, map)).collect();
-            let target = match target {
-                CallTarget::Method { object, method } => CallTarget::Method { object: Box::new(rewrite_module_names(*object, map)), method },
-                CallTarget::Computed { callee } => CallTarget::Computed { callee: Box::new(rewrite_module_names(*callee, map)) },
-                other => other,
+            return IrExpr {
+                kind: IrExprKind::Call { target: CallTarget::Module { module: new_module, func }, args, type_args },
+                ty: expr.ty, span: expr.span,
             };
-            IrExprKind::Call { target, args, type_args }
         }
-        IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: stmts.into_iter().map(|s| rewrite_module_names_stmt(s, map)).collect(),
-            expr: expr.map(|e| Box::new(rewrite_module_names(*e, map))),
-        },
-        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(rewrite_module_names(*cond, map)),
-            then: Box::new(rewrite_module_names(*then, map)),
-            else_: Box::new(rewrite_module_names(*else_, map)),
-        },
-        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_module_names(*body, map)), lambda_id,
-        },
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
-            var, var_tuple,
-            iterable: Box::new(rewrite_module_names(*iterable, map)),
-            body: body.into_iter().map(|s| rewrite_module_names_stmt(s, map)).collect(),
-        },
-        IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(rewrite_module_names(*subject, map)),
-            arms: arms.into_iter().map(|arm| IrMatchArm {
-                pattern: arm.pattern,
-                guard: arm.guard.map(|g| rewrite_module_names(g, map)),
-                body: rewrite_module_names(arm.body, map),
-            }).collect(),
-        },
-        IrExprKind::While { cond, body } => IrExprKind::While {
-            cond: Box::new(rewrite_module_names(*cond, map)),
-            body: body.into_iter().map(|s| rewrite_module_names_stmt(s, map)).collect(),
-        },
-        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
-            parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_module_names(expr, map) },
-                other => other,
-            }).collect(),
-        },
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op, left: Box::new(rewrite_module_names(*left, map)), right: Box::new(rewrite_module_names(*right, map)),
-        },
-        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(rewrite_module_names(*operand, map)),
-        },
-        IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| rewrite_module_names(e, map)).collect(),
-        },
-        IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name, fields: fields.into_iter().map(|(k, v)| (k, rewrite_module_names(v, map))).collect(),
-        },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(rewrite_module_names(*expr, map)),
-            fallback: Box::new(rewrite_module_names(*fallback, map)),
-        },
-        IrExprKind::Member { object, field } => IrExprKind::Member {
-            object: Box::new(rewrite_module_names(*object, map)), field,
-        },
-        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
-            object: Box::new(rewrite_module_names(*object, map)),
-            index: Box::new(rewrite_module_names(*index, map)),
-        },
-        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
-            object: Box::new(rewrite_module_names(*object, map)),
-            key: Box::new(rewrite_module_names(*key, map)),
-        },
-        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter().map(|e| rewrite_module_names(e, map)).collect(),
-        },
-        IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
-            base: Box::new(rewrite_module_names(*base, map)),
-            fields: fields.into_iter().map(|(k, v)| (k, rewrite_module_names(v, map))).collect(),
-        },
-        IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
-            object: Box::new(rewrite_module_names(*object, map)), index,
-        },
-        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter().map(|(k, v)| (rewrite_module_names(k, map), rewrite_module_names(v, map))).collect(),
-        },
-        IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
-            start: Box::new(rewrite_module_names(*start, map)),
-            end: Box::new(rewrite_module_names(*end, map)),
-            inclusive,
-        },
-        IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| rewrite_module_names(e, map)).collect(),
-        },
-        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
-            expr: Box::new(rewrite_module_names(*expr, map)), field,
-        },
-        // Codegen wrapper nodes — must recurse into inner expressions
-        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow {
-            expr: Box::new(rewrite_module_names(*expr, map)), as_str, mutable,
-        },
-        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(rewrite_module_names(*expr, map)) },
-        IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
-            name, args: args.into_iter().map(|a| rewrite_module_names(a, map)).collect(),
-        },
-        other => other,
-    };
-    IrExpr { kind, ty, span }
-}
-
-fn rewrite_module_names_stmt(stmt: IrStmt, map: &std::collections::HashMap<String, String>) -> IrStmt {
-    let kind = match stmt.kind {
-        IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-            var, mutability, ty, value: rewrite_module_names(value, map),
-        },
-        IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: rewrite_module_names(value, map) },
-        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: rewrite_module_names(expr, map) },
-        IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-            cond: rewrite_module_names(cond, map),
-            else_: rewrite_module_names(else_, map),
-        },
-        IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
-            target, field, value: rewrite_module_names(value, map),
-        },
-        IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
-            target, index: rewrite_module_names(index, map), value: rewrite_module_names(value, map),
-        },
-        IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
-            target, key: rewrite_module_names(key, map), value: rewrite_module_names(value, map),
-        },
-        IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-            pattern, value: rewrite_module_names(value, map),
-        },
-        other => other,
-    };
-    IrStmt { kind, span: stmt.span }
+    }
+    expr.map_children(&mut |e| rewrite_module_names(e, map))
 }
 
 // ── Lambda clone optimization: only clone multi-use params ─────────

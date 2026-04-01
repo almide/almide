@@ -9,7 +9,6 @@ pub enum Effect {
     Time,
     Rand,
     Fan,
-    Log,
 }
 
 impl std::fmt::Display for Effect {
@@ -21,7 +20,6 @@ impl std::fmt::Display for Effect {
             Effect::Time => write!(f, "Time"),
             Effect::Rand => write!(f, "Rand"),
             Effect::Fan => write!(f, "Fan"),
-            Effect::Log => write!(f, "Log"),
         }
     }
 }

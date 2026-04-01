@@ -342,6 +342,199 @@ pub enum IterCollector {
     Count { lambda: Box<IrExpr> },
 }
 
+// ── Structural recursion helpers ────────────────────────────────
+//
+// `map_children` applies `f` to every direct child `IrExpr`.
+// All variants are listed explicitly (no wildcard) so that adding
+// a new IrExprKind variant causes a compile error here — forcing
+// the author to decide how its children should be traversed.
+
+impl IrExpr {
+    /// Apply `f` to every immediate child expression, returning a new `IrExpr`.
+    /// Leaf nodes (literals, Var, Unit, …) are returned unchanged.
+    pub fn map_children(self, f: &mut impl FnMut(IrExpr) -> IrExpr) -> IrExpr {
+        let ty = self.ty;
+        let span = self.span;
+        let kind = match self.kind {
+            // ── Leaves (no child expressions) ──
+            IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+            | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+            | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+            | IrExprKind::Break | IrExprKind::Continue
+            | IrExprKind::OptionNone | IrExprKind::EmptyMap
+            | IrExprKind::RenderedCall { .. }
+            | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+            | IrExprKind::Hole | IrExprKind::Todo { .. } => self.kind,
+
+            // ── Unary wrappers ──
+            IrExprKind::UnOp { op, operand } => IrExprKind::UnOp { op, operand: Box::new(f(*operand)) },
+            IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(f(*expr)) },
+            IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(f(*expr)) },
+            IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(f(*expr)), as_str, mutable },
+            IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(f(*expr)) },
+            IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(f(*expr)) },
+            IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(f(*expr)) },
+            IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(f(*expr)) },
+            IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(f(*expr)) },
+            IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(f(*expr)) },
+            IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(f(*expr)) },
+            IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(f(*expr)) },
+            IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(f(*expr)) },
+
+            // ── Binary / access ──
+            IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
+                op, left: Box::new(f(*left)), right: Box::new(f(*right)),
+            },
+            IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
+                expr: Box::new(f(*expr)), fallback: Box::new(f(*fallback)),
+            },
+            IrExprKind::Member { object, field } => IrExprKind::Member { object: Box::new(f(*object)), field },
+            IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain { expr: Box::new(f(*expr)), field },
+            IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex { object: Box::new(f(*object)), index },
+            IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
+                object: Box::new(f(*object)), index: Box::new(f(*index)),
+            },
+            IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+                object: Box::new(f(*object)), key: Box::new(f(*key)),
+            },
+            IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
+                start: Box::new(f(*start)), end: Box::new(f(*end)), inclusive,
+            },
+
+            // ── Control flow ──
+            IrExprKind::If { cond, then, else_ } => IrExprKind::If {
+                cond: Box::new(f(*cond)), then: Box::new(f(*then)), else_: Box::new(f(*else_)),
+            },
+            IrExprKind::Match { subject, arms } => IrExprKind::Match {
+                subject: Box::new(f(*subject)),
+                arms: arms.into_iter().map(|arm| IrMatchArm {
+                    pattern: arm.pattern,
+                    guard: arm.guard.map(|g| f(g)),
+                    body: f(arm.body),
+                }).collect(),
+            },
+            IrExprKind::Block { stmts, expr } => IrExprKind::Block {
+                stmts: stmts.into_iter().map(|s| s.map_exprs(f)).collect(),
+                expr: expr.map(|e| Box::new(f(*e))),
+            },
+
+            // ── Loops ──
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
+                var, var_tuple,
+                iterable: Box::new(f(*iterable)),
+                body: body.into_iter().map(|s| s.map_exprs(f)).collect(),
+            },
+            IrExprKind::While { cond, body } => IrExprKind::While {
+                cond: Box::new(f(*cond)),
+                body: body.into_iter().map(|s| s.map_exprs(f)).collect(),
+            },
+
+            // ── Calls ──
+            IrExprKind::Call { target, args, type_args } => {
+                let args = args.into_iter().map(|a| f(a)).collect();
+                let target = match target {
+                    CallTarget::Method { object, method } => CallTarget::Method { object: Box::new(f(*object)), method },
+                    CallTarget::Computed { callee } => CallTarget::Computed { callee: Box::new(f(*callee)) },
+                    other => other,
+                };
+                IrExprKind::Call { target, args, type_args }
+            }
+
+            // ── Collections ──
+            IrExprKind::List { elements } => IrExprKind::List {
+                elements: elements.into_iter().map(|e| f(e)).collect(),
+            },
+            IrExprKind::Tuple { elements } => IrExprKind::Tuple {
+                elements: elements.into_iter().map(|e| f(e)).collect(),
+            },
+            IrExprKind::Fan { exprs } => IrExprKind::Fan {
+                exprs: exprs.into_iter().map(|e| f(e)).collect(),
+            },
+            IrExprKind::Record { name, fields } => IrExprKind::Record {
+                name, fields: fields.into_iter().map(|(k, v)| (k, f(v))).collect(),
+            },
+            IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
+                base: Box::new(f(*base)),
+                fields: fields.into_iter().map(|(k, v)| (k, f(v))).collect(),
+            },
+            IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
+                entries: entries.into_iter().map(|(k, v)| (f(k), f(v))).collect(),
+            },
+
+            // ── Functions ──
+            IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+                params, body: Box::new(f(*body)), lambda_id,
+            },
+            IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
+                name, args: args.into_iter().map(|a| f(a)).collect(),
+            },
+
+            // ── Strings ──
+            IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
+                parts: parts.into_iter().map(|p| match p {
+                    IrStringPart::Expr { expr } => IrStringPart::Expr { expr: f(expr) },
+                    other => other,
+                }).collect(),
+            },
+
+            // ── Iterator chain ──
+            IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
+                source: Box::new(f(*source)),
+                consume,
+                steps: steps.into_iter().map(|s| s.map_exprs(f)).collect(),
+                collector: collector.map_exprs(f),
+            },
+        };
+        IrExpr { kind, ty, span }
+    }
+}
+
+impl IrStmt {
+    /// Apply `f` to every expression contained in this statement.
+    pub fn map_exprs(self, f: &mut impl FnMut(IrExpr) -> IrExpr) -> IrStmt {
+        let kind = match self.kind {
+            IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind { var, mutability, ty, value: f(value) },
+            IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure { pattern, value: f(value) },
+            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: f(value) },
+            IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign { target, index: f(index), value: f(value) },
+            IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert { target, key: f(key), value: f(value) },
+            IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign { target, field, value: f(value) },
+            IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard { cond: f(cond), else_: f(else_) },
+            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: f(expr) },
+            IrStmtKind::Comment { .. } => self.kind,
+            IrStmtKind::ListSwap { target, a, b } => IrStmtKind::ListSwap { target, a: f(a), b: f(b) },
+            IrStmtKind::ListReverse { target, end } => IrStmtKind::ListReverse { target, end: f(end) },
+            IrStmtKind::ListRotateLeft { target, end } => IrStmtKind::ListRotateLeft { target, end: f(end) },
+            IrStmtKind::ListCopySlice { dst, src, len } => IrStmtKind::ListCopySlice { dst, src, len: f(len) },
+        };
+        IrStmt { kind, span: self.span }
+    }
+}
+
+impl IterStep {
+    pub fn map_exprs(self, f: &mut impl FnMut(IrExpr) -> IrExpr) -> IterStep {
+        match self {
+            IterStep::Map { lambda } => IterStep::Map { lambda: Box::new(f(*lambda)) },
+            IterStep::Filter { lambda } => IterStep::Filter { lambda: Box::new(f(*lambda)) },
+            IterStep::FlatMap { lambda } => IterStep::FlatMap { lambda: Box::new(f(*lambda)) },
+            IterStep::FilterMap { lambda } => IterStep::FilterMap { lambda: Box::new(f(*lambda)) },
+        }
+    }
+}
+
+impl IterCollector {
+    pub fn map_exprs(self, f: &mut impl FnMut(IrExpr) -> IrExpr) -> IterCollector {
+        match self {
+            IterCollector::Collect => IterCollector::Collect,
+            IterCollector::Fold { init, lambda } => IterCollector::Fold { init: Box::new(f(*init)), lambda: Box::new(f(*lambda)) },
+            IterCollector::Any { lambda } => IterCollector::Any { lambda: Box::new(f(*lambda)) },
+            IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(f(*lambda)) },
+            IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(f(*lambda)) },
+            IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(f(*lambda)) },
+        }
+    }
+}
+
 // ── Statements ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -33,7 +33,6 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
             "Time" => Some(Effect::Time),
             "Rand" => Some(Effect::Rand),
             "Fan" => Some(Effect::Fan),
-            "Log" => Some(Effect::Log),
             _ => None,
         })
         .collect();

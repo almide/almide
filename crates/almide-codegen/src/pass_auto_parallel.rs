@@ -131,13 +131,13 @@ fn is_pure_expr(
                     if name.starts_with("almide_rt_") {
                         let rest = &name["almide_rt_".len()..];
                         let module = rest.split('_').next().unwrap_or("");
-                        if matches!(module, "fs" | "http" | "env" | "process" | "time" | "log") {
+                        if matches!(module, "fs" | "http" | "env" | "process" | "time") {
                             return false;
                         }
                     }
                 }
                 CallTarget::Module { module, .. } => {
-                    if matches!(&**module, "fs" | "http" | "env" | "process" | "time" | "log") {
+                    if matches!(&**module, "fs" | "http" | "env" | "process" | "time") {
                         return false;
                     }
                 }

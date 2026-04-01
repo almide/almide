@@ -217,7 +217,6 @@ pub fn cmd_check_effects(file: &str) {
                         "Time" => Some(Effect::Time),
                         "Rand" => Some(Effect::Rand),
                         "Fan" => Some(Effect::Fan),
-                        "Log" => Some(Effect::Log),
                         _ => None,
                     })
                     .collect();

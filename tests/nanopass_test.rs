@@ -392,7 +392,7 @@ mod clone_insertion {
     #[test]
     fn multi_use_local_string_triggers_pass() {
         // let s = "hello"
-        // s ++ s  — s is a local let binding used twice in concat
+        // s + s  — s is a local let binding used twice in concat
         let mut vt = VarTable::new();
         let v_s = vt.alloc(sym("s"), Ty::String, Mutability::Let, None);
 

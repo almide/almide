@@ -458,9 +458,6 @@ impl FuncCompiler<'_> {
                     _ if module == "process" => {
                         self.emit_process_call(func, args);
                     }
-                    _ if module == "log" => {
-                        self.emit_log_call(func, args);
-                    }
                     _ if module == "testing" => {
                         // Delegate to Named handler: testing.assert_gt → "assert_gt"
                         let target = CallTarget::Named { name: (*func).into() };
@@ -1105,69 +1102,6 @@ impl FuncCompiler<'_> {
     }
 
     /// Log module: structured logging to stderr via WASI fd_write(2, ...).
-    /// Simple variants: `[LEVEL] msg\n`
-    /// _with variants:  `[LEVEL] msg data\n`
-    fn emit_log_call(&mut self, func: &str, args: &[IrExpr]) {
-        let prefix = match func {
-            "debug" | "debug_with" => "[DEBUG] ",
-            "info"  | "info_with"  => "[INFO] ",
-            "warn"  | "warn_with"  => "[WARN] ",
-            "error" | "error_with" => "[ERROR] ",
-            _ => {
-                self.emit_stub_call(args);
-                return;
-            }
-        };
-        let prefix_ptr = self.emitter.intern_string(prefix);
-
-        // Build the full message string on the heap:
-        //   simple: prefix + msg
-        //   _with:  prefix + msg + " " + data
-        wasm!(self.func, { i32_const(prefix_ptr as i32); });
-        self.emit_expr(&args[0]); // msg: String
-        wasm!(self.func, { call(self.emitter.rt.concat_str); });
-
-        if func.ends_with("_with") {
-            let space = self.emitter.intern_string(" ");
-            wasm!(self.func, { i32_const(space as i32); call(self.emitter.rt.concat_str); });
-            self.emit_expr(&args[1]); // data: String
-            wasm!(self.func, { call(self.emitter.rt.concat_str); });
-        }
-
-        // Write the concatenated string to stderr (fd=2).
-        // String layout: [len:i32][data:u8...], pointer is on the stack.
-        let s = self.scratch.alloc_i32();
-        wasm!(self.func, {
-            local_set(s);
-            // iov[0].buf = s + 4 (skip length prefix)
-            i32_const(0);
-            local_get(s); i32_const(4); i32_add;
-            i32_store(0);
-            // iov[0].len = *s (load length)
-            i32_const(4);
-            local_get(s); i32_load(0);
-            i32_store(0);
-            // fd_write(stderr=2, iovs=0, iovs_len=1, nwritten=8)
-            i32_const(2); i32_const(0); i32_const(1); i32_const(8);
-            call(self.emitter.rt.fd_write);
-            drop;
-        });
-        self.scratch.free_i32(s);
-
-        // Write newline
-        wasm!(self.func, {
-            i32_const(0);
-            i32_const(super::NEWLINE_OFFSET as i32);
-            i32_store(0);
-            i32_const(4);
-            i32_const(1);
-            i32_store(0);
-            i32_const(2); i32_const(0); i32_const(1); i32_const(8);
-            call(self.emitter.rt.fd_write);
-            drop;
-        });
-    }
-
     /// Random module: PRNG-based random number generation.
     /// Uses xorshift64 state stored at linear memory address 0 (8 bytes).
     pub(super) fn emit_random_call(&mut self, func: &str, args: &[IrExpr]) {

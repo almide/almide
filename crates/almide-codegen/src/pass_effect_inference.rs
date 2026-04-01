@@ -27,7 +27,6 @@ fn module_to_effect(module: &str) -> Option<Effect> {
         "env" | "process" => Some(Effect::Env),
         "time" | "datetime" => Some(Effect::Time),
         "fan" => Some(Effect::Fan),
-        "log" => Some(Effect::Log),
         _ => None,
     }
 }
@@ -426,7 +425,6 @@ mod tests {
         assert_eq!(module_to_effect("time"), Some(Effect::Time));
         assert_eq!(module_to_effect("datetime"), Some(Effect::Time));
         assert_eq!(module_to_effect("fan"), Some(Effect::Fan));
-        assert_eq!(module_to_effect("log"), Some(Effect::Log));
         assert_eq!(module_to_effect("list"), None);
         assert_eq!(module_to_effect("string"), None);
         assert_eq!(module_to_effect("math"), None);
@@ -438,7 +436,6 @@ mod tests {
         assert_eq!(runtime_name_to_effect("almide_rt_http_get"), Some(Effect::Net));
         assert_eq!(runtime_name_to_effect("almide_rt_env_get"), Some(Effect::Env));
         assert_eq!(runtime_name_to_effect("almide_rt_time_now"), Some(Effect::Time));
-        assert_eq!(runtime_name_to_effect("almide_rt_log_info"), Some(Effect::Log));
         assert_eq!(runtime_name_to_effect("almide_rt_list_map"), None);
         assert_eq!(runtime_name_to_effect("println"), None);
     }
