@@ -23,6 +23,7 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
             "Unit" => Ty::Unit,
             "Bytes" => Ty::Bytes,
             "Matrix" => Ty::Matrix,
+            "RawPtr" => Ty::RawPtr,
             "Path" => Ty::String,
             other => {
                 if let Some(types) = known_types {

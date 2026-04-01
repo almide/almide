@@ -7,214 +7,146 @@ use super::Parser;
 impl Parser {
     pub(crate) fn parse_expr(&mut self) -> Result<Expr, String> {
         self.enter_depth()?;
-        let result = self.parse_pipe();
+        let result = self.parse_expr_bp(0);
         self.exit_depth();
         result
     }
 
-    fn parse_pipe(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_or()?;
-        loop {
-            self.skip_newlines_if_followed_by(TokenType::PipeArrow);
-            self.skip_newlines_if_followed_by(TokenType::ComposeArrow);
-            if self.check(TokenType::ComposeArrow) {
-                let span = Some(self.current_span());
-                self.advance();
-                self.skip_newlines();
-                let right = self.parse_or()?;
-                left = Expr::new(self.next_id(), span, ExprKind::Compose {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                });
-            } else if self.check(TokenType::PipeArrow) {
-                let span = Some(self.current_span());
-                self.advance();
-                self.skip_newlines();
-                if self.check(TokenType::Match)
-                    && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace)
-                {
-                    self.advance();
-                    self.skip_newlines();
-                    self.expect(TokenType::LBrace)?;
-                    self.skip_newlines();
-                    let mut arms = Vec::new();
-                    while !self.check(TokenType::RBrace) {
-                        arms.push(self.parse_match_arm()?);
-                        self.skip_newlines();
-                        if self.check(TokenType::Comma) {
-                            self.advance();
-                            self.skip_newlines();
-                        }
-                    }
-                    self.expect(TokenType::RBrace)?;
-                    left = Expr::new(self.next_id(), span, ExprKind::Match {
-                        subject: Box::new(left),
-                        arms,
-                    });
-                } else {
-                    let right = self.parse_or()?;
-                    left = Expr::new(self.next_id(), span, ExprKind::Pipe {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    });
-                }
-            } else {
-                break;
-            }
-        }
-        Ok(left)
+    /// Kept as public entry point for callers that expect parse_or level
+    /// (e.g. parse_if condition). Now identical to parse_expr_bp(0).
+    pub(crate) fn parse_or(&mut self) -> Result<Expr, String> {
+        self.parse_expr_bp(0)
     }
 
-    pub(crate) fn parse_or(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_and()?;
+    // ── Pratt parser core ───────────────────────────────────────
+
+    /// Binding powers for infix operators.
+    /// Returns (left_bp, right_bp). left_bp < right_bp = left-assoc.
+    fn infix_bp(tt: &TokenType) -> Option<(u8, u8)> {
+        match tt {
+            //                             left  right
+            TokenType::Or               => Some((2,  3)),   // left-assoc
+            TokenType::And              => Some((4,  5)),   // left-assoc
+            TokenType::EqEq  | TokenType::BangEq
+            | TokenType::LAngle | TokenType::RAngle
+            | TokenType::LtEq  | TokenType::GtEq
+                                        => Some((6,  7)),   // non-assoc (enforced below)
+            TokenType::PipeArrow        => Some((8,  25)),  // ★ asymmetric
+            TokenType::DotDot           => Some((10, 10)),  // range
+            TokenType::DotDotEq         => Some((10, 10)),
+            TokenType::Plus | TokenType::Minus
+            | TokenType::PlusPlus       => Some((12, 13)),  // left-assoc
+            TokenType::Star | TokenType::Slash
+            | TokenType::Percent        => Some((14, 15)),  // left-assoc
+            TokenType::Caret            => Some((17, 16)),  // right-assoc
+            TokenType::ComposeArrow     => Some((25, 26)),  // left-assoc, inside |>'s right
+            _ => None,
+        }
+    }
+
+    /// All token types that are infix operators (for newline lookahead).
+    const INFIX_TOKENS: &'static [TokenType] = &[
+        TokenType::Or, TokenType::And,
+        TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq,
+        TokenType::PipeArrow, TokenType::ComposeArrow,
+        TokenType::DotDot, TokenType::DotDotEq,
+        TokenType::Plus, TokenType::Minus, TokenType::PlusPlus,
+        TokenType::Star, TokenType::Slash, TokenType::Percent,
+        TokenType::Caret,
+    ];
+
+    fn parse_expr_bp(&mut self, min_bp: u8) -> Result<Expr, String> {
+        let mut left = self.parse_unary()?;
+
         loop {
-            self.skip_newlines_if_followed_by_any(&[TokenType::Or]);
-            if !(self.check(TokenType::Or) || self.check(TokenType::PipePipe)) { break; }
+            // Allow operators on next line for multiline expressions
+            self.skip_newlines_if_followed_by_any(Self::INFIX_TOKENS);
+
+            // Error hints for invalid operators
             if self.check(TokenType::PipePipe) {
                 return Err(self.check_hint_or_err(
                     None, super::hints::HintScope::Expression,
                     "'||' is not valid in Almide",
                 ));
             }
-            let span = Some(self.current_span());
-            self.advance();
-            self.skip_newlines();
-            let right = self.parse_and()?;
-            left = Expr::new(self.next_id(), span, ExprKind::Binary {
-                op: sym("or"),
-                left: Box::new(left),
-                right: Box::new(right),
-            });
-        }
-        Ok(left)
-    }
-
-    fn parse_and(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_comparison()?;
-        loop {
-            self.skip_newlines_if_followed_by_any(&[TokenType::And]);
-            if !(self.check(TokenType::And) || self.check(TokenType::AmpAmp)) { break; }
             if self.check(TokenType::AmpAmp) {
                 return Err(self.check_hint_or_err(
                     None, super::hints::HintScope::Expression,
                     "'&&' is not valid in Almide",
                 ));
             }
-            let span = Some(self.current_span());
-            self.advance();
-            self.skip_newlines();
-            let right = self.parse_comparison()?;
-            left = Expr::new(self.next_id(), span, ExprKind::Binary {
-                op: sym("and"),
-                left: Box::new(left),
-                right: Box::new(right),
-            });
-        }
-        Ok(left)
-    }
 
-    fn parse_comparison(&mut self) -> Result<Expr, String> {
-        let left = self.parse_range()?;
-        self.skip_newlines_if_followed_by_any(&[TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq]);
-        if !(self.check(TokenType::EqEq)
-            || self.check(TokenType::BangEq)
-            || self.check(TokenType::LAngle)
-            || self.check(TokenType::RAngle)
-            || self.check(TokenType::LtEq)
-            || self.check(TokenType::GtEq)) { return Ok(left); }
-        let span = Some(self.current_span());
-        let op = sym(&self.current().value);
-        self.advance();
-        self.skip_newlines();
-        let right = self.parse_range()?;
-        let result = Expr::new(self.next_id(), span, ExprKind::Binary {
-            op, left: Box::new(left), right: Box::new(right),
-        });
-        // Reject chained comparisons: a < b < c
-        if self.check(TokenType::EqEq) || self.check(TokenType::BangEq)
-            || self.check(TokenType::LAngle) || self.check(TokenType::RAngle)
-            || self.check(TokenType::LtEq) || self.check(TokenType::GtEq)
-        {
-            let tok = self.current();
-            return Err(format!(
-                "Chained comparison operators are not allowed at line {}:{}\n  Hint: Use 'and' to combine comparisons. Write: a < b and b < c",
-                tok.line, tok.col
-            ));
-        }
-        Ok(result)
-    }
+            let tt = self.current().token_type.clone();
+            let Some((l_bp, r_bp)) = Self::infix_bp(&tt) else { break };
+            if l_bp < min_bp { break; }
 
-    fn parse_range(&mut self) -> Result<Expr, String> {
-        let left = self.parse_add_sub()?;
-        if self.check(TokenType::DotDot) {
             let span = Some(self.current_span());
+            let op_value = self.current().value.clone();
             self.advance();
             self.skip_newlines();
-            let right = self.parse_add_sub()?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Range {
-                start: Box::new(left), end: Box::new(right), inclusive: false,
-            }));
-        }
-        if self.check(TokenType::DotDotEq) {
-            let span = Some(self.current_span());
-            self.advance();
-            self.skip_newlines();
-            let right = self.parse_add_sub()?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Range {
-                start: Box::new(left), end: Box::new(right), inclusive: true,
-            }));
-        }
-        Ok(left)
-    }
 
-    fn parse_add_sub(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_mul_div()?;
-        loop {
-            self.skip_newlines_if_followed_by_any(&[TokenType::Plus, TokenType::Minus, TokenType::PlusPlus]);
-            if !(self.check(TokenType::Plus) || self.check(TokenType::Minus)
-                || self.check(TokenType::PlusPlus)) { break; }
-            let span = Some(self.current_span());
-            let op = sym(&self.current().value);
-            self.advance();
-            self.skip_newlines();
-            let right = self.parse_mul_div()?;
-            left = Expr::new(self.next_id(), span, ExprKind::Binary {
-                op, left: Box::new(left), right: Box::new(right),
-            });
-        }
-        Ok(left)
-    }
+            // ── Special: |> match { ... } ──
+            if tt == TokenType::PipeArrow
+                && self.check(TokenType::Match)
+                && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace)
+            {
+                self.advance(); // consume 'match'
+                self.skip_newlines();
+                self.expect(TokenType::LBrace)?;
+                self.skip_newlines();
+                let mut arms = Vec::new();
+                while !self.check(TokenType::RBrace) {
+                    arms.push(self.parse_match_arm()?);
+                    self.skip_newlines();
+                    if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
+                }
+                self.expect(TokenType::RBrace)?;
+                left = Expr::new(self.next_id(), span, ExprKind::Match {
+                    subject: Box::new(left), arms,
+                });
+                continue;
+            }
 
-    fn parse_mul_div(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_power()?;
-        loop {
-            self.skip_newlines_if_followed_by_any(&[TokenType::Star, TokenType::Slash, TokenType::Percent]);
-            if !(self.check(TokenType::Star) || self.check(TokenType::Slash)
-                || self.check(TokenType::Percent)) { break; }
-            let span = Some(self.current_span());
-            let op = sym(&self.current().value);
-            self.advance();
-            self.skip_newlines();
-            let right = self.parse_power()?;
-            left = Expr::new(self.next_id(), span, ExprKind::Binary {
-                op, left: Box::new(left), right: Box::new(right),
-            });
-        }
-        Ok(left)
-    }
+            let right = self.parse_expr_bp(r_bp)?;
 
-    fn parse_power(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_unary()?;
-        // ^ is right-associative (2 ^ 3 ^ 2 = 2 ^ (3 ^ 2))
-        if self.check(TokenType::Caret) {
-            let span = Some(self.current_span());
-            self.advance();
-            self.skip_newlines();
-            let right = self.parse_power()?;
-            left = Expr::new(self.next_id(), span, ExprKind::Binary {
-                op: sym("^"), left: Box::new(left), right: Box::new(right),
-            });
+            // ── Build AST node ──
+            left = match tt {
+                TokenType::PipeArrow => Expr::new(self.next_id(), span, ExprKind::Pipe {
+                    left: Box::new(left), right: Box::new(right),
+                }),
+                TokenType::ComposeArrow => Expr::new(self.next_id(), span, ExprKind::Compose {
+                    left: Box::new(left), right: Box::new(right),
+                }),
+                TokenType::DotDot => Expr::new(self.next_id(), span, ExprKind::Range {
+                    start: Box::new(left), end: Box::new(right), inclusive: false,
+                }),
+                TokenType::DotDotEq => Expr::new(self.next_id(), span, ExprKind::Range {
+                    start: Box::new(left), end: Box::new(right), inclusive: true,
+                }),
+                _ => Expr::new(self.next_id(), span, ExprKind::Binary {
+                    op: sym(&op_value), left: Box::new(left), right: Box::new(right),
+                }),
+            };
+
+            // ── Reject chained comparisons: a < b < c ──
+            if matches!(tt, TokenType::EqEq | TokenType::BangEq
+                | TokenType::LAngle | TokenType::RAngle
+                | TokenType::LtEq | TokenType::GtEq)
+            {
+                if matches!(self.current().token_type,
+                    TokenType::EqEq | TokenType::BangEq
+                    | TokenType::LAngle | TokenType::RAngle
+                    | TokenType::LtEq | TokenType::GtEq)
+                {
+                    let tok = self.current();
+                    return Err(format!(
+                        "Chained comparison operators are not allowed at line {}:{}\n  Hint: Use 'and' to combine comparisons. Write: a < b and b < c",
+                        tok.line, tok.col
+                    ));
+                }
+            }
         }
+
         Ok(left)
     }
 

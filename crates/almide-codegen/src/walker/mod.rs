@@ -101,7 +101,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         repr_c: ctx.repr_c,
     };
 
-    // Extern fn: emit import/use via template
+    // Extern fn: emit import/use via template (rs) or extern "C" block (c)
     if !func.extern_attrs.is_empty() {
         let target_str = match ctx.target {
             Target::Rust => "rs",
@@ -112,6 +112,10 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             if attr.target == target_str {
                 return ctx.templates.render_with("extern_fn", None, &[], &[("module", attr.module.as_str()), ("function", attr.function.as_str()), ("name", func.name.as_str())])
                     .unwrap_or_else(|| format!("// extern: {}.{}", attr.module, attr.function));
+            }
+            // @extern(c, "lib", "func") — generate extern "C" block + safe wrapper
+            if attr.target == "c" && matches!(ctx.target, Target::Rust) {
+                return render_extern_c(ctx, func, attr);
             }
         }
     }
@@ -429,4 +433,90 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     }
 
     parts.join("\n\n")
+}
+
+// ── C FFI extern codegen ──────────────────────────────────────
+
+/// Render @extern(c, "lib", "func") as: extern "C" block + safe Almide wrapper.
+///
+/// Type mapping (Almide → C extern → safe wrapper):
+///   Int     → i32 in extern, i64 in wrapper (cast)
+///   Float   → f64 (same)
+///   Bool    → i32 in extern, bool in wrapper (cast)
+///   RawPtr  → *mut u8 (same)
+fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr) -> String {
+    use almide_lang::types::Ty;
+
+    let lib = attr.module.as_str();
+    let c_func = attr.function.as_str();
+    let almide_name = func.name.as_str();
+
+    // Build C parameter list and Almide parameter list
+    let mut c_params = Vec::new();
+    let mut almide_params = Vec::new();
+    let mut call_args = Vec::new();
+
+    for p in &func.params {
+        let name = p.name.as_str();
+        let (c_ty, almide_ty, to_c) = extern_c_type_mapping(ctx, &p.ty, name);
+        c_params.push(format!("{}: {}", name, c_ty));
+        almide_params.push(format!("{}: {}", name, almide_ty));
+        call_args.push(to_c);
+    }
+
+    let (c_ret, almide_ret, from_c) = extern_c_return_mapping(ctx, &func.ret_ty);
+
+    let c_params_str = c_params.join(", ");
+    let almide_params_str = almide_params.join(", ");
+    let call_args_str = call_args.join(", ");
+
+    format!(
+        "#[link(name = \"{lib}\")]\nextern \"C\" {{ fn {c_func}({c_params_str}) -> {c_ret}; }}\n\
+         pub fn {almide_name}({almide_params_str}) -> {almide_ret} {{ {from_c} }}",
+        lib = lib,
+        c_func = c_func,
+        c_params_str = c_params_str,
+        c_ret = c_ret,
+        almide_name = almide_name,
+        almide_params_str = almide_params_str,
+        almide_ret = almide_ret,
+        from_c = format!("unsafe {{ {} }}", wrap_return(&from_c, c_func, &call_args_str)),
+    )
+}
+
+/// Map an Almide param type to (C type, Almide type, call expression).
+fn extern_c_type_mapping(_ctx: &RenderContext, ty: &almide_lang::types::Ty, name: &str) -> (String, String, String) {
+    use almide_lang::types::Ty;
+    match ty {
+        Ty::Int    => ("i32".into(), "i64".into(), format!("{} as i32", name)),
+        Ty::Float  => ("f64".into(), "f64".into(), name.into()),
+        Ty::Bool   => ("i32".into(), "bool".into(), format!("if {} {{ 1 }} else {{ 0 }}", name)),
+        Ty::RawPtr => ("*mut u8".into(), "*mut u8".into(), name.into()),
+        Ty::String => ("*const u8".into(), "String".into(), format!("{}.as_ptr()", name)),
+        other      => {
+            let s = format!("{:?}", other);
+            (s.clone(), s.clone(), name.into())
+        }
+    }
+}
+
+/// Map an Almide return type to (C type, Almide type, conversion wrapper template).
+fn extern_c_return_mapping(_ctx: &RenderContext, ty: &almide_lang::types::Ty) -> (String, String, String) {
+    use almide_lang::types::Ty;
+    match ty {
+        Ty::Int    => ("i32".into(), "i64".into(), "as_i64".into()),
+        Ty::Float  => ("f64".into(), "f64".into(), "direct".into()),
+        Ty::Bool   => ("i32".into(), "bool".into(), "ne_zero".into()),
+        Ty::RawPtr => ("*mut u8".into(), "*mut u8".into(), "direct".into()),
+        Ty::Unit   => ("()".into(), "()".into(), "direct".into()),
+        _other     => ("i32".into(), "i64".into(), "as_i64".into()),
+    }
+}
+
+fn wrap_return(mode: &str, c_func: &str, call_args: &str) -> String {
+    match mode {
+        "as_i64"  => format!("{}({}) as i64", c_func, call_args),
+        "ne_zero" => format!("{}({}) != 0", c_func, call_args),
+        _         => format!("{}({})", c_func, call_args),
+    }
 }
