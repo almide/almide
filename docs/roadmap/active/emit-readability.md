@@ -1,47 +1,48 @@
 <!-- description: Improve readability of generated Rust and TypeScript output -->
 # Emit Readability
 
-**Priority:** Medium — Directly affects the quality of generated code that LLMs modify
-**Prerequisites:** codegen v3 (TOML template walker) completed
-**Goal:** Improve readability of `--target rust` / `--target ts` output for both humans and LLMs
+**Priority:** High — Directly affects the quality of generated code that LLMs modify
+**Goal:** `almide app.almd --target rust` output should be readable without rustfmt
 
 > "Generated code readability directly impacts modification survival rate."
 
 ---
 
-## Why
+## Current State (v0.10.5)
 
-Almide's mission is "the language LLMs can write most accurately." There are cases where LLMs read and modify code emitted via `--target rust/ts` (debugging, integration, learning). The current emit output is correct, but there is room for readability improvement:
+Phase 4 の codegen 最適化（iterator chain, math inline, borrow inference）は完了。
+残りは **ソース構造の保存** と **フォーマッティング品質** の 2 軸。
 
-- Source structure (blank lines, logical blocks) is lost
-- Variable names are preserved, but comments are not
-- Generated code formatting is mechanical, sometimes obscuring intent
+### 現状の問題
 
-Highly readable generated code:
-1. Makes it easier for LLMs to grasp context, improving modification accuracy
-2. Is easier for humans to debug
-3. Functions as a "source map" of the generated code
+```rust
+// 現在の emit: 全部詰まる、doc comment 消える、match は 1 行
+pub fn area(width: f64, height: f64) -> f64 { (width * height) }
+pub fn perimeter(width: f64, height: f64) -> f64 { (2f64 * (width + height)) }
+pub fn describe(s: Shape) -> String { match s { Shape::Circle(r) => format!("..."),
+Shape::Rect(dims) => format!("..."), } }
+```
 
----
+### 理想
 
-## Design
+```rust
+/// Compute the area of a rectangle
+pub fn area(width: f64, height: f64) -> f64 {
+    width * height
+}
 
-### What to Preserve
+/// Compute the perimeter
+pub fn perimeter(width: f64, height: f64) -> f64 {
+    2.0 * (width + height)
+}
 
-| Element | Current | Goal |
-|---|---|---|
-| Variable names | ✅ Preserved | Maintain |
-| Function names | ✅ Preserved | Maintain |
-| Blank lines (logical block separators) | ❌ Removed | Reflect source blank lines in emit output |
-| Doc comments | ❌ Removed | Emit as `/// ...` / `/** ... */` |
-| Inline comments | ❌ Removed | Future consideration |
-| Source function order | ✅ Preserved | Maintain |
-| Import order | △ Mechanical | Logical grouping |
-
-### Non-Goals
-
-- Complete preservation of source comments (internal compiler comments are not emitted)
-- Exact match with hand-written code quality (aim for "readable machine output")
+pub fn describe(s: Shape) -> String {
+    match s {
+        Shape::Circle(r) => format!("circle r={}", r),
+        Shape::Rect(dims) => format!("rect {}x{}", dims.width, dims.height),
+    }
+}
+```
 
 ---
 
@@ -49,47 +50,78 @@ Highly readable generated code:
 
 ### Phase 1: Blank Line Preservation
 
-- [ ] Parser: record blank line positions in AST/IR (`blank_lines_before: u32`)
-- [ ] IR: add blank line annotation to `IrStmt`
-- [ ] Walker: insert blank lines during emit based on blank line annotations
-- [ ] Test: verify that source logical block structure is reflected in emit output
+ソースの空行を emit に反映する。関数間・型間の論理ブロック分離を保存。
+
+**実装パス**: Parser → AST → IR → Walker
+
+- [ ] Parser: 空行位置を AST に記録（`blank_lines_before: u32` を Decl/Stmt に追加）
+- [ ] IR: `IrFunction` / `IrTopLet` に `blank_lines_before` フィールド追加
+- [ ] Walker: emit 時に `blank_lines_before` の数だけ改行を挿入
+- [ ] 最低限: top-level 宣言間に常に 1 空行（ソース追跡なしでも実装可能、walker のみ）
 
 ### Phase 2: Doc Comment Preservation
 
-- [ ] Parser: record doc comments (`/// ...`) in AST
-- [ ] IR: add doc comment field to function/type definitions
-- [ ] Rust emit: output as `/// ...`
-- [ ] TS emit: output as `/** ... */`
-- [ ] WASM: don't emit comments (binary format)
+`/// ...` doc comment を Rust/TS emit に反映。
+
+**実装パス**: Parser → AST → IR → Walker
+
+- [ ] Parser: `/// ...` コメントを AST の Decl に `doc: Option<String>` として記録
+- [ ] IR: `IrFunction` に `doc: Option<String>` フィールド追加
+- [ ] Rust emit: `/// ...` として出力
+- [ ] TS emit: `/** ... */` として出力
+- [ ] WASM: コメント不要（バイナリ形式）
 
 ### Phase 3: Import Grouping
 
-- [ ] Rust emit: group by `use std::` / `use crate::` / external crates + blank lines
-- [ ] TS emit: group by stdlib / local modules
-- [ ] Logical ordering (stdlib → external → local)
+- [ ] Rust emit: `use std::` / `use crate::` / external crates をグループ化 + 空行で分離
+- [ ] TS emit: stdlib / local modules をグループ化
+- [ ] 論理順序: stdlib → external → local
 
 ### Phase 4: Formatting Quality
 
+**完了:**
 - [x] Iterator chain emission: `list.map/filter/fold` → `.into_iter().map().collect()` (v0.10.4)
-- [x] Math intrinsics inline: `math.sqrt(x)` → `x.sqrt()` instead of `almide_rt_math_sqrt(x)` (v0.10.4)
+- [x] Math intrinsics inline: `math.sqrt(x)` → `x.sqrt()` (v0.10.4)
 - [x] Numeric cast inline: `float.from_int(n)` → `(n as f64)` (v0.10.4)
 - [x] Borrow parameter inference: read-only String/List params → `&str` / `&[T]` (v0.10.4)
-- [ ] Improve line break rules for long expressions (builder chains, long argument lists)
-- [ ] Alignment of match/when arms
-- [ ] Target readability level where `rustfmt` / `prettier` aren't needed to read the output
+
+**残り:**
+- [ ] match arm を複数行に展開（各 arm を独立行、インデント付き）
+- [ ] 長い式の改行（builder chains、引数リスト）
+- [ ] rustfmt / prettier なしで読めるレベルの出力品質
 
 ---
 
-## Implementation Notes
+## 実装戦略
 
-- Blank line preservation passes through Parser → IR → Walker, so the change scope is wide
-- Doc comments are a lightweight change — adding `Option<String>` to IR
-- Add blank line / comment placeholders to TOML templates
+**Quick win (walker のみ):**
+- top-level 宣言間に空行挿入
+- match arm の複数行展開
+- 長い式の改行ルール
+
+**Full (parser → IR → walker):**
+- blank line / doc comment tracking を parser に追加
+- IR に伝搬
+- walker で emit
+
+Quick win だけでも大幅改善。Full は Quick win の上に積む。
 
 ---
+
+## Key Files
+
+| ファイル | 変更内容 |
+|---|---|
+| `src/parser/declarations.rs` | doc comment / blank line 記録 |
+| `src/ast.rs` | Decl に doc/blank_lines フィールド追加 |
+| `src/lower/mod.rs` | IR に doc/blank_lines 伝搬 |
+| `src/ir/mod.rs` | IrFunction に doc/blank_lines フィールド追加 |
+| `src/codegen/walker/mod.rs` | emit 時のフォーマッティング |
+| `src/codegen/walker/expressions.rs` | match arm / 長い式の改行 |
 
 ## Success Criteria
 
-- `almide app.almd --target rust` output preserves the logical structure of the source
-- Doc comments are reflected in Rust/TS output
-- Improved accuracy when asking an LLM "what does this function do" given emit output (qualitative evaluation)
+- `almide app.almd --target rust` 出力がソースの論理構造を保存
+- Doc comment が Rust/TS 出力に反映
+- match arm が複数行で出力
+- rustfmt なしで人間が読めるレベル
