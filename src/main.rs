@@ -259,6 +259,12 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         // Lower user modules to IR (skip TOML-defined stdlib — they use generated codegen)
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
+            // For dependency modules, temporarily set self_module_name to the package root
+            // so `import self` in sub-modules resolves to the dependency, not the main project
+            let saved_self = checker.env.self_module_name;
+            if let Some(pid) = pkg_id.as_ref() {
+                checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+            }
             checker.infer_module(mod_prog, name);
             let versioned = pkg_id.as_ref().map(|pid| {
                 let base = pid.mod_name();
@@ -276,6 +282,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
             let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
             checker.env.import_table = saved_table;
+            checker.env.self_module_name = saved_self;
             module_irs.insert(name.clone(), mod_ir_program);
             if let Some(ref mut ir) = ir_program {
                 ir.modules.push(mod_ir_module);

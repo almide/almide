@@ -293,6 +293,8 @@ fn load_module(
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let dep_name = &path[0];
+            // `import self` in a dependency root module is self-referential — skip
+            if dep_name.as_str() == "self" { continue; }
             if !stdlib::is_stdlib_module(dep_name) {
                 load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
             }
@@ -334,8 +336,11 @@ fn parse_almd_file(file_path: &Path, display_name: &str) -> Result<ast::Program,
 }
 
 /// Resolve imports within a sub-module's program.
+/// `pkg_name` is the owning package name (e.g. "bindgen") so that `import self`
+/// can be recognised as a reference to the already-loaded root module.
 fn resolve_submodule_imports(
     program: &ast::Program,
+    pkg_name: &str,
     base_dir: &Path,
     dep_paths: &[(project::PkgId, PathBuf)],
     loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
@@ -344,9 +349,13 @@ fn resolve_submodule_imports(
 ) -> Result<(), String> {
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
-            let dep_name = &path[0];
-            if !stdlib::is_stdlib_module(dep_name) {
-                load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
+            let first = path[0].as_str();
+            // `import self` / `import self as pkg` — root module is already loaded
+            if first == "self" {
+                continue;
+            }
+            if !stdlib::is_stdlib_module(first) {
+                load_module(first, base_dir, dep_paths, loaded, loaded_names, loading)?;
             }
         }
     }
@@ -386,7 +395,9 @@ fn load_sub_namespaces(
         }
         let program = parse_almd_file(&file_path, &sub_name)?;
         // Resolve this sub-module's imports
-        resolve_submodule_imports(&program, base_dir, dep_paths, loaded, loaded_names, loading)?;
+        // Root package name: first segment of the dotted pkg_name (e.g. "bindgen" from "bindgen.bindings")
+        let root_pkg = pkg_name.split('.').next().unwrap_or(pkg_name);
+        resolve_submodule_imports(&program, root_pkg, base_dir, dep_paths, loaded, loaded_names, loading)?;
         loaded_names.insert(sub_name.clone());
         loaded.push((sub_name, program, pkg_id.clone(), false));
     }
@@ -409,7 +420,8 @@ fn load_sub_namespaces(
         let sub_mod = subdir.join("mod.almd");
         if sub_mod.exists() {
             let program = parse_almd_file(&sub_mod, &sub_name)?;
-            resolve_submodule_imports(&program, base_dir, dep_paths, loaded, loaded_names, loading)?;
+            let root_pkg = pkg_name.split('.').next().unwrap_or(pkg_name);
+            resolve_submodule_imports(&program, root_pkg, base_dir, dep_paths, loaded, loaded_names, loading)?;
             loaded_names.insert(sub_name.clone());
             loaded.push((sub_name.clone(), program, pkg_id.clone(), false));
         }

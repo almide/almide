@@ -236,6 +236,10 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         // Lower user modules to IR
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
+            let saved_self = checker.env.self_module_name;
+            if let Some(pid) = pkg_id.as_ref() {
+                checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+            }
             checker.infer_module(mod_prog, name);
             let versioned = pkg_id.as_ref().map(|pid| {
                 let base = pid.mod_name();
@@ -247,6 +251,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
             let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
             checker.env.import_table = saved_table;
+            checker.env.self_module_name = saved_self;
             ir_program.modules.push(mod_ir_module);
         }
         almide::optimize::optimize_program(&mut ir_program);
@@ -447,6 +452,10 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
         // Lower user modules to IR
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
+            let saved_self = checker.env.self_module_name;
+            if let Some(pid) = pkg_id.as_ref() {
+                checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+            }
             checker.infer_module(mod_prog, name);
             let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
             let self_name = checker.env.self_module_name.map(|s| s.to_string());
@@ -455,6 +464,7 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
             let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
             checker.env.import_table = saved_table;
+            checker.env.self_module_name = saved_self;
             ir_program.modules.push(mod_ir_module);
         }
 

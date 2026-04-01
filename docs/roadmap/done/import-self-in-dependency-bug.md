@@ -1,4 +1,5 @@
 <!-- description: Fix import self resolution in dependency packages (blocks almide-lander) -->
+<!-- done: 2026-04-02 -->
 # `import self` in Dependency Packages Bug
 
 ## Problem
