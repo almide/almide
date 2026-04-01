@@ -79,9 +79,9 @@
 |------|------|-------------|
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
 | 2026-04-01 | [Canonical AST](done/canonical-ast.md) | Introduce Canonical AST phase to separate name resolution from type checking |
+| 2026-03-31 | [Rainbow FFI Gate](done/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
 | 2026-03-31 | [Dead Code Elimination](done/dead-code-elimination.md) | Dependency-graph-based dead code elimination for smaller WASM binaries |
 | 2026-03-30 | [Diagnostic end_col — Precise Error Underlines](done/diagnostic-end-col.md) | Track end column in diagnostics for precise error underlines |
-| 2026-03-28 | [Rainbow FFI Gate](done/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
 | 2026-03-28 | [Module System Diamond Dependency Verification](done/module-system-diamond-verification.md) | Verify diamond dependency handling and fix remaining module system edge cases |
 | 2026-03-27 | [Unwrap Operators: `!` `??` `?` `?.`](done/unwrap-operators.md) | Postfix !, ??, ? and ?. operators for explicit Result/Option unwrapping |
 | 2026-03-27 | [HTTPS Native Support](done/https-native.md) | Native HTTPS support via rustls across all targets |
