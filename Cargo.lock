@@ -25,6 +25,7 @@ name = "almide"
 version = "0.10.5"
 dependencies = [
  "almide-base",
+ "almide-lang",
  "clap",
  "lasso",
  "proptest",
@@ -41,6 +42,15 @@ version = "0.10.5"
 dependencies = [
  "lasso",
  "serde",
+]
+
+[[package]]
+name = "almide-lang"
+version = "0.10.5"
+dependencies = [
+ "almide-base",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
