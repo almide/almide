@@ -6,7 +6,7 @@
 
 ## Active
 
-11 items
+12 items
 
 | Item | Description |
 |------|-------------|
@@ -15,6 +15,7 @@
 | [Compiler Architecture: All 10s](active/compiler-architecture-10.md) | Achieve 10/10 on every compiler architecture quality metric |
 | [Compiler Depth Matrix](active/compiler-depth-matrix.md) | Map Almide's compiler depth against industrial compilers and plan next tiers |
 | [Contracts — Runtime Validation](active/contracts-runtime-validation.md) | Runtime contracts for value constraints |
+| [Crate Split](active/crate-split.md) | Split compiler into workspace crates for build parallelism and API boundaries |
 | [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Automated verification that Rust, TS, and WASM produce identical output |
 | [Error Message Suggestions](active/error-message-suggestions.md) | Fuzzy matching suggestions in error messages (did you mean?) |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](active/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
