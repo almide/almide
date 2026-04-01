@@ -4,6 +4,14 @@
 >
 > [GRAND_PLAN.md](GRAND_PLAN.md) — 5-phase strategy
 
+## Active
+
+1 items
+
+| Item | Description |
+|------|-------------|
+| [Versioned Module Codegen Bug](active/versioned-module-codegen-bug.md) | Fix versioned module name mismatch in codegen for package dependencies |
+
 ## On Hold
 
 23 items
