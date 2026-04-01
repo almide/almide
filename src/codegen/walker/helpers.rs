@@ -64,6 +64,39 @@ pub fn erase_named_typevars(ty: Ty) -> Ty {
     }
 }
 
+/// Indent each non-empty line by the given number of spaces.
+pub fn indent_lines(s: &str, spaces: usize) -> String {
+    let prefix = " ".repeat(spaces);
+    s.lines()
+        .map(|line| if line.is_empty() { String::new() } else { format!("{}{}", prefix, line) })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Render the body of an expression as flat lines (unwrapping Block if present).
+/// Used by if/else branches and other contexts that provide their own `{ }` wrapping.
+pub fn render_body_content(ctx: &RenderContext, expr: &crate::ir::IrExpr) -> String {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            let mut parts: Vec<String> = stmts.iter()
+                .map(|s| terminate_stmt(ctx, super::statements::render_stmt(ctx, s)))
+                .collect();
+            if let Some(e) = tail {
+                let expr_str = super::expressions::render_expr(ctx, e);
+                let is_control = matches!(&e.kind, IrExprKind::Break | IrExprKind::Continue);
+                if is_control {
+                    parts.push(expr_str);
+                } else {
+                    parts.push(ctx.templates.render_with("block_result_expr", None, &[], &[("expr", expr_str.as_str())])
+                        .unwrap_or_else(|| expr_str.clone()));
+                }
+            }
+            parts.join("\n")
+        }
+        _ => super::expressions::render_expr(ctx, expr),
+    }
+}
+
 /// Render a Fn type as Box<dyn Fn(...) -> T> (for nested impl Trait in Rust)
 pub fn render_type_boxed_fn(ctx: &RenderContext, ty: &Ty) -> String {
     match ty {

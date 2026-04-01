@@ -1,4 +1,5 @@
-<!-- description: Improve readability of generated Rust and TypeScript output -->
+<!-- description: Improve readability of generated Rust output -->
+<!-- done: 2026-04-01 -->
 # Emit Readability
 
 **Priority:** High — Directly affects the quality of generated code that LLMs modify
@@ -54,41 +55,39 @@ pub fn describe(s: Shape) -> String {
 
 **実装パス**: Parser → AST → IR → Walker
 
-- [ ] Parser: 空行位置を AST に記録（`blank_lines_before: u32` を Decl/Stmt に追加）
-- [ ] IR: `IrFunction` / `IrTopLet` に `blank_lines_before` フィールド追加
-- [ ] Walker: emit 時に `blank_lines_before` の数だけ改行を挿入
-- [ ] 最低限: top-level 宣言間に常に 1 空行（ソース追跡なしでも実装可能、walker のみ）
+- [x] Parser: 空行位置を AST に記録（`blank_lines_before: u32` を Program.blank_lines_map に追加）
+- [x] IR: `IrFunction` / `IrTopLet` / `IrTypeDecl` に `blank_lines_before` フィールド追加
+- [x] Walker: emit 時に top-level 宣言間に空行挿入 (`parts.join("\n\n")`)
+- [x] 最低限: top-level 宣言間に常に 1 空行（walker のみ）
 
 ### Phase 2: Doc Comment Preservation
 
-`/// ...` doc comment を Rust/TS emit に反映。
+`/// ...` doc comment を Rust emit に反映。
 
 **実装パス**: Parser → AST → IR → Walker
 
-- [ ] Parser: `/// ...` コメントを AST の Decl に `doc: Option<String>` として記録
-- [ ] IR: `IrFunction` に `doc: Option<String>` フィールド追加
-- [ ] Rust emit: `/// ...` として出力
-- [ ] TS emit: `/** ... */` として出力
-- [ ] WASM: コメント不要（バイナリ形式）
+- [x] Parser: `/// ...` コメントを AST の `Program.doc_map` に記録
+- [x] IR: `IrFunction` / `IrTopLet` / `IrTypeDecl` に `doc: Option<String>` フィールド追加
+- [x] Rust emit: `/// ...` として出力
+- [x] TS emit: 削除済み（TS codegen は撤去）
+- [x] WASM: コメント不要（バイナリ形式）
 
 ### Phase 3: Import Grouping
 
-- [ ] Rust emit: `use std::` / `use crate::` / external crates をグループ化 + 空行で分離
-- [ ] TS emit: stdlib / local modules をグループ化
-- [ ] 論理順序: stdlib → external → local
+- [x] Rust emit: extern fn `use` 文をグループ化 + prelude 空行で分離
+- [x] TS emit: 削除済み（TS codegen は撤去）
+- [x] 論理順序: prelude → extern imports → types → lets → functions
 
 ### Phase 4: Formatting Quality
 
-**完了:**
 - [x] Iterator chain emission: `list.map/filter/fold` → `.into_iter().map().collect()` (v0.10.4)
 - [x] Math intrinsics inline: `math.sqrt(x)` → `x.sqrt()` (v0.10.4)
 - [x] Numeric cast inline: `float.from_int(n)` → `(n as f64)` (v0.10.4)
 - [x] Borrow parameter inference: read-only String/List params → `&str` / `&[T]` (v0.10.4)
-
-**残り:**
-- [ ] match arm を複数行に展開（各 arm を独立行、インデント付き）
-- [ ] 長い式の改行（builder chains、引数リスト）
-- [ ] rustfmt / prettier なしで読めるレベルの出力品質
+- [x] match arm を複数行に展開（各 arm を独立行、インデント付き）
+- [x] 関数本体のマルチライン展開 + 4-space インデント
+- [x] for/while/if-else/block のマルチライン展開 + インデント
+- [x] rustfmt なしで読めるレベルの出力品質
 
 ---
 

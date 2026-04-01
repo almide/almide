@@ -129,7 +129,7 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
     match target {
         Target::Rust => {
             output.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]\n\n");
-            output.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n");
+            output.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n\n");
             output.push_str("trait AlmideConcat<Rhs> { type Output; fn concat(self, rhs: Rhs) -> Self::Output; }\n");
             output.push_str("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }\n");
             output.push_str("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");

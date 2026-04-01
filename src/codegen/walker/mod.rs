@@ -26,7 +26,7 @@ use super::template::TemplateSet;
 use types::render_type as render_type_fn;
 use expressions::render_expr as render_expr_fn;
 use statements::render_stmt as render_stmt_fn;
-use helpers::terminate_stmt;
+use helpers::{terminate_stmt, indent_lines};
 use declarations::{render_type_decl, collect_named_records, collect_anon_records};
 
 /// Render context: carries the variable table, target, and annotations.
@@ -150,7 +150,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .join(", ");
 
     // Function body: render Block contents directly (no IIFE wrapper)
-    let body_str = match &func.body.kind {
+    let body_raw = match &func.body.kind {
         IrExprKind::Block { stmts, expr } => {
             let mut parts: Vec<String> = stmts.iter()
                 .map(|s| terminate_stmt(&fn_ctx, render_stmt_fn(&fn_ctx, s)))
@@ -168,16 +168,17 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             parts.join("\n")
         }
         _ => {
-            let body_raw = render_expr_fn(&fn_ctx, &func.body);
+            let raw = render_expr_fn(&fn_ctx, &func.body);
             let is_control = matches!(&func.body.kind, IrExprKind::Break | IrExprKind::Continue);
             if is_control {
-                body_raw
+                raw
             } else {
-                fn_ctx.templates.render_with("block_result_expr", None, &[], &[("expr", body_raw.as_str())])
-                    .unwrap_or_else(|| body_raw.clone())
+                fn_ctx.templates.render_with("block_result_expr", None, &[], &[("expr", raw.as_str())])
+                    .unwrap_or_else(|| raw.clone())
             }
         }
     };
+    let body_str = indent_lines(&body_raw, 4);
     let ret_str = render_type_fn(ctx, &func.ret_ty);
 
     // Build generics string for functions
@@ -229,8 +230,19 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     } else {
         "fn_decl"
     };
-    fn_ctx.templates.render_with(construct, None, &[], &[("name", safe_name.as_str()), ("params", params_str.as_str()), ("return_type", ret_str.as_str()), ("body", body_str.as_str())])
-        .unwrap_or_else(|| format!("fn {}() {{ }}", func.name))
+    let fn_code = fn_ctx.templates.render_with(construct, None, &[], &[("name", safe_name.as_str()), ("params", params_str.as_str()), ("return_type", ret_str.as_str()), ("body", body_str.as_str())])
+        .unwrap_or_else(|| format!("fn {}() {{ }}", func.name));
+
+    // Prepend doc comment if present
+    if let Some(ref doc) = func.doc {
+        let doc_lines: String = doc.lines()
+            .map(|line| if line.is_empty() { "///".to_string() } else { format!("/// {}", line) })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{}\n{}", doc_lines, fn_code)
+    } else {
+        fn_code
+    }
 }
 
 // ── Full program rendering ──
@@ -298,7 +310,15 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 
     // Type declarations
     for td in &program.type_decls {
-        parts.push(render_type_decl(&ctx, td));
+        let mut rendered = render_type_decl(&ctx, td);
+        if let Some(ref doc) = td.doc {
+            let doc_lines: String = doc.lines()
+                .map(|line| if line.is_empty() { "///".to_string() } else { format!("/// {}", line) })
+                .collect::<Vec<_>>()
+                .join("\n");
+            rendered = format!("{}\n{}", doc_lines, rendered);
+        }
+        parts.push(rendered);
     }
 
     // Top-level lets
@@ -314,15 +334,34 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             TopLetKind::Lazy => "top_let_lazy",
         };
         let name_upper = name.to_uppercase();
-        let rendered = ctx.templates.render_with(construct, None, &[], &[("name", name_upper.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
+        let mut rendered = ctx.templates.render_with(construct, None, &[], &[("name", name_upper.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
             .unwrap_or_else(|| format!("const {} = {};", name, val_str));
+        if let Some(ref doc) = tl.doc {
+            let doc_lines: String = doc.lines()
+                .map(|line| if line.is_empty() { "///".to_string() } else { format!("/// {}", line) })
+                .collect::<Vec<_>>()
+                .join("\n");
+            rendered = format!("{}\n{}", doc_lines, rendered);
+        }
         parts.push(rendered);
     }
 
-    // Functions (non-test)
+    // Functions (non-test): separate extern fn imports from regular functions
+    let mut import_parts = Vec::new();
+    let mut fn_parts = Vec::new();
     for func in program.functions.iter().filter(|f| !f.is_test) {
-        parts.push(render_function(&ctx, func));
+        let rendered = render_function(&ctx, func);
+        if !func.extern_attrs.is_empty() {
+            import_parts.push(rendered);
+        } else {
+            fn_parts.push(rendered);
+        }
     }
+    // Emit imports first as a group, then functions
+    if !import_parts.is_empty() {
+        parts.push(import_parts.join("\n"));
+    }
+    parts.extend(fn_parts);
 
     // Test functions
     let test_fns: Vec<&IrFunction> = program.functions.iter().filter(|f| f.is_test).collect();
@@ -331,7 +370,8 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             .map(|f| render_function(&ctx, f))
             .collect();
         let tests_s = test_parts.join("\n\n");
-        let wrapped = ctx.templates.render_with("test_module", None, &[], &[("tests", tests_s.as_str())])
+        let indented_tests = indent_lines(&tests_s, 4);
+        let wrapped = ctx.templates.render_with("test_module", None, &[], &[("tests", indented_tests.as_str())])
             .unwrap_or_else(|| test_parts.join("\n\n"));
         parts.push(wrapped);
     }

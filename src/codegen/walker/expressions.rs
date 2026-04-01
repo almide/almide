@@ -6,7 +6,7 @@ use super::RenderContext;
 use super::super::pass::Target;
 use super::types::render_type;
 use super::statements::{render_stmt, render_match_arm};
-use super::helpers::{template_or, terminate_stmt, contains_loop_control, ty_has_named_typevar, erase_named_typevars, ty_contains_name};
+use super::helpers::{template_or, terminate_stmt, indent_lines, render_body_content, contains_loop_control, ty_has_named_typevar, erase_named_typevars, ty_contains_name};
 
 /// Render a statement list. Peephole patterns are detected at IR level
 /// by PeepholePass; this just renders the resulting IR nodes.
@@ -68,19 +68,18 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Control flow ──
         IrExprKind::If { cond, then, else_ } => {
-            // If branches contain break/continue, use statement form (not ternary/IIFE)
-            if contains_loop_control(then) || contains_loop_control(else_) {
-                let cond_str = render_expr(ctx, cond);
-                let then_str = render_expr(ctx, then);
-                let else_str = render_expr(ctx, else_);
-                format!("if ({}) {{ {} }} else {{ {} }}", cond_str, then_str, else_str)
+            let cond_s = render_expr(ctx, cond);
+            let then_content = render_body_content(ctx, then);
+            let else_content = render_body_content(ctx, else_);
+
+            if then_content.contains('\n') || else_content.contains('\n') {
+                // Multi-line: indent branch bodies
+                let indented_then = indent_lines(&then_content, 4);
+                let indented_else = indent_lines(&else_content, 4);
+                format!("if {} {{\n{}\n}} else {{\n{}\n}}", cond_s, indented_then, indented_else)
             } else {
-                let cond_s = render_expr(ctx, cond);
-                let then_s = render_expr(ctx, then);
-                let else_s = render_expr(ctx, else_);
-                ctx.templates.render_with("if_expr", None, &[], &[("cond", cond_s.as_str()), ("then", then_s.as_str()), ("else", else_s.as_str())])
-                    .unwrap_or_else(|| format!("if {} {{ {} }} else {{ {} }}",
-                        render_expr(ctx, cond), render_expr(ctx, then), render_expr(ctx, else_)))
+                ctx.templates.render_with("if_expr", None, &[], &[("cond", cond_s.as_str()), ("then", then_content.as_str()), ("else", else_content.as_str())])
+                    .unwrap_or_else(|| format!("if {} {{ {} }} else {{ {} }}", cond_s, then_content, else_content))
             }
         }
 
@@ -88,11 +87,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // Match subject transforms (.as_str(), .as_deref()) are handled by
             // MatchSubjectPass nanopass — walker just renders what's in the IR.
             let subj = render_expr(ctx, subject);
-            let arms_str = arms.iter()
+            let arms_raw = arms.iter()
                 .map(|arm| render_match_arm(ctx, arm))
                 .collect::<Vec<_>>()
                 .join("\n");
-            let fallback = format!("match {{ {} }}", &arms_str);
+            let arms_str = indent_lines(&arms_raw, 4);
+            let fallback = format!("match {} {{\n{}\n}}", &subj, &arms_str);
             ctx.templates.render_with("match_expr", None, &[], &[("subject", subj.as_str()), ("arms", arms_str.as_str())])
                 .unwrap_or(fallback)
         }
@@ -113,6 +113,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
             }
             let body = parts.join("\n");
+            let indented_body = indent_lines(&body, 4);
             // If block contains break/continue, don't wrap in IIFE — use bare block
             let has_control = stmts.iter().any(|s| match &s.kind {
                 IrStmtKind::Expr { expr } => contains_loop_control(expr),
@@ -120,10 +121,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 _ => false,
             }) || expr.as_ref().map_or(false, |e| contains_loop_control(e));
             if has_control {
-                format!("{{\n{}\n}}", body)
+                format!("{{\n{}\n}}", indented_body)
             } else {
-                ctx.templates.render_with("block_expr", None, &[], &[("body", body.as_str())])
-                    .unwrap_or_else(|| format!("{{\n{}\n}}", body))
+                ctx.templates.render_with("block_expr", None, &[], &[("body", indented_body.as_str())])
+                    .unwrap_or_else(|| format!("{{\n{}\n}}", indented_body))
             }
         }
 
@@ -138,14 +139,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 ctx.var_name(*var).to_string()
             };
             let iter = render_expr(ctx, iterable);
-            let body_str = render_stmts(ctx, body).join("\n");
+            let body_raw = render_stmts(ctx, body).join("\n");
+            let body_str = indent_lines(&body_raw, 4);
             ctx.templates.render_with("for_loop", None, &[], &[("var", var_name.as_str()), ("iter", iter.as_str()), ("body", body_str.as_str())])
                 .unwrap_or_else(|| format!("for _ in _ {{ }}"))
         }
 
         IrExprKind::While { cond, body } => {
             let cond_str = render_expr(ctx, cond);
-            let body_str = render_stmts(ctx, body).join("\n");
+            let body_raw = render_stmts(ctx, body).join("\n");
+            let body_str = indent_lines(&body_raw, 4);
             ctx.templates.render_with("while_loop", None, &[], &[("cond", cond_str.as_str()), ("body", body_str.as_str())])
                 .unwrap_or_else(|| format!("while _ {{ }}"))
         }

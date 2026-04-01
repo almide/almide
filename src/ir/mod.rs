@@ -432,6 +432,10 @@ pub struct IrTypeDecl {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generics: Option<Vec<crate::ast::GenericParam>>,
     pub visibility: IrVisibility,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    #[serde(default)]
+    pub blank_lines_before: u32,
 }
 
 // ── Function parameter metadata ─────────────────────────────────
@@ -494,6 +498,12 @@ pub struct IrFunction {
     pub extern_attrs: Vec<crate::ast::ExternAttr>,
     #[serde(default = "default_ir_visibility")]
     pub visibility: IrVisibility,
+    /// Doc comment from source (`///` lines).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    /// Number of blank lines before this declaration in source.
+    #[serde(default)]
+    pub blank_lines_before: u32,
 }
 
 /// Classification of top-level let bindings for codegen.
@@ -513,6 +523,10 @@ pub struct IrTopLet {
     pub value: IrExpr,
     #[serde(default = "default_top_let_kind")]
     pub kind: TopLetKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    #[serde(default)]
+    pub blank_lines_before: u32,
 }
 
 fn default_top_let_kind() -> TopLetKind { TopLetKind::Lazy }

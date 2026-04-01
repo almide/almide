@@ -491,6 +491,8 @@ mod tests {
             generics: None,
             extern_attrs: vec![],
             visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
         }
     }
 
@@ -723,6 +725,8 @@ mod tests {
                 deriving: None,
                 generics: None,
                 visibility: IrVisibility::Public,
+                doc: None,
+                blank_lines_before: 0,
             }],
             var_table: vt,
             modules: vec![],
@@ -756,6 +760,8 @@ mod tests {
                 deriving: None,
                 generics: None,
                 visibility: IrVisibility::Public,
+                doc: None,
+                blank_lines_before: 0,
             }],
             var_table: vt,
             modules: vec![],
@@ -787,6 +793,8 @@ mod tests {
             generics: None,
             extern_attrs: vec![],
             visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
         };
         let prog = make_program(vec![f], vt);
         let errors = verify_program(&prog);

@@ -307,6 +307,12 @@ pub struct Program {
     /// - remaining: comments before each decl
     #[serde(skip)]
     pub comment_map: Vec<Vec<String>>,
+    /// Doc comments (`///`) for each decl (parallel to `decls`).
+    #[serde(skip)]
+    pub doc_map: Vec<Option<String>>,
+    /// Number of blank lines before each decl (parallel to `decls`).
+    #[serde(skip)]
+    pub blank_lines_map: Vec<u32>,
 }
 
 // ── Generic AST visitor ──

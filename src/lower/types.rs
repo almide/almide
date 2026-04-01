@@ -32,7 +32,7 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
         ast::Visibility::Mod => IrVisibility::Mod,
         ast::Visibility::Local => IrVisibility::Private,
     };
-    IrTypeDecl { name: sym(name), kind, deriving: deriving.as_ref().map(|d| d.iter().copied().collect()), generics: generics.cloned(), visibility: vis }
+    IrTypeDecl { name: sym(name), kind, deriving: deriving.as_ref().map(|d| d.iter().copied().collect()), generics: generics.cloned(), visibility: vis, doc: None, blank_lines_before: 0 }
 }
 
 fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str) -> IrVariantDecl {

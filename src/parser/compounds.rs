@@ -52,16 +52,17 @@ impl Parser {
         self.skip_newlines();
         let open = self.current().clone();
         self.expect(TokenType::LBrace)?;
-        let mut leading = self.skip_newlines_collect_comments();
+        let (mut leading, _) = self.skip_newlines_collect_comments();
         let mut arms = Vec::new();
         while !self.check(TokenType::RBrace) {
             let mut arm = self.parse_match_arm()?;
             arm.comments = std::mem::take(&mut leading);
             arms.push(arm);
-            leading = self.skip_newlines_collect_comments();
+            let (l, _) = self.skip_newlines_collect_comments();
+            leading = l;
             if self.check(TokenType::Comma) {
                 self.advance();
-                let more = self.skip_newlines_collect_comments();
+                let (more, _) = self.skip_newlines_collect_comments();
                 leading.extend(more);
             }
         }

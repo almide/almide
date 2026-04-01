@@ -266,27 +266,37 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, module_prefix: 
     let mut top_lets = Vec::new();
     let mut type_decls = Vec::new();
 
-    for decl in &prog.decls {
+    for (decl_idx, decl) in prog.decls.iter().enumerate() {
+        let doc = prog.doc_map.get(decl_idx).cloned().flatten();
+        let blank_lines = prog.blank_lines_map.get(decl_idx).copied().unwrap_or(0);
+
         match decl {
             ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, visibility, .. } => {
-                let f = lower_fn(&mut ctx, name, params, body, effect, r#async, span, generics, extern_attrs, visibility, module_prefix);
+                let mut f = lower_fn(&mut ctx, name, params, body, effect, r#async, span, generics, extern_attrs, visibility, module_prefix);
+                f.doc = doc;
+                f.blank_lines_before = blank_lines;
                 functions.push(f);
             }
             // Extern fn without body: include in IR with Hole body (codegen emits `use` import)
             ast::Decl::Fn { name, params, body: None, effect, r#async, span, generics, extern_attrs, visibility, .. } if !extern_attrs.is_empty() => {
                 let hole_body = ast::Expr::new(ast::ExprId(0), span.clone(), ast::ExprKind::Hole);
-                let f = lower_fn(&mut ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, visibility, module_prefix);
+                let mut f = lower_fn(&mut ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, visibility, module_prefix);
+                f.doc = doc;
+                f.blank_lines_before = blank_lines;
                 functions.push(f);
             }
             ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {
-                type_decls.push(types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref()));
+                let mut td = types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref());
+                td.doc = doc;
+                td.blank_lines_before = blank_lines;
+                type_decls.push(td);
             }
             ast::Decl::TopLet { name, ty: _, value, .. } => {
                 let val_ty = ctx.env.top_lets.get(name).cloned().unwrap_or_else(|| ctx.expr_ty(value));
                 let var = ctx.define_var(name, val_ty.clone(), Mutability::Let, None);
                 let ir_value = lower_expr(&mut ctx, value);
                 let kind = classify_top_let_kind(&ir_value);
-                top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind });
+                top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, doc, blank_lines_before: blank_lines });
             }
             ast::Decl::Test { name, body, .. } => {
                 let test_fn = lower_test(&mut ctx, name, body);
@@ -530,6 +540,7 @@ fn lower_fn(
         name: sym(name), params: ir_params, ret_ty, body: ir_body,
         is_effect, is_async, is_test: false,
         generics: generics.clone(), extern_attrs: extern_attrs.to_vec(), visibility: vis,
+        doc: None, blank_lines_before: 0,
     }
 }
 
@@ -541,5 +552,6 @@ fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
         name: sym(name), params: vec![], ret_ty: Ty::Unit, body: ir_body,
         is_effect: true, is_async: false, is_test: true,
         generics: None, extern_attrs: vec![], visibility: IrVisibility::Public,
+        doc: None, blank_lines_before: 0,
     }
 }

@@ -37,6 +37,8 @@ pub(super) fn specialize_function(
         is_test: orig.is_test,
         extern_attrs: orig.extern_attrs.clone(),
         visibility: orig.visibility.clone(),
+        doc: None,
+        blank_lines_before: 0,
     }
 }
 

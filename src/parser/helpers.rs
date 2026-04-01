@@ -326,14 +326,22 @@ impl Parser {
         }
     }
 
-    pub(crate) fn skip_newlines_collect_comments(&mut self) -> Vec<String> {
+    /// Skip newlines and collect comments. Returns (comments, blank_line_count).
+    /// A blank line is detected when 2+ consecutive Newline tokens appear.
+    pub(crate) fn skip_newlines_collect_comments(&mut self) -> (Vec<String>, u32) {
         let mut comments = Vec::new();
+        let mut consecutive_newlines = 0u32;
+        let mut max_gap = 0u32;
         while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
             if self.check(TokenType::Comment) {
                 comments.push(self.current().value.clone());
+                consecutive_newlines = 0;
+            } else {
+                consecutive_newlines += 1;
+                max_gap = max_gap.max(consecutive_newlines);
             }
             self.advance();
         }
-        comments
+        (comments, max_gap.saturating_sub(1))
     }
 }

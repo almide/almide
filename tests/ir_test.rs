@@ -319,6 +319,8 @@ fn ir_function_construction() {
         generics: None,
         extern_attrs: vec![],
         visibility: IrVisibility::Public,
+        doc: None,
+        blank_lines_before: 0,
     };
     assert_eq!(f.name, "add");
     assert_eq!(f.params.len(), 2);
@@ -340,6 +342,8 @@ fn ir_function_effect() {
         generics: None,
         extern_attrs: vec![],
         visibility: IrVisibility::Public,
+        doc: None,
+        blank_lines_before: 0,
     };
     assert!(f.is_effect);
 }
@@ -523,6 +527,8 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
             generics: None,
             extern_attrs: vec![],
             visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
         }],
         top_lets: vec![],
         type_decls: vec![],
@@ -597,6 +603,8 @@ fn unused_var_warning_used_var_no_warning() {
             generics: None,
             extern_attrs: vec![],
             visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
         }],
         top_lets: vec![],
         type_decls: vec![],

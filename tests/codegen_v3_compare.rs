@@ -103,6 +103,8 @@ fn make_test_program() -> IrProgram {
         generics: None,
         extern_attrs: vec![],
         visibility: IrVisibility::Public,
+        doc: None,
+        blank_lines_before: 0,
     };
 
     IrProgram {

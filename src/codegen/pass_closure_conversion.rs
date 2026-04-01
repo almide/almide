@@ -192,6 +192,8 @@ fn convert_expr(
                 generics: None,
                 extern_attrs: vec![],
                 visibility: IrVisibility::Private,
+                doc: None,
+                blank_lines_before: 0,
             });
 
             // 7. Replace the Lambda with ClosureCreate
