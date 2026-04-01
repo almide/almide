@@ -374,8 +374,13 @@ fn scan_closures_expr(
         IrExprKind::Tuple { elements } | IrExprKind::List { elements } => {
             for e in elements { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
-        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. } => {
+        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. }
+        | IrExprKind::TupleIndex { object, .. } => {
             scan_closures_expr(object, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrExprKind::MapAccess { object, key } => {
+            scan_closures_expr(object, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(key, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
         IrExprKind::StringInterp { parts } => {
             for p in parts {
@@ -383,6 +388,40 @@ fn scan_closures_expr(
                     scan_closures_expr(expr, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
                 }
             }
+        }
+        // Single-expr wrappers
+        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
+        | IrExprKind::ToOption { expr } | IrExprKind::ResultOk { expr }
+        | IrExprKind::ResultErr { expr } | IrExprKind::OptionSome { expr }
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr }
+        | IrExprKind::OptionalChain { expr, .. } => {
+            scan_closures_expr(expr, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            scan_closures_expr(expr, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(fallback, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrExprKind::Fan { exprs } => {
+            for e in exprs { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries {
+                scan_closures_expr(k, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+                scan_closures_expr(v, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            }
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            scan_closures_expr(base, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            for (_, e) in fields { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
+        }
+        IrExprKind::Range { start, end, .. } => {
+            scan_closures_expr(start, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(end, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrExprKind::RustMacro { args, .. } => {
+            for e in args { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
         _ => {}
     }
