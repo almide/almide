@@ -6,25 +6,19 @@
 
 ## Active
 
-11 items
+5 items
 
 | Item | Description |
 |------|-------------|
 | [LLM Benchmark Execution](active/benchmark-execution.md) | LLM accuracy benchmarks comparing Almide, Python, and MoonBit |
 | [Codegen Perfection](active/codegen-perfection.md) | Make codegen bulletproof by learning from Gleam/Roc architecture patterns |
 | [Compiler Architecture: All 10s](active/compiler-architecture-10.md) | Achieve 10/10 on every compiler architecture quality metric |
-| [Compiler Depth Matrix](active/compiler-depth-matrix.md) | Map Almide's compiler depth against industrial compilers and plan next tiers |
-| [Contracts — Runtime Validation](active/contracts-runtime-validation.md) | Runtime contracts for value constraints |
-| [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Automated verification that Rust, TS, and WASM produce identical output |
 | [Error Message Suggestions](active/error-message-suggestions.md) | Fuzzy matching suggestions in error messages (did you mean?) |
-| [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](active/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [Nanopass Debug Dump](active/nanopass-debug-dump.md) | Environment-variable-controlled IR dump for each nanopass stage |
-| [Type Expressiveness: Business Scenario Comparison](active/type-expressiveness-scenarios.md) | Business scenario comparison of type expressiveness across languages |
-| [WASM HTTP Client](active/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
 
 ## On Hold
 
-37 items
+41 items
 
 | Item | Description |
 |------|-------------|
@@ -34,9 +28,12 @@
 | [Async Backend — tokio opt-in](on-hold/async-backend.md) | Optional tokio-based async backend for high-concurrency workloads |
 | [build.rs Runtime Scanner Hardening](on-hold/buildrs-syn-scanner.md) | Replace regex-based runtime scanner with syn crate for robust parsing |
 | [Compile-Time Contracts](on-hold/compile-time-contracts.md) | Compile-time preconditions and type invariants via where clauses |
+| [Contracts — Runtime Validation](on-hold/contracts-runtime-validation.md) | Runtime contracts for value constraints |
+| [Cross-Target Parity Matrix](on-hold/cross-target-parity-matrix.md) | Automated verification that Rust, TS, and WASM produce identical output |
 | [Effect Type Integration — Embed EffectSet in FnType](on-hold/effect-type-integration.md) | Embed EffectSet into FnType for type-level effect tracking |
 | [Error-Fix Database](on-hold/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
 | [Go Target](on-hold/go-target.md) | Go codegen target via TOML templates and Go-specific nanopass passes |
+| [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [Gradual Typing](on-hold/gradual-typing.md) | Gradual typing with automatic runtime checks at typed/untyped boundaries |
 | [Incremental Compilation](on-hold/incremental-compilation.md) | Skip redundant rustc invocations by hashing generated Rust source |
 | [IR Interpreter](on-hold/ir-interpreter.md) | Direct IR execution for instant REPL, playground, and fast test runs |
@@ -64,23 +61,26 @@
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
 | [Trait-Based I/O Abstraction](on-hold/trait-based-io.md) | Abstract filesystem and I/O behind traits for testability |
 | [WASM Component Model](on-hold/wasm-component-model.md) | WebAssembly Component Model support with WIT bindings |
+| [WASM HTTP Client](on-hold/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
 | [Web Framework](on-hold/web-framework.md) | First-party Hono-like web framework with template and Codec integration |
 
 ## Done
 
-173 items
+175 items
 
 <details>
-<summary>Show all 173 completed items</summary>
+<summary>Show all 175 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
 | 2026-04-01 | [WASM Remaining FS Operations](done/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
+| 2026-04-01 | [Type Expressiveness: Business Scenario Comparison](done/type-expressiveness-scenarios.md) | Business scenario comparison of type expressiveness across languages |
 | 2026-04-01 | [Purity Exploitation — Leveraging fn/effect fn Distinction](done/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | 2026-04-01 | [Emit Readability](done/emit-readability.md) | Improve readability of generated Rust output |
 | 2026-04-01 | [Crate Split](done/crate-split.md) | Split compiler into workspace crates for build parallelism and API boundaries |
 | 2026-04-01 | [Compiler Fragility Hotspots](done/compiler-fragility-hotspots.md) | Fix fragile compiler internals: visitor pattern, ExprId duplication, UF isolation, Ty clone cost |
+| 2026-04-01 | [Compiler Depth Matrix](done/compiler-depth-matrix.md) | Map Almide's compiler depth against industrial compilers and plan next tiers |
 | 2026-04-01 | [Canonical AST](done/canonical-ast.md) | Introduce Canonical AST phase to separate name resolution from type checking |
 | 2026-03-31 | [Rainbow FFI Gate](done/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
 | 2026-03-31 | [Dead Code Elimination](done/dead-code-elimination.md) | Dependency-graph-based dead code elimination for smaller WASM binaries |
