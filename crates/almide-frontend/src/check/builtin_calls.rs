@@ -41,7 +41,7 @@ impl Checker {
                 if let Some(first) = arg_tys.first() {
                     self.constrain(Ty::String, first.clone(), "call to panic()".to_string());
                 }
-                Some(Ty::Unit)
+                Some(Ty::Never)
             }
             "assert" => Some(Ty::Unit),
             "assert_eq" | "assert_ne" => {
