@@ -6,11 +6,12 @@
 
 ## Active
 
-10 items
+11 items
 
 | Item | Description |
 |------|-------------|
 | [LLM Benchmark Execution](active/benchmark-execution.md) | LLM accuracy benchmarks comparing Almide, Python, and MoonBit |
+| [Codegen Perfection](active/codegen-perfection.md) | Make codegen bulletproof by learning from Gleam/Roc architecture patterns |
 | [Compiler Architecture: All 10s](active/compiler-architecture-10.md) | Achieve 10/10 on every compiler architecture quality metric |
 | [Compiler Depth Matrix](active/compiler-depth-matrix.md) | Map Almide's compiler depth against industrial compilers and plan next tiers |
 | [Contracts — Runtime Validation](active/contracts-runtime-validation.md) | Runtime contracts for value constraints |
