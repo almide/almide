@@ -1,5 +1,8 @@
 <!-- description: Export Almide code as native-speed libraries callable from any language -->
+<!-- done: 2026-04-01 -->
 # Rainbow FFI Gate
+
+> Realized via almide-lander: Almide → Rust codegen → cdylib + language bindings
 
 ## Thesis
 

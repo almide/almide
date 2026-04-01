@@ -26,7 +26,7 @@
 
 ## On Hold
 
-38 items
+37 items
 
 | Item | Description |
 |------|-------------|
@@ -54,7 +54,6 @@
 | [Platform/Application Separation](on-hold/platform-app-separation.md) | Platform/application separation for dual-target compilation |
 | [Almide Platform Architecture Vision](on-hold/platform-architecture.md) | Multi-layer platform vision with pluggable renderer and host bindings |
 | [Rainbow Bridge — Wrap External Code as Almide Packages](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
-| [Rainbow FFI Gate](on-hold/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
 | [REPL](on-hold/repl.md) | Interactive read-eval-print loop with persistent state across inputs |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
 | [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy |
@@ -71,14 +70,15 @@
 
 ## Done
 
-166 items
+167 items
 
 <details>
-<summary>Show all 166 completed items</summary>
+<summary>Show all 167 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
+| 2026-04-01 | [Rainbow FFI Gate](done/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
 | 2026-04-01 | [Canonical AST](done/canonical-ast.md) | Introduce Canonical AST phase to separate name resolution from type checking |
 | 2026-03-31 | [Dead Code Elimination](done/dead-code-elimination.md) | Dependency-graph-based dead code elimination for smaller WASM binaries |
 | 2026-03-30 | [Diagnostic end_col — Precise Error Underlines](done/diagnostic-end-col.md) | Track end column in diagnostics for precise error underlines |
