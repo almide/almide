@@ -1,0 +1,7 @@
+---
+source: tests/codegen_snapshot_test.rs
+expression: code
+---
+pub fn greet(name: String) -> String {
+    format!("{}{}", "Hello, ".to_string(), name)
+}

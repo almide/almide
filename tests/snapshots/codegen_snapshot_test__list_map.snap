@@ -1,0 +1,7 @@
+---
+source: tests/codegen_snapshot_test.rs
+expression: code
+---
+pub fn doubles(xs: Vec<i64>) -> Vec<i64> {
+    (xs).into_iter().map(move |x| (x * 2i64)).collect::<Vec<_>>()
+}

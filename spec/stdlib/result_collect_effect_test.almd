@@ -1,0 +1,40 @@
+// Test result.collect! inside effect fn
+
+effect fn parse_int_strict(s: String) -> Result[Int, String] = {
+    let n = int.parse(s)!
+    ok(n)
+}
+
+// Block body: explicit ok() wrapping
+effect fn parse_all(strs: List[String]) -> Result[List[Int], String] = {
+    let vals = strs |> list.map(parse_int_strict) |> result.collect!
+    ok(vals)
+}
+
+test "collect! success in effect fn" {
+    assert_eq(parse_all(["1", "2", "3"]), ok([1, 2, 3]))
+}
+
+test "collect! failure in effect fn" {
+    match parse_all(["1", "abc", "3"]) {
+        err(e) => assert(string.len(e) > 0),
+        ok(_) => assert(false, "should fail"),
+    }
+}
+
+// Also test result.collect_map! in effect fn
+effect fn parse_all_map(strs: List[String]) -> Result[List[Int], String] = {
+    let vals = result.collect_map(strs, parse_int_strict)!
+    ok(vals)
+}
+
+test "collect_map! success in effect fn" {
+    assert_eq(parse_all_map(["10", "20", "30"]), ok([10, 20, 30]))
+}
+
+test "collect_map! failure in effect fn" {
+    match parse_all_map(["10", "abc", "30"]) {
+        err(e) => assert(string.len(e) > 0),
+        ok(_) => assert(false, "should fail"),
+    }
+}

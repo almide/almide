@@ -1,0 +1,11 @@
+[package]
+name = "almide-syntax"
+version = "0.11.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Almide syntax definitions: AST, lexer, and parser"
+
+[dependencies]
+almide-base = { path = "../almide-base" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -1,4 +1,4 @@
-use crate::{parse_file, codegen, check, diagnostic, resolve, project, project_fetch};
+use crate::{parse_file, canonicalize, codegen, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool, repr_c: bool) {
     let (mut program, source_text, _parse_errors) = parse_file(file);
@@ -24,12 +24,14 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
     let run_check = emit_ir || (!no_check && !emit_ast);
     let mut checker_opt: Option<check::Checker> = None;
     if run_check {
-        let mut checker = check::Checker::new();
+        let canon = canonicalize::canonicalize_program(
+            &program,
+            resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
+        );
+        let mut checker = check::Checker::from_env(canon.env);
         checker.set_source(file, &source_text);
-        for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
-            checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
-        }
-        let diagnostics = checker.check_program(&mut program);
+        checker.diagnostics = canon.diagnostics;
+        let diagnostics = checker.infer_program(&mut program);
         let errors: Vec<_> = diagnostics.iter()
             .filter(|d| d.level == diagnostic::Level::Error)
             .collect();
@@ -48,13 +50,17 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
 
     // Lower to IR if checker ran
     let mut ir_program = checker_opt.as_ref().map(|checker| {
-        almide::lower::lower_program(&program, &checker.expr_types, &checker.env)
+        almide::lower::lower_program(&program, &checker.env, &checker.type_map)
     });
     let mut module_irs = std::collections::HashMap::new();
     if let Some(checker) = &mut checker_opt {
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
-            let mod_types = checker.check_module_bodies(mod_prog, name);
+            let saved_self = checker.env.self_module_name;
+            if let Some(pid) = pkg_id.as_ref() {
+                checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+            }
+            checker.infer_module(mod_prog, name);
             let versioned = pkg_id.as_ref().map(|pid| {
                 let base = pid.mod_name();
                 if let Some(suffix) = name.strip_prefix(&pid.name) {
@@ -67,9 +73,10 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
-            let mod_ir = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            let mod_ir = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
             checker.env.import_table = saved_table;
+            checker.env.self_module_name = saved_self;
             module_irs.insert(name.clone(), mod_ir);
             if let Some(ref mut ir) = ir_program {
                 ir.modules.push(mod_ir_module);

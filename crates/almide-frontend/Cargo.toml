@@ -1,0 +1,16 @@
+[package]
+name = "almide-frontend"
+version = "0.11.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Almide frontend: type checker, canonicalization, IR lowering"
+
+[dependencies]
+almide-base = { path = "../almide-base" }
+almide-lang = { path = "../almide-lang" }
+almide-ir = { path = "../almide-ir" }
+serde = { version = "1", features = ["derive"] }
+
+[build-dependencies]
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }

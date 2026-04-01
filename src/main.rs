@@ -1,23 +1,11 @@
-// Re-export library modules (shared with playground WASM crate)
-pub use almide::ast;
-pub use almide::codegen;
-pub use almide::diagnostic;
-pub use almide::fmt;
-pub use almide::lexer;
-pub use almide::parser;
-pub use almide::stdlib;
-pub use almide::types;
-pub use almide::intern;
-pub use almide::import_table;
-pub use almide::canonicalize;
-
-// CLI-only modules
-mod check;
 mod cli;
 
-mod project;
-mod project_fetch;
-mod resolve;
+// Bring library modules into binary crate scope so cli/ submodules can use `crate::*`.
+pub use almide::{
+    ast, canonicalize, check, codegen, diagnostic, fmt,
+    import_table, intern, ir, lexer, lower, mono, optimize,
+    parser, project, project_fetch, resolve, stdlib, types,
+};
 
 use std::process::Command;
 use clap::{Parser, Subcommand};
@@ -70,6 +58,9 @@ enum Commands {
         /// Add #[repr(C)] to structs/enums for stable C ABI
         #[arg(long)]
         repr_c: bool,
+        /// Build as shared library (.dylib/.so) instead of executable
+        #[arg(long)]
+        cdylib: bool,
     },
     /// Run tests
     Test {
@@ -234,12 +225,14 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
     let mut ir_program = None;
     let mut module_irs = std::collections::HashMap::new();
     if !no_check {
-        let mut checker = check::Checker::new();
+        let canon = canonicalize::canonicalize_program(
+            &program,
+            resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
+        );
+        let mut checker = check::Checker::from_env(canon.env);
         checker.set_source(file, &source_text);
-        for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
-            checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
-        }
-        let diagnostics = checker.check_program(&mut program);
+        checker.diagnostics = canon.diagnostics;
+        let diagnostics = checker.infer_program(&mut program);
         // Combine parse errors + checker errors
         let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();
         let checker_errors: Vec<_> = diagnostics.iter()
@@ -258,7 +251,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         }
         // Lower to IR only if no parse errors (partial AST can't produce valid IR)
         if !has_parse_errors {
-            let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+            let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
             // Emit unused variable warnings
             let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
             for d in &unused_warnings {
@@ -269,7 +262,13 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         // Lower user modules to IR (skip TOML-defined stdlib — they use generated codegen)
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
-            let mod_types = checker.check_module_bodies(mod_prog, name);
+            // For dependency modules, temporarily set self_module_name to the package root
+            // so `import self` in sub-modules resolves to the dependency, not the main project
+            let saved_self = checker.env.self_module_name;
+            if let Some(pid) = pkg_id.as_ref() {
+                checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+            }
+            checker.infer_module(mod_prog, name);
             let versioned = pkg_id.as_ref().map(|pid| {
                 let base = pid.mod_name();
                 if let Some(suffix) = name.strip_prefix(&pid.name) {
@@ -283,9 +282,10 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
-            let mod_ir_program = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
             checker.env.import_table = saved_table;
+            checker.env.self_module_name = saved_self;
             module_irs.insert(name.clone(), mod_ir_program);
             if let Some(ref mut ir) = ir_program {
                 ir.modules.push(mod_ir_module);
@@ -413,9 +413,9 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_run(&file, &program_args, no_check);
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib } => {
             let file = resolve_file(file);
-            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c);
+            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib);
         }
         Commands::Test { file, run, no_check, json, target } => {
             let file_str = file.as_deref().unwrap_or("");

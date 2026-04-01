@@ -1,0 +1,89 @@
+// Exhaustiveness check: ensure exhaustive matches compile and run correctly.
+
+type Color = | Red | Green | Blue
+
+fn color_name(c: Color) -> String =
+  match c {
+    Red => "red"
+    Green => "green"
+    Blue => "blue"
+  }
+
+type Expr =
+  | Lit(Int)
+  | Neg(Expr)
+  | Add(Expr, Expr)
+
+fn eval(e: Expr) -> Int =
+  match e {
+    Lit(n) => n
+    Neg(inner) => 0 - eval(inner)
+    Add(a, b) => eval(a) + eval(b)
+  }
+
+fn classify_option(x: Option[Option[Int]]) -> String =
+  match x {
+    some(some(n)) => "deep: " + int.to_string(n)
+    some(none) => "shallow none"
+    none => "nothing"
+  }
+
+fn classify_result(x: Option[Result[Int, String]]) -> String =
+  match x {
+    some(ok(n)) => "ok: " + int.to_string(n)
+    some(err(e)) => "err: " + e
+    none => "none"
+  }
+
+fn bool_pair(a: Bool, b: Bool) -> String =
+  match (a, b) {
+    (true, true) => "tt"
+    (true, false) => "tf"
+    (false, true) => "ft"
+    (false, false) => "ff"
+  }
+
+fn classify_int(x: Int) -> String =
+  match x {
+    0 => "zero"
+    1 => "one"
+    _ => "other"
+  }
+
+test "variant exhaustive match" {
+  assert_eq(color_name(Red), "red")
+  assert_eq(color_name(Green), "green")
+  assert_eq(color_name(Blue), "blue")
+}
+
+test "nested variant exhaustive match" {
+  assert_eq(eval(Lit(42)), 42)
+  assert_eq(eval(Neg(Lit(5))), -5)
+  assert_eq(eval(Add(Lit(1), Lit(2))), 3)
+  assert_eq(eval(Neg(Neg(Lit(7)))), 7)
+}
+
+test "nested option exhaustive match" {
+  assert_eq(classify_option(some(some(42))), "deep: 42")
+  assert_eq(classify_option(some(none)), "shallow none")
+  assert_eq(classify_option(none), "nothing")
+}
+
+test "option result exhaustive match" {
+  assert_eq(classify_result(some(ok(1))), "ok: 1")
+  assert_eq(classify_result(some(err("fail"))), "err: fail")
+  assert_eq(classify_result(none), "none")
+}
+
+test "tuple exhaustive match" {
+  assert_eq(bool_pair(true, true), "tt")
+  assert_eq(bool_pair(true, false), "tf")
+  assert_eq(bool_pair(false, true), "ft")
+  assert_eq(bool_pair(false, false), "ff")
+}
+
+test "int with wildcard" {
+  assert_eq(classify_int(0), "zero")
+  assert_eq(classify_int(1), "one")
+  assert_eq(classify_int(99), "other")
+}

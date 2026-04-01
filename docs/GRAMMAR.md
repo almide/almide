@@ -91,5 +91,5 @@ See [STDLIB-SPEC.md](./STDLIB-SPEC.md) for the complete stdlib function referenc
 - Default arguments and named arguments are supported
 - Case-insensitive aliases: `Ok`/`ok`, `Err`/`err`, `Some`/`some`, `None`/`none`
 - All errors via `Result[T, E]`, all optionals via `Option[T]`
-- Operators (high to low): `. ()` > `not -` > `^` (power, right-assoc) > `* / %` > `+ - ++` > `..` `..=` > `== != < > <= >=` (non-assoc) > `and` > `or` > `|>` `>>`
+- Operators (high to low): `. ()` > `not -` > `^` (power, right-assoc) > `* / %` > `+ -` > `..` `..=` > `== != < > <= >=` (non-assoc) > `and` > `or` > `|>` `>>`
 - See [CHEATSHEET.md](./CHEATSHEET.md) for syntax details and examples

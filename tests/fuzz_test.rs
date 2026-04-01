@@ -1,6 +1,7 @@
 use proptest::prelude::*;
 use almide::lexer::Lexer;
 use almide::parser::Parser;
+use almide::canonicalize;
 use almide::check::Checker;
 
 // ── Generators ──────────────────────────────────────────────────
@@ -114,8 +115,10 @@ proptest! {
         let tokens = Lexer::tokenize(&src);
         let mut parser = Parser::new(tokens);
         if let Ok(mut program) = parser.parse() {
-            let mut checker = Checker::new();
-            let _ = checker.check_program(&mut program);
+            let canon = canonicalize::canonicalize_program(&program, std::iter::empty());
+            let mut checker = Checker::from_env(canon.env);
+            checker.diagnostics = canon.diagnostics;
+            let _ = checker.infer_program(&mut program);
         }
     }
 
@@ -124,8 +127,10 @@ proptest! {
         let tokens = Lexer::tokenize(&src);
         let mut parser = Parser::new(tokens);
         if let Ok(mut program) = parser.parse() {
-            let mut checker = Checker::new();
-            let _ = checker.check_program(&mut program);
+            let canon = canonicalize::canonicalize_program(&program, std::iter::empty());
+            let mut checker = Checker::from_env(canon.env);
+            checker.diagnostics = canon.diagnostics;
+            let _ = checker.infer_program(&mut program);
         }
     }
 }

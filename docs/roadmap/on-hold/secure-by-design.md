@@ -38,7 +38,7 @@ effect fn fetch(url: String) -> Response
 - `eval()`, `require()`, dynamic `import()` do not exist in the language
 - **Security implication**: grep for `@extern` in the codebase and all contact points with the outside world are enumerated
 
-**Status: ✅ @extern is implemented.** ❌ platform tags are not implemented (→ platform-target-separation.md).
+**Status: ✅ @extern is implemented.** ✅ Capability inference implemented (Layer 2: 7 categories, transitive, `almide check --effects`). ❌ platform tags not yet implemented.
 
 ### Layer 3: Opaque Types — Restrict the means of constructing dangerous output
 

@@ -1,0 +1,11 @@
+[package]
+name = "almide-optimize"
+version = "0.11.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Almide IR optimizer: dead code elimination, constant propagation, monomorphization"
+
+[dependencies]
+almide-base = { path = "../almide-base" }
+almide-lang = { path = "../almide-lang" }
+almide-ir = { path = "../almide-ir" }

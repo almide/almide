@@ -910,7 +910,7 @@ match pair {
 | 2 | `not` `-` (unary) | Right (prefix) |
 | 3 | `^` | Right |
 | 4 | `*` `/` `%` | Left |
-| 5 | `+` `-` `++` | Left |
+| 5 | `+` `-` | Left |
 | 6 | `..` `..=` | Non-associative |
 | 7 | `==` `!=` `<` `>` `<=` `>=` | Non-associative |
 | 8 | `and` | Left |

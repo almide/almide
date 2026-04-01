@@ -1,0 +1,43 @@
+type Handler = {
+    run: (String) -> String,
+    name: String,
+}
+
+fn make_handler(n: String) -> Handler = {
+    run: (x) => n + ":" + x,
+    name: n,
+}
+
+test "direct field call" {
+    let h = make_handler("echo")
+    assert_eq(h.run("hello"), "echo:hello")
+}
+
+test "field access then call" {
+    let h = make_handler("echo")
+    let f = h.run
+    assert_eq(f("hello"), "echo:hello")
+}
+
+test "list of record with fn" {
+    let handlers = [make_handler("a"), make_handler("b")]
+    assert_eq(list.len(handlers), 2)
+}
+
+type DataSource = {
+    fetch: (String) -> Result[List[String], String],
+    name: String,
+}
+
+fn mock_source(rows: List[String]) -> DataSource = {
+    fetch: (_) => ok(rows),
+    name: "mock",
+}
+
+test "record with Result-returning fn" {
+    let src = mock_source(["a", "b"])
+    match src.fetch("*") {
+        ok(rows) => assert_eq(rows, ["a", "b"]),
+        err(_) => assert(false, "should succeed"),
+    }
+}

@@ -1,0 +1,16 @@
+---
+source: tests/codegen_snapshot_test.rs
+expression: code
+---
+pub fn add(a: i64, b: i64) -> i64 {
+    (a + b)
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn __test_almd_addition() {
+        assert_eq!(add(1i64, 2i64), 3i64)
+    }
+}

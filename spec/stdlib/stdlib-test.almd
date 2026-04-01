@@ -125,7 +125,7 @@ test "list.fold" {
   assert_eq(sum, 10)
 }
 
-test "list concat with ++" {
+test "list concat with +" {
   assert_eq([1, 2] + [3, 4], [1, 2, 3, 4])
   assert_eq([] + [1], [1])
 }

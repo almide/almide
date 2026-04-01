@@ -56,7 +56,7 @@ for item in items {
   println(item)
 }
 for (i, item) in list.enumerate(items) {
-  println(int.to_string(i) ++ ": " ++ item)
+  println(int.to_string(i) + ": " + item)
 }
 
 // While loop
@@ -93,8 +93,8 @@ type Shape =
   | Rect(Float, Float)
 
 // List/String concat
-let combined = [1, 2] ++ [3, 4]
-let greeting = "hello" ++ " " ++ "world"
+let combined = [1, 2] + [3, 4]
+let greeting = "hello" + " " + "world"
 
 // UFCS — method syntax works on any type (auto-resolves to correct module)
 let n = "hello".len()          // same as string.len("hello")

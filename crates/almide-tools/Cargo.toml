@@ -1,0 +1,13 @@
+[package]
+name = "almide-tools"
+version = "0.11.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Almide developer tools: formatter, module interface, almdi"
+
+[dependencies]
+almide-base = { path = "../almide-base" }
+almide-lang = { path = "../almide-lang" }
+almide-ir = { path = "../almide-ir" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

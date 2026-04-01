@@ -1,0 +1,10 @@
+---
+source: tests/codegen_snapshot_test.rs
+expression: code
+---
+pub fn unwrap_or(x: Option<i64>, r#default: i64) -> i64 {
+    match x {
+        Some(v) => v,
+        None => default,
+    }
+}

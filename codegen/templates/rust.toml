@@ -106,7 +106,7 @@ template = "({inner}).ok()"
 # ── Match ──
 
 [match_expr]
-template = "match {subject} {{ {arms} }}"
+template = "match {subject} {{\n{arms}\n}}"
 
 [match_arm]
 template = "{pattern} => {{ {body} }}"
@@ -184,11 +184,11 @@ template = "{value}"
 # ── Declarations ──
 
 [fn_decl]
-template = "pub fn {name}({params}) -> {return_type} {{ {body} }}"
+template = "pub fn {name}({params}) -> {return_type} {{\n{body}\n}}"
 
 # Effect fn: ret_ty in IR is already Result<T, String>, so use it directly
 [effect_fn_decl]
-template = "pub fn {name}({params}) -> {return_type} {{ {body} }}"
+template = "pub fn {name}({params}) -> {return_type} {{\n{body}\n}}"
 
 [[fn_param]]
 template = "{name}: {type}"
@@ -253,13 +253,17 @@ template = "impl Fn({params}) -> {return} + Clone"
 [type_fn_boxed]
 template = "Box<dyn Fn({params}) -> {return}>"
 
+# Fn type for struct fields: uses Rc for cloneability
+[type_fn_field]
+template = "std::rc::Rc<dyn Fn({params}) -> {return}>"
+
 # ── Loops ──
 
 [for_loop]
-template = "for {var} in {iter} {{ {body} }}"
+template = "for {var} in {iter} {{\n{body}\n}}"
 
 [while_loop]
-template = "while {cond} {{ {body} }}"
+template = "while {cond} {{\n{body}\n}}"
 
 [break_stmt]
 template = "break;"
@@ -287,6 +291,10 @@ template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub stru
 [[struct_decl]]
 template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub struct {name} {{\n{fields}\n}}"
 
+[[struct_decl]]
+when_attr = "has_fn_fields"
+template = "#[derive(Clone)]\npub struct {name} {{\n{fields}\n}}"
+
 [struct_field]
 template = "    pub {name}: {type},"
 
@@ -311,10 +319,10 @@ template = "// use {module};"
 # ── Test ──
 
 [test_module]
-template = "mod tests {{\n    use super::*;\n{tests}\n}}"
+template = "mod tests {{\n    use super::*;\n\n{tests}\n}}"
 
 [test_block]
-template = "#[test]\nfn {name}() {{ {body} }}"
+template = "#[test]\nfn {name}() {{\n{body}\n}}"
 
 [assert_eq]
 template = "assert!(almide_eq!({left}, {right}), \"assertion failed: {{:?}} != {{:?}}\", {left}, {right});"
