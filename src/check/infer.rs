@@ -524,6 +524,10 @@ impl Checker {
             }
             ExprKind::Unwrap { expr: inner, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
+                // Annotate the inner expression with its resolved type so the lowering
+                // can construct the correct IR type (e.g., Result[List[T], List[E]] for
+                // result.collect rather than hardcoding Result[T, String]).
+                inner.ty = Some(inner_ty.clone());
                 match &inner_ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                     Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),

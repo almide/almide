@@ -420,8 +420,14 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             ctx.mk(IrExprKind::UnwrapOr { expr: Box::new(piped), fallback: Box::new(ir_fallback) }, ty, span)
         }
         ast::ExprKind::Unwrap { expr: inner, .. } => {
-            let inner_ty = match &ty {
-                _ => Ty::result(ty.clone(), Ty::String),
+            // Use the checker's resolved type for the inner expression.
+            // This preserves the actual error type (e.g., List[String] from result.collect)
+            // instead of hardcoding String.
+            let inner_checked_ty = ctx.expr_ty(inner);
+            let inner_ty = if inner_checked_ty.is_result() || inner_checked_ty.is_option() {
+                inner_checked_ty
+            } else {
+                Ty::result(ty.clone(), Ty::String)
             };
             let piped = lower_pipe(ctx, left, inner, inner_ty, span.clone());
             ctx.mk(IrExprKind::Unwrap { expr: Box::new(piped) }, ty, span)

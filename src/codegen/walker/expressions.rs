@@ -3,6 +3,7 @@
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
 use super::RenderContext;
+use super::super::pass::Target;
 use super::types::render_type;
 use super::statements::{render_stmt, render_match_arm};
 use super::helpers::{template_or, terminate_stmt, contains_loop_control, ty_has_named_typevar, erase_named_typevars, ty_contains_name};
@@ -447,6 +448,29 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     format!("({}).unwrap()", s)
                 } else {
                     format!("({}).unwrap()", s)
+                }
+            } else if !inner.ty.is_option() && matches!(ctx.target, Target::Rust) {
+                // Result unwrap in effect fn: error type must be coerced to String.
+                // If the error type is not String, insert .map_err(...) before ?.
+                let needs_map_err = if let Some((_ok_ty, err_ty)) = inner.ty.inner2() {
+                    !matches!(err_ty, Ty::String)
+                } else {
+                    false
+                };
+                if needs_map_err {
+                    let err_ty = inner.ty.inner2().map(|(_, e)| e);
+                    // List[String] → join with ", " for readable error messages
+                    let is_list_string = err_ty.is_some_and(|e| {
+                        matches!(e, Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 && matches!(args[0], Ty::String))
+                    });
+                    if is_list_string {
+                        format!("({}).map_err(|errs| errs.join(\", \"))?", s)
+                    } else {
+                        format!("({}).map_err(|e| format!(\"{{:?}}\", e))?", s)
+                    }
+                } else {
+                    ctx.templates.render_with("unwrap_expr", None, &[], &[("inner", s.as_str())])
+                        .unwrap_or_else(|| format!("({})?", s))
                 }
             } else {
                 let when_type = if inner.ty.is_option() { Some("Option") } else { None };
