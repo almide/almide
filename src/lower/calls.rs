@@ -134,8 +134,26 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                     return CallTarget::Named { name: sym(&key) };
                 }
             }
-            // Built-in generic types: xs.len() → list.len(xs) for List, Map, etc.
+            // Record field call: h.run("hello") where run is a Fn-typed field
+            // Must check before UFCS so field-access + call takes priority
             let obj_ty = ctx.expr_ty(object);
+            {
+                let resolved = ctx.env.resolve_named(&obj_ty);
+                let fn_field = match &resolved {
+                    Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                        fields.iter().find(|(n, _)| *n == *field)
+                            .and_then(|(_, t)| if matches!(t, Ty::Fn { .. }) { Some(()) } else { None })
+                    }
+                    _ => None,
+                };
+                if fn_field.is_some() {
+                    let ir_obj = lower_expr(ctx, object);
+                    let field_ty = ctx.expr_ty(callee);
+                    let member = ctx.mk(IrExprKind::Member { object: Box::new(ir_obj), field: *field }, field_ty, callee.span);
+                    return CallTarget::Computed { callee: Box::new(member) };
+                }
+            }
+            // Built-in generic types: xs.len() → list.len(xs) for List, Map, etc.
             let builtin_module = match &obj_ty {
                 Ty::Applied(TypeConstructorId::List, _) => Some("list"),
                 Ty::Applied(TypeConstructorId::Map, _) => Some("map"),

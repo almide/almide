@@ -212,6 +212,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         val_str = format!("Box::new({})", val_str);
                     }
                 }
+                // Rc-wrap Fn-typed fields: closures stored in struct fields use Rc<dyn Fn>
+                if matches!(&v.ty, Ty::Fn { .. }) {
+                    val_str = format!("std::rc::Rc::new({})", val_str);
+                }
                 field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", k.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| format!("{}: {}", k, val_str)));
             }
@@ -759,7 +763,12 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
         }
         CallTarget::Computed { callee } => {
             let s = render_expr(ctx, callee);
-            if matches!(&callee.kind, IrExprKind::Lambda { .. }) { format!("({})", s) } else { s }
+            // Wrap in parens for lambda and field-access calls:
+            // Lambda: (|x| x + 1)(5)
+            // Member: (h.run)("hello") — required in Rust to call Fn-typed fields
+            if matches!(&callee.kind, IrExprKind::Lambda { .. } | IrExprKind::Member { .. }) {
+                format!("({})", s)
+            } else { s }
         }
         CallTarget::Module { .. } => unreachable!(),
     };

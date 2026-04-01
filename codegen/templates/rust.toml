@@ -253,6 +253,10 @@ template = "impl Fn({params}) -> {return} + Clone"
 [type_fn_boxed]
 template = "Box<dyn Fn({params}) -> {return}>"
 
+# Fn type for struct fields: uses Rc for cloneability
+[type_fn_field]
+template = "std::rc::Rc<dyn Fn({params}) -> {return}>"
+
 # ── Loops ──
 
 [for_loop]
@@ -286,6 +290,10 @@ template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub stru
 
 [[struct_decl]]
 template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+when_attr = "has_fn_fields"
+template = "#[derive(Clone)]\npub struct {name} {{\n{fields}\n}}"
 
 [struct_field]
 template = "    pub {name}: {type},"

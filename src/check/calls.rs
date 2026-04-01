@@ -74,6 +74,22 @@ impl Checker {
                 let obj_ty = self.infer_expr(object);
                 let obj_concrete = resolve_ty(&obj_ty, &self.uf);
                 let field = field.clone();
+                // Record field call: h.run("hello") where run is a Fn-typed field
+                // Must check before UFCS so field-access + call takes priority
+                let field_ty = self.resolve_field_type(&obj_concrete, &field);
+                if let Ty::Fn { params, ret } = &field_ty {
+                    // Validate argument count
+                    if arg_tys.len() != params.len() {
+                        self.emit(super::err(
+                            format!("field '{}' expects {} argument(s) but got {}", field, params.len(), arg_tys.len()),
+                            "Check the number of arguments", format!("call to .{}()", field)).with_code("E004"));
+                    }
+                    // Unify argument types with parameter types
+                    for (aty, pty) in arg_tys.iter().zip(params.iter()) {
+                        self.constrain(pty.clone(), aty.clone(), format!("call to .{}()", field));
+                    }
+                    return ret.as_ref().clone();
+                }
                 // Built-in generic types -> stdlib module UFCS
                 let builtin_module = builtin_module_for_type(&obj_concrete);
                 if let Some(module) = builtin_module {

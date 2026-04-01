@@ -5,7 +5,7 @@ use crate::ir::*;
 use crate::types::Ty;
 use super::RenderContext;
 use super::types::render_type;
-use super::helpers::{template_or, ty_contains_name};
+use super::helpers::{template_or, ty_contains_name, render_type_field_fn};
 
 pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     let decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
@@ -27,18 +27,31 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
 
     match &td.kind {
         IrTypeDeclKind::Record { fields } => {
+            let has_fn_fields = fields.iter().any(|f| matches!(&f.ty, Ty::Fn { .. }));
             let fields_str = fields.iter()
                 .map(|f| {
-                    let type_s = render_type(ctx, &f.ty);
+                    // Fn-typed struct fields: use Rc<dyn Fn> for cloneability
+                    // (impl Fn is invalid in struct position, Box<dyn Fn> is not Clone)
+                    let type_s = if matches!(&f.ty, Ty::Fn { .. }) {
+                        render_type_field_fn(ctx, &f.ty)
+                    } else {
+                        render_type(ctx, &f.ty)
+                    };
                     ctx.templates.render_with("struct_field", None, &[], &[("name", f.name.as_str()), ("type", type_s.as_str())])
                         .unwrap_or_else(|| format!("    pub {}: {},", f.name, render_type(ctx, &f.ty)))
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
             let full_name = format!("{}{}", td.name, generics_str);
+            let mut attrs = decl_attrs.clone();
+            if has_fn_fields { attrs.push("has_fn_fields"); }
             let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
-            let fallback = format!("{}pub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str);
-            ctx.templates.render_with("struct_decl", None, &decl_attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
+            let fallback = if has_fn_fields {
+                format!("#[derive(Clone)]\npub struct {} {{\n{}\n}}", full_name, &fields_str)
+            } else {
+                format!("{}pub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
+            };
+            ctx.templates.render_with("struct_decl", None, &attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
                 .unwrap_or(fallback)
         }
         IrTypeDeclKind::Variant { cases, .. } => {

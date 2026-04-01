@@ -81,3 +81,20 @@ pub fn render_type_boxed_fn(ctx: &RenderContext, ty: &Ty) -> String {
         _ => super::types::render_type(ctx, ty),
     }
 }
+
+/// Render a Fn type as Rc<dyn Fn(...) -> T> for struct fields (cloneable, no impl Trait)
+pub fn render_type_field_fn(ctx: &RenderContext, ty: &Ty) -> String {
+    match ty {
+        Ty::Fn { params, ret } => {
+            let params_str = params.iter().map(|p| super::types::render_type(ctx, p)).collect::<Vec<_>>().join(", ");
+            let ret_str = if matches!(ret.as_ref(), Ty::Fn { .. }) {
+                render_type_field_fn(ctx, ret)
+            } else {
+                super::types::render_type(ctx, ret)
+            };
+            ctx.templates.render_with("type_fn_field", None, &[], &[("params", params_str.as_str()), ("return", ret_str.as_str())])
+                .unwrap_or_else(|| format!("std::rc::Rc<dyn Fn({}) -> {}>", params_str, ret_str))
+        }
+        _ => super::types::render_type(ctx, ty),
+    }
+}
