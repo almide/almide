@@ -6,7 +6,7 @@
 
 ## Active
 
-10 items
+9 items
 
 | Item | Description |
 |------|-------------|
@@ -18,7 +18,6 @@
 | [Error Message Suggestions](active/error-message-suggestions.md) | Fuzzy matching suggestions in error messages (did you mean?) |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](active/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [Nanopass Debug Dump](active/nanopass-debug-dump.md) | Environment-variable-controlled IR dump for each nanopass stage |
-| [Purity Exploitation — Leveraging fn/effect fn Distinction](active/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | [WASM HTTP Client](active/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
 
 ## On Hold
@@ -67,15 +66,16 @@
 
 ## Done
 
-170 items
+171 items
 
 <details>
-<summary>Show all 170 completed items</summary>
+<summary>Show all 171 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
 | 2026-04-01 | [WASM Remaining FS Operations](done/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
+| 2026-04-01 | [Purity Exploitation — Leveraging fn/effect fn Distinction](done/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | 2026-04-01 | [Compiler Fragility Hotspots](done/compiler-fragility-hotspots.md) | Fix fragile compiler internals: visitor pattern, ExprId duplication, UF isolation, Ty clone cost |
 | 2026-04-01 | [Canonical AST](done/canonical-ast.md) | Introduce Canonical AST phase to separate name resolution from type checking |
 | 2026-03-31 | [Rainbow FFI Gate](done/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
