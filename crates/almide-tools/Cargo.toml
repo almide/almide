@@ -1,6 +1,6 @@
 [package]
 name = "almide-tools"
-version = "0.10.5"
+version = "0.11.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Almide developer tools: formatter, module interface, almdi"
