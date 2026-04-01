@@ -10,8 +10,8 @@
 
 | Item | Description |
 |------|-------------|
-| [Almide Native cdylib — Scaffold in Almide, Not Rust](active/almide-native-cdylib.md) | Build .so/.dylib from pure Almide, eliminating Rust scaffolding from lander |
 | [C FFI — Call C Libraries from Almide](active/c-ffi.md) | Call C libraries from Almide via @extern(c, ...) and extern "C" codegen |
+| [Exhaustiveness Strengthening — Nested Patterns](active/exhaustiveness-strengthening.md) | Nested pattern exhaustiveness via Maranget's algorithm |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 
 ## On Hold
@@ -46,10 +46,10 @@
 
 ## Done
 
-185 items
+186 items
 
 <details>
-<summary>Show all 185 completed items</summary>
+<summary>Show all 186 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|

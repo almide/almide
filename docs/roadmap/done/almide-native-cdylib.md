@@ -1,5 +1,5 @@
 <!-- description: Build .so/.dylib from pure Almide, eliminating Rust scaffolding from lander -->
-# Almide Native cdylib — Scaffold in Almide, Not Rust
+<!-- done: 2026-04-02 --><!-- done: 2026-04-02 --># Almide Native cdylib — Scaffold in Almide, Not Rust
 
 ## Goal
 
