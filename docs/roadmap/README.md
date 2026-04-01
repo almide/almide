@@ -6,7 +6,7 @@
 
 ## On Hold
 
-40 items
+38 items
 
 | Item | Description |
 |------|-------------|
@@ -24,7 +24,6 @@
 | [Go Target](on-hold/go-target.md) | Go codegen target via TOML templates and Go-specific nanopass passes |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [Gradual Typing](on-hold/gradual-typing.md) | Gradual typing with automatic runtime checks at typed/untyped boundaries |
-| [IR Interpreter](on-hold/ir-interpreter.md) | Direct IR execution for instant REPL, playground, and fast test runs |
 | [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
 | [LLM Integration](on-hold/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
 | [LLM → IR Direct Generation](on-hold/llm-ir-generation.md) | LLM generates typed IR as JSON directly, bypassing parser errors |
@@ -36,7 +35,6 @@
 | [Platform/Application Separation](on-hold/platform-app-separation.md) | Platform/application separation for dual-target compilation |
 | [Almide Platform Architecture Vision](on-hold/platform-architecture.md) | Multi-layer platform vision with pluggable renderer and host bindings |
 | [Rainbow Bridge — Wrap External Code as Almide Packages](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
-| [REPL](on-hold/repl.md) | Interactive read-eval-print loop with persistent state across inputs |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
 | [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy |
 | [Secure by Design](on-hold/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
