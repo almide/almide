@@ -6,7 +6,7 @@
 
 ## On Hold
 
-37 items
+36 items
 
 | Item | Description |
 |------|-------------|
@@ -23,7 +23,6 @@
 | [Error-Fix Database](on-hold/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
 | [Go Target](on-hold/go-target.md) | Go codegen target via TOML templates and Go-specific nanopass passes |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
-| [Gradual Typing](on-hold/gradual-typing.md) | Gradual typing with automatic runtime checks at typed/untyped boundaries |
 | [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
 | [LLM Integration](on-hold/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
 | [LSP Code Actions](on-hold/lsp-code-actions.md) | LSP code actions for auto-fix, refactoring, and import management |
