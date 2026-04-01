@@ -6,7 +6,7 @@
 
 ## On Hold
 
-38 items
+37 items
 
 | Item | Description |
 |------|-------------|
@@ -26,7 +26,6 @@
 | [Gradual Typing](on-hold/gradual-typing.md) | Gradual typing with automatic runtime checks at typed/untyped boundaries |
 | [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
 | [LLM Integration](on-hold/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
-| [LLM → IR Direct Generation](on-hold/llm-ir-generation.md) | LLM generates typed IR as JSON directly, bypassing parser errors |
 | [LSP Code Actions](on-hold/lsp-code-actions.md) | LSP code actions for auto-fix, refactoring, and import management |
 | [LSP Server](on-hold/lsp.md) | Language Server Protocol for editor completion, diagnostics, and navigation |
 | [Package Registry](on-hold/package-registry.md) | Lock file, semver resolution, and central package registry |
