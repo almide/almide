@@ -26,6 +26,7 @@ mod builtin_calls;
 mod static_dispatch;
 mod solving;
 mod diagnostics;
+mod exhaustiveness;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -325,35 +326,26 @@ fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
 impl Checker {
 
     pub(crate) fn check_match_exhaustiveness(&mut self, subject_ty: &Ty, arms: &[ast::MatchArm]) {
-        let resolved = self.env.resolve_named(subject_ty);
-        let required: Vec<String> = match &resolved {
-            Ty::Variant { cases, .. } => cases.iter().map(|c| c.name.to_string()).collect(),
-            Ty::Applied(crate::types::TypeConstructorId::Option, _) => vec!["some".into(), "none".into()],
-            Ty::Applied(crate::types::TypeConstructorId::Result, _) => vec!["ok".into(), "err".into()],
-            Ty::Bool => vec!["true".into(), "false".into()],
-            _ => return,
-        };
-        let mut covered = std::collections::HashSet::new();
-        let mut has_wildcard = false;
-        for arm in arms { if arm.guard.is_some() { continue; } self.collect_covered(&arm.pattern, &mut covered, &mut has_wildcard); }
-        if has_wildcard { return; }
-        let missing: Vec<&String> = required.iter().filter(|c| !covered.contains(*c)).collect();
+        let missing = exhaustiveness::check_exhaustiveness(subject_ty, arms, &self.env);
         if !missing.is_empty() {
-            let list = missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
-            self.emit(Diagnostic::error(format!("non-exhaustive match: missing {}", list), format!("Add arms for {}, or use '_'", list), "match").with_code("E010"));
-        }
-    }
-
-    fn collect_covered(&self, pat: &ast::Pattern, covered: &mut std::collections::HashSet<String>, wildcard: &mut bool) {
-        match pat {
-            ast::Pattern::Wildcard | ast::Pattern::Ident { .. } => *wildcard = true,
-            ast::Pattern::Constructor { name, .. } | ast::Pattern::RecordPattern { name, .. } => { covered.insert(name.to_string()); }
-            ast::Pattern::Some { .. } => { covered.insert("some".into()); }
-            ast::Pattern::None => { covered.insert("none".into()); }
-            ast::Pattern::Ok { .. } => { covered.insert("ok".into()); }
-            ast::Pattern::Err { .. } => { covered.insert("err".into()); }
-            ast::Pattern::Literal { value } => { if let ast::ExprKind::Bool { value: v, .. } = &value.kind { covered.insert(if *v { "true" } else { "false" }.into()); } }
-            _ => {}
+            let list = missing.join(", ");
+            let resolved = self.env.resolve_named(subject_ty);
+            let hint = if missing.len() == 1 && missing[0] == "_" {
+                let ty_name = match &resolved {
+                    Ty::Int => "Int",
+                    Ty::Float => "Float",
+                    Ty::String => "String",
+                    _ => "this type",
+                };
+                format!("match on {} requires a catch-all '_' pattern", ty_name)
+            } else {
+                format!("Add arms for {}, or use '_'", list)
+            };
+            self.emit(Diagnostic::error(
+                format!("non-exhaustive match: missing {}", list),
+                hint,
+                "match",
+            ).with_code("E010"));
         }
     }
 

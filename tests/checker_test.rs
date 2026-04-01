@@ -767,3 +767,141 @@ fn escape_multiple_vars_mutated() {
     );
     assert!(errs.len() >= 2, "should report errors for both vars, got: {:?}", errs);
 }
+
+// ---- Exhaustiveness: nested patterns ----
+
+#[test]
+fn exhaust_nested_option() {
+    // Missing some(none)
+    let errs = errors(
+        "fn f(x: Option[Option[Int]]) -> Int = match x {\n  some(some(n)) => n\n  none => 0\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("some(none)")), "should report some(none), got: {:?}", errs);
+}
+
+#[test]
+fn exhaust_nested_option_complete() {
+    has_no_errors(
+        "fn f(x: Option[Option[Int]]) -> Int = match x {\n  some(some(n)) => n\n  some(none) => -1\n  none => 0\n}"
+    );
+}
+
+#[test]
+fn exhaust_nested_result_in_option() {
+    // Missing some(err(_))
+    let errs = errors(
+        "fn f(x: Option[Result[Int, String]]) -> String = match x {\n  some(ok(n)) => \"ok\"\n  none => \"none\"\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("some(err(_))")), "should report some(err(_)), got: {:?}", errs);
+}
+
+#[test]
+fn exhaust_deep_variant() {
+    // type Expr = | Lit(Int) | Neg(Expr)
+    // Missing Neg(Neg(_))
+    let errs = errors(
+        "type Expr =\n  | Lit(Int)\n  | Neg(Expr)\nfn eval(e: Expr) -> Int = match e {\n  Lit(n) => n\n  Neg(Lit(n)) => 0 - n\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("Neg(Neg(_))")), "should report Neg(Neg(_)), got: {:?}", errs);
+}
+
+#[test]
+fn exhaust_variant_with_wildcard_nested() {
+    has_no_errors(
+        "type Expr =\n  | Lit(Int)\n  | Neg(Expr)\nfn eval(e: Expr) -> Int = match e {\n  Lit(n) => n\n  Neg(x) => 0\n}"
+    );
+}
+
+// ---- Exhaustiveness: tuple patterns ----
+
+#[test]
+fn exhaust_tuple_bool_pair() {
+    // Missing (true, false), (false, true)
+    let errs = errors(
+        "fn f(p: (Bool, Bool)) -> String = match p {\n  (true, true) => \"tt\"\n  (false, false) => \"ff\"\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("(true, false)")), "should report (true, false), got: {:?}", errs);
+    assert!(errs.iter().any(|e| e.contains("(false, true)")), "should report (false, true), got: {:?}", errs);
+}
+
+#[test]
+fn exhaust_tuple_bool_pair_complete() {
+    has_no_errors(
+        "fn f(p: (Bool, Bool)) -> String = match p {\n  (true, true) => \"tt\"\n  (true, false) => \"tf\"\n  (false, true) => \"ft\"\n  (false, false) => \"ff\"\n}"
+    );
+}
+
+#[test]
+fn exhaust_tuple_with_wildcard() {
+    has_no_errors(
+        "fn f(p: (Bool, Bool)) -> String = match p {\n  (true, true) => \"tt\"\n  _ => \"other\"\n}"
+    );
+}
+
+// ---- Exhaustiveness: infinite domain ----
+
+#[test]
+fn exhaust_int_without_wildcard() {
+    let errs = errors(
+        "fn f(x: Int) -> String = match x {\n  0 => \"zero\"\n  1 => \"one\"\n}"
+    );
+    assert!(!errs.is_empty(), "should require _ for Int match");
+}
+
+#[test]
+fn exhaust_int_with_wildcard() {
+    has_no_errors(
+        "fn f(x: Int) -> String = match x {\n  0 => \"zero\"\n  _ => \"other\"\n}"
+    );
+}
+
+#[test]
+fn exhaust_string_without_wildcard() {
+    let errs = errors(
+        "fn f(x: String) -> Int = match x {\n  \"a\" => 1\n  \"b\" => 2\n}"
+    );
+    assert!(!errs.is_empty(), "should require _ for String match");
+}
+
+// ---- Exhaustiveness: existing flat cases still work ----
+
+#[test]
+fn exhaust_variant_missing_case() {
+    let errs = errors(
+        "type Color =\n  | Red\n  | Green\n  | Blue\nfn name(c: Color) -> String = match c {\n  Red => \"red\"\n  Green => \"green\"\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("Blue")), "should report Blue, got: {:?}", errs);
+}
+
+#[test]
+fn exhaust_option_missing_none() {
+    let errs = errors(
+        "fn f(x: Option[Int]) -> Int = match x {\n  some(v) => v\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("none")), "should report none, got: {:?}", errs);
+}
+
+#[test]
+fn exhaust_result_missing_err() {
+    let errs = errors(
+        "fn f(x: Result[Int, String]) -> Int = match x {\n  ok(v) => v\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("err")), "should report err, got: {:?}", errs);
+}
+
+#[test]
+fn exhaust_bool_missing_false() {
+    let errs = errors(
+        "fn f(x: Bool) -> Int = match x {\n  true => 1\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("false")), "should report false, got: {:?}", errs);
+}
+
+#[test]
+fn exhaust_guard_not_counted() {
+    // Guard arms don't guarantee coverage
+    let errs = errors(
+        "type AB = | A | B\nfn f(x: AB) -> Int = match x {\n  A => 1\n  B if true => 2\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("B")), "guarded B should not count, got: {:?}", errs);
+}
