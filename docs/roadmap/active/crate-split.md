@@ -76,13 +76,26 @@ Zero cross-group dependencies — clean three-way split.
 - **almide-frontend** (~5.7k lines): `check/`, `canonicalize/`, `lower/`, `import_table.rs`, `stdlib.rs`, `type_env.rs`, `generated/stdlib_sigs.rs`. Has own `build.rs` for stdlib_sigs generation. Main crate's build.rs is now empty.
 - **almide-optimize** (~2.5k lines): `optimize/`, `mono/`. `mono/propagation.rs` codegen dependency resolved by adding `wasm_types_compatible()` to almide-ir (no wasm-encoder dep).
 - **almide-tools** (~1.5k lines): `fmt.rs`, `interface.rs`, `almdi.rs`.
-- **almide (CLI)** (remaining): `main.rs`, `cli/`, `resolve.rs`, `project.rs`, `project_fetch.rs`. All re-export stubs.
+- **almide (CLI)** (~3.6k lines): `main.rs`, `cli/`, `resolve.rs`, `project.rs`, `project_fetch.rs`. lib.rs is a pure `pub use` re-export map (no stub files).
 - **AUTO_IMPORT_BUNDLED** moved to `almide_lang::stdlib_info`.
+- **Re-export stubs removed**: lib.rs consolidates all module aliases via `pub use crate as module;`. 18 stub files deleted.
 
 ## Future: Breaking ast↔types Cycle
 
-The clean long-term fix is removing `Expr.ty: Option<Ty>` from the AST and using an external `HashMap<ExprId, Ty>` populated by the checker. This would allow:
-- almide-syntax (ast + lexer + parser) — no type system dependency
-- almide-types (Ty, TypeEnv, unify) — no AST dependency
+Remove `Expr.ty: Option<Ty>` from AST and use `TypeMap = HashMap<ExprId, Ty>` populated by the checker.
 
-This is a separate refactor with ~50 files touched. Track independently.
+**Analysis complete (2026-04-01):**
+
+Join points (only 2):
+1. `ast::Expr.ty: Option<Ty>` — checker sets in 4 places, lower reads in ~50 places
+2. `types::VariantPayload::Record(Vec<(Sym, Ty, Option<ast::Expr>)>)` — default expressions
+
+Implementation plan:
+1. Add `TypeMap = HashMap<ExprId, Ty>` to checker, populate instead of `expr.ty = Some(...)`
+2. Add TypeMap to `LowerCtx`, helper method `ctx.ty(expr) -> Ty`
+3. Replace all `expr.ty.clone().unwrap_or(...)` in lower/ (~50 sites) with `ctx.ty(expr)`
+4. Remove `Expr.ty` field from `ast::Expr`
+5. Change `VariantPayload::Record` default from `Option<ast::Expr>` to `Option<ExprId>`, store actual Exprs in side table
+6. Split: almide-syntax (ast, lexer, parser) + almide-types (Ty, unify, constructor)
+
+This is all-or-nothing (~50 files, 4 crates). ExprId already exists on Expr.
