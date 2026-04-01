@@ -2,7 +2,7 @@
 # Compiler Architecture: All 10s
 
 **Goal**: 10/10 on every compiler architecture metric
-**Current**: 105/110 — Remaining: Tests 9→10, Codegen Integration 9→10
+**Current**: 106/110 — Remaining: Codegen Integration 9→10
 **Scope**: Entire compiler infrastructure including WASM codegen
 
 ---
@@ -19,11 +19,11 @@
 | Monomorphization | 7 | **10** | 10 | ✅ |
 | Error Diagnostics | 9 | **10** | 10 | ✅ |
 | Code Quality | 7 | **10** | 10 | ✅ String interning (Sym type, lasso), Sym throughout Ty/FnSig/TypeEnv |
-| Tests | 8 | **9** | 10 | ✅ fuzzing, 167/167 WASM all pass, TypeVar regression 6 cases added, parallel execution (2:30→16s). Remaining: nanopass unit tests |
+| Tests | 8 | **10** | 10 | ✅ fuzzing, 167/167 WASM all pass, TypeVar regression 6 cases, parallel execution (2:30→16s), nanopass unit tests (28 tests, 16 passes) |
 | Build System | 7 | **10** | 10 | ✅ build.rs split, per-file cache + parallel test execution |
 | Codegen Integration | 5 | **9** | 10 | ✅ WASM result.collect/partition/collect_map implemented. Remaining: stdlib dispatch unification |
 
-**Total: 64/100 → 105/110**
+**Total: 64/100 → 106/110**
 
 ---
 
@@ -67,18 +67,11 @@
 - [x] **WASM result.collect/partition/collect_map** — CI WASM tests all pass
 - [x] **TypeVar ICE guard** — 2-layer guard after lower + after mono, all inference TypeVars resolved
 - [x] **TypeVar regression tests** — 6 patterns: chained fold, none/err comparison, generic variant, recursive variant, closure field access
+- [x] **Nanopass unit tests** — 28 tests covering 16 passes (TCO, ResultPropagation, EffectInference, BorrowInsertion, CloneInsertion, ClosureConversion, StdlibLowering, BuiltinLowering, etc.)
 
 ---
 
-## Remaining (5pt left)
-
-### Tests 9→10 (1pt remaining)
-
-#### Nanopass Unit Tests
-
-Input IR → output IR transformation tests for each pass. 15 passes × 2-5 cases = 40-50 tests.
-
-**Effort**: M (4-5 days)
+## Remaining (4pt left)
 
 ### Codegen Integration 9→10 (1pt remaining)
 
@@ -98,5 +91,5 @@ Add wasm_handler/wasm_rt to TOML and have build.rs auto-generate the WASM dispat
 
 ---
 
-**Estimated remaining effort**: 2-3 weeks
+**Estimated remaining effort**: 1-2 weeks
 **Score on completion**: 110/110
