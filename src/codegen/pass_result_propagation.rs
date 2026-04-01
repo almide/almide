@@ -306,16 +306,67 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                 else_: Box::new(insert_try_for_lifted(*else_, lifted)),
             }, ty, span,
         },
-        IrExprKind::Match { subject, arms } => IrExpr {
-            kind: IrExprKind::Match {
-                subject: Box::new(insert_try_for_lifted(*subject, lifted)),
-                arms: arms.into_iter().map(|a| IrMatchArm {
-                    pattern: a.pattern, guard: a.guard,
-                    body: insert_try_for_lifted(a.body, lifted),
-                }).collect(),
-            }, ty, span,
-        },
+        IrExprKind::Match { subject, arms } => {
+            // If any arm uses Ok/Err patterns, the user is matching on the Result
+            // directly — don't unwrap the subject, just update its type.
+            let arms_match_result = arms.iter().any(|a| matches!(&a.pattern, IrPattern::Ok { .. } | IrPattern::Err { .. }));
+            let subject = if arms_match_result {
+                Box::new(insert_try_for_lifted_no_unwrap(*subject, lifted))
+            } else {
+                Box::new(insert_try_for_lifted(*subject, lifted))
+            };
+            IrExpr {
+                kind: IrExprKind::Match {
+                    subject,
+                    arms: arms.into_iter().map(|a| IrMatchArm {
+                        pattern: a.pattern, guard: a.guard,
+                        body: insert_try_for_lifted(a.body, lifted),
+                    }).collect(),
+                }, ty, span,
+            }
+        }
         _ => expr,
+    }
+}
+
+/// Like insert_try_for_lifted, but does NOT unwrap calls to lifted effect fns.
+/// Used for match subjects when the arms use Ok/Err patterns — the user is
+/// explicitly matching on the Result, so the subject must remain a Result.
+fn insert_try_for_lifted_no_unwrap(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+    match expr.kind {
+        IrExprKind::Call { ref target, ref args, .. } => {
+            let lifted_ty = match target {
+                CallTarget::Named { name } => lifted.get::<str>(name),
+                CallTarget::Module { module, func } => lifted.get(&format!("{}.{}", module, func)),
+                CallTarget::Method { method, .. } => lifted.get::<str>(method),
+                _ => None,
+            };
+            if let Some(result_ty) = lifted_ty {
+                // Don't unwrap — return the call with its Result type so
+                // the match arms can handle Ok/Err directly.
+                let _ = args;
+                match expr.kind {
+                    IrExprKind::Call { target, args, type_args } => {
+                        let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
+                        return IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty: result_ty.clone(), span };
+                    }
+                    _ => unreachable!()
+                }
+            }
+            // Not a lifted call — recurse normally
+            let _ = args;
+            match expr.kind {
+                IrExprKind::Call { target, args, type_args } => {
+                    let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
+                    IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty, span }
+                }
+                _ => unreachable!()
+            }
+        }
+        // For non-call subjects, delegate to normal processing
+        _ => insert_try_for_lifted(expr, lifted),
     }
 }
 
