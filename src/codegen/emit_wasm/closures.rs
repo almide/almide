@@ -6,7 +6,8 @@
 use std::collections::{HashMap, HashSet};
 use wasm_encoder::ValType;
 
-use crate::ir::{IrExpr, IrExprKind, IrProgram, IrStmt, IrStmtKind, VarId};
+use crate::ir::{IrExpr, IrExprKind, IrProgram, IrStmtKind, VarId};
+use crate::ir::visit::{IrVisitor, walk_expr, walk_stmt};
 use crate::types::Ty;
 
 use super::{CompiledFunc, FuncCompiler, LambdaInfo, WasmEmitter};
@@ -23,10 +24,8 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     let mut mutable_vars: HashSet<u32> = HashSet::new();
 
     for func in &program.functions {
-        // Include test functions in pre-scan/compile
-        let mut scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
-        scan_closures_expr(&func.body, &mut scope_vars, &mut mutable_vars, &program.var_table,
-            &mut lambda_exprs, &mut fn_ref_set);
+        let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
+        scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
     }
     // BFS: scan lambda bodies for nested lambdas (repeat until no new lambdas found)
     let mut scan_start = 0;
@@ -37,11 +36,9 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
             let body = lambda_exprs[i].1.clone();
             let params = &lambda_exprs[i].0;
             let captures = &lambda_exprs[i].2;
-            // Scope includes lambda params + captured vars (so nested lambdas see them as in-scope)
             let mut inner_scope: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
             for &vid in captures { inner_scope.insert(vid); }
-            scan_closures_expr(&body, &mut inner_scope, &mut mutable_vars, &program.var_table,
-                &mut lambda_exprs, &mut fn_ref_set);
+            scan_closures(&body, inner_scope, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
         }
         scan_start = current_len;
     }
@@ -128,9 +125,8 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
     let mut mutable_vars: HashSet<u32> = HashSet::new();
 
     for func in &program.functions {
-        let mut scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
-        scan_closures_expr(&func.body, &mut scope_vars, &mut mutable_vars, &program.var_table,
-            &mut lambda_exprs, &mut fn_ref_set);
+        let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
+        scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
     }
     // BFS: scan lambda bodies for nested lambdas
     let mut scan_start = 0;
@@ -143,8 +139,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
             let captures = &lambda_exprs[i].2;
             let mut inner_scope: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
             for &vid in captures { inner_scope.insert(vid); }
-            scan_closures_expr(&body, &mut inner_scope, &mut mutable_vars, &program.var_table,
-                &mut lambda_exprs, &mut fn_ref_set);
+            scan_closures(&body, inner_scope, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
         }
         scan_start = current_len;
     }
@@ -296,180 +291,80 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
     }
 }
 
-/// Recursively scan an expression for Lambda and FnRef nodes.
-fn scan_closures_expr(
-    expr: &IrExpr,
-    scope_vars: &mut HashSet<u32>,
-    mutable_vars: &mut HashSet<u32>,
-    var_table: &crate::ir::VarTable,
-    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>, Option<u32>)>,
-    fn_refs: &mut HashSet<String>,
-) {
-    match &expr.kind {
-        IrExprKind::Lambda { params, body, lambda_id } => {
-            // Compute captures: vars referenced in body but not in params
-            let param_ids: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
-            let mut body_vars = HashSet::new();
-            collect_var_refs(body, &mut body_vars);
-            let mut captures: Vec<u32> = body_vars.difference(&param_ids)
-                .copied()
-                .filter(|vid| scope_vars.contains(vid))
-                .collect();
-            captures.sort(); // Deterministic order for env layout
+// ── ClosureScanner: IrVisitor-based Lambda/FnRef collector ──────────
+//
+// Uses the shared `walk_expr`/`walk_stmt` from ir::visit for exhaustive
+// traversal. Only overrides visit_expr/visit_stmt where custom logic is needed:
+// - Lambda: collect captures, do NOT recurse (BFS second pass handles nesting)
+// - FnRef: collect name
+// - ForIn: insert loop vars into scope before visiting body
+// - Bind/BindDestructure: insert bound vars into scope after visiting value
 
-            let param_list: Vec<(VarId, crate::types::Ty)> = params.iter()
-                .map(|(vid, ty)| (*vid, ty.clone()))
-                .collect();
-            lambdas.push((param_list, *body.clone(), captures, *lambda_id));
-            // NOTE: Do NOT recurse into lambda body here.
-            // Nested lambdas will be scanned in a second pass (BFS order)
-            // to match emit order (user fn bodies first, then lambda bodies).
-        }
-        IrExprKind::FnRef { name } => {
-            fn_refs.insert(name.to_string());
-        }
-        IrExprKind::Block { stmts, expr } => {
-            for stmt in stmts {
-                scan_closures_stmt(stmt, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+struct ClosureScanner<'a> {
+    scope_vars: HashSet<u32>,
+    mutable_vars: &'a mut HashSet<u32>,
+    lambdas: &'a mut Vec<(Vec<(VarId, Ty)>, IrExpr, Vec<u32>, Option<u32>)>,
+    fn_refs: &'a mut HashSet<String>,
+}
+
+impl IrVisitor for ClosureScanner<'_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::Lambda { params, body, lambda_id } => {
+                let param_ids: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
+                let mut body_vars = HashSet::new();
+                collect_var_refs(body, &mut body_vars);
+                let mut captures: Vec<u32> = body_vars.difference(&param_ids)
+                    .copied()
+                    .filter(|vid| self.scope_vars.contains(vid))
+                    .collect();
+                captures.sort();
+                let param_list: Vec<(VarId, Ty)> = params.iter()
+                    .map(|(vid, ty)| (*vid, ty.clone()))
+                    .collect();
+                self.lambdas.push((param_list, *body.clone(), captures, *lambda_id));
+                // Do NOT recurse — nested lambdas scanned in BFS second pass
             }
-            if let Some(e) = expr { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            scan_closures_expr(cond, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(then, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(else_, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            scan_closures_expr(left, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(right, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrExprKind::UnOp { operand, .. } => {
-            scan_closures_expr(operand, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                crate::ir::CallTarget::Method { object, .. } => scan_closures_expr(object, scope_vars, mutable_vars, var_table, lambdas, fn_refs),
-                crate::ir::CallTarget::Computed { callee } => scan_closures_expr(callee, scope_vars, mutable_vars, var_table, lambdas, fn_refs),
-                _ => {}
+            IrExprKind::FnRef { name } => {
+                self.fn_refs.insert(name.to_string());
             }
-            for arg in args { scan_closures_expr(arg, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                self.visit_expr(iterable);
+                self.scope_vars.insert(var.0);
+                if let Some(vt) = var_tuple { for v in vt { self.scope_vars.insert(v.0); } }
+                for stmt in body { self.visit_stmt(stmt); }
+            }
+            _ => walk_expr(self, expr),
         }
-        IrExprKind::While { cond, body } => {
-            scan_closures_expr(cond, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            for stmt in body { scan_closures_stmt(stmt, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
-        }
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-            scan_closures_expr(iterable, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scope_vars.insert(var.0);
-            if let Some(vt) = var_tuple { for v in vt { scope_vars.insert(v.0); } }
-            for stmt in body { scan_closures_stmt(stmt, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
-        }
-        IrExprKind::Match { subject, arms } => {
-            scan_closures_expr(subject, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            for arm in arms { scan_closures_expr(&arm.body, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, e) in fields { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
-        }
-        IrExprKind::Tuple { elements } | IrExprKind::List { elements } => {
-            for e in elements { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. }
-        | IrExprKind::TupleIndex { object, .. } => {
-            scan_closures_expr(object, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            scan_closures_expr(object, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(key, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let crate::ir::IrStringPart::Expr { expr } = p {
-                    scan_closures_expr(expr, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+    }
+
+    fn visit_stmt(&mut self, stmt: &crate::ir::IrStmt) {
+        match &stmt.kind {
+            IrStmtKind::Bind { var, mutability, value, .. } => {
+                self.visit_expr(value);
+                self.scope_vars.insert(var.0);
+                if *mutability == crate::ir::Mutability::Var {
+                    self.mutable_vars.insert(var.0);
                 }
             }
-        }
-        // Single-expr wrappers
-        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
-        | IrExprKind::ToOption { expr } | IrExprKind::ResultOk { expr }
-        | IrExprKind::ResultErr { expr } | IrExprKind::OptionSome { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr }
-        | IrExprKind::OptionalChain { expr, .. } => {
-            scan_closures_expr(expr, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            scan_closures_expr(expr, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(fallback, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrExprKind::Fan { exprs } => {
-            for e in exprs { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries {
-                scan_closures_expr(k, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-                scan_closures_expr(v, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            IrStmtKind::BindDestructure { pattern, value, .. } => {
+                self.visit_expr(value);
+                collect_pattern_var_ids(pattern, &mut self.scope_vars);
             }
+            _ => walk_stmt(self, stmt),
         }
-        IrExprKind::SpreadRecord { base, fields } => {
-            scan_closures_expr(base, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            for (_, e) in fields { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
-        }
-        IrExprKind::Range { start, end, .. } => {
-            scan_closures_expr(start, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(end, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for e in args { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
-        }
-        _ => {}
     }
 }
 
-fn scan_closures_stmt(
-    stmt: &IrStmt,
-    scope_vars: &mut HashSet<u32>,
+fn scan_closures(
+    expr: &IrExpr,
+    scope_vars: HashSet<u32>,
     mutable_vars: &mut HashSet<u32>,
-    var_table: &crate::ir::VarTable,
-    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>, Option<u32>)>,
+    lambdas: &mut Vec<(Vec<(VarId, Ty)>, IrExpr, Vec<u32>, Option<u32>)>,
     fn_refs: &mut HashSet<String>,
 ) {
-    match &stmt.kind {
-        IrStmtKind::Bind { var, mutability, value, .. } => {
-            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scope_vars.insert(var.0);
-            if *mutability == crate::ir::Mutability::Var {
-                mutable_vars.insert(var.0);
-            }
-        }
-        IrStmtKind::Assign { value, .. } => {
-            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrStmtKind::Expr { expr } => {
-            scan_closures_expr(expr, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrStmtKind::Guard { cond, else_ } => {
-            scan_closures_expr(cond, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(else_, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrStmtKind::BindDestructure { pattern, value, .. } => {
-            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            collect_pattern_var_ids(pattern, scope_vars);
-        }
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            scan_closures_expr(index, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            scan_closures_expr(key, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        IrStmtKind::FieldAssign { value, .. } => {
-            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
-        }
-        _ => {}
-    }
+    let mut scanner = ClosureScanner { scope_vars, mutable_vars, lambdas, fn_refs };
+    scanner.visit_expr(expr);
 }
 
 /// Collect all VarIds bound by an IrPattern into a set.
@@ -582,92 +477,24 @@ pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &crate::ir::VarTable, re
     }
 }
 
-/// Collect all Var references in an expression.
-pub(super) fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
-    match &expr.kind {
-        IrExprKind::Var { id } => { vars.insert(id.0); }
-        IrExprKind::Block { stmts, expr } => {
-            for stmt in stmts {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_var_refs(value, vars),
-                    IrStmtKind::Expr { expr } => collect_var_refs(expr, vars),
-                    IrStmtKind::Guard { cond, else_ } => { collect_var_refs(cond, vars); collect_var_refs(else_, vars); }
-                    IrStmtKind::IndexAssign { index, value, .. } => { collect_var_refs(index, vars); collect_var_refs(value, vars); }
-                    IrStmtKind::FieldAssign { value, .. } => collect_var_refs(value, vars),
-                    IrStmtKind::BindDestructure { value, .. } => collect_var_refs(value, vars),
-                    _ => {}
-                }
-            }
-            if let Some(e) = expr { collect_var_refs(e, vars); }
+// ── VarRefCollector: IrVisitor-based variable reference collector ────
+//
+// Collects all VarIds referenced in an expression tree (including inside
+// nested lambdas). Uses walk_expr for exhaustive traversal.
+
+struct VarRefCollector<'a> {
+    vars: &'a mut HashSet<u32>,
+}
+
+impl IrVisitor for VarRefCollector<'_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        if let IrExprKind::Var { id } = &expr.kind {
+            self.vars.insert(id.0);
         }
-        IrExprKind::If { cond, then, else_ } => {
-            collect_var_refs(cond, vars); collect_var_refs(then, vars); collect_var_refs(else_, vars);
-        }
-        IrExprKind::BinOp { left, right, .. } => { collect_var_refs(left, vars); collect_var_refs(right, vars); }
-        IrExprKind::UnOp { operand, .. } => collect_var_refs(operand, vars),
-        IrExprKind::Call { args, target, .. } => {
-            if let crate::ir::CallTarget::Computed { callee } = target { collect_var_refs(callee, vars); }
-            if let crate::ir::CallTarget::Method { object, .. } = target { collect_var_refs(object, vars); }
-            for a in args { collect_var_refs(a, vars); }
-        }
-        // Recurse into nested lambdas to find transitive captures
-        IrExprKind::Lambda { body, .. } => collect_var_refs(body, vars),
-        IrExprKind::Match { subject, arms } => {
-            collect_var_refs(subject, vars);
-            for arm in arms { collect_var_refs(&arm.body, vars); }
-        }
-        IrExprKind::While { cond, body } => {
-            collect_var_refs(cond, vars);
-            for stmt in body {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_var_refs(value, vars),
-                    IrStmtKind::Expr { expr } => collect_var_refs(expr, vars),
-                    IrStmtKind::Guard { cond, else_ } => { collect_var_refs(cond, vars); collect_var_refs(else_, vars); }
-                    _ => {}
-                }
-            }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            collect_var_refs(iterable, vars);
-            for stmt in body {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_var_refs(value, vars),
-                    IrStmtKind::Expr { expr } => collect_var_refs(expr, vars),
-                    IrStmtKind::Guard { cond, else_ } => { collect_var_refs(cond, vars); collect_var_refs(else_, vars); }
-                    _ => {}
-                }
-            }
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { collect_var_refs(e, vars); }
-        }
-        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
-            for (_, e) in fields { collect_var_refs(e, vars); }
-        }
-        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr } => {
-            collect_var_refs(expr, vars);
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            collect_var_refs(expr, vars);
-            collect_var_refs(fallback, vars);
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. }
-        | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            collect_var_refs(object, vars);
-        }
-        IrExprKind::StringInterp { parts } => {
-            for part in parts {
-                if let crate::ir::IrStringPart::Expr { expr } = part {
-                    collect_var_refs(expr, vars);
-                }
-            }
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { collect_var_refs(k, vars); collect_var_refs(v, vars); }
-        }
-        _ => {}
+        walk_expr(self, expr);
     }
+}
+
+pub(super) fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
+    VarRefCollector { vars }.visit_expr(expr);
 }
