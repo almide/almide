@@ -12,6 +12,7 @@
 
 use std::collections::HashSet;
 use crate::ir::*;
+use crate::ir::visit::{IrVisitor, walk_expr, walk_stmt};
 use crate::types::Ty;
 use crate::intern::sym;
 use super::pass::{NanoPass, PassResult, Target};
@@ -377,154 +378,76 @@ fn convert_target(
 
 // ── Free variable analysis ──────────────────────────────────────
 
-fn collect_free_vars(expr: &IrExpr, bound: &HashSet<VarId>, free: &mut HashSet<VarId>) {
-    match &expr.kind {
-        IrExprKind::Var { id } => {
-            if !bound.contains(id) { free.insert(*id); }
-        }
-        // After bottom-up conversion, inner lambdas are already ClosureCreate.
-        // Their captures reference variables from the enclosing scope.
-        IrExprKind::ClosureCreate { captures, .. } => {
-            for (vid, _) in captures {
-                if !bound.contains(vid) { free.insert(*vid); }
+// ── FreeVarCollector: IrVisitor-based free variable analysis ────────
+//
+// Computes free variables of an expression by tracking bound variables
+// through scopes. Uses walk_expr/walk_stmt for exhaustive traversal of
+// non-scope-introducing nodes.
+
+struct FreeVarCollector {
+    bound: HashSet<VarId>,
+    free: HashSet<VarId>,
+}
+
+impl IrVisitor for FreeVarCollector {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::Var { id } => {
+                if !self.bound.contains(id) { self.free.insert(*id); }
             }
-        }
-        IrExprKind::Lambda { params, body, .. } => {
-            // Should not happen after bottom-up conversion, but handle for safety
-            let mut inner_bound = bound.clone();
-            for (v, _) in params { inner_bound.insert(*v); }
-            collect_free_vars(body, &inner_bound, free);
-        }
-        IrExprKind::Block { stmts, expr: tail } => {
-            let mut local_bound = bound.clone();
-            for stmt in stmts {
-                collect_free_vars_stmt(stmt, &local_bound, free);
-                match &stmt.kind {
-                    IrStmtKind::Bind { var, .. } => { local_bound.insert(*var); }
-                    IrStmtKind::BindDestructure { pattern, .. } => {
-                        collect_pattern_bindings(pattern, &mut local_bound);
-                    }
-                    _ => {}
+            IrExprKind::ClosureCreate { captures, .. } => {
+                for (vid, _) in captures {
+                    if !self.bound.contains(vid) { self.free.insert(*vid); }
                 }
             }
-            if let Some(e) = tail { collect_free_vars(e, &local_bound, free); }
-        }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } => collect_free_vars(object, bound, free),
-                CallTarget::Computed { callee } => collect_free_vars(callee, bound, free),
-                _ => {}
+            IrExprKind::Lambda { params, body, .. } => {
+                let saved = self.bound.clone();
+                for (v, _) in params { self.bound.insert(*v); }
+                self.visit_expr(body);
+                self.bound = saved;
             }
-            for a in args { collect_free_vars(a, bound, free); }
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            collect_free_vars(left, bound, free);
-            collect_free_vars(right, bound, free);
-        }
-        IrExprKind::UnOp { operand, .. } => collect_free_vars(operand, bound, free),
-        IrExprKind::If { cond, then, else_ } => {
-            collect_free_vars(cond, bound, free);
-            collect_free_vars(then, bound, free);
-            collect_free_vars(else_, bound, free);
-        }
-        IrExprKind::Match { subject, arms } => {
-            collect_free_vars(subject, bound, free);
-            for arm in arms {
-                let mut arm_bound = bound.clone();
-                collect_pattern_bindings(&arm.pattern, &mut arm_bound);
-                if let Some(g) = &arm.guard { collect_free_vars(g, &arm_bound, free); }
-                collect_free_vars(&arm.body, &arm_bound, free);
+            IrExprKind::Block { stmts, expr: tail } => {
+                let saved = self.bound.clone();
+                for stmt in stmts {
+                    self.visit_stmt(stmt);
+                    match &stmt.kind {
+                        IrStmtKind::Bind { var, .. } => { self.bound.insert(*var); }
+                        IrStmtKind::BindDestructure { pattern, .. } => {
+                            collect_pattern_bindings(pattern, &mut self.bound);
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(e) = tail { self.visit_expr(e); }
+                self.bound = saved;
             }
-        }
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-            collect_free_vars(iterable, bound, free);
-            let mut loop_bound = bound.clone();
-            loop_bound.insert(*var);
-            if let Some(vt) = var_tuple { for v in vt { loop_bound.insert(*v); } }
-            for s in body { collect_free_vars_stmt(s, &loop_bound, free); }
-        }
-        IrExprKind::While { cond, body } => {
-            collect_free_vars(cond, bound, free);
-            for s in body { collect_free_vars_stmt(s, bound, free); }
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { collect_free_vars(e, bound, free); }
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { collect_free_vars(v, bound, free); }
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            collect_free_vars(base, bound, free);
-            for (_, v) in fields { collect_free_vars(v, bound, free); }
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            collect_free_vars(object, bound, free);
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            collect_free_vars(object, bound, free);
-            collect_free_vars(index, bound, free);
-        }
-        IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
-        | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
-        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
-        | IrExprKind::ToVec { expr: e } | IrExprKind::Await { expr: e } => {
-            collect_free_vars(e, bound, free);
-        }
-        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            collect_free_vars(e, bound, free);
-            collect_free_vars(f, bound, free);
-        }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr: e } = p { collect_free_vars(e, bound, free); }
+            IrExprKind::Match { subject, arms } => {
+                self.visit_expr(subject);
+                for arm in arms {
+                    let saved = self.bound.clone();
+                    collect_pattern_bindings(&arm.pattern, &mut self.bound);
+                    if let Some(g) = &arm.guard { self.visit_expr(g); }
+                    self.visit_expr(&arm.body);
+                    self.bound = saved;
+                }
             }
-        }
-        IrExprKind::Range { start, end, .. } => {
-            collect_free_vars(start, bound, free);
-            collect_free_vars(end, bound, free);
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries {
-                collect_free_vars(k, bound, free);
-                collect_free_vars(v, bound, free);
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                self.visit_expr(iterable);
+                let saved = self.bound.clone();
+                self.bound.insert(*var);
+                if let Some(vt) = var_tuple { for v in vt { self.bound.insert(*v); } }
+                for s in body { self.visit_stmt(s); }
+                self.bound = saved;
             }
+            _ => walk_expr(self, expr),
         }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { collect_free_vars(a, bound, free); }
-        }
-        _ => {} // Leaf nodes: LitInt, LitStr, Unit, FnRef, etc.
     }
 }
 
-fn collect_free_vars_stmt(stmt: &IrStmt, bound: &HashSet<VarId>, free: &mut HashSet<VarId>) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-            collect_free_vars(value, bound, free);
-        }
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            collect_free_vars(index, bound, free);
-            collect_free_vars(value, bound, free);
-        }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            collect_free_vars(key, bound, free);
-            collect_free_vars(value, bound, free);
-        }
-        IrStmtKind::Guard { cond, else_ } => {
-            collect_free_vars(cond, bound, free);
-            collect_free_vars(else_, bound, free);
-        }
-        IrStmtKind::Expr { expr } => collect_free_vars(expr, bound, free),
-        IrStmtKind::ListSwap { a, b, .. } => {
-            collect_free_vars(a, bound, free);
-            collect_free_vars(b, bound, free);
-        }
-        _ => {}
-    }
+fn collect_free_vars(expr: &IrExpr, bound: &HashSet<VarId>, free: &mut HashSet<VarId>) {
+    let mut collector = FreeVarCollector { bound: bound.clone(), free: std::mem::take(free) };
+    collector.visit_expr(expr);
+    *free = collector.free;
 }
 
 fn collect_pattern_bindings(pattern: &IrPattern, bound: &mut HashSet<VarId>) {

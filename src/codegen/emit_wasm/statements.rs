@@ -1,6 +1,7 @@
 //! IrStmt → WASM instruction emission + local variable pre-scanning.
 
 use crate::ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
+use crate::ir::visit::{IrVisitor, walk_expr, walk_stmt};
 use crate::types::Ty;
 use wasm_encoder::ValType;
 
@@ -510,143 +511,87 @@ pub fn collect_locals(body: &IrExpr, var_table: &crate::ir::VarTable) -> LocalSc
     LocalScanResult { binds }
 }
 
-fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
-    match &expr.kind {
-        IrExprKind::Block { stmts, expr } => {
-            for stmt in stmts { scan_stmt(stmt, locals, vt); }
-            if let Some(e) = expr { scan_expr(e, locals, vt); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            scan_expr(cond, locals, vt);
-            scan_expr(then, locals, vt);
-            scan_expr(else_, locals, vt);
-        }
-        IrExprKind::While { cond, body } => {
-            scan_expr(cond, locals, vt);
-            for stmt in body { scan_stmt(stmt, locals, vt); }
-        }
-        IrExprKind::ForIn { var, var_tuple, body, iterable } => {
-            // Determine loop variable type from iterable's element type (more reliable than VarTable)
-            let elem_ty = match &iterable.ty {
-                crate::types::Ty::Applied(crate::types::TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
-                crate::types::Ty::Applied(crate::types::TypeConstructorId::Map, args) if args.len() == 2 =>
-                    crate::types::Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
-                _ => vt.get(*var).ty.clone(),
-            };
-            let val_type = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I64);
-            locals.push((*var, val_type));
-            // Also register tuple destructure vars
-            if let Some(tuple_vars) = var_tuple {
-                for tv in tuple_vars {
-                    let tv_info = vt.get(*tv);
-                    let tv_type = values::ty_to_valtype(&tv_info.ty).unwrap_or(ValType::I64);
-                    locals.push((*tv, tv_type));
+// ── LocalScanner: IrVisitor-based local variable collector ──────────
+//
+// Collects all local variable bindings in a function body for WASM local
+// allocation. Uses walk_expr/walk_stmt for exhaustive traversal; only
+// overrides ForIn, Match (which register bindings) and Bind/BindDestructure.
+
+struct LocalScanner<'a> {
+    locals: &'a mut Vec<(VarId, ValType)>,
+    vt: &'a crate::ir::VarTable,
+}
+
+impl IrVisitor for LocalScanner<'_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                let elem_ty = match &iterable.ty {
+                    crate::types::Ty::Applied(crate::types::TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                    crate::types::Ty::Applied(crate::types::TypeConstructorId::Map, args) if args.len() == 2 =>
+                        crate::types::Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
+                    _ => self.vt.get(*var).ty.clone(),
+                };
+                self.locals.push((*var, values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I64)));
+                if let Some(tuple_vars) = var_tuple {
+                    for tv in tuple_vars {
+                        let tv_type = values::ty_to_valtype(&self.vt.get(*tv).ty).unwrap_or(ValType::I64);
+                        self.locals.push((*tv, tv_type));
+                    }
+                }
+                self.visit_expr(iterable);
+                for stmt in body { self.visit_stmt(stmt); }
+            }
+            IrExprKind::Match { subject, arms } => {
+                self.visit_expr(subject);
+                let resolved_ty = resolve_scan_subject_ty(subject, arms, self.vt);
+                for arm in arms {
+                    scan_pattern(&arm.pattern, &resolved_ty, self.locals, self.vt);
+                    self.visit_expr(&arm.body);
                 }
             }
-            scan_expr(iterable, locals, vt);
-            for stmt in body { scan_stmt(stmt, locals, vt); }
+            _ => walk_expr(self, expr),
         }
-        IrExprKind::BinOp { left, right, .. } => {
-            scan_expr(left, locals, vt);
-            scan_expr(right, locals, vt);
-        }
-        IrExprKind::UnOp { operand, .. } => scan_expr(operand, locals, vt),
-        IrExprKind::Call { args, target, .. } => {
-            if let crate::ir::CallTarget::Method { object, .. } = target { scan_expr(object, locals, vt); }
-            if let crate::ir::CallTarget::Computed { callee } = target { scan_expr(callee, locals, vt); }
-            for arg in args { scan_expr(arg, locals, vt); }
-        }
-        IrExprKind::Match { subject, arms } => {
-            scan_expr(subject, locals, vt);
-            let resolved_ty = resolve_scan_subject_ty(subject, arms, vt);
-            for arm in arms {
-                scan_pattern(&arm.pattern, &resolved_ty, locals, vt);
-                scan_expr(&arm.body, locals, vt);
-            }
-        }
-        IrExprKind::StringInterp { parts } => {
-            for part in parts {
-                if let crate::ir::IrStringPart::Expr { expr } = part {
-                    scan_expr(expr, locals, vt);
+    }
+
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        match &stmt.kind {
+            IrStmtKind::Bind { var, ty, value, .. } => {
+                let effective_ty = if let IrExprKind::Try { expr: inner }
+                    | IrExprKind::Unwrap { expr: inner } = &value.kind {
+                    if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) = &value.ty {
+                        args.first().cloned().unwrap_or(value.ty.clone())
+                    } else if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) = &inner.ty {
+                        args.first().cloned().unwrap_or(value.ty.clone())
+                    } else {
+                        value.ty.clone()
+                    }
+                } else {
+                    value.ty.clone()
+                };
+                let resolved_ty = if !matches!(&effective_ty, Ty::Unknown | Ty::TypeVar(_)) {
+                    effective_ty
+                } else if !matches!(ty, Ty::Unknown | Ty::TypeVar(_)) {
+                    ty.clone()
+                } else {
+                    infer_bind_type(value)
+                };
+                if let Some(vt_wasm) = values::ty_to_valtype(&resolved_ty) {
+                    self.locals.push((*var, vt_wasm));
                 }
+                self.visit_expr(value);
             }
+            IrStmtKind::BindDestructure { pattern, value } => {
+                scan_destructure_pattern(pattern, &value.ty, self.locals, self.vt);
+                self.visit_expr(value);
+            }
+            _ => walk_stmt(self, stmt),
         }
-        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::OptionalChain { expr, .. } => {
-            scan_expr(expr, locals, vt);
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            scan_expr(expr, locals, vt);
-            scan_expr(fallback, locals, vt);
-        }
-        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
-            for (_, e) in fields { scan_expr(e, locals, vt); }
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { scan_expr(e, locals, vt); }
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. } => {
-            scan_expr(object, locals, vt);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            scan_expr(object, locals, vt);
-            scan_expr(key, locals, vt);
-        }
-        IrExprKind::Lambda { body, .. } => {
-            scan_expr(body, locals, vt);
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { scan_expr(k, locals, vt); scan_expr(v, locals, vt); }
-        }
-        _ => {}
     }
 }
 
-fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
-    match &stmt.kind {
-        IrStmtKind::Bind { var, ty, value, .. } => {
-            // Resolve bind type.
-            // For Try(Call(...)) (effect fn unwrap), use the Result's inner type, not Result itself.
-            let effective_ty = if let IrExprKind::Try { expr: inner }
-                | IrExprKind::Unwrap { expr: inner } = &value.kind {
-                if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) = &value.ty {
-                    args.first().cloned().unwrap_or(value.ty.clone())
-                } else if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) = &inner.ty {
-                    args.first().cloned().unwrap_or(value.ty.clone())
-                } else {
-                    value.ty.clone()
-                }
-            } else {
-                value.ty.clone()
-            };
-            let resolved_ty = if !matches!(&effective_ty, Ty::Unknown | Ty::TypeVar(_)) {
-                effective_ty
-            } else if !matches!(ty, Ty::Unknown | Ty::TypeVar(_)) {
-                ty.clone()
-            } else {
-                infer_bind_type(value)
-            };
-            let val_type = values::ty_to_valtype(&resolved_ty);
-            if let Some(vt_wasm) = val_type {
-                locals.push((*var, vt_wasm));
-            }
-            scan_expr(value, locals, vt);
-        }
-        IrStmtKind::BindDestructure { pattern, value } => {
-            // Collect vars from destructure pattern
-            scan_destructure_pattern(pattern, &value.ty, locals, vt);
-            scan_expr(value, locals, vt);
-        }
-        IrStmtKind::Assign { value, .. } => scan_expr(value, locals, vt),
-        IrStmtKind::Expr { expr } => scan_expr(expr, locals, vt),
-        IrStmtKind::Guard { cond, else_ } => {
-            scan_expr(cond, locals, vt);
-            scan_expr(else_, locals, vt);
-        }
-        _ => {}
-    }
+fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
+    LocalScanner { locals, vt }.visit_expr(expr);
 }
 
 /// Resolve match subject type, fixing IR type inference gaps.
