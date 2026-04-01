@@ -1,4 +1,5 @@
 <!-- description: Fix fragile compiler internals: visitor pattern, ExprId duplication, UF isolation, Ty clone cost -->
+<!-- done: 2026-04-01 -->
 # Compiler Fragility Hotspots
 
 **Goal**: コンパイラ内部の脆弱なポイントを構造的に解消する

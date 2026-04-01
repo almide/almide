@@ -1,4 +1,5 @@
 <!-- description: Static exhaustiveness checking for match expressions -->
+<!-- done: 2026-03-15 -->
 # Pattern Exhaustiveness Check
 
 match 式でバリアントの漏れをコンパイル時に検出する。

@@ -6,20 +6,18 @@
 
 ## Active
 
-13 items
+11 items
 
 | Item | Description |
 |------|-------------|
 | [LLM Benchmark Execution](active/benchmark-execution.md) | LLM accuracy benchmarks comparing Almide, Python, and MoonBit |
 | [Compiler Architecture: All 10s](active/compiler-architecture-10.md) | Achieve 10/10 on every compiler architecture quality metric |
-| [Compiler Fragility Hotspots](active/compiler-fragility-hotspots.md) | Fix fragile compiler internals: visitor pattern, ExprId duplication, UF isolation, Ty clone cost |
 | [Contracts — Runtime Validation](active/contracts-runtime-validation.md) | Runtime contracts for value constraints |
 | [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Automated verification that Rust, TS, and WASM produce identical output |
 | [Emit Readability](active/emit-readability.md) | Improve readability of generated Rust and TypeScript output |
 | [Error Message Suggestions](active/error-message-suggestions.md) | Fuzzy matching suggestions in error messages (did you mean?) |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](active/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [Nanopass Debug Dump](active/nanopass-debug-dump.md) | Environment-variable-controlled IR dump for each nanopass stage |
-| [Pattern Exhaustiveness Check](active/pattern-exhaustiveness-check.md) | Static exhaustiveness checking for match expressions |
 | [Purity Exploitation — Leveraging fn/effect fn Distinction](active/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | [WASM HTTP Client](active/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
 | [WASM Remaining FS Operations](active/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
@@ -70,14 +68,15 @@
 
 ## Done
 
-167 items
+169 items
 
 <details>
-<summary>Show all 167 completed items</summary>
+<summary>Show all 169 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
+| 2026-04-01 | [Compiler Fragility Hotspots](done/compiler-fragility-hotspots.md) | Fix fragile compiler internals: visitor pattern, ExprId duplication, UF isolation, Ty clone cost |
 | 2026-04-01 | [Canonical AST](done/canonical-ast.md) | Introduce Canonical AST phase to separate name resolution from type checking |
 | 2026-03-31 | [Rainbow FFI Gate](done/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
 | 2026-03-31 | [Dead Code Elimination](done/dead-code-elimination.md) | Dependency-graph-based dead code elimination for smaller WASM binaries |
@@ -173,6 +172,7 @@
 | 2026-03-15 | [Tail Call Optimization](done/tail-call-optimization.md) | Self-recursive tail call to labeled loop transformation |
 | 2026-03-15 | [Syntax Sugar](done/syntax-sugar.md) | Syntax sugar (ranges, exhaustiveness check, lambda shorthand) |
 | 2026-03-15 | [RustIR: Rust Codegen Intermediate Representation](done/rust-ir.md) | Two-stage Rust codegen pipeline via RustIR intermediate repr |
+| 2026-03-15 | [Pattern Exhaustiveness Check](done/pattern-exhaustiveness-check.md) | Static exhaustiveness checking for match expressions |
 | 2026-03-15 | [Parser Error Recovery](done/parser-error-recovery.md) | Continue parsing after syntax errors to report multiple diagnostics |
 | 2026-03-15 | [Operator Protocol](done/operator-protocol.md) | Convention-based operator dispatch (==, repr, sort, hash) |
 | 2026-03-15 | [Monomorphization](done/monomorphization.md) | Function monomorphization for generic structural bounds in Rust codegen |
