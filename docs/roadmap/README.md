@@ -6,22 +6,17 @@
 
 ## On Hold
 
-36 items
+24 items
 
 | Item | Description |
 |------|-------------|
 | [Almide Shell](on-hold/almide-shell.md) | Interactive shell replacing Bash/Zsh with type-safe LLM-friendly syntax |
 | [Almide UI — Reactive Web Framework as Almide Library](on-hold/almide-ui.md) | SolidJS-like reactive UI framework built as a pure Almide library |
 | [API Diff & Automatic Versioning](on-hold/api-diff-auto-versioning.md) | Automatic semver bump detection via public API diffing |
-| [Async Backend — tokio opt-in](on-hold/async-backend.md) | Optional tokio-based async backend for high-concurrency workloads |
 | [LLM Benchmark: Next Phase](on-hold/benchmark-next-phase.md) | LLM benchmark Phase 2-3: cross-language comparison, harder problems, publication |
-| [build.rs Runtime Scanner Hardening](on-hold/buildrs-syn-scanner.md) | Replace regex-based runtime scanner with syn crate for robust parsing |
 | [Compile-Time Contracts](on-hold/compile-time-contracts.md) | Compile-time preconditions and type invariants via where clauses |
-| [Contracts — Runtime Validation](on-hold/contracts-runtime-validation.md) | Runtime contracts for value constraints |
-| [Cross-Target Parity Matrix](on-hold/cross-target-parity-matrix.md) | Automated verification that Rust, TS, and WASM produce identical output |
 | [Effect Type Integration — Embed EffectSet in FnType](on-hold/effect-type-integration.md) | Embed EffectSet into FnType for type-level effect tracking |
 | [Error-Fix Database](on-hold/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
-| [Go Target](on-hold/go-target.md) | Go codegen target via TOML templates and Go-specific nanopass passes |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
 | [LLM Integration](on-hold/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
@@ -29,20 +24,13 @@
 | [LSP Server](on-hold/lsp.md) | Language Server Protocol for editor completion, diagnostics, and navigation |
 | [Package Registry](on-hold/package-registry.md) | Lock file, semver resolution, and central package registry |
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
-| [Phase-Typed AST](on-hold/phase-typed-ast.md) | Phase type parameters for type-safe compiler pipeline transitions |
-| [Platform/Application Separation](on-hold/platform-app-separation.md) | Platform/application separation for dual-target compilation |
-| [Almide Platform Architecture Vision](on-hold/platform-architecture.md) | Multi-layer platform vision with pluggable renderer and host bindings |
 | [Rainbow Bridge — Wrap External Code as Almide Packages](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
 | [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy |
 | [Secure by Design](on-hold/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
 | [Security Model — Layer 3–5](on-hold/security-model.md) | Package boundary, runtime sandbox, and supply chain integrity layers |
-| [Self-Contained Compiler: Remove rustc Dependency](on-hold/self-contained-compiler.md) | Emit LLVM IR directly to eliminate rustc dependency for end users |
-| [Self-Hosting: Autonomous Bootstrap Compiler](on-hold/self-hosting.md) | Rewrite the compiler in Almide for a self-contained 350KB WASM toolchain |
 | [Snapshot Testing](on-hold/snapshot-testing.md) | Built-in snapshot testing for output regression detection |
-| [Stdlib in Almide: Unified Library Architecture](on-hold/stdlib-in-almide.md) | Rewrite stdlib in Almide with a 3-layer architecture |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
-| [Trait-Based I/O Abstraction](on-hold/trait-based-io.md) | Abstract filesystem and I/O behind traits for testability |
 | [WASM Component Model](on-hold/wasm-component-model.md) | WebAssembly Component Model support with WIT bindings |
 | [WASM HTTP Client](on-hold/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
 | [Web Framework](on-hold/web-framework.md) | First-party Hono-like web framework with template and Codec integration |
