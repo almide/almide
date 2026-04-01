@@ -1,13 +1,11 @@
 [package]
-name = "almide-lang"
+name = "almide-syntax"
 version = "0.10.5"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-description = "Almide language definitions: re-exports almide-syntax + almide-types"
+description = "Almide syntax definitions: AST, lexer, and parser"
 
 [dependencies]
 almide-base = { path = "../almide-base" }
-almide-syntax = { path = "../almide-syntax" }
-almide-types = { path = "../almide-types" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

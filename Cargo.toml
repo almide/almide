@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-lang", "crates/almide-ir", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-tools"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-tools"]
 resolver = "3"
 
 [package]

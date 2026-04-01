@@ -1,4 +1,5 @@
 <!-- description: Split compiler into workspace crates for build parallelism and API boundaries -->
+<!-- done: 2026-04-01 -->
 # Crate Split
 
 Split the monolithic compiler into a Cargo workspace with focused crates.
@@ -14,8 +15,9 @@ Split the monolithic compiler into a Cargo workspace with focused crates.
 
 ```
 almide-base      Sym, Span, Diagnostic                    ~400 lines
-almide-lang      ast, types (Ty/unify/constructor),        ~10k lines
-                 lexer, parser
+almide-syntax    ast, lexer, parser                        ~8k lines
+almide-types     Ty, unify, constructor, stdlib_info       ~2k lines
+almide-lang      re-export: syntax + types                 (thin shim)
 almide-ir        IR definitions, visit, verify,            ~3k lines
                  effect, annotations
 almide-codegen   walker, 20 nanopass passes,               ~30k lines
@@ -31,7 +33,9 @@ almide           CLI (main, cli/, resolve, project)        ~3k lines
 
 ```
 almide-base         (no deps)
-almide-lang       → base
+almide-syntax     → base
+almide-types      → base
+almide-lang       → syntax, types              (re-export shim)
 almide-ir         → base, lang
 almide-frontend   → base, lang, ir
 almide-optimize   → ir, lang (types)
@@ -42,7 +46,7 @@ almide            → all
 
 ## Design Decisions
 
-- **ast + types in same crate (almide-lang)**: Bidirectional dependency — `Expr.ty: Option<Ty>` and `VariantPayload::Record` contains `ast::Expr`. Breaking this requires removing `Expr.ty` (ExprId→Ty map), a larger refactor for later.
+- **ast + types split (almide-syntax + almide-types)**: Bidirectional dependency broken in Phase 7 (`Expr.ty` → TypeMap, `VariantPayload::Record` default exprs removed), split in Phase 8. almide-lang remains as a re-export shim for backward compatibility.
 - **TypeEnv stays in main crate**: Depends on `import_table` which depends on `stdlib`. Only `Ty`/`unify`/`constructor` moved to almide-lang.
 - **WASM and Rust emit NOT split**: 20 nanopass passes are shared across targets. Splitting would require a codegen-core + codegen-rust + codegen-wasm triple, with marginal incremental build benefit. Feature flags (`target-rust`, `target-wasm`) can conditionally compile targets within one crate.
 - **EffectMap and CodegenAnnotations moved to almide-ir**: Originally defined in codegen but stored on `IrProgram`. Moved to break the IR→codegen circular dependency.
@@ -58,6 +62,8 @@ almide            → all
 | 4 | almide-ir | Done (2026-04-01) |
 | 5 | almide-codegen | Done (2026-04-01) |
 | 6 | almide-frontend, almide-optimize, almide-tools | Done (2026-04-01) |
+| 7 | Break ast↔types cycle (TypeMap, VariantPayload) | Done (2026-04-01) |
+| 8 | Split almide-lang → almide-syntax + almide-types | Done (2026-04-01) |
 
 ## Phase 5: almide-codegen (done)
 
@@ -80,22 +86,22 @@ Zero cross-group dependencies — clean three-way split.
 - **AUTO_IMPORT_BUNDLED** moved to `almide_lang::stdlib_info`.
 - **Re-export stubs removed**: lib.rs consolidates all module aliases via `pub use crate as module;`. 18 stub files deleted.
 
-## Future: Breaking ast↔types Cycle
+## Phase 7: Breaking ast↔types Cycle (done)
 
-Remove `Expr.ty: Option<Ty>` from AST and use `TypeMap = HashMap<ExprId, Ty>` populated by the checker.
+Both directions of the bidirectional dependency eliminated:
 
-**Analysis complete (2026-04-01):**
+1. **ast→types**: Removed `Expr.ty: Option<Ty>` from `ast::Expr`. Checker now populates `TypeMap = HashMap<ExprId, Ty>` (`Checker.type_map`). LowerCtx reads from the TypeMap via `expr_ty()`.
+2. **types→ast**: Simplified `VariantPayload::Record(Vec<(Sym, Ty, Option<ast::Expr>)>)` to `VariantPayload::Record(Vec<(Sym, Ty)>)`. The default expressions were never read from VariantPayload — lowering reads them from `ast::FieldType.default` directly.
 
-Join points (only 2):
-1. `ast::Expr.ty: Option<Ty>` — checker sets in 4 places, lower reads in ~50 places
-2. `types::VariantPayload::Record(Vec<(Sym, Ty, Option<ast::Expr>)>)` — default expressions
+Files changed: ~25 across 4 crates (almide-lang, almide-frontend, almide-codegen, almide CLI).
 
-Implementation plan:
-1. Add `TypeMap = HashMap<ExprId, Ty>` to checker, populate instead of `expr.ty = Some(...)`
-2. Add TypeMap to `LowerCtx`, helper method `ctx.ty(expr) -> Ty`
-3. Replace all `expr.ty.clone().unwrap_or(...)` in lower/ (~50 sites) with `ctx.ty(expr)`
-4. Remove `Expr.ty` field from `ast::Expr`
-5. Change `VariantPayload::Record` default from `Option<ast::Expr>` to `Option<ExprId>`, store actual Exprs in side table
-6. Split: almide-syntax (ast, lexer, parser) + almide-types (Ty, unify, constructor)
+## Phase 8: Split almide-lang → almide-syntax + almide-types (done)
 
-This is all-or-nothing (~50 files, 4 crates). ExprId already exists on Expr.
+Clean split enabled by Phase 7's cycle elimination:
+
+- **almide-syntax** (~8k lines): ast, lexer, parser → almide-base only
+- **almide-types** (~2k lines): Ty, unify, constructor, stdlib_info → almide-base only
+- **almide-lang** (thin shim): `pub use almide_syntax::*; pub use almide_types::*;` — downstream crates unchanged
+- **TypeMap** stays in almide-frontend (bridges ExprId from syntax and Ty from types)
+
+Zero downstream changes required — almide-lang re-exports preserve all existing `almide_lang::ast::*` and `almide_lang::types::*` paths.

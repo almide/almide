@@ -7,7 +7,9 @@ The Almide compiler is split into a Cargo workspace with focused crates for buil
 ```mermaid
 graph TD
     BASE["almide-base<br/><i>~460 lines</i><br/>Sym, Span, Diagnostic"]
-    LANG["almide-lang<br/><i>~5.7k lines</i><br/>AST, types, lexer, parser,<br/>stdlib_info"]
+    SYNTAX["almide-syntax<br/><i>~8k lines</i><br/>AST, lexer, parser"]
+    TYPES["almide-types<br/><i>~2k lines</i><br/>Ty, unify, constructor,<br/>stdlib_info"]
+    LANG["almide-lang<br/><i>re-export shim</i><br/>syntax + types"]
     IR["almide-ir<br/><i>~3.1k lines</i><br/>IR nodes, visit, verify,<br/>effect, annotations"]
     CODEGEN["almide-codegen<br/><i>~44.7k lines</i><br/>nanopass pipeline, walker,<br/>emit_wasm, template"]
     FRONTEND["almide-frontend<br/><i>~6.5k lines</i><br/>check, canonicalize, lower,<br/>stdlib, import_table"]
@@ -15,7 +17,10 @@ graph TD
     TOOLS["almide-tools<br/><i>~1.5k lines</i><br/>fmt, interface, almdi"]
     CLI["almide (CLI)<br/><i>~3.6k lines</i><br/>main, cli/, resolve,<br/>project, project_fetch"]
 
-    BASE --> LANG
+    BASE --> SYNTAX
+    BASE --> TYPES
+    SYNTAX --> LANG
+    TYPES --> LANG
     BASE --> IR
     LANG --> IR
     BASE --> CODEGEN
@@ -36,6 +41,8 @@ graph TD
     TOOLS --> CLI
 
     style BASE fill:#e8f5e9,stroke:#388e3c
+    style SYNTAX fill:#e8eaf6,stroke:#3f51b5
+    style TYPES fill:#e8eaf6,stroke:#3f51b5
     style LANG fill:#e3f2fd,stroke:#1976d2
     style IR fill:#fff3e0,stroke:#f57c00
     style CODEGEN fill:#fce4ec,stroke:#c62828
@@ -52,7 +59,9 @@ graph TD
 | Crate | Role | Key Modules |
 |-------|------|-------------|
 | **almide-base** | Shared primitives | `Sym` (interned strings), `Span` (source locations), `Diagnostic` (error reporting) |
-| **almide-lang** | Language definition | AST nodes, type system (`Ty`, `unify`, `constructor`), lexer, parser, stdlib module registry |
+| **almide-syntax** | Syntax layer | AST node definitions, lexer (tokenizer), parser |
+| **almide-types** | Type system | `Ty`, `unify`, `constructor` (type constructors), stdlib module registry |
+| **almide-lang** | Re-export shim | Combines almide-syntax + almide-types for backward compatibility |
 | **almide-ir** | Intermediate representation | Typed IR nodes (`IrExpr`, `IrStmt`, `IrProgram`), visitor pattern, verification, effect system |
 | **almide-codegen** | Code generation | 20 nanopass passes, TOML-driven template walker (Rust), direct WASM binary emit |
 | **almide-frontend** | Analysis pipeline | Type checker, name canonicalization, IR lowering, stdlib signatures (build.rs generated) |
@@ -66,15 +75,15 @@ graph TD
 Source (.almd)
     │
     ▼
-┌─────────┐   almide-lang
+┌─────────┐   almide-syntax
 │  Parse   │   lexer → parser → AST
 └────┬─────┘
      │
      ▼
-┌──────────────┐   almide-frontend
+┌──────────────┐   almide-frontend (+ almide-types for TypeMap)
 │ Canonicalize  │   name resolution, protocol registration
-│    Check      │   type inference, constraint solving
-│    Lower      │   AST → typed IR
+│    Check      │   type inference → TypeMap (ExprId→Ty)
+│    Lower      │   AST + TypeMap → typed IR
 └────┬─────────┘
      │
      ▼
@@ -92,16 +101,20 @@ Source (.almd)
 
 ## Build Parallelism
 
-Once `almide-base` and `almide-lang` are built, the following compile **in parallel**:
+Once `almide-base` is built, `almide-syntax` and `almide-types` compile **in parallel** (no dependency between them). After those complete, the downstream crates also compile in parallel:
 
 ```
-             ┌─ almide-codegen
-almide-ir ───┼─ almide-frontend
-             ├─ almide-optimize
-             └─ almide-tools
+              ┌─ almide-syntax ─┐
+almide-base ──┤                 ├─ almide-lang ─┐
+              └─ almide-types ──┘                │
+                                                 ├─ almide-ir ───┬─ almide-codegen
+                                                 │               ├─ almide-frontend
+                                                 │               ├─ almide-optimize
+                                                 │               └─ almide-tools
+                                                 └───────────────┘
 ```
 
-Changing a file in `check/` does **not** recompile codegen (~44k lines), and vice versa.
+Changing a file in `check/` does **not** recompile codegen (~44k lines), and vice versa. Changing a type definition does **not** recompile the parser.
 
 ## Build Scripts
 
@@ -114,10 +127,4 @@ Two crates have `build.rs` for code generation from `stdlib/defs/*.toml`:
 
 ## Re-export Pattern
 
-The main `almide` crate contains thin re-export stubs (e.g., `src/codegen.rs` = `pub use almide_codegen::*;`) so that all existing `crate::module::*` paths continue to work without mass-rewriting CLI and test code.
-
-## Future Work
-
-**Breaking the ast↔types cycle** (tracked separately): Currently `almide-lang` contains both AST and type system because `Expr.ty: Option<Ty>` creates a bidirectional dependency. Removing this field and using an external `HashMap<ExprId, Ty>` would enable:
-- `almide-syntax` (AST + lexer + parser) — no type system dependency
-- `almide-types` (Ty, TypeEnv, unify) — no AST dependency
+The main `almide` crate re-exports all sub-crates via `pub use` in `lib.rs`, so all existing `almide::module::*` paths continue to work. Similarly, `almide-lang` re-exports `almide-syntax` and `almide-types` for backward compatibility.

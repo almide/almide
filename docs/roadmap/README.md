@@ -6,7 +6,7 @@
 
 ## Active
 
-12 items
+11 items
 
 | Item | Description |
 |------|-------------|
@@ -15,7 +15,6 @@
 | [Compiler Architecture: All 10s](active/compiler-architecture-10.md) | Achieve 10/10 on every compiler architecture quality metric |
 | [Compiler Depth Matrix](active/compiler-depth-matrix.md) | Map Almide's compiler depth against industrial compilers and plan next tiers |
 | [Contracts — Runtime Validation](active/contracts-runtime-validation.md) | Runtime contracts for value constraints |
-| [Crate Split](active/crate-split.md) | Split compiler into workspace crates for build parallelism and API boundaries |
 | [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Automated verification that Rust, TS, and WASM produce identical output |
 | [Error Message Suggestions](active/error-message-suggestions.md) | Fuzzy matching suggestions in error messages (did you mean?) |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](active/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
@@ -69,10 +68,10 @@
 
 ## Done
 
-172 items
+173 items
 
 <details>
-<summary>Show all 172 completed items</summary>
+<summary>Show all 173 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
@@ -80,6 +79,7 @@
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
 | 2026-04-01 | [Purity Exploitation — Leveraging fn/effect fn Distinction](done/purity-exploitation.md) | Exploit fn/effect fn purity for auto-parallelism and escape analysis |
 | 2026-04-01 | [Emit Readability](done/emit-readability.md) | Improve readability of generated Rust output |
+| 2026-04-01 | [Crate Split](done/crate-split.md) | Split compiler into workspace crates for build parallelism and API boundaries |
 | 2026-04-01 | [Compiler Fragility Hotspots](done/compiler-fragility-hotspots.md) | Fix fragile compiler internals: visitor pattern, ExprId duplication, UF isolation, Ty clone cost |
 | 2026-04-01 | [Canonical AST](done/canonical-ast.md) | Introduce Canonical AST phase to separate name resolution from type checking |
 | 2026-03-31 | [Rainbow FFI Gate](done/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
