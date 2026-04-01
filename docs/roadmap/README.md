@@ -6,13 +6,12 @@
 
 ## Active
 
-5 items
+4 items
 
 | Item | Description |
 |------|-------------|
 | [LLM Benchmark Execution](active/benchmark-execution.md) | LLM accuracy benchmarks comparing Almide, Python, and MoonBit |
 | [Codegen Perfection](active/codegen-perfection.md) | Make codegen bulletproof by learning from Gleam/Roc architecture patterns |
-| [Compiler Architecture: All 10s](active/compiler-architecture-10.md) | Achieve 10/10 on every compiler architecture quality metric |
 | [Error Message Suggestions](active/error-message-suggestions.md) | Fuzzy matching suggestions in error messages (did you mean?) |
 | [Nanopass Debug Dump](active/nanopass-debug-dump.md) | Environment-variable-controlled IR dump for each nanopass stage |
 
@@ -66,10 +65,10 @@
 
 ## Done
 
-175 items
+176 items
 
 <details>
-<summary>Show all 175 completed items</summary>
+<summary>Show all 176 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
@@ -81,6 +80,7 @@
 | 2026-04-01 | [Crate Split](done/crate-split.md) | Split compiler into workspace crates for build parallelism and API boundaries |
 | 2026-04-01 | [Compiler Fragility Hotspots](done/compiler-fragility-hotspots.md) | Fix fragile compiler internals: visitor pattern, ExprId duplication, UF isolation, Ty clone cost |
 | 2026-04-01 | [Compiler Depth Matrix](done/compiler-depth-matrix.md) | Map Almide's compiler depth against industrial compilers and plan next tiers |
+| 2026-04-01 | [Compiler Architecture: All 10s](done/compiler-architecture-10.md) | Achieve 10/10 on every compiler architecture quality metric |
 | 2026-04-01 | [Canonical AST](done/canonical-ast.md) | Introduce Canonical AST phase to separate name resolution from type checking |
 | 2026-03-31 | [Rainbow FFI Gate](done/rainbow-gate.md) | Export Almide code as native-speed libraries callable from any language |
 | 2026-03-31 | [Dead Code Elimination](done/dead-code-elimination.md) | Dependency-graph-based dead code elimination for smaller WASM binaries |
