@@ -10,7 +10,7 @@
 
 | Item | Description |
 |------|-------------|
-| [Versioned Module Codegen Bug](active/versioned-module-codegen-bug.md) | Fix versioned module name mismatch in codegen for package dependencies |
+| [`import self` in Dependency Packages Bug](active/import-self-in-dependency-bug.md) | Fix import self resolution in dependency packages (blocks almide-lander) |
 
 ## On Hold
 
@@ -44,13 +44,14 @@
 
 ## Done
 
-181 items
+182 items
 
 <details>
-<summary>Show all 181 completed items</summary>
+<summary>Show all 182 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-04-02 | [Versioned Module Codegen Bug](done/versioned-module-codegen-bug.md) | Fix versioned module name mismatch in codegen for package dependencies |
 | 2026-04-01 | [WASM Remaining FS Operations](done/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
 | 2026-04-01 | [Type Expressiveness: Business Scenario Comparison](done/type-expressiveness-scenarios.md) | Business scenario comparison of type expressiveness across languages |
