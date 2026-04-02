@@ -8,7 +8,7 @@
 //! - MLIR dialect conversion patterns
 //! - NLLB-200 Mixture of Experts (shared + language-specific)
 
-use almide_ir::IrProgram;
+use almide_ir::{IrProgram, IrExprKind, IrPattern, IrVisitor};
 use almide_lang::types::Ty;
 
 // ── Pass Result ──
@@ -90,9 +90,123 @@ pub trait NanoPass: std::fmt::Debug {
     /// Default: no dependencies.
     fn depends_on(&self) -> Vec<&'static str> { vec![] }
 
+    /// Postconditions: structural invariants guaranteed after this pass runs.
+    /// Verified automatically in debug/CI builds (ALMIDE_CHECK_IR=1).
+    fn postconditions(&self) -> Vec<Postcondition> { vec![] }
+
     /// Run the pass. Takes ownership of the program, returns modified program
     /// and whether any changes were made.
     fn run(&self, program: IrProgram, target: Target) -> PassResult;
+}
+
+/// Structural invariants a pass guarantees after execution.
+#[derive(Debug)]
+pub enum Postcondition {
+    /// No IR pattern of this kind remains (e.g., "List" after ListPatternLowering)
+    NoPatternKind(&'static str),
+    /// No TypeVar remains in any function signature or body type
+    NoTypeVars,
+    /// All Ty nodes are concrete (no Unknown, no TypeVar)
+    AllTypesConcrete,
+    /// Custom check: returns list of violation messages (empty = OK)
+    Custom(fn(&IrProgram) -> Vec<String>),
+}
+
+/// Verify postconditions for a pass. Returns list of violations.
+pub fn verify_postconditions(pass_name: &str, program: &IrProgram, postconditions: &[Postcondition]) -> Vec<String> {
+    use almide_lang::types::Ty;
+    let mut violations = Vec::new();
+
+    for pc in postconditions {
+        match pc {
+            Postcondition::NoPatternKind(kind) => {
+                let count = count_pattern_kind(program, kind);
+                if count > 0 {
+                    violations.push(format!(
+                        "[{}] {} '{}' pattern(s) remain after pass (expected 0)",
+                        pass_name, count, kind
+                    ));
+                }
+            }
+            Postcondition::NoTypeVars => {
+                let count = count_typevars_in_functions(program);
+                if count > 0 {
+                    violations.push(format!(
+                        "[{}] {} TypeVar(s) remain in active functions (expected 0)",
+                        pass_name, count
+                    ));
+                }
+            }
+            Postcondition::AllTypesConcrete => {
+                let (unknowns, typevars) = count_incomplete_types(program);
+                if unknowns > 0 {
+                    violations.push(format!(
+                        "[{}] {} Unknown type(s) in IR (expected 0)",
+                        pass_name, unknowns
+                    ));
+                }
+                if typevars > 0 {
+                    violations.push(format!(
+                        "[{}] {} TypeVar(s) in IR (expected 0)",
+                        pass_name, typevars
+                    ));
+                }
+            }
+            Postcondition::Custom(check) => {
+                violations.extend(check(program));
+            }
+        }
+    }
+    violations
+}
+
+fn count_pattern_kind(program: &IrProgram, kind: &str) -> usize {
+    use almide_ir::*;
+    struct PatternCounter { kind: String, count: usize }
+    impl IrVisitor for PatternCounter {
+        fn visit_pattern(&mut self, pat: &IrPattern) {
+            let matches = match (&pat, self.kind.as_str()) {
+                (IrPattern::List { .. }, "List") => true,
+                _ => false,
+            };
+            if matches { self.count += 1; }
+            almide_ir::walk_pattern(self, pat);
+        }
+    }
+    let mut counter = PatternCounter { kind: kind.to_string(), count: 0 };
+    for func in &program.functions { counter.visit_expr(&func.body); }
+    counter.count
+}
+
+fn count_typevars_in_functions(program: &IrProgram) -> usize {
+    use almide_lang::types::Ty;
+    fn has_typevar(ty: &Ty) -> bool {
+        match ty {
+            Ty::TypeVar(_) => true,
+            _ => ty.children().iter().any(|c| has_typevar(c)),
+        }
+    }
+    let mut count = 0;
+    for func in &program.functions {
+        if has_typevar(&func.ret_ty) { count += 1; }
+        for p in &func.params { if has_typevar(&p.ty) { count += 1; } }
+    }
+    count
+}
+
+fn count_incomplete_types(program: &IrProgram) -> (usize, usize) {
+    use almide_lang::types::Ty;
+    let mut unknowns = 0;
+    let mut typevars = 0;
+    for func in &program.functions {
+        if func.ret_ty.contains_unknown() { unknowns += 1; }
+        if func.ret_ty.contains_typevar() { typevars += 1; }
+        for p in &func.params {
+            if p.ty.contains_unknown() { unknowns += 1; }
+            if p.ty.contains_typevar() { typevars += 1; }
+        }
+    }
+    (unknowns, typevars)
 }
 
 // ── Pass Pipeline ──
@@ -171,6 +285,18 @@ impl Pipeline {
                         eprintln!("  {}", e);
                     }
                     panic!("IR verification failed after pass '{}'", pass_name);
+                }
+            }
+
+            // Postcondition verification (always on — these are structural invariants)
+            let postconds = pass.postconditions();
+            if !postconds.is_empty() {
+                let violations = verify_postconditions(pass_name, &program, &postconds);
+                for v in &violations {
+                    eprintln!("[POSTCONDITION VIOLATION] {}", v);
+                }
+                if !violations.is_empty() && check_ir {
+                    panic!("Postcondition violation after pass '{}'", pass_name);
                 }
             }
 

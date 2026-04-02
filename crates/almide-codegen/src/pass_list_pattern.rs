@@ -28,6 +28,9 @@ pub struct ListPatternLoweringPass;
 impl NanoPass for ListPatternLoweringPass {
     fn name(&self) -> &str { "ListPatternLowering" }
     fn targets(&self) -> Option<Vec<Target>> { None }
+    fn postconditions(&self) -> Vec<super::pass::Postcondition> {
+        vec![super::pass::Postcondition::NoPatternKind("List")]
+    }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
