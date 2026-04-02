@@ -1,0 +1,128 @@
+// Regression tests from monkey testing sessions (v0.11.1–v0.11.2)
+// Covers: variant Eq, recursive generics, default fields, list patterns,
+// generic structs, empty for, multi-param generics, effect fn, quicksort
+
+type Color: Eq = | Red | Green | Blue | Custom(Int, Int, Int)
+
+test "variant eq" {
+  assert_eq(Red == Red, true)
+  assert_eq(Red == Blue, false)
+  assert_eq(Custom(1,2,3) == Custom(1,2,3), true)
+  assert_eq(Custom(1,2,3) == Custom(4,5,6), false)
+}
+
+type Tree[T] = | Leaf(T) | Node(Tree[T], Tree[T])
+
+fn tree_fold[T, U](t: Tree[T], leaf: (T) -> U, merge: (U, U) -> U) -> U =
+  match t { Leaf(v) => leaf(v), Node(l, r) => merge(tree_fold(l, leaf, merge), tree_fold(r, leaf, merge)) }
+
+test "recursive generic fold" {
+  let t = Node(Node(Leaf(1), Leaf(2)), Leaf(3))
+  assert_eq(tree_fold(t, (v) => v, (a, b) => a + b), 6)
+  let s = tree_fold(Node(Leaf("a"), Leaf("b")), (v) => v, (a, b) => a + b)
+  assert_eq(s, "ab")
+}
+
+type Opts = { verbose: Bool = false, retries: Int = 3 }
+
+test "all defaults" {
+  let o = Opts {}
+  assert_eq(o.verbose, false)
+  assert_eq(o.retries, 3)
+}
+
+test "partial override" {
+  let o = Opts { verbose: true }
+  assert_eq(o.verbose, true)
+  assert_eq(o.retries, 3)
+}
+
+fn describe(xs: List[Int]) -> String =
+  match xs {
+    [] => "empty",
+    [0] => "zero",
+    [n] if n > 0 => "positive",
+    [_] => "negative",
+    [a, b] => int.to_string(a) + "," + int.to_string(b),
+    _ => "many",
+  }
+
+test "list patterns" {
+  assert_eq(describe([]), "empty")
+  assert_eq(describe([0]), "zero")
+  assert_eq(describe([5]), "positive")
+  assert_eq(describe([-3]), "negative")
+  assert_eq(describe([1, 2]), "1,2")
+  assert_eq(describe([1, 2, 3]), "many")
+}
+
+fn classify(a: List[Int], b: List[Int]) -> String =
+  match (a, b) {
+    ([], []) => "both empty",
+    ([], _) => "a empty",
+    (_, []) => "b empty",
+    _ => "both",
+  }
+
+test "tuple list patterns" {
+  assert_eq(classify([], []), "both empty")
+  assert_eq(classify([], [1]), "a empty")
+  assert_eq(classify([1], []), "b empty")
+  assert_eq(classify([1], [2]), "both")
+}
+
+type Wrapper[T] = { value: T, label: String }
+fn unwrap_val[T](w: Wrapper[T]) -> T = w.value
+
+test "generic struct" {
+  let w = { value: 42, label: "x" }
+  assert_eq(unwrap_val(w), 42)
+  let w2 = { value: [1,2], label: "y" }
+  assert_eq(unwrap_val(w2), [1, 2])
+}
+
+test "empty for" {
+  var n = 99
+  for _ in [] { n = 0 }
+  assert_eq(n, 99)
+}
+
+fn zip_with[A, B, C](xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C] =
+  list.zip(xs, ys) |> list.map((p) => { let (a, b) = p; f(a, b) })
+
+test "3-param generic" {
+  assert_eq(zip_with([1,2], ["a","b"], (n, s) => int.to_string(n) + s), ["1a", "2b"])
+}
+
+effect fn safe_div(a: Int, b: Int) -> Result[Int, String] =
+  if b == 0 then err("div by zero")
+  else ok(a / b)
+
+test "effect fn ok" { assert_eq(safe_div(10, 2), ok(5)) }
+test "effect fn err" { assert_eq(safe_div(1, 0), err("div by zero")) }
+
+fn frequencies(xs: List[String]) -> Map[String, Int] =
+  list.fold(xs, [:], (acc, x) => map.set(acc, x, (map.get(acc, x) ?? 0) + 1))
+
+test "frequencies" {
+  let f = frequencies(["a", "b", "a", "c", "a"])
+  assert_eq(map.get(f, "a"), some(3))
+  assert_eq(map.get(f, "b"), some(1))
+}
+
+fn quicksort(xs: List[Int]) -> List[Int] =
+  match xs {
+    [] => [],
+    _ => {
+      let pivot = list.first(xs) ?? 0
+      let rest = list.drop(xs, 1)
+      quicksort(rest |> list.filter((x) => x < pivot))
+        + [pivot]
+        + quicksort(rest |> list.filter((x) => x >= pivot))
+    },
+  }
+
+test "quicksort" {
+  assert_eq(quicksort([3,6,8,10,1,2,1]), [1,1,2,3,6,8,10])
+  assert_eq(quicksort([]), [])
+}
