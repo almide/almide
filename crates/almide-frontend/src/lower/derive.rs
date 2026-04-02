@@ -38,6 +38,8 @@ pub(super) fn generate_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl
                 "Eq" => {
                     if let Some(ref fields) = fields {
                         auto.push(auto_derive_eq(&mut ctx.var_table, &td.name, &type_ty, fields));
+                    } else if matches!(&td.kind, IrTypeDeclKind::Variant { .. }) {
+                        auto.push(auto_derive_variant_eq(&mut ctx.var_table, &td.name, &type_ty));
                     }
                 }
                 "Codec" => {
@@ -88,6 +90,36 @@ fn auto_derive_repr(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[
         params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None }],
         ret_ty: Ty::String,
         body: IrExpr { kind: IrExprKind::StringInterp { parts }, ty: Ty::String, span: None },
+        is_effect: false, is_async: false, is_test: false,
+        generics: None, extern_attrs: vec![], export_attrs: vec![], visibility: IrVisibility::Public,
+        doc: None, blank_lines_before: 0,
+    }
+}
+
+/// Auto-derive Eq for variant types: `fn Color.eq(a: Color, b: Color) -> Bool = a == b`
+/// Variant types get `#[derive(PartialEq)]` in Rust, so direct == comparison works.
+fn auto_derive_variant_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty) -> IrFunction {
+    let var_a = vt.alloc(sym("_a"), type_ty.clone(), Mutability::Let, None);
+    let var_b = vt.alloc(sym("_b"), type_ty.clone(), Mutability::Let, None);
+
+    let body = IrExpr {
+        kind: IrExprKind::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(IrExpr { kind: IrExprKind::Var { id: var_a }, ty: type_ty.clone(), span: None }),
+            right: Box::new(IrExpr { kind: IrExprKind::Var { id: var_b }, ty: type_ty.clone(), span: None }),
+        },
+        ty: Ty::Bool,
+        span: None,
+    };
+
+    IrFunction {
+        name: sym(&format!("{}.eq", type_name)),
+        params: vec![
+            IrParam { var: var_a, ty: type_ty.clone(), name: sym("_a"), borrow: ParamBorrow::Own, open_record: None, default: None },
+            IrParam { var: var_b, ty: type_ty.clone(), name: sym("_b"), borrow: ParamBorrow::Own, open_record: None, default: None },
+        ],
+        ret_ty: Ty::Bool,
+        body,
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
