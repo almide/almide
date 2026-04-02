@@ -6,13 +6,11 @@
 
 ## Active
 
-6 items
+4 items
 
 | Item | Description |
 |------|-------------|
-| [C FFI — Call C Libraries from Almide](active/c-ffi.md) | Call C libraries from Almide via @extern(c, ...) and extern "C" codegen |
-| [Exhaustiveness Strengthening — Nested Patterns](active/exhaustiveness-strengthening.md) | Nested pattern exhaustiveness via Maranget's algorithm |
-| [Fan Async Backend](active/fan-async-backend.md) | Migrate fan runtime from std::thread to tokio async |
+| [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with Flow[T] and compiler-driven optimization |
 | [Flexible Error Types](active/flexible-error-types.md) | Allow user-defined error types in Result and effect fn |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
@@ -49,10 +47,10 @@
 
 ## Done
 
-186 items
+188 items
 
 <details>
-<summary>Show all 186 completed items</summary>
+<summary>Show all 188 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|

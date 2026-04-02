@@ -290,7 +290,7 @@ impl Checker {
     }
 
     /// Create fresh inference variables for a type's generic parameters.
-    fn instantiate_type_generics(&mut self, type_name: &str) -> Vec<Ty> {
+    pub(crate) fn instantiate_type_generics(&mut self, type_name: &str) -> Vec<Ty> {
         // Count generics by finding TypeVars in the type definition
         if let Some(ty_def) = self.env.types.get(&sym(type_name)).cloned() {
             let mut type_vars = Vec::new();

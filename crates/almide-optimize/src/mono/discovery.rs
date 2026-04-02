@@ -104,10 +104,11 @@ pub(super) fn discover_in_expr(
                         }
                     }
 
-                    // Skip bindings with Unknown or unresolved inference vars
+                    // Skip bindings with Unknown, TypeVars, or unresolved inference vars
                     let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
                         !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
-                        && !matches!(ty, Ty::TypeVar(n) if n.starts_with('?'))
+                        && !matches!(ty, Ty::TypeVar(_))
+                        && !ty.contains_typevar()
                     );
                     if all_concrete {
                         let suffix = mangle_suffix(&bindings);

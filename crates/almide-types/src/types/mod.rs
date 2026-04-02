@@ -182,6 +182,10 @@ impl Ty {
         self.any_child_recursive(&|t| matches!(t, Ty::Unknown))
     }
 
+    pub fn contains_typevar(&self) -> bool {
+        self.any_child_recursive(&|t| matches!(t, Ty::TypeVar(_)))
+    }
+
     /// Construct a normalized union type: flatten nested unions, deduplicate, sort.
     /// Returns the inner type if only one member remains.
     pub fn union(mut members: Vec<Ty>) -> Ty {

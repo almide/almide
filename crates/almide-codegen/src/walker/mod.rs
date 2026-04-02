@@ -40,6 +40,8 @@ pub struct RenderContext<'a> {
     pub is_test: bool,
     pub ann: CodegenAnnotations,
     pub type_aliases: std::collections::HashMap<almide_base::intern::Sym, almide_lang::types::Ty>,
+    /// Type names that have generic parameters (for erasing to `_` when args are missing)
+    pub generic_types: std::collections::HashSet<almide_base::intern::Sym>,
     /// Use minimal generic bounds (Clone only) for bundled .almd module functions.
     pub minimal_generic_bounds: bool,
     /// Emit `#[repr(C)]` on structs/enums for stable C ABI layout.
@@ -48,7 +50,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), minimal_generic_bounds: false, repr_c: false }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -97,6 +99,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         is_test: func.is_test,
         ann: ctx.ann.clone(),
         type_aliases: ctx.type_aliases.clone(),
+        generic_types: ctx.generic_types.clone(),
         minimal_generic_bounds: ctx.minimal_generic_bounds,
         repr_c: ctx.repr_c,
     };
@@ -264,9 +267,15 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Build constructor → enum name map
     // Build type alias map for transparent expansion
     let mut type_aliases = std::collections::HashMap::new();
+    let mut generic_types = std::collections::HashSet::new();
     for td in &program.type_decls {
-        if let IrTypeDeclKind::Alias { target } = &td.kind {
-            type_aliases.insert(td.name, target.clone());
+        match &td.kind {
+            IrTypeDeclKind::Alias { target } => { type_aliases.insert(td.name, target.clone()); }
+            _ => {}
+        }
+        // Track types with generic parameters
+        if td.generics.as_ref().map_or(false, |g| !g.is_empty()) {
+            generic_types.insert(td.name);
         }
     }
     let mut ctx = RenderContext {
@@ -278,6 +287,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         is_test: ctx.is_test,
         ann: ctx.ann.clone(),
         type_aliases,
+        generic_types,
         minimal_generic_bounds: false,
         repr_c: ctx.repr_c,
     };
@@ -403,6 +413,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             is_test: false,
             ann: ctx.ann.clone(),
             type_aliases: ctx.type_aliases.clone(),
+            generic_types: ctx.generic_types.clone(),
             minimal_generic_bounds: is_bundled,
             repr_c: ctx.repr_c,
         };

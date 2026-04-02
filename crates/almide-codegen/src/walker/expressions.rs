@@ -130,6 +130,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Loops ──
         IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+            // Optimize: for loop over empty list literal → skip entirely
+            if let IrExprKind::List { elements } = &iterable.kind {
+                if elements.is_empty() {
+                    return "{}".to_string();
+                }
+            }
             let var_name = if let Some(tuple_vars) = var_tuple {
                 let names: Vec<String> = tuple_vars.iter().map(|id| ctx.var_name(*id).to_string()).collect();
                 let vars_s = names.join(", ");
