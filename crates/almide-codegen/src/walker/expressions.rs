@@ -493,7 +493,21 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         IrExprKind::UnwrapOr { expr: inner, fallback } => {
             let s = render_expr(ctx, inner);
-            let f = render_expr(ctx, fallback);
+            let mut f = render_expr(ctx, fallback);
+            // When the fallback is a lambda and the result type is Fn (from a List[Fn] get),
+            // wrap in Rc::new to match the Rc<dyn Fn> stored in the collection
+            if ctx.target == super::super::pass::Target::Rust
+                && matches!(&fallback.kind, IrExprKind::Lambda { .. })
+                && matches!(&expr.ty, Ty::Fn { .. })
+            {
+                // Check if inner is Option[Fn] (from list.get on a List[Fn])
+                if let Some(inner_ty) = inner.ty.option_inner() {
+                    if matches!(inner_ty, Ty::Fn { .. }) {
+                        let rc_type = super::helpers::render_type_rc_fn(ctx, &inner_ty);
+                        f = format!("std::rc::Rc::new({}) as {}", f, rc_type);
+                    }
+                }
+            }
             let when_type = if inner.ty.is_option() { Some("Option") } else { None };
             // When inner.ty is Unknown, defaults to Result template.
             // This is correct if type inference produced Unknown due to a bug;
