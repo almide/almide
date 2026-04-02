@@ -27,6 +27,7 @@ use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
 use super::pass_closure_conversion::ClosureConversionPass;
+use super::pass_list_pattern::ListPatternLoweringPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -50,6 +51,8 @@ pub fn configure(target: Target) -> TargetConfig {
 fn build_pipeline(target: Target) -> Pipeline {
     match target {
         Target::Rust => Pipeline::new()
+            // ListPatternLowering: desugar list patterns to if/else before any other pass
+            .add(ListPatternLoweringPass)
             // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
             .add(BoxDerefPass)
             // TCO: convert self-recursive tail calls to loops (before any lowering)
@@ -100,6 +103,7 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(FanLoweringPass),
 
         Target::Wasm => Pipeline::new()
+            .add(ListPatternLoweringPass)
             .add(TailCallOptPass)
             .add(LICMPass)
             .add(EffectInferencePass)

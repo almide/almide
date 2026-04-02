@@ -580,7 +580,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
         }
 
         // Tuple pattern — pass through (shouldn't appear in variant match)
-        IrPattern::Tuple { .. } => {
+        IrPattern::Tuple { .. } | IrPattern::List { .. } => {
             arm.body.clone()
         }
     }

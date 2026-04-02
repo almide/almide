@@ -141,6 +141,7 @@ pub enum IrPattern {
     None,
     Ok { inner: Box<IrPattern> },
     Err { inner: Box<IrPattern> },
+    List { elements: Vec<IrPattern> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

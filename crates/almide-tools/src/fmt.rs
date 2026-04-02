@@ -642,6 +642,7 @@ fn fmt_pattern(out: &mut String, pat: &Pattern) {
             out.push_str(" }");
         }
         Pattern::Tuple { elements } => { out.push('('); comma_sep(out, elements, |out, e| fmt_pattern(out, e)); out.push(')'); }
+        Pattern::List { elements } => { out.push('['); comma_sep(out, elements, |out, e| fmt_pattern(out, e)); out.push(']'); }
         Pattern::Some { inner } => { out.push_str("some("); fmt_pattern(out, inner); out.push(')'); }
         Pattern::None => out.push_str("none"),
         Pattern::Ok { inner } => { out.push_str("ok("); fmt_pattern(out, inner); out.push(')'); }

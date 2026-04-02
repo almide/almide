@@ -2,7 +2,7 @@
 //! to target-specific code strings.
 
 use almide_ir::*;
-use almide_lang::types::Ty;
+use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
 use super::types::render_type;
 use super::expressions::render_expr;
@@ -103,6 +103,36 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, mutability } => {
             let name_s = ctx.var_name(*var).to_string();
+            // List[Fn] binding: render as Vec<Rc<dyn Fn(...)>> with Rc-wrapped lambdas
+            let is_list_of_fn = matches!(ty, Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() && matches!(&args[0], Ty::Fn { .. }));
+            if is_list_of_fn && ctx.target == super::super::pass::Target::Rust {
+                if let Ty::Applied(_, args) = ty {
+                    let fn_ty = &args[0];
+                    let rc_type_s = super::helpers::render_type_rc_fn(ctx, fn_ty);
+                    let type_s = format!("Vec<{}>", rc_type_s);
+                    let value_s = if let IrExprKind::List { elements } = &value.kind {
+                        let elems = elements.iter().enumerate().map(|(i, e)| {
+                            let s = render_expr(ctx, e);
+                            if i == 0 {
+                                // Cast first element to establish Vec type
+                                format!("std::rc::Rc::new({}) as {}", s, rc_type_s)
+                            } else {
+                                format!("std::rc::Rc::new({})", s)
+                            }
+                        }).collect::<Vec<_>>().join(", ");
+                        ctx.templates.render_with("list_literal", None, &[], &[("elements", elems.as_str())])
+                            .unwrap_or_else(|| format!("vec![{}]", elems))
+                    } else {
+                        render_expr(ctx, value)
+                    };
+                    let construct = match mutability {
+                        Mutability::Let => "let_binding",
+                        Mutability::Var => "var_binding",
+                    };
+                    return ctx.templates.render_with(construct, None, &[], &[("name", name_s.as_str()), ("type", type_s.as_str()), ("value", value_s.as_str())])
+                        .unwrap_or_else(|| format!("let {} = {};", name_s, value_s));
+                }
+            }
             // Erase Fn types in bindings (Rust can't write `impl Fn` in let position; TS gets `any`)
             // Also resolve aliases first — `type Handler = Fn(String) -> String` should erase too
             let resolved_owned;
@@ -135,7 +165,37 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 ty
             };
             let type_s = render_type(ctx, ty);
-            let value_s = render_expr(ctx, value);
+            // When binding a lambda to a Fn-typed variable (e.g. type alias Handler = (String) -> String),
+            // the let type is erased to `_` but the lambda params have no type annotations either,
+            // causing Rust type inference failure. Render lambda params with explicit types in this case.
+            let value_s = if matches!(ty, Ty::Unknown) {
+                if let IrExprKind::Lambda { params, body, .. } = &value.kind {
+                    let has_typed_params = params.iter().any(|(_, t)| !matches!(t, Ty::Unknown));
+                    if has_typed_params {
+                        let params_str = params.iter()
+                            .map(|(id, pty)| {
+                                let name = ctx.var_name(*id).to_string();
+                                if matches!(pty, Ty::Unknown) {
+                                    name
+                                } else {
+                                    let ty_str = super::types::render_type(ctx, pty);
+                                    format!("{}: {}", name, ty_str)
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let body_str = render_expr(ctx, body);
+                        ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
+                            .unwrap_or_else(|| format!("move |{}| {}", params_str, body_str))
+                    } else {
+                        render_expr(ctx, value)
+                    }
+                } else {
+                    render_expr(ctx, value)
+                }
+            } else {
+                render_expr(ctx, value)
+            };
             let construct = match mutability {
                 Mutability::Let => "let_binding",
                 Mutability::Var => "var_binding",
@@ -294,6 +354,11 @@ pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm) -> String {
         .unwrap_or_else(|| format!("_ => _,"))
 }
 
+/// Check if any match arm uses a list pattern.
+pub fn arms_have_list_pattern(arms: &[IrMatchArm]) -> bool {
+    arms.iter().any(|arm| matches!(&arm.pattern, IrPattern::List { .. }))
+}
+
 pub fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
     match pat {
         IrPattern::Wildcard => template_or(ctx, "pattern_wildcard", &[], "_"),
@@ -345,6 +410,14 @@ pub fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
             let elems = elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>().join(", ");
             ctx.templates.render_with("tuple_literal", None, &[], &[("elements", elems.as_str())])
                 .unwrap_or_else(|| "tuple(...)".into())
+        }
+        IrPattern::List { elements } => {
+            if elements.is_empty() {
+                "[]".to_string()
+            } else {
+                let elems = elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>().join(", ");
+                format!("[{}]", elems)
+            }
         }
         IrPattern::RecordPattern { name, fields, rest } => {
             // Qualify enum variant record patterns: Circle → Shape::Circle

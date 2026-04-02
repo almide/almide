@@ -723,6 +723,11 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { end; });
             }
 
+            // List pattern: [a, b] => ... — pass through (list matching not yet implemented in WASM)
+            IrPattern::List { .. } => {
+                self.emit_expr(&arm.body);
+            }
+
             // Tuple pattern: (a, b) => ...
             IrPattern::Tuple { elements } => {
                 if let Ty::Tuple(elem_types) = subject_ty {

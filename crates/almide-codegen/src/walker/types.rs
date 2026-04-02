@@ -2,7 +2,7 @@
 
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
-use super::helpers::{template_or, render_type_boxed_fn};
+use super::helpers::{template_or, render_type_boxed_fn, render_type_rc_fn};
 
 pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
     match ty {
@@ -31,7 +31,7 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             let inner = &args[0];
             let inner_s = render_type(ctx, inner);
             ctx.templates.render_with("type_list", None, &[], &[("inner", inner_s.as_str())])
-                .unwrap_or_else(|| format!("Vec<{}>", render_type(ctx, inner)))
+                .unwrap_or_else(|| format!("Vec<{}>", inner_s))
         }
         Ty::Named(name, args) => {
             // Set type → template

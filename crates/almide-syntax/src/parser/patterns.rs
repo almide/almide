@@ -50,6 +50,21 @@ impl Parser {
             self.expect(TokenType::RParen)?;
             return Ok(first);
         }
+        // List pattern: [], [a], [a, b, ...]
+        if self.check(TokenType::LBracket) {
+            self.advance();
+            let mut elements = Vec::new();
+            if !self.check(TokenType::RBracket) {
+                elements.push(self.parse_pattern()?);
+                while self.check(TokenType::Comma) {
+                    self.advance();
+                    if self.check(TokenType::RBracket) { break; }
+                    elements.push(self.parse_pattern()?);
+                }
+            }
+            self.expect(TokenType::RBracket)?;
+            return Ok(Pattern::List { elements });
+        }
         // Negative numeric literal: -1, -3.14
         if self.check(TokenType::Minus)
             && self.peek_at(1).map(|t| matches!(t.token_type, TokenType::Int | TokenType::Float)).unwrap_or(false)
@@ -93,7 +108,7 @@ impl Parser {
         let tok = self.current();
         let hint = match tok.value.as_str() {
             "=>" => "\n  Hint: Missing pattern before '=>'. Use '_' for wildcard, or a variable name",
-            _ => "\n  Hint: Valid patterns: _, variable, Type(args), (a, b), some(x), ok(x), err(x), none, true, false, 42, \"text\"",
+            _ => "\n  Hint: Valid patterns: _, variable, Type(args), (a, b), [], [a, b], some(x), ok(x), err(x), none, true, false, 42, \"text\"",
         };
         Err(format!(
             "Expected pattern at line {}:{} (got {:?} '{}'){}",

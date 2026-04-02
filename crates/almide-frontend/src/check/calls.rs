@@ -349,9 +349,24 @@ impl Checker {
             let expected_resolved = self.env.resolve_named(&expected);
             let arg_resolved = self.env.resolve_named(arg_ty);
             if types_mismatch(&expected_resolved, &arg_resolved) {
+                let hint = if let Ty::Named(name, args) = &expected {
+                    let n = name.as_str();
+                    let is_likely_typevar = args.is_empty()
+                        && !n.is_empty()
+                        && n.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
+                        && !self.env.types.contains_key(name)
+                        && !self.env.constructors.contains_key(name);
+                    if is_likely_typevar {
+                        format!("'{}' is not a known type. To use it as a type parameter, declare it: fn {}[{}](...)", n, fn_name, n)
+                    } else {
+                        Self::hint_with_conversion("Fix the argument type", &expected, arg_ty)
+                    }
+                } else {
+                    Self::hint_with_conversion("Fix the argument type", &expected, arg_ty)
+                };
                 let mut diag = super::err(
                     format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
-                    Self::hint_with_conversion("Fix the argument type", &expected, arg_ty),
+                    hint,
                     format!("call to {}()", fn_name)).with_code("E005");
                 if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
                     diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));

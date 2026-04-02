@@ -1,4 +1,5 @@
 <!-- description: Call C libraries from Almide via @extern(c, ...) and extern "C" codegen -->
+<!-- done: 2026-03-29 -->
 # C FFI — Call C Libraries from Almide
 
 ## Goal

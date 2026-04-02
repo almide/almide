@@ -1,4 +1,5 @@
 <!-- description: Nested pattern exhaustiveness via Maranget's algorithm -->
+<!-- done: 2026-03-31 -->
 # Exhaustiveness Strengthening — Nested Patterns
 
 ## Current State
