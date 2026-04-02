@@ -67,3 +67,25 @@ test "zip_with" {
 ```
 
 Must pass on both `--target rust` and `--target wasm`.
+
+## Reference Architecture Insights
+
+Surveyed Gleam, Roc, Elm, Nickel, MoonBit compilers for relevant patterns:
+
+| Problem | Pattern | Source |
+|---|---|---|
+| Inference var unification | **Rigid vs. unbound distinction**: declared generics are rigid (never instantiated), inferred types are unbound (get fresh instances). Prevents mixing the two. | Gleam |
+| Monomorphization | **Variable → MonoTypeId cache** with deduplication. Walk inference solutions via `lower_var(subs, var)` to create concrete mono types. | Roc |
+| WASM type resolution | **Defunctionalization**: closures → tagged unions → switch dispatch. Eliminates indirect calls and function pointer types. | Roc |
+| Union-Find efficiency | **Rank-based pooling** (8 pools by variable rank) + **CPS unification** with lazy propagation. O(α(n)) amortized. | Elm |
+| Sound generalization | **Level-based polymorphism** (VarLevel u16): prevents unsound generalization when levels mismatch. | Nickel |
+
+### Recommended approach for Almide
+
+Adopt Gleam's **rigid/unbound** pattern:
+1. In `enter_generics`: mark TypeVars as **rigid** (new flag on TypeVar, or separate enum variant)
+2. In `check_named_call_with_type_args`: when building bindings for a called function's generics, if the binding resolves to a rigid TypeVar from the outer scope, use it directly instead of creating a fresh `?n`
+3. `resolve_inference_typevars`: rigid TypeVars pass through to IR untouched; only unbound `?n` become Unknown
+4. Mono: `substitute({A: Int})` works on rigid TypeVars as before
+
+This eliminates the `?n → Unknown → can't substitute` problem at its source.
