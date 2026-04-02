@@ -778,6 +778,14 @@ impl Checker {
                     for e in elements { self.bind_pattern(e, &Ty::Unknown); }
                 }
             }
+            ast::Pattern::List { elements } => {
+                let resolved = resolve_ty(ty, &self.uf);
+                let elem_ty = match &resolved {
+                    Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() => args[0].clone(),
+                    _ => Ty::Unknown,
+                };
+                for e in elements { self.bind_pattern(e, &elem_ty); }
+            }
             ast::Pattern::Some { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
             ast::Pattern::Ok { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
             ast::Pattern::Err { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }

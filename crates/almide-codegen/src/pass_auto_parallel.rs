@@ -312,7 +312,7 @@ fn collect_pattern_bindings(pattern: &IrPattern, vars: &mut std::collections::Ha
                 if let Some(p) = &f.pattern { collect_pattern_bindings(p, vars); }
             }
         }
-        IrPattern::Tuple { elements } => {
+        IrPattern::Tuple { elements } | IrPattern::List { elements } => {
             for p in elements { collect_pattern_bindings(p, vars); }
         }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {

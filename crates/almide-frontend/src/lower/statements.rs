@@ -151,6 +151,14 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             let inner_ty = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown };
             IrPattern::Err { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
+        ast::Pattern::List { elements } => {
+            let elem_ty = match ty {
+                Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() => args[0].clone(),
+                _ => Ty::Unknown,
+            };
+            let ir_elems = elements.iter().map(|e| lower_pattern(ctx, e, &elem_ty)).collect();
+            IrPattern::List { elements: ir_elems }
+        }
     }
 }
 

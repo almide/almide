@@ -69,6 +69,9 @@ fn lower(pat: &ast::Pattern) -> Pat {
         ast::Pattern::Tuple { elements, .. } => {
             Pat::Ctor(CtorId::Tuple, elements.iter().map(lower).collect())
         }
+        ast::Pattern::List { elements, .. } => {
+            Pat::Ctor(CtorId::Tuple, elements.iter().map(lower).collect())
+        }
         ast::Pattern::Literal { value, .. } => lower_literal(value),
     }
 }

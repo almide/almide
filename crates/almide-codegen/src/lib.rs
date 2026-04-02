@@ -32,6 +32,7 @@ pub mod pass_builtin_lowering;
 pub mod pass_capture_clone;
 pub mod pass_clone;
 pub mod pass_fan_lowering;
+pub mod pass_list_pattern;
 pub mod pass_match_lowering;
 pub mod pass_match_subject;
 pub mod pass_result_erasure;

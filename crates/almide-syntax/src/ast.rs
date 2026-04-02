@@ -109,6 +109,7 @@ pub enum Pattern {
     None,
     Ok { inner: Box<Pattern> },
     Err { inner: Box<Pattern> },
+    List { elements: Vec<Pattern> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -360,7 +361,7 @@ fn visit_pattern_exprs_mut(pat: &mut Pattern, f: &mut impl FnMut(&mut Expr)) {
         Pattern::RecordPattern { fields, .. } => {
             for fp in fields.iter_mut() { if let Some(ref mut p) = fp.pattern { visit_pattern_exprs_mut(p, f); } }
         }
-        Pattern::Tuple { elements } => { for e in elements.iter_mut() { visit_pattern_exprs_mut(e, f); } }
+        Pattern::Tuple { elements } | Pattern::List { elements } => { for e in elements.iter_mut() { visit_pattern_exprs_mut(e, f); } }
         Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => visit_pattern_exprs_mut(inner, f),
         Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}
     }
