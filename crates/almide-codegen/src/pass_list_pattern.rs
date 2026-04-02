@@ -57,9 +57,19 @@ impl NanoPass for ListPatternLoweringPass {
     }
 }
 
-/// Check if a match has any list pattern arms.
+/// Check if a match has any list pattern arms (recursively checks nested patterns).
 fn has_list_patterns(arms: &[IrMatchArm]) -> bool {
-    arms.iter().any(|arm| matches!(&arm.pattern, IrPattern::List { .. }))
+    arms.iter().any(|arm| pattern_contains_list(&arm.pattern))
+}
+
+fn pattern_contains_list(pat: &IrPattern) -> bool {
+    match pat {
+        IrPattern::List { .. } => true,
+        IrPattern::Tuple { elements } => elements.iter().any(pattern_contains_list),
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => pattern_contains_list(inner),
+        IrPattern::Constructor { args, .. } => args.iter().any(pattern_contains_list),
+        _ => false,
+    }
 }
 
 /// Recursively rewrite expressions, desugaring match with list patterns.
@@ -297,6 +307,127 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                 kind: IrExprKind::If {
                     cond: Box::new(combined_cond),
                     then: Box::new(then_body),
+                    else_: Box::new(else_body),
+                },
+                ty: result_ty.clone(),
+                span: None,
+            }
+        }
+        // Tuple containing list patterns: extract list checks from tuple elements
+        IrPattern::Tuple { elements } if elements.iter().any(pattern_contains_list) => {
+            // Build conditions for list elements within the tuple
+            let tuple_tys = match &subject.ty {
+                Ty::Tuple(tys) => tys.clone(),
+                _ => vec![Ty::Unknown; elements.len()],
+            };
+            let mut conds: Vec<IrExpr> = Vec::new();
+            let mut stmts: Vec<IrStmt> = Vec::new();
+
+            for (i, elem_pat) in elements.iter().enumerate() {
+                let elem_access = IrExpr {
+                    kind: IrExprKind::TupleIndex {
+                        object: Box::new(subject.clone()),
+                        index: i,
+                    },
+                    ty: tuple_tys.get(i).cloned().unwrap_or(Ty::Unknown),
+                    span: None,
+                };
+                match elem_pat {
+                    IrPattern::List { elements: list_elems } => {
+                        // Length check
+                        let len_call = IrExpr {
+                            kind: IrExprKind::Call {
+                                target: CallTarget::Module { module: sym("list"), func: sym("len") },
+                                args: vec![elem_access.clone()],
+                                type_args: vec![],
+                            },
+                            ty: Ty::Int,
+                            span: None,
+                        };
+                        conds.push(IrExpr {
+                            kind: IrExprKind::BinOp {
+                                op: BinOp::Eq,
+                                left: Box::new(len_call),
+                                right: Box::new(IrExpr {
+                                    kind: IrExprKind::LitInt { value: list_elems.len() as i64 },
+                                    ty: Ty::Int,
+                                    span: None,
+                                }),
+                            },
+                            ty: Ty::Bool,
+                            span: None,
+                        });
+                        // Bind list elements
+                        let inner_elem_ty = match tuple_tys.get(i) {
+                            Some(Ty::Applied(TypeConstructorId::List, args)) if !args.is_empty() => args[0].clone(),
+                            _ => Ty::Unknown,
+                        };
+                        for (j, lp) in list_elems.iter().enumerate() {
+                            if let IrPattern::Bind { var, .. } = lp {
+                                stmts.push(IrStmt {
+                                    kind: IrStmtKind::Bind {
+                                        var: *var,
+                                        mutability: Mutability::Let,
+                                        ty: inner_elem_ty.clone(),
+                                        value: IrExpr {
+                                            kind: IrExprKind::IndexAccess {
+                                                object: Box::new(elem_access.clone()),
+                                                index: Box::new(IrExpr {
+                                                    kind: IrExprKind::LitInt { value: j as i64 },
+                                                    ty: Ty::Int,
+                                                    span: None,
+                                                }),
+                                            },
+                                            ty: inner_elem_ty.clone(),
+                                            span: None,
+                                        },
+                                    },
+                                    span: None,
+                                });
+                            }
+                        }
+                    }
+                    IrPattern::Bind { var, .. } => {
+                        stmts.push(IrStmt {
+                            kind: IrStmtKind::Bind {
+                                var: *var,
+                                mutability: Mutability::Let,
+                                ty: tuple_tys.get(i).cloned().unwrap_or(Ty::Unknown),
+                                value: elem_access,
+                            },
+                            span: None,
+                        });
+                    }
+                    _ => {} // Wildcard — no action
+                }
+            }
+
+            // Combine conditions
+            let combined_cond = if conds.is_empty() {
+                IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None }
+            } else {
+                conds.into_iter().reduce(|a, b| IrExpr {
+                    kind: IrExprKind::BinOp { op: BinOp::And, left: Box::new(a), right: Box::new(b) },
+                    ty: Ty::Bool,
+                    span: None,
+                }).unwrap()
+            };
+
+            let body = if stmts.is_empty() {
+                arm.body.clone()
+            } else {
+                IrExpr {
+                    kind: IrExprKind::Block { stmts, expr: Some(Box::new(arm.body.clone())) },
+                    ty: result_ty.clone(),
+                    span: None,
+                }
+            };
+
+            let else_body = build_list_if_chain(subject, rest, result_ty, vt);
+            IrExpr {
+                kind: IrExprKind::If {
+                    cond: Box::new(combined_cond),
+                    then: Box::new(body),
                     else_: Box::new(else_body),
                 },
                 ty: result_ty.clone(),
