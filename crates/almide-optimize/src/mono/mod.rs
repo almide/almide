@@ -92,11 +92,13 @@ pub fn monomorphize(program: &mut IrProgram) {
 
         // Rewrite call sites (all instances, including previous rounds)
         all_instances.extend(new);
-        rewrite_calls(program, &bound_fns, &all_instances);
 
-        // Track frontier: next round only scans these new functions
+        // Add new specialized functions BEFORE rewriting, so self-recursive
+        // calls within specialized functions also get rewritten.
         frontier_start = Some(program.functions.len());
         program.functions.extend(new_functions);
+
+        rewrite_calls(program, &bound_fns, &all_instances);
     }
 
     // Remove generic functions: both those with specialized instances AND
