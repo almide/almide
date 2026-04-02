@@ -2,7 +2,7 @@
 
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
-use super::helpers::{template_or, render_type_boxed_fn, render_type_rc_fn};
+use super::helpers::{template_or, render_type_boxed_fn, render_type_rc_fn, ty_has_named_typevar};
 
 pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
     match ty {
@@ -47,6 +47,11 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                 }
             }
             if args.is_empty() {
+                // If the type has generic parameters but no type arguments,
+                // emit `_` to let Rust infer the concrete type
+                if ctx.generic_types.contains(name) {
+                    return "_".to_string();
+                }
                 name.to_string()
             } else {
                 let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
@@ -58,6 +63,10 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             names.sort();
             // Check named records first (user-defined types)
             if let Some(n) = ctx.ann.named_records.get(&names) {
+                // If the struct is generic but no type args are present, let Rust infer
+                if ctx.generic_types.contains(&almide_base::intern::sym(n)) {
+                    return "_".to_string();
+                }
                 return n.clone();
             }
             // Check anonymous records
