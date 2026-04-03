@@ -278,7 +278,9 @@ impl Checker {
             ast::Decl::Test { body, .. } => {
                 self.env.push_scope();
                 let prev_call = self.env.can_call_effect; self.env.can_call_effect = true;
+                let prev_test = self.env.in_test_block; self.env.in_test_block = true;
                 self.infer_expr(body);
+                self.env.in_test_block = prev_test;
                 self.env.can_call_effect = prev_call;
                 self.env.pop_scope();
             }

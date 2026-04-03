@@ -65,11 +65,8 @@ impl NanoPass for ResultPropagationPass {
             if !lifted_fns.is_empty() {
                 func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
             }
-            // Auto-? insertion disabled — use explicit ! operator instead
+            // fan blocks in tests still need Try insertion for effect fn calls
             if func.is_test {
-                if !lifted_fns.is_empty() {
-                    func.body = insert_try_for_lifted(std::mem::take(&mut func.body), &lifted_fns);
-                }
                 func.body = insert_try_in_fan(std::mem::take(&mut func.body));
             }
         }
@@ -335,7 +332,7 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
     match expr.kind {
-        IrExprKind::Call { ref target, ref args, .. } => {
+        IrExprKind::Call { ref target, .. } => {
             let lifted_ty = match target {
                 CallTarget::Named { name } => lifted.get::<str>(name),
                 CallTarget::Module { module, func } => lifted.get(&format!("{}.{}", module, func)),
@@ -357,7 +354,6 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                 };
             }
             // Recurse into args to find nested lifted calls
-            let _ = args; // avoid unused warning from ref above
             match expr.kind {
                 IrExprKind::Call { target, args, type_args } => {
                     let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();

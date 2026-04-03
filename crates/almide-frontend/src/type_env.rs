@@ -68,6 +68,8 @@ pub struct TypeEnv {
     pub impl_validated: std::collections::HashSet<(Sym, Sym)>,
     /// Function declaration locations: fn key -> (line, col)
     pub fn_decl_spans: std::collections::HashMap<Sym, (usize, usize)>,
+    /// Whether we're inside a test block (effect fn calls return Result[T, String])
+    pub in_test_block: bool,
 }
 
 impl TypeEnv {
@@ -102,6 +104,7 @@ impl TypeEnv {
             type_protocols: std::collections::HashMap::new(),
             impl_validated: std::collections::HashSet::new(),
             fn_decl_spans: std::collections::HashMap::new(),
+            in_test_block: false,
         }
     }
 

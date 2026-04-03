@@ -1,0 +1,38 @@
+// Test block result semantics: effect fn calls return Result[T, String] in test blocks.
+// No auto-unwrap. Use `!` for explicit unwrap, or assert on ok/err directly.
+
+effect fn safe_div(a: Int, b: Int) -> Int = {
+  guard b != 0 else err("division by zero")!
+  a / b
+}
+
+effect fn validate_age(age: Int) -> String = {
+  guard age >= 0 else err("negative age")!
+  guard age < 200 else err("unrealistic age")!
+  "valid"
+}
+
+test "effect fn ok" {
+  assert_eq(safe_div(10, 2), ok(5))
+}
+
+test "effect fn err" {
+  assert_eq(safe_div(10, 0), err("division by zero"))
+}
+
+test "chained ok" {
+  assert_eq(validate_age(25), ok("valid"))
+}
+
+test "chained err first guard" {
+  assert_eq(validate_age(-1), err("negative age"))
+}
+
+test "chained err second guard" {
+  assert_eq(validate_age(300), err("unrealistic age"))
+}
+
+test "explicit unwrap with !" {
+  assert_eq(safe_div(10, 2)!, 5)
+  assert_eq(validate_age(25)!, "valid")
+}

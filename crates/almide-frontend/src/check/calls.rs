@@ -286,6 +286,15 @@ impl Checker {
             }
         }
         let ret = if final_bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &final_bindings) };
+        // In test blocks, user-defined effect fn calls that return non-Result T are reported as Result[T, String].
+        // This removes the implicit auto-unwrap and lets users choose: `!` to unwrap, or match on ok/err.
+        // Only user-defined fns are wrapped — stdlib effect fns are not lifted by codegen,
+        // so their runtime implementations return raw values (not Result).
+        if self.env.in_test_block && sig.is_effect && !ret.is_result()
+            && self.env.functions.contains_key(&sym(name))
+        {
+            return Ty::result(ret, Ty::String);
+        }
         ret
     }
 

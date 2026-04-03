@@ -122,6 +122,6 @@ effect fn dispatch(cmd: String) -> Unit = {
 }
 
 test "effect fn match dispatch" {
-  let _r1 = dispatch("a")
-  let _r2 = dispatch("x")
+  dispatch("a")!
+  dispatch("x")!
 }

@@ -6,12 +6,11 @@
 
 ## Active
 
-4 items
+3 items
 
 | Item | Description |
 |------|-------------|
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with Flow[T] and compiler-driven optimization |
-| [Flexible Error Types](active/flexible-error-types.md) | Allow user-defined error types in Result and effect fn |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 
@@ -47,10 +46,10 @@
 
 ## Done
 
-188 items
+191 items
 
 <details>
-<summary>Show all 188 completed items</summary>
+<summary>Show all 191 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|

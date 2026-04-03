@@ -254,6 +254,21 @@ test "description" {
 }
 ```
 
+### Testing effect fn error cases
+
+In test blocks, `effect fn` calls return `Result[T, String]` — no auto-unwrap. Use `!` for the value, or assert on `ok`/`err` directly:
+
+```almide
+effect fn validate(n: Int) -> Int = {
+  guard n > 0 else err("bad")!
+  n
+}
+
+test "ok value" { assert_eq(validate(5)!, 5) }          // explicit unwrap
+test "ok result" { assert_eq(validate(5), ok(5)) }      // Result-aware
+test "err" { assert_eq(validate(-1), err("bad")) }      // natural
+```
+
 ## Built-in functions
 ```
 println(s)                 // print line to stdout
