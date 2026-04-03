@@ -87,13 +87,12 @@ test "empty for" {
   assert_eq(n, 99)
 }
 
-// zip_with[A, B, C] — works on Rust but WASM has inference var issue.
-// See roadmap: type-inference-unification.md
-// fn zip_with[A, B, C](xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C] =
-//   list.zip(xs, ys) |> list.map((p) => { let (a, b) = p; f(a, b) })
-// test "3-param generic" {
-//   assert_eq(zip_with([1,2], ["a","b"], (n, s) => int.to_string(n) + s), ["1a", "2b"])
-// }
+fn zip_with[A, B, C](xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C] =
+  list.zip(xs, ys) |> list.map((p) => { let (a, b) = p; f(a, b) })
+
+test "3-param generic" {
+  assert_eq(zip_with([1,2], ["a","b"], (n, s) => int.to_string(n) + s), ["1a", "2b"])
+}
 
 effect fn safe_div(a: Int, b: Int) -> Result[Int, String] =
   if b == 0 then err("div by zero")

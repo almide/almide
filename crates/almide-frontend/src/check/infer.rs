@@ -773,8 +773,15 @@ impl Checker {
                 let resolved = resolve_ty(ty, &self.uf);
                 if let Ty::Tuple(tys) = &resolved {
                     for (i, e) in elements.iter().enumerate() { self.bind_pattern(e, tys.get(i).unwrap_or(&Ty::Unknown)); }
+                } else if super::types::is_inference_var(&resolved).is_some() {
+                    // Type is an unresolved inference var (e.g., lambda parameter).
+                    // Create fresh vars for each element and constrain: ?N = (?a, ?b, ...).
+                    // When the outer call context later resolves ?N, the element vars
+                    // get their correct types through the constraint chain.
+                    let elem_vars: Vec<Ty> = elements.iter().map(|_| self.fresh_var()).collect();
+                    self.constrain(resolved, Ty::Tuple(elem_vars.clone()), "tuple destructure");
+                    for (e, ev) in elements.iter().zip(elem_vars.iter()) { self.bind_pattern(e, ev); }
                 } else {
-                    // Type not yet resolved — bind each element as Unknown so variables are in scope
                     for e in elements { self.bind_pattern(e, &Ty::Unknown); }
                 }
             }

@@ -1,4 +1,5 @@
 <!-- description: Unify inference variables with named TypeVars in generic function bodies -->
+<!-- done: 2026-04-03 -->
 # Type Inference Unification for Generic Functions
 
 ## Problem

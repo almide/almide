@@ -256,23 +256,17 @@ test "description" {
 
 ### Testing effect fn error cases
 
-`effect fn foo() -> Int` auto-unwraps in tests — the result is `Int`, not `Result`. To test both ok and err paths, declare the return type as `Result[T, String]` explicitly:
+In test blocks, `effect fn` calls return `Result[T, String]` — no auto-unwrap. Use `!` for the value, or assert on `ok`/`err` directly:
 
 ```almide
-// ✗ Can't test err case (auto-unwrapped to Int)
 effect fn validate(n: Int) -> Int = {
   guard n > 0 else err("bad")!
   n
 }
 
-// ✓ Can test both ok and err
-effect fn validate(n: Int) -> Result[Int, String] = {
-  guard n > 0 else return err("bad")
-  ok(n)
-}
-
-test "ok" { assert_eq(validate(5), ok(5)) }
-test "err" { assert_eq(validate(-1), err("bad")) }
+test "ok value" { assert_eq(validate(5)!, 5) }          // explicit unwrap
+test "ok result" { assert_eq(validate(5), ok(5)) }      // Result-aware
+test "err" { assert_eq(validate(-1), err("bad")) }      // natural
 ```
 
 ## Built-in functions

@@ -105,11 +105,11 @@ effect fn unwrap_option_some() -> Int = {
 }
 
 test "! Result ok in effect fn" {
-  assert_eq(unwrap_result_ok(), 42)
+  assert_eq(unwrap_result_ok()!, 42)
 }
 
 test "! Option some in effect fn" {
-  assert_eq(unwrap_option_some(), 10)
+  assert_eq(unwrap_option_some()!, 10)
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -118,18 +118,17 @@ test "! Option some in effect fn" {
 
 effect fn returns_int() -> Int = 42
 effect fn returns_string() -> String = "hello"
-// NOTE: effect fn calling another effect fn works via direct call.
-// The type checker sees T (not Result[T, String]) since wrapping happens in codegen.
-// This means ! and ?? cannot be used between effect fns — direct call is the pattern.
+// NOTE: effect fn calling another effect fn works via direct call within effect fn bodies.
+// In test blocks, effect fn calls return Result[T, String] — use ! for explicit unwrap.
 effect fn calls_effect() -> Int = returns_int()
 
 test "effect fn returns value directly" {
-  assert_eq(returns_int(), 42)
-  assert_eq(returns_string(), "hello")
+  assert_eq(returns_int()!, 42)
+  assert_eq(returns_string()!, "hello")
 }
 
 test "effect fn calls another effect fn" {
-  assert_eq(calls_effect(), 42)
+  assert_eq(calls_effect()!, 42)
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -152,7 +151,7 @@ test "guard in pure fn" {
 }
 
 test "guard in effect fn with err propagation" {
-  assert_eq(guard_effect(5), 10)
+  assert_eq(guard_effect(5)!, 10)
 }
 
 // guard in loop
@@ -247,7 +246,7 @@ effect fn nested_unwrap() -> Int = {
 }
 
 test "nested: unwrap Result then Option" {
-  assert_eq(nested_unwrap(), 42)
+  assert_eq(nested_unwrap()!, 42)
 }
 
 // ═══════════════════════════════════════════════════════════════════

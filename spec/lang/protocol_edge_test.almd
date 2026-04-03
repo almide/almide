@@ -171,7 +171,7 @@ effect fn Event.log_info(e: Event) -> String = e.message
 
 test "protocol with effect fn" {
   let e = Event { message: "started" };
-  assert_eq(e.log_info(), "started")
+  assert_eq(e.log_info()!, "started")
 }
 
 // ── Protocol method that returns Bool (predicate pattern) ──

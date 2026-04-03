@@ -22,7 +22,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "almide"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "almide-base",
  "almide-codegen",
@@ -44,7 +44,7 @@ dependencies = [
 
 [[package]]
 name = "almide-base"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "lasso",
  "serde",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "almide-codegen"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "almide-base",
  "almide-ir",
@@ -65,7 +65,7 @@ dependencies = [
 
 [[package]]
 name = "almide-frontend"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "almide-base",
  "almide-ir",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "almide-ir"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "almide-base",
  "almide-lang",
@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "almide-lang"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "almide-base",
  "almide-syntax",
@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "almide-optimize"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "almide-base",
  "almide-ir",
@@ -106,7 +106,7 @@ dependencies = [
 
 [[package]]
 name = "almide-syntax"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "almide-base",
  "serde",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "almide-tools"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "almide-base",
  "almide-ir",
@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "almide-types"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "almide-base",
  "serde",

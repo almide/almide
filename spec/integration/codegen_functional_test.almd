@@ -52,7 +52,7 @@ effect fn running_sum(xs: List[Int]) -> List[Int] = {
 }
 
 test "closure mutation (FnMut)" {
-  assert_eq(running_sum([1, 2, 3, 4]), [1, 3, 6, 10])
+  assert_eq(running_sum([1, 2, 3, 4])!, [1, 3, 6, 10])
 }
 
 test "nested map with closures" {

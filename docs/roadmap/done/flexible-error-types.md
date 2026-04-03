@@ -1,4 +1,5 @@
 <!-- description: User-defined error types in Result, and test block Result visibility -->
+<!-- done: 2026-04-03 -->
 # Flexible Error Types
 
 ## Current State
