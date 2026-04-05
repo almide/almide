@@ -147,6 +147,25 @@ pub fn collect_named_records(program: &IrProgram) -> HashMap<Vec<String>, String
     map
 }
 
+/// Map each named record type to its total field count so destructure
+/// patterns can decide whether they need a trailing `..`.
+pub fn collect_record_field_counts(program: &IrProgram) -> HashMap<String, usize> {
+    let mut map = HashMap::new();
+    for td in &program.type_decls {
+        if let IrTypeDeclKind::Record { fields } = &td.kind {
+            map.insert(td.name.to_string(), fields.len());
+        }
+    }
+    for module in &program.modules {
+        for td in &module.type_decls {
+            if let IrTypeDeclKind::Record { fields } = &td.kind {
+                map.insert(td.name.to_string(), fields.len());
+            }
+        }
+    }
+    map
+}
+
 pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, String>) -> HashMap<Vec<String>, String> {
     let named_set: HashSet<Vec<String>> = named.keys().cloned().collect();
     let mut seen: HashSet<Vec<String>> = HashSet::new();

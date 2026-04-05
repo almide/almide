@@ -276,8 +276,13 @@ pub fn register_impl_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
             if let Some(proto_method) = proto_def.methods.iter().find(|pm| pm.name == *name) {
                 let gnames: Vec<Sym> = generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default();
                 for gn in &gnames { env.types.insert(*gn, Ty::TypeVar(*gn)); }
-                let impl_params: Vec<Ty> = params.iter().map(|p| resolve(env, &p.ty)).collect();
-                let impl_ret = resolve(env, return_type);
+                // Resolve impl signatures structurally so nominal types
+                // (e.g. `d: Dog`) unify with the protocol's structural
+                // expectation (Self → `{ name: String }`).
+                let impl_params: Vec<Ty> = params.iter()
+                    .map(|p| env.resolve_named(&resolve(env, &p.ty)))
+                    .collect();
+                let impl_ret = env.resolve_named(&resolve(env, return_type));
                 for gn in &gnames { env.types.remove(gn); }
 
                 let expected_params: Vec<Ty> = proto_method.params.iter()

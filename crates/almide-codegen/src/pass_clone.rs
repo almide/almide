@@ -198,13 +198,18 @@ fn count_syntactic_stmt(stmt: &IrStmt, counts: &mut HashMap<VarId, u32>) {
 // ── Clone ID classification ────────────────────────────────────────
 
 fn needs_clone(ty: &Ty) -> bool {
-    matches!(ty,
+    match ty {
         Ty::String | Ty::Applied(_, _) |
         Ty::Record { .. } | Ty::OpenRecord { .. } |
         Ty::Named(_, _) |
         Ty::Variant { .. } | Ty::Fn { .. } |
-        Ty::TypeVar(_)
-    )
+        Ty::TypeVar(_) => true,
+        // A tuple needs cloning when any element needs cloning. Pure numeric
+        // tuples like `(Int, Int)` are Copy in the Rust target and can be
+        // moved out of an index access directly.
+        Ty::Tuple(elements) => elements.iter().any(needs_clone),
+        _ => false,
+    }
 }
 
 /// Split clone candidates into "always clone" and "eligible for last-use move".

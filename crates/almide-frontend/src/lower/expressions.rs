@@ -304,6 +304,19 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
         // ── Access ──
         ast::ExprKind::Member { object, field, .. } => {
+            // Module function used as first-class value: `string.len` →
+            // lowered to a wrapper lambda `(x) => string.len(x)`. This lets
+            // user code write `list.map(xs, string.len)` without a manual
+            // eta expansion.
+            if let ast::ExprKind::Ident { name: mod_name, .. } = &object.kind {
+                if let Ty::Fn { params, ret } = &ty {
+                    let is_module_fn = crate::stdlib::lookup_sig(mod_name, field).is_some()
+                        || ctx.env.functions.contains_key(&sym(&format!("{}.{}", mod_name, field)));
+                    if is_module_fn {
+                        return eta_expand_module_fn(ctx, *mod_name, *field, params.clone(), (**ret).clone(), span);
+                    }
+                }
+            }
             let obj = lower_expr(ctx, object);
             ctx.mk(IrExprKind::Member { object: Box::new(obj), field: *field }, ty, span)
         }
@@ -463,4 +476,55 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             }, ty, span)
         }
     }
+}
+
+/// Eta-expand a module function reference (`string.len`, `list.map`, ...)
+/// into a lambda that calls it. Used when the reference appears in value
+/// position rather than as a callee, e.g. `xs |> list.map(string.len)`.
+fn eta_expand_module_fn(
+    ctx: &mut LowerCtx,
+    module: almide_base::intern::Sym,
+    field: almide_base::intern::Sym,
+    params: Vec<Ty>,
+    ret_ty: Ty,
+    span: Option<ast::Span>,
+) -> IrExpr {
+    ctx.push_scope();
+    let mut param_vars: Vec<(VarId, Ty)> = Vec::with_capacity(params.len());
+    for (i, pt) in params.iter().enumerate() {
+        let name = format!("__eta_{}", i);
+        let var = ctx.define_var(&name, pt.clone(), Mutability::Let, span.clone());
+        param_vars.push((var, pt.clone()));
+    }
+    let args: Vec<IrExpr> = param_vars.iter()
+        .map(|(var, pt)| ctx.mk(IrExprKind::Var { id: *var }, pt.clone(), span.clone()))
+        .collect();
+    // For stdlib modules (e.g. `string`) use CallTarget::Module so codegen
+    // picks the stdlib runtime function. For user convention methods
+    // (`Type.method`) use CallTarget::Named with the dotted key.
+    let mod_name = module.as_str();
+    let target = if crate::stdlib::is_stdlib_module(mod_name)
+        || crate::stdlib::is_any_stdlib(mod_name)
+        || ctx.env.user_modules.contains(&module)
+        || ctx.env.import_table.aliases.contains_key(&module)
+    {
+        let resolved = ctx.env.import_table.aliases.get(&module).copied().unwrap_or(module);
+        CallTarget::Module { module: resolved, func: field }
+    } else {
+        CallTarget::Named { name: sym(&format!("{}.{}", module, field)) }
+    };
+    let call = ctx.mk(IrExprKind::Call {
+        target, args, type_args: vec![],
+    }, ret_ty.clone(), span.clone());
+    ctx.pop_scope();
+    let lambda_id = Some(ctx.next_lambda_id());
+    let lambda_ty = Ty::Fn {
+        params: params.clone(),
+        ret: Box::new(ret_ty),
+    };
+    ctx.mk(IrExprKind::Lambda {
+        params: param_vars,
+        body: Box::new(call),
+        lambda_id,
+    }, lambda_ty, span)
 }

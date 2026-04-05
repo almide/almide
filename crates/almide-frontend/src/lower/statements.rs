@@ -18,15 +18,31 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
     };
 
     let kind = match stmt {
-        ast::Stmt::Let { name, value, .. } => {
-            let ir_val = lower_expr(ctx, value);
-            let val_ty = ir_val.ty.clone();
+        ast::Stmt::Let { name, ty, value, .. } => {
+            let mut ir_val = lower_expr(ctx, value);
+            // If the user wrote `let x: T = ...`, honor that annotation over the
+            // structurally-inferred type of the value. Otherwise two nominal
+            // record types with identical fields (e.g. `Dog` and `Cat`) collide
+            // at codegen time because the value keeps its structural type.
+            let val_ty = if let Some(te) = ty {
+                let declared = super::types::resolve_type_expr(te);
+                override_record_literal_ty(&mut ir_val, &declared);
+                declared
+            } else {
+                ir_val.ty.clone()
+            };
             let var = ctx.define_var(name, val_ty.clone(), Mutability::Let, span);
             IrStmtKind::Bind { var, mutability: Mutability::Let, ty: val_ty, value: ir_val }
         }
-        ast::Stmt::Var { name, value, .. } => {
-            let ir_val = lower_expr(ctx, value);
-            let val_ty = ir_val.ty.clone();
+        ast::Stmt::Var { name, ty, value, .. } => {
+            let mut ir_val = lower_expr(ctx, value);
+            let val_ty = if let Some(te) = ty {
+                let declared = super::types::resolve_type_expr(te);
+                override_record_literal_ty(&mut ir_val, &declared);
+                declared
+            } else {
+                ir_val.ty.clone()
+            };
             let var = ctx.define_var(name, val_ty.clone(), Mutability::Var, span);
             IrStmtKind::Bind { var, mutability: Mutability::Var, ty: val_ty, value: ir_val }
         }
@@ -70,6 +86,33 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
     };
 
     IrStmt { kind, span }
+}
+
+/// Retag an anonymous record literal's IR type with the declared nominal type.
+///
+/// Record literals are inferred as structural `Ty::Record { fields }`. When
+/// assigned to a let with an explicit nominal annotation (e.g. `let d: Dog`),
+/// the declared type should win. Otherwise multiple nominal types with
+/// identical field shapes (Dog vs Cat, both `{name: String}`) collide at
+/// codegen because `collect_named_records` keys by sorted field names.
+fn override_record_literal_ty(ir_val: &mut IrExpr, declared: &Ty) {
+    if !matches!(declared, Ty::Named(_, _)) { return; }
+    match &mut ir_val.kind {
+        IrExprKind::Record { .. } => {
+            if matches!(ir_val.ty, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Unknown) {
+                ir_val.ty = declared.clone();
+            }
+        }
+        // The literal may be wrapped in a trivial block (e.g. `let x = { ... }`
+        // can lower as Block { expr: Some(Record) }). Recurse into the tail.
+        IrExprKind::Block { expr: Some(inner), .. } => {
+            override_record_literal_ty(inner, declared);
+            if matches!(ir_val.ty, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Unknown) {
+                ir_val.ty = declared.clone();
+            }
+        }
+        _ => {}
+    }
 }
 
 // ── Pattern lowering ────────────────────────────────────────────

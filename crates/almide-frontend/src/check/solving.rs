@@ -23,9 +23,18 @@ impl Checker {
                         "Fix the expression type or change the expected type",
                         &exp, &act,
                     );
+                    // Temporarily swap in the constraint's own span so the
+                    // error is reported at the call site where the constraint
+                    // was introduced, not at wherever checking happened to
+                    // end up.
+                    let saved_span = self.current_span;
+                    if c.span.is_some() {
+                        self.current_span = c.span;
+                    }
                     self.emit(err(
                         format!("type mismatch in {}: expected {} but got {}", c.context, exp.display(), act.display()),
                         hint, c.context.clone()).with_code("E001"));
+                    self.current_span = saved_span;
                 }
             }
         }

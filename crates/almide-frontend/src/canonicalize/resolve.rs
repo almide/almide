@@ -26,11 +26,28 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
             "RawPtr" => Ty::RawPtr,
             "Path" => Ty::String,
             other => {
+                // - Generic type parameters (T, U, Self, ...) resolve via
+                //   known_types as `Ty::TypeVar`.
+                // - Record/Variant/OpenRecord declarations must keep their
+                //   nominal identity — expanding them to the structural form
+                //   here would collapse two distinct types with identical
+                //   shapes (e.g. Dog and Cat both `{name: String}`). They
+                //   come back as `Ty::Named` and are expanded on demand via
+                //   `resolve_named`.
+                // - Transparent aliases (e.g. `type Score = Int`) follow
+                //   through to the target type so `a + b` works.
                 if let Some(types) = known_types {
-                    types.get(&sym(other)).cloned().unwrap_or(Ty::Named(other.into(), vec![]))
-                } else {
-                    Ty::Named(sym(other), vec![])
+                    if let Some(found) = types.get(&sym(other)) {
+                        match found {
+                            Ty::TypeVar(tv) => return Ty::TypeVar(*tv),
+                            Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. } => {
+                                // nominal — keep as Named
+                            }
+                            other_ty => return other_ty.clone(),
+                        }
+                    }
                 }
+                Ty::Named(sym(other), vec![])
             }
         },
         ast::TypeExpr::Generic { name, args } => {

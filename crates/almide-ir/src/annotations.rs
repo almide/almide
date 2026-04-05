@@ -8,6 +8,10 @@ pub struct CodegenAnnotations {
     pub ctor_to_enum: HashMap<String, String>,
     pub anon_records: HashMap<Vec<String>, String>,
     pub named_records: HashMap<Vec<String>, String>,
+    /// Field count of each nominal record type (name → number of fields).
+    /// Used to decide whether a record destructure pattern needs a trailing
+    /// `..` to cover fields the user didn't name.
+    pub record_field_counts: HashMap<String, usize>,
     pub recursive_enums: HashSet<String>,
     pub boxed_fields: HashSet<(String, String)>,
     pub default_fields: HashMap<(String, String), IrExpr>,

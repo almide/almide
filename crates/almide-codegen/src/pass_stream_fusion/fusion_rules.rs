@@ -59,6 +59,15 @@ pub(super) fn is_range_call(target: &CallTarget) -> bool {
 pub(super) fn try_eliminate_identity_map(expr: IrExpr) -> Option<IrExpr> {
     if let IrExprKind::Call { ref target, ref args, .. } = expr.kind {
         if is_map_call(target) && args.len() >= 2 && is_identity_lambda(&args[1]) {
+            // `list.map(xs, x => x)` collapses to `xs` ONLY when `xs` is
+            // already materialized as a list. A Range literal
+            // (`0..5 |> list.map(x => x)`) would otherwise lose the
+            // implicit `.collect::<Vec<_>>()` that the map call normally
+            // provides, leaving a raw `Range<i64>` where a `Vec<i64>` is
+            // expected.
+            if matches!(args[0].kind, IrExprKind::Range { .. }) {
+                return None;
+            }
             return Some(args[0].clone());
         }
     }

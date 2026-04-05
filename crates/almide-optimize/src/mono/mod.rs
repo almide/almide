@@ -75,7 +75,7 @@ pub fn monomorphize(program: &mut IrProgram) {
         // Specialize new functions
         let mut new_functions = Vec::new();
         for ((fn_name, suffix), bindings) in &new {
-            if let Some(orig) = program.functions.iter().find(|f| f.name == *fn_name) {
+            if let Some(orig) = program.functions.iter().find(|f| !f.is_test && f.name == *fn_name) {
                 new_functions.push(specialize_function(orig, suffix, bindings));
             }
         }
@@ -102,12 +102,17 @@ pub fn monomorphize(program: &mut IrProgram) {
     }
 
     // Remove generic functions: both those with specialized instances AND
-    // those with no call sites (unused generics still carry TypeVars)
+    // those with no call sites (unused generics still carry TypeVars).
+    //
+    // IMPORTANT: tests may share a name with a function (e.g. `fn wrap_all[T]`
+    // and `test "wrap_all"` both lower to `name = "wrap_all"`). Only drop
+    // *generic non-test* functions — never a test, regardless of name.
     let mono_fn_names: std::collections::HashSet<String> = all_instances.keys().map(|(name, _)| name.clone()).collect();
     program.functions.retain(|f| {
+        if f.is_test { return true; } // tests always survive mono
         if mono_fn_names.contains::<str>(&f.name) { return false; } // replaced by specialized
         // Also remove generic functions with no instances (unused)
-        if f.generics.as_ref().map_or(false, |g| !g.is_empty()) && !f.is_test {
+        if f.generics.as_ref().map_or(false, |g| !g.is_empty()) {
             return false;
         }
         true

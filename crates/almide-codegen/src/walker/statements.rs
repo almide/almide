@@ -270,6 +270,16 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             // For record patterns with empty name, resolve from value type
             let pat_str = match pattern {
                 IrPattern::RecordPattern { name, fields, rest } if name.is_empty() => {
+                    // Determine the total field count of the value type so we
+                    // can automatically insert `..` when the pattern only
+                    // destructures a subset (otherwise Rust complains with
+                    // E0027 "pattern does not mention field X").
+                    let total_fields: Option<usize> = match &value.ty {
+                        Ty::Named(n, _) => ctx.ann.record_field_counts.get(n.as_str()).copied(),
+                        Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } =>
+                            Some(ty_fields.len()),
+                        _ => None,
+                    };
                     let type_name = match &value.ty {
                         Ty::Named(n, _) => n.to_string(),
                         Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
@@ -293,7 +303,9 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                             None => f.name.clone(),
                         })
                         .collect::<Vec<_>>().join(", ");
-                    if *rest {
+                    let needs_rest = *rest
+                        || total_fields.map_or(false, |n| fields.len() < n);
+                    if needs_rest {
                         let construct = if fields_str.is_empty() { "record_pattern_rest_empty" } else { "record_pattern_rest" };
                         ctx.templates.render_with(construct, None, &[], &[("name", qualified.as_str()), ("fields", fields_str.as_str())])
                             .unwrap_or_else(|| format!("{} {{ {} }}", qualified, fields_str))

@@ -27,7 +27,7 @@ use types::render_type as render_type_fn;
 use expressions::render_expr as render_expr_fn;
 use statements::render_stmt as render_stmt_fn;
 use helpers::{terminate_stmt, indent_lines};
-use declarations::{render_type_decl, collect_named_records, collect_anon_records};
+use declarations::{render_type_decl, collect_named_records, collect_anon_records, collect_record_field_counts};
 
 /// Render context: carries the variable table, target, and annotations.
 /// The walker NEVER checks types — all codegen decisions come from annotations.
@@ -302,6 +302,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Build anonymous record maps (populated by target-specific pipeline)
     ctx.ann.named_records = collect_named_records(program);
     ctx.ann.anon_records = collect_anon_records(program, &ctx.ann.named_records);
+    ctx.ann.record_field_counts = collect_record_field_counts(program);
 
     let mut parts = Vec::new();
 

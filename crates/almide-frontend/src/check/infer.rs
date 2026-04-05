@@ -106,6 +106,27 @@ impl Checker {
             }
 
             ExprKind::Member { object, field, .. } => {
+                // Module function used as a first-class value: `string.len`,
+                // `list.map`, etc. Detect this BEFORE inferring the object
+                // (which would fail because `string` is not a variable) and
+                // return the function's type signature.
+                if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
+                    if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
+                        self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
+                        return Ty::Fn {
+                            params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+                            ret: Box::new(sig.ret.clone()),
+                        };
+                    }
+                    let key = format!("{}.{}", mod_name, field);
+                    if let Some(sig) = self.env.functions.get(&sym(&key)).cloned() {
+                        self.type_map.insert(object.id, Ty::Unit);
+                        return Ty::Fn {
+                            params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+                            ret: Box::new(sig.ret.clone()),
+                        };
+                    }
+                }
                 let obj_ty = self.infer_expr(object);
                 let concrete = resolve_ty(&obj_ty, &self.uf);
                 self.resolve_field_type(&concrete, field)
