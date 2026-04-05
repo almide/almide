@@ -588,8 +588,12 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         type_idx: fd_readdir_type_idx,
     });
 
-    // Register type declarations (record and variant field layouts)
-    for td in &program.type_decls {
+    // Register type declarations (record and variant field layouts).
+    // Include both the main program and all imported modules so nominal
+    // types from `import mod` resolve during codegen.
+    let all_type_decls = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
+    for td in all_type_decls {
         match &td.kind {
             almide_ir::IrTypeDeclKind::Record { fields } => {
                 let field_list: Vec<(String, almide_lang::types::Ty)> = fields.iter()
