@@ -13,3 +13,4 @@ __pycache__/
 *.pyc
 research/benchmark/framework/config.yaml
 research/benchmark/framework/results/
+docs-site/
