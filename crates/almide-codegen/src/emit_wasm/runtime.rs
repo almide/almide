@@ -155,6 +155,13 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     );
     emitter.rt.list_eq = emitter.register_func("__list_eq", list_eq_ty);
 
+    // __list_list_str_cmp(a: i32, b: i32) -> i32 (lexicographic compare of
+    // List[String] lists; returns negative / 0 / positive like memcmp).
+    let llcmp_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32], vec![ValType::I32],
+    );
+    emitter.rt.list_list_str_cmp = emitter.register_func("__list_list_str_cmp", llcmp_ty);
+
     // __concat_list(a: i32, b: i32, elem_size: i32) -> i32
     let concat_list_ty = emitter.register_type(
         vec![ValType::I32, ValType::I32, ValType::I32], vec![ValType::I32],
@@ -223,6 +230,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::runtime_eq::compile_result_eq_i64_str(emitter);
     super::runtime_eq::compile_mem_eq(emitter);
     super::runtime_eq::compile_list_eq(emitter);
+    super::runtime_eq::compile_list_list_str_cmp(emitter);
     super::runtime_eq::compile_concat_list(emitter);
     super::runtime_eq::compile_int_parse(emitter);
     super::rt_numeric::compile_int_from_hex(emitter);

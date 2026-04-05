@@ -311,23 +311,32 @@ impl FuncCompiler<'_> {
               // Same tag. If tag==0 (ok): compare ok values
               local_get(a); i32_load(0); i32_eqz;
               if_i32;
-                local_get(a);
         });
-        self.emit_load_at(ok_ty, 4);
-        wasm!(self.func, { local_get(b); });
-        self.emit_load_at(ok_ty, 4);
-        let ok_clone = ok_ty.clone();
-        self.emit_eq_typed(&ok_clone);
+        // Ty::Unit has no representation — skip loading and treat as equal.
+        if matches!(ok_ty, Ty::Unit) {
+            wasm!(self.func, { i32_const(1); });
+        } else {
+            wasm!(self.func, { local_get(a); });
+            self.emit_load_at(ok_ty, 4);
+            wasm!(self.func, { local_get(b); });
+            self.emit_load_at(ok_ty, 4);
+            let ok_clone = ok_ty.clone();
+            self.emit_eq_typed(&ok_clone);
+        }
         wasm!(self.func, {
               else_;
                 // tag==1 (err): compare err values
-                local_get(a);
         });
-        self.emit_load_at(err_ty, 4);
-        wasm!(self.func, { local_get(b); });
-        self.emit_load_at(err_ty, 4);
-        let err_clone = err_ty.clone();
-        self.emit_eq_typed(&err_clone);
+        if matches!(err_ty, Ty::Unit) {
+            wasm!(self.func, { i32_const(1); });
+        } else {
+            wasm!(self.func, { local_get(a); });
+            self.emit_load_at(err_ty, 4);
+            wasm!(self.func, { local_get(b); });
+            self.emit_load_at(err_ty, 4);
+            let err_clone = err_ty.clone();
+            self.emit_eq_typed(&err_clone);
+        }
         wasm!(self.func, {
               end;
             end;
@@ -463,6 +472,32 @@ impl FuncCompiler<'_> {
             }
             (Ty::String, CmpKind::Gte) => {
                 wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_ge_s; });
+            }
+            // Variant (enum-like) comparison: each value is a pointer to a heap
+            // block whose first i32 is the discriminant tag. For `Ord`-derived
+            // variants, `Low < Medium` means `Low.tag < Medium.tag`, so we load
+            // both tags and compare them as unsigned i32s.
+            //
+            // Stack on entry: [left_ptr, right_ptr]. We must load tags from both
+            // pointers and compare, preserving WASM's strict stack discipline.
+            // Use scratch locals to hold the pointers since WASM has no swap op.
+            (Ty::Named(name, _), cmp_kind) if self.emitter.variant_info.contains_key(name.as_str()) => {
+                let right = self.scratch.alloc_i32();
+                let left = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    local_set(right);
+                    local_set(left);
+                    local_get(left); i32_load(0);
+                    local_get(right); i32_load(0);
+                });
+                match cmp_kind {
+                    CmpKind::Lt => { wasm!(self.func, { i32_lt_u; }); }
+                    CmpKind::Gt => { wasm!(self.func, { i32_gt_u; }); }
+                    CmpKind::Lte => { wasm!(self.func, { i32_le_u; }); }
+                    CmpKind::Gte => { wasm!(self.func, { i32_ge_u; }); }
+                }
+                self.scratch.free_i32(left);
+                self.scratch.free_i32(right);
             }
             // TypeVar/Unknown: unresolved type — trap rather than silently compare as wrong type
             (Ty::TypeVar(_) | Ty::Unknown, _) => { wasm!(self.func, { unreachable; }); }

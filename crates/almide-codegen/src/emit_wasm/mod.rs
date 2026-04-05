@@ -77,6 +77,7 @@ pub struct StringRuntime {
     pub contains: u32,
     pub trim: u32,
     pub slice: u32,
+    pub char_count: u32,
     pub reverse: u32,
     pub repeat: u32,
     pub index_of: u32,
@@ -118,6 +119,7 @@ pub struct RuntimeFuncs {
     pub concat_list: u32,
     pub list_eq: u32,
     pub mem_eq: u32,
+    pub list_list_str_cmp: u32,
     pub option_eq_i64: u32,
     pub option_eq_str: u32,
     pub result_eq_i64_str: u32,
@@ -168,7 +170,7 @@ struct ImportInfo {
 /// Central state for WASM binary emission.
 pub struct WasmEmitter {
     // Type section (deduplicated function signatures)
-    types: Vec<(Vec<ValType>, Vec<ValType>)>,
+    pub(crate) types: Vec<(Vec<ValType>, Vec<ValType>)>,
     type_map: HashMap<(Vec<ValType>, Vec<ValType>), u32>,
 
     // Imports
@@ -265,7 +267,7 @@ impl WasmEmitter {
                 math_sin: 0, math_cos: 0, math_tan: 0,
                 math_log: 0, math_log10: 0, math_log2: 0, math_exp: 0,
                 concat_str: 0, concat_list: 0,
-                list_eq: 0, mem_eq: 0,
+                list_eq: 0, mem_eq: 0, list_list_str_cmp: 0,
                 option_eq_i64: 0, option_eq_str: 0,
                 result_eq_i64_str: 0, int_parse: 0, int_from_hex: 0,
                 string: StringRuntime {
@@ -282,6 +284,7 @@ impl WasmEmitter {
                     is_digit: 0, is_alpha: 0, is_alnum: 0,
                     is_whitespace: 0, is_upper: 0, is_lower: 0,
                     cmp: 0,
+                    char_count: 0,
                 },
                 value_stringify: 0,
                 json_parse: 0,
@@ -629,6 +632,12 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }
     }
 
+    // Also register all anonymous record shapes found in the IR under synthetic
+    // names so `emit_member`'s Unknown-type fallback (which searches
+    // `record_fields` by field name) can resolve Member access on Lambda
+    // parameters whose type inference left them as TypeVar/Unknown.
+    register_anonymous_records(program, &mut emitter);
+
     // Build default_fields from type declarations
     for td in &program.type_decls {
         match &td.kind {
@@ -681,10 +690,30 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     let has_main = program.functions.iter().any(|f| f.name == "main" && !f.is_test);
 
     for func in &program.functions {
+        // Resolve param and ret types: Unknown/TypeVar can leak through from
+        // lifted lambdas whose outer `Ty::Fn` had unresolved entries. Fall back
+        // to VarTable (for params) and expression inspection (for ret).
         let params: Vec<ValType> = func.params.iter()
-            .filter_map(|p| values::ty_to_valtype(&p.ty))
+            .filter_map(|p| {
+                let pty = if matches!(&p.ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_) | almide_lang::types::Ty::OpenRecord { .. }) {
+                    let vt_ty = &program.var_table.get(p.var).ty;
+                    if !matches!(vt_ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_) | almide_lang::types::Ty::OpenRecord { .. }) {
+                        vt_ty.clone()
+                    } else {
+                        p.ty.clone()
+                    }
+                } else {
+                    p.ty.clone()
+                };
+                values::ty_to_valtype(&pty)
+            })
             .collect();
-        let results = values::ret_type(&func.ret_ty);
+        let resolved_ret_ty = if matches!(&func.ret_ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_)) {
+            closures::resolve_expr_ty(&func.body, &program.var_table, &emitter.record_fields)
+        } else {
+            func.ret_ty.clone()
+        };
+        let results = values::ret_type(&resolved_ret_ty);
         let type_idx = emitter.register_type(params, results);
         // Use prefixed name for test functions to avoid colliding with user functions
         let reg_name = if func.is_test {
@@ -1156,6 +1185,151 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
 }
 
 use std::collections::HashSet;
+
+/// Walk all IR expressions/statements and collect anonymous record shapes
+/// (i.e. `Ty::Record { fields }`). Each unique field-set is registered in
+/// `emitter.record_fields` under a synthetic name `__anon_record_N` so the
+/// emit-phase Member access fallback (which iterates record_fields looking
+/// for a match by field name) can find them when a lambda param's own type
+/// was left as Unknown/TypeVar by type inference.
+fn register_anonymous_records(program: &IrProgram, emitter: &mut WasmEmitter) {
+    use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind};
+    let mut seen: HashSet<Vec<(String, String)>> = HashSet::new();
+    // Seed with already-registered records to avoid redundant anonymous entries.
+    for fields in emitter.record_fields.values() {
+        let key: Vec<(String, String)> = fields.iter().map(|(n, t)| (n.clone(), format!("{:?}", t))).collect();
+        seen.insert(key);
+    }
+
+    fn walk_ty(
+        ty: &Ty,
+        seen: &mut HashSet<Vec<(String, String)>>,
+        record_fields: &mut HashMap<String, Vec<(String, Ty)>>,
+    ) {
+        match ty {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                let field_vec: Vec<(String, Ty)> = fields.iter()
+                    .map(|(n, t)| (n.to_string(), t.clone()))
+                    .collect();
+                let key: Vec<(String, String)> = field_vec.iter()
+                    .map(|(n, t)| (n.clone(), format!("{:?}", t)))
+                    .collect();
+                if seen.insert(key) {
+                    let name = format!("__anon_record_{}", record_fields.len());
+                    record_fields.insert(name, field_vec.clone());
+                }
+                for (_, fty) in fields.iter() { walk_ty(fty, seen, record_fields); }
+            }
+            Ty::Applied(_, args) => { for a in args { walk_ty(a, seen, record_fields); } }
+            Ty::Tuple(elems) => { for e in elems { walk_ty(e, seen, record_fields); } }
+            Ty::Fn { params, ret } => {
+                for p in params { walk_ty(p, seen, record_fields); }
+                walk_ty(ret, seen, record_fields);
+            }
+            _ => {}
+        }
+    }
+
+    fn walk_expr(
+        expr: &IrExpr,
+        seen: &mut HashSet<Vec<(String, String)>>,
+        record_fields: &mut HashMap<String, Vec<(String, Ty)>>,
+    ) {
+        walk_ty(&expr.ty, seen, record_fields);
+        match &expr.kind {
+            IrExprKind::Block { stmts, expr: tail } => {
+                for s in stmts { walk_stmt(s, seen, record_fields); }
+                if let Some(t) = tail { walk_expr(t, seen, record_fields); }
+            }
+            IrExprKind::Call { args, .. } => { for a in args { walk_expr(a, seen, record_fields); } }
+            IrExprKind::If { cond, then, else_ } => {
+                walk_expr(cond, seen, record_fields);
+                walk_expr(then, seen, record_fields);
+                walk_expr(else_, seen, record_fields);
+            }
+            IrExprKind::Match { subject, arms } => {
+                walk_expr(subject, seen, record_fields);
+                for arm in arms {
+                    if let Some(g) = &arm.guard { walk_expr(g, seen, record_fields); }
+                    walk_expr(&arm.body, seen, record_fields);
+                }
+            }
+            IrExprKind::Record { fields, .. } => {
+                // Build field-type list from the literal's field expressions.
+                let field_vec: Vec<(String, Ty)> = fields.iter()
+                    .map(|(n, e)| (n.to_string(), e.ty.clone()))
+                    .collect();
+                let key: Vec<(String, String)> = field_vec.iter()
+                    .map(|(n, t)| (n.clone(), format!("{:?}", t)))
+                    .collect();
+                let is_unresolved = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
+                if field_vec.iter().all(|(_, t)| !is_unresolved(t)) && seen.insert(key) {
+                    let name = format!("__anon_record_{}", record_fields.len());
+                    record_fields.insert(name, field_vec);
+                }
+                for (_, e) in fields.iter() { walk_expr(e, seen, record_fields); }
+            }
+            IrExprKind::SpreadRecord { base, fields } => {
+                walk_expr(base, seen, record_fields);
+                for (_, e) in fields.iter() { walk_expr(e, seen, record_fields); }
+            }
+            IrExprKind::List { elements } => { for e in elements { walk_expr(e, seen, record_fields); } }
+            IrExprKind::Tuple { elements } => { for e in elements { walk_expr(e, seen, record_fields); } }
+            IrExprKind::Lambda { body, .. } => { walk_expr(body, seen, record_fields); }
+            IrExprKind::ClosureCreate { captures, .. } => {
+                for (_, t) in captures { walk_ty(t, seen, record_fields); }
+            }
+            IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+            | IrExprKind::OptionSome { expr } => walk_expr(expr, seen, record_fields),
+            IrExprKind::Member { object, .. } => { walk_expr(object, seen, record_fields); }
+            IrExprKind::IndexAccess { object, index } => {
+                walk_expr(object, seen, record_fields);
+                walk_expr(index, seen, record_fields);
+            }
+            IrExprKind::BinOp { left, right, .. } => {
+                walk_expr(left, seen, record_fields);
+                walk_expr(right, seen, record_fields);
+            }
+            IrExprKind::UnOp { operand, .. } => walk_expr(operand, seen, record_fields),
+            IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => walk_expr(expr, seen, record_fields),
+            IrExprKind::ForIn { iterable, body, .. } => {
+                walk_expr(iterable, seen, record_fields);
+                for s in body { walk_stmt(s, seen, record_fields); }
+            }
+            IrExprKind::While { cond, body } => {
+                walk_expr(cond, seen, record_fields);
+                for s in body { walk_stmt(s, seen, record_fields); }
+            }
+            _ => {}
+        }
+    }
+
+    fn walk_stmt(
+        stmt: &IrStmt,
+        seen: &mut HashSet<Vec<(String, String)>>,
+        record_fields: &mut HashMap<String, Vec<(String, Ty)>>,
+    ) {
+        match &stmt.kind {
+            IrStmtKind::Bind { value, ty, .. } => {
+                walk_ty(ty, seen, record_fields);
+                walk_expr(value, seen, record_fields);
+            }
+            IrStmtKind::BindDestructure { value, .. } => walk_expr(value, seen, record_fields),
+            IrStmtKind::Assign { value, .. } => walk_expr(value, seen, record_fields),
+            IrStmtKind::Expr { expr } => walk_expr(expr, seen, record_fields),
+            _ => {}
+        }
+    }
+
+    for func in &program.functions {
+        walk_ty(&func.ret_ty, &mut seen, &mut emitter.record_fields);
+        for p in &func.params { walk_ty(&p.ty, &mut seen, &mut emitter.record_fields); }
+        walk_expr(&func.body, &mut seen, &mut emitter.record_fields);
+    }
+    for tl in &program.top_lets {
+        walk_expr(&tl.value, &mut seen, &mut emitter.record_fields);
+    }
+}
 
 #[cfg(test)]
 mod tests {

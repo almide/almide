@@ -57,6 +57,71 @@ impl FuncCompiler<'_> {
             .unwrap_or(Ty::Int)
     }
 
+    /// Resolve the concrete return type of a closure argument. Handles the case
+    /// where the closure's `Ty::Fn.ret` is Unknown/TypeVar by falling back to:
+    /// 1. Lambda body's own `.ty` (pre-closure-conversion)
+    /// 2. The lifted WASM function's registered return ValType (post-closure-conversion)
+    ///
+    /// The ValType result is coarser than a `Ty` (it can't distinguish String
+    /// from List or other heap types) but is sufficient for sizing decisions
+    /// and for picking the correct call_indirect signature.
+    pub(super) fn resolve_closure_ret_valtype(&self, fn_expr: &IrExpr) -> Option<ValType> {
+        let is_unresolved = |t: &Ty| matches!(t, Ty::TypeVar(_) | Ty::Unknown);
+        // 1. Fn type's ret
+        if let Ty::Fn { ret, .. } = &fn_expr.ty {
+            if !is_unresolved(ret.as_ref()) {
+                return values::ty_to_valtype(ret);
+            }
+        }
+        // 2. Lambda body's type
+        if let almide_ir::IrExprKind::Lambda { body, .. } = &fn_expr.kind {
+            if !is_unresolved(&body.ty) {
+                return values::ty_to_valtype(&body.ty);
+            }
+        }
+        // 3. ClosureCreate: look up the lifted function's registered WASM type
+        if let almide_ir::IrExprKind::ClosureCreate { func_name, .. } = &fn_expr.kind {
+            if let Some(&func_idx) = self.emitter.func_map.get(func_name.as_str()) {
+                if let Some(&type_idx) = self.emitter.func_type_indices.get(&func_idx) {
+                    if let Some((_params, results)) = self.emitter.types.get(type_idx as usize) {
+                        return results.first().copied();
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Resolve the concrete type of the first non-env parameter of a closure
+    /// argument. Like `resolve_closure_ret_valtype` but for the input side.
+    /// Used to size the `param_ty`/`in_elem_ty` in `emit_list_map` etc. when
+    /// type inference left the list element type unresolved.
+    pub(super) fn resolve_closure_param_valtype(&self, fn_expr: &IrExpr, idx: usize) -> Option<ValType> {
+        let is_unresolved = |t: &Ty| matches!(t, Ty::TypeVar(_) | Ty::Unknown);
+        if let Ty::Fn { params, .. } = &fn_expr.ty {
+            if let Some(p) = params.get(idx) {
+                if !is_unresolved(p) { return values::ty_to_valtype(p); }
+            }
+        }
+        if let almide_ir::IrExprKind::Lambda { params, .. } = &fn_expr.kind {
+            if let Some((_, pty)) = params.get(idx) {
+                if !is_unresolved(pty) { return values::ty_to_valtype(pty); }
+            }
+        }
+        if let almide_ir::IrExprKind::ClosureCreate { func_name, .. } = &fn_expr.kind {
+            if let Some(&func_idx) = self.emitter.func_map.get(func_name.as_str()) {
+                if let Some(&type_idx) = self.emitter.func_type_indices.get(&func_idx) {
+                    if let Some((params, _results)) = self.emitter.types.get(type_idx as usize) {
+                        // WASM param layout for a lifted closure: [env_i32, user_params...].
+                        // `idx` is the user-level param index (0-based), so skip env.
+                        return params.get(idx + 1).copied();
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Copy one element from [stack: dst_addr, src_addr] based on type.
     pub(super) fn emit_elem_copy(&mut self, ty: &Ty) {
         match values::ty_to_valtype(ty) {
@@ -197,14 +262,115 @@ impl FuncCompiler<'_> {
         // This is a placeholder; slice uses the same pattern as take/drop
     }
 
-    /// Emit list.sort (insertion sort for List[Int] and List[String]).
+    /// Emit list.sort (insertion sort for List[Int], List[String], and
+    /// List[List[String]] via lexicographic inner-list comparison).
     pub(super) fn emit_list_sort(&mut self, args: &[IrExpr]) {
-        let elem_ty = self.list_elem_ty(&args[0].ty);
+        // Resolve the element type aggressively — use the expression type
+        // first, then fall back to VarTable when the expression was left
+        // generic by inference.
+        let mut elem_ty = self.list_elem_ty(&args[0].ty);
+        if matches!(&elem_ty, Ty::TypeVar(_) | Ty::Unknown) {
+            if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
+                let vt = self.var_table.get(*id).ty.clone();
+                if let Ty::Applied(_, inner) = vt {
+                    if let Some(t) = inner.first().cloned() {
+                        if !matches!(t, Ty::TypeVar(_) | Ty::Unknown) {
+                            elem_ty = t;
+                        }
+                    }
+                }
+            }
+        }
         match &elem_ty {
             Ty::Int => self.emit_list_sort_int(args),
             Ty::String => self.emit_list_sort_string(args),
+            // `List[List[T]]` lex sort: when T is String or unresolved (the
+            // common fold-accumulator case where type inference leaves `A`
+            // unconcretized), treat inner elements as string pointers. Every
+            // heap-pointer element has the same layout, so the underlying
+            // insertion sort loop is identical — the comparison function is
+            // what needs to know the semantics.
+            Ty::Applied(almide_lang::types::TypeConstructorId::List, inner)
+                if inner.first().is_some_and(|t| matches!(t, Ty::String | Ty::TypeVar(_) | Ty::Unknown)) =>
+            {
+                self.emit_list_sort_list_string(args)
+            }
             _ => self.emit_stub_call(args),
         }
+    }
+
+    /// Insertion sort for `List[List[String]]` using lexicographic comparison
+    /// of inner string lists. Inner-list elements are 4-byte pointers (like
+    /// regular `List[String]`), so the outer sort reuses the i32-pointer
+    /// layout — only the comparison differs.
+    fn emit_list_sort_list_string(&mut self, args: &[IrExpr]) {
+        let xs_ptr = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let dst = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        let j = self.scratch.alloc_i32();
+        let key = self.scratch.alloc_i32();
+
+        self.emit_expr(&args[0]);
+        wasm!(self.func, {
+            local_set(xs_ptr);
+            local_get(xs_ptr); i32_load(0); local_set(len);
+            i32_const(4); local_get(len); i32_const(4); i32_mul; i32_add;
+            call(self.emitter.rt.alloc); local_set(dst);
+            local_get(dst); local_get(len); i32_store(0);
+            // Copy all pointers
+            i32_const(0); local_set(i);
+            block_empty; loop_empty;
+              local_get(i); local_get(len); i32_ge_u; br_if(1);
+              local_get(dst); i32_const(4); i32_add;
+              local_get(i); i32_const(4); i32_mul; i32_add;
+              local_get(xs_ptr); i32_const(4); i32_add;
+              local_get(i); i32_const(4); i32_mul; i32_add;
+              i32_load(0); i32_store(0);
+              local_get(i); i32_const(1); i32_add; local_set(i);
+              br(0);
+            end; end;
+            // Insertion sort
+            i32_const(1); local_set(i);
+            block_empty; loop_empty;
+              local_get(i); local_get(len); i32_ge_u; br_if(1);
+              local_get(dst); i32_const(4); i32_add;
+              local_get(i); i32_const(4); i32_mul; i32_add;
+              i32_load(0); local_set(key);
+              local_get(i); i32_const(1); i32_sub; local_set(j);
+              block_empty; loop_empty;
+                local_get(j); i32_const(0); i32_lt_s; br_if(1);
+                // cmp(dst[j], key) <= 0 → stop
+                local_get(dst); i32_const(4); i32_add;
+                local_get(j); i32_const(4); i32_mul; i32_add;
+                i32_load(0);
+                local_get(key);
+                call(self.emitter.rt.list_list_str_cmp);
+                i32_const(0); i32_le_s; br_if(1);
+                // Shift
+                local_get(dst); i32_const(4); i32_add;
+                local_get(j); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
+                local_get(dst); i32_const(4); i32_add;
+                local_get(j); i32_const(4); i32_mul; i32_add;
+                i32_load(0); i32_store(0);
+                local_get(j); i32_const(1); i32_sub; local_set(j);
+                br(0);
+              end; end;
+              local_get(dst); i32_const(4); i32_add;
+              local_get(j); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
+              local_get(key); i32_store(0);
+              local_get(i); i32_const(1); i32_add; local_set(i);
+              br(0);
+            end; end;
+            local_get(dst);
+        });
+
+        self.scratch.free_i32(key);
+        self.scratch.free_i32(j);
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(dst);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(xs_ptr);
     }
 
     /// Insertion sort for List[Int] (elements are i64, 8 bytes each).

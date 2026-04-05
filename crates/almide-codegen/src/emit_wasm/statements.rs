@@ -1,5 +1,7 @@
 //! IrStmt → WASM instruction emission + local variable pre-scanning.
 
+use std::collections::HashMap;
+
 use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
 use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
 use almide_lang::types::Ty;
@@ -7,6 +9,11 @@ use wasm_encoder::ValType;
 
 use super::FuncCompiler;
 use super::values;
+
+/// Lookup for record/variant field types by nominal name.
+/// Used during pre-scan to resolve `Ty::Named` to concrete field types
+/// so that destructuring patterns allocate the correct WASM local valtypes.
+pub type RecordFieldLookup = HashMap<String, Vec<(String, Ty)>>;
 
 impl FuncCompiler<'_> {
     /// Get the element type of a list variable from VarTable.
@@ -505,9 +512,13 @@ pub struct LocalScanResult {
 
 /// Pre-scan a function body to collect all local variable bindings
 /// and count scratch local depth.
-pub fn collect_locals(body: &IrExpr, var_table: &almide_ir::VarTable) -> LocalScanResult {
+pub fn collect_locals(
+    body: &IrExpr,
+    var_table: &almide_ir::VarTable,
+    record_fields: &RecordFieldLookup,
+) -> LocalScanResult {
     let mut binds = Vec::new();
-    scan_expr(body, &mut binds, var_table);
+    scan_expr(body, &mut binds, var_table, record_fields);
     LocalScanResult { binds }
 }
 
@@ -520,6 +531,7 @@ pub fn collect_locals(body: &IrExpr, var_table: &almide_ir::VarTable) -> LocalSc
 struct LocalScanner<'a> {
     locals: &'a mut Vec<(VarId, ValType)>,
     vt: &'a almide_ir::VarTable,
+    record_fields: &'a RecordFieldLookup,
 }
 
 impl IrVisitor for LocalScanner<'_> {
@@ -546,7 +558,7 @@ impl IrVisitor for LocalScanner<'_> {
                 self.visit_expr(subject);
                 let resolved_ty = resolve_scan_subject_ty(subject, arms, self.vt);
                 for arm in arms {
-                    scan_pattern(&arm.pattern, &resolved_ty, self.locals, self.vt);
+                    scan_pattern(&arm.pattern, &resolved_ty, self.locals, self.vt, self.record_fields);
                     self.visit_expr(&arm.body);
                 }
             }
@@ -582,7 +594,7 @@ impl IrVisitor for LocalScanner<'_> {
                 self.visit_expr(value);
             }
             IrStmtKind::BindDestructure { pattern, value } => {
-                scan_destructure_pattern(pattern, &value.ty, self.locals, self.vt);
+                scan_destructure_pattern(pattern, &value.ty, self.locals, self.vt, self.record_fields);
                 self.visit_expr(value);
             }
             _ => walk_stmt(self, stmt),
@@ -590,8 +602,28 @@ impl IrVisitor for LocalScanner<'_> {
     }
 }
 
-fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &almide_ir::VarTable) {
-    LocalScanner { locals, vt }.visit_expr(expr);
+fn scan_expr(
+    expr: &IrExpr,
+    locals: &mut Vec<(VarId, ValType)>,
+    vt: &almide_ir::VarTable,
+    record_fields: &RecordFieldLookup,
+) {
+    LocalScanner { locals, vt, record_fields }.visit_expr(expr);
+}
+
+/// Resolve record field list from a value type, handling both structural
+/// (`Ty::Record` / `Ty::OpenRecord`) and nominal (`Ty::Named("User", ...)`) forms.
+/// Returns an empty vec when the type is unknown or not a record.
+fn resolve_record_fields(value_ty: &Ty, record_fields: &RecordFieldLookup) -> Vec<(String, Ty)> {
+    match value_ty {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect()
+        }
+        Ty::Named(name, _type_args) => {
+            record_fields.get(name.as_str()).cloned().unwrap_or_default()
+        }
+        _ => vec![],
+    }
 }
 
 /// Resolve match subject type, fixing IR type inference gaps.
@@ -613,13 +645,19 @@ fn resolve_scan_subject_ty(subject: &IrExpr, arms: &[almide_ir::IrMatchArm], vt:
 }
 
 /// Scan a destructuring pattern (let (a, b) = ...) for variable bindings.
-fn scan_destructure_pattern(pattern: &almide_ir::IrPattern, value_ty: &almide_lang::types::Ty, locals: &mut Vec<(VarId, ValType)>, vt: &almide_ir::VarTable) {
+fn scan_destructure_pattern(
+    pattern: &almide_ir::IrPattern,
+    value_ty: &almide_lang::types::Ty,
+    locals: &mut Vec<(VarId, ValType)>,
+    vt: &almide_ir::VarTable,
+    record_fields: &RecordFieldLookup,
+) {
     match pattern {
         almide_ir::IrPattern::Tuple { elements } => {
             let elem_types = if let almide_lang::types::Ty::Tuple(tys) = value_ty { tys.clone() } else { vec![] };
             for (i, elem) in elements.iter().enumerate() {
                 let elem_ty = elem_types.get(i).cloned().unwrap_or(almide_lang::types::Ty::Int);
-                scan_destructure_pattern(elem, &elem_ty, locals, vt);
+                scan_destructure_pattern(elem, &elem_ty, locals, vt, record_fields);
             }
         }
         almide_ir::IrPattern::Bind { var, .. } => {
@@ -629,20 +667,17 @@ fn scan_destructure_pattern(pattern: &almide_ir::IrPattern, value_ty: &almide_la
         }
         almide_ir::IrPattern::RecordPattern { fields, .. } => {
             // Record destructure: resolve field types from value_ty (authoritative).
-            let record_fields: Vec<(String, almide_lang::types::Ty)> = match value_ty {
-                almide_lang::types::Ty::Record { fields } => fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
-                almide_lang::types::Ty::OpenRecord { fields } => fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
-                _ => vec![],
-            };
+            // Handles structural records and nominal `Ty::Named("User", ...)` via lookup.
+            let resolved_fields = resolve_record_fields(value_ty, record_fields);
             let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();
             for field in fields {
                 // Resolve field type from the record type (not VarTable -- VarTable may have stale types)
-                let field_ty = record_fields.iter()
+                let field_ty = resolved_fields.iter()
                     .find(|(n, _)| n == &field.name)
                     .map(|(_, t)| t.clone())
                     .unwrap_or(almide_lang::types::Ty::Int);
                 if let Some(pat) = &field.pattern {
-                    scan_destructure_pattern(pat, &field_ty, locals, vt);
+                    scan_destructure_pattern(pat, &field_ty, locals, vt, record_fields);
                 } else {
                     // Implicit bind: field name = var name. Look up VarId from VarTable.
                     // Use field_ty from the record type for the WASM local declaration.
@@ -663,7 +698,13 @@ fn scan_destructure_pattern(pattern: &almide_ir::IrPattern, value_ty: &almide_la
 }
 
 /// Scan a match pattern for variable bindings.
-fn scan_pattern(pattern: &almide_ir::IrPattern, subject_ty: &almide_lang::types::Ty, locals: &mut Vec<(VarId, ValType)>, vt: &almide_ir::VarTable) {
+fn scan_pattern(
+    pattern: &almide_ir::IrPattern,
+    subject_ty: &almide_lang::types::Ty,
+    locals: &mut Vec<(VarId, ValType)>,
+    vt: &almide_ir::VarTable,
+    record_fields: &RecordFieldLookup,
+) {
     match pattern {
         almide_ir::IrPattern::Bind { var, ty } => {
             // Use pattern's own type (set by lowering, updated by mono) — no VarTable dependency
@@ -712,7 +753,7 @@ fn scan_pattern(pattern: &almide_ir::IrPattern, subject_ty: &almide_lang::types:
                         locals.push((*var, val_type));
                     }
                 } else {
-                    scan_pattern(arg, subject_ty, locals, vt);
+                    scan_pattern(arg, subject_ty, locals, vt, record_fields);
                 }
             }
         }
@@ -720,7 +761,7 @@ fn scan_pattern(pattern: &almide_ir::IrPattern, subject_ty: &almide_lang::types:
             let elem_types = if let almide_lang::types::Ty::Tuple(tys) = subject_ty { tys.clone() } else { vec![] };
             for (i, elem) in elements.iter().enumerate() {
                 let et = elem_types.get(i).cloned().unwrap_or(subject_ty.clone());
-                scan_pattern(elem, &et, locals, vt);
+                scan_pattern(elem, &et, locals, vt, record_fields);
             }
         }
         almide_ir::IrPattern::Some { inner } | almide_ir::IrPattern::Ok { inner } => {
@@ -735,7 +776,7 @@ fn scan_pattern(pattern: &almide_ir::IrPattern, subject_ty: &almide_lang::types:
                     } else { subject_ty.clone() }
                 } else { subject_ty.clone() }
             };
-            scan_pattern(inner, &inner_ty, locals, vt);
+            scan_pattern(inner, &inner_ty, locals, vt, record_fields);
         }
         almide_ir::IrPattern::Err { inner } => {
             let inner_ty = if let almide_lang::types::Ty::Applied(_, args) = subject_ty {
@@ -748,23 +789,31 @@ fn scan_pattern(pattern: &almide_ir::IrPattern, subject_ty: &almide_lang::types:
                     } else { subject_ty.clone() }
                 } else { subject_ty.clone() }
             };
-            scan_pattern(inner, &inner_ty, locals, vt);
+            scan_pattern(inner, &inner_ty, locals, vt, record_fields);
         }
         almide_ir::IrPattern::RecordPattern { name: _, fields, .. } => {
             // For pattern=None fields, the binding is implicit (field name = var name).
             // The lowerer has already allocated VarIds for these in the VarTable.
             // Search from the END of VarTable to find the most recent (correct scope) VarId,
             // and skip VarIds already registered in locals to avoid duplicates.
+            // Resolve field types from subject_ty (structural or nominal) so local
+            // valtypes match the actual value layout — falls back to VarTable only
+            // when the record type cannot be resolved.
+            let resolved_fields = resolve_record_fields(subject_ty, record_fields);
             let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();
             for field in fields {
                 if let Some(pat) = &field.pattern {
-                    scan_pattern(pat, subject_ty, locals, vt);
+                    scan_pattern(pat, subject_ty, locals, vt, record_fields);
                 } else {
                     // Implicit bind: find VarId by field name, searching from end (most recent scope)
                     for i in (0..vt.len()).rev() {
                         let info = vt.get(almide_ir::VarId(i as u32));
                         if info.name == field.name && !existing_ids.contains(&(i as u32)) {
-                            if let Some(val_type) = values::ty_to_valtype(&info.ty) {
+                            let field_ty = resolved_fields.iter()
+                                .find(|(n, _)| n == &field.name)
+                                .map(|(_, t)| t.clone())
+                                .unwrap_or_else(|| info.ty.clone());
+                            if let Some(val_type) = values::ty_to_valtype(&field_ty) {
                                 locals.push((almide_ir::VarId(i as u32), val_type));
                             }
                             break;

@@ -19,8 +19,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.string.trim); });
             }
             "len" => {
+                // UTF-8 char count, matching Rust `s.chars().count()` semantics.
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_load(0); i64_extend_i32_u; });
+                wasm!(self.func, { call(self.emitter.rt.string.char_count); });
             }
             "contains" => {
                 self.emit_expr(&args[0]);

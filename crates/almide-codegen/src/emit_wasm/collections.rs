@@ -202,11 +202,15 @@ impl FuncCompiler<'_> {
 
         // Overwrite specified fields
         for (field_name, field_expr) in overrides {
-            if let Some((offset, _)) = values::field_offset(&all_fields, field_name) {
+            // Use the record's declared field type for the store width — the
+            // override expression's own `.ty` may be Unknown when inference
+            // was incomplete (e.g. lambda body without propagated types),
+            // whereas the record layout is authoritative.
+            if let Some((offset, field_ty)) = values::field_offset(&all_fields, field_name) {
                 let total_offset = tag_offset + offset;
                 wasm!(self.func, { local_get(result_scratch); });
                 self.emit_expr(field_expr);
-                self.emit_store_at(&field_expr.ty, total_offset);
+                self.emit_store_at(&field_ty, total_offset);
             }
         }
 

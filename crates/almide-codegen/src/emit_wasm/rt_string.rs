@@ -69,6 +69,12 @@ pub fn register(emitter: &mut WasmEmitter) {
 
     // String comparison: (a: i32, b: i32) -> i32 (negative/0/positive)
     emitter.rt.string.cmp = emitter.register_func("__str_cmp", ty_i32x2_i32);
+
+    // UTF-8 char count: (s: i32) -> i64 — counts code points, not bytes.
+    // Distinct from `string.len` which reads the byte-count header and is used
+    // for sizing; `char_count` walks the data section and skips UTF-8
+    // continuation bytes (bytes whose top two bits are `10`).
+    emitter.rt.string.char_count = emitter.register_func("__str_char_count", _ty_i32_i64);
 }
 
 /// Compile all string runtime function bodies.
@@ -105,6 +111,39 @@ pub fn compile(emitter: &mut WasmEmitter) {
     super::rt_string_extra::compile_is_upper(emitter);
     super::rt_string_extra::compile_is_lower(emitter);
     super::rt_string_extra::compile_cmp(emitter);
+    compile_char_count(emitter);
+}
+
+/// Count UTF-8 code points in a string (pointer to `[len:i32][bytes...]`).
+/// Iterates the byte payload and skips continuation bytes (top bits `10xxxxxx`).
+fn compile_char_count(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.char_count];
+    // Locals: 1=byte_len, 2=i (byte index), 3=count
+    let mut f = Function::new([(3, ValType::I32)]);
+    wasm!(f, {
+        // byte_len = *s
+        local_get(0); i32_load(0); local_set(1);
+        // i = 0, count = 0
+        i32_const(0); local_set(2);
+        i32_const(0); local_set(3);
+        block_empty; loop_empty;
+          local_get(2); local_get(1); i32_ge_u; br_if(1);
+          // byte = s[4 + i]
+          local_get(0); i32_const(4); i32_add;
+          local_get(2); i32_add; i32_load8_u(0);
+          // if (byte & 0xC0) != 0x80 then count++
+          i32_const(0xC0); i32_and;
+          i32_const(0x80); i32_ne;
+          if_empty;
+            local_get(3); i32_const(1); i32_add; local_set(3);
+          end;
+          local_get(2); i32_const(1); i32_add; local_set(2);
+          br(0);
+        end; end;
+        local_get(3); i64_extend_i32_u;
+        end;
+    });
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
 // ── Core ──
@@ -366,6 +405,14 @@ fn compile_split(emitter: &mut WasmEmitter) {
     ]);
     wasm!(f, {
         local_get(1); i32_load(0); local_set(3); // d_len
+        // Empty delimiter: return [s] to avoid infinite recursion on index_of("x", "") == 0.
+        local_get(3); i32_eqz;
+        if_empty;
+          i32_const(8); call(emitter.rt.alloc); local_set(7);
+          local_get(7); i32_const(1); i32_store(0);
+          local_get(7); local_get(0); i32_store(4);
+          local_get(7); return_;
+        end;
         local_get(0); local_get(1); call(emitter.rt.string.index_of); local_set(2);
         local_get(2); i64_const(-1); i64_eq;
         if_i32;

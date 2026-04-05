@@ -493,12 +493,17 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, { call(self.emitter.rt.int_to_string); });
                     }
                     "len" | "length" | "string.len" | "list.len" | "map.len" => {
-                        // .len() for String, List, Map — all store length at offset 0
+                        // For String: char count (UTF-8 code points), matching Rust runtime.
+                        // For List/Map: the length header at offset 0.
                         self.emit_expr(object);
-                        wasm!(self.func, {
-                            i32_load(0);
-                            i64_extend_i32_u;
-                        });
+                        if matches!(object.ty, Ty::String) {
+                            wasm!(self.func, { call(self.emitter.rt.string.char_count); });
+                        } else {
+                            wasm!(self.func, {
+                                i32_load(0);
+                                i64_extend_i32_u;
+                            });
+                        }
                     }
                     "to_string" | "float.to_string" if matches!(object.ty, Ty::Float) => {
                         self.emit_expr(object);

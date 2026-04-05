@@ -34,7 +34,7 @@ pub fn compile_function_with_init(
     }
 
     // Pre-scan body for variable bindings and match scratch requirements
-    let scan = collect_locals(&func.body, _var_table);
+    let scan = collect_locals(&func.body, _var_table, &emitter.record_fields);
     let mut local_decls = Vec::new();
 
     // Bind locals

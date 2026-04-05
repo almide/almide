@@ -1,3 +1,4 @@
+// wasm:skip — prompt file: V1 code intentionally fails V2 tests (modification benchmark).
 // ========== V1 SOLUTION (working code — all tests pass) ==========
 
 fn respond(input: String) -> String = {

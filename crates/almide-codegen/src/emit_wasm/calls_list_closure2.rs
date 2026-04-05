@@ -9,6 +9,20 @@ use almide_ir::{IrExpr, IrExprKind};
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
+/// Build a representative `Ty` for a given `ValType`, used when we only know
+/// the WASM ABI shape (from a lifted closure's registered type) but not the
+/// source-level type. The returned `Ty` round-trips correctly through
+/// `ty_to_valtype`/`byte_size`.
+fn vt_to_placeholder_ty(vt: ValType) -> Ty {
+    match vt {
+        ValType::I64 => Ty::Int,
+        ValType::F64 => Ty::Float,
+        // All i32 heap pointers have identical runtime layout (4-byte pointer);
+        // `Ty::String` is a convenient stand-in.
+        _ => Ty::String,
+    }
+}
+
 impl FuncCompiler<'_> {
     /// Dispatch list closure calls (second half). Returns true if handled.
     pub(super) fn emit_list_closure_call2(&mut self, method: &str, args: &[IrExpr]) -> bool {
@@ -947,6 +961,21 @@ impl FuncCompiler<'_> {
                 }
             }
         }
+        // Final fallback: inspect the lifted closure's actual registered WASM
+        // param/ret valtypes. This handles the case where inference left both
+        // the list element and lambda body as Unknown but the lifted function
+        // has a concrete signature (e.g. from our closure-conversion VarTable
+        // propagation + anonymous record fallback).
+        let in_vt = values::ty_to_valtype(&in_elem_ty);
+        let in_elem_ty = match self.resolve_closure_param_valtype(fn_arg, 0) {
+            Some(actual) if Some(actual) != in_vt => vt_to_placeholder_ty(actual),
+            _ => in_elem_ty,
+        };
+        let out_vt = values::ty_to_valtype(&out_elem_ty);
+        let out_elem_ty = match self.resolve_closure_ret_valtype(fn_arg) {
+            Some(actual) if Some(actual) != out_vt => vt_to_placeholder_ty(actual),
+            _ => out_elem_ty,
+        };
         let in_size = values::byte_size(&in_elem_ty);
         let out_size = values::byte_size(&out_elem_ty);
 

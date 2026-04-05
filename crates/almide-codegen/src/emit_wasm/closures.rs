@@ -169,7 +169,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
             .collect();
 
         // Pre-scan body for additional locals
-        let scan = statements::collect_locals(body, &program.var_table);
+        let scan = statements::collect_locals(body, &program.var_table, &emitter.record_fields);
         let mut local_decls = Vec::new();
 
         // Captured var locals
