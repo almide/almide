@@ -1,0 +1,158 @@
+// Monkey test 14: エッジケース・境界値
+
+// 空リストと各種操作
+test "empty list combinators" {
+    let xs: List[Int] = []
+    assert_eq(xs |> list.map((x) => x + 1), [])
+    assert_eq(xs |> list.filter((x) => x > 0), [])
+    assert_eq(xs |> list.fold(42, (a, b) => a + b), 42)
+    assert_eq(xs |> list.find((x) => x > 0), none)
+    assert(list.is_empty(xs))
+}
+
+// 単一要素リスト
+test "singleton list" {
+    let xs = [42]
+    assert_eq(list.len(xs), 1)
+    assert_eq(list.first(xs), some(42))
+    assert_eq(list.last(xs), some(42))
+    assert_eq(xs |> list.reverse, [42])
+}
+
+// ネストした Option
+test "nested option" {
+    let double: Option[Option[Int]] = some(some(5))
+    match double {
+        some(inner) => match inner {
+            some(v) => assert_eq(v, 5),
+            none => assert(false),
+        },
+        none => assert(false),
+    }
+}
+
+// Result of Option
+test "result of option" {
+    let r: Result[Option[Int], String] = ok(some(10))
+    match r {
+        ok(opt) => assert_eq(opt, some(10)),
+        err(_) => assert(false),
+    }
+}
+
+// 極端に長い文字列補間
+test "long interpolation" {
+    let a = 1
+    let b = 2
+    let c = 3
+    let d = 4
+    let s = "${int.to_string(a)}+${int.to_string(b)}+${int.to_string(c)}+${int.to_string(d)}=${int.to_string(a+b+c+d)}"
+    assert_eq(s, "1+2+3+4=10")
+}
+
+// 文字列に特殊文字
+test "special characters in string" {
+    let s = "tab\there\nnewline\"quoted\""
+    assert(string.contains(s, "\t"))
+    assert(string.contains(s, "\n"))
+    assert(string.contains(s, "\""))
+}
+
+// 0 除算は err を返す (safe_div 経由)
+effect fn safe_int_div(a: Int, b: Int) -> Int = {
+    guard b != 0 else err("div by zero")!
+    a / b
+}
+
+test "zero division guarded" {
+    assert_eq(safe_int_div(10, 2)!, 5)
+    assert_eq(safe_int_div(10, 0), err("div by zero"))
+}
+
+// 複雑なネスト構造
+type Inventory = {
+    id: String,
+    items: List[{ name: String, qty: Int }],
+    tags: List[String],
+}
+
+test "complex nested structure" {
+    let inv: Inventory = {
+        id: "W001",
+        items: [
+            { name: "apple", qty: 10 },
+            { name: "banana", qty: 5 },
+        ],
+        tags: ["perishable", "fresh"],
+    }
+    assert_eq(inv.id, "W001")
+    assert_eq(list.len(inv.items), 2)
+    assert_eq(list.len(inv.tags), 2)
+    let total_qty = inv.items |> list.fold(0, (acc, item) => acc + item.qty)
+    assert_eq(total_qty, 15)
+}
+
+// if 式のネスト
+test "nested if expressions" {
+    let grade = (score: Int) =>
+        if score >= 90 then "A"
+        else if score >= 80 then "B"
+        else if score >= 70 then "C"
+        else "F"
+    assert_eq(grade(95), "A")
+    assert_eq(grade(85), "B")
+    assert_eq(grade(75), "C")
+    assert_eq(grade(50), "F")
+}
+
+// Bool 演算
+test "boolean edge" {
+    assert(true and true)
+    assert(not (true and false))
+    assert(true or false)
+    assert(not (false or false))
+    assert(not false)
+    assert(not not true)
+}
+
+// 一度も呼ばれないブランチでも型が合う
+fn safe_head(xs: List[Int]) -> Int =
+    match xs {
+        [] => 0,
+        _ => list.first(xs) ?? 0,
+    }
+
+test "safe head" {
+    assert_eq(safe_head([]), 0)
+    assert_eq(safe_head([1, 2, 3]), 1)
+}
+
+// BUG FOUND (error cascade):
+//   let binding の識別子を大文字始まり (`let MyValue = 42`) にすると
+//   パーサが「TypeName を識別子位置で見た」と怒る。それ自体は正しい
+//   診断だが、後続の行 `assert_eq(result, 216)` まで
+//   "expected MyValue but got Int" という別エラーが雪崩で出る。
+//   エラー回復が未到達コードまで波及している。
+// 回避: snake_case を使う
+test "mixed case identifiers" {
+    let my_value = 42
+    let my_other = my_value + 1
+    assert_eq(my_other, 43)
+}
+
+// 深いネスト
+test "deeply nested lambda" {
+    let f = (a) => (b) => (c) => (d) => a + b + c + d
+    assert_eq(f(1)(2)(3)(4), 10)
+}
+
+// 配列のパイプチェーン
+test "long pipe chain" {
+    let result = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        |> list.filter((x) => x % 2 == 0)
+        |> list.map((x) => x * x)
+        |> list.filter((x) => x > 10)
+        |> list.fold(0, (acc, x) => acc + x)
+    // [2,4,6,8,10] → [4,16,36,64,100] → [16,36,64,100] → sum = 216
+    assert_eq(result, 216)
+}

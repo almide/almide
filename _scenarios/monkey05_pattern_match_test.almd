@@ -1,0 +1,139 @@
+// Monkey test 05: パターンマッチ
+
+type Shape = Circle(Float) | Rect(Float, Float) | Triangle(Float, Float, Float)
+
+fn area(s: Shape) -> Float =
+    match s {
+        Circle(r)             => 3.14159 * r * r,
+        Rect(w, h)            => w * h,
+        Triangle(a, b, c)     => {
+            let s = (a + b + c) / 2.0
+            float.sqrt(s * (s - a) * (s - b) * (s - c))
+        },
+    }
+
+test "variant with different arities" {
+    assert(area(Circle(1.0)) > 3.14)
+    assert_eq(area(Rect(3.0, 4.0)), 12.0)
+    assert(area(Triangle(3.0, 4.0, 5.0)) > 5.9)
+}
+
+// ネストパターン
+type Tree = Leaf(Int) | Node(Int, Int)
+
+fn sum_tree(t: Tree) -> Int =
+    match t {
+        Leaf(v) => v,
+        Node(a, b) => a + b,
+    }
+
+test "simple nested" {
+    assert_eq(sum_tree(Leaf(5)), 5)
+    assert_eq(sum_tree(Node(3, 4)), 7)
+}
+
+// ガード付きパターン
+fn classify(n: Int) -> String =
+    match n {
+        0 => "zero",
+        x if x < 0 => "negative",
+        x if x < 10 => "small",
+        x if x < 100 => "medium",
+        _ => "large",
+    }
+
+test "guard patterns" {
+    assert_eq(classify(0), "zero")
+    assert_eq(classify(-5), "negative")
+    assert_eq(classify(5), "small")
+    assert_eq(classify(50), "medium")
+    assert_eq(classify(500), "large")
+}
+
+// 文字列パターン
+fn greet(lang: String) -> String =
+    match lang {
+        "en" => "hello",
+        "ja" => "こんにちは",
+        "es" => "hola",
+        _ => "?",
+    }
+
+test "string patterns" {
+    assert_eq(greet("en"), "hello")
+    assert_eq(greet("ja"), "こんにちは")
+    assert_eq(greet("xx"), "?")
+}
+
+// Result パターン
+fn safe_div(a: Int, b: Int) -> Result[Int, String] =
+    if b == 0 then err("div by zero") else ok(a / b)
+
+fn handle(r: Result[Int, String]) -> String =
+    match r {
+        ok(v) => "got ${int.to_string(v)}",
+        err(e) => "err: ${e}",
+    }
+
+test "result patterns" {
+    assert_eq(handle(safe_div(10, 2)), "got 5")
+    assert_eq(handle(safe_div(10, 0)), "err: div by zero")
+}
+
+// Option パターン
+fn describe(opt: Option[Int]) -> String =
+    match opt {
+        some(v) => "some(${int.to_string(v)})",
+        none => "none",
+    }
+
+test "option patterns" {
+    assert_eq(describe(some(42)), "some(42)")
+    assert_eq(describe(none), "none")
+}
+
+// 型アノテーション付きレコード
+type Point = { x: Int, y: Int }
+
+fn quadrant(p: Point) -> Int =
+    match p {
+        Point{x, y} if x > 0 and y > 0 => 1,
+        Point{x, y} if x < 0 and y > 0 => 2,
+        Point{x, y} if x < 0 and y < 0 => 3,
+        Point{x, y} if x > 0 and y < 0 => 4,
+        _ => 0,
+    }
+
+test "record destructure with guard" {
+    assert_eq(quadrant({ x: 1, y: 1 }), 1)
+    assert_eq(quadrant({ x: -1, y: 1 }), 2)
+    assert_eq(quadrant({ x: -1, y: -1 }), 3)
+    assert_eq(quadrant({ x: 1, y: -1 }), 4)
+    assert_eq(quadrant({ x: 0, y: 0 }), 0)
+}
+
+// match が式として値を返す
+test "match as expression" {
+    let n = 3
+    let name = match n {
+        1 => "one",
+        2 => "two",
+        3 => "three",
+        _ => "many",
+    }
+    assert_eq(name, "three")
+}
+
+// ワイルドカードのみ
+test "wildcard only" {
+    let x = 42
+    let r = match x { _ => "any" }
+    assert_eq(r, "any")
+}
+
+// Bool パターン
+test "bool patterns" {
+    let b = true
+    let s = match b { true => "T", false => "F" }
+    assert_eq(s, "T")
+}

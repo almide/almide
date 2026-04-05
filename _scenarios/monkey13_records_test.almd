@@ -1,0 +1,138 @@
+// Monkey test 13: レコード・スプレッド・デストラクチャ
+//
+// Regression for fixed bug: 部分デストラクチャで `..` が自動挿入されなかった。
+// 以前は `let { name, age } = user` で User 型の残りフィールドを無視できず
+// Rust E0027 で壊れていた。
+
+type User = { name: String, age: Int, email: String }
+type Person = { name: String, age: Int }
+
+test "record literal and field access" {
+    let u = { name: "alice", age: 30, email: "a@x.com" }
+    assert_eq(u.name, "alice")
+    assert_eq(u.age, 30)
+    assert_eq(u.email, "a@x.com")
+}
+
+test "spread update single field" {
+    let u = { name: "alice", age: 30, email: "a@x.com" }
+    let u2 = { ...u, age: 31 }
+    assert_eq(u2.name, "alice")
+    assert_eq(u2.age, 31)
+    assert_eq(u2.email, "a@x.com")
+    // 元は不変
+    assert_eq(u.age, 30)
+}
+
+test "spread update multiple fields" {
+    let u = { name: "alice", age: 30, email: "a@x.com" }
+    let u2 = { ...u, age: 31, email: "new@x.com" }
+    assert_eq(u2.age, 31)
+    assert_eq(u2.email, "new@x.com")
+}
+
+test "nested record" {
+    let p = {
+        center: { x: 1, y: 2 },
+        radius: 3
+    }
+    assert_eq(p.center.x, 1)
+    assert_eq(p.center.y, 2)
+    assert_eq(p.radius, 3)
+}
+
+test "destructure partial" {
+    let u: User = { name: "alice", age: 30, email: "a@x.com" }
+    let { name, age } = u
+    assert_eq(name, "alice")
+    assert_eq(age, 30)
+}
+
+test "destructure full" {
+    let u: User = { name: "alice", age: 30, email: "a@x.com" }
+    let { name, age, email } = u
+    assert_eq(name, "alice")
+    assert_eq(age, 30)
+    assert_eq(email, "a@x.com")
+}
+
+// レコードのリスト
+test "list of records" {
+    let users: List[Person] = [
+        { name: "alice", age: 30 },
+        { name: "bob", age: 25 },
+        { name: "carol", age: 35 },
+    ]
+    assert_eq(list.len(users), 3)
+    let names = users |> list.map((u) => u.name)
+    assert_eq(names, ["alice", "bob", "carol"])
+    let ages = users |> list.map((u) => u.age)
+    let avg = (ages |> list.fold(0, (a, b) => a + b)) / list.len(ages)
+    assert_eq(avg, 30)
+}
+
+// レコードをフィルタ
+test "filter records" {
+    let users: List[Person] = [
+        { name: "alice", age: 30 },
+        { name: "bob", age: 25 },
+        { name: "carol", age: 35 },
+    ]
+    let adults = users |> list.filter((u) => u.age >= 30)
+    assert_eq(list.len(adults), 2)
+}
+
+// レコードを変換
+test "map records" {
+    let users: List[Person] = [
+        { name: "alice", age: 30 },
+        { name: "bob", age: 25 },
+    ]
+    let aged = users |> list.map((u) => { ...u, age: u.age + 1 })
+    let a0: Person = list.first(aged) ?? { name: "", age: 0 }
+    assert_eq(a0.age, 31)
+}
+
+// 同名フィールド shorthand (record literal)
+test "field shorthand" {
+    let name = "alice"
+    let age = 30
+    // ショートハンド構文があれば...
+    let u: Person = { name: name, age: age }
+    assert_eq(u.name, "alice")
+    assert_eq(u.age, 30)
+}
+
+// 再帰的レコード
+type Tree = { value: Int, left: Option[Int], right: Option[Int] }
+
+test "record with Option fields" {
+    let root = { value: 10, left: some(5), right: some(15) }
+    let leaf = { value: 1, left: none, right: none }
+    assert_eq(root.value, 10)
+    assert_eq(root.left, some(5))
+    assert_eq(leaf.left, none)
+}
+
+// ジェネリックレコード (不使用の場合)
+type Response[T] = { code: Int, body: T, message: String }
+
+fn ok_response[T](body: T) -> Response[T] =
+    { code: 200, body: body, message: "OK" }
+
+test "generic response int" {
+    let r = ok_response(42)
+    assert_eq(r.code, 200)
+    assert_eq(r.body, 42)
+}
+
+test "generic response string" {
+    let r = ok_response("hello")
+    assert_eq(r.body, "hello")
+    assert_eq(r.message, "OK")
+}
+
+test "generic response list" {
+    let r = ok_response([1, 2, 3])
+    assert_eq(list.len(r.body), 3)
+}

@@ -1,0 +1,132 @@
+// Monkey test 08: Option / Result / エラー処理
+
+// 基本: Option
+test "option some none" {
+    let x: Option[Int] = some(42)
+    let y: Option[Int] = none
+    assert_eq(x, some(42))
+    assert_eq(y, none)
+}
+
+// ?? fallback
+test "option fallback" {
+    let x = some(10) ?? 0
+    let y = none ?? 99
+    assert_eq(x, 10)
+    assert_eq(y, 99)
+}
+
+// nested option pattern
+fn unwrap_default(o: Option[Int], default: Int) -> Int =
+    match o {
+        some(v) => v,
+        none => default,
+    }
+
+test "manual unwrap" {
+    assert_eq(unwrap_default(some(7), 0), 7)
+    assert_eq(unwrap_default(none, 0), 0)
+}
+
+// Result 基本
+fn safe_div(a: Int, b: Int) -> Result[Int, String] =
+    if b == 0 then err("division by zero") else ok(a / b)
+
+test "result basic" {
+    assert_eq(safe_div(10, 2), ok(5))
+    assert_eq(safe_div(10, 0), err("division by zero"))
+}
+
+// Result を Option に変換 (?)
+test "result to option" {
+    let r1 = safe_div(10, 2)
+    let r2 = safe_div(10, 0)
+    assert_eq(r1?, some(5))
+    assert_eq(r2?, none)
+}
+
+// ?? fallback for Result
+test "result fallback" {
+    let v1 = safe_div(10, 2) ?? -1
+    let v2 = safe_div(10, 0) ?? -1
+    assert_eq(v1, 5)
+    assert_eq(v2, -1)
+}
+
+// effect fn + unwrap !
+effect fn checked_sqrt(x: Float) -> Float =
+    if x < 0.0 then err("negative")! else float.sqrt(x)
+
+test "checked sqrt ok" {
+    assert(checked_sqrt(4.0)! > 1.9)
+}
+
+test "checked sqrt err" {
+    assert_eq(checked_sqrt(-1.0), err("negative"))
+}
+
+// 連鎖
+effect fn ladder(x: Int) -> Int = {
+    let r1 = safe_div(100, x)!
+    let r2 = safe_div(r1, 2)!
+    r2
+}
+
+test "ladder ok" {
+    assert_eq(ladder(4)!, 12)  // 100/4=25, 25/2=12
+}
+
+test "ladder err propagates" {
+    assert_eq(ladder(0), err("division by zero"))
+}
+
+// Option[Record] で ?.field
+type User = { name: String, age: Int }
+
+fn find_user(id: Int) -> Option[User] =
+    if id == 1 then some({ name: "alice", age: 30 })
+    else none
+
+test "optional chaining" {
+    let u = find_user(1)
+    let name = u?.name
+    assert_eq(name, some("alice"))
+
+    let u2 = find_user(99)
+    let name2 = u2?.name
+    assert_eq(name2, none)
+}
+
+// Option を List に平坦化
+test "filter_map with option" {
+    let xs = [1, 2, 3, 4, 5]
+    let evens = xs |> list.filter_map((x) =>
+        if x % 2 == 0 then some(x) else none
+    )
+    assert_eq(evens, [2, 4])
+}
+
+// エラー伝播
+effect fn pipeline(s: String) -> Int = {
+    guard string.len(s) > 0 else err("empty")!
+    let parsed = int.parse(s)!
+    parsed * 2
+}
+
+test "pipeline ok" {
+    assert_eq(pipeline("42")!, 84)
+}
+
+test "pipeline empty err" {
+    match pipeline("") {
+        err(e) => assert_eq(e, "empty"),
+        ok(_) => assert(false),
+    }
+}
+
+test "pipeline parse err" {
+    match pipeline("not a number") {
+        err(_) => assert(true),
+        ok(_) => assert(false),
+    }
+}

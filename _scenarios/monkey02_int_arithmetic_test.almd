@@ -1,0 +1,78 @@
+// Monkey test 02: Int 四則演算・境界値
+//
+// Almide の Int は Rust i64 (恐らく) なので範囲は ±9.2e18
+
+fn add(a: Int, b: Int) -> Int = a + b
+fn sub(a: Int, b: Int) -> Int = a - b
+fn mul(a: Int, b: Int) -> Int = a * b
+fn idiv(a: Int, b: Int) -> Int = a / b
+fn imod(a: Int, b: Int) -> Int = a % b
+
+test "basic arithmetic" {
+    assert_eq(add(1, 2), 3)
+    assert_eq(sub(5, 3), 2)
+    assert_eq(mul(4, 5), 20)
+    assert_eq(idiv(10, 3), 3)
+    assert_eq(imod(10, 3), 1)
+}
+
+test "negative numbers" {
+    assert_eq(add(-5, 3), -2)
+    assert_eq(mul(-3, -4), 12)
+    assert_eq(sub(-10, -5), -5)
+    assert_eq(idiv(-10, 3), -3)
+}
+
+test "zero semantics" {
+    assert_eq(add(0, 0), 0)
+    assert_eq(mul(0, 12345), 0)
+    assert_eq(sub(42, 42), 0)
+}
+
+test "large numbers" {
+    let big = 1000000000
+    assert_eq(mul(big, 2), 2000000000)
+    assert_eq(add(big, big), 2000000000)
+}
+
+test "power operator" {
+    assert_eq(2 ^ 10, 1024)
+    assert_eq(3 ^ 3, 27)
+    assert_eq(5 ^ 0, 1)
+}
+
+test "power right-associative" {
+    // 2^(3^2) = 2^9 = 512, not (2^3)^2 = 64
+    assert_eq(2 ^ 3 ^ 2, 512)
+}
+
+test "operator precedence" {
+    assert_eq(2 + 3 * 4, 14)
+    assert_eq((2 + 3) * 4, 20)
+    assert_eq(10 - 3 - 2, 5)        // left-assoc
+    assert_eq(20 / 4 / 2, 2)        // left-assoc
+    assert_eq(2 + 3 * 4 - 1, 13)
+}
+
+test "int utility fns" {
+    assert_eq(int.to_string(42), "42")
+    assert_eq(int.to_string(-7), "-7")
+    assert_eq(int.to_string(0), "0")
+    assert_eq(int.abs(-5), 5)
+    assert_eq(int.abs(5), 5)
+    assert_eq(int.abs(0), 0)
+}
+
+test "min/max" {
+    assert_eq(int.min(3, 5), 3)
+    assert_eq(int.min(-3, -5), -5)
+    assert_eq(int.max(3, 5), 5)
+    assert_eq(int.max(-3, -5), -3)
+}
+
+test "unary minus" {
+    let x = 5
+    assert_eq(-x, -5)
+    assert_eq(-(-x), 5)
+    assert_eq(-(-(-x)), -5)
+}

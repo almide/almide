@@ -1,0 +1,107 @@
+// Monkey test 03: 文字列操作 — 補間・連結・Unicode・stdlib
+
+test "basic concat" {
+    let a = "hello"
+    let b = "world"
+    assert_eq(a + " " + b, "hello world")
+}
+
+test "interpolation basic" {
+    let name = "almide"
+    let n = 42
+    assert_eq("hi ${name} #${int.to_string(n)}", "hi almide #42")
+}
+
+test "interpolation with expression" {
+    assert_eq("result=${int.to_string(1 + 2 * 3)}", "result=7")
+}
+
+test "empty string" {
+    let e = ""
+    assert_eq(e + "x", "x")
+    assert_eq("y" + e, "y")
+    assert_eq(string.len(e), 0)
+}
+
+test "unicode length" {
+    let s = "あいう"
+    // string.len はバイト数 or 文字数? 文字数期待
+    assert_eq(string.len(s), 3)
+}
+
+test "emoji length" {
+    let s = "a🙂b"
+    // 絵文字でも文字数で 3 を期待
+    assert_eq(string.len(s), 3)
+}
+
+test "to_upper to_lower" {
+    assert_eq(string.to_upper("abc"), "ABC")
+    assert_eq(string.to_lower("XYZ"), "xyz")
+    assert_eq(string.to_upper(""), "")
+}
+
+test "trim" {
+    assert_eq(string.trim("  hello  "), "hello")
+    assert_eq(string.trim("\t\nfoo\n\t"), "foo")
+    assert_eq(string.trim(""), "")
+}
+
+test "split and join" {
+    let parts = string.split("a,b,c,d", ",")
+    assert_eq(list.len(parts), 4)
+    assert_eq(parts[0], "a")
+    assert_eq(parts[3], "d")
+    assert_eq(list.join(parts, "-"), "a-b-c-d")
+}
+
+test "split empty separator" {
+    // 空文字列で分割すると各文字?
+    let parts = string.split("abc", "")
+    // 実装依存だが何らか返すことを期待
+    assert(list.len(parts) >= 1)
+}
+
+test "contains" {
+    assert(string.contains("hello world", "world"))
+    assert(not string.contains("hello", "xyz"))
+    assert(string.contains("abc", ""))
+}
+
+test "starts_with ends_with" {
+    assert(string.starts_with("hello", "he"))
+    assert(string.ends_with("hello", "lo"))
+    assert(not string.starts_with("hello", "ell"))
+    assert(not string.ends_with("hello", "ell"))
+}
+
+test "replace" {
+    assert_eq(string.replace("foo bar foo", "foo", "baz"), "baz bar baz")
+    assert_eq(string.replace("aaa", "a", "bb"), "bbbbbb")
+    assert_eq(string.replace("hello", "x", "y"), "hello")
+}
+
+test "heredoc" {
+    let s = """
+        line1
+        line2
+        line3
+        """
+    assert(string.contains(s, "line1"))
+    assert(string.contains(s, "line2"))
+    assert(string.contains(s, "line3"))
+}
+
+test "heredoc with interpolation" {
+    let name = "alice"
+    let s = """
+        Hello, ${name}!
+        """
+    assert(string.contains(s, "Hello, alice!"))
+}
+
+test "escape sequences" {
+    let s = "a\tb\nc"
+    assert(string.contains(s, "\t"))
+    assert(string.contains(s, "\n"))
+}

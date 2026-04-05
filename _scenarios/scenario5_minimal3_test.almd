@@ -1,0 +1,17 @@
+// Minimal: Record with Fn field — try different call styles
+
+type Handler = {
+    run: (String) -> String,
+    name: String,
+}
+
+fn make_handler(n: String) -> Handler = {
+    run: (x) => n + ":" + x,
+    name: n,
+}
+
+test "field access then call" {
+    let h = make_handler("echo")
+    let f = h.run
+    assert_eq(f("hello"), "echo:hello")
+}

@@ -1,0 +1,22 @@
+// Minimal repro: Record with function field in a List
+
+type Handler = {
+    run: (String) -> String,
+    name: String,
+}
+
+fn make_handler(n: String) -> Handler = {
+    run: (x) => n + ":" + x,
+    name: n,
+}
+
+test "single handler" {
+    let h = make_handler("echo")
+    assert_eq(h.name, "echo")
+    assert_eq(h.run("hello"), "echo:hello")
+}
+
+test "list of handlers" {
+    let handlers = [make_handler("a"), make_handler("b")]
+    assert_eq(list.len(handlers), 2)
+}

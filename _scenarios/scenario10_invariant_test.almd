@@ -1,0 +1,151 @@
+// Scenario 10: 不変条件の強制
+// 医療: 投薬量は必ず正の値、血圧は生理的範囲内
+// 金融: 残高は非負、利率は 0-100%
+
+// --- Smart constructor パターン ---
+
+type PositiveInt = PositiveInt(Int)
+
+fn positive_int(n: Int) -> Result[PositiveInt, String] = {
+    guard n > 0 else err("must be positive, got ${int.to_string(n)}")
+    ok(PositiveInt(n))
+}
+
+fn pos_value(p: PositiveInt) -> Int = match p { PositiveInt(v) => v }
+
+type Percentage = Percentage(Float)
+
+fn percentage(v: Float) -> Result[Percentage, String] = {
+    guard v >= 0.0 else err("percentage must be >= 0")
+    guard v <= 100.0 else err("percentage must be <= 100")
+    ok(Percentage(v))
+}
+
+fn pct_value(p: Percentage) -> Float = match p { Percentage(v) => v }
+
+type BloodPressure = { systolic: Int, diastolic: Int }
+
+fn blood_pressure(sys: Int, dia: Int) -> Result[BloodPressure, String] = {
+    guard sys > 0 and sys < 300 else err("systolic out of range: ${int.to_string(sys)}")
+    guard dia > 0 and dia < 200 else err("diastolic out of range: ${int.to_string(dia)}")
+    guard sys > dia else err("systolic must be > diastolic")
+    ok({ systolic: sys, diastolic: dia })
+}
+
+fn bp_category(bp: BloodPressure) -> String =
+    if bp.systolic < 120 and bp.diastolic < 80 then "normal"
+    else if bp.systolic < 130 and bp.diastolic < 80 then "elevated"
+    else if bp.systolic < 140 or bp.diastolic < 90 then "high-stage1"
+    else "high-stage2"
+
+test "positive int accepts valid" {
+    match positive_int(42) {
+        ok(p) => assert_eq(pos_value(p), 42),
+        err(_) => assert(false, "should accept 42"),
+    }
+}
+
+test "positive int rejects zero" {
+    match positive_int(0) {
+        err(e) => assert(string.contains(e, "positive")),
+        ok(_) => assert(false, "should reject 0"),
+    }
+}
+
+test "positive int rejects negative" {
+    match positive_int(-5) {
+        err(e) => assert(string.contains(e, "positive")),
+        ok(_) => assert(false, "should reject -5"),
+    }
+}
+
+test "percentage valid" {
+    match percentage(50.0) {
+        ok(p) => assert_eq(pct_value(p), 50.0),
+        err(_) => assert(false, "should accept 50%"),
+    }
+}
+
+test "percentage boundary" {
+    assert_eq(percentage(0.0), ok(Percentage(0.0)))
+    assert_eq(percentage(100.0), ok(Percentage(100.0)))
+}
+
+test "percentage rejects out of range" {
+    match percentage(150.0) {
+        err(_) => assert(true),
+        ok(_) => assert(false, "should reject 150%"),
+    }
+    match percentage(-10.0) {
+        err(_) => assert(true),
+        ok(_) => assert(false, "should reject -10%"),
+    }
+}
+
+test "blood pressure normal" {
+    match blood_pressure(110, 70) {
+        ok(bp) => assert_eq(bp_category(bp), "normal"),
+        err(_) => assert(false, "should accept 110/70"),
+    }
+}
+
+test "blood pressure high" {
+    match blood_pressure(150, 95) {
+        ok(bp) => assert_eq(bp_category(bp), "high-stage2"),
+        err(_) => assert(false, "should accept 150/95"),
+    }
+}
+
+test "blood pressure invalid range" {
+    match blood_pressure(50, 80) {
+        err(e) => assert(string.contains(e, "systolic must be > diastolic")),
+        ok(_) => assert(false, "systolic < diastolic should fail"),
+    }
+}
+
+test "blood pressure out of physiological range" {
+    match blood_pressure(350, 70) {
+        err(e) => assert(string.contains(e, "out of range")),
+        ok(_) => assert(false, "350 systolic should fail"),
+    }
+}
+
+// --- 複合バリデーション: 投薬オーダー ---
+
+type MedOrder = {
+    patient_id: String,
+    drug_name: String,
+    dose_mg: PositiveInt,
+    frequency_per_day: PositiveInt,
+}
+
+effect fn create_med_order(patient: String, drug: String, dose: Int, freq: Int) -> MedOrder = {
+    let d = positive_int(dose)!
+    let f = positive_int(freq)!
+    guard pos_value(f) <= 6 else err("frequency too high: max 6 per day")
+    { patient_id: patient, drug_name: drug, dose_mg: d, frequency_per_day: f }
+}
+
+test "valid med order" {
+    match create_med_order("P001", "Aspirin", 100, 3) {
+        ok(order) => {
+            assert_eq(order.patient_id, "P001")
+            assert_eq(pos_value(order.dose_mg), 100)
+        },
+        err(e) => assert(false, "should succeed: ${e}"),
+    }
+}
+
+test "med order rejects zero dose" {
+    match create_med_order("P001", "Aspirin", 0, 3) {
+        err(e) => assert(string.contains(e, "positive")),
+        ok(_) => assert(false, "should reject zero dose"),
+    }
+}
+
+test "med order rejects excessive frequency" {
+    match create_med_order("P001", "Aspirin", 100, 10) {
+        err(e) => assert(string.contains(e, "frequency")),
+        ok(_) => assert(false, "should reject freq > 6"),
+    }
+}

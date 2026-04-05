@@ -1,0 +1,72 @@
+// Monkey test 01: インライン variant 構文 (単一ケース含む)
+//
+// Regression for fixed bug: 単一ケース inline variant のパーサ曖昧性。
+// かつては `type T = T(String)` が type alias と解釈されて自己参照ループしていた
+// (同名) / `type T = Wrap(String)` が未定義型参照を吐いていた (異名)。
+// 現在は leading `|` なしでも正しく single-case variant として parse される。
+
+// 同名 newtype (leading | なし — 以前は無限ループしていた形)
+type PatientId = PatientId(String)
+type DrugId    = DrugId(String)
+type DoseAmount = DoseAmount(Float)
+
+// 異名 newtype (leading | なし — 以前は未定義型参照で codegen 崩壊)
+type OrderId = Oid(String)
+
+fn patient_id_str(id: PatientId) -> String =
+    match id { PatientId(s) => s }
+
+fn drug_id_str(id: DrugId) -> String =
+    match id { DrugId(s) => s }
+
+fn dose_value(d: DoseAmount) -> Float =
+    match d { DoseAmount(v) => v }
+
+test "same-name single-case variant without leading |" {
+    let p = PatientId("P001")
+    let d = DrugId("D042")
+    let amt = DoseAmount(2.5)
+    assert_eq(patient_id_str(p), "P001")
+    assert_eq(drug_id_str(d), "D042")
+    assert(dose_value(amt) > 2.4)
+}
+
+fn order_id_str(o: OrderId) -> String =
+    match o { Oid(s) => s }
+
+test "different-name single-case variant without leading |" {
+    let o = Oid("ORD-001")
+    assert_eq(order_id_str(o), "ORD-001")
+}
+
+// 多ケースインラインは leading | なしで動く
+type Color = Red | Green | Blue
+
+fn color_name(c: Color) -> String =
+    match c {
+        Red => "red",
+        Green => "green",
+        Blue => "blue",
+    }
+
+test "inline multi-case variant without leading |" {
+    assert_eq(color_name(Red), "red")
+    assert_eq(color_name(Green), "green")
+    assert_eq(color_name(Blue), "blue")
+}
+
+// 2ケース以上ならペイロード付きでも leading | 不要
+type Shape = Circle(Float) | Square(Float) | Rect(Float, Float)
+
+fn area(s: Shape) -> Float =
+    match s {
+        Circle(r) => 3.14159 * r * r,
+        Square(a) => a * a,
+        Rect(w, h) => w * h,
+    }
+
+test "inline multi-case with payload" {
+    assert(area(Circle(1.0)) > 3.14)
+    assert_eq(area(Square(2.0)), 4.0)
+    assert_eq(area(Rect(3.0, 4.0)), 12.0)
+}

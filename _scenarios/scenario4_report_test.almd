@@ -1,0 +1,113 @@
+// Scenario 4: レポート生成 — 複数フォーマット出力
+
+type Format = Html | Csv | Markdown | Json
+
+type ReportData = {
+    title: String,
+    headers: List[String],
+    rows: List[List[String]],
+}
+
+fn render_header(fmt: Format, title: String) -> String =
+    match fmt {
+        Html     => "<h1>${title}</h1>\n",
+        Csv      => "# ${title}\n",
+        Markdown => "# ${title}\n\n",
+        Json     => """{"title":"${title}",""",
+    }
+
+fn render_table(fmt: Format, headers: List[String], rows: List[List[String]]) -> String =
+    match fmt {
+        Html => {
+            let header_cells = headers |> list.map((h) => "<th>${h}</th>") |> list.join("")
+            let row_strs = rows |> list.map((row) => {
+                let cells = row |> list.map((c) => "<td>${c}</td>") |> list.join("")
+                "<tr>${cells}</tr>"
+            }) |> list.join("\n")
+            "<table><tr>${header_cells}</tr>\n${row_strs}</table>"
+        },
+        Csv => {
+            let header_line = headers |> list.join(",")
+            let row_lines = rows |> list.map((row) => row |> list.join(",")) |> list.join("\n")
+            "${header_line}\n${row_lines}"
+        },
+        Markdown => {
+            let header_line = "| " + (headers |> list.join(" | ")) + " |"
+            let sep = "| " + (headers |> list.map((_) => "---") |> list.join(" | ")) + " |"
+            let row_lines = rows |> list.map((row) => "| " + (row |> list.join(" | ")) + " |") |> list.join("\n")
+            "${header_line}\n${sep}\n${row_lines}"
+        },
+        Json => {
+            let row_objs = rows |> list.map((row) => {
+                let pairs = list.zip(headers, row)
+                    |> list.map((pair) => {
+                        let (k, v) = pair
+                        "\"${k}\":\"${v}\""
+                    })
+                    |> list.join(",")
+                "{${pairs}}"
+            }) |> list.join(",")
+            "\"rows\":[${row_objs}]}"
+        },
+    }
+
+fn generate_report(fmt: Format, data: ReportData) -> String =
+    render_header(fmt, data.title) + render_table(fmt, data.headers, data.rows)
+
+fn content_type(fmt: Format) -> String =
+    match fmt {
+        Html     => "text/html",
+        Csv      => "text/csv",
+        Markdown => "text/markdown",
+        Json     => "application/json",
+    }
+
+// テスト用データ
+fn sample_data() -> ReportData = {
+    title: "Sales Report",
+    headers: ["Name", "Amount", "Status"],
+    rows: [
+        ["Alice", "1000", "paid"],
+        ["Bob", "2000", "pending"],
+    ],
+}
+
+test "csv report" {
+    let report = generate_report(Csv, sample_data())
+    assert(string.contains(report, "Sales Report"))
+    assert(string.contains(report, "Name,Amount,Status"))
+    assert(string.contains(report, "Alice,1000,paid"))
+}
+
+test "html report" {
+    let report = generate_report(Html, sample_data())
+    assert(string.contains(report, "<h1>Sales Report</h1>"))
+    assert(string.contains(report, "<th>Name</th>"))
+    assert(string.contains(report, "<td>Alice</td>"))
+}
+
+test "markdown report" {
+    let report = generate_report(Markdown, sample_data())
+    assert(string.contains(report, "# Sales Report"))
+    assert(string.contains(report, "| Name | Amount | Status |"))
+    assert(string.contains(report, "| Alice | 1000 | paid |"))
+}
+
+test "json report" {
+    let report = generate_report(Json, sample_data())
+    assert(string.contains(report, "\"title\":\"Sales Report\""))
+    assert(string.contains(report, "\"Name\":\"Alice\""))
+}
+
+test "content types" {
+    assert_eq(content_type(Html), "text/html")
+    assert_eq(content_type(Csv), "text/csv")
+    assert_eq(content_type(Json), "application/json")
+}
+
+test "all formats produce output" {
+    let formats = [Html, Csv, Markdown, Json]
+    let reports = formats |> list.map((fmt) => generate_report(fmt, sample_data()))
+    let all_non_empty = reports |> list.all((r) => string.len(r) > 0)
+    assert(all_non_empty)
+}

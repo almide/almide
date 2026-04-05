@@ -1,0 +1,97 @@
+// Monkey test 07: 再帰・相互再帰
+
+fn fact(n: Int) -> Int =
+    if n <= 1 then 1 else n * fact(n - 1)
+
+test "factorial" {
+    assert_eq(fact(0), 1)
+    assert_eq(fact(1), 1)
+    assert_eq(fact(5), 120)
+    assert_eq(fact(10), 3628800)
+}
+
+fn fib(n: Int) -> Int =
+    if n < 2 then n else fib(n - 1) + fib(n - 2)
+
+test "fibonacci" {
+    assert_eq(fib(0), 0)
+    assert_eq(fib(1), 1)
+    assert_eq(fib(10), 55)
+    assert_eq(fib(15), 610)
+}
+
+// 末尾再帰
+fn sum_tail(n: Int, acc: Int) -> Int =
+    if n == 0 then acc else sum_tail(n - 1, acc + n)
+
+test "tail recursion" {
+    assert_eq(sum_tail(10, 0), 55)
+    assert_eq(sum_tail(100, 0), 5050)
+    assert_eq(sum_tail(1000, 0), 500500)
+}
+
+// リスト長 自前再帰
+fn my_len(xs: List[Int]) -> Int =
+    match xs {
+        [] => 0,
+        _ => todo("not implemented for general lists"),
+    }
+
+// 安全側: fold で定義
+fn len_via_fold(xs: List[Int]) -> Int =
+    xs |> list.fold(0, (acc, _) => acc + 1)
+
+test "length via fold" {
+    assert_eq(len_via_fold([]), 0)
+    assert_eq(len_via_fold([1, 2, 3]), 3)
+    assert_eq(len_via_fold([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), 10)
+}
+
+// Ackermann (小さい値のみ)
+fn ack(m: Int, n: Int) -> Int =
+    if m == 0 then n + 1
+    else if n == 0 then ack(m - 1, 1)
+    else ack(m - 1, ack(m, n - 1))
+
+test "ackermann small" {
+    assert_eq(ack(0, 0), 1)
+    assert_eq(ack(1, 1), 3)
+    assert_eq(ack(2, 2), 7)
+    assert_eq(ack(3, 3), 61)
+}
+
+// 相互再帰
+fn is_even(n: Int) -> Bool =
+    if n == 0 then true else is_odd(n - 1)
+
+fn is_odd(n: Int) -> Bool =
+    if n == 0 then false else is_even(n - 1)
+
+test "mutual recursion" {
+    assert(is_even(0))
+    assert(not is_even(1))
+    assert(is_odd(1))
+    assert(is_even(10))
+    assert(is_odd(11))
+}
+
+// GCD
+fn gcd(a: Int, b: Int) -> Int =
+    if b == 0 then a else gcd(b, a % b)
+
+test "gcd" {
+    assert_eq(gcd(12, 8), 4)
+    assert_eq(gcd(100, 75), 25)
+    assert_eq(gcd(17, 13), 1)
+    assert_eq(gcd(0, 5), 5)
+}
+
+// 再帰でリスト生成
+fn range_rec(from: Int, to: Int) -> List[Int] =
+    if from >= to then [] else [from] + range_rec(from + 1, to)
+
+test "range via recursion" {
+    assert_eq(range_rec(0, 0), [])
+    assert_eq(range_rec(1, 5), [1, 2, 3, 4])
+    assert_eq(list.len(range_rec(0, 100)), 100)
+}
