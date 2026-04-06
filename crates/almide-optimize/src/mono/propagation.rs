@@ -17,13 +17,11 @@ pub(super) fn propagate_concrete_types(program: &mut IrProgram) {
 /// If the body expression is a Match whose .ty disagrees with ret_ty, fix it.
 /// Also recurse into Block tails.
 fn fix_body_match_ty(body: &mut IrExpr, ret_ty: &Ty) {
+    if matches!(ret_ty, Ty::Unit | Ty::Unknown) { return; }
     match &mut body.kind {
         IrExprKind::Match { arms, .. } => {
-            if !almide_ir::wasm_types_compatible(&body.ty, ret_ty)
-                && !matches!(ret_ty, Ty::Unit | Ty::Unknown)
-            {
+            if !almide_ir::wasm_types_compatible(&body.ty, ret_ty) {
                 body.ty = ret_ty.clone();
-                // Also fix arm body types
                 for arm in arms.iter_mut() {
                     if !almide_ir::wasm_types_compatible(&arm.body.ty, ret_ty) {
                         fix_body_match_ty(&mut arm.body, ret_ty);
@@ -33,12 +31,23 @@ fn fix_body_match_ty(body: &mut IrExpr, ret_ty: &Ty) {
         }
         IrExprKind::Block { expr: Some(tail), .. } => {
             fix_body_match_ty(tail, ret_ty);
-            if !almide_ir::wasm_types_compatible(&body.ty, ret_ty)
-                && !matches!(ret_ty, Ty::Unit | Ty::Unknown) {
+            if !almide_ir::wasm_types_compatible(&body.ty, ret_ty) {
                 body.ty = ret_ty.clone();
             }
         }
-        _ => {}
+        IrExprKind::If { then, else_, .. } => {
+            fix_body_match_ty(then, ret_ty);
+            fix_body_match_ty(else_, ret_ty);
+            if !almide_ir::wasm_types_compatible(&body.ty, ret_ty) {
+                body.ty = ret_ty.clone();
+            }
+        }
+        _ => {
+            // Leaf expression with wrong type — fix directly
+            if !almide_ir::wasm_types_compatible(&body.ty, ret_ty) {
+                body.ty = ret_ty.clone();
+            }
+        }
     }
 }
 
