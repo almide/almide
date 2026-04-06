@@ -230,6 +230,9 @@ impl FuncCompiler<'_> {
             IrExprKind::Call { target, args, .. } => {
                 self.emit_call(target, args, &expr.ty);
             }
+            IrExprKind::TailCall { target, args } => {
+                self.emit_tail_call(target, args, &expr.ty);
+            }
 
             // ── String interpolation ──
             IrExprKind::StringInterp { parts } => {

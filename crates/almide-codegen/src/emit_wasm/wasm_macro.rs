@@ -338,6 +338,13 @@ macro_rules! wasm {
         $f.instruction(&wasm_encoder::Instruction::CallIndirect { type_index: $ty, table_index: $tbl });
         wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, return_call($v:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::ReturnCall($v)); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, return_call_indirect($ty:expr, $tbl:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::ReturnCallIndirect { type_index: $ty, table_index: $tbl });
+        wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, br($v:expr); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::Br($v)); wasm!(@emit $f, $($rest)*)
     };

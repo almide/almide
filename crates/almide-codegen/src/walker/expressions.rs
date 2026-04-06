@@ -166,7 +166,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::RenderedCall { code } => code.clone(),
 
         // ── Calls ──
-        IrExprKind::Call { target, args, .. } => {
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
             match target {
                 CallTarget::Module { module, func } => {
                     // Module calls: use template (TS/JS) or runtime function (Rust)

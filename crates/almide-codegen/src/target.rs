@@ -29,6 +29,7 @@ use super::pass_peephole::PeepholePass;
 use super::pass_rust_lowering::RustLoweringPass;
 use super::pass_closure_conversion::ClosureConversionPass;
 use super::pass_list_pattern::ListPatternLoweringPass;
+use super::pass_tail_call_mark::TailCallMarkPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -107,7 +108,6 @@ fn build_pipeline(target: Target) -> Pipeline {
 
         Target::Wasm => Pipeline::new()
             .add(ListPatternLoweringPass)
-            .add(TailCallOptPass)
             .add(LICMPass)
             .add(EffectInferencePass)
             // StreamFusion not included: WASM emitter has its own lowering paths
@@ -116,7 +116,10 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(PeepholePass)
             // Closure conversion: lift lambdas to top-level functions with explicit env
             .add(ClosureConversionPass)
-            .add(FanLoweringPass),
+            .add(FanLoweringPass)
+            // TailCallMark: mark tail-position calls for WASM return_call emission.
+            // Must run last — after all passes that may create or transform calls.
+            .add(TailCallMarkPass),
     }
 }
 
