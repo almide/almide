@@ -404,10 +404,10 @@ template = "(*{name})"
 template = "{expr}.clone()"
 
 [range_expr]
-template = "({start}..{end})"
+template = "({start}..{end}).collect::<Vec<_>>()"
 
 [range_inclusive]
-template = "({start}..={end})"
+template = "({start}..={end}).collect::<Vec<_>>()"
 
 [for_tuple_destructure]
 template = "({vars})"
