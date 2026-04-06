@@ -478,14 +478,21 @@ impl FuncCompiler<'_> {
             return;
         }
 
-        // Emit first part as a string
-        self.emit_string_part(&parts[0]);
-
-        // For each subsequent part: emit it, then concat with accumulator
-        for part in &parts[1..] {
-            self.emit_string_part(part);
-            wasm!(self.func, { call(self.emitter.rt.concat_str); });
+        // Single part: no scratch buffer needed
+        if parts.len() == 1 {
+            self.emit_string_part(&parts[0]);
+            return;
         }
+
+        // Multi-part: use memory 1 scratch buffer.
+        // Each part → string ptr → scratch_write_str (copies bytes to mem1).
+        // After all parts: scratch_finalize → alloc on mem0 heap + copy from mem1.
+        // Result: zero intermediate heap allocations.
+        for part in parts {
+            self.emit_string_part(part);
+            wasm!(self.func, { call(self.emitter.rt.scratch_write_str); });
+        }
+        wasm!(self.func, { call(self.emitter.rt.scratch_finalize); });
     }
 
     /// Emit a single string interpolation part as a string (i32 pointer).

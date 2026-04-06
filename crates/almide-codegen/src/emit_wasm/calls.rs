@@ -710,6 +710,76 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Emit a tail call (WASM `return_call` / `return_call_indirect`).
+    /// Falls back to normal call for targets that don't resolve to a known function.
+    pub(super) fn emit_tail_call(&mut self, target: &CallTarget, args: &[IrExpr], ret_ty: &Ty) {
+        match target {
+            CallTarget::Named { name } => {
+                // Only user-defined functions get return_call; builtins fall back to normal call
+                if let Some(&func_idx) = self.emitter.func_map.get(name.as_str()) {
+                    for arg in args {
+                        self.emit_expr(arg);
+                    }
+                    wasm!(self.func, { return_call(func_idx); });
+                } else {
+                    // Not a user function (builtin/stub) — fall back to normal call
+                    self.emit_call(target, args, ret_ty);
+                }
+            }
+            CallTarget::Computed { callee } => {
+                // Closure tail call: same setup as emit_call but return_call_indirect
+                let scratch = self.scratch.alloc_i32();
+                self.emit_expr(callee);
+                wasm!(self.func, { local_set(scratch); });
+
+                // Push env_ptr (first hidden arg)
+                wasm!(self.func, {
+                    local_get(scratch);
+                    i32_load(4);
+                });
+
+                for arg in args {
+                    self.emit_expr(arg);
+                }
+
+                // Push table_idx
+                wasm!(self.func, {
+                    local_get(scratch);
+                    i32_load(0);
+                });
+
+                let callee_fn_ty = match &callee.ty {
+                    Ty::Fn { .. } => callee.ty.clone(),
+                    _ => {
+                        if let almide_ir::IrExprKind::Var { id } = &callee.kind {
+                            self.var_table.get(*id).ty.clone()
+                        } else {
+                            callee.ty.clone()
+                        }
+                    }
+                };
+                if let Ty::Fn { params, ret } = &callee_fn_ty {
+                    let mut closure_params = vec![ValType::I32];
+                    for p in params {
+                        if let Some(vt) = values::ty_to_valtype(p) {
+                            closure_params.push(vt);
+                        }
+                    }
+                    let ret_types = values::ret_type(ret);
+                    let type_idx = self.emitter.register_type(closure_params, ret_types);
+                    wasm!(self.func, { return_call_indirect(type_idx, 0); });
+                } else {
+                    wasm!(self.func, { unreachable; });
+                }
+                self.scratch.free_i32(scratch);
+            }
+            // Module/Method calls in tail position — fall back to normal call
+            _ => {
+                self.emit_call(target, args, ret_ty);
+            }
+        }
+    }
+
     pub(super) fn emit_stub_call(&mut self, args: &[IrExpr]) {
         // Unimplemented function: trap immediately rather than returning a default value.
         // Returning silent defaults (0, empty string, etc.) is dangerous in medical contexts

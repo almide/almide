@@ -251,6 +251,9 @@ pub enum IrExprKind {
 
     // ── Calls (fully resolved) ──
     Call { target: CallTarget, args: Vec<IrExpr>, #[serde(default, skip_serializing_if = "Vec::is_empty")] type_args: Vec<Ty> },
+    /// Tail call: same as Call but emits `return_call` in WASM.
+    /// Inserted by TailCallMarkPass for calls in tail position.
+    TailCall { target: CallTarget, args: Vec<IrExpr> },
 
     // ── Collections ──
     List { elements: Vec<IrExpr> },
@@ -461,6 +464,15 @@ impl IrExpr {
                     other => other,
                 };
                 IrExprKind::Call { target, args, type_args }
+            }
+            IrExprKind::TailCall { target, args } => {
+                let args = args.into_iter().map(|a| f(a)).collect();
+                let target = match target {
+                    CallTarget::Method { object, method } => CallTarget::Method { object: Box::new(f(*object)), method },
+                    CallTarget::Computed { callee } => CallTarget::Computed { callee: Box::new(f(*callee)) },
+                    other => other,
+                };
+                IrExprKind::TailCall { target, args }
             }
 
             // ── Collections ──

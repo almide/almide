@@ -135,6 +135,13 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let concat_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.concat_str = emitter.register_func("__concat_str", concat_ty);
 
+    // __scratch_write_str(str_ptr: i32) -> ()   [writes string bytes to memory 1]
+    let scratch_w_ty = emitter.register_type(vec![ValType::I32], vec![]);
+    emitter.rt.scratch_write_str = emitter.register_func("__scratch_write_str", scratch_w_ty);
+    // __scratch_finalize() -> i32   [copy memory 1 scratch to memory 0 heap, return heap ptr]
+    let scratch_f_ty = emitter.register_type(vec![], vec![ValType::I32]);
+    emitter.rt.scratch_finalize = emitter.register_func("__scratch_finalize", scratch_f_ty);
+
     // __option_eq_i64(a: i32, b: i32) -> i32
     let opt_eq_i64_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.option_eq_i64 = emitter.register_func("__option_eq_i64", opt_eq_i64_ty);
@@ -213,8 +220,10 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     // Regex runtime
     super::rt_regex::register(emitter);
 
-    // Global: __heap_ptr (mutable i32, initialized at assembly time)
-    emitter.heap_ptr_global = 0; // first and only global
+    // Global 0: __heap_ptr (memory 0 bump allocator)
+    emitter.heap_ptr_global = 0;
+    // Global 1: __scratch_ptr (memory 1 string builder scratch)
+    emitter.scratch_ptr_global = 1;
 }
 
 /// Compile all runtime function bodies.
@@ -225,6 +234,8 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_float_to_string(emitter);
     compile_println_int(emitter);
     compile_concat_str(emitter);
+    compile_scratch_write_str(emitter);
+    compile_scratch_finalize(emitter);
     super::runtime_eq::compile_option_eq_i64(emitter);
     super::runtime_eq::compile_option_eq_str(emitter);
     super::runtime_eq::compile_result_eq_i64_str(emitter);
@@ -741,5 +752,154 @@ pub(super) fn emit_memcpy_loop(f: &mut Function, dst: u32, src: u32, len: u32, c
         end;
         end;
     });
+}
+
+// ── Multi-memory string builder scratch ─────────────────────────
+
+/// __scratch_write_str(str_ptr: i32) → ()
+/// Copies string DATA bytes (not the length prefix) from memory 0 to memory 1
+/// at the current scratch_ptr offset, then advances scratch_ptr.
+fn compile_scratch_write_str(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.scratch_write_str];
+    // params: 0=$str_ptr
+    // locals: 1=$len, 2=$i
+    let mut f = Function::new([
+        (1, ValType::I32), // 1: $len
+        (1, ValType::I32), // 2: $i
+    ]);
+
+    wasm!(f, {
+        // $len = mem0[str_ptr + 0] (string byte length)
+        local_get(0);
+        i32_load(0);
+        local_set(1);
+
+        // Ensure memory 1 has enough space: scratch_ptr + len
+        // If scratch_ptr + len > memory_size(1) * 65536, grow
+        global_get(emitter.scratch_ptr_global);
+        local_get(1);
+        i32_add;
+        memory_size(1);
+        i32_const(65536);
+        i32_mul;
+        i32_gt_u;
+        if_empty;
+        // Grow by (needed / 65536) + 1 pages
+        global_get(emitter.scratch_ptr_global);
+        local_get(1);
+        i32_add;
+        memory_size(1);
+        i32_const(65536);
+        i32_mul;
+        i32_sub;
+        i32_const(65536);
+        i32_div_u;
+        i32_const(1);
+        i32_add;
+        memory_grow(1);
+        drop;
+        end;
+
+        // Byte-copy loop: mem1[scratch_ptr + i] = mem0[str_ptr + 4 + i]
+        i32_const(0);
+        local_set(2);
+        block_empty;
+        loop_empty;
+        local_get(2);
+        local_get(1);
+        i32_ge_u;
+        br_if(1);
+
+        // dst address in mem1
+        global_get(emitter.scratch_ptr_global);
+        local_get(2);
+        i32_add;
+
+        // src byte from mem0
+        local_get(0);
+        i32_const(4);
+        i32_add;
+        local_get(2);
+        i32_add;
+        i32_load8_u(0);
+
+        // store to mem1
+        i32_store8(0, 1);
+
+        local_get(2);
+        i32_const(1);
+        i32_add;
+        local_set(2);
+        br(0);
+        end;
+        end;
+
+        // scratch_ptr += len
+        global_get(emitter.scratch_ptr_global);
+        local_get(1);
+        i32_add;
+        global_set(emitter.scratch_ptr_global);
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __scratch_finalize() → i32
+/// Allocates [len:i32][data...] on memory 0 heap, copies scratch bytes from
+/// memory 1, resets scratch_ptr to 0, returns the memory 0 string pointer.
+fn compile_scratch_finalize(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.scratch_finalize];
+    // params: (none)
+    // locals: 0=$total_len (= scratch_ptr), 1=$result
+    let mut f = Function::new([
+        (1, ValType::I32), // 0: $total_len
+        (1, ValType::I32), // 1: $result
+    ]);
+
+    wasm!(f, {
+        // $total_len = scratch_ptr (number of bytes written)
+        global_get(emitter.scratch_ptr_global);
+        local_set(0);
+
+        // If total_len == 0, return empty string
+        local_get(0);
+        i32_eqz;
+        if_empty;
+        i32_const(emitter.intern_string("") as i32);
+        return_;
+        end;
+
+        // Allocate on memory 0 heap: 4 (length prefix) + total_len
+        local_get(0);
+        i32_const(4);
+        i32_add;
+        call(emitter.rt.alloc);
+        local_set(1);
+
+        // Write length prefix
+        local_get(1);
+        local_get(0);
+        i32_store(0);
+
+        // Copy data: memory.copy(dst_mem=0, src_mem=1)
+        // dst = result + 4 (in mem0), src = 0 (in mem1), len = total_len
+        local_get(1);
+        i32_const(4);
+        i32_add;  // dst in mem0
+        i32_const(0);  // src in mem1
+        local_get(0);  // len
+        memory_copy(1, 0);  // src=mem1, dst=mem0
+
+        // Reset scratch_ptr
+        i32_const(0);
+        global_set(emitter.scratch_ptr_global);
+
+        // Return result pointer
+        local_get(1);
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 

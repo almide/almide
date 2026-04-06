@@ -123,7 +123,7 @@ fn is_pure_expr(
         }
 
         // Calls: check if the target is an effect fn
-        IrExprKind::Call { target, args, .. } => {
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
             match target {
                 CallTarget::Named { name } => {
                     if effect_fns.contains(name) { return false; }
