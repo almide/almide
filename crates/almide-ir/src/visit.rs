@@ -131,6 +131,7 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         | IrExprKind::Await { expr: e }
         | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
         | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::RcWrap { expr: e, .. }
         | IrExprKind::ToVec { expr: e } => {
             v.visit_expr(e);
         }

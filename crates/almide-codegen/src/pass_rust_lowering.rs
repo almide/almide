@@ -35,9 +35,33 @@ impl NanoPass for RustLoweringPass {
     }
 }
 
-/// Walk all stmts in expressions recursively.
+/// Walk all stmts in expressions recursively. Also rewrites UnwrapOr
+/// fallback lambdas for List[Fn] contexts with RcWrap.
 fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
     let mut changed = false;
+    // UnwrapOr with Fn fallback lambda: wrap in RcWrap for List[Fn] compatibility
+    if let IrExprKind::UnwrapOr { expr: inner, fallback } = &mut expr.kind {
+        if matches!(&fallback.kind, IrExprKind::Lambda { .. })
+            && matches!(&expr.ty, almide_lang::types::Ty::Fn { .. })
+        {
+            if let Some(inner_fn_ty) = inner.ty.option_inner() {
+                if matches!(inner_fn_ty, almide_lang::types::Ty::Fn { .. }) {
+                    let old_fallback = std::mem::replace(fallback.as_mut(), IrExpr {
+                        kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None,
+                    });
+                    *fallback.as_mut() = IrExpr {
+                        ty: old_fallback.ty.clone(),
+                        span: old_fallback.span,
+                        kind: IrExprKind::RcWrap {
+                            expr: Box::new(old_fallback),
+                            cast_ty: Some(Box::new(inner_fn_ty.clone())),
+                        },
+                    };
+                    changed = true;
+                }
+            }
+        }
+    }
     match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts.iter_mut() {
@@ -104,6 +128,30 @@ fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, changed: &mut boo
 /// Try to rewrite a single statement.
 fn rewrite_stmt(stmt: &mut IrStmt, vt: &mut VarTable) -> bool {
     let span = stmt.span;
+    // (0) List[Fn] binding: wrap lambda elements in RcWrap
+    if let IrStmtKind::Bind { ty, value, .. } = &mut stmt.kind {
+        if let almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::List, args) = ty {
+            if let Some(fn_ty) = args.first().cloned() {
+                if matches!(&fn_ty, almide_lang::types::Ty::Fn { .. }) {
+                    if let IrExprKind::List { elements } = &mut value.kind {
+                        let cast = Some(Box::new(fn_ty));
+                        for elem in elements.iter_mut() {
+                            let inner = std::mem::replace(elem, IrExpr {
+                                kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None,
+                            });
+                            *elem = IrExpr {
+                                ty: inner.ty.clone(),
+                                span: inner.span,
+                                kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: cast.clone() },
+                            };
+                        }
+                        // Change type to mark it (walker will render Rc type from the RcWrap nodes)
+                        return true;
+                    }
+                }
+            }
+        }
+    }
     // (1) xs = xs + [v] → xs.push(v)
     if let IrStmtKind::Assign { var, value } = &stmt.kind {
         if let Some(push_stmt) = try_rewrite_push(*var, value, span) {

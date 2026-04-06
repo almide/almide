@@ -457,63 +457,33 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // In test functions, ? cannot be used (return type is ()).
             // Use .unwrap() instead.
             if ctx.is_test {
-                if inner.ty.is_option() {
-                    format!("({}).unwrap()", s)
-                } else {
-                    format!("({}).unwrap()", s)
-                }
-            } else if !inner.ty.is_option() && matches!(ctx.target, Target::Rust) {
-                // Result unwrap in effect fn: error type must be coerced to String.
-                // If the error type is not String, insert .map_err(...) before ?.
-                let needs_map_err = if let Some((_ok_ty, err_ty)) = inner.ty.inner2() {
-                    !matches!(err_ty, Ty::String)
-                } else {
-                    false
-                };
-                if needs_map_err {
-                    let err_ty = inner.ty.inner2().map(|(_, e)| e);
-                    // List[String] → join with ", " for readable error messages
-                    let is_list_string = err_ty.is_some_and(|e| {
-                        matches!(e, Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 && matches!(args[0], Ty::String))
-                    });
-                    if is_list_string {
-                        format!("({}).map_err(|errs| errs.join(\", \"))?", s)
-                    } else {
-                        format!("({}).map_err(|e| format!(\"{{:?}}\", e))?", s)
-                    }
-                } else {
-                    ctx.templates.render_with("unwrap_expr", None, &[], &[("inner", s.as_str())])
-                        .unwrap_or_else(|| format!("({})?", s))
-                }
+                format!("({}).unwrap()", s)
             } else {
+                // Determine the right template variant based on inner type.
+                // For Result with non-String error, use map_err variants
+                // (the template decides whether/how to coerce — target-agnostic).
                 let when_type = if inner.ty.is_option() { Some("Option") } else { None };
-                ctx.templates.render_with("unwrap_expr", when_type, &[], &[("inner", s.as_str())])
-                    .unwrap_or_else(|| {
-                        if inner.ty.is_option() {
-                            format!("((__v) => {{ if (__v === null) throw new Error('unwrap on none'); return __v; }})({})", s)
+                let err_coerce_attr = if !inner.ty.is_option() {
+                    if let Some((_, err_ty)) = inner.ty.inner2() {
+                        if matches!(err_ty, Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 && matches!(args[0], Ty::String)) {
+                            Some("map_err_join")
+                        } else if !matches!(err_ty, Ty::String) {
+                            Some("map_err_debug")
                         } else {
-                            format!("({})?", s)
+                            None
                         }
-                    })
+                    } else { None }
+                } else { None };
+                let attrs: Vec<&str> = err_coerce_attr.into_iter().collect();
+                ctx.templates.render_with("unwrap_expr", when_type, &attrs, &[("inner", s.as_str())])
+                    .unwrap_or_else(|| format!("({})?", s))
             }
         }
         IrExprKind::UnwrapOr { expr: inner, fallback } => {
             let s = render_expr(ctx, inner);
-            let mut f = render_expr(ctx, fallback);
-            // When the fallback is a lambda and the result type is Fn (from a List[Fn] get),
-            // wrap in Rc::new to match the Rc<dyn Fn> stored in the collection
-            if ctx.target == super::super::pass::Target::Rust
-                && matches!(&fallback.kind, IrExprKind::Lambda { .. })
-                && matches!(&expr.ty, Ty::Fn { .. })
-            {
-                // Check if inner is Option[Fn] (from list.get on a List[Fn])
-                if let Some(inner_ty) = inner.ty.option_inner() {
-                    if matches!(inner_ty, Ty::Fn { .. }) {
-                        let rc_type = super::helpers::render_type_rc_fn(ctx, &inner_ty);
-                        f = format!("std::rc::Rc::new({}) as {}", f, rc_type);
-                    }
-                }
-            }
+            let f = render_expr(ctx, fallback);
+            // Rc wrapping for List[Fn] fallback is now handled by RustLoweringPass
+            // which inserts RcWrap nodes into the IR.
             let when_type = if inner.ty.is_option() { Some("Option") } else { None };
             // When inner.ty is Unknown, defaults to Result template.
             // This is correct if type inference produced Unknown due to a bug;
@@ -563,6 +533,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         IrExprKind::BoxNew { expr: inner } => {
             format!("Box::new({})", render_expr(ctx, inner))
+        }
+        IrExprKind::RcWrap { expr: inner, cast_ty } => {
+            let s = render_expr(ctx, inner);
+            if let Some(ty) = cast_ty {
+                let rc_type = super::helpers::render_type_rc_fn(ctx, ty);
+                format!("std::rc::Rc::new({}) as {}", s, rc_type)
+            } else {
+                format!("std::rc::Rc::new({})", s)
+            }
         }
         IrExprKind::RustMacro { name, args } => {
             // Render macro args — LitStr rendered as bare &str (no .to_string())

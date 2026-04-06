@@ -60,6 +60,7 @@ fn fold_expr(expr: &mut IrExpr) {
         | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::RcWrap { expr, .. }
         | IrExprKind::ToVec { expr } => fold_expr(expr),
         IrExprKind::UnwrapOr { expr: e, fallback: f } => {
             fold_expr(e);

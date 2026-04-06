@@ -136,6 +136,7 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
         | IrExprKind::Await { expr }
         | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::RcWrap { expr, .. }
         | IrExprKind::ToVec { expr } => {
             count_uses_in_expr(expr, table);
         }
@@ -363,6 +364,7 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
         }
         IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
         | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::RcWrap { expr, .. }
         | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
             bump_vars_in_expr(expr, locals, table);
         }

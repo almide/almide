@@ -87,6 +87,14 @@ template = "Ok({inner})"
 template = "Err(format!(\"{:?}\", {inner}))"
 
 [[unwrap_expr]]
+when_attr = "map_err_join"
+template = "({inner}).map_err(|errs| errs.join(\", \"))?"
+
+[[unwrap_expr]]
+when_attr = "map_err_debug"
+template = "({inner}).map_err(|e| format!(\"{:?}\", e))?"
+
+[[unwrap_expr]]
 template = "({inner})?"
 
 [[unwrap_expr]]

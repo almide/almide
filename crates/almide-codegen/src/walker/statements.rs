@@ -13,36 +13,8 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, mutability } => {
             let name_s = ctx.var_name(*var).to_string();
-            // List[Fn] binding: render as Vec<Rc<dyn Fn(...)>> with Rc-wrapped lambdas
-            let is_list_of_fn = matches!(ty, Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() && matches!(&args[0], Ty::Fn { .. }));
-            if is_list_of_fn && ctx.target == super::super::pass::Target::Rust {
-                if let Ty::Applied(_, args) = ty {
-                    let fn_ty = &args[0];
-                    let rc_type_s = super::helpers::render_type_rc_fn(ctx, fn_ty);
-                    let type_s = format!("Vec<{}>", rc_type_s);
-                    let value_s = if let IrExprKind::List { elements } = &value.kind {
-                        let elems = elements.iter().enumerate().map(|(i, e)| {
-                            let s = render_expr(ctx, e);
-                            if i == 0 {
-                                // Cast first element to establish Vec type
-                                format!("std::rc::Rc::new({}) as {}", s, rc_type_s)
-                            } else {
-                                format!("std::rc::Rc::new({})", s)
-                            }
-                        }).collect::<Vec<_>>().join(", ");
-                        ctx.templates.render_with("list_literal", None, &[], &[("elements", elems.as_str())])
-                            .unwrap_or_else(|| format!("vec![{}]", elems))
-                    } else {
-                        render_expr(ctx, value)
-                    };
-                    let construct = match mutability {
-                        Mutability::Let => "let_binding",
-                        Mutability::Var => "var_binding",
-                    };
-                    return ctx.templates.render_with(construct, None, &[], &[("name", name_s.as_str()), ("type", type_s.as_str()), ("value", value_s.as_str())])
-                        .unwrap_or_else(|| format!("let {} = {};", name_s, value_s));
-                }
-            }
+            // List[Fn] Rc wrapping is now handled by RustLoweringPass
+            // which inserts RcWrap nodes into the IR.
             // Erase Fn types in bindings (Rust can't write `impl Fn` in let position; TS gets `any`)
             // Also resolve aliases first — `type Handler = Fn(String) -> String` should erase too
             let resolved_owned;
