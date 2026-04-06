@@ -71,11 +71,9 @@ fn mark_tail_calls(expr: &mut IrExpr) -> bool {
             changed
         }
 
-        // Result wrappers: if the inner expr is a Call, the wrapper + call is a tail call
-        // e.g., `Ok(f(x))` in an effect fn — the call to f is in tail position
-        IrExprKind::ResultOk { expr: inner } | IrExprKind::Try { expr: inner } => {
-            mark_tail_calls(inner)
-        }
+        // ResultOk/Try are NOT tail positions: the wrapper changes the return type.
+        // `Ok(f(x))` wraps f's result in Result — return_call(f) would skip the wrapping.
+        // `Try(f(x))` unwraps f's Result — return_call(f) would return Result, not the inner T.
 
         // Everything else is NOT a tail position
         _ => false,

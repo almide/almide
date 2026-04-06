@@ -116,6 +116,10 @@ pub struct RuntimeFuncs {
     pub int_to_string: u32,
     pub println_int: u32,
     pub concat_str: u32,
+    /// Write string bytes to memory 1 scratch buffer, advance scratch_ptr.
+    pub scratch_write_str: u32,
+    /// Finalize scratch buffer: alloc on memory 0 heap, copy from memory 1, reset scratch_ptr.
+    pub scratch_finalize: u32,
     pub concat_list: u32,
     pub list_eq: u32,
     pub mem_eq: u32,
@@ -268,7 +272,8 @@ impl WasmEmitter {
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
                 math_sin: 0, math_cos: 0, math_tan: 0,
                 math_log: 0, math_log10: 0, math_log2: 0, math_exp: 0,
-                concat_str: 0, concat_list: 0,
+                concat_str: 0, scratch_write_str: 0, scratch_finalize: 0,
+                concat_list: 0,
                 list_eq: 0, mem_eq: 0, list_list_str_cmp: 0,
                 option_eq_i64: 0, option_eq_str: 0,
                 result_eq_i64_str: 0, int_parse: 0, int_from_hex: 0,
