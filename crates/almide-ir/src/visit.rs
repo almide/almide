@@ -69,7 +69,7 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         }
 
         // ── Calls ──
-        IrExprKind::Call { target, args, .. } => {
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
             match target {
                 CallTarget::Method { object, .. } => v.visit_expr(object),
                 CallTarget::Computed { callee } => v.visit_expr(callee),

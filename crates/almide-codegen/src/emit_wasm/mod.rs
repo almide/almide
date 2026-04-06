@@ -195,6 +195,8 @@ pub struct WasmEmitter {
 
     // Globals
     pub heap_ptr_global: u32,
+    /// Memory 1 scratch pointer (string builder). Reset to 0 after each string op.
+    pub scratch_ptr_global: u32,
     // Top-level let globals: VarId → (global index, ValType)
     pub top_let_globals: HashMap<u32, (u32, ValType)>,
     pub top_let_init: Vec<(u32, ValType, i64)>, // (global_idx, type, const_init_bits) in order
@@ -309,9 +311,10 @@ impl WasmEmitter {
                 fd_readdir: 0,
             },
             heap_ptr_global: 0,
+            scratch_ptr_global: 1,
             top_let_globals: HashMap::new(),
             top_let_init: Vec::new(),
-            next_global: 1, // 0 = heap_ptr
+            next_global: 2, // 0 = heap_ptr, 1 = scratch_ptr
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
             record_fields: HashMap::new(),
@@ -889,10 +892,19 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
         module.section(&tables);
     }
 
-    // ── Memory section ──
+    // ── Memory section (multi-memory: WASM 3.0) ──
     let mut memory = MemorySection::new();
+    // Memory 0: main memory (scratch + data segment + heap)
     memory.memory(MemoryType {
         minimum: 64, // 4MB
+        maximum: None,
+        memory64: false,
+        shared: false,
+        page_size_log2: None,
+    });
+    // Memory 1: string builder scratch (temporary buffer for string operations)
+    memory.memory(MemoryType {
+        minimum: 1, // 64KB — grows on demand
         maximum: None,
         memory64: false,
         shared: false,
@@ -904,6 +916,7 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
     let mut globals = GlobalSection::new();
     let heap_start = NEWLINE_OFFSET + emitter.data_bytes.len() as u32;
     let heap_start_aligned = (heap_start + 7) & !7;
+    // Global 0: heap pointer (memory 0)
     globals.global(
         GlobalType {
             val_type: ValType::I32,
@@ -911,6 +924,15 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
             shared: false,
         },
         &wasm_encoder::ConstExpr::i32_const(heap_start_aligned as i32),
+    );
+    // Global 1: scratch pointer (memory 1) — string builder scratch
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+            shared: false,
+        },
+        &wasm_encoder::ConstExpr::i32_const(0),
     );
     // Top-level let globals
     for &(_, vt, bits) in &emitter.top_let_init {
