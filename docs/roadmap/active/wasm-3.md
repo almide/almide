@@ -48,14 +48,9 @@ Shared memory + atomics for fan expression compilation.
 - **Runtime support**: Chrome 74, Firefox 79, Safari 14.1, Wasmtime 15, Wasmer 4.0 — universal
 - Blocked on fan concurrency language design (separate roadmap item)
 
-## Baseline Compatibility
+## No 2.0 Fallback
 
-Default output (`almide build --target wasm`) remains **WASM 2.0 compatible**. New features are enabled via:
-
-```
-almide build app.almd --target wasm              # 3.0 (default from v0.12)
-almide build app.almd --target wasm --compat 2.0  # 2.0 fallback for legacy runtimes
-```
+WASM output is 3.0 only. No `--compat 2.0` mode. All 3.0 features used by Almide (tail calls, EH, multi-memory, threads) are shipped in every major runtime as of 2025. Maintaining dual codegen paths is not worth the cost for runtimes that don't exist in practice.
 
 ## Messaging
 
