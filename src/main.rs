@@ -2,7 +2,7 @@ mod cli;
 
 // Bring library modules into binary crate scope so cli/ submodules can use `crate::*`.
 pub use almide::{
-    ast, canonicalize, check, codegen, diagnostic, fmt,
+    ast, canonicalize, check, codegen, diagnostic, diagnostic_render, fmt,
     import_table, intern, ir, lexer, lower, mono, optimize,
     parser, project, project_fetch, resolve, stdlib, types,
 };
@@ -241,13 +241,13 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         all_errors.extend(checker_errors);
         if !all_errors.is_empty() {
             for d in &all_errors {
-                eprintln!("{}", d.display_with_source(&source_text));
+                eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
             }
             eprintln!("\n{} error(s) found", all_errors.len());
             return Err(format!("{} error(s) found", all_errors.len()));
         }
         for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-            eprintln!("{}", d.display_with_source(&source_text));
+            eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
         }
         // Lower to IR only if no parse errors (partial AST can't produce valid IR)
         if !has_parse_errors {
@@ -255,7 +255,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             // Emit unused variable warnings
             let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
             for d in &unused_warnings {
-                eprintln!("{}", d.display_with_source(&source_text));
+                eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
             }
             ir_program = Some(ir);
         }
@@ -388,7 +388,7 @@ fn print_error_explanation(code: &str) {
 }
 
 fn main() {
-    almide::diagnostic::init_color();
+    crate::diagnostic_render::init_color();
     // Legacy mode: `almide file.almd [--target X]` → rewrite as `almide emit file.almd [--target X]`
     let raw_args: Vec<String> = std::env::args().collect();
     if raw_args.len() >= 2

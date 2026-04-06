@@ -441,7 +441,7 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
         if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
             eprintln!("SKIP {} (type errors)", test_file);
             for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Error) {
-                eprintln!("  {}", d.display_with_source(&source_text));
+                eprintln!("  {}", crate::diagnostic_render::display_with_source(d, &source_text));
             }
             skipped += 1;
             continue;

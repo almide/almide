@@ -128,7 +128,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
 
     if !parse_errors.is_empty() {
         for e in &parse_errors {
-            eprintln!("{}", e.display_with_source(&source_text));
+            eprintln!("{}", crate::diagnostic_render::display_with_source(e, &source_text));
         }
         std::process::exit(1);
     }
@@ -162,7 +162,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     let diagnostics = checker.infer_program(&mut program);
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
         for d in &diagnostics {
-            eprintln!("{}", d.display_with_source(&source_text));
+            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
         }
         std::process::exit(1);
     }
@@ -248,7 +248,7 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
     let diagnostics = checker.infer_program(&mut program);
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
         for d in &diagnostics {
-            eprintln!("{}", d.display_with_source(&source_text));
+            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
         }
         std::process::exit(1);
     }

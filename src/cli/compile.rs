@@ -131,13 +131,13 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
         .collect();
     if !errors.is_empty() {
         for d in &errors {
-            eprintln!("{}", d.display_with_source(&source_text));
+            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
         }
         eprintln!("\n{} error(s) found", errors.len());
         std::process::exit(1);
     }
     for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-        eprintln!("{}", d.display_with_source(&source_text));
+        eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
     }
 
     // Lower to IR

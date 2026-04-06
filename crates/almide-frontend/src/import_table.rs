@@ -69,6 +69,44 @@ impl ImportTable {
     pub fn mark_used(&mut self, name: &str) {
         self.used.insert(sym(name));
     }
+
+    /// Resolve a dotted module path like `a.b.c` from a Member chain expression.
+    /// Works for both `accessible` modules (user packages) and `aliases` (imports).
+    /// Used by both checker (infer_pipe) and lowering (lower_call_target) to
+    /// eliminate duplicated module resolution logic.
+    pub fn resolve_dotted_path(&self, kind: &ast::ExprKind) -> Option<String> {
+        match kind {
+            ast::ExprKind::Member { object, field, .. } => {
+                // Direct root: `root.field`
+                if let ast::ExprKind::Ident { name: root, .. } = &object.kind {
+                    let resolved_root = self.resolve(root)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| root.to_string());
+                    let candidate = format!("{}.{}", resolved_root, field);
+                    if self.accessible.contains(&sym(&candidate)) {
+                        return Some(candidate);
+                    }
+                    let prefix = format!("{}.", candidate);
+                    if self.accessible.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                        return Some(candidate);
+                    }
+                }
+                // Recursive: `parent.field`
+                if let Some(parent) = self.resolve_dotted_path(&object.kind) {
+                    let candidate = format!("{}.{}", parent, field);
+                    if self.accessible.contains(&sym(&candidate)) {
+                        return Some(candidate);
+                    }
+                    let prefix = format!("{}.", candidate);
+                    if self.accessible.iter().any(|m| m.as_str().starts_with(&prefix)) {
+                        return Some(candidate);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Build an ImportTable from a program's imports.
