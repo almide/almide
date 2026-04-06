@@ -31,7 +31,7 @@ effect fn agent(cmd: String) -> String = {
 
 The compiler rejects the binary. The WASM file is never produced. No runtime check needed.
 
-## Capability Taxonomy (14 categories)
+## Capability Taxonomy (13 categories)
 
 | Category | Stdlib functions | WASI imports |
 |----------|-----------------|-------------|
@@ -45,12 +45,12 @@ The compiler rejects the binary. The WASM file is never produced. No runtime che
 | `Time` | datetime.now, env.millis | clock_time_get |
 | `Rand` | random.int, random.float | random_get |
 | `Fan` | fan { }, fan.map | (internal: threads/async) |
-| `Log` | (future: log.info, log.debug) | fd_write(stderr) |
+| `IO.stderr` | eprintln | fd_write(fd=2) |
 | `IO.stdin` | io.read_line | fd_read(fd=0) |
 | `IO.stdout` | println, io.print | fd_write(fd=1) |
 | `IO.stderr` | eprintln | fd_write(fd=2) |
 
-Shorthand: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, `Net` = Net.fetch + Net.listen
+Shorthand: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, `Net` = Net.fetch + Net.listen, `All` = all 13
 
 ## Three Layers of Defense
 
@@ -74,7 +74,7 @@ Layer 1 catches bugs. Layer 2 catches compiler bugs. Layer 3 catches everything 
    - Stored as a static table in `almide-frontend`
 
 2. Parse `[permissions]` from almide.toml
-   - `allow = ["FS.read", "IO.stdout"]` → `CapabilitySet` (u16 bitset, 14 bits)
+   - `allow = ["FS.read", "IO.stdout"]` → `CapabilitySet` (u16 bitset, 13 bits)
    - Default when `[permissions]` absent: all capabilities allowed (backward compat)
 
 3. Capability checking pass in the type checker
@@ -283,6 +283,6 @@ Phase 1 alone is enough to claim "compile-time sandboxed AI agent containers."
 ## What We Don't Do
 
 - Algebraic effect handlers — too complex, not needed for capability checking
-- User-defined effect categories — 14 built-in categories cover stdlib
+- User-defined effect categories — 13 built-in categories cover stdlib
 - Effect syntax in function signatures — capabilities declared in almide.toml, not code
 - Runtime capability requests — everything is compile-time
