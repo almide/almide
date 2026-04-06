@@ -4,14 +4,33 @@ use almide_lang::types::Ty;
 use super::utils::ty_to_name;
 
 /// Specialize a function for concrete types.
-/// Builds the specialized function directly without cloning the entire original,
-/// avoiding redundant allocation of fields we immediately overwrite (generics, name).
+///
+/// Each specialization gets **fresh VarIds** (alpha-renaming) so that multiple
+/// specializations of the same generic function never share VarTable entries.
+/// The fresh VarIds are allocated in `vt` with already-substituted types,
+/// eliminating the need for a separate `update_var_table_types` pass.
 pub(super) fn specialize_function(
     orig: &IrFunction,
     suffix: &str,
     bindings: &HashMap<String, Ty>,
+    vt: &mut VarTable,
 ) -> IrFunction {
-    // Build specialized params: substitute type variables
+    // Phase 1: Collect all VarIds referenced in the original function
+    let mut old_ids = Vec::new();
+    for p in &orig.params { collect_var_id(p.var, &mut old_ids); }
+    collect_varids_in_expr(&orig.body, &mut old_ids);
+
+    // Phase 2: Allocate fresh VarIds with substituted types
+    let mut remap: HashMap<VarId, VarId> = HashMap::with_capacity(old_ids.len());
+    for old in &old_ids {
+        if remap.contains_key(old) { continue; }
+        let info = vt.get(*old);
+        let new_ty = substitute_ty(&info.ty, bindings);
+        let new_id = vt.alloc(info.name.clone(), new_ty, info.mutability, info.span);
+        remap.insert(*old, new_id);
+    }
+
+    // Phase 3: Build specialized params with fresh VarIds
     let params: Vec<IrParam> = orig.params.iter().enumerate().map(|(i, param)| {
         let open_key = format!("__open_{}", i);
         let new_ty = if let Some(concrete) = bindings.get(&open_key) {
@@ -19,12 +38,17 @@ pub(super) fn specialize_function(
         } else {
             substitute_ty(&param.ty, bindings)
         };
-        IrParam { ty: new_ty, ..param.clone() }
+        IrParam {
+            var: remap.get(&param.var).copied().unwrap_or(param.var),
+            ty: new_ty,
+            ..param.clone()
+        }
     }).collect();
 
-    // Build specialized body: clone + substitute in one step
+    // Phase 4: Clone body, substitute types, and remap VarIds
     let mut body = orig.body.clone();
     substitute_expr_types(&mut body, bindings);
+    remap_expr_varids(&mut body, &remap);
 
     IrFunction {
         name: format!("{}__{}", orig.name, suffix).into(),
@@ -40,6 +64,265 @@ pub(super) fn specialize_function(
         visibility: orig.visibility.clone(),
         doc: None,
         blank_lines_before: 0,
+    }
+}
+
+// ── VarId collection ────────────────────────────────────────────
+
+fn collect_var_id(id: VarId, out: &mut Vec<VarId>) {
+    if !out.contains(&id) { out.push(id); }
+}
+
+fn collect_varids_in_expr(expr: &IrExpr, out: &mut Vec<VarId>) {
+    match &expr.kind {
+        IrExprKind::Var { id } => collect_var_id(*id, out),
+        IrExprKind::BinOp { left, right, .. } => { collect_varids_in_expr(left, out); collect_varids_in_expr(right, out); }
+        IrExprKind::UnOp { operand, .. } => collect_varids_in_expr(operand, out),
+        IrExprKind::If { cond, then, else_ } => {
+            collect_varids_in_expr(cond, out);
+            collect_varids_in_expr(then, out);
+            collect_varids_in_expr(else_, out);
+        }
+        IrExprKind::Match { subject, arms } => {
+            collect_varids_in_expr(subject, out);
+            for arm in arms {
+                collect_varids_in_pattern(&arm.pattern, out);
+                if let Some(g) = &arm.guard { collect_varids_in_expr(g, out); }
+                collect_varids_in_expr(&arm.body, out);
+            }
+        }
+        IrExprKind::Block { stmts, expr } => {
+            for s in stmts { collect_varids_in_stmt(s, out); }
+            if let Some(e) = expr { collect_varids_in_expr(e, out); }
+        }
+        IrExprKind::Call { target, args, .. } => {
+            match target {
+                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => collect_varids_in_expr(object, out),
+                _ => {}
+            }
+            for a in args { collect_varids_in_expr(a, out); }
+        }
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+            collect_var_id(*var, out);
+            if let Some(tvs) = var_tuple { for tv in tvs { collect_var_id(*tv, out); } }
+            collect_varids_in_expr(iterable, out);
+            for s in body { collect_varids_in_stmt(s, out); }
+        }
+        IrExprKind::While { cond, body } => {
+            collect_varids_in_expr(cond, out);
+            for s in body { collect_varids_in_stmt(s, out); }
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+            for e in elements { collect_varids_in_expr(e, out); }
+        }
+        IrExprKind::Record { fields, .. } => { for (_, e) in fields { collect_varids_in_expr(e, out); } }
+        IrExprKind::SpreadRecord { base, fields } => {
+            collect_varids_in_expr(base, out);
+            for (_, e) in fields { collect_varids_in_expr(e, out); }
+        }
+        IrExprKind::MapLiteral { entries } => { for (k, v) in entries { collect_varids_in_expr(k, out); collect_varids_in_expr(v, out); } }
+        IrExprKind::Range { start, end, .. } => { collect_varids_in_expr(start, out); collect_varids_in_expr(end, out); }
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => collect_varids_in_expr(object, out),
+        IrExprKind::IndexAccess { object, index } => { collect_varids_in_expr(object, out); collect_varids_in_expr(index, out); }
+        IrExprKind::MapAccess { object, key } => { collect_varids_in_expr(object, out); collect_varids_in_expr(key, out); }
+        IrExprKind::Lambda { params, body, .. } => {
+            for (id, _) in params { collect_var_id(*id, out); }
+            collect_varids_in_expr(body, out);
+        }
+        IrExprKind::StringInterp { parts } => {
+            for p in parts { if let IrStringPart::Expr { expr } = p { collect_varids_in_expr(expr, out); } }
+        }
+        IrExprKind::ClosureCreate { captures, .. } => {
+            for (id, _) in captures { collect_var_id(*id, out); }
+        }
+        IrExprKind::EnvLoad { env_var, .. } => collect_var_id(*env_var, out),
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            collect_varids_in_expr(source, out);
+            for step in steps {
+                match step {
+                    IterStep::Map { lambda } | IterStep::Filter { lambda }
+                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => collect_varids_in_expr(lambda, out),
+                }
+            }
+            match collector {
+                IterCollector::Collect => {}
+                IterCollector::Fold { init, lambda } => { collect_varids_in_expr(init, out); collect_varids_in_expr(lambda, out); }
+                IterCollector::Any { lambda } | IterCollector::All { lambda }
+                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => collect_varids_in_expr(lambda, out),
+            }
+        }
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Await { expr } | IrExprKind::Clone { expr }
+        | IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. }
+        | IrExprKind::BoxNew { expr } | IrExprKind::RcWrap { expr, .. }
+        | IrExprKind::ToVec { expr } | IrExprKind::Unwrap { expr }
+        | IrExprKind::ToOption { expr } => collect_varids_in_expr(expr, out),
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            collect_varids_in_expr(expr, out);
+            collect_varids_in_expr(fallback, out);
+        }
+        IrExprKind::RustMacro { args, .. } => { for a in args { collect_varids_in_expr(a, out); } }
+        _ => {} // literals, unit, break, continue, etc.
+    }
+}
+
+fn collect_varids_in_stmt(stmt: &IrStmt, out: &mut Vec<VarId>) {
+    match &stmt.kind {
+        IrStmtKind::Bind { var, value, .. } => { collect_var_id(*var, out); collect_varids_in_expr(value, out); }
+        IrStmtKind::BindDestructure { pattern, value } => { collect_varids_in_pattern(pattern, out); collect_varids_in_expr(value, out); }
+        IrStmtKind::Assign { var, value } => { collect_var_id(*var, out); collect_varids_in_expr(value, out); }
+        IrStmtKind::IndexAssign { target, index, value } => { collect_var_id(*target, out); collect_varids_in_expr(index, out); collect_varids_in_expr(value, out); }
+        IrStmtKind::MapInsert { target, key, value } => { collect_var_id(*target, out); collect_varids_in_expr(key, out); collect_varids_in_expr(value, out); }
+        IrStmtKind::FieldAssign { target, value, .. } => { collect_var_id(*target, out); collect_varids_in_expr(value, out); }
+        IrStmtKind::ListSwap { target, a, b } => { collect_var_id(*target, out); collect_varids_in_expr(a, out); collect_varids_in_expr(b, out); }
+        IrStmtKind::ListReverse { target, end } | IrStmtKind::ListRotateLeft { target, end } => { collect_var_id(*target, out); collect_varids_in_expr(end, out); }
+        IrStmtKind::ListCopySlice { dst, src, len } => { collect_var_id(*dst, out); collect_var_id(*src, out); collect_varids_in_expr(len, out); }
+        IrStmtKind::Expr { expr } => collect_varids_in_expr(expr, out),
+        IrStmtKind::Guard { cond, else_ } => { collect_varids_in_expr(cond, out); collect_varids_in_expr(else_, out); }
+        IrStmtKind::Comment { .. } => {}
+    }
+}
+
+fn collect_varids_in_pattern(pattern: &IrPattern, out: &mut Vec<VarId>) {
+    match pattern {
+        IrPattern::Bind { var, .. } => collect_var_id(*var, out),
+        IrPattern::Constructor { args, .. } => { for a in args { collect_varids_in_pattern(a, out); } }
+        IrPattern::Tuple { elements } | IrPattern::List { elements } => { for e in elements { collect_varids_in_pattern(e, out); } }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => collect_varids_in_pattern(inner, out),
+        IrPattern::RecordPattern { fields, .. } => { for f in fields { if let Some(p) = &f.pattern { collect_varids_in_pattern(p, out); } } }
+        IrPattern::Literal { expr } => collect_varids_in_expr(expr, out),
+        _ => {} // Wildcard, None
+    }
+}
+
+// ── VarId remapping ─────────────────────────────────────────────
+
+fn remap_id(id: VarId, remap: &HashMap<VarId, VarId>) -> VarId {
+    remap.get(&id).copied().unwrap_or(id)
+}
+
+fn remap_expr_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
+    match &mut expr.kind {
+        IrExprKind::Var { id } => *id = remap_id(*id, remap),
+        IrExprKind::BinOp { left, right, .. } => { remap_expr_varids(left, remap); remap_expr_varids(right, remap); }
+        IrExprKind::UnOp { operand, .. } => remap_expr_varids(operand, remap),
+        IrExprKind::If { cond, then, else_ } => {
+            remap_expr_varids(cond, remap);
+            remap_expr_varids(then, remap);
+            remap_expr_varids(else_, remap);
+        }
+        IrExprKind::Match { subject, arms } => {
+            remap_expr_varids(subject, remap);
+            for arm in arms {
+                remap_pattern_varids(&mut arm.pattern, remap);
+                if let Some(g) = &mut arm.guard { remap_expr_varids(g, remap); }
+                remap_expr_varids(&mut arm.body, remap);
+            }
+        }
+        IrExprKind::Block { stmts, expr } => {
+            for s in stmts { remap_stmt_varids(s, remap); }
+            if let Some(e) = expr { remap_expr_varids(e, remap); }
+        }
+        IrExprKind::Call { target, args, .. } => {
+            match target {
+                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => remap_expr_varids(object, remap),
+                _ => {}
+            }
+            for a in args { remap_expr_varids(a, remap); }
+        }
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+            *var = remap_id(*var, remap);
+            if let Some(tvs) = var_tuple { for tv in tvs { *tv = remap_id(*tv, remap); } }
+            remap_expr_varids(iterable, remap);
+            for s in body { remap_stmt_varids(s, remap); }
+        }
+        IrExprKind::While { cond, body } => {
+            remap_expr_varids(cond, remap);
+            for s in body { remap_stmt_varids(s, remap); }
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+            for e in elements { remap_expr_varids(e, remap); }
+        }
+        IrExprKind::Record { fields, .. } => { for (_, e) in fields { remap_expr_varids(e, remap); } }
+        IrExprKind::SpreadRecord { base, fields } => {
+            remap_expr_varids(base, remap);
+            for (_, e) in fields { remap_expr_varids(e, remap); }
+        }
+        IrExprKind::MapLiteral { entries } => { for (k, v) in entries { remap_expr_varids(k, remap); remap_expr_varids(v, remap); } }
+        IrExprKind::Range { start, end, .. } => { remap_expr_varids(start, remap); remap_expr_varids(end, remap); }
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => remap_expr_varids(object, remap),
+        IrExprKind::IndexAccess { object, index } => { remap_expr_varids(object, remap); remap_expr_varids(index, remap); }
+        IrExprKind::MapAccess { object, key } => { remap_expr_varids(object, remap); remap_expr_varids(key, remap); }
+        IrExprKind::Lambda { params, body, .. } => {
+            for (id, _) in params { *id = remap_id(*id, remap); }
+            remap_expr_varids(body, remap);
+        }
+        IrExprKind::StringInterp { parts } => {
+            for p in parts { if let IrStringPart::Expr { expr } = p { remap_expr_varids(expr, remap); } }
+        }
+        IrExprKind::ClosureCreate { captures, .. } => {
+            for (id, _) in captures { *id = remap_id(*id, remap); }
+        }
+        IrExprKind::EnvLoad { env_var, .. } => *env_var = remap_id(*env_var, remap),
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            remap_expr_varids(source, remap);
+            for step in steps {
+                match step {
+                    IterStep::Map { lambda } | IterStep::Filter { lambda }
+                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => remap_expr_varids(lambda, remap),
+                }
+            }
+            match collector {
+                IterCollector::Collect => {}
+                IterCollector::Fold { init, lambda } => { remap_expr_varids(init, remap); remap_expr_varids(lambda, remap); }
+                IterCollector::Any { lambda } | IterCollector::All { lambda }
+                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => remap_expr_varids(lambda, remap),
+            }
+        }
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Await { expr } | IrExprKind::Clone { expr }
+        | IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. }
+        | IrExprKind::BoxNew { expr } | IrExprKind::RcWrap { expr, .. }
+        | IrExprKind::ToVec { expr } | IrExprKind::Unwrap { expr }
+        | IrExprKind::ToOption { expr } => remap_expr_varids(expr, remap),
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            remap_expr_varids(expr, remap);
+            remap_expr_varids(fallback, remap);
+        }
+        IrExprKind::RustMacro { args, .. } => { for a in args { remap_expr_varids(a, remap); } }
+        _ => {} // literals, unit, break, continue, etc.
+    }
+}
+
+fn remap_stmt_varids(stmt: &mut IrStmt, remap: &HashMap<VarId, VarId>) {
+    match &mut stmt.kind {
+        IrStmtKind::Bind { var, value, .. } => { *var = remap_id(*var, remap); remap_expr_varids(value, remap); }
+        IrStmtKind::BindDestructure { pattern, value } => { remap_pattern_varids(pattern, remap); remap_expr_varids(value, remap); }
+        IrStmtKind::Assign { var, value } => { *var = remap_id(*var, remap); remap_expr_varids(value, remap); }
+        IrStmtKind::IndexAssign { target, index, value } => { *target = remap_id(*target, remap); remap_expr_varids(index, remap); remap_expr_varids(value, remap); }
+        IrStmtKind::MapInsert { target, key, value } => { *target = remap_id(*target, remap); remap_expr_varids(key, remap); remap_expr_varids(value, remap); }
+        IrStmtKind::FieldAssign { target, value, .. } => { *target = remap_id(*target, remap); remap_expr_varids(value, remap); }
+        IrStmtKind::ListSwap { target, a, b } => { *target = remap_id(*target, remap); remap_expr_varids(a, remap); remap_expr_varids(b, remap); }
+        IrStmtKind::ListReverse { target, end } | IrStmtKind::ListRotateLeft { target, end } => { *target = remap_id(*target, remap); remap_expr_varids(end, remap); }
+        IrStmtKind::ListCopySlice { dst, src, len } => { *dst = remap_id(*dst, remap); *src = remap_id(*src, remap); remap_expr_varids(len, remap); }
+        IrStmtKind::Expr { expr } => remap_expr_varids(expr, remap),
+        IrStmtKind::Guard { cond, else_ } => { remap_expr_varids(cond, remap); remap_expr_varids(else_, remap); }
+        IrStmtKind::Comment { .. } => {}
+    }
+}
+
+fn remap_pattern_varids(pattern: &mut IrPattern, remap: &HashMap<VarId, VarId>) {
+    match pattern {
+        IrPattern::Bind { var, .. } => *var = remap_id(*var, remap),
+        IrPattern::Constructor { args, .. } => { for a in args { remap_pattern_varids(a, remap); } }
+        IrPattern::Tuple { elements } | IrPattern::List { elements } => { for e in elements { remap_pattern_varids(e, remap); } }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => remap_pattern_varids(inner, remap),
+        IrPattern::RecordPattern { fields, .. } => { for f in fields { if let Some(p) = &mut f.pattern { remap_pattern_varids(p, remap); } } }
+        _ => {} // Wildcard, None, Literal (literals don't bind VarIds)
     }
 }
 
@@ -66,118 +349,7 @@ pub(super) fn substitute_ty(ty: &Ty, bindings: &HashMap<String, Ty>) -> Ty {
     }
 }
 
-/// Update VarTable types for all variables referenced in an expression tree.
-pub(super) fn update_var_table_types(expr: &IrExpr, bindings: &HashMap<String, Ty>, vt: &mut VarTable) {
-    if let IrExprKind::Var { id } = &expr.kind {
-        let old = &vt.get(*id).ty;
-        let new = substitute_ty(old, bindings);
-        if new != *old {
-            vt.entries[id.0 as usize].ty = new;
-        }
-    }
-    // Recurse using the same structure as substitute_expr_types
-    match &expr.kind {
-        IrExprKind::BinOp { left, right, .. } => { update_var_table_types(left, bindings, vt); update_var_table_types(right, bindings, vt); }
-        IrExprKind::UnOp { operand, .. } => update_var_table_types(operand, bindings, vt),
-        IrExprKind::If { cond, then, else_ } => { update_var_table_types(cond, bindings, vt); update_var_table_types(then, bindings, vt); update_var_table_types(else_, bindings, vt); }
-        IrExprKind::Match { subject, arms } => {
-            update_var_table_types(subject, bindings, vt);
-            for arm in arms {
-                update_pattern_var_types(&arm.pattern, bindings, vt);
-                if let Some(g) = &arm.guard { update_var_table_types(g, bindings, vt); }
-                update_var_table_types(&arm.body, bindings, vt);
-            }
-        }
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { update_stmt_var_types(s, bindings, vt); }
-            if let Some(e) = expr { update_var_table_types(e, bindings, vt); }
-        }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => update_var_table_types(object, bindings, vt),
-                _ => {}
-            }
-            for a in args { update_var_table_types(a, bindings, vt); }
-        }
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-            // Update loop variable types
-            let new = substitute_ty(&vt.get(*var).ty, bindings);
-            vt.entries[var.0 as usize].ty = new;
-            if let Some(tvs) = var_tuple { for tv in tvs { vt.entries[tv.0 as usize].ty = substitute_ty(&vt.get(*tv).ty, bindings); } }
-            update_var_table_types(iterable, bindings, vt);
-            for s in body { update_stmt_var_types(s, bindings, vt); }
-        }
-        IrExprKind::While { cond, body } => {
-            update_var_table_types(cond, bindings, vt);
-            for s in body { update_stmt_var_types(s, bindings, vt); }
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => { for e in elements { update_var_table_types(e, bindings, vt); } }
-        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => { for (_, e) in fields { update_var_table_types(e, bindings, vt); } }
-        IrExprKind::Lambda { body, params, .. } => {
-            for (var_id, _) in params {
-                let new_ty = substitute_ty(&vt.get(*var_id).ty, bindings);
-                vt.entries[var_id.0 as usize].ty = new_ty;
-            }
-            update_var_table_types(body, bindings, vt);
-        }
-        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::Try { expr } | IrExprKind::Await { expr } | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::RcWrap { expr, .. } | IrExprKind::ToVec { expr }
-        | IrExprKind::OptionalChain { expr, .. } => {
-            update_var_table_types(expr, bindings, vt);
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            update_var_table_types(expr, bindings, vt);
-            update_var_table_types(fallback, bindings, vt);
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } | IrExprKind::IndexAccess { object, .. } => {
-            update_var_table_types(object, bindings, vt);
-        }
-        IrExprKind::MapLiteral { entries } => { for (k, v) in entries { update_var_table_types(k, bindings, vt); update_var_table_types(v, bindings, vt); } }
-        IrExprKind::StringInterp { parts } => { for p in parts { if let IrStringPart::Expr { expr } = p { update_var_table_types(expr, bindings, vt); } } }
-        IrExprKind::Fan { exprs } => { for e in exprs { update_var_table_types(e, bindings, vt); } }
-        IrExprKind::RustMacro { args, .. } => { for a in args { update_var_table_types(a, bindings, vt); } }
-        _ => {}
-    }
-}
-
-fn update_pattern_var_types(pattern: &IrPattern, bindings: &HashMap<String, Ty>, vt: &mut VarTable) {
-    match pattern {
-        IrPattern::Bind { var, .. } => { vt.entries[var.0 as usize].ty = substitute_ty(&vt.get(*var).ty, bindings); }
-        IrPattern::Constructor { args, .. } => { for a in args { update_pattern_var_types(a, bindings, vt); } }
-        IrPattern::Tuple { elements } => { for e in elements { update_pattern_var_types(e, bindings, vt); } }
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => { update_pattern_var_types(inner, bindings, vt); }
-        IrPattern::RecordPattern { fields, .. } => { for f in fields { if let Some(p) = &f.pattern { update_pattern_var_types(p, bindings, vt); } } }
-        _ => {}
-    }
-}
-
-fn update_stmt_var_types(stmt: &IrStmt, bindings: &HashMap<String, Ty>, vt: &mut VarTable) {
-    match &stmt.kind {
-        IrStmtKind::Bind { var, value, .. } => {
-            vt.entries[var.0 as usize].ty = substitute_ty(&vt.get(*var).ty, bindings);
-            update_var_table_types(value, bindings, vt);
-        }
-        IrStmtKind::BindDestructure { value, pattern, .. } => {
-            update_pattern_var_types(pattern, bindings, vt);
-            update_var_table_types(value, bindings, vt);
-        }
-        IrStmtKind::Assign { value, .. } => update_var_table_types(value, bindings, vt),
-        IrStmtKind::IndexAssign { index, value, .. } => { update_var_table_types(index, bindings, vt); update_var_table_types(value, bindings, vt); }
-        IrStmtKind::MapInsert { key, value, .. } => { update_var_table_types(key, bindings, vt); update_var_table_types(value, bindings, vt); }
-        IrStmtKind::FieldAssign { value, .. } => update_var_table_types(value, bindings, vt),
-        IrStmtKind::ListSwap { a, b, .. } => { update_var_table_types(a, bindings, vt); update_var_table_types(b, bindings, vt); }
-        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => { update_var_table_types(end, bindings, vt); }
-        IrStmtKind::ListCopySlice { len, .. } => { update_var_table_types(len, bindings, vt); }
-        IrStmtKind::Expr { expr } => update_var_table_types(expr, bindings, vt),
-        IrStmtKind::Guard { cond, else_ } => { update_var_table_types(cond, bindings, vt); update_var_table_types(else_, bindings, vt); }
-        IrStmtKind::Comment { .. } => {}
-    }
-}
-
-pub(super) fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
+fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
     expr.ty = substitute_ty(&expr.ty, bindings);
     match &mut expr.kind {
         IrExprKind::BinOp { left, right, .. } => {

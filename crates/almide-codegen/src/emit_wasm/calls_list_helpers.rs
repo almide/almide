@@ -66,7 +66,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Resolve the element type of a list expression, checking multiple sources
-    /// to handle TypeVar/Unknown types that the type checker left unresolved.
+    /// to handle cases where the expression-level type is still TypeVar/Unknown.
     pub(super) fn resolve_list_elem(&self, list_expr: &IrExpr, fn_expr: Option<&IrExpr>) -> Ty {
         // 1. From list expression type directly
         let from_expr = if let Ty::Applied(_, args) = &list_expr.ty {

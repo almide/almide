@@ -205,18 +205,11 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         let mut free_vars = HashSet::new();
         collect_free_vars(body, &param_set, &mut free_vars);
 
-        // Collect actual Var types from the lambda body — VarTable may be stale
-        // for monomorphized functions sharing VarIds across specializations.
-        let mut body_var_types = std::collections::HashMap::new();
-        collect_var_types(body, &mut body_var_types);
-
         // Filter to only clone-worthy types from outer scope.
-        // Use body Var type (post-mono concrete) over VarTable (possibly stale).
         let captures: Vec<VarId> = free_vars.into_iter()
             .filter(|v| {
                 if !scope_vars.contains(v) { return false; }
-                let ty = body_var_types.get(v).unwrap_or(&vt.get(*v).ty);
-                needs_clone_type(ty)
+                needs_clone_type(&vt.get(*v).ty)
             })
             .collect();
 
@@ -266,20 +259,11 @@ fn transform_stmt(stmt: &mut IrStmt, vt: &mut VarTable, scope_vars: &HashSet<Var
 /// Into:
 ///   { let __cap_N = x; move |params| { body using `__cap_N` } }
 fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTable) {
-    // Collect actual Var types from the lambda body — VarTable may be stale
-    // for monomorphized functions that share VarIds across specializations.
-    let body_var_types = if let IrExprKind::Lambda { body, .. } = &expr.kind {
-        let mut types = std::collections::HashMap::new();
-        collect_var_types(body, &mut types);
-        types
-    } else { std::collections::HashMap::new() };
-
     let mut stmts = Vec::new();
     let mut renames = std::collections::HashMap::new();
 
     for &var_id in captures {
-        let ty = body_var_types.get(&var_id).cloned()
-            .unwrap_or_else(|| vt.get(var_id).ty.clone());
+        let ty = vt.get(var_id).ty.clone();
         let cap_name = format!("__cap_{}", var_id.0);
         let cap_var = vt.alloc(
             almide_base::intern::sym(&cap_name),
@@ -594,40 +578,6 @@ fn replace_vars_stmt(stmt: &mut IrStmt, renames: &std::collections::HashMap<VarI
         }
         IrStmtKind::Expr { expr } => replace_vars(expr, renames),
         IrStmtKind::Comment { .. } => {}
-    }
-}
-
-/// Collect the types of Var expressions in an expression tree, keyed by VarId.
-/// Used to get the correct post-mono type for captured variables instead of
-/// relying on the (potentially stale) VarTable.
-fn collect_var_types(expr: &IrExpr, out: &mut std::collections::HashMap<VarId, Ty>) {
-    if let IrExprKind::Var { id } = &expr.kind {
-        if !expr.ty.is_unresolved() {
-            out.insert(*id, expr.ty.clone());
-        }
-    }
-    match &expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts {
-                match &s.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. }
-                    | IrStmtKind::BindDestructure { value, .. } | IrStmtKind::FieldAssign { value, .. } => collect_var_types(value, out),
-                    IrStmtKind::Expr { expr } => collect_var_types(expr, out),
-                    IrStmtKind::Guard { cond, else_ } => { collect_var_types(cond, out); collect_var_types(else_, out); }
-                    _ => {}
-                }
-            }
-            if let Some(e) = tail { collect_var_types(e, out); }
-        }
-        IrExprKind::BinOp { left, right, .. } => { collect_var_types(left, out); collect_var_types(right, out); }
-        IrExprKind::UnOp { operand, .. } => collect_var_types(operand, out),
-        IrExprKind::If { cond, then, else_ } => { collect_var_types(cond, out); collect_var_types(then, out); collect_var_types(else_, out); }
-        IrExprKind::Call { args, .. } => { for a in args { collect_var_types(a, out); } }
-        IrExprKind::Match { subject, arms } => {
-            collect_var_types(subject, out);
-            for arm in arms { collect_var_types(&arm.body, out); }
-        }
-        _ => {}
     }
 }
 
