@@ -1,0 +1,154 @@
+// Monkey test 23: higher-order functions and function composition
+//
+// Tests: pass functions as arguments, return functions from functions,
+// function stored in variable, list combinators with named functions,
+// nested lambda capture, currying pattern, compose via pipe.
+
+// ── Named function passed as argument ──
+fn double(x: Int) -> Int = x * 2
+fn negate(x: Int) -> Int = 0 - x
+fn is_positive(x: Int) -> Bool = x > 0
+
+test "list.map with named function" {
+    assert_eq(list.map([1, 2, 3], double), [2, 4, 6])
+}
+
+test "list.filter with named function" {
+    assert_eq(list.filter([-2, -1, 0, 1, 2], is_positive), [1, 2])
+}
+
+test "list.map then filter with named functions" {
+    let result = [1, -2, 3, -4]
+        |> list.map(double)
+        |> list.filter(is_positive)
+    assert_eq(result, [2, 6])
+}
+
+// ── Return function from function ──
+fn make_multiplier(factor: Int) -> (Int) -> Int = (x) => x * factor
+
+test "function returning function" {
+    let triple = make_multiplier(3)
+    let times10 = make_multiplier(10)
+    assert_eq(triple(7), 21)
+    assert_eq(times10(7), 70)
+}
+
+fn make_greeter(greeting: String) -> (String) -> String =
+    (name) => "${greeting}, ${name}!"
+
+test "returned function captures string" {
+    let hello = make_greeter("Hello")
+    let hey = make_greeter("Hey")
+    assert_eq(hello("Alice"), "Hello, Alice!")
+    assert_eq(hey("Bob"), "Hey, Bob!")
+}
+
+// ── Function stored in variable, called later ──
+test "function in variable called later" {
+    let f = double
+    let g = negate
+    assert_eq(f(5), 10)
+    assert_eq(g(5), -5)
+    // pass the stored variable to a combinator
+    assert_eq(list.map([1, 2, 3], f), [2, 4, 6])
+}
+
+// ── list.fold with named function ──
+fn sum_pair(acc: Int, x: Int) -> Int = acc + x
+
+test "list.fold with named two-arg function" {
+    let total = list.fold([10, 20, 30], 0, sum_pair)
+    assert_eq(total, 60)
+}
+
+// ── Nested lambda capture (closure over outer variable) ──
+test "nested lambda captures outer variable" {
+    let offset = 100
+    let transform = (xs: List[Int]) =>
+        xs |> list.map((x) => x + offset)
+    assert_eq(transform([1, 2, 3]), [101, 102, 103])
+    assert_eq(transform([0]), [100])
+}
+
+test "deep closure: three levels of capture" {
+    let a = 1
+    let f = (b) => {
+        let g = (c) => a + b + c
+        g
+    }
+    let g10 = f(10)
+    assert_eq(g10(100), 111)
+}
+
+// ── Lambda returning lambda (currying pattern) ──
+test "currying via inline lambda" {
+    let mul = (a) => (b) => a * b
+    assert_eq(mul(4)(5), 20)
+    assert_eq(mul(3)(7), 21)
+}
+
+test "currying: fully applied chain" {
+    let add = (a) => (b) => a + b
+    assert_eq(add(2)(3), 5)
+    assert_eq(add(10)(20), 30)
+}
+
+test "currying: three levels" {
+    let f = (a) => (b) => (c) => a + b + c
+    assert_eq(f(1)(2)(3), 6)
+}
+
+// ── Compose functions via pipe ──
+fn inc(x: Int) -> Int = x + 1
+fn square(x: Int) -> Int = x * x
+
+test "compose via pipe: inc then square" {
+    // pipe transforms a single value through a chain
+    let result = 3 |> inc |> square
+    assert_eq(result, 16) // (3+1)^2 = 16
+}
+
+test "compose via pipe: square then inc" {
+    let result = 3 |> square |> inc
+    assert_eq(result, 10) // 3^2+1 = 10
+}
+
+test "compose via pipe: long chain of named functions" {
+    let result = [1, 2, 3, 4, 5]
+        |> list.map(double)
+        |> list.filter(is_positive)
+        |> list.map(inc)
+        |> list.fold(0, sum_pair)
+    // [2,4,6,8,10] -> all positive -> [3,5,7,9,11] -> sum = 35
+    assert_eq(result, 35)
+}
+
+// ── Higher-order: apply a function chosen at runtime ──
+fn apply_by_name(name: String, x: Int) -> Int =
+    match name {
+        "double" => double(x),
+        "negate" => negate(x),
+        "inc" => inc(x),
+        "square" => square(x),
+        _ => x,
+    }
+
+test "dispatch to named function by string" {
+    assert_eq(apply_by_name("double", 5), 10)
+    assert_eq(apply_by_name("negate", 5), -5)
+    assert_eq(apply_by_name("inc", 5), 6)
+    assert_eq(apply_by_name("square", 5), 25)
+    assert_eq(apply_by_name("unknown", 5), 5)
+}
+
+// ── Compose two functions into one ──
+fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int =
+    (x) => f(g(x))
+
+test "compose creates new function" {
+    let inc_then_double = compose(double, inc)
+    assert_eq(inc_then_double(3), 8)   // double(inc(3)) = double(4) = 8
+    let double_then_inc = compose(inc, double)
+    assert_eq(double_then_inc(3), 7)   // inc(double(3)) = inc(6) = 7
+}

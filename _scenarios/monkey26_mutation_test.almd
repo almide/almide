@@ -1,0 +1,162 @@
+// Monkey test 26: mutable variables and in-place operations
+//
+// Tests: var declaration and reassignment, var inside for loop (accumulator),
+// var inside while loop (counter), list index write, map index write,
+// record field assignment, multiple var mutations in single block.
+
+// ── var declaration and reassignment ──
+test "var basic reassignment" {
+    var x = 10
+    assert_eq(x, 10)
+    x = 20
+    assert_eq(x, 20)
+    x = x + 5
+    assert_eq(x, 25)
+}
+
+test "var string reassignment" {
+    var s = "hello"
+    s = s + " world"
+    assert_eq(s, "hello world")
+    s = string.to_upper(s)
+    assert_eq(s, "HELLO WORLD")
+}
+
+// ── var inside for loop (accumulator) ──
+test "var accumulator in for loop" {
+    var sum = 0
+    for i in 1..=10 {
+        sum = sum + i
+    }
+    assert_eq(sum, 55)
+}
+
+test "var list accumulator in for loop" {
+    var result: List[String] = []
+    for i in 0..5 {
+        result = result + ["item_${int.to_string(i)}"]
+    }
+    assert_eq(result, ["item_0", "item_1", "item_2", "item_3", "item_4"])
+}
+
+test "var accumulator: running max" {
+    var max_val = 0
+    for x in [3, 7, 2, 9, 1, 8] {
+        if x > max_val then max_val = x
+    }
+    assert_eq(max_val, 9)
+}
+
+// ── var inside while loop (counter) ──
+test "var counter in while loop" {
+    var n = 1
+    var steps = 0
+    while n < 1000 {
+        n = n * 2
+        steps = steps + 1
+    }
+    assert_eq(n, 1024)
+    assert_eq(steps, 10)
+}
+
+test "var while: build list backwards" {
+    var i = 5
+    var xs: List[Int] = []
+    while i > 0 {
+        xs = xs + [i]
+        i = i - 1
+    }
+    assert_eq(xs, [5, 4, 3, 2, 1])
+}
+
+// ── List mutation: xs[i] = value ──
+test "list index write" {
+    var xs = [1, 2, 3, 4, 5]
+    xs[0] = 10
+    xs[4] = 50
+    assert_eq(xs, [10, 2, 3, 4, 50])
+}
+
+test "list index write in loop" {
+    var xs = [0, 0, 0, 0, 0]
+    for i in 0..5 {
+        xs[i] = (i + 1) * 10
+    }
+    assert_eq(xs, [10, 20, 30, 40, 50])
+}
+
+// ── Map mutation: m["key"] = value ──
+test "map index write" {
+    var m: Map[String, Int] = [:]
+    m["a"] = 1
+    m["b"] = 2
+    m["c"] = 3
+    assert_eq(map.len(m), 3)
+    assert_eq(m["a"], some(1))
+    assert_eq(m["b"], some(2))
+    assert_eq(m["c"], some(3))
+}
+
+test "map overwrite existing key" {
+    var m = ["x": 10, "y": 20]
+    m["x"] = 100
+    assert_eq(m["x"], some(100))
+    assert_eq(m["y"], some(20))
+}
+
+test "map mutation in loop: count characters" {
+    var counts: Map[String, Int] = [:]
+    for ch in string.chars("abracadabra") {
+        let current = counts[ch] ?? 0
+        counts[ch] = current + 1
+    }
+    assert_eq(counts["a"], some(5))
+    assert_eq(counts["b"], some(2))
+    assert_eq(counts["r"], some(2))
+}
+
+// ── Field assignment: record.field = value ──
+type Point = { x: Int, y: Int }
+
+test "record field assignment" {
+    var p: Point = { x: 0, y: 0 }
+    p.x = 10
+    p.y = 20
+    assert_eq(p.x, 10)
+    assert_eq(p.y, 20)
+}
+
+test "record field increment" {
+    var p: Point = { x: 5, y: 10 }
+    p.x = p.x + 1
+    p.y = p.y * 2
+    assert_eq(p.x, 6)
+    assert_eq(p.y, 20)
+}
+
+// ── Multiple var mutations in single block ──
+test "multiple vars in single block" {
+    var a = 0
+    var b = 1
+    var c = ""
+    for i in 0..5 {
+        let next = a + b
+        a = b
+        b = next
+        c = c + int.to_string(a) + " "
+    }
+    // fibonacci: 1 1 2 3 5
+    assert_eq(c, "1 1 2 3 5 ")
+    assert_eq(a, 5)
+    assert_eq(b, 8)
+}
+
+test "swap via temp var" {
+    var x = "first"
+    var y = "second"
+    let tmp = x
+    x = y
+    y = tmp
+    assert_eq(x, "second")
+    assert_eq(y, "first")
+}
