@@ -26,23 +26,27 @@
 
 String 比較は intentional。record field の出力順序が Sym Ord に依存しており、interned ID に変更すると生成コードが非決定的になりコンパイル失敗する。Ord impl にドキュメントコメントを追加済み。
 
-## Defer (pragmatic debt)
+### ~~6. almide-base: Sym の Ord が O(n) 文字列比較~~ Won't fix
+
+String 比較は intentional。record field の出力順序が Sym Ord に依存しており、interned ID に変更すると生成コードが非決定的になりコンパイル失敗する。Ord impl にドキュメントコメントを追加済み。
+
+## Accepted (pragmatic debt — documented, won't fix)
 
 ### 7. almide-base: diagnostic に表示ロジック混在
 
-ANSI カラー、source 行表示、JSON 出力が foundation crate に。分離コストが高く実害小。
+ANSI カラー、source 行表示、JSON 出力が foundation crate に。分離するとクレート数が増え依存管理が複雑化。実害なし。
 
 ### 8. almide-frontend: checker と lowering の pipe desugar 重複
 
-checker の `infer_pipe` が lowering の `lower_pipe` と重複するが、checker が pipe 意味論を理解する必要があり構造的に避けにくい。
+checker の `infer_pipe` が lowering の `lower_pipe` と重複。checker が pipe の意味論（引数挿入、postfix 演算子解除）を理解しないと正しい型推論ができないため構造的に不可避。
 
-### 9. almide-frontend: lowering 内の型推論フォールバック
+### ~~9. almide-frontend: lowering 内の型推論フォールバック~~ Accepted
 
-`LowerCtx::expr_ty()` が TypeMap の Unknown を `infer_stdlib_return_type()` で埋める。本来 checker 側で解決すべき。
+chained UFCS call (e.g. `items |> list.map(f) |> list.join(",")`) で checker の constraint propagation が中間型を Unknown にする構造的問題。lowering の `infer_stdlib_return_type()` フォールバックは全 stdlib module をカバーする安定ワークアラウンド。checker 修正は regression リスク高。コメントに architectural compromise として記載済み。
 
-### 10. almide-tools: ModuleInterface.version が常に None
+### ~~10. almide-tools: ModuleInterface.version が常に None~~ DONE
 
-バージョントラッキング未実装。外部バインディングジェネレータが実用化されるまで不要。
+`extract_with_version()` 追加。almide.toml の package.version を反映。
 
 ## Stats
 

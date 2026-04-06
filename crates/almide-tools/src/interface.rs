@@ -179,6 +179,10 @@ pub enum TypeRef {
 /// Extract the public module interface from a type-checked IR program.
 /// `source` is the original source text (for doc/example/deprecation extraction).
 pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> ModuleInterface {
+    extract_with_version(program, module_name, source, None)
+}
+
+pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Option<&str>, version: Option<&str>) -> ModuleInterface {
     let record_names = build_record_lookup(program);
     let variant_names = build_variant_lookup(program);
     let doc_info = source.map(|s| extract_docs(s)).unwrap_or_default();
@@ -297,7 +301,7 @@ pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> 
 
     ModuleInterface {
         module: module_name.to_string(),
-        version: None,
+        version: version.map(|v| v.to_string()),
         types,
         functions,
         constants,
