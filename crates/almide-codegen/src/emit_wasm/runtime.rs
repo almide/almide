@@ -839,6 +839,7 @@ fn compile_scratch_write_str(emitter: &mut WasmEmitter) {
         local_get(1);
         i32_add;
         global_set(emitter.scratch_ptr_global);
+        end;
     });
 
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
@@ -864,7 +865,7 @@ fn compile_scratch_finalize(emitter: &mut WasmEmitter) {
         // If total_len == 0, return empty string
         local_get(0);
         i32_eqz;
-        if_i32;
+        if_empty;
         i32_const(emitter.intern_string("") as i32);
         return_;
         end;
@@ -896,6 +897,7 @@ fn compile_scratch_finalize(emitter: &mut WasmEmitter) {
 
         // Return result pointer
         local_get(1);
+        end;
     });
 
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
