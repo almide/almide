@@ -185,31 +185,27 @@ This is the most invasive change (touches Ty enum, unification, inference) but e
 - `crates/almide-frontend/src/check/infer.rs` — effect propagation through HOFs
 - `crates/almide-frontend/src/check/unify.rs` — CapabilitySet unification
 
-### Phase 5: Agent Protocol + spawn[caps]
+### Phase 5: Agent Stdlib Module
 
-**Goal**: Standard protocol for AI agent communication, with sub-agent spawning.
+**Goal**: `agent` stdlib module for protocol handling and sub-agent spawning. No language keywords.
 
-1. Agent protocol (almide.toml `[agent]` section)
-   ```toml
-   [agent]
-   protocol = "stdio-json"
-   actions = ["read_file", "write_file", "search", "list_dir"]
-   ```
-   Generates boilerplate: stdin reader, JSON dispatcher, stdout writer.
-   `almide build --agent` outputs the agent binary with protocol handling.
+```almide
+import agent
 
-2. spawn[caps] for sub-agent isolation
-   ```almide
-   effect fn main() -> Unit = {
-     let result = spawn["FS.read"] {
-       fs.read_text("/data/input.csv")
-     }!
-     spawn["IO.stdout"] {
-       println(process(result))
-     }!
-   }
-   ```
-   Each `spawn` block runs with restricted capabilities. The compiler verifies the block body doesn't exceed the declared set.
+effect fn main() -> Unit = {
+  // Dispatch loop: read JSON command from stdin, dispatch to handler, write result
+  agent.serve((cmd) => match agent.action(cmd) {
+    "read_file" => ok(fs.read_text(agent.arg(cmd, "path"))!),
+    "list_dir"  => ok(fs.list_dir(agent.arg(cmd, "path"))! |> list.join("\n")),
+    _           => err("unknown action"),
+  })
+}
+```
+
+- `agent.serve(handler)` — stdin/stdout JSON protocol loop
+- `agent.action(cmd)` / `agent.arg(cmd, key)` — command parsing
+- `agent.spawn(config)` — sub-agent spawning with capability restriction (wasmtime subprocess)
+- All stdlib, no language changes, no new syntax
 
 ## AI Agent Container Example
 
@@ -276,7 +272,7 @@ echo '{"action":"read_file","path":"main.py"}' | \
 | **Phase 2** | WASM import pruning + manifest | S | ✅ Yes — binary-level proof |
 | **Phase 3** | Per-dependency restriction | S | ✅ Yes — supply chain safety |
 | **Phase 4** | Type-level effects (HOF) | L | ✅ Yes — precision |
-| **Phase 5** | Agent protocol + spawn | L | Depends on fan design |
+| **Phase 5** | Agent stdlib module | S | ✅ Yes — stdlib only, no language changes |
 
 Phase 1 alone is enough to claim "compile-time sandboxed AI agent containers."
 
