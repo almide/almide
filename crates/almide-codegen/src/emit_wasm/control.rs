@@ -500,7 +500,7 @@ impl FuncCompiler<'_> {
 
                         if let IrPattern::Bind { var, ty: pat_ty } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                let load_ty = if matches!(pat_ty, Ty::Unknown | Ty::TypeVar(_))
+                                let load_ty = if pat_ty.is_unresolved()
                                     || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
                                 { field_ty } else { pat_ty };
                                 wasm!(self.func, { local_get(scratch); });
@@ -656,8 +656,28 @@ impl FuncCompiler<'_> {
                     self.depth_pop(rec_guard);
                     wasm!(self.func, { end; });
                 } else {
-                    // Not a variant — treat as plain record (always matches)
-                    self.emit_expr(&arm.body);
+                    // Plain record (not a variant): the structural shape is guaranteed
+                    // by the type checker, so the record match itself always succeeds.
+                    // Still need to bind fields (pattern = None means implicit bind from
+                    // field name → VarId) and then run any guard; on guard failure, fall
+                    // through to the next arm.
+                    let case_fields = self.extract_record_fields(subject_ty);
+                    for pf in pat_fields {
+                        if let Some((foff, fty)) = values::field_offset(&case_fields, &pf.name) {
+                            let local_idx = if let Some(almide_ir::IrPattern::Bind { var, .. }) = &pf.pattern {
+                                self.var_map.get(&var.0).copied()
+                            } else {
+                                self.find_var_by_field(&pf.name, &case_fields).copied()
+                            };
+                            if let Some(idx) = local_idx {
+                                wasm!(self.func, { local_get(scratch); });
+                                self.emit_load_at(&fty, foff);
+                                wasm!(self.func, { local_set(idx); });
+                            }
+                        }
+                    }
+                    // Run guard (if any) and fall through to subsequent arms when it fails.
+                    self.emit_arm_body_or_guard(arm, arms, scratch, subject_ty, result_ty, idx, is_last);
                 }
             }
 
@@ -1012,7 +1032,7 @@ impl FuncCompiler<'_> {
                             .unwrap_or(Ty::Int);
                         if let IrPattern::Bind { var, ty: pat_ty } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                let load_ty = if matches!(pat_ty, Ty::Unknown | Ty::TypeVar(_))
+                                let load_ty = if pat_ty.is_unresolved()
                                     || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
                                 { &field_ty } else { pat_ty };
                                 wasm!(self.func, { local_get(inner_scratch); });

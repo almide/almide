@@ -1,0 +1,110 @@
+// Monkey test 09: Map / Set の動作確認
+
+test "map literal" {
+    let m = ["a": 1, "b": 2, "c": 3]
+    assert_eq(map.len(m), 3)
+    assert(map.contains(m, "a"))
+    assert(map.contains(m, "b"))
+    assert(not map.contains(m, "z"))
+}
+
+test "map index read" {
+    let m = ["x": 10, "y": 20]
+    assert_eq(m["x"], some(10))
+    assert_eq(m["y"], some(20))
+    assert_eq(m["z"], none)
+}
+
+test "empty map" {
+    let m: Map[String, Int] = [:]
+    assert_eq(map.len(m), 0)
+    assert(map.is_empty(m))
+}
+
+test "map set (immutable insert)" {
+    let m = ["a": 1]
+    // 関数名は map.set (map.insert は存在しない)
+    let m2 = map.set(m, "b", 2)
+    assert_eq(map.len(m2), 2)
+    assert_eq(m2["b"], some(2))
+    // 元の map は不変
+    assert_eq(map.len(m), 1)
+}
+
+test "map get with default" {
+    let m = ["a": 1, "b": 2]
+    let v = m["a"] ?? 0
+    let w = m["z"] ?? 0
+    assert_eq(v, 1)
+    assert_eq(w, 0)
+}
+
+test "map keys values" {
+    let m = ["a": 1, "b": 2, "c": 3]
+    let keys = map.keys(m)
+    let vals = map.values(m)
+    assert_eq(list.len(keys), 3)
+    assert_eq(list.len(vals), 3)
+    // 順序は不定なので sum で確認
+    assert_eq(vals |> list.fold(0, (a, b) => a + b), 6)
+}
+
+test "map remove" {
+    let m = ["a": 1, "b": 2, "c": 3]
+    let m2 = map.remove(m, "b")
+    assert_eq(map.len(m2), 2)
+    assert_eq(m2["b"], none)
+}
+
+test "map with int keys" {
+    let m: Map[Int, String] = [1: "one", 2: "two", 3: "three"]
+    assert_eq(m[1], some("one"))
+    assert_eq(m[100], none)
+}
+
+// ── Set ──
+test "set basic" {
+    let s = set.from_list([1, 2, 3, 2, 1])
+    assert_eq(set.len(s), 3)
+    assert(set.contains(s, 1))
+    assert(set.contains(s, 2))
+    assert(not set.contains(s, 99))
+}
+
+test "set insert and remove" {
+    let s = set.from_list([1, 2])
+    let s2 = set.insert(s, 3)
+    assert_eq(set.len(s2), 3)
+    let s3 = set.remove(s2, 1)
+    assert_eq(set.len(s3), 2)
+    assert(not set.contains(s3, 1))
+}
+
+test "set union intersection" {
+    let a = set.from_list([1, 2, 3, 4])
+    let b = set.from_list([3, 4, 5, 6])
+    let u = set.union(a, b)
+    let i = set.intersection(a, b)
+    assert_eq(set.len(u), 6)
+    assert_eq(set.len(i), 2)
+    assert(set.contains(i, 3))
+    assert(set.contains(i, 4))
+}
+
+test "set diff" {
+    let a = set.from_list([1, 2, 3, 4])
+    let b = set.from_list([3, 4, 5])
+    let d = set.difference(a, b)
+    assert_eq(set.len(d), 2)
+    assert(set.contains(d, 1))
+    assert(set.contains(d, 2))
+    assert(not set.contains(d, 3))
+}
+
+test "empty set" {
+    // set.from_list([]) は空リストの要素型を推論できないので
+    // set.new() を使う (set.new は type params [A] で空 Set を返す)
+    let s: Set[Int] = set.new()
+    assert_eq(set.len(s), 0)
+    assert(set.is_empty(s))
+}

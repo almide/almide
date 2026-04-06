@@ -861,12 +861,31 @@ impl FuncCompiler<'_> {
                 let elem_ty = self.list_elem_ty(&args[0].ty);
                 let es = values::byte_size(&elem_ty) as i32;
                 let elem_vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
-                // Infer key type from closure return type (Int or String)
-                let key_ty = if let Ty::Fn { ret, .. } = &args[1].ty {
+                // Infer key type from closure return type. The closure's
+                // `Ty::Fn.ret` can be Unknown/TypeVar when inference left the
+                // Lambda param generic; fall back to the lifted function's
+                // registered WASM return ValType so `key_is_str` and `ks`
+                // match the closure's call_indirect signature exactly.
+                let key_ty_initial = if let Ty::Fn { ret, .. } = &args[1].ty {
                     (**ret).clone()
                 } else { Ty::Int };
-                let key_is_str = matches!(&key_ty, Ty::String);
-                let ks: i32 = if key_is_str { 4 } else { 8 }; // key byte size
+                let key_vt = if !key_ty_initial.is_unresolved() {
+                    values::ty_to_valtype(&key_ty_initial).unwrap_or(ValType::I32)
+                } else {
+                    self.resolve_closure_ret_valtype(&args[1]).unwrap_or(ValType::I64)
+                };
+                // i32 = heap pointer (String/List/Record). i64 = Int. f64 = Float.
+                // For sort comparison, i32 keys use string.cmp, i64/f64 use numeric compare.
+                // This is correct only when heap pointer keys are always String
+                // (the only supported comparable heap type today) — other pointer
+                // types will mis-sort, but would have been broken before too.
+                let key_is_str = matches!(key_vt, ValType::I32);
+                let ks: i32 = match key_vt {
+                    ValType::I64 | ValType::F64 => 8,
+                    _ => 4,
+                };
+                // Synthesize a concrete key_ty for `emit_closure_call` sizing.
+                let key_ty = values::vt_to_placeholder_ty(key_vt);
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
@@ -938,8 +957,13 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                 });
-                // Bubble sort: outer loop i from 0..len-1, inner loop j from 0..len-1-i
+                // Bubble sort: outer loop i from 0..len-1, inner loop j from 0..len-1-i.
+                // Skip entirely when len < 2 (nothing to compare) — `len - 1`
+                // would underflow to u32::MAX for unsigned comparison and turn
+                // the loop into an infinite memory-walker.
                 wasm!(self.func, {
+                    block_empty;
+                      local_get(len); i32_const(2); i32_lt_u; br_if(0);
                     i32_const(0); local_set(i); // i (outer)
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_const(1); i32_sub; i32_ge_u; br_if(1);
@@ -1031,6 +1055,7 @@ impl FuncCompiler<'_> {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end; // end outer loop
+                    end; // end len<2 guard block
                     local_get(dst);
                 });
                 self.scratch.free(tmp_elem, elem_vt);

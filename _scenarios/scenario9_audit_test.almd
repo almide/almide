@@ -1,0 +1,128 @@
+// Scenario 9: 監査ログ + イベントソーシング
+// 金融: 全ての状態変更は記録されなければならない
+// 医療: 誰がいつ何をしたか追跡可能でなければならない
+
+type Event = AccountOpened(String, String) | Deposited(String, Int, String) | Withdrawn(String, Int, String) | TransferSent(String, String, Int, String) | TransferReceived(String, String, Int, String) | AccountFrozen(String, String, String)
+
+type AccountState = { id: String, balance: Int, frozen: Bool, event_count: Int }
+
+fn initial_state(id: String) -> AccountState =
+    { id: id, balance: 0, frozen: false, event_count: 0 }
+
+fn apply_event(state: AccountState, event: Event) -> Result[AccountState, String] = {
+    guard not state.frozen else err("account ${state.id} is frozen")
+    match event {
+        AccountOpened(id, _) =>
+            ok({ ...state, event_count: state.event_count + 1 }),
+        Deposited(_, amount, _) =>
+            ok({ ...state, balance: state.balance + amount, event_count: state.event_count + 1 }),
+        Withdrawn(_, amount, _) => {
+            guard state.balance >= amount else err("insufficient funds: ${int.to_string(state.balance)} < ${int.to_string(amount)}")
+            ok({ ...state, balance: state.balance - amount, event_count: state.event_count + 1 })
+        },
+        TransferSent(_, _, amount, _) => {
+            guard state.balance >= amount else err("insufficient funds for transfer")
+            ok({ ...state, balance: state.balance - amount, event_count: state.event_count + 1 })
+        },
+        TransferReceived(_, _, amount, _) =>
+            ok({ ...state, balance: state.balance + amount, event_count: state.event_count + 1 }),
+        AccountFrozen(_, _, _) =>
+            ok({ ...state, frozen: true, event_count: state.event_count + 1 }),
+    }
+}
+
+fn event_description(event: Event) -> String =
+    match event {
+        AccountOpened(id, ts) => "[${ts}] Account ${id} opened",
+        Deposited(id, amount, ts) => "[${ts}] Deposited ${int.to_string(amount)} to ${id}",
+        Withdrawn(id, amount, ts) => "[${ts}] Withdrawn ${int.to_string(amount)} from ${id}",
+        TransferSent(from, to, amount, ts) => "[${ts}] Transfer ${int.to_string(amount)} from ${from} to ${to}",
+        TransferReceived(to, from, amount, ts) => "[${ts}] Transfer ${int.to_string(amount)} received by ${to} from ${from}",
+        AccountFrozen(id, reason, ts) => "[${ts}] Account ${id} frozen: ${reason}",
+    }
+
+effect fn replay_events(events: List[Event]) -> AccountState = {
+    var state = initial_state("ACC001")
+    for event in events {
+        state = apply_event(state, event)!
+    }
+    state
+}
+
+fn build_audit_log(events: List[Event]) -> List[String] =
+    events |> list.map(event_description)
+
+test "deposit and withdraw" {
+    let events = [
+        AccountOpened("ACC001", "2026-01-01"),
+        Deposited("ACC001", 10000, "2026-01-02"),
+        Withdrawn("ACC001", 3000, "2026-01-03"),
+    ]
+    match replay_events(events) {
+        ok(state) => {
+            assert_eq(state.balance, 7000)
+            assert_eq(state.event_count, 3)
+        },
+        err(e) => assert(false, "should succeed: ${e}"),
+    }
+}
+
+test "overdraw prevented" {
+    let events = [
+        AccountOpened("ACC001", "2026-01-01"),
+        Deposited("ACC001", 1000, "2026-01-02"),
+        Withdrawn("ACC001", 5000, "2026-01-03"),
+    ]
+    match replay_events(events) {
+        err(e) => assert(string.contains(e, "insufficient")),
+        ok(_) => assert(false, "should fail on overdraw"),
+    }
+}
+
+test "frozen account rejects operations" {
+    let events = [
+        AccountOpened("ACC001", "2026-01-01"),
+        Deposited("ACC001", 10000, "2026-01-02"),
+        AccountFrozen("ACC001", "suspicious activity", "2026-01-03"),
+        Deposited("ACC001", 5000, "2026-01-04"),
+    ]
+    match replay_events(events) {
+        err(e) => assert(string.contains(e, "frozen")),
+        ok(_) => assert(false, "should reject deposit to frozen account"),
+    }
+}
+
+test "audit log completeness" {
+    let events = [
+        AccountOpened("ACC001", "2026-01-01"),
+        Deposited("ACC001", 10000, "2026-01-02"),
+        TransferSent("ACC001", "ACC002", 3000, "2026-01-03"),
+    ]
+    let log = build_audit_log(events)
+    assert_eq(list.len(log), 3)
+    let first = list.get(log, 0) ?? ""
+    assert(string.contains(first, "opened"))
+    let last = list.get(log, 2) ?? ""
+    assert(string.contains(last, "Transfer"))
+    assert(string.contains(last, "3000"))
+}
+
+test "transfer pair consistency" {
+    let send_events = [
+        AccountOpened("ACC001", "2026-01-01"),
+        Deposited("ACC001", 10000, "2026-01-01"),
+        TransferSent("ACC001", "ACC002", 3000, "2026-01-02"),
+    ]
+    let recv_events = [
+        AccountOpened("ACC002", "2026-01-01"),
+        TransferReceived("ACC002", "ACC001", 3000, "2026-01-02"),
+    ]
+    match replay_events(send_events) {
+        ok(s) => assert_eq(s.balance, 7000),
+        err(e) => assert(false, e),
+    }
+    match replay_events(recv_events) {
+        ok(r) => assert_eq(r.balance, 3000),
+        err(e) => assert(false, e),
+    }
+}

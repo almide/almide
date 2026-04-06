@@ -1,0 +1,98 @@
+// Monkey test 10: ジェネリクス
+//
+// Regression for fixed bugs:
+//  1. silent test drop。`test "foo"` が同名の `fn foo[T]` ジェネリック関数と
+//     IR 上で衝突し、monomorphization の filter でテストごと消されていた。
+//  2. stdlib/module 関数を first-class 値として渡せなかった
+//     (`list.map(xs, string.len)` が E003 で落ちていた)。
+//     値位置の `module.func` を eta 展開して lambda にするようにした。
+
+// 基本: ジェネリック関数
+fn identity[T](x: T) -> T = x
+
+test "identity int" {
+    assert_eq(identity(42), 42)
+}
+
+test "identity string" {
+    assert_eq(identity("hello"), "hello")
+}
+
+test "identity list" {
+    assert_eq(identity([1, 2, 3]), [1, 2, 3])
+}
+
+// 2つの型パラメータ
+fn pair_first[A, B](a: A, b: B) -> A = a
+fn pair_second[A, B](a: A, b: B) -> B = b
+
+test "pair first / second" {
+    assert_eq(pair_first(1, "hi"), 1)
+    assert_eq(pair_second(1, "hi"), "hi")
+    assert_eq(pair_first("a", 2), "a")
+}
+
+// ジェネリックコレクション関数
+fn my_head[T](xs: List[T], default: T) -> T =
+    list.first(xs) ?? default
+
+test "my_head" {
+    assert_eq(my_head([1, 2, 3], 0), 1)
+    assert_eq(my_head([], 0), 0)
+    assert_eq(my_head(["a", "b"], "x"), "a")
+}
+
+// ジェネリック型 (record)
+type Pair[A, B] = { first: A, second: B }
+
+fn make_pair[A, B](a: A, b: B) -> Pair[A, B] = { first: a, second: b }
+
+fn swap_pair[A, B](p: Pair[A, B]) -> Pair[B, A] =
+    { first: p.second, second: p.first }
+
+test "generic record" {
+    let p = make_pair(1, "one")
+    assert_eq(p.first, 1)
+    assert_eq(p.second, "one")
+}
+
+test "swap generic record" {
+    let p = make_pair(42, "answer")
+    let s = swap_pair(p)
+    assert_eq(s.first, "answer")
+    assert_eq(s.second, 42)
+}
+
+// ジェネリック variant (Option 的) — 以前は単一ケース inline variant バグで
+// 無限ループしていた形
+type Box[T] = Box(T)
+
+fn unbox[T](b: Box[T]) -> T = match b { Box(v) => v }
+
+test "generic variant" {
+    assert_eq(unbox(Box(10)), 10)
+    assert_eq(unbox(Box("hi")), "hi")
+}
+
+// ジェネリック関数をリスト combinator で呼ぶ
+fn wrap_all[T](xs: List[T]) -> List[Box[T]] =
+    xs |> list.map((x) => Box(x))
+
+test "wrap_all" {
+    let boxed = wrap_all([1, 2, 3])
+    assert_eq(list.len(boxed), 3)
+    assert_eq(unbox(list.first(boxed) ?? Box(0)), 1)
+}
+
+// 高階ジェネリック
+fn apply_all[A, B](xs: List[A], f: (A) -> B) -> List[B] =
+    xs |> list.map(f)
+
+test "apply_all" {
+    let doubled = apply_all([1, 2, 3], (x) => x * 2)
+    assert_eq(doubled, [2, 4, 6])
+
+    // stdlib 関数をそのまま first-class 値として渡す (修正済み)
+    let lengths = apply_all(["a", "bb", "ccc"], string.len)
+    assert_eq(lengths, [1, 2, 3])
+}

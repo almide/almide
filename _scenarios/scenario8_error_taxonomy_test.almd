@@ -1,0 +1,126 @@
+// Scenario 8: エラー分類の網羅性
+// 医療: エラーの種類ごとに対応が違う（アレルギー vs 在庫切れ vs システム障害）
+// 金融: 残高不足 vs 限度額超過 vs 不正検知 で後続処理が全く異なる
+
+type PaymentError = InsufficientFunds(Int, Int) | ExceedsLimit(Int, Int) | FraudDetected(String) | NetworkError(String) | CardExpired(String)
+
+fn error_severity(e: PaymentError) -> String =
+    match e {
+        FraudDetected(_) => "critical",
+        NetworkError(_)  => "retryable",
+        CardExpired(_)   => "user-action",
+        InsufficientFunds(_, _) => "user-action",
+        ExceedsLimit(_, _)      => "user-action",
+    }
+
+fn error_message(e: PaymentError) -> String =
+    match e {
+        InsufficientFunds(balance, required) =>
+            "残高不足: 残高 ${int.to_string(balance)}円, 必要 ${int.to_string(required)}円",
+        ExceedsLimit(amount, limit) =>
+            "限度額超過: ${int.to_string(amount)}円 > 上限${int.to_string(limit)}円",
+        FraudDetected(reason) =>
+            "不正検知: ${reason}",
+        NetworkError(msg) =>
+            "通信エラー: ${msg}",
+        CardExpired(card_last4) =>
+            "カード期限切れ: ****${card_last4}",
+    }
+
+fn should_retry(e: PaymentError) -> Bool =
+    match e {
+        NetworkError(_) => true,
+        _ => false,
+    }
+
+fn should_alert_security(e: PaymentError) -> Bool =
+    match e {
+        FraudDetected(_) => true,
+        _ => false,
+    }
+
+// 決済処理シミュレーション
+fn process_payment(balance: Int, limit: Int, amount: Int, card_valid: Bool) -> Result[Int, PaymentError] = {
+    guard card_valid else err(CardExpired("1234"))
+    guard amount <= limit else err(ExceedsLimit(amount, limit))
+    guard balance >= amount else err(InsufficientFunds(balance, amount))
+    ok(balance - amount)
+}
+
+test "successful payment" {
+    assert_eq(process_payment(10000, 50000, 3000, true), ok(7000))
+}
+
+test "insufficient funds" {
+    match process_payment(1000, 50000, 3000, true) {
+        err(InsufficientFunds(bal, req)) => {
+            assert_eq(bal, 1000)
+            assert_eq(req, 3000)
+        },
+        _ => assert(false, "should be InsufficientFunds"),
+    }
+}
+
+test "exceeds limit" {
+    match process_payment(100000, 50000, 60000, true) {
+        err(ExceedsLimit(amt, lim)) => {
+            assert_eq(amt, 60000)
+            assert_eq(lim, 50000)
+        },
+        _ => assert(false, "should be ExceedsLimit"),
+    }
+}
+
+test "card expired" {
+    match process_payment(10000, 50000, 3000, false) {
+        err(CardExpired(last4)) => assert_eq(last4, "1234"),
+        _ => assert(false, "should be CardExpired"),
+    }
+}
+
+test "error severity classification" {
+    assert_eq(error_severity(FraudDetected("suspicious IP")), "critical")
+    assert_eq(error_severity(NetworkError("timeout")), "retryable")
+    assert_eq(error_severity(InsufficientFunds(100, 500)), "user-action")
+}
+
+test "retry logic" {
+    assert_eq(should_retry(NetworkError("timeout")), true)
+    assert_eq(should_retry(InsufficientFunds(100, 500)), false)
+    assert_eq(should_retry(FraudDetected("bot")), false)
+}
+
+test "security alert" {
+    assert_eq(should_alert_security(FraudDetected("velocity")), true)
+    assert_eq(should_alert_security(NetworkError("timeout")), false)
+}
+
+// --- 医療エラー分類 ---
+
+type MedicalError = AllergyConflict(String, String) | ContraindicationFound(String, String) | DoseOutOfRange(Float, Float, Float) | DrugNotFound(String)
+
+fn medical_error_action(e: MedicalError) -> String =
+    match e {
+        AllergyConflict(drug, allergen) => "BLOCK: ${drug} conflicts with allergy to ${allergen}",
+        ContraindicationFound(drug1, drug2) => "WARN: ${drug1} contraindicated with ${drug2}",
+        DoseOutOfRange(dose, min, max) => "ADJUST: ${float.to_string(dose)}mg outside range ${float.to_string(min)}-${float.to_string(max)}mg",
+        DrugNotFound(name) => "CHECK: drug '${name}' not in formulary",
+    }
+
+fn is_blocking(e: MedicalError) -> Bool =
+    match e {
+        AllergyConflict(_, _) => true,
+        _ => false,
+    }
+
+test "allergy conflict is blocking" {
+    let e = AllergyConflict("Penicillin", "beta-lactam")
+    assert(is_blocking(e))
+    assert(string.contains(medical_error_action(AllergyConflict("Penicillin", "beta-lactam")), "BLOCK"))
+}
+
+test "dose out of range is non-blocking" {
+    let e = DoseOutOfRange(500.0, 10.0, 200.0)
+    assert_eq(is_blocking(e), false)
+    assert(string.contains(medical_error_action(e), "ADJUST"))
+}

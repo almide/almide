@@ -7,6 +7,9 @@
 pub use almide_base::intern;
 pub use almide_base::diagnostic;
 
+// ── Diagnostic rendering (CLI-layer, moved out of almide-base) ──
+pub mod diagnostic_render;
+
 // ── Language (almide-lang) ──
 pub use almide_lang::ast;
 pub use almide_lang::lexer;

@@ -815,7 +815,7 @@ impl FuncCompiler<'_> {
                     if let Ty::Fn { params, .. } = &args[2].ty { params.get(1).cloned() } else { None },
                     if let almide_ir::IrExprKind::Lambda { params: lp, .. } = &args[2].kind { lp.get(1).map(|(_, t)| t.clone()) } else { None },
                 ].into_iter().flatten()
-                    .find(|t| !matches!(t, Ty::Unknown | Ty::TypeVar(_)))
+                    .find(|t| !t.is_unresolved())
                     .unwrap_or(Ty::Int);
 
                 // Resolve acc type: use Fn return type or lambda body type, with TypeVar→concrete fallback
@@ -828,7 +828,7 @@ impl FuncCompiler<'_> {
                     let init_ty = args[1].ty.clone();
                     // Pick first concrete (non-TypeVar/Unknown) type
                     [fn_ret, body_ty, Some(init_ty)].into_iter().flatten()
-                        .find(|t| !matches!(t, Ty::Unknown | Ty::TypeVar(_)))
+                        .find(|t| !t.is_unresolved())
                         .unwrap_or_else(|| if let Ty::Fn { ret, .. } = &args[2].ty { *ret.clone() } else { args[1].ty.clone() })
                 };
                 // Resolve TypeVar inside Applied types (e.g., List[TypeVar(?0)] → List[elem_ty])
@@ -903,28 +903,7 @@ impl FuncCompiler<'_> {
     /// Key insight: compute dst address BEFORE call_indirect so result goes
     /// directly onto the stack in the right position for store.
     pub(super) fn emit_list_map(&mut self, list_arg: &IrExpr, fn_arg: &IrExpr, ret_ty: &Ty) {
-        // Resolve input element type from multiple sources
-        let in_elem_ty = {
-            let from_list = if let Ty::Applied(_, args) = &list_arg.ty {
-                args.first().cloned()
-            } else { None };
-            let from_var = if from_list.as_ref().map_or(true, |t| matches!(t, Ty::TypeVar(_) | Ty::Unknown)) {
-                if let almide_ir::IrExprKind::Var { id } = &list_arg.kind {
-                    if let Ty::Applied(_, a) = &self.var_table.get(*id).ty {
-                        a.first().cloned()
-                    } else { None }
-                } else { None }
-            } else { None };
-            let from_fn = if let Ty::Fn { params, .. } = &fn_arg.ty {
-                params.first().cloned()
-            } else { None };
-            let from_lambda = if let almide_ir::IrExprKind::Lambda { params, .. } = &fn_arg.kind {
-                params.first().map(|(_, t)| t.clone())
-            } else { None };
-            [from_list, from_var, from_fn, from_lambda].into_iter().flatten()
-                .find(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown))
-                .unwrap_or(Ty::Int)
-        };
+        let in_elem_ty = self.resolve_list_elem(list_arg, Some(fn_arg));
         let mut out_elem_ty = if let Ty::Applied(_, args) = ret_ty {
             args.first().cloned().unwrap_or(Ty::Int)
         } else { Ty::Int };
@@ -932,21 +911,36 @@ impl FuncCompiler<'_> {
         // element type from the lambda body.  The call-site ret_ty can remain
         // unresolved when the map result is unused or only used in a type-agnostic
         // context, but the lambda body always carries the concrete type.
-        if matches!(&out_elem_ty, Ty::TypeVar(_) | Ty::Unknown) {
+        if out_elem_ty.is_unresolved() {
             if let IrExprKind::Lambda { body, .. } = &fn_arg.kind {
-                if !matches!(&body.ty, Ty::TypeVar(_) | Ty::Unknown) {
+                if !body.ty.is_unresolved() {
                     out_elem_ty = body.ty.clone();
                 }
             }
             // Also try fn_arg.ty.ret as a secondary source
-            if matches!(&out_elem_ty, Ty::TypeVar(_) | Ty::Unknown) {
+            if out_elem_ty.is_unresolved() {
                 if let Ty::Fn { ret, .. } = &fn_arg.ty {
-                    if !matches!(ret.as_ref(), Ty::TypeVar(_) | Ty::Unknown) {
+                    if !ret.is_unresolved() {
                         out_elem_ty = *ret.clone();
                     }
                 }
             }
         }
+        // Final fallback: inspect the lifted closure's actual registered WASM
+        // param/ret valtypes. This handles the case where inference left both
+        // the list element and lambda body as Unknown but the lifted function
+        // has a concrete signature (e.g. from our closure-conversion VarTable
+        // propagation + anonymous record fallback).
+        let in_vt = values::ty_to_valtype(&in_elem_ty);
+        let in_elem_ty = match self.resolve_closure_param_valtype(fn_arg, 0) {
+            Some(actual) if Some(actual) != in_vt => values::vt_to_placeholder_ty(actual),
+            _ => in_elem_ty,
+        };
+        let out_vt = values::ty_to_valtype(&out_elem_ty);
+        let out_elem_ty = match self.resolve_closure_ret_valtype(fn_arg) {
+            Some(actual) if Some(actual) != out_vt => values::vt_to_placeholder_ty(actual),
+            _ => out_elem_ty,
+        };
         let in_size = values::byte_size(&in_elem_ty);
         let out_size = values::byte_size(&out_elem_ty);
 

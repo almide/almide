@@ -64,8 +64,10 @@ pub(super) fn discover_in_expr(
         IrExprKind::Call { target, args, type_args } => {
             if let CallTarget::Named { name } = target {
                 if let Some(bounded_params) = bound_fns.get::<str>(name) {
-                    // Find the original function to get parameter types and generics
-                    let orig_fn = program_functions.iter().find(|f| f.name == *name);
+                    // Find the original generic function to get parameter types
+                    // and generics. Tests can share the raw name (`test "wrap_all"`
+                    // collides with `fn wrap_all[T]`), so skip them here.
+                    let orig_fn = program_functions.iter().find(|f| !f.is_test && f.name == *name);
                     let param_types: Vec<Ty> = orig_fn
                         .map(|f| f.params.iter().map(|p| p.ty.clone()).collect())
                         .unwrap_or_default();

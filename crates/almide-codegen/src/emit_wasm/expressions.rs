@@ -857,7 +857,7 @@ impl FuncCompiler<'_> {
                 let extract_elem = |ty: &Ty| -> Option<u32> {
                     if let Ty::Applied(_, args) = ty {
                         args.first()
-                            .filter(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown))
+                            .filter(|t| !t.is_unresolved())
                             .map(|t| values::byte_size(t))
                     } else { None }
                 };

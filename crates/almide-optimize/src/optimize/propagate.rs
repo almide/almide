@@ -10,11 +10,23 @@ pub(super) fn constant_propagate(program: &mut IrProgram) {
             propagate_expr(&mut f.body, &constants);
         }
     }
+    for tl in &mut program.top_lets {
+        let constants = collect_constants(&tl.value);
+        if !constants.is_empty() {
+            propagate_expr(&mut tl.value, &constants);
+        }
+    }
     for m in &mut program.modules {
         for f in &mut m.functions {
             let constants = collect_constants(&f.body);
             if !constants.is_empty() {
                 propagate_expr(&mut f.body, &constants);
+            }
+        }
+        for tl in &mut m.top_lets {
+            let constants = collect_constants(&tl.value);
+            if !constants.is_empty() {
+                propagate_expr(&mut tl.value, &constants);
             }
         }
     }

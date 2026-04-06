@@ -274,6 +274,47 @@ pub(super) fn compile_list_eq(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
+/// __list_list_str_cmp(a: i32, b: i32) -> i32
+/// Lexicographic comparison of two `List[String]` values. Returns negative if
+/// a < b, 0 if equal, positive if a > b (matching `memcmp`/`strcmp`).
+pub(super) fn compile_list_list_str_cmp(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.list_list_str_cmp];
+    let str_cmp = emitter.rt.string.cmp;
+    let mut f = Function::new([
+        (1, ValType::I32), // 2: a_len
+        (1, ValType::I32), // 3: b_len
+        (1, ValType::I32), // 4: min_len
+        (1, ValType::I32), // 5: i
+        (1, ValType::I32), // 6: c (per-element cmp)
+    ]);
+    wasm!(f, {
+        local_get(0); i32_load(0); local_set(2);
+        local_get(1); i32_load(0); local_set(3);
+        // min_len = min(a_len, b_len)
+        local_get(2); local_get(3); i32_lt_u;
+        if_i32; local_get(2); else_; local_get(3); end;
+        local_set(4);
+        // Compare element-by-element (elements are 4-byte string pointers).
+        i32_const(0); local_set(5);
+        block_empty; loop_empty;
+          local_get(5); local_get(4); i32_ge_u; br_if(1);
+          local_get(0); i32_const(4); i32_add;
+          local_get(5); i32_const(4); i32_mul; i32_add; i32_load(0);
+          local_get(1); i32_const(4); i32_add;
+          local_get(5); i32_const(4); i32_mul; i32_add; i32_load(0);
+          call(str_cmp); local_set(6);
+          local_get(6); i32_const(0); i32_ne;
+          if_empty; local_get(6); return_; end;
+          local_get(5); i32_const(1); i32_add; local_set(5);
+          br(0);
+        end; end;
+        // Tie on common prefix: shorter list sorts first.
+        local_get(2); local_get(3); i32_sub;
+        end;
+    });
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
 /// __concat_list(a: i32, b: i32, elem_size: i32) -> i32
 /// Concatenate two lists. Layout: [len:i32][data...]. Generic over elem_size.
 pub(super) fn compile_concat_list(emitter: &mut WasmEmitter) {

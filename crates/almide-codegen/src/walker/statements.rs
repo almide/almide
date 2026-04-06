@@ -9,130 +9,12 @@ use super::expressions::render_expr;
 use super::helpers::{template_or, terminate_stmt, ty_has_named_typevar, erase_named_typevars};
 
 /// Check if an expression references a specific variable (any depth).
-fn expr_references_var(expr: &IrExpr, var: VarId) -> bool {
-    match &expr.kind {
-        IrExprKind::Var { id } => *id == var,
-        IrExprKind::BinOp { left, right, .. } => {
-            expr_references_var(left, var) || expr_references_var(right, var)
-        }
-        IrExprKind::UnOp { operand, .. } => expr_references_var(operand, var),
-        IrExprKind::Call { target, args, .. } => {
-            let t = match target {
-                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => expr_references_var(object, var),
-                _ => false,
-            };
-            t || args.iter().any(|a| expr_references_var(a, var))
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            expr_references_var(object, var) || expr_references_var(index, var)
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
-            expr_references_var(object, var)
-        }
-        IrExprKind::Clone { expr: e } | IrExprKind::Borrow { expr: e, .. }
-        | IrExprKind::Deref { expr: e } | IrExprKind::ToVec { expr: e }
-        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e } => {
-            expr_references_var(e, var)
-        }
-        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            expr_references_var(e, var) || expr_references_var(f, var)
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            elements.iter().any(|e| expr_references_var(e, var))
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            expr_references_var(cond, var) || expr_references_var(then, var) || expr_references_var(else_, var)
-        }
-        IrExprKind::Block { stmts, expr: tail } => {
-            stmts.iter().any(|s| stmt_references_var(s, var))
-                || tail.as_ref().is_some_and(|e| expr_references_var(e, var))
-        }
-        _ => false,
-    }
-}
-
-fn stmt_references_var(stmt: &IrStmt, var: VarId) -> bool {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. }
-        | IrStmtKind::FieldAssign { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
-            expr_references_var(value, var)
-        }
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            expr_references_var(index, var) || expr_references_var(value, var)
-        }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            expr_references_var(key, var) || expr_references_var(value, var)
-        }
-        IrStmtKind::ListSwap { a, b, .. } => {
-            expr_references_var(a, var) || expr_references_var(b, var)
-        }
-        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            expr_references_var(end, var)
-        }
-        IrStmtKind::ListCopySlice { len, .. } => {
-            expr_references_var(len, var)
-        }
-        IrStmtKind::Expr { expr } => expr_references_var(expr, var),
-        IrStmtKind::Guard { cond, else_ } => {
-            expr_references_var(cond, var) || expr_references_var(else_, var)
-        }
-        IrStmtKind::Comment { .. } => false,
-    }
-}
-
-/// Detect `xs = xs + [v]` and render as `xs.push(v);`
-fn try_render_push(ctx: &RenderContext, var: VarId, value: &IrExpr) -> Option<String> {
-    // Match: BinOp(ConcatList, left, List([element]))
-    let IrExprKind::BinOp { op: BinOp::ConcatList, left, right } = &value.kind else { return None; };
-    let IrExprKind::List { elements } = &right.kind else { return None; };
-    if elements.len() != 1 { return None; }
-    // Left must be Var(var) or Clone(Var(var))
-    let is_self = match &left.kind {
-        IrExprKind::Var { id } => *id == var,
-        IrExprKind::Clone { expr } => matches!(&expr.kind, IrExprKind::Var { id } if *id == var),
-        _ => false,
-    };
-    if !is_self { return None; }
-    let target_s = ctx.var_name(var);
-    let elem_s = render_expr(ctx, &elements[0]);
-    Some(format!("{}.push({});", target_s, elem_s))
-}
-
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, mutability } => {
             let name_s = ctx.var_name(*var).to_string();
-            // List[Fn] binding: render as Vec<Rc<dyn Fn(...)>> with Rc-wrapped lambdas
-            let is_list_of_fn = matches!(ty, Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() && matches!(&args[0], Ty::Fn { .. }));
-            if is_list_of_fn && ctx.target == super::super::pass::Target::Rust {
-                if let Ty::Applied(_, args) = ty {
-                    let fn_ty = &args[0];
-                    let rc_type_s = super::helpers::render_type_rc_fn(ctx, fn_ty);
-                    let type_s = format!("Vec<{}>", rc_type_s);
-                    let value_s = if let IrExprKind::List { elements } = &value.kind {
-                        let elems = elements.iter().enumerate().map(|(i, e)| {
-                            let s = render_expr(ctx, e);
-                            if i == 0 {
-                                // Cast first element to establish Vec type
-                                format!("std::rc::Rc::new({}) as {}", s, rc_type_s)
-                            } else {
-                                format!("std::rc::Rc::new({})", s)
-                            }
-                        }).collect::<Vec<_>>().join(", ");
-                        ctx.templates.render_with("list_literal", None, &[], &[("elements", elems.as_str())])
-                            .unwrap_or_else(|| format!("vec![{}]", elems))
-                    } else {
-                        render_expr(ctx, value)
-                    };
-                    let construct = match mutability {
-                        Mutability::Let => "let_binding",
-                        Mutability::Var => "var_binding",
-                    };
-                    return ctx.templates.render_with(construct, None, &[], &[("name", name_s.as_str()), ("type", type_s.as_str()), ("value", value_s.as_str())])
-                        .unwrap_or_else(|| format!("let {} = {};", name_s, value_s));
-                }
-            }
+            // List[Fn] Rc wrapping is now handled by RustLoweringPass
+            // which inserts RcWrap nodes into the IR.
             // Erase Fn types in bindings (Rust can't write `impl Fn` in let position; TS gets `any`)
             // Also resolve aliases first — `type Handler = Fn(String) -> String` should erase too
             let resolved_owned;
@@ -204,12 +86,8 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 .unwrap_or_else(|| format!("let _ = _;"))
         }
         IrStmtKind::Assign { var, value } => {
-            // Optimize: xs = xs + [v] → xs.push(v) (Rust only)
-            if ctx.target == super::super::pass::Target::Rust {
-                if let Some(push_str) = try_render_push(ctx, *var, value) {
-                    return push_str;
-                }
-            }
+            // Push optimization (xs = xs + [v] → xs.push(v)) is now handled
+            // by RustLoweringPass which rewrites to a Call(Method("push")).
             let target_s = ctx.var_name(*var).to_string();
             let value_s = render_expr(ctx, value);
             ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
@@ -244,15 +122,10 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let target_str = ctx.var_name(*target).to_string();
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
-            // Rust borrow conflict: `xs[f(xs)] = v` borrows xs mutably (assignment)
-            // and immutably (index expr) in the same statement.
-            // Extract index to a let binding when the index expr references the target var.
-            if ctx.target == super::super::pass::Target::Rust && expr_references_var(index, *target) {
-                format!("{{ let __idx = ({}) as usize; {}[__idx] = {}; }}", idx_str, target_str, val_str)
-            } else {
-                ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
-                    .unwrap_or_else(|| "idx[...] = ...;".into())
-            }
+            // Borrow conflict (xs[f(xs)] = v) is now resolved by RustLoweringPass
+            // which lifts the index expression to a let binding at the IR level.
+            ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
+                .unwrap_or_else(|| "idx[...] = ...;".into())
         }
         IrStmtKind::MapInsert { target, key, value } => {
             let target_str = ctx.var_name(*target).to_string();
@@ -270,6 +143,16 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             // For record patterns with empty name, resolve from value type
             let pat_str = match pattern {
                 IrPattern::RecordPattern { name, fields, rest } if name.is_empty() => {
+                    // Determine the total field count of the value type so we
+                    // can automatically insert `..` when the pattern only
+                    // destructures a subset (otherwise Rust complains with
+                    // E0027 "pattern does not mention field X").
+                    let total_fields: Option<usize> = match &value.ty {
+                        Ty::Named(n, _) => ctx.ann.record_field_counts.get(n.as_str()).copied(),
+                        Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } =>
+                            Some(ty_fields.len()),
+                        _ => None,
+                    };
                     let type_name = match &value.ty {
                         Ty::Named(n, _) => n.to_string(),
                         Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
@@ -293,7 +176,9 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                             None => f.name.clone(),
                         })
                         .collect::<Vec<_>>().join(", ");
-                    if *rest {
+                    let needs_rest = *rest
+                        || total_fields.map_or(false, |n| fields.len() < n);
+                    if needs_rest {
                         let construct = if fields_str.is_empty() { "record_pattern_rest_empty" } else { "record_pattern_rest" };
                         ctx.templates.render_with(construct, None, &[], &[("name", qualified.as_str()), ("fields", fields_str.as_str())])
                             .unwrap_or_else(|| format!("{} {{ {} }}", qualified, fields_str))

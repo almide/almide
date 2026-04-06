@@ -1,0 +1,80 @@
+// Scenario 2: 通知システム — 複数チャネル dispatch + 設定の違い
+
+type SmtpConfig = { host: String, port: Int }
+type TwilioConfig = { account_sid: String, auth_token: String }
+type FcmConfig = { project_id: String }
+
+type Channel = Email(SmtpConfig) | Sms(TwilioConfig) | Push(FcmConfig) | Slack(String)
+
+type Message = { subject: String, body: String }
+
+fn channel_name(ch: Channel) -> String =
+    match ch {
+        Email(_) => "email",
+        Sms(_)   => "sms",
+        Push(_)  => "push",
+        Slack(_) => "slack",
+    }
+
+fn supports_rich_text(ch: Channel) -> Bool =
+    match ch {
+        Email(_) => true,
+        Slack(_) => true,
+        _        => false,
+    }
+
+fn send(ch: Channel, recipient: String, msg: Message) -> String =
+    match ch {
+        Email(config) => "sent email to ${recipient} via ${config.host}: ${msg.subject}",
+        Sms(config)   => "sent sms to ${recipient}: ${msg.body}",
+        Push(config)  => "sent push to ${recipient} (project: ${config.project_id})",
+        Slack(url)    => "sent slack to ${recipient} via webhook",
+    }
+
+fn notify_all(channels: List[Channel], recipient: String, msg: Message) -> List[String] =
+    channels |> list.map((ch) => send(ch, recipient, msg))
+
+fn notify_rich_only(channels: List[Channel], recipient: String, msg: Message) -> List[String] =
+    channels
+        |> list.filter(supports_rich_text)
+        |> list.map((ch) => send(ch, recipient, msg))
+
+test "send email" {
+    let ch = Email({ host: "smtp.example.com", port: 587 })
+    let result = send(ch, "alice@example.com", { subject: "Hello", body: "Hi there" })
+    assert_eq(result, "sent email to alice@example.com via smtp.example.com: Hello")
+}
+
+test "send sms" {
+    let ch = Sms({ account_sid: "AC123", auth_token: "token" })
+    let result = send(ch, "+81901234567", { subject: "", body: "Your code: 1234" })
+    assert_eq(result, "sent sms to +81901234567: Your code: 1234")
+}
+
+test "supports rich text" {
+    assert_eq(supports_rich_text(Email({ host: "smtp", port: 25 })), true)
+    assert_eq(supports_rich_text(Slack("https://hooks.slack.com/xxx")), true)
+    assert_eq(supports_rich_text(Sms({ account_sid: "x", auth_token: "y" })), false)
+    assert_eq(supports_rich_text(Push({ project_id: "proj" })), false)
+}
+
+test "notify all channels" {
+    let channels = [
+        Email({ host: "smtp", port: 25 }),
+        Sms({ account_sid: "x", auth_token: "y" }),
+        Slack("https://hooks.slack.com/xxx"),
+    ]
+    let results = notify_all(channels, "bob", { subject: "Alert", body: "Server down" })
+    assert_eq(list.len(results), 3)
+}
+
+test "notify rich only" {
+    let channels = [
+        Email({ host: "smtp", port: 25 }),
+        Sms({ account_sid: "x", auth_token: "y" }),
+        Push({ project_id: "proj" }),
+        Slack("https://hooks.slack.com/xxx"),
+    ]
+    let results = notify_rich_only(channels, "carol", { subject: "Report", body: "See attached" })
+    assert_eq(list.len(results), 2)
+}

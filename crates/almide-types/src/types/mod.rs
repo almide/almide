@@ -186,6 +186,23 @@ impl Ty {
         self.any_child_recursive(&|t| matches!(t, Ty::TypeVar(_)))
     }
 
+    /// True when this type is an unresolved placeholder that the type checker
+    /// failed to concretize. Codegen must fall back to heuristics or defaults
+    /// when encountering these.
+    #[inline]
+    pub fn is_unresolved(&self) -> bool {
+        matches!(self, Ty::Unknown | Ty::TypeVar(_))
+    }
+
+    /// Like `is_unresolved`, but also treats `OpenRecord` as unresolved. Use
+    /// when precise field layout is needed (e.g. WASM local allocation, closure
+    /// param sizing) — an open record's fields are a subset of the actual
+    /// record and cannot be relied upon for offset computation.
+    #[inline]
+    pub fn is_unresolved_structural(&self) -> bool {
+        matches!(self, Ty::Unknown | Ty::TypeVar(_) | Ty::OpenRecord { .. })
+    }
+
     /// Construct a normalized union type: flatten nested unions, deduplicate, sort.
     /// Returns the inner type if only one member remains.
     pub fn union(mut members: Vec<Ty>) -> Ty {

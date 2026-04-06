@@ -1,4 +1,5 @@
 use almide::diagnostic::{Diagnostic, Level};
+use almide::diagnostic_render;
 
 // ---- Error creation ----
 
@@ -96,7 +97,7 @@ fn diagnostic_display_with_source_shows_line() {
     d.line = Some(2);
     d.col = Some(5);
     let source = "fn f() -> Int =\n  let x = \"hello\"\n  x";
-    let out = d.display_with_source(source);
+    let out = diagnostic_render::display_with_source(&d, source);
     assert!(out.contains("let x = \"hello\""), "should show source line, got: {}", out);
     assert!(out.contains("^"), "should show caret underline, got: {}", out);
 }
@@ -104,7 +105,7 @@ fn diagnostic_display_with_source_shows_line() {
 #[test]
 fn diagnostic_display_with_source_no_line() {
     let d = Diagnostic::error("err", "hint", "ctx");
-    let out = d.display_with_source("fn f() -> Int = 1");
+    let out = diagnostic_render::display_with_source(&d, "fn f() -> Int = 1");
     // Should still show basic display without source snippet
     assert!(out.contains("error: err"));
 }
@@ -113,7 +114,7 @@ fn diagnostic_display_with_source_no_line() {
 fn diagnostic_display_with_source_line_out_of_range() {
     let mut d = Diagnostic::error("err", "", "");
     d.line = Some(999);
-    let out = d.display_with_source("fn f() -> Int = 1");
+    let out = diagnostic_render::display_with_source(&d, "fn f() -> Int = 1");
     // Should not crash, just show basic display
     assert!(out.contains("error: err"));
 }
@@ -137,7 +138,7 @@ fn diagnostic_secondary_in_source() {
     d.col = Some(1);
     d = d.with_secondary(1, Some(5), "declared here");
     let source = "fn f() -> Int =\n  let x = 1\n  \"hello\"";
-    let out = d.display_with_source(source);
+    let out = diagnostic_render::display_with_source(&d, source);
     assert!(out.contains("declared here"), "got: {}", out);
 }
 
@@ -172,7 +173,7 @@ fn diagnostic_multiple_secondaries_in_source() {
     d = d.with_secondary(1, Some(5), "declared as Int here")
          .with_secondary(3, Some(5), "used as String here");
     let source = "let x: Int = 1\nfn f() -> Int = x\nlet y = x\nfn g() -> String = x\n\"bad\"";
-    let out = d.display_with_source(source);
+    let out = diagnostic_render::display_with_source(&d, source);
     assert!(out.contains("declared as Int here"));
     assert!(out.contains("used as String here"));
 }
@@ -185,7 +186,7 @@ fn diagnostic_end_col_caret_range() {
     d.line = Some(1);
     d.col = Some(5);
     d.end_col = Some(10);
-    let out = d.display_with_source("let x = \"hello\"");
+    let out = diagnostic_render::display_with_source(&d, "let x = \"hello\"");
     // Should show multiple carets
     assert!(out.contains("^^^^^"), "expected 5 carets for col 5..10, got: {}", out);
 }
@@ -208,7 +209,7 @@ fn diagnostic_clone() {
 fn diagnostic_empty_source_line() {
     let mut d = Diagnostic::error("err", "", "");
     d.line = Some(2);
-    let out = d.display_with_source("line1\n\nline3");
+    let out = diagnostic_render::display_with_source(&d, "line1\n\nline3");
     // Empty source line should not crash
     assert!(out.contains("error: err"));
 }

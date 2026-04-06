@@ -35,10 +35,10 @@ impl Parser {
             }
             self.expect(TokenType::RParen)?;
             self.skip_newlines_if_followed_by(TokenType::Pipe);
-            if self.check(TokenType::Pipe) {
-                return self.try_parse_inline_variant(name, fields);
-            }
-            return Ok(TypeExpr::Simple { name });
+            // `Name(Type, ...)` in type position is a constructor with payload.
+            // Always treat it as an inline variant — try_parse_inline_variant
+            // handles the single-case form when no trailing `|` follows.
+            return self.try_parse_inline_variant(name, fields);
         }
         self.skip_newlines_if_followed_by(TokenType::Pipe);
         if self.check(TokenType::Pipe) {

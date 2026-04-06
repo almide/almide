@@ -79,7 +79,7 @@ fn convert_expr(
     var_table: &mut VarTable,
 ) -> IrExpr {
     let span = expr.span;
-    let ty = expr.ty.clone();
+    let mut ty = expr.ty.clone();
 
     let kind = match expr.kind {
         IrExprKind::Lambda { params, body, lambda_id } => {
@@ -157,6 +157,14 @@ fn convert_expr(
             // these vars are in scope (as locals or as cap_locals from the enclosing lifted fn).
 
             // 6. Build the lifted function
+            // Use the outer Fn type (if available) as an authoritative source for
+            // param/ret types — type inference may leave individual Lambda param
+            // annotations as Unknown/TypeVar even when the enclosing Ty::Fn is
+            // fully resolved (e.g. when passed to a stdlib callback).
+            let fn_params: Option<Vec<Ty>> = match &ty {
+                Ty::Fn { params, .. } => Some(params.clone()),
+                _ => None,
+            };
             let mut func_params = vec![IrParam {
                 var: env_var,
                 ty: env_ty.clone(), // env pointer (i32 in WASM, maps via ty_to_valtype)
@@ -165,12 +173,31 @@ fn convert_expr(
                 open_record: None,
                 default: None,
             }];
-            for (vid, vty) in &params {
-                let info = var_table.get(*vid);
+            for (i, (vid, vty)) in params.iter().enumerate() {
+                let info_name = var_table.get(*vid).name;
+                let info_ty = var_table.get(*vid).ty.clone();
+                // Priority: own annotation → Fn type → VarTable → body usage → fallback
+                let resolved_ty = if !vty.is_unresolved_structural() {
+                    vty.clone()
+                } else if let Some(fp) = fn_params.as_ref().and_then(|ps| ps.get(i)).filter(|t| !t.is_unresolved_structural()) {
+                    fp.clone()
+                } else if !info_ty.is_unresolved_structural() {
+                    info_ty.clone()
+                } else if let Some(inferred) = infer_param_ty_from_body(&body, *vid) {
+                    inferred
+                } else {
+                    info_ty.clone()
+                };
+                // Propagate the resolved type back to the VarTable so later
+                // emit phases (Member access resolution, etc.) see a concrete
+                // type instead of the original Unknown/TypeVar.
+                if info_ty.is_unresolved_structural() && !resolved_ty.is_unresolved_structural() {
+                    var_table.entries[vid.0 as usize].ty = resolved_ty.clone();
+                }
                 func_params.push(IrParam {
                     var: *vid,
-                    ty: vty.clone(),
-                    name: info.name,
+                    ty: resolved_ty,
+                    name: info_name,
                     borrow: ParamBorrow::Own,
                     open_record: None,
                     default: None,
@@ -178,9 +205,16 @@ fn convert_expr(
             }
 
             let ret_ty = match &ty {
-                Ty::Fn { ret, .. } => *ret.clone(),
-                _ => body.ty.clone(),
+                Ty::Fn { ret, .. } if !ret.is_unresolved() => *ret.clone(),
+                _ if !body.ty.is_unresolved() => body.ty.clone(),
+                _ => infer_body_result_ty(&body).unwrap_or_else(|| body.ty.clone()),
             };
+
+            // Propagate the resolved signature back to the enclosing ClosureCreate
+            // expression's type so downstream list/map/fold call sites see
+            // the concrete param/ret types (they read from fn_arg.ty).
+            let resolved_params: Vec<Ty> = func_params.iter().skip(1).map(|p| p.ty.clone()).collect();
+            ty = Ty::Fn { params: resolved_params, ret: Box::new(ret_ty.clone()) };
 
             lifted.push(IrFunction {
                 name: func_name,
@@ -210,11 +244,18 @@ fn convert_expr(
             stmts: stmts.into_iter().map(|s| convert_stmt(s, lifted, counter, var_table)).collect(),
             expr: tail.map(|e| Box::new(convert_expr(*e, lifted, counter, var_table))),
         },
-        IrExprKind::Call { target, args, type_args } => IrExprKind::Call {
-            target: convert_target(target, lifted, counter, var_table),
-            args: args.into_iter().map(|a| convert_expr(a, lifted, counter, var_table)).collect(),
-            type_args,
-        },
+        IrExprKind::Call { target, args, type_args } => {
+            // Before descending, propagate list element type → inline Lambda
+            // param types. Type inference may leave list closure callbacks'
+            // params as Unknown/TypeVar even when the list's element type is
+            // fully resolved, which breaks downstream Member/sort/map emit.
+            let propagated_args = propagate_list_elem_to_lambda_params(&target, args, var_table);
+            IrExprKind::Call {
+                target: convert_target(target, lifted, counter, var_table),
+                args: propagated_args.into_iter().map(|a| convert_expr(a, lifted, counter, var_table)).collect(),
+                type_args,
+            }
+        }
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(convert_expr(*cond, lifted, counter, var_table)),
             then: Box::new(convert_expr(*then, lifted, counter, var_table)),
@@ -659,4 +700,184 @@ fn rewrite_var_ids_stmt(stmt: &IrStmt, mappings: &[(VarId, VarId, Ty)]) -> IrStm
         other => other.clone(),
     };
     IrStmt { kind, span: stmt.span }
+}
+
+/// For list stdlib calls whose callback Lambda has unresolved param types,
+/// seed the Lambda param from the list's element type. This plugs the gap
+/// where type inference didn't push the list element through to the lambda
+/// param (most commonly with anonymous record element types).
+///
+/// Mutates the `vty` entries of inline Lambdas in `args` and updates the
+/// VarTable entries for the param VarIds so downstream passes see the
+/// propagated type.
+fn propagate_list_elem_to_lambda_params(
+    target: &almide_ir::CallTarget,
+    args: Vec<IrExpr>,
+    var_table: &mut VarTable,
+) -> Vec<IrExpr> {
+    use almide_ir::CallTarget;
+    // Extract method name + the "list" arg (object or first positional arg).
+    let (method_name, list_arg_idx): (Option<String>, usize) = match target {
+        CallTarget::Method { method, .. } => (Some(method.to_string()), 0),
+        CallTarget::Module { module, func } if module.as_str() == "list" => {
+            (Some(func.to_string()), 0)
+        }
+        _ => (None, 0),
+    };
+    let Some(name) = method_name else { return args; };
+    // Only methods that take `(list, ..., lambda)` benefit from this.
+    if !matches!(
+        name.as_str(),
+        "map" | "filter" | "filter_map" | "flat_map" | "fold" | "reduce"
+        | "find" | "any" | "all" | "each" | "count" | "partition"
+        | "sort_by" | "group_by" | "unique_by" | "take_while" | "drop_while"
+        | "min_by" | "max_by" | "scan" | "chunk_by" | "dedup_by"
+    ) {
+        return args;
+    }
+    // Resolve list element type from the list arg (or via VarTable).
+    let list_elem = args.get(list_arg_idx).and_then(|a| match &a.ty {
+        Ty::Applied(_, ta) => ta.first().cloned().filter(|t| !t.is_unresolved_structural()),
+        _ => None,
+    }).or_else(|| {
+        args.get(list_arg_idx).and_then(|a| {
+            if let IrExprKind::Var { id } = &a.kind {
+                if let Ty::Applied(_, ta) = &var_table.get(*id).ty {
+                    return ta.first().cloned().filter(|t| !t.is_unresolved_structural());
+                }
+            }
+            None
+        })
+    });
+    let Some(elem_ty) = list_elem else { return args; };
+    // Walk args and update any inline Lambda whose first param is unresolved.
+    args.into_iter().map(|arg| {
+        match arg.kind {
+            IrExprKind::Lambda { mut params, body, lambda_id } => {
+                if let Some((vid, pty)) = params.first_mut() {
+                    if pty.is_unresolved_structural() {
+                        *pty = elem_ty.clone();
+                        if var_table.get(*vid).ty.is_unresolved_structural() {
+                            var_table.entries[vid.0 as usize].ty = elem_ty.clone();
+                        }
+                    }
+                }
+                // Also refresh the Lambda's outer `Ty::Fn.params[0]` so later
+                // lookups of `lambda.ty` see the resolved element type.
+                let refreshed_ty = match arg.ty {
+                    Ty::Fn { params: fparams, ret } => {
+                        let new_params: Vec<Ty> = fparams.into_iter().enumerate().map(|(i, p)| {
+                            if i == 0 && p.is_unresolved_structural() { elem_ty.clone() } else { p }
+                        }).collect();
+                        Ty::Fn { params: new_params, ret }
+                    }
+                    other => other,
+                };
+                IrExpr {
+                    kind: IrExprKind::Lambda { params, body, lambda_id },
+                    ty: refreshed_ty,
+                    span: arg.span,
+                }
+            }
+            _ => arg,
+        }
+    }).collect()
+}
+
+/// Infer a Lambda body's result type when both its own `.ty` and the
+/// enclosing `Ty::Fn` `ret` are unresolved. Traces the "tail" of the
+/// expression tree (final value of blocks, branches of if/match, binop
+/// results) to find a concrete type.
+fn infer_body_result_ty(expr: &IrExpr) -> Option<Ty> {
+    match &expr.kind {
+        IrExprKind::Block { expr: Some(tail), .. } => infer_body_result_ty(tail),
+        IrExprKind::If { then, else_, .. } => {
+            infer_body_result_ty(then)
+                .filter(|t| !t.is_unresolved())
+                .or_else(|| infer_body_result_ty(else_))
+        }
+        IrExprKind::Match { arms, .. } => {
+            arms.iter()
+                .find_map(|arm| infer_body_result_ty(&arm.body).filter(|t| !t.is_unresolved()))
+        }
+        IrExprKind::BinOp { op, left, right } => {
+            // Most ops have a fixed result type; ConcatList inherits from operands.
+            op.result_ty().or_else(|| {
+                if !left.ty.is_unresolved() { Some(left.ty.clone()) }
+                else if !right.ty.is_unresolved() { Some(right.ty.clone()) }
+                else { None }
+            })
+        }
+        IrExprKind::LitInt { .. } => Some(Ty::Int),
+        IrExprKind::LitFloat { .. } => Some(Ty::Float),
+        IrExprKind::LitBool { .. } => Some(Ty::Bool),
+        IrExprKind::LitStr { .. } => Some(Ty::String),
+        _ => {
+            if !expr.ty.is_unresolved() { Some(expr.ty.clone()) } else { None }
+        }
+    }
+}
+
+/// Infer a Lambda parameter's type by scanning the body for operations that
+/// constrain it. Used as a last-resort fallback when type inference leaves
+/// a param as Unknown/TypeVar.
+///
+/// Handles the common case where `p` is one operand of a homogeneous binop
+/// (`a + b`, comparisons, etc.) and the sibling operand has a resolved type.
+fn infer_param_ty_from_body(body: &IrExpr, target: VarId) -> Option<Ty> {
+    fn walk(expr: &IrExpr, target: VarId) -> Option<Ty> {
+        match &expr.kind {
+            IrExprKind::BinOp { left, right, .. } => {
+                // If one side is Var(target) and the other has a known type, use it.
+                if let IrExprKind::Var { id } = &left.kind {
+                    if *id == target && !right.ty.is_unresolved_structural() {
+                        return Some(right.ty.clone());
+                    }
+                }
+                if let IrExprKind::Var { id } = &right.kind {
+                    if *id == target && !left.ty.is_unresolved_structural() {
+                        return Some(left.ty.clone());
+                    }
+                }
+                // Recurse
+                walk(left, target).or_else(|| walk(right, target))
+            }
+            IrExprKind::If { cond, then, else_ } => {
+                walk(cond, target)
+                    .or_else(|| walk(then, target))
+                    .or_else(|| walk(else_, target))
+            }
+            IrExprKind::Block { stmts, expr } => {
+                for stmt in stmts {
+                    if let Some(t) = walk_stmt_for_target(stmt, target) {
+                        return Some(t);
+                    }
+                }
+                expr.as_ref().and_then(|e| walk(e, target))
+            }
+            IrExprKind::Call { args, .. } => {
+                args.iter().find_map(|a| walk(a, target))
+            }
+            IrExprKind::Match { subject, arms } => {
+                walk(subject, target)
+                    .or_else(|| arms.iter().find_map(|a| walk(&a.body, target)))
+            }
+            IrExprKind::UnOp { operand, .. } => walk(operand, target),
+            IrExprKind::Member { object, .. } => walk(object, target),
+            IrExprKind::IndexAccess { object, index } => {
+                walk(object, target).or_else(|| walk(index, target))
+            }
+            _ => None,
+        }
+    }
+    fn walk_stmt_for_target(stmt: &IrStmt, target: VarId) -> Option<Ty> {
+        match &stmt.kind {
+            IrStmtKind::Bind { value, .. } => walk(value, target),
+            IrStmtKind::BindDestructure { value, .. } => walk(value, target),
+            IrStmtKind::Assign { value, .. } => walk(value, target),
+            IrStmtKind::Expr { expr } => walk(expr, target),
+            _ => None,
+        }
+    }
+    walk(body, target)
 }

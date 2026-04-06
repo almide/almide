@@ -62,6 +62,25 @@ pub enum BinOp {
     And, Or,
 }
 
+impl BinOp {
+    /// The result type of this operator, when it can be determined from the
+    /// operator alone. Returns `None` for `ConcatList` (result type = operand type,
+    /// which must be resolved from context).
+    pub fn result_ty(&self) -> Option<Ty> {
+        match self {
+            BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt
+            | BinOp::ModInt | BinOp::PowInt => Some(Ty::Int),
+            BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat
+            | BinOp::ModFloat | BinOp::PowFloat => Some(Ty::Float),
+            BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix => Some(Ty::Matrix),
+            BinOp::ConcatStr => Some(Ty::String),
+            BinOp::ConcatList => None,
+            BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte
+            | BinOp::And | BinOp::Or => Some(Ty::Bool),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnOp {
@@ -280,6 +299,8 @@ pub enum IrExprKind {
     Borrow { expr: Box<IrExpr>, as_str: bool, #[serde(default)] mutable: bool },
     /// Box wrapping: `Box::new(expr)`
     BoxNew { expr: Box<IrExpr> },
+    /// Rc wrapping: `std::rc::Rc::new(expr)` — for List[Fn] elements in Rust.
+    RcWrap { expr: Box<IrExpr>, cast_ty: Option<Box<almide_lang::types::Ty>> },
     /// Macro invocation: `name!(args)` (Rust assert_eq!, println!, etc.)
     RustMacro { name: Sym, args: Vec<IrExpr> },
     /// ToVec: `(expr).to_vec()`
@@ -373,6 +394,7 @@ impl IrExpr {
             IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(f(*expr)) },
             IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(f(*expr)), as_str, mutable },
             IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(f(*expr)) },
+            IrExprKind::RcWrap { expr, cast_ty } => IrExprKind::RcWrap { expr: Box::new(f(*expr)), cast_ty },
             IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(f(*expr)) },
             IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(f(*expr)) },
             IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(f(*expr)) },

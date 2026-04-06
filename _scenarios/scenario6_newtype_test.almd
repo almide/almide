@@ -1,0 +1,62 @@
+// Scenario 6: Newtype safety — 型の取り違え防止
+// 医療: 患者IDと薬剤IDを間違えたら死ぬ
+// 金融: USDとJPYを間違えたら破産する
+
+type PatientId = PatientId(String)
+type DrugId = DrugId(String)
+type DoseAmount = DoseAmount(Float)
+
+type Prescription = {
+    patient: PatientId,
+    drug: DrugId,
+    dose: DoseAmount,
+}
+
+fn prescribe(patient: PatientId, drug: DrugId, dose: DoseAmount) -> Prescription =
+    { patient: patient, drug: drug, dose: dose }
+
+fn patient_id_str(id: PatientId) -> String =
+    match id { PatientId(s) => s }
+
+fn drug_id_str(id: DrugId) -> String =
+    match id { DrugId(s) => s }
+
+fn dose_value(d: DoseAmount) -> Float =
+    match d { DoseAmount(v) => v }
+
+test "correct prescription" {
+    let rx = prescribe(PatientId("P001"), DrugId("D042"), DoseAmount(5.0))
+    assert_eq(patient_id_str(rx.patient), "P001")
+    assert_eq(drug_id_str(rx.drug), "D042")
+}
+
+// このテストが型エラーで弾かれることを期待:
+// prescribe(DrugId("D042"), PatientId("P001"), DoseAmount(5.0))
+// → 引数の順序を間違えたら コンパイルエラー になるべき
+
+// --- 通貨の取り違え ---
+
+type USD = USD(Int)
+type JPY = JPY(Int)
+
+fn add_usd(a: USD, b: USD) -> USD =
+    match a { USD(x) => match b { USD(y) => USD(x + y) } }
+
+fn add_jpy(a: JPY, b: JPY) -> JPY =
+    match a { JPY(x) => match b { JPY(y) => JPY(x + y) } }
+
+fn usd_value(u: USD) -> Int = match u { USD(v) => v }
+fn jpy_value(j: JPY) -> Int = match j { JPY(v) => v }
+
+test "USD addition" {
+    let total = add_usd(USD(100), USD(200))
+    assert_eq(usd_value(total), 300)
+}
+
+test "JPY addition" {
+    let total = add_jpy(JPY(10000), JPY(5000))
+    assert_eq(jpy_value(total), 15000)
+}
+
+// このテストが型エラーで弾かれることを期待:
+// add_usd(USD(100), JPY(5000))  → コンパイルエラー

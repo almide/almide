@@ -11,16 +11,19 @@ pub(super) fn rewrite_calls(
     bound_fns: &HashMap<String, Vec<BoundedParam>>,
     instances: &HashMap<MonoKey, HashMap<String, Ty>>,
 ) {
+    // Tests can share raw names with generic functions (e.g. `fn wrap_all[T]` vs
+    // `test "wrap_all"` — both lower to name = "wrap_all"). Skip tests when
+    // building these lookups so the generic function's signature wins.
     let fn_param_types: HashMap<String, Vec<Ty>> = program.functions.iter()
-        .filter(|f| bound_fns.contains_key::<str>(&f.name))
+        .filter(|f| !f.is_test && bound_fns.contains_key::<str>(&f.name))
         .map(|f| (f.name.to_string(), f.params.iter().map(|p| p.ty.clone()).collect()))
         .collect();
     let fn_generics: HashMap<String, Vec<String>> = program.functions.iter()
-        .filter(|f| bound_fns.contains_key::<str>(&f.name))
+        .filter(|f| !f.is_test && bound_fns.contains_key::<str>(&f.name))
         .filter_map(|f| f.generics.as_ref().map(|gs| (f.name.to_string(), gs.iter().map(|g| g.name.to_string()).collect())))
         .collect();
     let fn_ret_types: HashMap<String, Ty> = program.functions.iter()
-        .filter(|f| bound_fns.contains_key::<str>(&f.name))
+        .filter(|f| !f.is_test && bound_fns.contains_key::<str>(&f.name))
         .map(|f| (f.name.to_string(), f.ret_ty.clone()))
         .collect();
 

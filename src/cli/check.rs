@@ -44,7 +44,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
         warnings.push(d);
     }
     for d in &warnings {
-        eprintln!("{}", d.display_with_source(&source_text));
+        eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
     }
 
     // Combine parse errors + checker errors
@@ -56,7 +56,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     if deny_warnings && !warnings.is_empty() {
         // Treat warnings as errors
         for d in &all_errors {
-            eprintln!("{}", d.display_with_source(&source_text));
+            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
         }
         let total = all_errors.len() + warnings.len();
         eprintln!("\n{} error(s) found (--deny-warnings: {} warning(s) treated as errors)", total, warnings.len());
@@ -64,7 +64,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     }
     if !all_errors.is_empty() {
         for d in &all_errors {
-            eprintln!("{}", d.display_with_source(&source_text));
+            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
         }
         eprintln!("\n{} error(s) found", all_errors.len());
         std::process::exit(1);
@@ -116,10 +116,10 @@ pub fn cmd_check_json(file: &str) {
 
     // Output each diagnostic as JSON (one per line)
     for d in &parse_errors {
-        println!("{}", d.to_json());
+        println!("{}", crate::diagnostic_render::to_json(d));
     }
     for d in &diagnostics {
-        println!("{}", d.to_json());
+        println!("{}", crate::diagnostic_render::to_json(d));
     }
 
     // Lower to IR for unused variable warnings
@@ -127,7 +127,7 @@ pub fn cmd_check_json(file: &str) {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
         let unused = almide::ir::collect_unused_var_warnings(&ir, file);
         for d in &unused {
-            println!("{}", d.to_json());
+            println!("{}", crate::diagnostic_render::to_json(d));
         }
     }
 }
@@ -137,7 +137,7 @@ pub fn cmd_check_effects(file: &str) {
 
     if !parse_errors.is_empty() {
         for d in &parse_errors {
-            eprintln!("{}", d.display_with_source(&source_text));
+            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
         }
         eprintln!("\n{} parse error(s)", parse_errors.len());
         std::process::exit(1);
@@ -174,7 +174,7 @@ pub fn cmd_check_effects(file: &str) {
         .collect();
     if !errors.is_empty() {
         for d in &errors {
-            eprintln!("{}", d.display_with_source(&source_text));
+            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
         }
         eprintln!("\n{} error(s) found", errors.len());
         std::process::exit(1);

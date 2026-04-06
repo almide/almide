@@ -1,0 +1,94 @@
+// Scenario 7: 状態遷移の安全性
+// 医療: 未承認の処方を投薬したら事故
+// 金融: 未決済の注文を出荷したら損害
+
+// --- 注文ステートマシン ---
+
+type OrderDraft = { items: List[String], customer: String }
+type OrderConfirmed = { items: List[String], customer: String, confirmed_at: String }
+type OrderPaid = { items: List[String], customer: String, confirmed_at: String, paid_at: String, amount: Int }
+type OrderShipped = { items: List[String], customer: String, tracking: String }
+
+// 各遷移を関数で表現 — 型が遷移を強制する
+fn create_order(customer: String, items: List[String]) -> OrderDraft =
+    { items: items, customer: customer }
+
+fn confirm_order(draft: OrderDraft, timestamp: String) -> OrderConfirmed =
+    { items: draft.items, customer: draft.customer, confirmed_at: timestamp }
+
+fn pay_order(confirmed: OrderConfirmed, amount: Int, timestamp: String) -> OrderPaid =
+    { items: confirmed.items, customer: confirmed.customer, confirmed_at: confirmed.confirmed_at, paid_at: timestamp, amount: amount }
+
+fn ship_order(paid: OrderPaid, tracking: String) -> OrderShipped =
+    { items: paid.items, customer: paid.customer, tracking: tracking }
+
+test "valid order flow" {
+    let draft = create_order("alice", ["widget", "gadget"])
+    let confirmed = confirm_order(draft, "2026-04-01T10:00")
+    let paid = pay_order(confirmed, 5000, "2026-04-01T11:00")
+    let shipped = ship_order(paid, "TRACK-001")
+    assert_eq(shipped.tracking, "TRACK-001")
+    assert_eq(shipped.customer, "alice")
+}
+
+// ship_order(confirmed, "TRACK-001")  → 型エラー: 未決済は出荷できない
+// pay_order(draft, 5000, "...")        → 型エラー: 未確認は決済できない
+
+// --- 処方ステートマシン ---
+
+type RxDraft = { patient: String, drug: String, dose: Float }
+type RxApproved = { patient: String, drug: String, dose: Float, approver: String }
+type RxDispensed = { patient: String, drug: String, dose: Float, approver: String, dispensed_by: String }
+
+fn draft_rx(patient: String, drug: String, dose: Float) -> RxDraft =
+    { patient: patient, drug: drug, dose: dose }
+
+fn approve_rx(draft: RxDraft, approver: String) -> RxApproved =
+    { patient: draft.patient, drug: draft.drug, dose: draft.dose, approver: approver }
+
+fn dispense_rx(approved: RxApproved, pharmacist: String) -> RxDispensed =
+    { patient: approved.patient, drug: approved.drug, dose: approved.dose, approver: approved.approver, dispensed_by: pharmacist }
+
+test "valid prescription flow" {
+    let draft = draft_rx("P001", "Aspirin", 100.0)
+    let approved = approve_rx(draft, "Dr. Smith")
+    let dispensed = dispense_rx(approved, "Pharmacist Jones")
+    assert_eq(dispensed.approver, "Dr. Smith")
+    assert_eq(dispensed.dispensed_by, "Pharmacist Jones")
+}
+
+// dispense_rx(draft, "Jones")  → 型エラー: 未承認は調剤できない
+
+// --- 境界値バリデーション ---
+
+fn validate_dose(dose: Float) -> Result[Float, String] = {
+    guard dose > 0.0 else err("dose must be positive")
+    guard dose <= 1000.0 else err("dose exceeds maximum (1000mg)")
+    ok(dose)
+}
+
+fn validate_amount(amount: Int) -> Result[Int, String] = {
+    guard amount > 0 else err("amount must be positive")
+    guard amount <= 10000000 else err("amount exceeds limit (10M)")
+    ok(amount)
+}
+
+test "dose validation" {
+    assert_eq(validate_dose(100.0), ok(100.0))
+    match validate_dose(0.0) {
+        err(e) => assert(string.contains(e, "positive")),
+        ok(_) => assert(false, "should reject zero dose"),
+    }
+    match validate_dose(2000.0) {
+        err(e) => assert(string.contains(e, "maximum")),
+        ok(_) => assert(false, "should reject excessive dose"),
+    }
+}
+
+test "amount validation" {
+    assert_eq(validate_amount(5000), ok(5000))
+    match validate_amount(-100) {
+        err(e) => assert(string.contains(e, "positive")),
+        ok(_) => assert(false, "should reject negative"),
+    }
+}

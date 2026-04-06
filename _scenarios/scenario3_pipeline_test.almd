@@ -1,0 +1,127 @@
+// Scenario 3: データ変換パイプライン — CSV → バリデーション → 正規化 → 集計
+
+type UserRow = { name: String, email: String, age: Int }
+
+fn parse_row(line: String) -> Result[UserRow, String] = {
+    let parts = string.split(line, ",")
+    match list.len(parts) {
+        3 => {
+            let name = list.get(parts, 0) ?? ""
+            let email = list.get(parts, 1) ?? ""
+            let age_str = list.get(parts, 2) ?? "0"
+            match int.parse(string.trim(age_str)) {
+                ok(age) => ok({ name: string.trim(name), email: string.trim(email), age: age }),
+                err(e) => err("invalid age: ${age_str}"),
+            }
+        },
+        _ => err("expected 3 fields, got ${int.to_string(list.len(parts))}"),
+    }
+}
+
+fn validate_user(user: UserRow) -> Result[UserRow, String] = {
+    guard user.age > 0 and user.age < 150 else err("invalid age: ${int.to_string(user.age)}")
+    guard string.contains(user.email, "@") else err("invalid email: ${user.email}")
+    guard string.len(user.name) > 0 else err("empty name")
+    ok(user)
+}
+
+fn normalize_user(user: UserRow) -> UserRow =
+    { name: string.trim(user.name), email: string.to_lower(user.email), age: user.age }
+
+effect fn import_users(lines: List[String]) -> List[UserRow] = {
+    let parsed = lines
+        |> list.map(parse_row)
+        |> result.collect!
+    let validated = parsed
+        |> list.map(validate_user)
+        |> result.collect!
+    let normalized = validated |> list.map(normalize_user)
+    normalized
+}
+
+fn average_age(users: List[UserRow]) -> Int = {
+    let total = users |> list.fold(0, (acc, u) => acc + u.age)
+    if list.len(users) > 0 then total / list.len(users) else 0
+}
+
+fn users_by_domain(users: List[UserRow], domain: String) -> List[UserRow] =
+    users |> list.filter((u) => string.ends_with(u.email, domain))
+
+test "parse valid row" {
+    let result = parse_row("Alice, alice@example.com, 30")
+    assert_eq(result, ok({ name: "Alice", email: "alice@example.com", age: 30 }))
+}
+
+test "parse invalid row" {
+    let result = parse_row("only,two")
+    match result {
+        err(_) => assert(true),
+        ok(_) => assert(false, "should fail"),
+    }
+}
+
+test "validate valid user" {
+    let user = { name: "Bob", email: "bob@test.com", age: 25 }
+    assert_eq(validate_user(user), ok(user))
+}
+
+test "validate invalid age" {
+    let user = { name: "Old", email: "old@test.com", age: 200 }
+    match validate_user(user) {
+        err(msg) => assert(string.contains(msg, "invalid age")),
+        ok(_) => assert(false, "should fail"),
+    }
+}
+
+test "validate invalid email" {
+    let user = { name: "Bad", email: "no-at-sign", age: 25 }
+    match validate_user(user) {
+        err(msg) => assert(string.contains(msg, "invalid email")),
+        ok(_) => assert(false, "should fail"),
+    }
+}
+
+test "full pipeline success" {
+    let lines = [
+        "Alice, alice@example.com, 30",
+        "Bob, BOB@EXAMPLE.COM, 25",
+    ]
+    let result = import_users(lines)
+    match result {
+        ok(users) => {
+            assert_eq(list.len(users), 2)
+            let first = list.get(users, 0) ?? { name: "", email: "", age: 0 }
+            assert_eq(first.email, "alice@example.com")
+            let second = list.get(users, 1) ?? { name: "", email: "", age: 0 }
+            assert_eq(second.email, "bob@example.com")
+        },
+        err(e) => assert(false, "should succeed: ${e}"),
+    }
+}
+
+test "full pipeline parse error" {
+    let lines = ["Alice, alice@example.com, 30", "bad-line"]
+    match import_users(lines) {
+        err(_) => assert(true),
+        ok(_) => assert(false, "should fail"),
+    }
+}
+
+test "average age" {
+    let users = [
+        { name: "A", email: "a@test.com", age: 20 },
+        { name: "B", email: "b@test.com", age: 30 },
+        { name: "C", email: "c@test.com", age: 40 },
+    ]
+    assert_eq(average_age(users), 30)
+}
+
+test "filter by domain" {
+    let users = [
+        { name: "A", email: "a@gmail.com", age: 20 },
+        { name: "B", email: "b@company.com", age: 30 },
+        { name: "C", email: "c@gmail.com", age: 40 },
+    ]
+    let gmail_users = users_by_domain(users, "@gmail.com")
+    assert_eq(list.len(gmail_users), 2)
+}

@@ -131,20 +131,26 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
         .collect();
     if !errors.is_empty() {
         for d in &errors {
-            eprintln!("{}", d.display_with_source(&source_text));
+            eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
         }
         eprintln!("\n{} error(s) found", errors.len());
         std::process::exit(1);
     }
     for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-        eprintln!("{}", d.display_with_source(&source_text));
+        eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
     }
 
     // Lower to IR
     let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
 
-    // Extract interface
-    let iface = almide::interface::extract(&ir, &module_name, Some(&source_text));
+    // Extract interface (with version from almide.toml if available)
+    let pkg_version = std::path::Path::new("almide.toml").exists()
+        .then(|| project::parse_toml(std::path::Path::new("almide.toml")).ok())
+        .flatten()
+        .map(|p| p.package.version);
+    let iface = almide::interface::extract_with_version(
+        &ir, &module_name, Some(&source_text), pkg_version.as_deref(),
+    );
 
     if json {
         // --json: print interface JSON to stdout (no artifact)

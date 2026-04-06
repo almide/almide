@@ -12,6 +12,11 @@ pub struct Constraint {
     pub expected: Ty,
     pub actual: Ty,
     pub context: String,
+    /// Source span captured when the constraint was added. Used for error
+    /// reporting; without it, mismatches reported during `solve_constraints`
+    /// attach to whichever expression the checker happened to visit last,
+    /// which produces wildly misleading error locations.
+    pub span: Option<crate::ast::Span>,
 }
 
 /// Check if a Ty is an inference variable (?N).

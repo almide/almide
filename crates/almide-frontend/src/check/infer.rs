@@ -106,6 +106,27 @@ impl Checker {
             }
 
             ExprKind::Member { object, field, .. } => {
+                // Module function used as a first-class value: `string.len`,
+                // `list.map`, etc. Detect this BEFORE inferring the object
+                // (which would fail because `string` is not a variable) and
+                // return the function's type signature.
+                if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
+                    if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
+                        self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
+                        return Ty::Fn {
+                            params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+                            ret: Box::new(sig.ret.clone()),
+                        };
+                    }
+                    let key = format!("{}.{}", mod_name, field);
+                    if let Some(sig) = self.env.functions.get(&sym(&key)).cloned() {
+                        self.type_map.insert(object.id, Ty::Unit);
+                        return Ty::Fn {
+                            params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+                            ret: Box::new(sig.ret.clone()),
+                        };
+                    }
+                }
                 let obj_ty = self.infer_expr(object);
                 let concrete = resolve_ty(&obj_ty, &self.uf);
                 self.resolve_field_type(&concrete, field)
@@ -853,7 +874,7 @@ impl Checker {
             }
         }
         // Detect dot-chain submodule access (for pipe context)
-        if let Some(dotted) = self.resolve_dotted_module_path(&object.kind) {
+        if let Some(dotted) = self.env.import_table.resolve_dotted_path(&object.kind) {
             let key = format!("{}.{}", dotted, field);
             if self.env.functions.contains_key(&sym(&key)) {
                 let last_seg = dotted.rsplit('.').next().unwrap_or(&dotted);
@@ -875,38 +896,6 @@ impl Checker {
         None
     }
 
-    /// Resolve a nested Member chain to a dotted module path.
-    fn resolve_dotted_module_path(&self, kind: &ExprKind) -> Option<String> {
-        match kind {
-            ExprKind::Member { object, field, .. } => {
-                if let ExprKind::Ident { name: root, .. } = &object.kind {
-                    let resolved_root = self.env.import_table.resolve(root)
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| root.to_string());
-                    let candidate = format!("{}.{}", resolved_root, field);
-                    if self.env.import_table.accessible.contains(&sym(&candidate)) {
-                        return Some(candidate);
-                    }
-                    let prefix = format!("{}.", candidate);
-                    if self.env.import_table.accessible.iter().any(|m| m.as_str().starts_with(&prefix)) {
-                        return Some(candidate);
-                    }
-                }
-                if let Some(parent) = self.resolve_dotted_module_path(&object.kind) {
-                    let candidate = format!("{}.{}", parent, field);
-                    if self.env.import_table.accessible.contains(&sym(&candidate)) {
-                        return Some(candidate);
-                    }
-                    let prefix = format!("{}.", candidate);
-                    if self.env.import_table.accessible.iter().any(|m| m.as_str().starts_with(&prefix)) {
-                        return Some(candidate);
-                    }
-                }
-                None
-            }
-            _ => None,
-        }
-    }
 }
 
 /// Collect all Ident names referenced in an expression (shallow, for var capture check).

@@ -58,7 +58,7 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
             }
         }
         // Resolve body return type: if Unknown, infer from expression tree + VarTable
-        let body_ret_ty = if matches!(&_body.ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_)) {
+        let body_ret_ty = if _body.ty.is_unresolved() {
             resolve_expr_ty(_body, &program.var_table, &emitter.record_fields)
         } else {
             _body.ty.clone()
@@ -169,7 +169,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
             .collect();
 
         // Pre-scan body for additional locals
-        let scan = statements::collect_locals(body, &program.var_table);
+        let scan = statements::collect_locals(body, &program.var_table, &emitter.record_fields, &emitter.variant_info);
         let mut local_decls = Vec::new();
 
         // Captured var locals
@@ -387,11 +387,11 @@ fn collect_pattern_var_ids(pattern: &almide_ir::IrPattern, out: &mut HashSet<u32
 /// Resolve a lambda parameter type when it's TypeVar or Unknown.
 fn resolve_lambda_param_ty(param_ty: &almide_lang::types::Ty, _body_ty: &almide_lang::types::Ty, var_table: &almide_ir::VarTable, vid: VarId) -> almide_lang::types::Ty {
     match param_ty {
-        almide_lang::types::Ty::TypeVar(_) | almide_lang::types::Ty::Unknown | almide_lang::types::Ty::OpenRecord { .. } => {
+        _ if param_ty.is_unresolved_structural() => {
             // Try VarTable for the resolved type
             if (vid.0 as usize) < var_table.len() {
                 let info = var_table.get(vid);
-                if !matches!(&info.ty, almide_lang::types::Ty::TypeVar(_) | almide_lang::types::Ty::Unknown | almide_lang::types::Ty::OpenRecord { .. }) {
+                if !info.ty.is_unresolved_structural() {
                     return info.ty.clone();
                 }
             }
@@ -411,14 +411,14 @@ fn resolve_lambda_param_ty(param_ty: &almide_lang::types::Ty, _body_ty: &almide_
 pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &almide_ir::VarTable, record_fields: &HashMap<String, Vec<(String, almide_lang::types::Ty)>>) -> almide_lang::types::Ty {
     use almide_lang::types::Ty;
     // If the expression already has a concrete type, use it
-    if !matches!(&expr.ty, Ty::Unknown | Ty::TypeVar(_)) {
+    if !expr.ty.is_unresolved() {
         return expr.ty.clone();
     }
     match &expr.kind {
         IrExprKind::Var { id } => {
             if (id.0 as usize) < var_table.len() {
                 let info = var_table.get(*id);
-                if !matches!(&info.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                if !info.ty.is_unresolved() {
                     return info.ty.clone();
                 }
             }
@@ -464,7 +464,7 @@ pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &almide_ir::VarTable, re
             // Resolve from the first arm's body
             if let Some(arm) = arms.first() {
                 let resolved = resolve_expr_ty(&arm.body, var_table, record_fields);
-                if !matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+                if !resolved.is_unresolved() {
                     return resolved;
                 }
             }

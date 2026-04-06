@@ -152,6 +152,9 @@ impl PartialOrd for Sym {
 }
 
 impl Ord for Sym {
+    /// Compares by string content (O(n)) for deterministic ordering across
+    /// compiler invocations. Internal data structures sort Syms for canonical
+    /// field order in generated code, so the ordering must be stable.
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         if self.0 == other.0 {
             std::cmp::Ordering::Equal

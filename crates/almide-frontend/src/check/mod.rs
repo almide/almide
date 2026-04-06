@@ -105,7 +105,10 @@ impl Checker {
         let ctx = context.into();
         // Eagerly unify to propagate type info into lambda bodies
         self.unify_infer(&expected, &actual);
-        self.constraints.push(Constraint { expected, actual, context: ctx });
+        self.constraints.push(Constraint {
+            expected, actual, context: ctx,
+            span: self.current_span,
+        });
     }
 
     pub fn set_source(&mut self, file: &str, text: &str) { self.source_file = Some(file.into()); self.source_text = Some(text.into()); }

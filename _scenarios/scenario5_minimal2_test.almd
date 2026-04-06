@@ -1,0 +1,17 @@
+// Even more minimal: Record with Fn field
+
+type Handler = {
+    run: (String) -> String,
+    name: String,
+}
+
+fn make_handler(n: String) -> Handler = {
+    run: (x) => n + ":" + x,
+    name: n,
+}
+
+test "single handler" {
+    let h = make_handler("echo")
+    assert_eq(h.name, "echo")
+    assert_eq(h.run("hello"), "echo:hello")
+}

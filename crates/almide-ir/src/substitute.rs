@@ -170,6 +170,10 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             kind: IrExprKind::BoxNew { expr: Box::new(sub(inner)) },
             ty: expr.ty.clone(), span: expr.span,
         },
+        IrExprKind::RcWrap { expr: inner, cast_ty } => IrExpr {
+            kind: IrExprKind::RcWrap { expr: Box::new(sub(inner)), cast_ty: cast_ty.clone() },
+            ty: expr.ty.clone(), span: expr.span,
+        },
         IrExprKind::ToVec { expr: inner } => IrExpr {
             kind: IrExprKind::ToVec { expr: Box::new(sub(inner)) },
             ty: expr.ty.clone(), span: expr.span,

@@ -27,7 +27,7 @@ use types::render_type as render_type_fn;
 use expressions::render_expr as render_expr_fn;
 use statements::render_stmt as render_stmt_fn;
 use helpers::{terminate_stmt, indent_lines};
-use declarations::{render_type_decl, collect_named_records, collect_anon_records};
+use declarations::{render_type_decl, collect_named_records, collect_anon_records, collect_record_field_counts};
 
 /// Render context: carries the variable table, target, and annotations.
 /// The walker NEVER checks types — all codegen decisions come from annotations.
@@ -143,9 +143,16 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
                 param_name = fn_ctx.templates.render_with("keyword_escape", None, &[], &[("name", param_name.as_str())])
                     .unwrap_or(param_name);
             }
-            // Rust: add `mut` for params marked Var (e.g. by TCO pass)
-            if fn_ctx.target == Target::Rust && fn_ctx.var_table.get(p.var).mutability == Mutability::Var {
-                param_name = format!("mut {}", param_name);
+            // Mutable params (e.g. from TCO pass) — let the template decide
+            // whether to emit a `mut` prefix via the {mut_prefix} variable.
+            let mut_prefix = if fn_ctx.var_table.get(p.var).mutability == Mutability::Var {
+                fn_ctx.templates.render_with("mut_param_prefix", None, &[], &[])
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            if !mut_prefix.is_empty() {
+                param_name = format!("{}{}", mut_prefix, param_name);
             }
             let type_s = match p.borrow {
                 ParamBorrow::Own => render_type_fn(&fn_ctx, &p.ty),
@@ -302,6 +309,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Build anonymous record maps (populated by target-specific pipeline)
     ctx.ann.named_records = collect_named_records(program);
     ctx.ann.anon_records = collect_anon_records(program, &ctx.ann.named_records);
+    ctx.ann.record_field_counts = collect_record_field_counts(program);
 
     let mut parts = Vec::new();
 

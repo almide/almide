@@ -1,0 +1,65 @@
+// Scenario 1: 複数決済プロバイダ — match dispatch
+
+type PaymentResult = { tx_id: String, status: String, provider_name: String }
+type RefundResult = { tx_id: String, refunded: Bool }
+
+type Provider = Stripe(String) | PayPal(String, String) | Square(String)
+
+fn charge(provider: Provider, amount: Int, currency: String) -> PaymentResult =
+    match provider {
+        Stripe(key)        => { tx_id: "stripe_tx_001", status: "ok", provider_name: "stripe" },
+        PayPal(id, secret) => { tx_id: "paypal_tx_001", status: "ok", provider_name: "paypal" },
+        Square(key)        => { tx_id: "square_tx_001", status: "ok", provider_name: "square" },
+    }
+
+fn refund(provider: Provider, tx_id: String) -> RefundResult =
+    match provider {
+        Stripe(_)     => { tx_id: tx_id, refunded: true },
+        PayPal(_, _)  => { tx_id: tx_id, refunded: true },
+        Square(_)     => { tx_id: tx_id, refunded: false },
+    }
+
+fn provider_name(provider: Provider) -> String =
+    match provider {
+        Stripe(_)     => "Stripe",
+        PayPal(_, _)  => "PayPal",
+        Square(_)     => "Square",
+    }
+
+type Order = { total: Int, currency: String, item: String }
+
+fn process_order(provider: Provider, order: Order) -> String = {
+    let result = charge(provider, order.total, order.currency)
+    "Charged ${int.to_string(order.total)} ${order.currency} via ${provider_name(provider)}: ${result.status}"
+}
+
+test "stripe charge" {
+    let p = Stripe("sk_test_xxx")
+    let result = charge(p, 1000, "JPY")
+    assert_eq(result.provider_name, "stripe")
+    assert_eq(result.status, "ok")
+}
+
+test "paypal charge" {
+    let p = PayPal("client_id", "secret")
+    let result = charge(p, 2000, "USD")
+    assert_eq(result.provider_name, "paypal")
+}
+
+test "process order" {
+    let order = { total: 5000, currency: "JPY", item: "widget" }
+    let msg = process_order(Stripe("key"), order)
+    assert_eq(msg, "Charged 5000 JPY via Stripe: ok")
+}
+
+test "refund square fails" {
+    let result = refund(Square("key"), "tx_123")
+    assert_eq(result.refunded, false)
+}
+
+test "multi-provider dispatch" {
+    let providers = [Stripe("k1"), PayPal("id", "sec"), Square("k2")]
+    let order = { total: 100, currency: "USD", item: "test" }
+    let results = providers |> list.map((p) => process_order(p, order))
+    assert_eq(list.len(results), 3)
+}

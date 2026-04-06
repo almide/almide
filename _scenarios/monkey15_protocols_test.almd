@@ -1,0 +1,63 @@
+// Monkey test 15: プロトコル / convention methods
+//
+// Regression for fixed bugs:
+//  1. 構造的に同一な nominal 型 (Dog / Cat が両方 {name: String}) が
+//     type alias resolution で unify されていた。
+//  2. プロトコル境界ジェネリック [T: Animal] の monomorphization が
+//     `T_species(...)` という未定義関数を吐いていた (上の bug に起因)。
+
+protocol Animal {
+  fn species(a: Self) -> String
+  fn sound(a: Self) -> String
+}
+
+// 同じ {name: String} でも nominal 型として別物であることが保たれる
+type Dog: Animal = { name: String }
+fn Dog.species(d: Dog) -> String = "dog"
+fn Dog.sound(d: Dog) -> String = "woof"
+
+type Cat: Animal = { name: String }
+fn Cat.species(c: Cat) -> String = "cat"
+fn Cat.sound(c: Cat) -> String = "meow"
+
+test "dog protocol methods" {
+    let d: Dog = { name: "rex" }
+    assert_eq(d.species(), "dog")
+    assert_eq(d.sound(), "woof")
+}
+
+test "cat protocol methods" {
+    let c: Cat = { name: "whiskers" }
+    assert_eq(c.species(), "cat")
+    assert_eq(c.sound(), "meow")
+}
+
+// プロトコル境界ジェネリック — 以前は T_species(...) で崩壊していた形
+fn describe[T: Animal](a: T) -> String =
+    "${a.species()} says ${a.sound()}"
+
+test "generic over protocol" {
+    let d: Dog = { name: "rex" }
+    assert_eq(describe(d), "dog says woof")
+    let c: Cat = { name: "whiskers" }
+    assert_eq(describe(c), "cat says meow")
+}
+
+// 組み込み convention: Eq
+type Color: Eq = Red | Green | Blue
+
+test "builtin eq convention" {
+    assert(Red == Red)
+    assert(not (Red == Green))
+    assert(Blue != Red)
+}
+
+// Ord convention
+type Priority: Ord, Eq = Low | Medium | High
+
+test "builtin ord convention" {
+    assert(Low < Medium)
+    assert(Medium < High)
+    assert(Low < High)
+    assert(High > Low)
+}

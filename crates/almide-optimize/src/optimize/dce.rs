@@ -6,9 +6,15 @@ pub(super) fn eliminate_dead_code(program: &mut IrProgram) {
     for f in &mut program.functions {
         dce_expr(&mut f.body, &program.var_table);
     }
+    for tl in &mut program.top_lets {
+        dce_expr(&mut tl.value, &program.var_table);
+    }
     for m in &mut program.modules {
         for f in &mut m.functions {
             dce_expr(&mut f.body, &m.var_table);
+        }
+        for tl in &mut m.top_lets {
+            dce_expr(&mut tl.value, &m.var_table);
         }
     }
 }

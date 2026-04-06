@@ -179,6 +179,10 @@ pub enum TypeRef {
 /// Extract the public module interface from a type-checked IR program.
 /// `source` is the original source text (for doc/example/deprecation extraction).
 pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> ModuleInterface {
+    extract_with_version(program, module_name, source, None)
+}
+
+pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Option<&str>, version: Option<&str>) -> ModuleInterface {
     let record_names = build_record_lookup(program);
     let variant_names = build_variant_lookup(program);
     let doc_info = source.map(|s| extract_docs(s)).unwrap_or_default();
@@ -297,7 +301,7 @@ pub fn extract(program: &IrProgram, module_name: &str, source: Option<&str>) -> 
 
     ModuleInterface {
         module: module_name.to_string(),
-        version: None,
+        version: version.map(|v| v.to_string()),
         types,
         functions,
         constants,
@@ -525,9 +529,11 @@ fn c_abi_size_align(ty: &Ty) -> Option<(usize, usize)> {
         Ty::Bool => Some((1, 1)),
         Ty::Int => Some((8, 8)),    // i64
         Ty::Float => Some((8, 8)),  // f64
-        // String, List, Map, Set, Option, Result are pointer-based (opaque)
+        // String, Bytes, Matrix are pointer-based (opaque fat pointer: ptr + metadata)
         Ty::String => Some((16, 8)),  // (ptr, len)
         Ty::Bytes => Some((16, 8)),
+        Ty::Matrix => Some((16, 8)), // opaque pointer-based
+        Ty::RawPtr => Some((8, 8)),  // *mut u8, C-compatible pointer
         Ty::Unit => Some((0, 1)),
         // Named user types: would need full type table lookup — skip for now
         Ty::Named(_, _) => None,

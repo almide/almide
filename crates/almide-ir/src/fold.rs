@@ -34,17 +34,61 @@ fn fold_expr(expr: &mut IrExpr) {
         IrExprKind::Call { args, .. } => {
             for a in args { fold_expr(a); }
         }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
+        | IrExprKind::Fan { exprs: elements } => {
             for e in elements { fold_expr(e); }
         }
         IrExprKind::Lambda { body, .. } => fold_expr(body),
         IrExprKind::Match { subject, arms } => {
             fold_expr(subject);
-            for a in arms { fold_expr(&mut a.body); }
+            for a in arms {
+                if let Some(g) = &mut a.guard { fold_expr(g); }
+                fold_expr(&mut a.body);
+            }
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            fold_expr(iterable);
+            for s in body { fold_stmt(s); }
+        }
+        IrExprKind::While { cond, body } => {
+            fold_expr(cond);
+            for s in body { fold_stmt(s); }
         }
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Await { expr } => fold_expr(expr),
+        | IrExprKind::Await { expr }
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::RcWrap { expr, .. }
+        | IrExprKind::ToVec { expr } => fold_expr(expr),
+        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
+            fold_expr(e);
+            fold_expr(f);
+        }
+        IrExprKind::OptionalChain { expr: object, .. } => fold_expr(object),
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { fold_expr(a); }
+        }
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            fold_expr(source);
+            for step in steps {
+                match step {
+                    super::IterStep::Map { lambda } | super::IterStep::Filter { lambda }
+                    | super::IterStep::FlatMap { lambda } | super::IterStep::FilterMap { lambda } => {
+                        fold_expr(lambda);
+                    }
+                }
+            }
+            match collector {
+                super::IterCollector::Collect => {}
+                super::IterCollector::Fold { init, lambda } => { fold_expr(init); fold_expr(lambda); }
+                super::IterCollector::Any { lambda } | super::IterCollector::All { lambda }
+                | super::IterCollector::Find { lambda } | super::IterCollector::Count { lambda } => {
+                    fold_expr(lambda);
+                }
+            }
+        }
         IrExprKind::Record { fields, .. } => {
             for (_, v) in fields { fold_expr(v); }
         }

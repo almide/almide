@@ -1,13 +1,62 @@
 //! List stdlib helper methods for WASM codegen.
 //!
 //! Utility functions used by both calls_list.rs and calls_list_closure.rs:
-//! list_elem_ty, emit_elem_copy, emit_elem_store, emit_list_slice_impl, emit_memcpy_loop.
+//! list_elem_ty, emit_elem_copy, emit_elem_store.
 
-use super::FuncCompiler;
+use super::{FuncCompiler, WasmEmitter};
 use super::values;
 use almide_ir::IrExpr;
 use almide_lang::types::Ty;
-use wasm_encoder::ValType;
+use wasm_encoder::{Function, Instruction, ValType};
+
+/// Distinguishes the three element shapes supported by `emit_list_sort_generic`.
+/// Each variant knows its element size, load/store width, and comparison strategy.
+enum SortKind {
+    /// i64 elements, 8 bytes, inline `i64_le_s` comparison.
+    Int,
+    /// i32 string-pointer elements, 4 bytes, `__str_cmp` call + `i32_le_s`.
+    String,
+    /// i32 List[String]-pointer elements, 4 bytes, `__list_list_str_cmp` call + `i32_le_s`.
+    ListString,
+}
+
+impl SortKind {
+    fn elem_size(&self) -> u32 {
+        match self { SortKind::Int => 8, _ => 4 }
+    }
+    fn emit_load(&self, f: &mut Function) {
+        match self {
+            SortKind::Int => { f.instruction(&Instruction::I64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
+            _ => { f.instruction(&Instruction::I32Load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
+        }
+    }
+    fn emit_store(&self, f: &mut Function) {
+        match self {
+            SortKind::Int => { f.instruction(&Instruction::I64Store(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
+            _ => { f.instruction(&Instruction::I32Store(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
+        }
+    }
+    fn emit_copy_one(&self, f: &mut Function) {
+        self.emit_load(f);
+        self.emit_store(f);
+    }
+    /// Emit `dst[j] <= key` comparison, leaving an i32 boolean on the stack.
+    fn emit_le_cmp(&self, f: &mut Function, emitter: &WasmEmitter) {
+        match self {
+            SortKind::Int => { f.instruction(&Instruction::I64LeS); }
+            SortKind::String => {
+                f.instruction(&Instruction::Call(emitter.rt.string.cmp));
+                f.instruction(&Instruction::I32Const(0));
+                f.instruction(&Instruction::I32LeS);
+            }
+            SortKind::ListString => {
+                f.instruction(&Instruction::Call(emitter.rt.list_list_str_cmp));
+                f.instruction(&Instruction::I32Const(0));
+                f.instruction(&Instruction::I32LeS);
+            }
+        }
+    }
+}
 
 impl FuncCompiler<'_> {
     pub(super) fn list_elem_ty(&self, ty: &Ty) -> Ty {
@@ -23,14 +72,14 @@ impl FuncCompiler<'_> {
         let from_expr = if let Ty::Applied(_, args) = &list_expr.ty {
             args.first().cloned()
         } else { None };
-        if from_expr.as_ref().is_some_and(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown)) {
+        if from_expr.as_ref().is_some_and(|t| !t.is_unresolved()) {
             return from_expr.unwrap();
         }
         // 2. From VarTable (if list_expr is a Var)
         if let almide_ir::IrExprKind::Var { id } = &list_expr.kind {
             if let Ty::Applied(_, a) = &self.var_table.get(*id).ty {
                 let t = a.first().cloned();
-                if t.as_ref().is_some_and(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown)) {
+                if t.as_ref().is_some_and(|t| !t.is_unresolved()) {
                     return t.unwrap();
                 }
             }
@@ -39,22 +88,85 @@ impl FuncCompiler<'_> {
         if let Some(fn_e) = fn_expr {
             if let Ty::Fn { params, .. } = &fn_e.ty {
                 let t = params.first().cloned();
-                if t.as_ref().is_some_and(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown)) {
+                if t.as_ref().is_some_and(|t| !t.is_unresolved()) {
                     return t.unwrap();
                 }
             }
             // 4. From Lambda params directly
             if let almide_ir::IrExprKind::Lambda { params, .. } = &fn_e.kind {
                 let t = params.first().map(|(_, t)| t.clone());
-                if t.as_ref().is_some_and(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown)) {
+                if t.as_ref().is_some_and(|t| !t.is_unresolved()) {
                     return t.unwrap();
                 }
             }
         }
         // Fallback: if still TypeVar/Unknown, default to Int
         from_expr
-            .filter(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown))
+            .filter(|t| !t.is_unresolved())
             .unwrap_or(Ty::Int)
+    }
+
+    /// Resolve the concrete return type of a closure argument. Handles the case
+    /// where the closure's `Ty::Fn.ret` is Unknown/TypeVar by falling back to:
+    /// 1. Lambda body's own `.ty` (pre-closure-conversion)
+    /// 2. The lifted WASM function's registered return ValType (post-closure-conversion)
+    ///
+    /// The ValType result is coarser than a `Ty` (it can't distinguish String
+    /// from List or other heap types) but is sufficient for sizing decisions
+    /// and for picking the correct call_indirect signature.
+    pub(super) fn resolve_closure_ret_valtype(&self, fn_expr: &IrExpr) -> Option<ValType> {
+        // 1. Fn type's ret
+        if let Ty::Fn { ret, .. } = &fn_expr.ty {
+            if !ret.is_unresolved() {
+                return values::ty_to_valtype(ret);
+            }
+        }
+        // 2. Lambda body's type
+        if let almide_ir::IrExprKind::Lambda { body, .. } = &fn_expr.kind {
+            if !body.ty.is_unresolved() {
+                return values::ty_to_valtype(&body.ty);
+            }
+        }
+        // 3. ClosureCreate: look up the lifted function's registered WASM type
+        if let almide_ir::IrExprKind::ClosureCreate { func_name, .. } = &fn_expr.kind {
+            if let Some(&func_idx) = self.emitter.func_map.get(func_name.as_str()) {
+                if let Some(&type_idx) = self.emitter.func_type_indices.get(&func_idx) {
+                    if let Some((_params, results)) = self.emitter.types.get(type_idx as usize) {
+                        return results.first().copied();
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Resolve the concrete type of the first non-env parameter of a closure
+    /// argument. Like `resolve_closure_ret_valtype` but for the input side.
+    /// Used to size the `param_ty`/`in_elem_ty` in `emit_list_map` etc. when
+    /// type inference left the list element type unresolved.
+    pub(super) fn resolve_closure_param_valtype(&self, fn_expr: &IrExpr, idx: usize) -> Option<ValType> {
+        if let Ty::Fn { params, .. } = &fn_expr.ty {
+            if let Some(p) = params.get(idx) {
+                if !p.is_unresolved() { return values::ty_to_valtype(p); }
+            }
+        }
+        if let almide_ir::IrExprKind::Lambda { params, .. } = &fn_expr.kind {
+            if let Some((_, pty)) = params.get(idx) {
+                if !pty.is_unresolved() { return values::ty_to_valtype(pty); }
+            }
+        }
+        if let almide_ir::IrExprKind::ClosureCreate { func_name, .. } = &fn_expr.kind {
+            if let Some(&func_idx) = self.emitter.func_map.get(func_name.as_str()) {
+                if let Some(&type_idx) = self.emitter.func_type_indices.get(&func_idx) {
+                    if let Some((params, _results)) = self.emitter.types.get(type_idx as usize) {
+                        // WASM param layout for a lifted closure: [env_i32, user_params...].
+                        // `idx` is the user-level param index (0-based), so skip env.
+                        return params.get(idx + 1).copied();
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Copy one element from [stack: dst_addr, src_addr] based on type.
@@ -106,261 +218,118 @@ impl FuncCompiler<'_> {
         self.emit_call_indirect(ct, rt);
     }
 
-    /// Emit take/drop as list slice. For take: start=0,end=n. For drop: start=n,end=len.
-    #[allow(dead_code)] // Will be activated when list.take/drop WASM codegen lands
-    fn emit_list_slice_impl(
-        &mut self, xs: &IrExpr, start_arg: Option<&IrExpr>, end_arg: Option<&IrExpr>,
-        elem_size: usize, is_take: bool,
-    ) {
-        let xs_ptr = self.scratch.alloc_i32();
-        let n = self.scratch.alloc_i32();
-        let start = self.scratch.alloc_i32();
-        let end = self.scratch.alloc_i32();
-        let new_len = self.scratch.alloc_i32();
-        let dst = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-
-        self.emit_expr(xs);
-        wasm!(self.func, { local_set(xs_ptr); }); // xs_ptr = xs
-        // Compute start and end
-        if is_take {
-            // take(xs, n): start=0, end=min(n, len)
-            self.emit_expr(end_arg.unwrap());
-            wasm!(self.func, {
-                i32_wrap_i64; local_set(n); // n
-                i32_const(0); local_set(start); // start = 0
-                // end = min(n, len)
-                local_get(n); local_get(xs_ptr); i32_load(0);
-                i32_lt_u;
-                if_i32; local_get(n); else_; local_get(xs_ptr); i32_load(0); end;
-                local_set(end); // end
-            });
-        } else {
-            // drop(xs, n): start=min(n, len), end=len
-            self.emit_expr(start_arg.unwrap());
-            wasm!(self.func, {
-                i32_wrap_i64; local_set(n); // n
-                // start = min(n, len)
-                local_get(n); local_get(xs_ptr); i32_load(0);
-                i32_lt_u;
-                if_i32; local_get(n); else_; local_get(xs_ptr); i32_load(0); end;
-                local_set(start); // start
-                local_get(xs_ptr); i32_load(0); local_set(end); // end = len
-            });
-        }
-        // new_len = end - start
-        wasm!(self.func, {
-            local_get(end); local_get(start); i32_sub; local_set(new_len);
-            // alloc
-            i32_const(4); local_get(new_len); i32_const(elem_size as i32); i32_mul; i32_add;
-            call(self.emitter.rt.alloc); local_set(dst);
-            local_get(dst); local_get(new_len); i32_store(0);
-            // copy loop
-            i32_const(0); local_set(i); // i
-            block_empty; loop_empty;
-              local_get(i); local_get(new_len); i32_ge_u; br_if(1);
-              // dst[4 + i*es]
-              local_get(dst); i32_const(4); i32_add;
-              local_get(i); i32_const(elem_size as i32); i32_mul; i32_add;
-              // src[4 + (start+i)*es]
-              local_get(xs_ptr); i32_const(4); i32_add;
-              local_get(start); local_get(i); i32_add;
-              i32_const(elem_size as i32); i32_mul; i32_add;
-        });
-        // Copy one element
-        let _elem_ty = if is_take {
-            self.list_elem_ty(&end_arg.unwrap().ty)
-        } else {
-            self.list_elem_ty(&start_arg.unwrap().ty)
-        };
-        // Actually use xs type
-        self.emit_elem_copy(&self.list_elem_ty(&xs.ty));
-        wasm!(self.func, {
-              local_get(i); i32_const(1); i32_add; local_set(i);
-              br(0);
-            end; end;
-            local_get(dst);
-        });
-
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(dst);
-        self.scratch.free_i32(new_len);
-        self.scratch.free_i32(end);
-        self.scratch.free_i32(start);
-        self.scratch.free_i32(n);
-        self.scratch.free_i32(xs_ptr);
-    }
-
-    #[allow(dead_code)] // Placeholder for list.slice WASM codegen
-    fn emit_memcpy_loop(&mut self, _i_local: u32, _dst_local: u32, _start_local: u32, _elem_size: usize) {
-        // Generic memcpy for list.slice — complex, use inline for now
-        // This is a placeholder; slice uses the same pattern as take/drop
-    }
-
-    /// Emit list.sort (insertion sort for List[Int] and List[String]).
+    /// Emit list.sort (insertion sort for List[Int], List[String], and
+    /// List[List[String]] via lexicographic inner-list comparison).
     pub(super) fn emit_list_sort(&mut self, args: &[IrExpr]) {
-        let elem_ty = self.list_elem_ty(&args[0].ty);
+        // Resolve the element type aggressively — use the expression type
+        // first, then fall back to VarTable when the expression was left
+        // generic by inference.
+        let mut elem_ty = self.list_elem_ty(&args[0].ty);
+        if elem_ty.is_unresolved() {
+            if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
+                let vt = self.var_table.get(*id).ty.clone();
+                if let Ty::Applied(_, inner) = vt {
+                    if let Some(t) = inner.first().cloned() {
+                        if !t.is_unresolved() {
+                            elem_ty = t;
+                        }
+                    }
+                }
+            }
+        }
         match &elem_ty {
-            Ty::Int => self.emit_list_sort_int(args),
-            Ty::String => self.emit_list_sort_string(args),
+            Ty::Int => self.emit_list_sort_generic(args, SortKind::Int),
+            Ty::String => self.emit_list_sort_generic(args, SortKind::String),
+            // `List[List[T]]` lex sort: when T is String or unresolved (the
+            // common fold-accumulator case where type inference leaves `A`
+            // unconcretized), treat inner elements as string pointers.
+            Ty::Applied(almide_lang::types::TypeConstructorId::List, inner)
+                if inner.first().is_some_and(|t| matches!(t, Ty::String) || t.is_unresolved()) =>
+            {
+                self.emit_list_sort_generic(args, SortKind::ListString)
+            }
             _ => self.emit_stub_call(args),
         }
     }
 
-    /// Insertion sort for List[Int] (elements are i64, 8 bytes each).
-    fn emit_list_sort_int(&mut self, args: &[IrExpr]) {
+    /// Parameterized insertion sort. Three element kinds share the same
+    /// algorithm; only element size, load/store width, and comparison differ.
+    fn emit_list_sort_generic(&mut self, args: &[IrExpr], kind: SortKind) {
+        let es = kind.elem_size();
         let xs_ptr = self.scratch.alloc_i32();
         let len = self.scratch.alloc_i32();
         let dst = self.scratch.alloc_i32();
         let i = self.scratch.alloc_i32();
         let j = self.scratch.alloc_i32();
-        let key = self.scratch.alloc_i64();
+        let key = if matches!(kind, SortKind::Int) { self.scratch.alloc_i64() } else { self.scratch.alloc_i32() };
 
-        // Copy list first
+        // 1. Copy list header + payload.
         self.emit_expr(&args[0]);
         wasm!(self.func, {
             local_set(xs_ptr);
             local_get(xs_ptr); i32_load(0); local_set(len);
-            i32_const(4); local_get(len); i32_const(8); i32_mul; i32_add;
+            i32_const(4); local_get(len); i32_const(es as i32); i32_mul; i32_add;
             call(self.emitter.rt.alloc); local_set(dst);
             local_get(dst); local_get(len); i32_store(0);
-        });
-        // Copy all elements
-        wasm!(self.func, {
             i32_const(0); local_set(i);
             block_empty; loop_empty;
               local_get(i); local_get(len); i32_ge_u; br_if(1);
-              local_get(dst); i32_const(4); i32_add;
-              local_get(i); i32_const(8); i32_mul; i32_add;
-              local_get(xs_ptr); i32_const(4); i32_add;
-              local_get(i); i32_const(8); i32_mul; i32_add;
-              i64_load(0); i64_store(0);
-              local_get(i); i32_const(1); i32_add; local_set(i);
-              br(0);
+              local_get(dst); i32_const(4); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
+              local_get(xs_ptr); i32_const(4); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
+        });
+        kind.emit_copy_one(&mut self.func);
+        wasm!(self.func, {
+              local_get(i); i32_const(1); i32_add; local_set(i); br(0);
             end; end;
         });
-        // Insertion sort outer loop
+
+        // 2. Insertion sort.
         wasm!(self.func, {
             i32_const(1); local_set(i);
             block_empty; loop_empty;
               local_get(i); local_get(len); i32_ge_u; br_if(1);
-              local_get(dst); i32_const(4); i32_add;
-              local_get(i); i32_const(8); i32_mul; i32_add;
-              i64_load(0); local_set(key);
+              // key = dst[4 + i*es]
+              local_get(dst); i32_const(4); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
+        });
+        kind.emit_load(&mut self.func);
+        wasm!(self.func, {
+              local_set(key);
               local_get(i); i32_const(1); i32_sub; local_set(j);
-        });
-        // Inner loop: shift elements right
-        wasm!(self.func, {
+              // inner loop: shift while dst[j] > key
               block_empty; loop_empty;
                 local_get(j); i32_const(0); i32_lt_s; br_if(1);
-                local_get(dst); i32_const(4); i32_add;
-                local_get(j); i32_const(8); i32_mul; i32_add;
-                i64_load(0); local_get(key); i64_le_s; br_if(1);
-                local_get(dst); i32_const(4); i32_add;
-                local_get(j); i32_const(1); i32_add; i32_const(8); i32_mul; i32_add;
-                local_get(dst); i32_const(4); i32_add;
-                local_get(j); i32_const(8); i32_mul; i32_add;
-                i64_load(0); i64_store(0);
-                local_get(j); i32_const(1); i32_sub; local_set(j);
-                br(0);
-              end; end;
+                // compare dst[j] with key
+                local_get(dst); i32_const(4); i32_add; local_get(j); i32_const(es as i32); i32_mul; i32_add;
         });
-        // Place key and continue
+        kind.emit_load(&mut self.func);     // load dst[j]
+        wasm!(self.func, { local_get(key); }); // push key
+        kind.emit_le_cmp(&mut self.func, self.emitter);
         wasm!(self.func, {
+                br_if(1); // dst[j] <= key → stop
+                // shift: dst[j+1] = dst[j]
+                local_get(dst); i32_const(4); i32_add;
+                local_get(j); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
+                local_get(dst); i32_const(4); i32_add;
+                local_get(j); i32_const(es as i32); i32_mul; i32_add;
+        });
+        kind.emit_copy_one(&mut self.func);
+        wasm!(self.func, {
+                local_get(j); i32_const(1); i32_sub; local_set(j); br(0);
+              end; end;
+              // place key at dst[j+1]
               local_get(dst); i32_const(4); i32_add;
-              local_get(j); i32_const(1); i32_add; i32_const(8); i32_mul; i32_add;
-              local_get(key); i64_store(0);
-              local_get(i); i32_const(1); i32_add; local_set(i);
-              br(0);
+              local_get(j); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
+              local_get(key);
+        });
+        kind.emit_store(&mut self.func);
+        wasm!(self.func, {
+              local_get(i); i32_const(1); i32_add; local_set(i); br(0);
             end; end;
             local_get(dst);
         });
 
-        self.scratch.free_i64(key);
-        self.scratch.free_i32(j);
-        self.scratch.free_i32(i);
-        self.scratch.free_i32(dst);
-        self.scratch.free_i32(len);
-        self.scratch.free_i32(xs_ptr);
-    }
-
-    /// Insertion sort for List[String] (elements are i32 pointers, 4 bytes each).
-    /// Comparison uses __str_cmp which returns negative/0/positive.
-    fn emit_list_sort_string(&mut self, args: &[IrExpr]) {
-        let xs_ptr = self.scratch.alloc_i32();
-        let len = self.scratch.alloc_i32();
-        let dst = self.scratch.alloc_i32();
-        let i = self.scratch.alloc_i32();
-        let j = self.scratch.alloc_i32();
-        let str_key = self.scratch.alloc_i32();
-
-        // Copy list first
-        self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(xs_ptr);
-            local_get(xs_ptr); i32_load(0); local_set(len); // len
-            i32_const(4); local_get(len); i32_const(4); i32_mul; i32_add;
-            call(self.emitter.rt.alloc); local_set(dst); // dst
-            local_get(dst); local_get(len); i32_store(0);
-        });
-        // Copy all elements (i32 pointers)
-        wasm!(self.func, {
-            i32_const(0); local_set(i);
-            block_empty; loop_empty;
-              local_get(i); local_get(len); i32_ge_u; br_if(1);
-              local_get(dst); i32_const(4); i32_add;
-              local_get(i); i32_const(4); i32_mul; i32_add;
-              local_get(xs_ptr); i32_const(4); i32_add;
-              local_get(i); i32_const(4); i32_mul; i32_add;
-              i32_load(0); i32_store(0);
-              local_get(i); i32_const(1); i32_add; local_set(i);
-              br(0);
-            end; end;
-        });
-        // Insertion sort outer loop
-        wasm!(self.func, {
-            i32_const(1); local_set(i); // i = 1
-            block_empty; loop_empty;
-              local_get(i); local_get(len); i32_ge_u; br_if(1);
-              // key = dst[4 + i*4]
-              local_get(dst); i32_const(4); i32_add;
-              local_get(i); i32_const(4); i32_mul; i32_add;
-              i32_load(0); local_set(str_key); // key
-              local_get(i); i32_const(1); i32_sub; local_set(j); // j = i - 1
-        });
-        // Inner loop: shift elements right while dst[j] > key
-        wasm!(self.func, {
-              block_empty; loop_empty;
-                local_get(j); i32_const(0); i32_lt_s; br_if(1);
-                // Compare: str_cmp(dst[j], key) <= 0 means stop
-                local_get(dst); i32_const(4); i32_add;
-                local_get(j); i32_const(4); i32_mul; i32_add;
-                i32_load(0); // dst[j]
-                local_get(str_key); // key
-                call(self.emitter.rt.string.cmp);
-                i32_const(0); i32_le_s; br_if(1); // if dst[j] <= key, stop
-                // Shift: dst[j+1] = dst[j]
-                local_get(dst); i32_const(4); i32_add;
-                local_get(j); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
-                local_get(dst); i32_const(4); i32_add;
-                local_get(j); i32_const(4); i32_mul; i32_add;
-                i32_load(0); i32_store(0);
-                local_get(j); i32_const(1); i32_sub; local_set(j);
-                br(0);
-              end; end;
-        });
-        // Place key at dst[j+1]
-        wasm!(self.func, {
-              local_get(dst); i32_const(4); i32_add;
-              local_get(j); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
-              local_get(str_key); i32_store(0);
-              local_get(i); i32_const(1); i32_add; local_set(i);
-              br(0);
-            end; end;
-            local_get(dst);
-        });
-
-        self.scratch.free_i32(str_key);
+        // 3. Free scratch.
+        if matches!(kind, SortKind::Int) { self.scratch.free_i64(key); } else { self.scratch.free_i32(key); }
         self.scratch.free_i32(j);
         self.scratch.free_i32(i);
         self.scratch.free_i32(dst);

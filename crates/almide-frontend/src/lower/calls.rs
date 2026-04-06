@@ -122,7 +122,7 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             }
             // Dot-chain submodule fallback: still resolve so codegen doesn't break
             // (checker emits error for these, but lowering must still produce valid IR)
-            if let Some(dotted) = resolve_dotted_module_path(object, ctx) {
+            if let Some(dotted) = ctx.env.import_table.resolve_dotted_path(&object.kind) {
                 return CallTarget::Module { module: sym(&dotted), func: *field };
             }
             // TypeName.method(args) → direct named call (not UFCS, no object prepend)
@@ -218,40 +218,5 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             let ir_callee = lower_expr(ctx, callee);
             CallTarget::Computed { callee: Box::new(ir_callee) }
         }
-    }
-}
-
-/// Resolve a nested Member chain to a dotted module path for CallTarget::Module.
-fn resolve_dotted_module_path(expr: &ast::Expr, ctx: &LowerCtx) -> Option<String> {
-    match &expr.kind {
-        ast::ExprKind::Member { object, field, .. } => {
-            if let ast::ExprKind::Ident { name: root, .. } = &object.kind {
-                // Resolve alias: if root is an alias (e.g. "d" → "dmod_d"), use the target
-                let resolved_root = ctx.env.import_table.aliases.get(root)
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| root.to_string());
-                let candidate = format!("{}.{}", resolved_root, field);
-                if ctx.env.user_modules.contains(&sym(&candidate)) {
-                    return Some(candidate);
-                }
-                // Namespace prefix: dir without mod.almd but has children
-                let prefix = format!("{}.", candidate);
-                if ctx.env.user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
-                    return Some(candidate);
-                }
-            }
-            if let Some(parent) = resolve_dotted_module_path(object, ctx) {
-                let candidate = format!("{}.{}", parent, field);
-                if ctx.env.user_modules.contains(&sym(&candidate)) {
-                    return Some(candidate);
-                }
-                let prefix = format!("{}.", candidate);
-                if ctx.env.user_modules.iter().any(|m| m.as_str().starts_with(&prefix)) {
-                    return Some(candidate);
-                }
-            }
-            None
-        }
-        _ => None,
     }
 }

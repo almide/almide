@@ -1,0 +1,113 @@
+// Monkey test 06: クロージャ・高階関数・キャプチャ
+
+// 基本ラムダ
+test "lambda basic" {
+    let f = (x) => x + 1
+    assert_eq(f(10), 11)
+}
+
+test "lambda two args" {
+    let add = (a, b) => a + b
+    assert_eq(add(3, 4), 7)
+}
+
+test "lambda block body" {
+    let f = (x) => {
+        let y = x * 2
+        y + 1
+    }
+    assert_eq(f(5), 11)
+}
+
+// キャプチャ
+test "capture immutable" {
+    let base = 100
+    let add_base = (x) => x + base
+    assert_eq(add_base(5), 105)
+    assert_eq(add_base(10), 110)
+}
+
+test "capture string" {
+    let prefix = ">> "
+    let decorate = (s) => prefix + s
+    assert_eq(decorate("hello"), ">> hello")
+}
+
+test "capture list" {
+    let base = [1, 2, 3]
+    let extend = (x) => base + [x]
+    assert_eq(extend(4), [1, 2, 3, 4])
+    // 再度呼んでも base は変わらない
+    assert_eq(extend(5), [1, 2, 3, 5])
+}
+
+// 関数返却
+fn make_adder(n: Int) -> (Int) -> Int = (x) => x + n
+
+test "function returning function" {
+    let add5 = make_adder(5)
+    let add10 = make_adder(10)
+    assert_eq(add5(3), 8)
+    assert_eq(add10(3), 13)
+}
+
+// 関数を引数に取る
+fn apply_twice(f: (Int) -> Int, x: Int) -> Int = f(f(x))
+
+test "higher-order argument" {
+    assert_eq(apply_twice((x) => x + 1, 5), 7)
+    assert_eq(apply_twice((x) => x * 2, 3), 12)
+}
+
+// 関数合成
+fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int =
+    (x) => f(g(x))
+
+test "function composition" {
+    let inc = (x) => x + 1
+    let dbl = (x) => x * 2
+    let inc_then_dbl = compose(dbl, inc)   // dbl(inc(x)) = (x+1)*2
+    assert_eq(inc_then_dbl(3), 8)
+}
+
+// map に複雑な lambda
+test "map with captured value" {
+    let offset = 100
+    let xs = [1, 2, 3]
+    let result = xs |> list.map((x) => x + offset)
+    assert_eq(result, [101, 102, 103])
+}
+
+// 入れ子 lambda
+test "nested lambda" {
+    let make_multiplier = (factor) => (x) => x * factor
+    let triple = make_multiplier(3)
+    assert_eq(triple(7), 21)
+}
+
+// filter + map パイプ
+test "filter then map" {
+    let xs = [1, 2, 3, 4, 5, 6]
+    let result = xs
+        |> list.filter((x) => x % 2 == 0)
+        |> list.map((x) => x * x)
+    assert_eq(result, [4, 16, 36])
+}
+
+// fold でクロージャ
+test "fold with closure" {
+    let words = ["foo", "bar", "baz"]
+    let joined = words |> list.fold("", (acc, w) => acc + w + ",")
+    assert_eq(joined, "foo,bar,baz,")
+}
+
+// 高階関数 + ローカル状態
+fn count_if(xs: List[Int], pred: (Int) -> Bool) -> Int =
+    xs |> list.fold(0, (acc, x) => if pred(x) then acc + 1 else acc)
+
+test "count_if" {
+    let xs = [1, 2, 3, 4, 5, 6, 7, 8]
+    assert_eq(count_if(xs, (x) => x > 4), 4)
+    assert_eq(count_if(xs, (x) => x % 2 == 0), 4)
+    assert_eq(count_if(xs, (x) => x < 0), 0)
+}

@@ -144,10 +144,14 @@ impl<'a> LowerCtx<'a> {
                 }
             }
         }
-        // Resolve UFCS call return types: obj.method(args) when receiver type is known.
-        // The checker may store Unknown or a bogus Fn type for chained method calls
-        // on lambda parameters (constraints solve the receiver as callable rather than
-        // as a collection method). Re-derive the type from the stdlib signature.
+        // ARCHITECTURAL COMPROMISE: re-derive UFCS return types from stdlib signatures.
+        //
+        // The checker may store Unknown or a bogus Fn type for chained UFCS calls
+        // (e.g., `items |> list.map(f) |> list.join(",")`) because constraint
+        // solving resolves the receiver as callable rather than as a collection
+        // method. Fixing this requires changes to constraint propagation order in
+        // the checker, which is high-risk. This targeted fallback covers all stdlib
+        // modules and is stable.
         if ty == Ty::Unknown || matches!(&ty, Ty::Fn { .. }) {
             if let ast::ExprKind::Call { callee, .. } = &expr.kind {
                 if let ast::ExprKind::Member { object, field, .. } = &callee.kind {
