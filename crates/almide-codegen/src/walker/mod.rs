@@ -143,9 +143,16 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
                 param_name = fn_ctx.templates.render_with("keyword_escape", None, &[], &[("name", param_name.as_str())])
                     .unwrap_or(param_name);
             }
-            // Rust: add `mut` for params marked Var (e.g. by TCO pass)
-            if fn_ctx.target == Target::Rust && fn_ctx.var_table.get(p.var).mutability == Mutability::Var {
-                param_name = format!("mut {}", param_name);
+            // Mutable params (e.g. from TCO pass) — let the template decide
+            // whether to emit a `mut` prefix via the {mut_prefix} variable.
+            let mut_prefix = if fn_ctx.var_table.get(p.var).mutability == Mutability::Var {
+                fn_ctx.templates.render_with("mut_param_prefix", None, &[], &[])
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            if !mut_prefix.is_empty() {
+                param_name = format!("{}{}", mut_prefix, param_name);
             }
             let type_s = match p.borrow {
                 ParamBorrow::Own => render_type_fn(&fn_ctx, &p.ty),

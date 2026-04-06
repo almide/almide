@@ -347,6 +347,9 @@ template = "{inner}.await"
 [keyword_escape]
 template = "r#{name}"
 
+[mut_param_prefix]
+template = "mut "
+
 [map_literal]
 template = "HashMap::from([{entries}])"
 

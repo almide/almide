@@ -26,6 +26,7 @@ use super::pass_stream_fusion::StreamFusionPass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
+use super::pass_rust_lowering::RustLoweringPass;
 use super::pass_closure_conversion::ClosureConversionPass;
 use super::pass_list_pattern::ListPatternLoweringPass;
 use super::template::TemplateSet;
@@ -81,6 +82,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(BuiltinLoweringPass)
             // Peephole: swap/reverse/rotate/copy → specialized IR nodes
             .add(PeepholePass)
+            // Rust-specific: push optimization, borrow index lift
+            .add(RustLoweringPass)
             // Shared passes
             .add(FanLoweringPass),
 
