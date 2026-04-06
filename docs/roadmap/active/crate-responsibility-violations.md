@@ -5,40 +5,22 @@
 
 ## Must Fix (correctness)
 
-### 1. almide-ir: fold.rs に 14 ノードの再帰漏れ
+### ~~1. almide-ir: fold.rs に 14 ノードの再帰漏れ~~ DONE
 
-`fold_expr` の `_ => {}` catch-all が 14 の `IrExprKind` variant の子式を走査しない。fold ベースの最適化が Fan, ForIn, While, Unwrap, UnwrapOr, ToOption, OptionalChain, Clone, Deref, Borrow, BoxNew, ToVec, RustMacro, IterChain の中身をスキップする。
+### ~~2. almide-codegen: walker に target-specific チェック 5 件~~ DONE
 
-**対応:** 14 variant すべてに再帰処理を追加。visit.rs と同じカバレッジにする。
-
-### 2. almide-codegen: walker に target-specific チェック 5 件
-
-CLAUDE.md「Walker must stay target-agnostic」に違反。
-
-| File | Line | What |
-|------|------|------|
-| walker/expressions.rs | 505 | List[Fn] の unwrap_or で Rc::new |
-| walker/statements.rs | 108 | List[Fn] を Vec<Rc<dyn Fn>> に |
-| walker/statements.rs | 208 | `xs = xs + [v]` → `xs.push(v)` 最適化 |
-| walker/statements.rs | 250 | borrow conflict で index を let に抽出 |
-| walker/mod.rs | 147 | TCO 後 param に mut を付与 |
-
-**対応:** それぞれ nanopass に抽出。Rc ラップは `pass_rust_list_fn.rs`、push 最適化は `pass_push_optimization.rs`、borrow は既存 borrow pass に統合、mut は TCO pass 自体で処理。
+`pass_rust_lowering.rs` に push 最適化 + borrow index lift + List[Fn] Rc wrapping を統合。map_err は template の `when_attr` に移行。`IrExprKind::RcWrap` ノード新設。mut prefix は `mut_param_prefix` template 化。Walker の target チェック 5→0。
 
 ## Should Fix (consistency)
 
-### 3. almide-optimize: DCE/propagation が top_lets を処理しない
-
-`eliminate_dead_code()` と `constant_propagate()` は `program.functions` のみ走査。`program.top_lets` をスキップ。constant_fold は top_lets を処理するので不整合。
+### ~~3. almide-optimize: DCE/propagation が top_lets を処理しない~~ DONE
 
 ### 4. almide-optimize: mono の型上書き問題
 
 - `fix_body_match_ty()` が `expr.ty` を ret_ty で上書きするが内部式の型は再帰更新しない
 - ForIn の VarTable 更新が iterable 走査前に実行される
 
-### 5. almide-tools: ABI レイアウト不整合
-
-`c_abi_size_align()` が `Ty::Matrix` と `Ty::RawPtr` を未処理。codegen では Matrix = 4 bytes (pointer)。Record with Matrix で `abi: None` になる。
+### ~~5. almide-tools: ABI レイアウト不整合~~ DONE
 
 ### 6. almide-base: Sym の Ord が O(n) 文字列比較
 
