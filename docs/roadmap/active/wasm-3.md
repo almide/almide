@@ -1,4 +1,4 @@
-<!-- description: WebAssembly 3.0 target: tail calls, exception handling, multi-memory, Component Model async -->
+<!-- description: WebAssembly 3.0 target: tail calls, multi-memory, exception handling (v2), Component Model async -->
 # WebAssembly 3.0 Target
 
 Almide targets WebAssembly 3.0 — the first language to fully leverage the new spec for linear-memory compilation.
@@ -6,42 +6,43 @@ Almide targets WebAssembly 3.0 — the first language to fully leverage the new 
 ## Why
 
 - **Tail calls** eliminate stack overflow in recursive code — critical for a language that prefers recursion over mutation
-- **Native exception handling** makes effect fn error propagation zero-cost instead of manual Result chaining
-- **Multi-memory** isolates heap regions (strings, lists, closures) for safety and performance
+- **Multi-memory** isolates heap regions for safety and performance
 - **Component Model async** maps `fan` to `future<T>` / `stream<T>` — cooperative concurrency without threads
 - **No GC dependency** — Almide compiles to linear memory with deterministic allocation, running on any 3.0 runtime including lightweight embeddings where GC proposals aren't available
 
-## Implementation (all v0.12)
+## v1: Tail Calls + Multi-Memory (v0.12) ✅
 
-### Tail Calls
+### Tail Calls — Done
 
-Highest ROI. `return_call` / `return_call_indirect` for proper TCO in WASM.
+`return_call` / `return_call_indirect` for all tail-position calls.
 
-- Extend existing `pass_tco.rs` (currently Rust-only) to emit WASM tail call instructions
-- All recursive stdlib patterns (scan_while, skip_ws, etc.) become stack-safe
+- `TailCallMarkPass` marks tail-position calls in the IR
+- WASM emitter emits `return_call` instead of `call` for marked nodes
+- Applies to ALL tail calls (not just self-recursive) — mutual recursion included
+- Replaces loop-based `TailCallOptPass` in WASM pipeline
 - **Runtime support**: Chrome 112, Firefox 121, Safari 18.2, Wasmtime 22, Wasmer 7.1 — universal
 
-### Multi-Memory
+### Multi-Memory — Done
 
-Separate memories for different allocation pools.
+Memory 0 (main) + Memory 1 (string builder scratch).
 
-- Memory 0: general heap (records, variants)
-- Memory 1: string pool (immutable, compactable)
-- Memory 2: closure environments
-- Reduces fragmentation, enables per-pool growth strategies
+- Memory 0: 64 pages (4MB) — scratch + data segment + heap (unchanged)
+- Memory 1: 1 page (64KB) — string builder scratch, grows on demand
+- All load/store macros support `memory_index` parameter (default 0, backward compatible)
+- `memory_copy`, `memory_fill`, `memory_size`, `memory_grow` parameterized per memory
 - **Runtime support**: Chrome 120, Firefox 125, Wasmtime 15 (default ON), WasmEdge (default ON)
 
-### Exception Handling
+## v2: Exception Handling (deferred)
 
 `try_table` / `throw` / `throw_ref` with first-class `exnref`.
 
 - effect fn `?` propagation → WASM native exception flow instead of Result wrapping + branch
-- Significant binary size reduction (no Result construction/destruction overhead per call)
-- **Runtime support**: Chrome 137, Firefox 131, Safari 18.4 — all browsers ship it
-- **Container gap**: Wasmtime default OFF, WasmEdge requires `--enable-exception-handling`. This means Spin, wasmCloud, Docker+WASM, and K8s shims all require runtime config to enable it
-- **Strategy**: Emit EH instructions, but also keep the current Result-chain codegen as fallback. Select at build time: `--wasm-eh=native` (default for browser) / `--wasm-eh=result` (default for WASI CLI). When Wasmtime flips the default (tracked), remove the fallback
+- Eliminates Result heap allocation and per-`?` branch overhead
+- **Blocked on**: Wasmtime default OFF, WasmEdge requires `--enable-exception-handling`. All major WASI container runtimes (Spin, wasmCloud, Docker+WASM) require runtime config changes
+- **wasm-encoder 0.225**: Already supports TryTable, Throw, ThrowRef, exnref — ready when Wasmtime flips the default
+- **Trigger**: Implement when Wasmtime enables EH by default
 
-### Fan → Component Model Async (WASI 0.3)
+## v3: Fan → Component Model Async (WASI 0.3)
 
 `fan` compiles to Component Model async primitives, not wasm threads.
 
@@ -50,16 +51,16 @@ fan { fetch(url1), fetch(url2), fetch(url3) }
   → 3x future<T> + waitable-set multiplex
 ```
 
-- **Why not threads**: WASI container runtimes (Spin, wasmCloud, Fastly, Cloudflare) are single-threaded by design. `wasi-threads` was withdrawn in 2023. `shared-everything-threads` is still draft with zero implementations. No language has intra-instance parallelism in WASM containers today
-- **Why Component Model async**: WASI 0.3 adds `future<T>` and `stream<T>` as WIT-level types. The host runtime drives the executor — no language-side scheduler needed. Wasmtime 37+ and Spin v3.5+ ship it. This is what Rust (Spin SDK), Go (TinyGo), Python (componentize-py), and Kotlin all converge on
-- **Almide advantage**: `fan` is a language-level primitive, not a library pattern. The compiler maps it directly to the async ABI without developer ceremony. Other languages require manual `async fn` + `select!` / `join!` glue
-- **Browser target**: fan compiles to SharedArrayBuffer + Web Workers (existing threads support) for true parallelism. The compiler selects the strategy per target
-- **Runtime support**: Wasmtime 37+ (WASI 0.3 RC), Spin v3.5+, wasmCloud (tracking). WasmEdge and Wasmer not yet
+- **Why not threads**: WASI container runtimes are single-threaded by design. `wasi-threads` was withdrawn in 2023. `shared-everything-threads` is still draft with zero implementations
+- **Why Component Model async**: WASI 0.3 adds `future<T>` and `stream<T>` as WIT-level types. Host runtime drives the executor. Wasmtime 37+ and Spin v3.5+ ship it
+- **Almide advantage**: `fan` maps directly to async ABI without developer ceremony
+- **Browser target**: fan compiles to SharedArrayBuffer + Web Workers for true parallelism
+- **Runtime support**: Wasmtime 37+ (WASI 0.3 RC), Spin v3.5+, wasmCloud (tracking)
 
 ## No 2.0 Fallback
 
-WASM output is 3.0 only. No `--compat 2.0` mode. Tail calls and multi-memory are default-on in every major runtime. Exception handling has a build-time flag for runtimes that haven't enabled it yet (Wasmtime).
+WASM output is 3.0 only. Tail calls and multi-memory are default-on in every major runtime.
 
 ## Messaging
 
-> Almide is the first language designed for WebAssembly 3.0 — zero-cost error handling, stack-safe recursion, isolated memory regions, and native async concurrency, all without GC overhead.
+> Almide is the first language designed for WebAssembly 3.0 — stack-safe recursion, isolated memory regions, and native async concurrency, all without GC overhead.
