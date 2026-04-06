@@ -143,11 +143,8 @@ test "triple: three different types" {
 }
 
 // ── Generic function called with different concrete types ──
-// Note: `list.get(xs, i) ?? default` triggers a known WASM limitation with
-// generic monomorphization (shared VarIds cause elem_ty mismatch). Using
-// list.get_or as a workaround until mono is fixed to produce per-specialization VarIds.
 fn safe_get[T](xs: List[T], i: Int, default: T) -> T =
-    list.get_or(xs, i, default)
+    list.get(xs, i) ?? default
 
 test "safe_get with int list" {
     assert_eq(safe_get([10, 20, 30], 1, 0), 20)

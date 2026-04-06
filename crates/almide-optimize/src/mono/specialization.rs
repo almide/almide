@@ -121,14 +121,24 @@ pub(super) fn update_var_table_types(expr: &IrExpr, bindings: &HashMap<String, T
             update_var_table_types(body, bindings, vt);
         }
         IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::Try { expr } | IrExprKind::Await { expr } | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } => {
+        | IrExprKind::Try { expr } | IrExprKind::Await { expr } | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
+        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::RcWrap { expr, .. } | IrExprKind::ToVec { expr }
+        | IrExprKind::OptionalChain { expr, .. } => {
             update_var_table_types(expr, bindings, vt);
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            update_var_table_types(expr, bindings, vt);
+            update_var_table_types(fallback, bindings, vt);
         }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } | IrExprKind::IndexAccess { object, .. } => {
             update_var_table_types(object, bindings, vt);
         }
         IrExprKind::MapLiteral { entries } => { for (k, v) in entries { update_var_table_types(k, bindings, vt); update_var_table_types(v, bindings, vt); } }
         IrExprKind::StringInterp { parts } => { for p in parts { if let IrStringPart::Expr { expr } = p { update_var_table_types(expr, bindings, vt); } } }
+        IrExprKind::Fan { exprs } => { for e in exprs { update_var_table_types(e, bindings, vt); } }
+        IrExprKind::RustMacro { args, .. } => { for a in args { update_var_table_types(a, bindings, vt); } }
         _ => {}
     }
 }
@@ -266,7 +276,22 @@ pub(super) fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String
         }
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Await { expr } => substitute_expr_types(expr, bindings),
+        | IrExprKind::Await { expr }
+        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::RcWrap { expr, .. } | IrExprKind::ToVec { expr }
+        | IrExprKind::OptionalChain { expr, .. } => substitute_expr_types(expr, bindings),
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            substitute_expr_types(expr, bindings);
+            substitute_expr_types(fallback, bindings);
+        }
+        IrExprKind::Fan { exprs } => {
+            for e in exprs { substitute_expr_types(e, bindings); }
+        }
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { substitute_expr_types(a, bindings); }
+        }
         _ => {}
     }
 }
