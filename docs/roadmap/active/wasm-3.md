@@ -10,9 +10,9 @@ Almide targets WebAssembly 3.0 — the first language to fully leverage the new 
 - **Multi-memory** isolates heap regions (strings, lists, closures) for safety and performance
 - **No GC dependency** — Almide compiles to linear memory with deterministic allocation, running on any 3.0 runtime including lightweight embeddings where GC proposals aren't available
 
-## Phases
+## Implementation (all v0.12)
 
-### Phase 1: Tail Calls (v0.12)
+### Tail Calls
 
 Highest ROI. `return_call` / `return_call_indirect` for proper TCO in WASM.
 
@@ -20,7 +20,7 @@ Highest ROI. `return_call` / `return_call_indirect` for proper TCO in WASM.
 - All recursive stdlib patterns (scan_while, skip_ws, etc.) become stack-safe
 - **Runtime support**: Chrome 112, Firefox 121, Safari 18.2, Wasmtime 22, Wasmer 7.1 — universal
 
-### Phase 2: Exception Handling (v0.13)
+### Exception Handling
 
 `try_table` / `throw` / `throw_ref` with first-class `exnref`.
 
@@ -29,7 +29,7 @@ Highest ROI. `return_call` / `return_call_indirect` for proper TCO in WASM.
 - **Runtime support**: Chrome 137, Firefox 131, Safari 18.4, Wasmtime (flag), Wasmer 6.0
 - Note: Wasmtime still behind flag — CLI target may need fallback path or wait for default-on
 
-### Phase 3: Multi-Memory (v0.14)
+### Multi-Memory
 
 Separate memories for different allocation pools.
 
@@ -38,9 +38,8 @@ Separate memories for different allocation pools.
 - Memory 2: closure environments
 - Reduces fragmentation, enables per-pool growth strategies
 - **Runtime support**: Chrome 120, Firefox 125, Wasmtime 15 — Safari missing, so emit as opt-in feature
-- Emit flag: `--wasm-features multi-memory`
 
-### Phase 4: Threads (with fan concurrency)
+### Threads
 
 Shared memory + atomics for fan expression compilation.
 
@@ -54,9 +53,8 @@ Shared memory + atomics for fan expression compilation.
 Default output (`almide build --target wasm`) remains **WASM 2.0 compatible**. New features are enabled via:
 
 ```
-almide build app.almd --target wasm                           # 2.0 baseline
-almide build app.almd --target wasm --wasm-features tail-call # + TCO
-almide build app.almd --target wasm --wasm-features 3.0       # all available 3.0 features
+almide build app.almd --target wasm              # 3.0 (default from v0.12)
+almide build app.almd --target wasm --compat 2.0  # 2.0 fallback for legacy runtimes
 ```
 
 ## Messaging
