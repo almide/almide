@@ -185,27 +185,43 @@ This is the most invasive change (touches Ty enum, unification, inference) but e
 - `crates/almide-frontend/src/check/infer.rs` — effect propagation through HOFs
 - `crates/almide-frontend/src/check/unify.rs` — CapabilitySet unification
 
-### Phase 5: Agent Stdlib Module
+### Phase 5: MCP Server Stdlib Module
 
-**Goal**: `agent` stdlib module for protocol handling and sub-agent spawning. No language keywords.
+**Goal**: `mcp` stdlib module implementing Model Context Protocol (JSON-RPC over stdio). No custom protocol, no language changes.
+
+MCP is the de facto standard for AI agent tool communication (Claude Code, Cursor, Windsurf, GitHub Copilot). An Almide WASM binary that speaks MCP is immediately pluggable into any MCP client.
 
 ```almide
-import agent
+import mcp
 
-effect fn main() -> Unit = {
-  // Dispatch loop: read JSON command from stdin, dispatch to handler, write result
-  agent.serve((cmd) => match agent.action(cmd) {
-    "read_file" => ok(fs.read_text(agent.arg(cmd, "path"))!),
-    "list_dir"  => ok(fs.list_dir(agent.arg(cmd, "path"))! |> list.join("\n")),
-    _           => err("unknown action"),
-  })
+effect fn main() -> Unit =
+  mcp.serve([
+    mcp.tool("read_file", "Read a file at the given path", (params) => {
+      fs.read_text(mcp.arg(params, "path"))
+    }),
+    mcp.tool("list_dir", "List directory contents", (params) => {
+      fs.list_dir(mcp.arg(params, "path")) |> list.join("\n")
+    }),
+  ])
+```
+
+```json
+// Claude Code mcpServers config — works directly
+{
+  "mcpServers": {
+    "code-reviewer": {
+      "command": "wasmtime",
+      "args": ["run", "--dir", "/workspace", "agent.wasm"]
+    }
+  }
 }
 ```
 
-- `agent.serve(handler)` — stdin/stdout JSON protocol loop
-- `agent.action(cmd)` / `agent.arg(cmd, key)` — command parsing
-- `agent.spawn(config)` — sub-agent spawning with capability restriction (wasmtime subprocess)
-- All stdlib, no language changes, no new syntax
+- `mcp.serve(tools)` — JSON-RPC stdio loop (initialize → tools/list → tools/call)
+- `mcp.tool(name, description, handler)` — tool definition
+- `mcp.arg(params, key)` — parameter extraction
+- `mcp.resource(uri, handler)` — resource exposure (future)
+- All stdlib, no language changes. MCP spec compliance, not a custom protocol.
 
 ## AI Agent Container Example
 
@@ -221,35 +237,40 @@ allow = ["FS.read", "IO.stdin", "IO.stdout"]
 
 ```almide
 // agent.almd
-type Command = { action: String, path: String }
-type Response = { status: String, data: String }
+import mcp
 
-effect fn main() -> Unit = {
-  let input = fs.read_text("/dev/stdin")!
-  let cmd: Command = json.decode(input)!
-  
-  let result = match cmd.action {
-    "read_file" => ok({ status: "ok", data: fs.read_text(cmd.path)! }),
-    "list_dir"  => ok({ status: "ok", data: fs.list_dir(cmd.path)! |> list.join("\n") }),
-    _           => err("unknown action"),
-  }
-  
-  println(json.encode(result))
-}
+effect fn main() -> Unit =
+  mcp.serve([
+    mcp.tool("read_file", "Read file contents", (params) => {
+      fs.read_text(mcp.arg(params, "path"))
+    }),
+    mcp.tool("list_dir", "List directory", (params) => {
+      fs.list_dir(mcp.arg(params, "path")) |> list.join("\n")
+    }),
+    mcp.tool("search", "Search for pattern in files", (params) => {
+      let dir = mcp.arg(params, "dir")
+      let pattern = mcp.arg(params, "pattern")
+      fs.list_dir(dir)
+        |> list.filter((f) => string.contains(f, pattern))
+        |> list.join("\n")
+    }),
+  ])
 ```
 
 ```bash
-# Build: 5KB WASM binary + manifest
+# Build: small WASM binary + capability manifest
 almide build agent.almd --target wasm -o agent.wasm
 # → also outputs agent.manifest.json
 
-# Verify: orchestrator checks manifest before loading
-cat agent.manifest.json
-# {"capabilities": ["FS.read", "IO.stdin", "IO.stdout"], ...}
+# Use from Claude Code directly
+# claude_code_config.json:
+# { "mcpServers": { "code-reviewer": {
+#     "command": "wasmtime",
+#     "args": ["run", "--dir", "/workspace", "agent.wasm"]
+# }}}
 
-# Run: sandboxed, only /workspace readable
-echo '{"action":"read_file","path":"main.py"}' | \
-  wasmtime run --dir /workspace agent.wasm
+# Or run standalone with sandboxing
+wasmtime run --dir /workspace agent.wasm
 ```
 
 **What the compiler guarantees:**
@@ -262,7 +283,12 @@ echo '{"action":"read_file","path":"main.py"}' | \
 - Agent can only read from /workspace (--dir scoping)
 - Agent cannot access any other filesystem path
 
-**No other language provides this.** Rust/Go agents can call any syscall. Python/JS have no compile-time restriction. Deno has runtime permissions but no compile-time proof.
+**What MCP guarantees:**
+- Tool interface is discoverable (tools/list)
+- Input/output schema is typed
+- Any MCP client can use the agent without custom integration
+
+**No other language provides all three layers.** Rust/Go agents can call any syscall. Python/JS MCP servers have no compile-time capability restriction. Deno has runtime permissions but no compile-time proof and no WASM sandboxing.
 
 ## Implementation Priority
 
