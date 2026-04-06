@@ -245,9 +245,13 @@ impl FuncCompiler<'_> {
                                 self.scratch.free_i32(scratch);
                                 return;
                             } else if !is_unit {
-                                // Tuple payload variant: [tag:i32][arg0][arg1]...
-                                let mut total_size = 4u32; // tag
-                                for arg in args { total_size += values::byte_size(&arg.ty); }
+                                // Tuple/record payload variant: [tag:i32][arg0][arg1]...
+                                // Allocate the FULL variant size (padded to max across
+                                // all constructors) so mem_eq can safely compare any
+                                // two values of the same variant type.
+                                let mut payload_size = 0u32;
+                                for arg in args.iter() { payload_size += values::byte_size(&arg.ty); }
+                                let total_size = self.variant_alloc_size(name).max(4 + payload_size);
                                 let scratch = self.scratch.alloc_i32();
                                 wasm!(self.func, {
                                     i32_const(total_size as i32);

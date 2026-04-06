@@ -115,33 +115,16 @@ test "filter list of variants by constructor" {
 }
 
 // ── Variant identity via match ──
-// Record-payload variant equality (`Click{x,y} == Click{x,y}`) is a known
-// WASM limitation — record variant constructors aren't compatible with mem_eq.
-// Use match-based comparison as workaround.
-fn same_event(a: Event, b: Event) -> Bool =
-    match a {
-        Click { x, y } => match b {
-            Click { x: bx, y: by } => x == bx and y == by,
-            _ => false,
-        },
-        Key { code, shift } => match b {
-            Key { code: bc, shift: bs } => code == bc and shift == bs,
-            _ => false,
-        },
-        Close => match b {
-            Close => true,
-            _ => false,
-        },
-    }
-
-test "variant identity: same" {
-    assert(same_event(Click { x: 5, y: 10 }, Click { x: 5, y: 10 }))
-    assert(same_event(Close, Close))
+test "variant equality: same" {
+    assert_eq(Click { x: 5, y: 10 }, Click { x: 5, y: 10 })
+    assert_eq(Close, Close)
+    assert_eq(Key { code: 65, shift: true }, Key { code: 65, shift: true })
 }
 
-test "variant identity: different" {
-    assert(not same_event(Click { x: 1, y: 2 }, Click { x: 1, y: 3 }))
-    assert(not same_event(Close, Click { x: 0, y: 0 }))
+test "variant equality: different" {
+    assert(Click { x: 1, y: 2 } != Click { x: 1, y: 3 })
+    assert(Close != Click { x: 0, y: 0 })
+    assert(Key { code: 65, shift: true } != Key { code: 65, shift: false })
 }
 
 // ── Match with guard on variant field ──
