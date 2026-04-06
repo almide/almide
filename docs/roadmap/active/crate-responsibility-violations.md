@@ -15,16 +15,16 @@
 
 ### ~~3. almide-optimize: DCE/propagation が top_lets を処理しない~~ DONE
 
-### 4. almide-optimize: mono の型上書き問題
+### ~~4. almide-optimize: mono の型上書き問題~~ DONE
 
-- `fix_body_match_ty()` が `expr.ty` を ret_ty で上書きするが内部式の型は再帰更新しない
-- ForIn の VarTable 更新が iterable 走査前に実行される
+- `fix_body_match_ty()` に If 分岐の再帰を追加
+- ForIn VarTable 順序は false positive（fixed substitution map で順序不問）
 
 ### ~~5. almide-tools: ABI レイアウト不整合~~ DONE
 
-### 6. almide-base: Sym の Ord が O(n) 文字列比較
+### ~~6. almide-base: Sym の Ord が O(n) 文字列比較~~ Won't fix
 
-`Ord` impl が `resolve(*self).cmp(resolve(*other))` で O(n)。interned ID 比較にするか、安定ソートが必要な理由を文書化するか決定が必要。
+String 比較は intentional。record field の出力順序が Sym Ord に依存しており、interned ID に変更すると生成コードが非決定的になりコンパイル失敗する。Ord impl にドキュメントコメントを追加済み。
 
 ## Defer (pragmatic debt)
 
