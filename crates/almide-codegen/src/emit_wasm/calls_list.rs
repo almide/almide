@@ -853,7 +853,7 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 // Index is always Int (i64) — wrap to i32 for memory addressing.
                 // Check both explicit type and Unknown (which may actually be Int from TupleIndex etc.)
-                if matches!(&args[1].ty, Ty::Int | Ty::Unknown | Ty::TypeVar(_)) {
+                if matches!(&args[1].ty, Ty::Int) || args[1].ty.is_unresolved() {
                     wasm!(self.func, { i32_wrap_i64; });
                 }
                 wasm!(self.func, {

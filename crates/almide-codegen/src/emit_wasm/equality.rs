@@ -2,7 +2,10 @@
 //!
 //! Type-aware recursive equality for List, Option, Result, Tuple, Record, Variant.
 
+use std::collections::HashMap;
+
 use super::FuncCompiler;
+use super::VariantCase;
 use super::values;
 use almide_ir::IrExpr;
 use almide_lang::types::Ty;
@@ -180,12 +183,12 @@ impl FuncCompiler<'_> {
         match &expr.kind {
             IrExprKind::TupleIndex { object, index } => {
                 // Try to get the tuple type from the object, then extract element type
-                let obj_ty = if matches!(&object.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                let obj_ty = if object.ty.is_unresolved() {
                     // Try VarTable
                     if let IrExprKind::Var { id } = &object.kind {
                         if (id.0 as usize) < self.var_table.len() {
                             let info = self.var_table.get(*id);
-                            if !matches!(&info.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                            if !info.ty.is_unresolved() {
                                 Some(info.ty.clone())
                             } else { None }
                         } else { None }
@@ -200,7 +203,7 @@ impl FuncCompiler<'_> {
             IrExprKind::Var { id } => {
                 if (id.0 as usize) < self.var_table.len() {
                     let info = self.var_table.get(*id);
-                    if !matches!(&info.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                    if !info.ty.is_unresolved() {
                         Some(info.ty.clone())
                     } else { None }
                 } else { None }
@@ -500,7 +503,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(right);
             }
             // TypeVar/Unknown: unresolved type — trap rather than silently compare as wrong type
-            (Ty::TypeVar(_) | Ty::Unknown, _) => { wasm!(self.func, { unreachable; }); }
+            (ty, _) if ty.is_unresolved() => { wasm!(self.func, { unreachable; }); }
             _ => { wasm!(self.func, { unreachable; }); }
         }
     }
@@ -555,41 +558,7 @@ impl FuncCompiler<'_> {
     /// Extract field names and types from a record/named type.
     /// For generic types like Box[Int], substitutes type parameters.
     pub(super) fn extract_record_fields(&self, ty: &Ty) -> Vec<(String, Ty)> {
-        match ty {
-            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
-            Ty::Named(name, type_args) => {
-                if let Some(fields) = self.emitter.record_fields.get(name.as_str()) {
-                    if type_args.is_empty() {
-                        fields.clone()
-                    } else {
-                        // Collect generic param names from ALL constructors of the variant type
-                        // (not just this ctor) for correct index mapping.
-                        // E.g., Either[A,B]: Left(A), Right(B) → gnames = ["A","B"], not just ["B"]
-                        let mut generic_names: Vec<&str> = Vec::new();
-                        if let Some(cases) = self.emitter.variant_info.get(name.as_str()) {
-                            for case in cases {
-                                for (_, fty) in &case.fields {
-                                    super::expressions::collect_type_param_names(fty, &mut generic_names);
-                                }
-                            }
-                        }
-                        if generic_names.is_empty() {
-                            // Fallback: collect from this ctor's fields only (non-variant records)
-                            for (_, fty) in fields {
-                                super::expressions::collect_type_param_names(fty, &mut generic_names);
-                            }
-                        }
-                        fields.iter().map(|(fname, fty)| {
-                            let resolved = super::expressions::substitute_type_params(fty, &generic_names, type_args);
-                            (fname.clone(), resolved)
-                        }).collect()
-                    }
-                } else {
-                    vec![]
-                }
-            }
-            _ => vec![],
-        }
+        extract_record_fields(ty, &self.emitter.record_fields, &self.emitter.variant_info)
     }
 
     /// Find local index for a pattern field binding by name.
@@ -652,5 +621,54 @@ impl FuncCompiler<'_> {
         let cases = self.emitter.variant_info.get(type_name);
         let cases = cases?;
         cases.iter().find(|c| c.name == ctor_name).map(|c| c.tag)
+    }
+}
+
+/// Extract field names and types from a record/named type.
+///
+/// Handles `Ty::Record`, `Ty::OpenRecord`, and `Ty::Named` with full generic
+/// substitution via `variant_info`. This is the single canonical implementation;
+/// `FuncCompiler::extract_record_fields` delegates here.
+pub(super) fn extract_record_fields(
+    ty: &Ty,
+    record_fields: &HashMap<String, Vec<(String, Ty)>>,
+    variant_info: &HashMap<String, Vec<VariantCase>>,
+) -> Vec<(String, Ty)> {
+    match ty {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect()
+        }
+        Ty::Named(name, type_args) => {
+            if let Some(fields) = record_fields.get(name.as_str()) {
+                if type_args.is_empty() {
+                    fields.clone()
+                } else {
+                    // Collect generic param names from ALL constructors of the variant type
+                    // (not just this ctor) for correct index mapping.
+                    // E.g., Either[A,B]: Left(A), Right(B) → gnames = ["A","B"], not just ["B"]
+                    let mut generic_names: Vec<&str> = Vec::new();
+                    if let Some(cases) = variant_info.get(name.as_str()) {
+                        for case in cases {
+                            for (_, fty) in &case.fields {
+                                super::expressions::collect_type_param_names(fty, &mut generic_names);
+                            }
+                        }
+                    }
+                    if generic_names.is_empty() {
+                        // Fallback: collect from this ctor's fields only (non-variant records)
+                        for (_, fty) in fields {
+                            super::expressions::collect_type_param_names(fty, &mut generic_names);
+                        }
+                    }
+                    fields.iter().map(|(fname, fty)| {
+                        let resolved = super::expressions::substitute_type_params(fty, &generic_names, type_args);
+                        (fname.clone(), resolved)
+                    }).collect()
+                }
+            } else {
+                vec![]
+            }
+        }
+        _ => vec![],
     }
 }

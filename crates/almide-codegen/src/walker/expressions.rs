@@ -293,7 +293,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::OptionNone => {
             // Typed None: pass inner type via bindings + attribute for template guard
             if let Ty::Applied(TypeConstructorId::Option, args) = &expr.ty {
-                if args.len() == 1 && !matches!(&args[0], Ty::Unknown | Ty::TypeVar(_)) {
+                if args.len() == 1 && !args[0].is_unresolved() {
                     let type_hint_s = render_type(ctx, &args[0]);
                     return ctx.templates.render_with("none_expr", None, &["none_type_hint"], &[("type_hint", type_hint_s.as_str())])
                         .unwrap_or_else(|| "None".into());

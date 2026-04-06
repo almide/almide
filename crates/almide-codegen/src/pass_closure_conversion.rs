@@ -177,12 +177,11 @@ fn convert_expr(
                 let info_name = var_table.get(*vid).name;
                 let info_ty = var_table.get(*vid).ty.clone();
                 // Priority: own annotation → Fn type → VarTable → body usage → fallback
-                let is_unresolved = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_) | Ty::OpenRecord { .. });
-                let resolved_ty = if !is_unresolved(vty) {
+                let resolved_ty = if !vty.is_unresolved_structural() {
                     vty.clone()
-                } else if let Some(fp) = fn_params.as_ref().and_then(|ps| ps.get(i)).filter(|t| !is_unresolved(t)) {
+                } else if let Some(fp) = fn_params.as_ref().and_then(|ps| ps.get(i)).filter(|t| !t.is_unresolved_structural()) {
                     fp.clone()
-                } else if !is_unresolved(&info_ty) {
+                } else if !info_ty.is_unresolved_structural() {
                     info_ty.clone()
                 } else if let Some(inferred) = infer_param_ty_from_body(&body, *vid) {
                     inferred
@@ -192,7 +191,7 @@ fn convert_expr(
                 // Propagate the resolved type back to the VarTable so later
                 // emit phases (Member access resolution, etc.) see a concrete
                 // type instead of the original Unknown/TypeVar.
-                if is_unresolved(&info_ty) && !is_unresolved(&resolved_ty) {
+                if info_ty.is_unresolved_structural() && !resolved_ty.is_unresolved_structural() {
                     var_table.entries[vid.0 as usize].ty = resolved_ty.clone();
                 }
                 func_params.push(IrParam {
@@ -205,10 +204,9 @@ fn convert_expr(
                 });
             }
 
-            let is_unresolved_ty = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
             let ret_ty = match &ty {
-                Ty::Fn { ret, .. } if !is_unresolved_ty(ret.as_ref()) => *ret.clone(),
-                _ if !is_unresolved_ty(&body.ty) => body.ty.clone(),
+                Ty::Fn { ret, .. } if !ret.is_unresolved() => *ret.clone(),
+                _ if !body.ty.is_unresolved() => body.ty.clone(),
                 _ => infer_body_result_ty(&body).unwrap_or_else(|| body.ty.clone()),
             };
 
@@ -737,16 +735,15 @@ fn propagate_list_elem_to_lambda_params(
     ) {
         return args;
     }
-    let is_unresolved = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_) | Ty::OpenRecord { .. });
     // Resolve list element type from the list arg (or via VarTable).
     let list_elem = args.get(list_arg_idx).and_then(|a| match &a.ty {
-        Ty::Applied(_, ta) => ta.first().cloned().filter(|t| !is_unresolved(t)),
+        Ty::Applied(_, ta) => ta.first().cloned().filter(|t| !t.is_unresolved_structural()),
         _ => None,
     }).or_else(|| {
         args.get(list_arg_idx).and_then(|a| {
             if let IrExprKind::Var { id } = &a.kind {
                 if let Ty::Applied(_, ta) = &var_table.get(*id).ty {
-                    return ta.first().cloned().filter(|t| !is_unresolved(t));
+                    return ta.first().cloned().filter(|t| !t.is_unresolved_structural());
                 }
             }
             None
@@ -758,9 +755,9 @@ fn propagate_list_elem_to_lambda_params(
         match arg.kind {
             IrExprKind::Lambda { mut params, body, lambda_id } => {
                 if let Some((vid, pty)) = params.first_mut() {
-                    if is_unresolved(pty) {
+                    if pty.is_unresolved_structural() {
                         *pty = elem_ty.clone();
-                        if is_unresolved(&var_table.get(*vid).ty) {
+                        if var_table.get(*vid).ty.is_unresolved_structural() {
                             var_table.entries[vid.0 as usize].ty = elem_ty.clone();
                         }
                     }
@@ -770,7 +767,7 @@ fn propagate_list_elem_to_lambda_params(
                 let refreshed_ty = match arg.ty {
                     Ty::Fn { params: fparams, ret } => {
                         let new_params: Vec<Ty> = fparams.into_iter().enumerate().map(|(i, p)| {
-                            if i == 0 && is_unresolved(&p) { elem_ty.clone() } else { p }
+                            if i == 0 && p.is_unresolved_structural() { elem_ty.clone() } else { p }
                         }).collect();
                         Ty::Fn { params: new_params, ret }
                     }
@@ -792,47 +789,31 @@ fn propagate_list_elem_to_lambda_params(
 /// expression tree (final value of blocks, branches of if/match, binop
 /// results) to find a concrete type.
 fn infer_body_result_ty(expr: &IrExpr) -> Option<Ty> {
-    let is_unresolved = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
     match &expr.kind {
         IrExprKind::Block { expr: Some(tail), .. } => infer_body_result_ty(tail),
         IrExprKind::If { then, else_, .. } => {
             infer_body_result_ty(then)
-                .filter(|t| !is_unresolved(t))
+                .filter(|t| !t.is_unresolved())
                 .or_else(|| infer_body_result_ty(else_))
         }
         IrExprKind::Match { arms, .. } => {
             arms.iter()
-                .find_map(|arm| infer_body_result_ty(&arm.body).filter(|t| !is_unresolved(t)))
+                .find_map(|arm| infer_body_result_ty(&arm.body).filter(|t| !t.is_unresolved()))
         }
         IrExprKind::BinOp { op, left, right } => {
-            use almide_ir::BinOp;
-            match op {
-                // Int arithmetic → Int.
-                BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt
-                | BinOp::ModInt | BinOp::PowInt => Some(Ty::Int),
-                // Float arithmetic → Float.
-                BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat
-                | BinOp::ModFloat | BinOp::PowFloat => Some(Ty::Float),
-                // Matrix ops → Matrix.
-                BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix => Some(Ty::Matrix),
-                // Concatenation: result equals operand type.
-                BinOp::ConcatStr => Some(Ty::String),
-                BinOp::ConcatList => {
-                    if !is_unresolved(&left.ty) { Some(left.ty.clone()) }
-                    else if !is_unresolved(&right.ty) { Some(right.ty.clone()) }
-                    else { None }
-                }
-                // Comparisons and logical ops → Bool.
-                BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte
-                | BinOp::And | BinOp::Or => Some(Ty::Bool),
-            }
+            // Most ops have a fixed result type; ConcatList inherits from operands.
+            op.result_ty().or_else(|| {
+                if !left.ty.is_unresolved() { Some(left.ty.clone()) }
+                else if !right.ty.is_unresolved() { Some(right.ty.clone()) }
+                else { None }
+            })
         }
         IrExprKind::LitInt { .. } => Some(Ty::Int),
         IrExprKind::LitFloat { .. } => Some(Ty::Float),
         IrExprKind::LitBool { .. } => Some(Ty::Bool),
         IrExprKind::LitStr { .. } => Some(Ty::String),
         _ => {
-            if !is_unresolved(&expr.ty) { Some(expr.ty.clone()) } else { None }
+            if !expr.ty.is_unresolved() { Some(expr.ty.clone()) } else { None }
         }
     }
 }
@@ -844,60 +825,59 @@ fn infer_body_result_ty(expr: &IrExpr) -> Option<Ty> {
 /// Handles the common case where `p` is one operand of a homogeneous binop
 /// (`a + b`, comparisons, etc.) and the sibling operand has a resolved type.
 fn infer_param_ty_from_body(body: &IrExpr, target: VarId) -> Option<Ty> {
-    let is_unresolved = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_) | Ty::OpenRecord { .. });
-    fn walk(expr: &IrExpr, target: VarId, is_unresolved: &impl Fn(&Ty) -> bool) -> Option<Ty> {
+    fn walk(expr: &IrExpr, target: VarId) -> Option<Ty> {
         match &expr.kind {
             IrExprKind::BinOp { left, right, .. } => {
                 // If one side is Var(target) and the other has a known type, use it.
                 if let IrExprKind::Var { id } = &left.kind {
-                    if *id == target && !is_unresolved(&right.ty) {
+                    if *id == target && !right.ty.is_unresolved_structural() {
                         return Some(right.ty.clone());
                     }
                 }
                 if let IrExprKind::Var { id } = &right.kind {
-                    if *id == target && !is_unresolved(&left.ty) {
+                    if *id == target && !left.ty.is_unresolved_structural() {
                         return Some(left.ty.clone());
                     }
                 }
                 // Recurse
-                walk(left, target, is_unresolved).or_else(|| walk(right, target, is_unresolved))
+                walk(left, target).or_else(|| walk(right, target))
             }
             IrExprKind::If { cond, then, else_ } => {
-                walk(cond, target, is_unresolved)
-                    .or_else(|| walk(then, target, is_unresolved))
-                    .or_else(|| walk(else_, target, is_unresolved))
+                walk(cond, target)
+                    .or_else(|| walk(then, target))
+                    .or_else(|| walk(else_, target))
             }
             IrExprKind::Block { stmts, expr } => {
                 for stmt in stmts {
-                    if let Some(t) = walk_stmt_for_target(stmt, target, is_unresolved) {
+                    if let Some(t) = walk_stmt_for_target(stmt, target) {
                         return Some(t);
                     }
                 }
-                expr.as_ref().and_then(|e| walk(e, target, is_unresolved))
+                expr.as_ref().and_then(|e| walk(e, target))
             }
             IrExprKind::Call { args, .. } => {
-                args.iter().find_map(|a| walk(a, target, is_unresolved))
+                args.iter().find_map(|a| walk(a, target))
             }
             IrExprKind::Match { subject, arms } => {
-                walk(subject, target, is_unresolved)
-                    .or_else(|| arms.iter().find_map(|a| walk(&a.body, target, is_unresolved)))
+                walk(subject, target)
+                    .or_else(|| arms.iter().find_map(|a| walk(&a.body, target)))
             }
-            IrExprKind::UnOp { operand, .. } => walk(operand, target, is_unresolved),
-            IrExprKind::Member { object, .. } => walk(object, target, is_unresolved),
+            IrExprKind::UnOp { operand, .. } => walk(operand, target),
+            IrExprKind::Member { object, .. } => walk(object, target),
             IrExprKind::IndexAccess { object, index } => {
-                walk(object, target, is_unresolved).or_else(|| walk(index, target, is_unresolved))
+                walk(object, target).or_else(|| walk(index, target))
             }
             _ => None,
         }
     }
-    fn walk_stmt_for_target(stmt: &IrStmt, target: VarId, is_unresolved: &impl Fn(&Ty) -> bool) -> Option<Ty> {
+    fn walk_stmt_for_target(stmt: &IrStmt, target: VarId) -> Option<Ty> {
         match &stmt.kind {
-            IrStmtKind::Bind { value, .. } => walk(value, target, is_unresolved),
-            IrStmtKind::BindDestructure { value, .. } => walk(value, target, is_unresolved),
-            IrStmtKind::Assign { value, .. } => walk(value, target, is_unresolved),
-            IrStmtKind::Expr { expr } => walk(expr, target, is_unresolved),
+            IrStmtKind::Bind { value, .. } => walk(value, target),
+            IrStmtKind::BindDestructure { value, .. } => walk(value, target),
+            IrStmtKind::Assign { value, .. } => walk(value, target),
+            IrStmtKind::Expr { expr } => walk(expr, target),
             _ => None,
         }
     }
-    walk(body, target, &is_unresolved)
+    walk(body, target)
 }

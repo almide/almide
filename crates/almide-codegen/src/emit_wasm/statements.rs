@@ -8,12 +8,17 @@ use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
 use super::FuncCompiler;
+use super::VariantCase;
+use super::equality::extract_record_fields;
 use super::values;
 
 /// Lookup for record/variant field types by nominal name.
 /// Used during pre-scan to resolve `Ty::Named` to concrete field types
 /// so that destructuring patterns allocate the correct WASM local valtypes.
-pub type RecordFieldLookup = HashMap<String, Vec<(String, Ty)>>;
+pub(super) type RecordFieldLookup = HashMap<String, Vec<(String, Ty)>>;
+
+/// Lookup for variant type info by nominal name.
+pub(super) type VariantInfoLookup = HashMap<String, Vec<VariantCase>>;
 
 impl FuncCompiler<'_> {
     /// Get the element type of a list variable from VarTable.
@@ -463,20 +468,7 @@ fn infer_bind_type(expr: &IrExpr) -> Ty {
             }
         }
         // BinOp: infer from operation kind
-        IrExprKind::BinOp { op, .. } => {
-            use almide_ir::BinOp;
-            match op {
-                BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt
-                | BinOp::ModInt | BinOp::PowInt => Ty::Int,
-                BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat
-                | BinOp::ModFloat | BinOp::PowFloat => Ty::Float,
-                BinOp::ConcatStr => Ty::String,
-                BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix => Ty::Matrix,
-                BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte
-                | BinOp::And | BinOp::Or => Ty::Bool,
-                BinOp::ConcatList => Ty::Unknown,
-            }
-        }
+        IrExprKind::BinOp { op, .. } => op.result_ty().unwrap_or(Ty::Unknown),
         // Try/Unwrap/ToOption: unwrap inner type
         IrExprKind::Try { expr: inner }
         | IrExprKind::Unwrap { expr: inner }
@@ -516,9 +508,10 @@ pub fn collect_locals(
     body: &IrExpr,
     var_table: &almide_ir::VarTable,
     record_fields: &RecordFieldLookup,
+    variant_info: &VariantInfoLookup,
 ) -> LocalScanResult {
     let mut binds = Vec::new();
-    scan_expr(body, &mut binds, var_table, record_fields);
+    scan_expr(body, &mut binds, var_table, record_fields, variant_info);
     LocalScanResult { binds }
 }
 
@@ -532,6 +525,7 @@ struct LocalScanner<'a> {
     locals: &'a mut Vec<(VarId, ValType)>,
     vt: &'a almide_ir::VarTable,
     record_fields: &'a RecordFieldLookup,
+    variant_info: &'a VariantInfoLookup,
 }
 
 impl IrVisitor for LocalScanner<'_> {
@@ -558,7 +552,7 @@ impl IrVisitor for LocalScanner<'_> {
                 self.visit_expr(subject);
                 let resolved_ty = resolve_scan_subject_ty(subject, arms, self.vt);
                 for arm in arms {
-                    scan_pattern(&arm.pattern, &resolved_ty, self.locals, self.vt, self.record_fields);
+                    scan_pattern(&arm.pattern, &resolved_ty, self.locals, self.vt, self.record_fields, self.variant_info);
                     self.visit_expr(&arm.body);
                 }
             }
@@ -581,9 +575,9 @@ impl IrVisitor for LocalScanner<'_> {
                 } else {
                     value.ty.clone()
                 };
-                let resolved_ty = if !matches!(&effective_ty, Ty::Unknown | Ty::TypeVar(_)) {
+                let resolved_ty = if !effective_ty.is_unresolved() {
                     effective_ty
-                } else if !matches!(ty, Ty::Unknown | Ty::TypeVar(_)) {
+                } else if !ty.is_unresolved() {
                     ty.clone()
                 } else {
                     infer_bind_type(value)
@@ -594,7 +588,7 @@ impl IrVisitor for LocalScanner<'_> {
                 self.visit_expr(value);
             }
             IrStmtKind::BindDestructure { pattern, value } => {
-                scan_destructure_pattern(pattern, &value.ty, self.locals, self.vt, self.record_fields);
+                scan_destructure_pattern(pattern, &value.ty, self.locals, self.vt, self.record_fields, self.variant_info);
                 self.visit_expr(value);
             }
             _ => walk_stmt(self, stmt),
@@ -607,23 +601,9 @@ fn scan_expr(
     locals: &mut Vec<(VarId, ValType)>,
     vt: &almide_ir::VarTable,
     record_fields: &RecordFieldLookup,
+    variant_info: &VariantInfoLookup,
 ) {
-    LocalScanner { locals, vt, record_fields }.visit_expr(expr);
-}
-
-/// Resolve record field list from a value type, handling both structural
-/// (`Ty::Record` / `Ty::OpenRecord`) and nominal (`Ty::Named("User", ...)`) forms.
-/// Returns an empty vec when the type is unknown or not a record.
-fn resolve_record_fields(value_ty: &Ty, record_fields: &RecordFieldLookup) -> Vec<(String, Ty)> {
-    match value_ty {
-        Ty::Record { fields } | Ty::OpenRecord { fields } => {
-            fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect()
-        }
-        Ty::Named(name, _type_args) => {
-            record_fields.get(name.as_str()).cloned().unwrap_or_default()
-        }
-        _ => vec![],
-    }
+    LocalScanner { locals, vt, record_fields, variant_info }.visit_expr(expr);
 }
 
 /// Resolve match subject type, fixing IR type inference gaps.
@@ -651,13 +631,14 @@ fn scan_destructure_pattern(
     locals: &mut Vec<(VarId, ValType)>,
     vt: &almide_ir::VarTable,
     record_fields: &RecordFieldLookup,
+    variant_info: &VariantInfoLookup,
 ) {
     match pattern {
         almide_ir::IrPattern::Tuple { elements } => {
             let elem_types = if let almide_lang::types::Ty::Tuple(tys) = value_ty { tys.clone() } else { vec![] };
             for (i, elem) in elements.iter().enumerate() {
                 let elem_ty = elem_types.get(i).cloned().unwrap_or(almide_lang::types::Ty::Int);
-                scan_destructure_pattern(elem, &elem_ty, locals, vt, record_fields);
+                scan_destructure_pattern(elem, &elem_ty, locals, vt, record_fields, variant_info);
             }
         }
         almide_ir::IrPattern::Bind { var, .. } => {
@@ -667,8 +648,8 @@ fn scan_destructure_pattern(
         }
         almide_ir::IrPattern::RecordPattern { fields, .. } => {
             // Record destructure: resolve field types from value_ty (authoritative).
-            // Handles structural records and nominal `Ty::Named("User", ...)` via lookup.
-            let resolved_fields = resolve_record_fields(value_ty, record_fields);
+            // Uses extract_record_fields for full generic substitution.
+            let resolved_fields = extract_record_fields(value_ty, record_fields, variant_info);
             let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();
             for field in fields {
                 // Resolve field type from the record type (not VarTable -- VarTable may have stale types)
@@ -677,7 +658,7 @@ fn scan_destructure_pattern(
                     .map(|(_, t)| t.clone())
                     .unwrap_or(almide_lang::types::Ty::Int);
                 if let Some(pat) = &field.pattern {
-                    scan_destructure_pattern(pat, &field_ty, locals, vt, record_fields);
+                    scan_destructure_pattern(pat, &field_ty, locals, vt, record_fields, variant_info);
                 } else {
                     // Implicit bind: field name = var name. Look up VarId from VarTable.
                     // Use field_ty from the record type for the WASM local declaration.
@@ -704,6 +685,7 @@ fn scan_pattern(
     locals: &mut Vec<(VarId, ValType)>,
     vt: &almide_ir::VarTable,
     record_fields: &RecordFieldLookup,
+    variant_info: &VariantInfoLookup,
 ) {
     match pattern {
         almide_ir::IrPattern::Bind { var, ty } => {
@@ -722,7 +704,7 @@ fn scan_pattern(
                     // Use pattern.ty (set by mono substitute_pattern_types) — no VarTable
                     for arg in args.iter() {
                         if let almide_ir::IrPattern::Bind { var, ty } = arg {
-                            let effective_ty = if matches!(ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_)) {
+                            let effective_ty = if ty.is_unresolved() {
                                 &vt.get(*var).ty // fallback only
                             } else { ty };
                             if let Some(val_type) = values::ty_to_valtype(effective_ty) {
@@ -737,7 +719,7 @@ fn scan_pattern(
             for (_i, arg) in args.iter().enumerate() {
                 if let almide_ir::IrPattern::Bind { var, ty: pat_ty } = arg {
                     // Use pattern.ty first (set by mono), fall back to VarTable + substitution
-                    let resolved = if !matches!(pat_ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_))
+                    let resolved = if !pat_ty.is_unresolved()
                         && !matches!(pat_ty, almide_lang::types::Ty::Named(n, a) if a.is_empty() && n.len() <= 2 && n.chars().next().map_or(false, |c| c.is_uppercase()))
                     {
                         pat_ty.clone()
@@ -753,7 +735,7 @@ fn scan_pattern(
                         locals.push((*var, val_type));
                     }
                 } else {
-                    scan_pattern(arg, subject_ty, locals, vt, record_fields);
+                    scan_pattern(arg, subject_ty, locals, vt, record_fields, variant_info);
                 }
             }
         }
@@ -761,7 +743,7 @@ fn scan_pattern(
             let elem_types = if let almide_lang::types::Ty::Tuple(tys) = subject_ty { tys.clone() } else { vec![] };
             for (i, elem) in elements.iter().enumerate() {
                 let et = elem_types.get(i).cloned().unwrap_or(subject_ty.clone());
-                scan_pattern(elem, &et, locals, vt, record_fields);
+                scan_pattern(elem, &et, locals, vt, record_fields, variant_info);
             }
         }
         almide_ir::IrPattern::Some { inner } | almide_ir::IrPattern::Ok { inner } => {
@@ -771,12 +753,12 @@ fn scan_pattern(
                 // subject_ty is not Applied — try VarTable for inner binding
                 if let almide_ir::IrPattern::Bind { var, .. } = inner.as_ref() {
                     let vt_ty = &vt.get(*var).ty;
-                    if !matches!(vt_ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_)) {
+                    if !vt_ty.is_unresolved() {
                         vt_ty.clone()
                     } else { subject_ty.clone() }
                 } else { subject_ty.clone() }
             };
-            scan_pattern(inner, &inner_ty, locals, vt, record_fields);
+            scan_pattern(inner, &inner_ty, locals, vt, record_fields, variant_info);
         }
         almide_ir::IrPattern::Err { inner } => {
             let inner_ty = if let almide_lang::types::Ty::Applied(_, args) = subject_ty {
@@ -784,12 +766,12 @@ fn scan_pattern(
             } else {
                 if let almide_ir::IrPattern::Bind { var, .. } = inner.as_ref() {
                     let vt_ty = &vt.get(*var).ty;
-                    if !matches!(vt_ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_)) {
+                    if !vt_ty.is_unresolved() {
                         vt_ty.clone()
                     } else { subject_ty.clone() }
                 } else { subject_ty.clone() }
             };
-            scan_pattern(inner, &inner_ty, locals, vt, record_fields);
+            scan_pattern(inner, &inner_ty, locals, vt, record_fields, variant_info);
         }
         almide_ir::IrPattern::RecordPattern { name: _, fields, .. } => {
             // For pattern=None fields, the binding is implicit (field name = var name).
@@ -799,11 +781,11 @@ fn scan_pattern(
             // Resolve field types from subject_ty (structural or nominal) so local
             // valtypes match the actual value layout — falls back to VarTable only
             // when the record type cannot be resolved.
-            let resolved_fields = resolve_record_fields(subject_ty, record_fields);
+            let resolved_fields = extract_record_fields(subject_ty, record_fields, variant_info);
             let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();
             for field in fields {
                 if let Some(pat) = &field.pattern {
-                    scan_pattern(pat, subject_ty, locals, vt, record_fields);
+                    scan_pattern(pat, subject_ty, locals, vt, record_fields, variant_info);
                 } else {
                     // Implicit bind: find VarId by field name, searching from end (most recent scope)
                     for i in (0..vt.len()).rev() {

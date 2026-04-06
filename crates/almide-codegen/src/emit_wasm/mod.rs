@@ -695,9 +695,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         // to VarTable (for params) and expression inspection (for ret).
         let params: Vec<ValType> = func.params.iter()
             .filter_map(|p| {
-                let pty = if matches!(&p.ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_) | almide_lang::types::Ty::OpenRecord { .. }) {
+                let pty = if p.ty.is_unresolved_structural() {
                     let vt_ty = &program.var_table.get(p.var).ty;
-                    if !matches!(vt_ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_) | almide_lang::types::Ty::OpenRecord { .. }) {
+                    if !vt_ty.is_unresolved_structural() {
                         vt_ty.clone()
                     } else {
                         p.ty.clone()
@@ -708,7 +708,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 values::ty_to_valtype(&pty)
             })
             .collect();
-        let resolved_ret_ty = if matches!(&func.ret_ty, almide_lang::types::Ty::Unknown | almide_lang::types::Ty::TypeVar(_)) {
+        let resolved_ret_ty = if func.ret_ty.is_unresolved() {
             closures::resolve_expr_ty(&func.body, &program.var_table, &emitter.record_fields)
         } else {
             func.ret_ty.clone()
@@ -1262,8 +1262,7 @@ fn register_anonymous_records(program: &IrProgram, emitter: &mut WasmEmitter) {
                 let key: Vec<(String, String)> = field_vec.iter()
                     .map(|(n, t)| (n.clone(), format!("{:?}", t)))
                     .collect();
-                let is_unresolved = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
-                if field_vec.iter().all(|(_, t)| !is_unresolved(t)) && seen.insert(key) {
+                if field_vec.iter().all(|(_, t)| !t.is_unresolved()) && seen.insert(key) {
                     let name = format!("__anon_record_{}", record_fields.len());
                     record_fields.insert(name, field_vec);
                 }

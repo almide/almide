@@ -84,7 +84,7 @@ impl FuncCompiler<'_> {
                 if let Some(expr) = explicit_map.get(field_name.as_str()) {
                     self.emit_expr(expr);
                     // Use type-definition type when expr.ty is Unknown
-                    let store_ty = if matches!(&expr.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                    let store_ty = if expr.ty.is_unresolved() {
                         field_ty
                     } else {
                         &expr.ty
@@ -296,10 +296,10 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_tuple(&mut self, elements: &[IrExpr]) {
         let element_types: Vec<(String, Ty)> = elements.iter().enumerate()
             .map(|(i, e)| {
-                let ty = if matches!(&e.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                let ty = if e.ty.is_unresolved() {
                     if let almide_ir::IrExprKind::Var { id } = &e.kind {
                         let vt_ty = &self.var_table.get(*id).ty;
-                        if !matches!(vt_ty, Ty::Unknown | Ty::TypeVar(_)) { vt_ty.clone() }
+                        if !vt_ty.is_unresolved() { vt_ty.clone() }
                         else { e.ty.clone() }
                     } else { e.ty.clone() }
                 } else { e.ty.clone() };
@@ -319,10 +319,10 @@ impl FuncCompiler<'_> {
         let mut offset = 0u32;
         for elem in elements {
             // Resolve element type: use VarTable for Var refs, infer for Unknown
-            let elem_ty = if matches!(&elem.ty, Ty::Unknown | Ty::TypeVar(_)) {
+            let elem_ty = if elem.ty.is_unresolved() {
                 if let almide_ir::IrExprKind::Var { id } = &elem.kind {
                     let vt_ty = &self.var_table.get(*id).ty;
-                    if !matches!(vt_ty, Ty::Unknown | Ty::TypeVar(_)) { vt_ty.clone() }
+                    if !vt_ty.is_unresolved() { vt_ty.clone() }
                     else { self.infer_type_from_expr(elem) }
                 } else {
                     self.infer_type_from_expr(elem)
@@ -363,7 +363,7 @@ impl FuncCompiler<'_> {
         };
 
         // Use result_ty if concrete, otherwise fall back to tuple element type
-        let load_ty = if matches!(result_ty, Ty::Unknown | Ty::TypeVar(_)) {
+        let load_ty = if result_ty.is_unresolved() {
             elem_ty.as_ref().unwrap_or(result_ty)
         } else {
             result_ty
@@ -381,7 +381,7 @@ impl FuncCompiler<'_> {
         // Member expr may have the parent type instead of the field result type.
         let resolved_ty = if let almide_ir::IrExprKind::Var { id } = &object.kind {
             let vt_ty = &self.var_table.get(*id).ty;
-            if matches!(&object.ty, Ty::OpenRecord { .. } | Ty::TypeVar(_) | Ty::Unknown) && !matches!(vt_ty, Ty::OpenRecord { .. } | Ty::TypeVar(_) | Ty::Unknown) {
+            if object.ty.is_unresolved_structural() && !vt_ty.is_unresolved_structural() {
                 vt_ty.clone()
             } else {
                 object.ty.clone()
@@ -397,7 +397,7 @@ impl FuncCompiler<'_> {
         let tag_offset = self.variant_tag_offset(&resolved_ty);
 
         // If fields are empty and type is Unknown, try searching record_fields for a type that has this field
-        if fields.is_empty() && matches!(&resolved_ty, Ty::Unknown | Ty::TypeVar(_)) {
+        if fields.is_empty() && resolved_ty.is_unresolved() {
             for (_name, rf) in &self.emitter.record_fields {
                 if rf.iter().any(|(n, _)| n == field) {
                     fields = rf.clone();
@@ -420,7 +420,7 @@ impl FuncCompiler<'_> {
     fn resolve_member_result_type(&self, object: &IrExpr, field: &str) -> Ty {
         let obj_ty = if let almide_ir::IrExprKind::Var { id } = &object.kind {
             let vt_ty = &self.var_table.get(*id).ty;
-            if !matches!(vt_ty, Ty::Unknown | Ty::TypeVar(_)) { vt_ty.clone() } else { object.ty.clone() }
+            if !vt_ty.is_unresolved() { vt_ty.clone() } else { object.ty.clone() }
         } else if let almide_ir::IrExprKind::Member { object: inner, field: inner_f } = &object.kind {
             self.resolve_member_result_type(inner, inner_f)
         } else {

@@ -869,8 +869,7 @@ impl FuncCompiler<'_> {
                 let key_ty_initial = if let Ty::Fn { ret, .. } = &args[1].ty {
                     (**ret).clone()
                 } else { Ty::Int };
-                let is_unresolved = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
-                let key_vt = if !is_unresolved(&key_ty_initial) {
+                let key_vt = if !key_ty_initial.is_unresolved() {
                     values::ty_to_valtype(&key_ty_initial).unwrap_or(ValType::I32)
                 } else {
                     self.resolve_closure_ret_valtype(&args[1]).unwrap_or(ValType::I64)
@@ -886,11 +885,7 @@ impl FuncCompiler<'_> {
                     _ => 4,
                 };
                 // Synthesize a concrete key_ty for `emit_closure_call` sizing.
-                let key_ty = match key_vt {
-                    ValType::I64 => Ty::Int,
-                    ValType::F64 => Ty::Float,
-                    _ => Ty::String,
-                };
+                let key_ty = values::vt_to_placeholder_ty(key_vt);
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();

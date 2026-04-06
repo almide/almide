@@ -62,6 +62,25 @@ pub enum BinOp {
     And, Or,
 }
 
+impl BinOp {
+    /// The result type of this operator, when it can be determined from the
+    /// operator alone. Returns `None` for `ConcatList` (result type = operand type,
+    /// which must be resolved from context).
+    pub fn result_ty(&self) -> Option<Ty> {
+        match self {
+            BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt
+            | BinOp::ModInt | BinOp::PowInt => Some(Ty::Int),
+            BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat
+            | BinOp::ModFloat | BinOp::PowFloat => Some(Ty::Float),
+            BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix => Some(Ty::Matrix),
+            BinOp::ConcatStr => Some(Ty::String),
+            BinOp::ConcatList => None,
+            BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte
+            | BinOp::And | BinOp::Or => Some(Ty::Bool),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnOp {

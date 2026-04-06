@@ -500,7 +500,7 @@ impl FuncCompiler<'_> {
 
                         if let IrPattern::Bind { var, ty: pat_ty } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                let load_ty = if matches!(pat_ty, Ty::Unknown | Ty::TypeVar(_))
+                                let load_ty = if pat_ty.is_unresolved()
                                     || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
                                 { field_ty } else { pat_ty };
                                 wasm!(self.func, { local_get(scratch); });
@@ -1032,7 +1032,7 @@ impl FuncCompiler<'_> {
                             .unwrap_or(Ty::Int);
                         if let IrPattern::Bind { var, ty: pat_ty } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                let load_ty = if matches!(pat_ty, Ty::Unknown | Ty::TypeVar(_))
+                                let load_ty = if pat_ty.is_unresolved()
                                     || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
                                 { &field_ty } else { pat_ty };
                                 wasm!(self.func, { local_get(inner_scratch); });

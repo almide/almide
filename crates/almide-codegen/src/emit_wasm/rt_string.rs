@@ -12,7 +12,7 @@ pub fn register(emitter: &mut WasmEmitter) {
     let ty_i32x2_i32 = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     let ty_i32_i32 = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     let ty_i32x2_i64 = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I64]);
-    let _ty_i32_i64 = emitter.register_type(vec![ValType::I32], vec![ValType::I64]);
+    let ty_i32_i64 = emitter.register_type(vec![ValType::I32], vec![ValType::I64]);
 
     let s = &mut emitter.rt.string;
     // Will be set after register_func calls — need to go through emitter
@@ -74,7 +74,7 @@ pub fn register(emitter: &mut WasmEmitter) {
     // Distinct from `string.len` which reads the byte-count header and is used
     // for sizing; `char_count` walks the data section and skips UTF-8
     // continuation bytes (bytes whose top two bits are `10`).
-    emitter.rt.string.char_count = emitter.register_func("__str_char_count", _ty_i32_i64);
+    emitter.rt.string.char_count = emitter.register_func("__str_char_count", ty_i32_i64);
 }
 
 /// Compile all string runtime function bodies.

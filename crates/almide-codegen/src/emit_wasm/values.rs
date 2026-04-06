@@ -63,3 +63,17 @@ pub fn block_type(ty: &Ty) -> BlockType {
         None => BlockType::Empty,
     }
 }
+
+/// Build a representative `Ty` for a given `ValType`, used when we only know
+/// the WASM ABI shape (from a lifted closure's registered type) but not the
+/// source-level type. The returned `Ty` round-trips correctly through
+/// `ty_to_valtype`/`byte_size`.
+pub fn vt_to_placeholder_ty(vt: ValType) -> Ty {
+    match vt {
+        ValType::I64 => Ty::Int,
+        ValType::F64 => Ty::Float,
+        // All i32 heap pointers have identical runtime layout (4-byte pointer);
+        // `Ty::String` is a convenient stand-in.
+        _ => Ty::String,
+    }
+}
