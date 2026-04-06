@@ -1,4 +1,5 @@
-<!-- description: WebAssembly 3.0 target: tail calls, multi-memory, exception handling (v2), Component Model async -->
+<!-- description: WebAssembly 3.0 v1: native tail calls (return_call) and multi-memory -->
+<!-- done: 2026-04-06 -->
 # WebAssembly 3.0 Target
 
 Almide targets WebAssembly 3.0 — the first language to fully leverage the new spec for linear-memory compilation.
