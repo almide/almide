@@ -45,7 +45,7 @@ The compiler rejects the binary. The WASM file is never produced. No runtime che
 | `Time` | datetime.now, env.millis | clock_time_get |
 | `Rand` | random.int, random.float | random_get |
 | `Fan` | fan { }, fan.map | (internal: threads/async) |
-| `Log` | log.info, log.debug | fd_write(stderr) |
+| `Log` | (future: log.info, log.debug) | fd_write(stderr) |
 | `IO.stdin` | io.read_line | fd_read(fd=0) |
 | `IO.stdout` | println, io.print | fd_write(fd=1) |
 | `IO.stderr` | eprintln | fd_write(fd=2) |
