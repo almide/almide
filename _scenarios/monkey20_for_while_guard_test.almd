@@ -1,0 +1,184 @@
+// Monkey test 20: loops and guards
+//
+// Tests: for...in with enumerate, for...in over map, while with var mutation,
+// guard with early return, nested loops with guard break, for with chained
+// filter, range iteration (exclusive and inclusive), guard continue.
+
+// ── for...in with enumerate ──
+test "for with enumerate: index and value" {
+    var result: List[String] = []
+    for (i, name) in list.enumerate(["alice", "bob", "carol"]) {
+        result = result + ["${int.to_string(i)}-${name}"]
+    }
+    assert_eq(result, ["0-alice", "1-bob", "2-carol"])
+}
+
+test "enumerate via pipe then map" {
+    let indexed = ["x", "y", "z"]
+        |> list.enumerate
+        |> list.map((pair) => {
+            let (i, v) = pair
+            "${int.to_string(i)}:${v}"
+        })
+    assert_eq(indexed, ["0:x", "1:y", "2:z"])
+}
+
+// ── for...in over map (key, value) ──
+test "for over map entries: accumulate values" {
+    let m = ["a": 10, "b": 20, "c": 30]
+    var total = 0
+    for (_, v) in m {
+        total = total + v
+    }
+    assert_eq(total, 60)
+}
+
+test "for over map entries: collect keys" {
+    let m = ["x": 1, "y": 2, "z": 3]
+    var keys: List[String] = []
+    for (k, _) in m {
+        keys = keys + [k]
+    }
+    assert_eq(list.len(keys), 3)
+    let sorted = list.sort(keys)
+    assert_eq(sorted, ["x", "y", "z"])
+}
+
+// ── while with var mutation ──
+test "while countdown" {
+    var n = 10
+    var steps = 0
+    while n > 0 {
+        n = n - 1
+        steps = steps + 1
+    }
+    assert_eq(steps, 10)
+    assert_eq(n, 0)
+}
+
+test "while powers of two" {
+    var x = 1
+    var count = 0
+    while x < 1000 {
+        x = x * 2
+        count = count + 1
+    }
+    assert_eq(x, 1024)
+    assert_eq(count, 10)
+}
+
+test "while building list" {
+    var xs: List[Int] = []
+    var i = 0
+    while i < 5 {
+        xs = xs + [i * i]
+        i = i + 1
+    }
+    assert_eq(xs, [0, 1, 4, 9, 16])
+}
+
+// ── guard with early return (effect fn) ──
+effect fn validate_range(n: Int, lo: Int, hi: Int) -> Result[Int, String] = {
+    guard n >= lo else err("${int.to_string(n)} below ${int.to_string(lo)}")
+    guard n <= hi else err("${int.to_string(n)} above ${int.to_string(hi)}")
+    ok(n)
+}
+
+test "guard early return: within range" {
+    assert_eq(validate_range(5, 1, 10), ok(5))
+}
+
+test "guard early return: below range" {
+    assert_eq(validate_range(0, 1, 10), err("0 below 1"))
+}
+
+test "guard early return: above range" {
+    assert_eq(validate_range(20, 1, 10), err("20 above 10"))
+}
+
+// ── guard continue in for ──
+test "guard continue: skip odd numbers" {
+    var evens: List[Int] = []
+    for i in 1..=10 {
+        guard i % 2 == 0 else continue
+        evens = evens + [i]
+    }
+    assert_eq(evens, [2, 4, 6, 8, 10])
+}
+
+test "guard continue: skip empty strings" {
+    var words: List[String] = []
+    for s in ["hello", "", "world", "", "!"] {
+        guard string.len(s) > 0 else continue
+        words = words + [s]
+    }
+    assert_eq(words, ["hello", "world", "!"])
+}
+
+// ── guard break in while ──
+test "guard break equivalent via while condition" {
+    var sum = 0
+    var i = 0
+    let xs = [1, 2, 3, -1, 5, 6]
+    while i < list.len(xs) {
+        let v = xs[i]
+        guard v >= 0 else break
+        sum = sum + v
+        i = i + 1
+    }
+    assert_eq(sum, 6)
+}
+
+// ── Nested loops ──
+test "nested for loops: multiplication table" {
+    var products: List[Int] = []
+    for i in 1..=3 {
+        for j in 1..=3 {
+            products = products + [i * j]
+        }
+    }
+    assert_eq(products, [1, 2, 3, 2, 4, 6, 3, 6, 9])
+}
+
+// ── for...in over filter result (chained) ──
+test "for over chained filter result" {
+    let big_evens = 0..20
+        |> list.filter((x) => x % 2 == 0)
+        |> list.filter((x) => x > 10)
+    var sum = 0
+    for v in big_evens {
+        sum = sum + v
+    }
+    assert_eq(sum, 12 + 14 + 16 + 18)
+}
+
+// ── Range iteration ──
+test "range exclusive 0..5" {
+    let xs = 0..5 |> list.map((x) => x)
+    assert_eq(xs, [0, 1, 2, 3, 4])
+}
+
+test "range inclusive 1..=5" {
+    let xs = 1..=5 |> list.map((x) => x)
+    assert_eq(xs, [1, 2, 3, 4, 5])
+}
+
+test "range in for loop" {
+    var sum = 0
+    for i in 0..100 {
+        sum = sum + 1
+    }
+    assert_eq(sum, 100)
+}
+
+// ── while with complex condition ──
+test "while with compound condition" {
+    var a = 0
+    var b = 100
+    while a < b and a < 10 {
+        a = a + 1
+        b = b - 1
+    }
+    assert_eq(a, 10)
+    assert_eq(b, 90)
+}

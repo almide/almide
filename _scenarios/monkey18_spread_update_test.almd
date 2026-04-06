@@ -1,0 +1,133 @@
+// Monkey test 18: record spread / update
+//
+// Tests: basic spread, multiple overrides, spread inside list.map,
+// spread with variant records, nested record spread, preserving
+// un-overridden fields, spread with computed values.
+
+type Config = { host: String, port: Int, debug: Bool, timeout: Int }
+type Point = { x: Int, y: Int }
+type Rect = { origin: Point, width: Int, height: Int }
+
+let DEFAULT_CONFIG: Config = { host: "localhost", port: 8080, debug: false, timeout: 30 }
+
+// ── Basic spread: override one field ──
+test "spread update single field" {
+    let c = { ...DEFAULT_CONFIG, port: 443 }
+    assert_eq(c.host, "localhost")
+    assert_eq(c.port, 443)
+    assert_eq(c.debug, false)
+    assert_eq(c.timeout, 30)
+}
+
+// ── Spread with multiple overrides ──
+test "spread update multiple fields" {
+    let c = { ...DEFAULT_CONFIG, host: "prod.example.com", port: 443, debug: true }
+    assert_eq(c.host, "prod.example.com")
+    assert_eq(c.port, 443)
+    assert_eq(c.debug, true)
+    assert_eq(c.timeout, 30)
+}
+
+// ── Spread preserves un-overridden fields ──
+test "spread preserves all original fields" {
+    let base = { host: "a", port: 1, debug: true, timeout: 99 }
+    let updated = { ...base, host: "b" }
+    assert_eq(updated.port, 1)
+    assert_eq(updated.debug, true)
+    assert_eq(updated.timeout, 99)
+}
+
+// ── Spread does not mutate original ──
+test "spread does not mutate base record" {
+    let base: Config = { host: "old", port: 80, debug: false, timeout: 10 }
+    let _new = { ...base, host: "new" }
+    assert_eq(base.host, "old")
+}
+
+// ── Spread inside list.map (transform list of records) ──
+type Person = { name: String, age: Int }
+
+test "spread inside list.map: increment age" {
+    let people: List[Person] = [
+        { name: "alice", age: 30 },
+        { name: "bob", age: 25 },
+        { name: "carol", age: 35 },
+    ]
+    let aged = people |> list.map((p) => { ...p, age: p.age + 1 })
+    let ages = aged |> list.map((p) => p.age)
+    assert_eq(ages, [31, 26, 36])
+}
+
+test "spread inside list.map: add prefix to name" {
+    let people: List[Person] = [
+        { name: "alice", age: 30 },
+        { name: "bob", age: 25 },
+    ]
+    let titled = people |> list.map((p) => { ...p, name: "Dr. ${p.name}" })
+    let names = titled |> list.map((p) => p.name)
+    assert_eq(names, ["Dr. alice", "Dr. bob"])
+}
+
+// ── Nested record spread ──
+test "nested record: spread inner record" {
+    let r: Rect = { origin: { x: 0, y: 0 }, width: 100, height: 50 }
+    let moved = { ...r, origin: { ...r.origin, x: 10 } }
+    assert_eq(moved.origin.x, 10)
+    assert_eq(moved.origin.y, 0)
+    assert_eq(moved.width, 100)
+}
+
+test "nested record: spread both levels" {
+    let r: Rect = { origin: { x: 0, y: 0 }, width: 100, height: 50 }
+    let changed = { ...r, origin: { ...r.origin, x: 5, y: 5 }, width: 200 }
+    assert_eq(changed.origin.x, 5)
+    assert_eq(changed.origin.y, 5)
+    assert_eq(changed.width, 200)
+    assert_eq(changed.height, 50)
+}
+
+// ── Spread with computed values ──
+test "spread with computed field value" {
+    let base: Point = { x: 3, y: 4 }
+    let doubled = { ...base, x: base.x * 2, y: base.y * 2 }
+    assert_eq(doubled.x, 6)
+    assert_eq(doubled.y, 8)
+}
+
+// ── Spread in conditional ──
+test "spread in if-else expression" {
+    let base: Config = DEFAULT_CONFIG
+    let is_prod = true
+    let c = if is_prod then { ...base, host: "prod.com", port: 443 }
+            else { ...base, debug: true }
+    assert_eq(c.host, "prod.com")
+    assert_eq(c.port, 443)
+}
+
+// ── Spread chain: applying updates sequentially ──
+test "spread chain: sequential updates" {
+    let c0 = DEFAULT_CONFIG
+    let c1 = { ...c0, host: "staging" }
+    let c2 = { ...c1, port: 9090 }
+    let c3 = { ...c2, debug: true }
+    assert_eq(c3.host, "staging")
+    assert_eq(c3.port, 9090)
+    assert_eq(c3.debug, true)
+    assert_eq(c3.timeout, 30)
+}
+
+// ── Spread equality ──
+test "spread record equality" {
+    let a = { ...DEFAULT_CONFIG, port: 443 }
+    let b = { host: "localhost", port: 443, debug: false, timeout: 30 }
+    assert_eq(a, b)
+}
+
+// ── Spread with record list and fold ──
+test "spread inside fold to accumulate changes" {
+    let patches: List[Int] = [100, 200, 300]
+    let base: Config = DEFAULT_CONFIG
+    let final = patches |> list.fold(base, (cfg, p) => { ...cfg, port: p })
+    assert_eq(final.port, 300)
+    assert_eq(final.host, "localhost")
+}
