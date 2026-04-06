@@ -575,6 +575,12 @@ impl Checker {
 
     fn infer_pipe_direct(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
         let left_ty = self.infer_expr(left);
+        // Resolve TypeVars eagerly via UnionFind — earlier pipes in the chain
+        // have already been unified (constrain() calls unify_infer immediately),
+        // so the concrete type is available now. Without this, chained UFCS like
+        // `xs |> list.map(f) |> list.join(",")` sees a raw TypeVar for the
+        // intermediate result, causing module resolution to fail.
+        let left_ty = super::types::resolve_ty(&left_ty, &self.uf);
         match &mut right.kind {
             ExprKind::Call { callee, args, .. } => {
                 // Pipe inserts left as the first argument

@@ -1,0 +1,37 @@
+// Regression test: chained UFCS pipes must resolve intermediate types correctly.
+// Previously, `list.map(f) |> list.join(",")` left the intermediate type as
+// TypeVar, causing module resolution to fail for the second pipe.
+
+test "chained pipe: map then join" {
+    let result = [1, 2, 3] |> list.map((x) => int.to_string(x)) |> list.join(", ")
+    assert_eq(result, "1, 2, 3")
+}
+
+test "chained pipe: filter then map then join" {
+    let result = [1, 2, 3, 4, 5]
+        |> list.filter((x) => x > 2)
+        |> list.map((x) => int.to_string(x))
+        |> list.join("-")
+    assert_eq(result, "3-4-5")
+}
+
+test "chained pipe: map then len" {
+    let n = ["a", "bb", "ccc"]
+        |> list.map((s) => string.len(s))
+        |> list.len
+    assert_eq(n, 3)
+}
+
+test "chained pipe: filter then fold" {
+    let sum = [1, 2, 3, 4, 5]
+        |> list.filter((x) => x > 2)
+        |> list.fold(0, (acc, x) => acc + x)
+    assert_eq(sum, 12)
+}
+
+test "chained pipe: map then contains" {
+    let has_hello = ["hi", "hello", "hey"]
+        |> list.map((s) => string.to_upper(s))
+        |> list.contains("HELLO")
+    assert(has_hello)
+}
