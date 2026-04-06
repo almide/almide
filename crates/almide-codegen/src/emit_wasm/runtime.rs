@@ -213,8 +213,10 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     // Regex runtime
     super::rt_regex::register(emitter);
 
-    // Global: __heap_ptr (mutable i32, initialized at assembly time)
-    emitter.heap_ptr_global = 0; // first and only global
+    // Global 0: __heap_ptr (memory 0 bump allocator)
+    emitter.heap_ptr_global = 0;
+    // Global 1: __scratch_ptr (memory 1 string builder scratch)
+    emitter.scratch_ptr_global = 1;
 }
 
 /// Compile all runtime function bodies.

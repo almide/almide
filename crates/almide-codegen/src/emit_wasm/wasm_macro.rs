@@ -71,9 +71,23 @@ macro_rules! wasm {
     };
 
     // ── Memory (i32) ──
+    // Two-arg form: i32_load(offset, mem_index)
+    (@emit $f:expr, i32_load($off:expr, $mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32Load(wasm_encoder::MemArg {
+            offset: $off as u64, align: 2, memory_index: $mem,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
+    // One-arg form: i32_load(offset) → memory 0
     (@emit $f:expr, i32_load($off:expr); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I32Load(wasm_encoder::MemArg {
             offset: $off as u64, align: 2, memory_index: 0,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i32_store($off:expr, $mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32Store(wasm_encoder::MemArg {
+            offset: $off as u64, align: 2, memory_index: $mem,
         }));
         wasm!(@emit $f, $($rest)*)
     };
@@ -83,15 +97,33 @@ macro_rules! wasm {
         }));
         wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, i32_load8_u($off:expr, $mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32Load8U(wasm_encoder::MemArg {
+            offset: $off as u64, align: 0, memory_index: $mem,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, i32_load8_u($off:expr); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I32Load8U(wasm_encoder::MemArg {
             offset: $off as u64, align: 0, memory_index: 0,
         }));
         wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, i32_store8($off:expr, $mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32Store8(wasm_encoder::MemArg {
+            offset: $off as u64, align: 0, memory_index: $mem,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, i32_store8($off:expr); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I32Store8(wasm_encoder::MemArg {
             offset: $off as u64, align: 0, memory_index: 0,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i32_load16_u($off:expr, $mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32Load16U(wasm_encoder::MemArg {
+            offset: $off as u64, align: 1, memory_index: $mem,
         }));
         wasm!(@emit $f, $($rest)*)
     };
@@ -103,9 +135,21 @@ macro_rules! wasm {
     };
 
     // ── Memory (i64) ──
+    (@emit $f:expr, i64_load($off:expr, $mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Load(wasm_encoder::MemArg {
+            offset: $off as u64, align: 3, memory_index: $mem,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, i64_load($off:expr); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I64Load(wasm_encoder::MemArg {
             offset: $off as u64, align: 3, memory_index: 0,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_store($off:expr, $mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Store(wasm_encoder::MemArg {
+            offset: $off as u64, align: 3, memory_index: $mem,
         }));
         wasm!(@emit $f, $($rest)*)
     };
@@ -117,9 +161,21 @@ macro_rules! wasm {
     };
 
     // ── Memory (f64) ──
+    (@emit $f:expr, f64_load($off:expr, $mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64Load(wasm_encoder::MemArg {
+            offset: $off as u64, align: 3, memory_index: $mem,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, f64_load($off:expr); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64Load(wasm_encoder::MemArg {
             offset: $off as u64, align: 3, memory_index: 0,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64_store($off:expr, $mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64Store(wasm_encoder::MemArg {
+            offset: $off as u64, align: 3, memory_index: $mem,
         }));
         wasm!(@emit $f, $($rest)*)
     };
@@ -426,14 +482,20 @@ macro_rules! wasm {
     (@emit $f:expr, f64_const($v:expr); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64Const($v)); wasm!(@emit $f, $($rest)*)
     };
-    (@emit $f:expr, memory_size(0); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::MemorySize(0)); wasm!(@emit $f, $($rest)*)
+    (@emit $f:expr, memory_size($mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::MemorySize($mem)); wasm!(@emit $f, $($rest)*)
     };
-    (@emit $f:expr, memory_grow(0); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::MemoryGrow(0)); wasm!(@emit $f, $($rest)*)
+    (@emit $f:expr, memory_grow($mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::MemoryGrow($mem)); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, memory_copy($src:expr, $dst:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::MemoryCopy { src_mem: $src, dst_mem: $dst }); wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, memory_copy; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 }); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, memory_fill($mem:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::MemoryFill($mem)); wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, memory_fill; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::MemoryFill(0)); wasm!(@emit $f, $($rest)*)
