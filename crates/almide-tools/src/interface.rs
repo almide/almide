@@ -525,9 +525,11 @@ fn c_abi_size_align(ty: &Ty) -> Option<(usize, usize)> {
         Ty::Bool => Some((1, 1)),
         Ty::Int => Some((8, 8)),    // i64
         Ty::Float => Some((8, 8)),  // f64
-        // String, List, Map, Set, Option, Result are pointer-based (opaque)
+        // String, Bytes, Matrix are pointer-based (opaque fat pointer: ptr + metadata)
         Ty::String => Some((16, 8)),  // (ptr, len)
         Ty::Bytes => Some((16, 8)),
+        Ty::Matrix => Some((16, 8)), // opaque pointer-based
+        Ty::RawPtr => Some((8, 8)),  // *mut u8, C-compatible pointer
         Ty::Unit => Some((0, 1)),
         // Named user types: would need full type table lookup — skip for now
         Ty::Named(_, _) => None,
