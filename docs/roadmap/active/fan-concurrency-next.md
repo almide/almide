@@ -210,13 +210,19 @@ fan(timeout: 30000) {
 
 ### WASM Strategy
 
-| Feature | WASM (current) | WASM (JSPI) | WASM (WASI 0.3) |
+Primary target: **Component Model async (WASI 0.3)**. Browser target uses Web APIs.
+
+| Feature | WASM (current) | WASM (browser) | WASM (WASI 0.3) |
 |---|---|---|---|
-| `fan { }` | sequential | `Promise.all` | `task.spawn` |
-| `fan.map` | sequential loop | async + bounded | `stream` |
-| `fan.race` | first only | `Promise.race` | `waitable-set` |
+| `fan { }` | sequential | `Promise.all` | `future<T>` + `waitable-set` |
+| `fan.map` | sequential loop | async + bounded | `stream<T>` + bounded consumer |
+| `fan.race` | first only | `Promise.race` | `waitable-set.poll` |
 | `fan.link` | sync queue | `MessageChannel` | `stream<T>` |
 | `Flow[T]` | eager List | `AsyncIterator` | `stream<T>` |
+
+- **WASI containers** (Spin, wasmCloud, Docker+WASM): Component Model async. Host runtime is the executor. No threads, no language-side scheduler
+- **Browser**: SharedArrayBuffer + Web Workers for true parallelism, or JSPI for async
+- **Fallback**: Sequential execution when neither is available
 
 target がバックエンドを決める。Almide コードは同一。
 
