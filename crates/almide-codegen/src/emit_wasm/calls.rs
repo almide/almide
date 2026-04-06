@@ -228,10 +228,13 @@ impl FuncCompiler<'_> {
                         // Check if this is a variant constructor
                         if let Some((tag, is_unit)) = self.find_variant_ctor_tag(name) {
                             if is_unit && args.is_empty() {
-                                // Unit variant: allocate [tag:i32]
+                                // Unit variant: allocate with full variant size so
+                                // mem_eq (which compares tag + max_payload bytes)
+                                // doesn't read past the allocation.
+                                let variant_size = self.variant_alloc_size(name);
                                 let scratch = self.scratch.alloc_i32();
                                 wasm!(self.func, {
-                                    i32_const(4);
+                                    i32_const(variant_size as i32);
                                     call(self.emitter.rt.alloc);
                                     local_set(scratch);
                                     local_get(scratch);
