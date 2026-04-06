@@ -113,7 +113,7 @@ test "records with same defaults are equal" {
 test "records with different overrides are not equal" {
     let a = Button { label: "A" }
     let b = Button { label: "A", width: 200 }
-    assert_ne(a, b)
+    assert(not (a == b))
 }
 
 // ── Default fields with another variant type ──
