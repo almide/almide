@@ -32,7 +32,14 @@ impl FuncCompiler<'_> {
             size
         } else { 0 };
         let explicit_size: u32 = fields.iter().map(|(_, e)| values::byte_size(&e.ty)).sum();
-        let total_size = tag_size + if type_field_size > 0 { type_field_size } else { explicit_size };
+        let own_size = tag_size + if type_field_size > 0 { type_field_size } else { explicit_size };
+        // Pad to the variant's max size so mem_eq can safely compare any two
+        // constructors of the same variant type (avoids OOB reads).
+        let total_size = if let Some(ctor_name) = name {
+            self.variant_alloc_size(ctor_name).max(own_size)
+        } else {
+            own_size
+        };
 
         // Allocate
         wasm!(self.func, {

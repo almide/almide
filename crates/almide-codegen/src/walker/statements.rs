@@ -100,15 +100,29 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         IrStmtKind::Guard { cond, else_ } => {
             let cond_str = render_expr(ctx, cond);
             let else_str = render_expr(ctx, else_);
-            // Determine action: break for loop guards, return for function guards
+            // Determine action: break for loop guards, return for function guards.
+            // Check both the expression kind (for direct Unit/Break/Continue/ResultOk(Unit))
+            // and the expression type (for LICM-hoisted vars whose kind is Var but type is Result[Unit,_]).
             let is_loop_control = matches!(&else_.kind, IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue)
                 || (matches!(&else_.kind, IrExprKind::ResultOk { .. }) && {
                     if let IrExprKind::ResultOk { expr: inner } = &else_.kind {
                         matches!(&inner.kind, IrExprKind::Unit)
                     } else { false }
-                });
+                })
+                // Block wrapping Continue/Break: { continue } has ty=Unit but action=continue
+                || (matches!(&else_.kind, IrExprKind::Block { .. }) && {
+                    if let IrExprKind::Block { stmts, expr: None } = &else_.kind {
+                        stmts.len() == 1 && matches!(&stmts[0].kind, IrStmtKind::Expr { expr } if matches!(&expr.kind, IrExprKind::Continue | IrExprKind::Break))
+                    } else { false }
+                })
+                // LICM-hoisted ok(()) → Var with Result[Unit,_] type
+                || (matches!(&else_.kind, IrExprKind::Var { .. }) &&
+                    matches!(&else_.ty, Ty::Applied(TypeConstructorId::Result, args) if args.first().is_some_and(|t| matches!(t, Ty::Unit))));
+            let has_continue = matches!(&else_.kind, IrExprKind::Continue)
+                || matches!(&else_.kind, IrExprKind::Block { stmts, expr: None }
+                    if stmts.len() == 1 && matches!(&stmts[0].kind, IrStmtKind::Expr { expr } if matches!(&expr.kind, IrExprKind::Continue)));
             let action = if is_loop_control {
-                if matches!(&else_.kind, IrExprKind::Continue) { "continue" } else { "break" }
+                if has_continue { "continue" } else { "break" }
             } else { "return" };
             let neg = ctx.templates.render_with("guard_negate", None, &[], &[("cond", cond_str.as_str())])
                 .unwrap_or_else(|| format!("!cond"));

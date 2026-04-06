@@ -1,0 +1,192 @@
+// Monkey test 24: advanced variant (enum) patterns
+//
+// Tests: variant with tuple payload, variant with record payload,
+// nested match on variant fields, variant in list filtered by constructor,
+// variant equality, match with guard on variant field, recursive variant.
+
+// ── Variant with tuple payload ──
+type Shape = Circle(Float) | Rect(Float, Float) | Point
+
+fn shape_area(s: Shape) -> Float =
+    match s {
+        Circle(r) => 3.14159 * r * r,
+        Rect(w, h) => w * h,
+        Point => 0.0,
+    }
+
+test "variant tuple payload: Circle" {
+    assert(shape_area(Circle(2.0)) > 12.56)
+    assert(shape_area(Circle(2.0)) < 12.57)
+}
+
+test "variant tuple payload: Rect" {
+    assert_eq(shape_area(Rect(3.0, 4.0)), 12.0)
+}
+
+test "variant tuple payload: unit constructor" {
+    assert_eq(shape_area(Point), 0.0)
+}
+
+// ── Variant with record payload ──
+type Event =
+    | Click { x: Int, y: Int }
+    | Key { code: Int, shift: Bool }
+    | Close
+
+fn event_label(e: Event) -> String =
+    match e {
+        Click { x, y } => "click(${int.to_string(x)},${int.to_string(y)})",
+        Key { code, shift } =>
+            if shift then "shift+key(${int.to_string(code)})"
+            else "key(${int.to_string(code)})",
+        Close => "close",
+    }
+
+test "variant record payload: Click" {
+    assert_eq(event_label(Click { x: 10, y: 20 }), "click(10,20)")
+}
+
+test "variant record payload: Key without shift" {
+    assert_eq(event_label(Key { code: 65, shift: false }), "key(65)")
+}
+
+test "variant record payload: Key with shift" {
+    assert_eq(event_label(Key { code: 65, shift: true }), "shift+key(65)")
+}
+
+test "variant record payload: Close" {
+    assert_eq(event_label(Close), "close")
+}
+
+// ── Nested match on variant fields ──
+type Expr = Lit(Int) | Add(Int, Int) | Neg(Int)
+
+fn eval_expr(e: Expr) -> Int =
+    match e {
+        Lit(n) => n,
+        Add(a, b) => a + b,
+        Neg(n) => 0 - n,
+    }
+
+fn describe_expr(e: Expr) -> String =
+    match e {
+        Lit(n) => match n {
+            0 => "zero",
+            1 => "one",
+            _ => "lit(${int.to_string(n)})",
+        },
+        Add(a, b) => "${int.to_string(a)}+${int.to_string(b)}",
+        Neg(n) => "-${int.to_string(n)}",
+    }
+
+test "nested match on variant fields" {
+    assert_eq(describe_expr(Lit(0)), "zero")
+    assert_eq(describe_expr(Lit(1)), "one")
+    assert_eq(describe_expr(Lit(42)), "lit(42)")
+    assert_eq(describe_expr(Add(3, 4)), "3+4")
+    assert_eq(describe_expr(Neg(5)), "-5")
+}
+
+// ── Variant in list, filter by constructor ──
+fn is_click(e: Event) -> Bool =
+    match e {
+        Click { .. } => true,
+        _ => false,
+    }
+
+fn is_key(e: Event) -> Bool =
+    match e {
+        Key { .. } => true,
+        _ => false,
+    }
+
+test "filter list of variants by constructor" {
+    let events = [
+        Click { x: 1, y: 2 },
+        Key { code: 65, shift: false },
+        Close,
+        Click { x: 3, y: 4 },
+        Key { code: 66, shift: true },
+    ]
+    let clicks = events |> list.filter(is_click)
+    let keys = events |> list.filter(is_key)
+    assert_eq(list.len(clicks), 2)
+    assert_eq(list.len(keys), 2)
+}
+
+// ── Variant identity via match ──
+test "variant equality: same" {
+    assert_eq(Click { x: 5, y: 10 }, Click { x: 5, y: 10 })
+    assert_eq(Close, Close)
+    assert_eq(Key { code: 65, shift: true }, Key { code: 65, shift: true })
+}
+
+test "variant equality: different" {
+    assert(Click { x: 1, y: 2 } != Click { x: 1, y: 3 })
+    assert(Close != Click { x: 0, y: 0 })
+    assert(Key { code: 65, shift: true } != Key { code: 65, shift: false })
+}
+
+// ── Match with guard on variant field ──
+type Priority = Low | Medium | High
+
+type Task = { name: String, priority: Priority, done: Bool }
+
+fn urgent_tasks(tasks: List[Task]) -> List[String] =
+    tasks |> list.filter_map((t) =>
+        match t {
+            Task { name, priority, done } if not done => match priority {
+                High => some(name),
+                _ => none,
+            },
+            _ => none,
+        }
+    )
+
+test "match with guard on variant field" {
+    let tasks = [
+        { name: "deploy", priority: High, done: false },
+        { name: "docs", priority: Low, done: false },
+        { name: "hotfix", priority: High, done: true },
+        { name: "review", priority: High, done: false },
+    ]
+    assert_eq(urgent_tasks(tasks), ["deploy", "review"])
+}
+
+// ── Recursive variant (tree structure) ──
+type Tree = Leaf(Int) | Branch(Int, List[Tree])
+
+fn tree_sum(t: Tree) -> Int =
+    match t {
+        Leaf(v) => v,
+        Branch(v, children) =>
+            v + (children |> list.fold(0, (acc, child) => acc + tree_sum(child))),
+    }
+
+fn tree_depth(t: Tree) -> Int =
+    match t {
+        Leaf(_) => 1,
+        Branch(_, children) => {
+            let depths = children |> list.map((c) => tree_depth(c))
+            let max_child = list.max(depths) ?? 0
+            1 + max_child
+        },
+    }
+
+test "recursive variant: leaf sum" {
+    assert_eq(tree_sum(Leaf(42)), 42)
+}
+
+test "recursive variant: branch sum" {
+    let tree = Branch(1, [Leaf(2), Leaf(3), Branch(4, [Leaf(5)])])
+    assert_eq(tree_sum(tree), 15)  // 1+2+3+4+5
+}
+
+test "recursive variant: depth" {
+    let tree = Branch(0, [Leaf(1), Branch(2, [Branch(3, [Leaf(4)])])])
+    assert_eq(tree_depth(tree), 4)
+}
+
+test "recursive variant: single leaf depth" {
+    assert_eq(tree_depth(Leaf(0)), 1)
+}

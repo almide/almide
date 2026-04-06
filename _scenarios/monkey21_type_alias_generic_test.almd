@@ -1,0 +1,173 @@
+// Monkey test 21: type aliases and generics
+//
+// Tests: type alias (transparent), generic functions [T], generic record types,
+// generic variant types, multiple type params, generic fn called with different
+// concrete types, generic with constraints (protocol bounds).
+
+// ── Type alias (transparent) ──
+type Score = Int
+type Label = String
+type Names = List[String]
+
+test "type alias Int: arithmetic works" {
+    let a: Score = 80
+    let b: Score = 20
+    assert_eq(a + b, 100)
+}
+
+test "type alias String: string ops work" {
+    let label: Label = "hello"
+    assert_eq(string.to_upper(label), "HELLO")
+    assert_eq(string.len(label), 5)
+}
+
+test "type alias List: list ops work" {
+    let names: Names = ["alice", "bob", "carol"]
+    assert_eq(list.len(names), 3)
+    assert_eq(names |> list.map((n) => string.to_upper(n)), ["ALICE", "BOB", "CAROL"])
+}
+
+// ── Generic function [T] ──
+fn identity[T](x: T) -> T = x
+
+test "generic identity: int" {
+    assert_eq(identity(42), 42)
+}
+
+test "generic identity: string" {
+    assert_eq(identity("hello"), "hello")
+}
+
+test "generic identity: list" {
+    assert_eq(identity([1, 2, 3]), [1, 2, 3])
+}
+
+test "generic identity: bool" {
+    assert_eq(identity(true), true)
+}
+
+// ── Generic function returning generic ──
+fn wrap_in_list[T](item: T) -> List[T] = [item]
+
+test "wrap_in_list with int" {
+    assert_eq(wrap_in_list(42), [42])
+}
+
+test "wrap_in_list with string" {
+    assert_eq(wrap_in_list("hello"), ["hello"])
+}
+
+test "list.repeat with int" {
+    assert_eq(list.repeat(0, 3), [0, 0, 0])
+}
+
+test "list.repeat with string" {
+    assert_eq(list.repeat("x", 4), ["x", "x", "x", "x"])
+}
+
+// ── Generic record type ──
+type Pair[A, B] = { first: A, second: B }
+
+fn make_pair[A, B](a: A, b: B) -> Pair[A, B] = { first: a, second: b }
+
+fn swap[A, B](p: Pair[A, B]) -> Pair[B, A] =
+    { first: p.second, second: p.first }
+
+test "generic record: int-string pair" {
+    let p = make_pair(1, "one")
+    assert_eq(p.first, 1)
+    assert_eq(p.second, "one")
+}
+
+test "generic record: swap pair" {
+    let p = make_pair(42, "answer")
+    let s = swap(p)
+    assert_eq(s.first, "answer")
+    assert_eq(s.second, 42)
+}
+
+test "generic record: bool-list pair" {
+    let p = make_pair(true, [1, 2, 3])
+    assert_eq(p.first, true)
+    assert_eq(list.len(p.second), 3)
+}
+
+// ── Generic variant type ──
+type Maybe[T] = | Just(T) | Nothing
+
+fn unwrap_maybe[T](m: Maybe[T], default: T) -> T =
+    match m {
+        Just(v) => v,
+        Nothing => default,
+    }
+
+fn map_maybe[A, B](m: Maybe[A], f: (A) -> B) -> Maybe[B] =
+    match m {
+        Just(v) => Just(f(v)),
+        Nothing => Nothing(),
+    }
+
+test "generic variant: Just" {
+    assert_eq(unwrap_maybe(Just(10), 0), 10)
+}
+
+test "generic variant: Nothing" {
+    let m: Maybe[Int] = Nothing()
+    assert_eq(unwrap_maybe(m, 99), 99)
+}
+
+test "generic variant: map_maybe on Just" {
+    let m = Just(5)
+    let doubled = map_maybe(m, (x) => x * 2)
+    assert_eq(unwrap_maybe(doubled, 0), 10)
+}
+
+test "generic variant: map_maybe on Nothing" {
+    let m: Maybe[Int] = Nothing()
+    let result = map_maybe(m, (x) => x * 2)
+    assert_eq(unwrap_maybe(result, -1), -1)
+}
+
+// ── Multiple type parameters ──
+type Triple[A, B, C] = { a: A, b: B, c: C }
+
+fn triple_first[A, B, C](t: Triple[A, B, C]) -> A = t.a
+fn triple_second[A, B, C](t: Triple[A, B, C]) -> B = t.b
+fn triple_third[A, B, C](t: Triple[A, B, C]) -> C = t.c
+
+test "triple: three different types" {
+    let t: Triple[Int, String, Bool] = { a: 42, b: "hello", c: true }
+    assert_eq(triple_first(t), 42)
+    assert_eq(triple_second(t), "hello")
+    assert_eq(triple_third(t), true)
+}
+
+// ── Generic function called with different concrete types ──
+fn safe_get[T](xs: List[T], i: Int, default: T) -> T =
+    list.get(xs, i) ?? default
+
+test "safe_get with int list" {
+    assert_eq(safe_get([10, 20, 30], 1, 0), 20)
+    assert_eq(safe_get([10, 20, 30], 5, -1), -1)
+}
+
+test "safe_get with string list" {
+    assert_eq(safe_get(["a", "b"], 0, "?"), "a")
+    assert_eq(safe_get(["a", "b"], 9, "?"), "?")
+}
+
+test "safe_get with bool list" {
+    assert_eq(safe_get([true, false], 0, false), true)
+    assert_eq(safe_get([true, false], 5, true), true)
+}
+
+// ── Higher-order generic function ──
+fn apply_twice[T](f: (T) -> T, x: T) -> T = f(f(x))
+
+test "apply_twice: doubling int" {
+    assert_eq(apply_twice((x) => x * 2, 3), 12)
+}
+
+test "apply_twice: appending string" {
+    assert_eq(apply_twice((s) => s + "!", "hi"), "hi!!")
+}

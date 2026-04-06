@@ -26,7 +26,7 @@ use almide_lang::types::Ty;
 
 use utils::{MonoKey, BoundedParam, ty_contains_typevar};
 use discovery::{discover_instances, discover_instances_in_frontier};
-use specialization::{specialize_function, substitute_ty, update_var_table_types};
+use specialization::specialize_function;
 use rewrite::rewrite_calls;
 use propagation::propagate_concrete_types;
 
@@ -72,21 +72,11 @@ pub fn monomorphize(program: &mut IrProgram) {
             break;
         }
 
-        // Specialize new functions
+        // Specialize new functions (alpha-renaming: fresh VarIds per specialization)
         let mut new_functions = Vec::new();
         for ((fn_name, suffix), bindings) in &new {
             if let Some(orig) = program.functions.iter().find(|f| !f.is_test && f.name == *fn_name) {
-                new_functions.push(specialize_function(orig, suffix, bindings));
-            }
-        }
-
-        // Update VarTable types for specialized functions
-        for (func, ((_, _), bindings)) in new_functions.iter().zip(new.iter()) {
-            update_var_table_types(&func.body, bindings, &mut program.var_table);
-            for param in &func.params {
-                let old = &program.var_table.get(param.var).ty;
-                let new_ty = substitute_ty(old, bindings);
-                program.var_table.entries[param.var.0 as usize].ty = new_ty;
+                new_functions.push(specialize_function(orig, suffix, bindings, &mut program.var_table));
             }
         }
 

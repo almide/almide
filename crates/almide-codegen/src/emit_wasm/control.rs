@@ -1181,6 +1181,71 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(inner_scratch);
                 true
             }
+            IrPattern::RecordPattern { name: ctor_name, fields: pat_fields, .. } => {
+                // Inner variant with record payload (e.g., ok(Parsed { value, rest }))
+                let inner_scratch = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    local_get(container_scratch);
+                    i32_load(inner_offset);
+                    local_set(inner_scratch);
+                });
+                let tag = self.find_variant_tag_by_ctor(ctor_name, inner_ty);
+                if let Some(tag_val) = tag {
+                    wasm!(self.func, {
+                        local_get(inner_scratch);
+                        i32_load(0);
+                        i32_const(tag_val as i32);
+                        i32_eq;
+                    });
+                    let bt = values::block_type(result_ty);
+                    self.func.instruction(&Instruction::If(bt));
+                    let ctor_guard = self.depth_push();
+                    // Bind named fields from the variant's record layout
+                    let case_fields = self.emitter.record_fields.get(ctor_name.as_str()).cloned().unwrap_or_default();
+                    for pf in pat_fields {
+                        if let Some((foff, fty)) = values::field_offset(&case_fields, &pf.name) {
+                            let total_offset = 4 + foff; // 4 = tag size
+                            let local_idx = if let Some(almide_ir::IrPattern::Bind { var, .. }) = &pf.pattern {
+                                self.var_map.get(&var.0).copied()
+                            } else {
+                                self.find_var_by_field(&pf.name, &case_fields).copied()
+                            };
+                            if let Some(idx) = local_idx {
+                                wasm!(self.func, { local_get(inner_scratch); });
+                                self.emit_load_at(&fty, total_offset);
+                                wasm!(self.func, { local_set(idx); });
+                            }
+                        }
+                    }
+                    self.emit_arm_body_or_guard(arm, arms, outer_scratch, subject_ty, result_ty, idx, is_last);
+                    wasm!(self.func, { else_; });
+                    if is_last { wasm!(self.func, { unreachable; }); }
+                    else { self.emit_match_arms(arms, outer_scratch, subject_ty, result_ty, idx + 1); }
+                    self.depth_pop(ctor_guard);
+                    wasm!(self.func, { end; });
+                } else {
+                    // Not a variant — plain record inside container. Bind fields directly.
+                    let record_fields = self.extract_record_fields(inner_ty);
+                    for pf in pat_fields {
+                        if let Some((foff, fty)) = values::field_offset(&record_fields, &pf.name) {
+                            let local_idx = if let Some(almide_ir::IrPattern::Bind { var, .. }) = &pf.pattern {
+                                self.var_map.get(&var.0).copied()
+                            } else {
+                                self.find_var_by_field(&pf.name, &record_fields).copied()
+                            };
+                            if let Some(idx) = local_idx {
+                                wasm!(self.func, { local_get(inner_scratch); });
+                                self.emit_load_at(&fty, inner_offset + foff);
+                                wasm!(self.func, { local_set(idx); });
+                            }
+                        }
+                    }
+                    self.scratch.free_i32(inner_scratch);
+                    return false; // caller emits body
+                }
+                self.scratch.free_i32(inner_scratch);
+                true
+            }
             _ => false,
         }
     }

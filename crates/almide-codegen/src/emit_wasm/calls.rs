@@ -228,10 +228,13 @@ impl FuncCompiler<'_> {
                         // Check if this is a variant constructor
                         if let Some((tag, is_unit)) = self.find_variant_ctor_tag(name) {
                             if is_unit && args.is_empty() {
-                                // Unit variant: allocate [tag:i32]
+                                // Unit variant: allocate with full variant size so
+                                // mem_eq (which compares tag + max_payload bytes)
+                                // doesn't read past the allocation.
+                                let variant_size = self.variant_alloc_size(name);
                                 let scratch = self.scratch.alloc_i32();
                                 wasm!(self.func, {
-                                    i32_const(4);
+                                    i32_const(variant_size as i32);
                                     call(self.emitter.rt.alloc);
                                     local_set(scratch);
                                     local_get(scratch);
@@ -242,9 +245,13 @@ impl FuncCompiler<'_> {
                                 self.scratch.free_i32(scratch);
                                 return;
                             } else if !is_unit {
-                                // Tuple payload variant: [tag:i32][arg0][arg1]...
-                                let mut total_size = 4u32; // tag
-                                for arg in args { total_size += values::byte_size(&arg.ty); }
+                                // Tuple/record payload variant: [tag:i32][arg0][arg1]...
+                                // Allocate the FULL variant size (padded to max across
+                                // all constructors) so mem_eq can safely compare any
+                                // two values of the same variant type.
+                                let mut payload_size = 0u32;
+                                for arg in args.iter() { payload_size += values::byte_size(&arg.ty); }
+                                let total_size = self.variant_alloc_size(name).max(4 + payload_size);
                                 let scratch = self.scratch.alloc_i32();
                                 wasm!(self.func, {
                                     i32_const(total_size as i32);

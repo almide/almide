@@ -1,0 +1,165 @@
+// Monkey test 19: advanced string operations
+//
+// Tests: heredoc with interpolation, heredoc indentation stripping,
+// split/join roundtrip, Unicode (emoji), string.replace, string.repeat,
+// complex interpolation, escape sequences, string.chars, string.reverse.
+
+// ── Heredoc basic ──
+test "heredoc preserves content" {
+    let s = """
+        line one
+        line two
+        line three
+        """
+    assert(string.contains(s, "line one"))
+    assert(string.contains(s, "line two"))
+    assert(string.contains(s, "line three"))
+}
+
+// ── Heredoc with interpolation ──
+test "heredoc with interpolation" {
+    let name = "world"
+    let n = 42
+    let s = """
+        Hello, ${name}!
+        The answer is ${int.to_string(n)}.
+        """
+    assert(string.contains(s, "Hello, world!"))
+    assert(string.contains(s, "The answer is 42."))
+}
+
+test "heredoc with expression interpolation" {
+    let x = 10
+    let y = 20
+    let s = """
+        sum = ${int.to_string(x + y)}
+        product = ${int.to_string(x * y)}
+        """
+    assert(string.contains(s, "sum = 30"))
+    assert(string.contains(s, "product = 200"))
+}
+
+// ── Heredoc indentation stripping ──
+test "heredoc strips common indent" {
+    let s = """
+        alpha
+        beta
+        """
+    let lines = string.lines(s) |> list.filter((l) => string.len(l) > 0)
+    assert(list.len(lines) >= 2)
+    // After stripping, lines should not have leading spaces from the heredoc indent
+    let first = list.first(lines) ?? ""
+    assert(string.starts_with(first, "alpha"))
+}
+
+// ── Split + join roundtrip ──
+test "split then join roundtrip" {
+    let original = "a,b,c,d,e"
+    let roundtripped = original |> string.split(",") |> list.join(",")
+    assert_eq(roundtripped, original)
+}
+
+test "split then join with different separator" {
+    let csv = "one,two,three"
+    let tsv = csv |> string.split(",") |> list.join("\t")
+    assert(string.contains(tsv, "\t"))
+    assert(string.contains(tsv, "one"))
+    assert(string.contains(tsv, "three"))
+}
+
+// ── Unicode: emoji ──
+test "emoji string length is char count" {
+    assert_eq(string.len("hello"), 5)
+    assert_eq(string.len("a🙂b"), 3)
+}
+
+test "emoji contains" {
+    let s = "I ❤ Almide"
+    assert(string.contains(s, "❤"))
+    assert(string.contains(s, "Almide"))
+}
+
+test "unicode chars decomposition" {
+    let chars = string.chars("abc")
+    assert_eq(chars, ["a", "b", "c"])
+}
+
+// ── string.replace ──
+test "replace all occurrences" {
+    assert_eq(string.replace("aabaa", "a", "X"), "XXbXX")
+}
+
+test "replace no match returns original" {
+    assert_eq(string.replace("hello", "xyz", "!"), "hello")
+}
+
+test "replace with empty replacement" {
+    assert_eq(string.replace("a-b-c", "-", ""), "abc")
+}
+
+// ── string.repeat ──
+test "string repeat" {
+    assert_eq(string.repeat("ab", 3), "ababab")
+    assert_eq(string.repeat("x", 0), "")
+    assert_eq(string.repeat("!", 1), "!")
+}
+
+// ── String interpolation with complex expressions ──
+test "interpolation with arithmetic" {
+    let x = 7
+    assert_eq("result=${int.to_string(x * x + 1)}", "result=50")
+}
+
+test "interpolation with function call" {
+    let s = "hello"
+    assert_eq("len=${int.to_string(string.len(s))}", "len=5")
+}
+
+test "interpolation with ternary-like if" {
+    let n = 5
+    let s = "n is ${if n > 0 then "positive" else "non-positive"}"
+    assert_eq(s, "n is positive")
+}
+
+// ── Escape sequences ──
+test "escape newline and tab" {
+    let s = "a\tb\nc"
+    assert(string.contains(s, "\t"))
+    assert(string.contains(s, "\n"))
+}
+
+test "escape backslash" {
+    let s = "path\\to\\file"
+    assert(string.contains(s, "\\"))
+}
+
+test "escape double quote" {
+    let s = "say \"hello\""
+    assert(string.contains(s, "hello"))
+}
+
+// ── Additional string operations ──
+test "string.reverse" {
+    assert_eq(string.reverse("abcde"), "edcba")
+    assert_eq(string.reverse(""), "")
+}
+
+test "string.index_of" {
+    assert_eq(string.index_of("hello world", "world"), some(6))
+    assert_eq(string.index_of("hello", "xyz"), none)
+}
+
+test "string.count" {
+    assert_eq(string.count("banana", "an"), 2)
+    assert_eq(string.count("aaaa", "aa"), 2)
+}
+
+test "string.pad_start and pad_end" {
+    assert_eq(string.pad_start("42", 5, "0"), "00042")
+    assert_eq(string.pad_end("hi", 5, "."), "hi...")
+}
+
+test "string.capitalize" {
+    assert_eq(string.capitalize("hello"), "Hello")
+    assert_eq(string.capitalize(""), "")
+}

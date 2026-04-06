@@ -1,0 +1,151 @@
+// Monkey test 22: record default fields
+//
+// Tests: variant record with defaults, partial construction (omitting defaults),
+// overriding defaults, default fields with various types, default fields in
+// list operations, match on records with defaults.
+
+// ── Record type with default fields in variant constructors ──
+type Widget =
+    | Button { label: String, disabled: Bool = false, width: Int = 100 }
+    | Input { placeholder: String = "", value: String = "", max_len: Int = 255 }
+    | Spacer { size: Int = 8 }
+
+fn widget_info(w: Widget) -> String =
+    match w {
+        Button { label, disabled, width } => {
+            let state = if disabled then "disabled" else "enabled"
+            "${label} (${state}, w=${int.to_string(width)})"
+        },
+        Input { placeholder, value, max_len } => {
+            "input[${placeholder}]=${value} max=${int.to_string(max_len)}"
+        },
+        Spacer { size } =>
+            "spacer(${int.to_string(size)})",
+    }
+
+// ── Partial construction: omit all defaults ──
+test "omit all defaults: Button" {
+    let b = Button { label: "OK" }
+    assert_eq(widget_info(b), "OK (enabled, w=100)")
+}
+
+test "omit all defaults: Input" {
+    let i = Input {}
+    assert_eq(widget_info(i), "input[]= max=255")
+}
+
+test "omit all defaults: Spacer" {
+    let s = Spacer {}
+    assert_eq(widget_info(s), "spacer(8)")
+}
+
+// ── Override one default ──
+test "override one default: Button disabled" {
+    let b = Button { label: "Submit", disabled: true }
+    assert_eq(widget_info(b), "Submit (disabled, w=100)")
+}
+
+test "override one default: Input placeholder" {
+    let i = Input { placeholder: "Enter name" }
+    assert_eq(widget_info(i), "input[Enter name]= max=255")
+}
+
+test "override one default: Spacer size" {
+    let s = Spacer { size: 16 }
+    assert_eq(widget_info(s), "spacer(16)")
+}
+
+// ── Override all defaults ──
+test "override all defaults: Button" {
+    let b = Button { label: "Go", disabled: true, width: 200 }
+    assert_eq(widget_info(b), "Go (disabled, w=200)")
+}
+
+test "override all defaults: Input" {
+    let i = Input { placeholder: "email", value: "a@b.com", max_len: 100 }
+    assert_eq(widget_info(i), "input[email]=a@b.com max=100")
+}
+
+// ── Default fields in list operations ──
+test "list of widgets with defaults" {
+    let widgets: List[Widget] = [
+        Button { label: "Save" },
+        Button { label: "Cancel", disabled: true },
+        Spacer {},
+        Input { placeholder: "search" },
+    ]
+    assert_eq(list.len(widgets), 4)
+    let infos = widgets |> list.map((w) => widget_info(w))
+    assert_eq(infos[0], "Save (enabled, w=100)")
+    assert_eq(infos[1], "Cancel (disabled, w=100)")
+    assert_eq(infos[2], "spacer(8)")
+    assert_eq(infos[3], "input[search]= max=255")
+}
+
+// ── Match on records with default fields ──
+test "match extracts default fields correctly" {
+    let w = Button { label: "X" }
+    match w {
+        Button { label, disabled, width } => {
+            assert_eq(label, "X")
+            assert_eq(disabled, false)
+            assert_eq(width, 100)
+        },
+        _ => assert(false),
+    }
+}
+
+test "match with partial destructure on defaults" {
+    let w = Input { value: "test" }
+    match w {
+        Input { value, .. } => assert_eq(value, "test"),
+        _ => assert(false),
+    }
+}
+
+// ── Equality with default values ──
+test "records with same defaults are equal" {
+    let a = Spacer {}
+    let b = Spacer { size: 8 }
+    assert_eq(a, b)
+}
+
+test "records with different overrides are not equal" {
+    let a = Button { label: "A" }
+    let b = Button { label: "A", width: 200 }
+    assert(not (a == b))
+}
+
+// ── Default fields with another variant type ──
+type HttpMethod =
+    | Get { path: String, query: String = "" }
+    | Post { path: String, body: String = "", content_type: String = "application/json" }
+
+fn method_summary(m: HttpMethod) -> String =
+    match m {
+        Get { path, query } =>
+            if query == "" then "GET ${path}"
+            else "GET ${path}?${query}",
+        Post { path, body, content_type } =>
+            "POST ${path} [${content_type}] body=${int.to_string(string.len(body))}",
+    }
+
+test "HttpMethod Get with defaults" {
+    let m = Get { path: "/api" }
+    assert_eq(method_summary(m), "GET /api")
+}
+
+test "HttpMethod Get with query override" {
+    let m = Get { path: "/search", query: "q=hello" }
+    assert_eq(method_summary(m), "GET /search?q=hello")
+}
+
+test "HttpMethod Post with defaults" {
+    let m = Post { path: "/submit" }
+    assert_eq(method_summary(m), "POST /submit [application/json] body=0")
+}
+
+test "HttpMethod Post with all overrides" {
+    let m = Post { path: "/upload", body: "data", content_type: "text/plain" }
+    assert_eq(method_summary(m), "POST /upload [text/plain] body=4")
+}

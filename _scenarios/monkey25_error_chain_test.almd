@@ -1,0 +1,165 @@
+// Monkey test 25: complex error handling chains
+//
+// Tests: multiple effect fn calling each other (3+ deep), error propagation
+// with ! through chain, match on intermediate Result, result.map/flat_map,
+// collect errors from list, recovery with ?? fallback, error context enrichment.
+
+// ── Base layer: parse and validate ──
+fn safe_parse(s: String) -> Result[Int, String] =
+    int.parse(s)
+
+fn check_positive(n: Int) -> Result[Int, String] =
+    if n > 0 then ok(n) else err("must be positive, got ${int.to_string(n)}")
+
+fn check_range(n: Int, lo: Int, hi: Int) -> Result[Int, String] = {
+    if n < lo then err("${int.to_string(n)} < ${int.to_string(lo)}")
+    else if n > hi then err("${int.to_string(n)} > ${int.to_string(hi)}")
+    else ok(n)
+}
+
+// ── 3-deep effect fn chain ──
+effect fn parse_positive(s: String) -> Result[Int, String] = {
+    let n = safe_parse(s)!
+    let validated = check_positive(n)!
+    ok(validated)
+}
+
+effect fn parse_score(s: String) -> Result[Int, String] = {
+    let n = parse_positive(s)!
+    let score = check_range(n, 0, 100)!
+    ok(score)
+}
+
+test "3-deep chain: all ok" {
+    assert_eq(parse_score("85"), ok(85))
+}
+
+test "3-deep chain: parse error propagates" {
+    assert(result.is_err(parse_score("abc")))
+}
+
+test "3-deep chain: positive error propagates" {
+    assert_eq(parse_score("-5"), err("must be positive, got -5"))
+}
+
+test "3-deep chain: range error propagates" {
+    assert_eq(parse_score("150"), err("150 > 100"))
+}
+
+// ── Match on intermediate Result to transform error ──
+fn safe_divide(a: Int, b: Int) -> Result[Int, String] =
+    if b == 0 then err("division by zero") else ok(a / b)
+
+fn describe_division(a: Int, b: Int) -> String = {
+    let r = safe_divide(a, b)
+    match r {
+        ok(v) => "result: ${int.to_string(v)}",
+        err(e) => "failed: ${e}",
+    }
+}
+
+test "match on intermediate Result: ok path" {
+    assert_eq(describe_division(10, 2), "result: 5")
+}
+
+test "match on intermediate Result: err path" {
+    assert_eq(describe_division(10, 0), "failed: division by zero")
+}
+
+// ── result.map / result.flat_map ──
+test "result.map on ok" {
+    let r = parse_positive("5")
+    let doubled = result.map(r, (n) => n * 2)
+    assert_eq(doubled, ok(10))
+}
+
+test "result.map on err passes through" {
+    let r = parse_positive("-1")
+    let doubled = result.map(r, (n) => n * 2)
+    assert(result.is_err(doubled))
+}
+
+test "result.flat_map chains ok" {
+    let r = result.flat_map(parse_positive("10"), (n) =>
+        safe_divide(n, 2)
+    )
+    assert_eq(r, ok(5))
+}
+
+test "result.flat_map propagates first error" {
+    let r = result.flat_map(parse_positive("bad"), (n) =>
+        safe_divide(n, 2)
+    )
+    assert(result.is_err(r))
+}
+
+test "result.flat_map propagates second error" {
+    let r = result.flat_map(parse_positive("10"), (n) =>
+        safe_divide(n, 0)
+    )
+    assert_eq(r, err("division by zero"))
+}
+
+// ── Collect errors from list operations ──
+test "result.collect: all ok" {
+    let results = ["1", "2", "3"] |> list.map((s) => parse_positive(s))
+    let collected = result.collect(results)
+    assert_eq(collected, ok([1, 2, 3]))
+}
+
+test "result.collect: some errors" {
+    let results = ["1", "bad", "3", "-2"] |> list.map((s) => parse_positive(s))
+    let collected = result.collect(results)
+    assert(result.is_err(collected))
+}
+
+test "result.partition: split ok and err" {
+    let (oks, errs) = result.partition(
+        ["5", "abc", "10", "-1"] |> list.map((s) => parse_positive(s))
+    )
+    assert_eq(oks, [5, 10])
+    assert_eq(list.len(errs), 2)
+}
+
+// ── Recovery with ?? fallback on Result ──
+test "fallback with ?? on ok" {
+    let v = parse_positive("42") ?? 0
+    assert_eq(v, 42)
+}
+
+test "fallback with ?? on err" {
+    let v = parse_positive("bad") ?? -1
+    assert_eq(v, -1)
+}
+
+test "fallback chain: try multiple sources" {
+    let v = parse_positive("nope") ?? (parse_positive("-1") ?? 99)
+    assert_eq(v, 99)
+}
+
+// ── Error context enrichment (wrapping error message) ──
+effect fn load_config(key: String) -> Result[String, String] = {
+    guard key != "" else err("empty key")
+    guard key != "missing" else err("key not found: ${key}")
+    ok("value_of_${key}")
+}
+
+effect fn init_system(config_key: String) -> Result[String, String] = {
+    let value = result.map_err(
+        load_config(config_key),
+        (e) => "init failed: ${e}"
+    )!
+    ok("system(${value})")
+}
+
+test "error context enrichment: ok path" {
+    assert_eq(init_system("db"), ok("system(value_of_db)"))
+}
+
+test "error context enrichment: wrapped error" {
+    assert_eq(init_system("missing"), err("init failed: key not found: missing"))
+}
+
+test "error context enrichment: nested wrap" {
+    assert_eq(init_system(""), err("init failed: empty key"))
+}

@@ -1,0 +1,154 @@
+// Monkey test 16: effect fn (Result-returning side-effect functions)
+//
+// Tests: basic ok/err, chained ! propagation, multi-level propagation,
+// effect fn in test blocks, match on effect fn result, guard + effect fn,
+// effect fn with list combinators.
+
+// ── Basic effect fn: ok / err paths ──
+effect fn parse_positive(s: String) -> Result[Int, String] = {
+    let n = int.parse(s)!
+    guard n > 0 else err("not positive: ${s}")
+    ok(n)
+}
+
+test "effect fn returns ok on valid input" {
+    assert_eq(parse_positive("42"), ok(42))
+}
+
+test "effect fn returns err on invalid number" {
+    assert(result.is_err(parse_positive("abc")))
+}
+
+test "effect fn returns err on non-positive" {
+    assert_eq(parse_positive("-5"), err("not positive: -5"))
+}
+
+// ── Chained ! unwrap propagation ──
+effect fn add_parsed(a: String, b: String) -> Result[Int, String] = {
+    let x = parse_positive(a)!
+    let y = parse_positive(b)!
+    ok(x + y)
+}
+
+test "chained effect fn unwrap ok" {
+    assert_eq(add_parsed("10", "20"), ok(30))
+}
+
+test "chained effect fn first arg err propagates" {
+    assert(result.is_err(add_parsed("nope", "20")))
+}
+
+test "chained effect fn second arg err propagates" {
+    assert(result.is_err(add_parsed("10", "-1")))
+}
+
+// ── Multi-level propagation (3 deep) ──
+effect fn classify(s: String) -> Result[String, String] = {
+    let total = add_parsed(s, s)!
+    let label = match total {
+        n if n >= 100 => "large",
+        n if n >= 10 => "medium",
+        _ => "small",
+    }
+    ok(label)
+}
+
+test "three-level effect chain ok" {
+    assert_eq(classify("50"), ok("large"))
+}
+
+test "three-level effect chain small" {
+    assert_eq(classify("3"), ok("small"))
+}
+
+test "three-level effect chain err bubbles up" {
+    assert(result.is_err(classify("bad")))
+}
+
+// ── Effect fn in test blocks: Result is returned, not auto-unwrapped ──
+effect fn always_err() -> Result[Int, String] = err("boom")
+
+test "effect fn result can be compared directly in test" {
+    assert_eq(always_err(), err("boom"))
+}
+
+test "effect fn ok result compared directly" {
+    assert_eq(parse_positive("7"), ok(7))
+}
+
+test "effect fn unwrap with ! in test" {
+    assert_eq(parse_positive("99")!, 99)
+}
+
+// ── Match on effect fn result ──
+test "match on effect fn result ok branch" {
+    let r = parse_positive("5")
+    let msg = match r {
+        ok(n) => "got ${int.to_string(n)}",
+        err(e) => "error: ${e}",
+    }
+    assert_eq(msg, "got 5")
+}
+
+test "match on effect fn result err branch" {
+    let r = parse_positive("-1")
+    let msg = match r {
+        ok(_) => "unexpected",
+        err(e) => e,
+    }
+    assert_eq(msg, "not positive: -1")
+}
+
+// ── Effect fn with loop ──
+effect fn sum_positive_strings(strs: List[String]) -> Result[Int, String] = {
+    var total = 0
+    for s in strs {
+        let n = parse_positive(s)!
+        total = total + n
+    }
+    ok(total)
+}
+
+test "effect fn with for loop all ok" {
+    assert_eq(sum_positive_strings(["1", "2", "3"]), ok(6))
+}
+
+test "effect fn with for loop propagates mid-error" {
+    assert(result.is_err(sum_positive_strings(["1", "bad", "3"])))
+}
+
+// ── Effect fn with result.map ──
+effect fn doubled_positive(s: String) -> Result[Int, String] =
+    result.map(parse_positive(s), (n) => n * 2)
+
+test "result.map on effect fn result ok" {
+    assert_eq(doubled_positive("5"), ok(10))
+}
+
+test "result.map on effect fn result err" {
+    assert(result.is_err(doubled_positive("abc")))
+}
+
+// ── Effect fn with ?? fallback ──
+test "effect fn result with ?? fallback on err" {
+    let v = parse_positive("bad") ?? -1
+    assert_eq(v, -1)
+}
+
+test "effect fn result with ?? fallback on ok" {
+    let w = parse_positive("42") ?? -1
+    assert_eq(w, 42)
+}
+
+// ── Effect fn with result.flat_map ──
+test "result.flat_map chains results" {
+    let r = result.flat_map(parse_positive("10"), (n) =>
+        if n > 5 then ok(n * 100) else err("too small")
+    )
+    assert_eq(r, ok(1000))
+}
+
+test "result.flat_map propagates first error" {
+    let r = result.flat_map(parse_positive("abc"), (n) => ok(n * 100))
+    assert(result.is_err(r))
+}

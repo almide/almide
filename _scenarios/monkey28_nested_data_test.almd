@@ -1,0 +1,220 @@
+// Monkey test 28: deeply nested data structure operations
+//
+// Tests: list of records with nested records, map of lists,
+// record containing Option fields, list of variants grouped by constructor,
+// nested pattern matching, transform nested structures, flatten nested lists.
+
+// ── List of records with nested records ──
+type Address = { city: String, zip: String }
+type Person = { name: String, age: Int, address: Address }
+
+fn make_person(name: String, age: Int, city: String, zip: String) -> Person =
+    { name: name, age: age, address: { city: city, zip: zip } }
+
+test "list of records with nested records: access inner fields" {
+    let people = [
+        make_person("Alice", 30, "Tokyo", "100-0001"),
+        make_person("Bob", 25, "Osaka", "530-0001"),
+        make_person("Carol", 35, "Tokyo", "150-0002"),
+    ]
+    let cities = people |> list.map((p) => p.address.city)
+    assert_eq(cities, ["Tokyo", "Osaka", "Tokyo"])
+}
+
+test "filter by nested field" {
+    let people = [
+        make_person("Alice", 30, "Tokyo", "100-0001"),
+        make_person("Bob", 25, "Osaka", "530-0001"),
+        make_person("Carol", 35, "Tokyo", "150-0002"),
+    ]
+    let tokyo_people = people
+        |> list.filter((p) => p.address.city == "Tokyo")
+        |> list.map((p) => p.name)
+    assert_eq(tokyo_people, ["Alice", "Carol"])
+}
+
+test "transform nested structure: update inner field via spread" {
+    let people = [
+        make_person("Alice", 30, "Tokyo", "100-0001"),
+        make_person("Bob", 25, "Osaka", "530-0001"),
+    ]
+    let aged = people |> list.map((p) => {
+        ...p,
+        age: p.age + 1,
+        address: { ...p.address, city: string.to_upper(p.address.city) },
+    })
+    assert_eq(aged[0].age, 31)
+    assert_eq(aged[0].address.city, "TOKYO")
+    assert_eq(aged[1].age, 26)
+    assert_eq(aged[1].address.city, "OSAKA")
+}
+
+// ── Map of lists ──
+test "map of lists: group and access" {
+    let groups: Map[String, List[Int]] = [
+        "evens": [2, 4, 6],
+        "odds": [1, 3, 5],
+    ]
+    let even_sum = (groups["evens"] ?? []) |> list.sum
+    let odd_sum = (groups["odds"] ?? []) |> list.sum
+    assert_eq(even_sum, 12)
+    assert_eq(odd_sum, 9)
+}
+
+test "build map of lists via group_by" {
+    let words = ["apple", "avocado", "banana", "blueberry", "cherry"]
+    let grouped = words |> list.group_by((w) => string.take(w, 1))
+    let a_words = grouped["a"] ?? []
+    let b_words = grouped["b"] ?? []
+    assert_eq(list.len(a_words), 2)
+    assert_eq(list.len(b_words), 2)
+    assert(list.contains(a_words, "apple"))
+    assert(list.contains(b_words, "banana"))
+}
+
+// ── Record containing Option fields ──
+type Profile = { name: String, bio: Option[String], score: Option[Int] }
+
+fn profile_summary(p: Profile) -> String = {
+    let bio_str = p.bio ?? "no bio"
+    let score_str = match p.score {
+        some(s) => int.to_string(s),
+        none => "unrated",
+    }
+    "${p.name}: ${bio_str} (${score_str})"
+}
+
+test "record with all Option fields present" {
+    let p: Profile = { name: "Alice", bio: some("developer"), score: some(95) }
+    assert_eq(profile_summary(p), "Alice: developer (95)")
+}
+
+test "record with no Option fields" {
+    let p: Profile = { name: "Bob", bio: none, score: none }
+    assert_eq(profile_summary(p), "Bob: no bio (unrated)")
+}
+
+test "record with partial Option fields" {
+    let p: Profile = { name: "Carol", bio: some("designer"), score: none }
+    assert_eq(profile_summary(p), "Carol: designer (unrated)")
+}
+
+test "filter records by Option field presence" {
+    let profiles: List[Profile] = [
+        { name: "A", bio: some("x"), score: some(90) },
+        { name: "B", bio: none, score: some(80) },
+        { name: "C", bio: some("y"), score: none },
+        { name: "D", bio: none, score: none },
+    ]
+    let with_score = profiles
+        |> list.filter((p) => option.is_some(p.score))
+        |> list.map((p) => p.name)
+    assert_eq(with_score, ["A", "B"])
+}
+
+// ── List of variants, grouped by constructor ──
+type LogEntry =
+    | Info(String)
+    | Warn(String)
+    | Error(String)
+
+fn is_error(entry: LogEntry) -> Bool =
+    match entry { Error(_) => true, _ => false }
+
+fn is_warn(entry: LogEntry) -> Bool =
+    match entry { Warn(_) => true, _ => false }
+
+fn log_message(entry: LogEntry) -> String =
+    match entry {
+        Info(msg) => msg,
+        Warn(msg) => msg,
+        Error(msg) => msg,
+    }
+
+test "group variants by constructor" {
+    let logs = [
+        Info("started"),
+        Warn("low memory"),
+        Error("disk full"),
+        Info("processing"),
+        Error("timeout"),
+    ]
+    let errors = logs |> list.filter(is_error) |> list.map(log_message)
+    let warnings = logs |> list.filter(is_warn) |> list.map(log_message)
+    assert_eq(errors, ["disk full", "timeout"])
+    assert_eq(warnings, ["low memory"])
+}
+
+test "count variants by type" {
+    let logs = [Info("a"), Info("b"), Warn("c"), Error("d"), Info("e")]
+    let error_count = logs |> list.count(is_error)
+    let warn_count = logs |> list.count(is_warn)
+    let info_count = list.len(logs) - error_count - warn_count
+    assert_eq(error_count, 1)
+    assert_eq(warn_count, 1)
+    assert_eq(info_count, 3)
+}
+
+// ── Nested pattern matching (match inside match) ──
+type Outer = Left(Inner) | Right(Inner)
+type Inner = Val(Int) | Empty
+
+fn extract_value(o: Outer) -> Int =
+    match o {
+        Left(inner) => match inner {
+            Val(n) => n,
+            Empty => 0,
+        },
+        Right(inner) => match inner {
+            Val(n) => 0 - n,
+            Empty => 0,
+        },
+    }
+
+test "nested match: Left(Val)" {
+    assert_eq(extract_value(Left(Val(42))), 42)
+}
+
+test "nested match: Right(Val)" {
+    assert_eq(extract_value(Right(Val(10))), -10)
+}
+
+test "nested match: Left(Empty)" {
+    assert_eq(extract_value(Left(Empty)), 0)
+}
+
+test "nested match: Right(Empty)" {
+    assert_eq(extract_value(Right(Empty)), 0)
+}
+
+// ── Flatten nested lists ──
+test "flatten nested lists" {
+    let nested = [[1, 2], [3], [4, 5, 6], []]
+    assert_eq(list.flatten(nested), [1, 2, 3, 4, 5, 6])
+}
+
+test "flatten via flat_map" {
+    let words = ["hello world", "foo bar", "baz"]
+    let chars_per_word = words
+        |> list.flat_map((w) => string.split(w, " "))
+    assert_eq(chars_per_word, ["hello", "world", "foo", "bar", "baz"])
+}
+
+test "flatten deeply: list of list of lists via two flatten" {
+    let deep = [[[1, 2], [3]], [[4], [5, 6]]]
+    let flat_once = list.flatten(deep)
+    let flat_twice = list.flatten(flat_once)
+    assert_eq(flat_twice, [1, 2, 3, 4, 5, 6])
+}
+
+// ── Transform nested: map over list of records, accessing inner fields ──
+test "extract and transform nested data" {
+    let people = [
+        make_person("Alice", 30, "Tokyo", "100"),
+        make_person("Bob", 25, "Osaka", "530"),
+    ]
+    let labels = people |> list.map((p) =>
+        "${p.name}@${p.address.city}"
+    )
+    assert_eq(labels, ["Alice@Tokyo", "Bob@Osaka"])
+}

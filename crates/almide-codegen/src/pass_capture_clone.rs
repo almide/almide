@@ -205,9 +205,12 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         let mut free_vars = HashSet::new();
         collect_free_vars(body, &param_set, &mut free_vars);
 
-        // Filter to only clone-worthy types from outer scope
+        // Filter to only clone-worthy types from outer scope.
         let captures: Vec<VarId> = free_vars.into_iter()
-            .filter(|v| scope_vars.contains(v) && needs_clone_type(&vt.get(*v).ty))
+            .filter(|v| {
+                if !scope_vars.contains(v) { return false; }
+                needs_clone_type(&vt.get(*v).ty)
+            })
             .collect();
 
         if !captures.is_empty() {

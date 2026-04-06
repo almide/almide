@@ -504,13 +504,19 @@ impl FuncCompiler<'_> {
             }
             "filter_map" => {
                 // filter_map(xs, f) → List[B]: f returns Option[B], keep some values
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], Some(&args[1]));
                 let es = values::byte_size(&elem_ty) as i32;
-                // Output element type B: if input is List[Option[B]], unwrap Option to get B
-                let out_elem_ty = if let Ty::Applied(_, inner_args) = &elem_ty {
-                    inner_args.first().cloned().unwrap_or(Ty::Int)
-                } else if let Ty::Fn { ret, .. } = &args[1].ty {
-                    self.list_elem_ty(ret)
+                // Output element type B from the return type of the function or
+                // the overall call return type. After mono, TypeVars in fn.ret
+                // may still be unresolved — fall back to the call's ret_ty.
+                let out_elem_ty = if let Ty::Fn { ret, .. } = &args[1].ty {
+                    if let Ty::Applied(_, inner) = ret.as_ref() {
+                        inner.first().cloned().filter(|t| !t.is_unresolved()).unwrap_or(Ty::Int)
+                    } else { self.list_elem_ty(ret) }
+                } else if let Some(vt) = self.resolve_closure_ret_valtype(&args[1]) {
+                    // From lifted closure's registered WASM type: Option[B] → i32 ptr,
+                    // but inner B must be resolved from call ret_ty.
+                    values::vt_to_placeholder_ty(vt)
                 } else { Ty::Int };
                 let out_es = values::byte_size(&out_elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();

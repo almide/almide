@@ -1,0 +1,140 @@
+// Monkey test 17: pipe operator chains
+//
+// Tests: multi-step pipes across stdlib modules, pipe with lambda, pipe into
+// fold/reduce, nested pipes (inside lambda), UFCS method-style chains,
+// pipe with string functions, pipe with filter_map.
+
+// ── 3+ pipe chain across modules ──
+test "pipe chain: filter then map then join" {
+    let result = [1, 2, 3, 4, 5, 6]
+        |> list.filter((x) => x % 2 == 0)
+        |> list.map((x) => int.to_string(x))
+        |> list.join(", ")
+    assert_eq(result, "2, 4, 6")
+}
+
+test "pipe chain: sort then unique then reverse" {
+    let result = [3, 1, 4, 1, 5, 9, 2, 6, 5]
+        |> list.sort
+        |> list.unique
+        |> list.reverse
+    assert_eq(result, [9, 6, 5, 4, 3, 2, 1])
+}
+
+test "pipe chain: string trim then upper then len" {
+    let result = "  hello world  "
+        |> string.trim
+        |> string.to_upper
+        |> string.len
+    assert_eq(result, 11)
+}
+
+// ── Pipe with lambda ──
+test "pipe with lambda: map doubling" {
+    let result = [1, 2, 3] |> list.map((x) => x * 2)
+    assert_eq(result, [2, 4, 6])
+}
+
+test "pipe with lambda: filter_map" {
+    let result = ["1", "bad", "3", "nope", "5"]
+        |> list.filter_map((s) => {
+            let r = int.parse(s)
+            r?
+        })
+    assert_eq(result, [1, 3, 5])
+}
+
+// ── Pipe into fold ──
+test "pipe into fold: sum" {
+    let total = [10, 20, 30]
+        |> list.fold(0, (acc, x) => acc + x)
+    assert_eq(total, 60)
+}
+
+test "pipe into fold: string accumulation" {
+    let result = ["a", "b", "c"]
+        |> list.fold("", (acc, s) => if acc == "" then s else acc + "-" + s)
+    assert_eq(result, "a-b-c")
+}
+
+// ── Pipe into reduce ──
+test "pipe into reduce: product" {
+    let result = [2, 3, 4] |> list.reduce((a, b) => a * b)
+    assert_eq(result, some(24))
+}
+
+test "pipe into reduce: empty list" {
+    let empty: List[Int] = []
+    let result = empty |> list.reduce((a, b) => a + b)
+    assert_eq(result, none)
+}
+
+// ── Nested pipes (pipe inside lambda body) ──
+test "nested pipe inside map lambda" {
+    let sentences = ["hello world", "  foo  bar  ", "one"]
+    let word_counts = sentences
+        |> list.map((s) => s |> string.trim |> string.split(" ") |> list.len)
+    assert_eq(word_counts, [2, 3, 1])
+}
+
+test "nested pipe inside filter" {
+    let words = ["hello", "hi", "hey", "world", "halo"]
+    let h_words = words
+        |> list.filter((w) => w |> string.first == some("h"))
+    assert_eq(h_words, ["hello", "hi", "hey", "halo"])
+}
+
+// ── UFCS method-style chains (single line) ──
+test "UFCS chain: sort then len" {
+    let n = [3, 1, 2].sort().len()
+    assert_eq(n, 3)
+}
+
+test "UFCS chain: map via pipe then UFCS" {
+    let result = [1, 2, 3, 4] |> list.map((x) => x * x) |> list.filter((x) => x > 5) |> list.len
+    assert_eq(result, 2)
+}
+
+test "UFCS single call on list" {
+    let xs = [3, 1, 4, 1, 5]
+    let sorted = xs.sort()
+    assert_eq(sorted, [1, 1, 3, 4, 5])
+}
+
+// ── Pipe with enumerate ──
+test "pipe chain with enumerate" {
+    let result = ["a", "b", "c"]
+        |> list.enumerate
+        |> list.map((pair) => {
+            let (i, v) = pair
+            "${int.to_string(i)}:${v}"
+        })
+        |> list.join(",")
+    assert_eq(result, "0:a,1:b,2:c")
+}
+
+// ── Pipe into contains / any / all ──
+test "pipe into contains" {
+    let has = [1, 2, 3, 4, 5]
+        |> list.map((x) => x * 10)
+        |> list.contains(30)
+    assert(has)
+}
+
+test "pipe into all" {
+    let all_positive = [-1, 2, 3]
+        |> list.filter((x) => x > 0)
+        |> list.all((x) => x > 0)
+    assert(all_positive)
+}
+
+// ── Long chain: 5 stages ──
+test "five-stage pipe chain" {
+    let result = 0..20
+        |> list.filter((x) => x % 3 == 0)
+        |> list.map((x) => x * x)
+        |> list.filter((x) => x < 100)
+        |> list.map((x) => int.to_string(x))
+        |> list.join(" ")
+    assert_eq(result, "0 9 36 81")
+}

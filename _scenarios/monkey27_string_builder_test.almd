@@ -1,0 +1,178 @@
+// Monkey test 27: string-heavy computation patterns
+//
+// Tests: build string incrementally, parse CSV-like data, template rendering,
+// convert between Int/Float/String, multi-line string processing,
+// string comparison and sorting, empty string handling.
+
+// ── Build string incrementally with var + concatenation ──
+test "incremental string build" {
+    var out = ""
+    for i in 1..=5 {
+        if out != "" then out = out + ", "
+        out = out + int.to_string(i)
+    }
+    assert_eq(out, "1, 2, 3, 4, 5")
+}
+
+test "build string with conditional parts" {
+    let tags = ["urgent", "bug", "frontend"]
+    var label = "["
+    for (i, tag) in list.enumerate(tags) {
+        if i > 0 then label = label + "|"
+        label = label + tag
+    }
+    label = label + "]"
+    assert_eq(label, "[urgent|bug|frontend]")
+}
+
+// ── Parse CSV-like data (split, map, join) ──
+fn parse_csv_row(line: String) -> List[String] =
+    line |> string.split(",") |> list.map(string.trim)
+
+test "parse csv row" {
+    let row = parse_csv_row("alice, 30, engineer")
+    assert_eq(row, ["alice", "30", "engineer"])
+}
+
+test "parse csv and extract column" {
+    let lines = ["name,age,role", "alice,30,eng", "bob,25,design"]
+    let ages = lines
+        |> list.drop(1)
+        |> list.map((line) => {
+            let cols = string.split(line, ",")
+            list.get(cols, 1) ?? "0"
+        })
+    assert_eq(ages, ["30", "25"])
+}
+
+test "csv round-trip: parse then join" {
+    let original = "a,b,c"
+    let parsed = string.split(original, ",")
+    let rebuilt = list.join(parsed, ",")
+    assert_eq(rebuilt, original)
+}
+
+// ── Template rendering (replace placeholders with values) ──
+fn render_template(tmpl: String, vars: Map[String, String]) -> String = {
+    var result = tmpl + ""
+    let entries = map.entries(vars)
+    let replaced = entries |> list.fold(result, (acc, entry) => {
+        let (key, val) = entry
+        string.replace(acc, "{{${key}}}", val)
+    })
+    replaced
+}
+
+test "template rendering: single variable" {
+    let tmpl = "Hello, {{name}}!"
+    let vars = ["name": "Alice"]
+    assert_eq(render_template(tmpl, vars), "Hello, Alice!")
+}
+
+test "template rendering: multiple variables" {
+    let tmpl = "{{greeting}}, {{name}}! You are {{age}} years old."
+    let vars = ["greeting": "Hi", "name": "Bob", "age": "25"]
+    assert_eq(render_template(tmpl, vars), "Hi, Bob! You are 25 years old.")
+}
+
+test "template rendering: no placeholders left" {
+    let tmpl = "no vars here"
+    let vars: Map[String, String] = [:]
+    assert_eq(render_template(tmpl, vars), "no vars here")
+}
+
+// ── Convert between Int/Float/String ──
+test "int to string and back" {
+    let n = 42
+    let s = int.to_string(n)
+    let back = int.parse(s) ?? -1
+    assert_eq(back, 42)
+}
+
+test "float to string" {
+    let f = 3.14
+    let s = float.to_string(f)
+    assert(string.contains(s, "3.14"))
+}
+
+test "string to int: valid" {
+    assert_eq(int.parse("123"), ok(123))
+}
+
+test "string to int: invalid" {
+    assert(result.is_err(int.parse("abc")))
+}
+
+// ── Multi-line string processing ──
+test "split by newline, filter, rejoin" {
+    let lines = string.lines("alpha\n\nbeta\n\ngamma\n")
+    let non_empty = lines |> list.filter((line) => not string.is_empty(line))
+    assert_eq(non_empty, ["alpha", "beta", "gamma"])
+    let joined = list.join(non_empty, ",")
+    assert_eq(joined, "alpha,beta,gamma")
+}
+
+test "indent each line" {
+    let lines = ["fn main() {", "  println(\"hi\")", "}"]
+    let indented = lines
+        |> list.map((line) => "    " + line)
+        |> list.join("\n")
+    assert(string.starts_with(indented, "    fn main()"))
+}
+
+test "count non-blank lines" {
+    let text = "a\n\nb\nc\n\n\nd"
+    let count = text
+        |> string.lines
+        |> list.count((line) => not string.is_empty(line))
+    assert_eq(count, 4)
+}
+
+// ── String comparison and sorting ──
+test "string list sorting" {
+    let words = ["banana", "apple", "cherry", "date"]
+    let sorted = list.sort(words)
+    assert_eq(sorted, ["apple", "banana", "cherry", "date"])
+}
+
+test "sort strings by length" {
+    let words = ["hi", "hello", "hey", "a"]
+    let sorted = list.sort_by(words, string.len)
+    assert_eq(sorted, ["a", "hi", "hey", "hello"])
+}
+
+test "string comparison operators" {
+    assert("a" < "b")
+    assert("abc" < "abd")
+    assert("z" > "a")
+    assert(not ("hello" < "hello"))
+}
+
+// ── Empty string handling everywhere ──
+test "empty string: split returns single empty" {
+    let parts = string.split("", ",")
+    assert_eq(parts, [""])
+}
+
+test "empty string: trim" {
+    assert_eq(string.trim(""), "")
+}
+
+test "empty string: len" {
+    assert_eq(string.len(""), 0)
+}
+
+test "empty string: is_empty" {
+    assert(string.is_empty(""))
+    assert(not string.is_empty("x"))
+}
+
+test "empty string: concatenation identity" {
+    let s = "hello"
+    assert_eq("" + s, s)
+    assert_eq(s + "", s)
+}
+
+test "empty string: replace on empty" {
+    assert_eq(string.replace("", "a", "b"), "")
+}

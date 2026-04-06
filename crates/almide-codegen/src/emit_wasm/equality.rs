@@ -603,6 +603,21 @@ impl FuncCompiler<'_> {
         None
     }
 
+    /// Compute the allocation size for a variant constructor. All constructors
+    /// of the same variant type are padded to the maximum size so that
+    /// `mem_eq` can safely compare any two values of the type.
+    pub(super) fn variant_alloc_size(&self, ctor_name: &str) -> u32 {
+        for cases in self.emitter.variant_info.values() {
+            if cases.iter().any(|c| c.name == ctor_name) {
+                let max_payload = cases.iter()
+                    .map(|c| super::values::record_size(&c.fields))
+                    .max().unwrap_or(0);
+                return 4 + max_payload; // tag + max payload
+            }
+        }
+        4 // fallback: tag only
+    }
+
     /// Find the variant tag for a constructor name, searching variant_info by subject type.
     pub(super) fn find_variant_tag_by_ctor(&self, ctor_name: &str, subject_ty: &Ty) -> Option<u32> {
         let type_name = match subject_ty {

@@ -1,0 +1,11 @@
+// Regression: unit variant equality in mixed variant types (unit + tuple payload)
+// was trapping on WASM because unit variants were allocated with only 4 bytes
+// (tag), but mem_eq compared the full variant size (tag + max payload).
+
+type Shape = Circle(Float) | Rect(Float, Float) | Point
+
+test "unit variant eq" { assert_eq(Point, Point) }
+test "tuple variant eq" { assert_eq(Circle(3.0), Circle(3.0)) }
+test "tuple variant ne" { assert(Circle(3.0) != Circle(4.0)) }
+test "cross variant ne" { assert(Point != Circle(1.0)) }
+test "rect eq" { assert_eq(Rect(1.0, 2.0), Rect(1.0, 2.0)) }
