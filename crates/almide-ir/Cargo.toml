@@ -1,6 +1,6 @@
 [package]
 name = "almide-ir"
-version = "0.11.5"
+version = "0.11.6"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Almide typed intermediate representation (IR)"
