@@ -320,7 +320,10 @@ fn extract_invariants_from_stmt(
         }
         IrStmtKind::Guard { cond, else_ } => {
             try_hoist_expr(cond, loop_defined, vt, hoisted, pure_fns);
-            try_hoist_expr(else_, loop_defined, vt, hoisted, pure_fns);
+            // Do NOT hoist guard else — it's a control flow value (break/return),
+            // not a computed expression. Hoisting ok(()) out of a guard makes
+            // the hoisted binding's type (Result<(),_>) incompatible with
+            // non-effect function return type (()).
         }
         _ => {}
     }

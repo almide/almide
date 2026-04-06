@@ -453,6 +453,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| "try(...)".into())
         }
         IrExprKind::Unwrap { expr: inner } => {
+            // Short-circuit: ok(x)! = x, some(x)! = x — the unwrap is a no-op.
+            if matches!(&inner.kind, IrExprKind::ResultOk { .. } | IrExprKind::OptionSome { .. }) {
+                let inner_expr = match &inner.kind {
+                    IrExprKind::ResultOk { expr } | IrExprKind::OptionSome { expr } => expr,
+                    _ => unreachable!(),
+                };
+                return render_expr(ctx, inner_expr);
+            }
             let s = render_expr(ctx, inner);
             // In test functions, ? cannot be used (return type is ()).
             // Use .unwrap() instead.
