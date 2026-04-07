@@ -11,4 +11,5 @@ Almide targets WebAssembly 3.0 for sandboxed, portable AI agent containers.
 | [Agent Container](./agent-container.md) | Architecture: compiler → hatch → MCP → Claude Code |
 | [hatch Design](./hatch-design.md) | MCP bridge tool: responsibilities, protocol, CLI |
 | [Capability System](./capability-system.md) | 13-category compile-time permission enforcement |
+| [Bubblewrap](./bubblewrap.md) | WASM-on-WASM agent orchestration layer |
 | [Ecosystem](./ecosystem.md) | MCP, A2A, Wassette, WASI — where Almide sits |
