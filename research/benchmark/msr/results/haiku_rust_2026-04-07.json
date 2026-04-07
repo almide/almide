@@ -1,0 +1,13 @@
+{
+  "date": "2026-04-07",
+  "language": "almide",
+  "version": "0.12.1",
+  "target": "rust",
+  "model": "haiku",
+  "exercises": 25,
+  "passed": 25,
+  "failed": 0,
+  "check_failures": 0,
+  "test_failures": 0,
+  "msr": 1.0
+}
