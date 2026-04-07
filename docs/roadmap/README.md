@@ -6,14 +6,16 @@
 
 ## Active
 
-4 items
+6 items
 
 | Item | Description |
 |------|-------------|
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with Flow[T] and compiler-driven optimization |
+| [Float Bits Conversion](active/float-bits-conversion.md) | Add int.bits_to_float and float.to_bits for raw IEEE 754 conversion |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
+| [Variant Constructor as Function](active/variant-constructor-as-function.md) | Allow variant constructors to be passed as first-class functions |
 
 ## On Hold
 
