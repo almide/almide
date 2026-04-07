@@ -1,6 +1,6 @@
 [package]
 name = "almide-codegen"
-version = "0.12.0"
+version = "0.12.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Almide code generation: nanopass pipeline, walker, WASM emit"
