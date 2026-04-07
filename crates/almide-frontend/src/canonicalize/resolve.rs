@@ -41,17 +41,31 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
                 // - Transparent aliases (e.g. `type Score = Int`) follow
                 //   through to the target type so `a + b` works.
                 if let Some(types) = known_types {
-                    if let Some(found) = types.get(&sym(other)) {
+                    // Try exact match first (e.g. "Instr" or "binary.Instr")
+                    let found = types.get(&sym(other)).or_else(|| {
+                        // For module-qualified types like "binary.Instr",
+                        // also try the unqualified name "Instr"
+                        other.rsplit_once('.').and_then(|(_, bare)| types.get(&sym(bare)))
+                    });
+                    if let Some(found) = found {
                         match found {
                             Ty::TypeVar(tv) => return Ty::TypeVar(*tv),
                             Ty::Record { .. } | Ty::Variant { .. } => {
-                                // nominal — keep as Named
+                                // nominal — keep as Named, but use the canonical name
+                                if let Some((_, bare)) = other.rsplit_once('.') {
+                                    return Ty::Named(sym(bare), vec![]);
+                                }
                             }
                             other_ty => return other_ty.clone(),
                         }
                     }
                 }
-                Ty::Named(sym(other), vec![])
+                // For module-qualified names, use the bare name for Ty::Named
+                if let Some((_, bare)) = other.rsplit_once('.') {
+                    Ty::Named(sym(bare), vec![])
+                } else {
+                    Ty::Named(sym(other), vec![])
+                }
             }
         },
         ast::TypeExpr::Generic { name, args } => {
@@ -62,7 +76,10 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
                 "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
                 "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
                 "Set" => Ty::set_of(ra.first().cloned().unwrap_or(Ty::Unknown)),
-                _ => Ty::Named(sym(name), ra),
+                _ => {
+                    let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
+                    Ty::Named(resolved_name, ra)
+                },
             }
         },
         ast::TypeExpr::Record { fields } => Ty::Record {

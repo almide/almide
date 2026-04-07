@@ -14,7 +14,20 @@ impl Parser {
         if self.check(TokenType::LBrace) { return self.parse_record_type(); }
         if self.check(TokenType::Fn) { return self.parse_fn_type(); }
         if self.check(TokenType::LParen) { return self.parse_tuple_type(); }
+        // Module-qualified type: module.TypeName (e.g. binary.Instr)
+        if self.check(TokenType::Ident) && self.peek_dot_type_name() {
+            let module = self.advance_and_get_sym();
+            self.advance(); // skip '.'
+            let type_name = self.expect_type_name()?;
+            let qualified = sym(&format!("{}.{}", module, type_name));
+            return self.parse_type_name_suffix(qualified);
+        }
         let name = self.expect_type_name()?;
+        self.parse_type_name_suffix(name)
+    }
+
+    /// Parse suffix after a type name (generic args, tuple constructor, inline variant).
+    fn parse_type_name_suffix(&mut self, name: Sym) -> Result<TypeExpr, String> {
         if self.check(TokenType::LBracket) {
             let args = self.parse_type_args()?;
             self.skip_newlines_if_followed_by(TokenType::Pipe);
@@ -35,9 +48,6 @@ impl Parser {
             }
             self.expect(TokenType::RParen)?;
             self.skip_newlines_if_followed_by(TokenType::Pipe);
-            // `Name(Type, ...)` in type position is a constructor with payload.
-            // Always treat it as an inline variant — try_parse_inline_variant
-            // handles the single-case form when no trailing `|` follows.
             return self.try_parse_inline_variant(name, fields);
         }
         self.skip_newlines_if_followed_by(TokenType::Pipe);
