@@ -186,18 +186,82 @@ codegen-units = 1
 /// Build generated Rust code using cargo.
 /// Returns the path to the built binary on success.
 fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {
+    cargo_build_generated_with_native(rs_code, project_dir, release, &[], None)
+}
+
+/// Build generated Rust code with optional native Rust dependencies and source files.
+fn cargo_build_generated_with_native(
+    rs_code: &str,
+    project_dir: &std::path::Path,
+    release: bool,
+    native_deps: &[crate::project::NativeDep],
+    source_root: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, String> {
     let uses_matrix = rs_code.contains("almide_rt_matrix_");
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
-    let cargo_toml = if uses_matrix { GENERATED_CARGO_TOML_ML } else if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
-    std::fs::write(project_dir.join("Cargo.toml"), cargo_toml)
+
+    // Build Cargo.toml: start with base template, append native deps
+    let base_toml = if uses_matrix { GENERATED_CARGO_TOML_ML } else if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
+    let cargo_toml = if native_deps.is_empty() {
+        base_toml.to_string()
+    } else {
+        let mut toml = base_toml.to_string();
+        if !toml.contains("[dependencies]") {
+            toml.push_str("\n[dependencies]\n");
+        }
+        for dep in native_deps {
+            // spec can be a version string ("42.0.0") or an inline table
+            let dep_line = if dep.spec.starts_with('{') {
+                format!("{} = {}\n", dep.name, dep.spec)
+            } else {
+                format!("{} = \"{}\"\n", dep.name, dep.spec)
+            };
+            toml.push_str(&dep_line);
+        }
+        toml
+    };
+    std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
-    let final_code = if uses_matrix {
+
+    let mut final_code = if uses_matrix {
         replace_matrix_runtime(rs_code)
     } else {
         rs_code.to_string()
     };
+
+    // Copy native/*.rs files and add mod declarations
+    if let Some(root) = source_root {
+        let native_dir = root.join("native");
+        if native_dir.is_dir() {
+            let mut mod_decls = String::new();
+            if let Ok(entries) = std::fs::read_dir(&native_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map_or(false, |e| e == "rs") {
+                        let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+                        let content = std::fs::read_to_string(&path)
+                            .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
+                        std::fs::write(src_dir.join(entry.file_name()), &content)
+                            .map_err(|e| format!("failed to write native module {}: {}", stem, e))?;
+                        mod_decls.push_str(&format!("mod {};\n", stem));
+                    }
+                }
+            }
+            if !mod_decls.is_empty() {
+                // Insert mod declarations after #![allow(...)] inner attributes
+                if let Some(pos) = final_code.find("\nuse ") {
+                    final_code.insert_str(pos, &format!("\n{}", mod_decls));
+                } else if let Some(pos) = final_code.find("\nfn ") {
+                    final_code.insert_str(pos, &format!("\n{}", mod_decls));
+                } else {
+                    final_code = format!("{}\n{}", mod_decls, final_code);
+                }
+            }
+        }
+    }
+
     std::fs::write(src_dir.join("main.rs"), &final_code)
         .map_err(|e| format!("failed to write main.rs: {}", e))?;
 
