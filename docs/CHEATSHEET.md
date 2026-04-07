@@ -105,6 +105,8 @@ literal                    // int, float, string, bool
 ```
 **`_` can appear in match patterns, `let _ = x` (discard), `for _ in xs`, and lambda params `(_ ) => expr`.**
 
+**NOT supported in patterns:** no `...` spread, no range patterns (`1..5`), no nested `|` (or-pattern), no `as` binding.
+
 ### Lambda
 ```
 (x) => expr
@@ -345,6 +347,9 @@ Full function signatures: [docs/stdlib/](stdlib/)
 - `_` is ONLY for match wildcard patterns, never as a variable name
 - The stdlib functions listed above are exhaustive — no other functions exist
 - Use `for x in xs { ... }` for iteration
+- **No nested functions.** All `fn` must be at the top level. Use lambdas for local helpers
+- **No `mut` keyword.** Use `var` for mutable bindings, not `let mut`
+- Almide is NOT Rust. No `&`, `mut`, `impl`, `trait` (use `protocol`), `pub`, `mod` (as declaration)
 
 ## Common mistakes (DO NOT)
 - `list[1, 2, 3]` → **WRONG**. Write `[1, 2, 3]`. `list` is a module, not a type constructor
@@ -353,9 +358,15 @@ Full function signatures: [docs/stdlib/](stdlib/)
 - `List.new()` → **WRONG**. Write `[]`. There is no `new()` for List
 - `{"a": 1}` as a map → **WRONG**. Write `["a": 1]`. Braces `{}` are for records/blocks, brackets `[]` for lists and maps
 - `string.length(s)` → **WRONG**. Write `string.len(s)`. No synonyms
+- `string.to_lowercase(s)` → **WRONG**. Write `string.to_lower(s)`. No synonyms
+- `string.to_uppercase(s)` → **WRONG**. Write `string.to_upper(s)`. No synonyms
+- `string.substring(s, i, j)` → **WRONG**. Write `string.slice(s, i, j)`. No synonyms
 - `println(x)` where x is Int → **WRONG**. Write `println(int.to_string(x))`. No implicit conversion
 - `1 :: 2 :: []` → **WRONG**. Write `[1, 2]`. There is no cons operator `::`
 - `fn foo<T>(x: T)` → **WRONG**. Write `fn foo[T](x: T)`. Use `[]` for generics, not `<>`
+- `let mut x = 1` → **WRONG**. Write `var x = 1`. No `mut` keyword
+- Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
+- `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
 
 ## Complete example
 ```
