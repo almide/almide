@@ -3082,6 +3082,7 @@ impl FuncCompiler<'_> {
 
                 // First pass: count entries (skipping "." and "..")
                 // WASI dirent: d_next(8) + d_ino(8) + d_namlen(4) + d_type(4) = 24 bytes header
+                let skip = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(0); local_set(offset);
                     i32_const(0); local_set(list_count);
@@ -3090,40 +3091,33 @@ impl FuncCompiler<'_> {
                     local_get(bufused); i32_gt_u; br_if(1);
                     local_get(dir_buf); local_get(offset); i32_add; i32_const(16); i32_add;
                     i32_load(0); local_set(entry_name_len);
-                });
-                // Check for "." (namlen==1 && name[0]=='.')
-                wasm!(self.func, {
+
+                    // skip = (namlen==1 && name[0]=='.') || (namlen==2 && name[0]=='.' && name[1]=='.')
+                    i32_const(0); local_set(skip);
+                    // Check "."
                     local_get(entry_name_len); i32_const(1); i32_eq;
                     if_empty;
                       local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
                       i32_load8_u(0); i32_const(46); i32_eq;
-                      if_empty;
-                      else_;
-                        local_get(list_count); i32_const(1); i32_add; local_set(list_count);
-                      end;
-                    else_;
-                });
-                // Check for ".." (namlen==2 && name[0]=='.' && name[1]=='.')
-                wasm!(self.func, {
-                      local_get(entry_name_len); i32_const(2); i32_eq;
-                      if_empty;
-                        local_get(list_count); i32_const(1); i32_add; local_set(list_count);
-                      else_;
-                        local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
-                        i32_load8_u(0); i32_const(46); i32_eq;
-                        local_get(dir_buf); local_get(offset); i32_add; i32_const(25); i32_add;
-                        i32_load8_u(0); i32_const(46); i32_eq;
-                        i32_and;
-                        i32_eqz;
-                        if_empty;
-                        else_;
-                          local_get(list_count); i32_const(1); i32_add; local_set(list_count);
-                        end;
-                      end;
+                      if_empty; i32_const(1); local_set(skip); end;
                     end;
-                });
-                // Advance offset
-                wasm!(self.func, {
+                    // Check ".."
+                    local_get(entry_name_len); i32_const(2); i32_eq;
+                    if_empty;
+                      local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
+                      i32_load8_u(0); i32_const(46); i32_eq;
+                      local_get(dir_buf); local_get(offset); i32_add; i32_const(25); i32_add;
+                      i32_load8_u(0); i32_const(46); i32_eq;
+                      i32_and;
+                      if_empty; i32_const(1); local_set(skip); end;
+                    end;
+                    // Count if not skipped
+                    local_get(skip); i32_eqz;
+                    if_empty;
+                      local_get(list_count); i32_const(1); i32_add; local_set(list_count);
+                    end;
+
+                    // Advance offset
                     local_get(offset); i32_const(24); i32_add; local_get(entry_name_len); i32_add;
                     local_set(offset);
                     br(0);
@@ -3137,7 +3131,7 @@ impl FuncCompiler<'_> {
                     local_get(list_ptr); local_get(list_count); i32_store(0);
                 });
 
-                // Second pass: build string entries
+                // Second pass: build string entries (same skip logic as counting pass)
                 let copy_i = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(0); local_set(offset);
@@ -3147,51 +3141,33 @@ impl FuncCompiler<'_> {
                     local_get(bufused); i32_gt_u; br_if(1);
                     local_get(dir_buf); local_get(offset); i32_add; i32_const(16); i32_add;
                     i32_load(0); local_set(entry_name_len);
-                });
 
-                // Skip "."
-                wasm!(self.func, {
+                    // skip = (namlen==1 && name[0]=='.') || (namlen==2 && name[0]=='.' && name[1]=='.')
+                    i32_const(0); local_set(skip);
                     local_get(entry_name_len); i32_const(1); i32_eq;
                     if_empty;
                       local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
                       i32_load8_u(0); i32_const(46); i32_eq;
-                      if_empty;
-                      else_;
-                });
-                // Not ".": build entry
-                self.emit_fs_list_dir_build_entry(copy_i, entry_name_len, str_ptr, dir_buf, offset, list_ptr, counter);
-                wasm!(self.func, {
-                      end;
-                    else_;
-                });
-
-                // namlen != 1: check ".."
-                wasm!(self.func, {
-                      local_get(entry_name_len); i32_const(2); i32_eq;
-                      if_empty;
-                });
-                // namlen != 2: build entry
-                self.emit_fs_list_dir_build_entry(copy_i, entry_name_len, str_ptr, dir_buf, offset, list_ptr, counter);
-                wasm!(self.func, {
-                      else_;
-                        local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
-                        i32_load8_u(0); i32_const(46); i32_eq;
-                        local_get(dir_buf); local_get(offset); i32_add; i32_const(25); i32_add;
-                        i32_load8_u(0); i32_const(46); i32_eq;
-                        i32_and;
-                        i32_eqz;
-                        if_empty;
-                });
-                // Not "..": build entry
-                self.emit_fs_list_dir_build_entry(copy_i, entry_name_len, str_ptr, dir_buf, offset, list_ptr, counter);
-                wasm!(self.func, {
-                        end;
-                      end;
+                      if_empty; i32_const(1); local_set(skip); end;
                     end;
+                    local_get(entry_name_len); i32_const(2); i32_eq;
+                    if_empty;
+                      local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
+                      i32_load8_u(0); i32_const(46); i32_eq;
+                      local_get(dir_buf); local_get(offset); i32_add; i32_const(25); i32_add;
+                      i32_load8_u(0); i32_const(46); i32_eq;
+                      i32_and;
+                      if_empty; i32_const(1); local_set(skip); end;
+                    end;
+                    // Build entry if not skipped
+                    local_get(skip); i32_eqz;
+                    if_empty;
                 });
-
-                // Advance offset
+                self.emit_fs_list_dir_build_entry(copy_i, entry_name_len, str_ptr, dir_buf, offset, list_ptr, counter);
                 wasm!(self.func, {
+                    end;
+
+                    // Advance offset
                     local_get(offset); i32_const(24); i32_add; local_get(entry_name_len); i32_add;
                     local_set(offset);
                     br(0);
@@ -3213,6 +3189,7 @@ impl FuncCompiler<'_> {
                     end;
                 });
 
+                self.scratch.free_i32(skip);
                 self.scratch.free_i32(counter);
                 self.scratch.free_i32(str_ptr);
                 self.scratch.free_i32(entry_name_len);
