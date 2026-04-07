@@ -65,7 +65,33 @@ impl Checker {
             }
 
             ExprKind::TypeName { name, .. } => {
-                if let Some((type_name, _)) = self.env.constructors.get(&sym(name)) { Ty::Named(*type_name, vec![]) }
+                if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
+                    match &case.payload {
+                        VariantPayload::Tuple(tys) if !tys.is_empty() => {
+                            // Constructor with payload used as value → function type
+                            let generic_args = self.instantiate_type_generics(type_name.as_str());
+                            let ret = Ty::Named(type_name, generic_args.clone());
+                            let params = if generic_args.is_empty() {
+                                tys.clone()
+                            } else {
+                                // Substitute TypeVars with fresh inference vars
+                                if let Some(ty_def) = self.env.types.get(&type_name).cloned() {
+                                    let mut type_var_names = Vec::new();
+                                    crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
+                                    let subst: std::collections::HashMap<Sym, Ty> = type_var_names.iter()
+                                        .zip(generic_args.iter())
+                                        .map(|(tv, fresh)| (*tv, fresh.clone()))
+                                        .collect();
+                                    tys.iter().map(|t| super::calls::subst_ty(t, &subst)).collect()
+                                } else {
+                                    tys.clone()
+                                }
+                            };
+                            Ty::Fn { params, ret: Box::new(ret) }
+                        }
+                        _ => Ty::Named(type_name, vec![])
+                    }
+                }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
                 else { Ty::Named(sym(name), vec![]) }
             }
@@ -125,6 +151,24 @@ impl Checker {
                             params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
                             ret: Box::new(sig.ret.clone()),
                         };
+                    }
+                    // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
+                    if let Some((type_name, case)) = self.env.constructors.get(&sym(field)).cloned() {
+                        let resolved_mod = self.env.import_table.resolve(mod_name)
+                            .unwrap_or(sym(mod_name));
+                        let qualified = format!("{}.{}", resolved_mod.as_str(), type_name.as_str());
+                        if self.env.types.contains_key(&sym(&qualified)) {
+                            self.type_map.insert(object.id, Ty::Unit);
+                            let generic_args = self.instantiate_type_generics(type_name.as_str());
+                            return match &case.payload {
+                                VariantPayload::Unit => Ty::Named(type_name, generic_args),
+                                VariantPayload::Tuple(param_tys) => Ty::Fn {
+                                    params: param_tys.clone(),
+                                    ret: Box::new(Ty::Named(type_name, generic_args)),
+                                },
+                                VariantPayload::Record(_) => Ty::Named(type_name, generic_args),
+                            };
+                        }
                     }
                 }
                 let obj_ty = self.infer_expr(object);
@@ -760,9 +804,11 @@ impl Checker {
             ast::Pattern::Ident { name } => { self.env.define_var(name, ty.clone()); }
             ast::Pattern::Constructor { name, args } => {
                 let resolved = self.env.resolve_named(ty);
+                // Normalize module-qualified names: "binary.Unreachable" → "Unreachable"
+                let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
                 let payload_tys: Vec<Ty> = match &resolved {
                     Ty::Variant { cases, .. } => cases.iter()
-                        .find(|c| c.name == *name)
+                        .find(|c| c.name == bare_name)
                         .map(|c| match &c.payload {
                             VariantPayload::Tuple(tys) => tys.clone(),
                             _ => vec![],

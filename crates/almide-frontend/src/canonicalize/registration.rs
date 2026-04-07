@@ -362,11 +362,9 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     for gn in &gnames { env.types.insert(*gn, Ty::TypeVar(*gn)); }
     let mut resolved = resolve(env, ty);
     for gn in &gnames { env.types.remove(gn); }
-    if prefix.is_none() {
-        if let Ty::Variant { name: ref mut vn, ref cases } = resolved {
-            *vn = sym(name);
-            for case in cases { env.constructors.insert(case.name, (sym(name), case.clone())); }
-        }
+    if let Ty::Variant { name: ref mut vn, ref cases } = resolved {
+        *vn = sym(name);
+        for case in cases { env.constructors.insert(case.name, (sym(name), case.clone())); }
     }
     let key = prefixed_key(prefix, name);
     env.types.insert(sym(&key), resolved.clone());

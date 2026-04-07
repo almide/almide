@@ -1,0 +1,11 @@
+type Policy = Never | OnFailure | Always
+
+type Wrapper = Wrap(Int) | Empty
+
+fn parse_tag(s: String) -> Option[String] =
+  if string.starts_with(s, "tag:") then Some(string.slice(s, 4, string.len(s)))
+  else None
+
+// Test: function reference used within the same module (intra-module)
+fn tag_count(items: List[String]) -> Int =
+  items |> list.filter_map(parse_tag) |> list.len

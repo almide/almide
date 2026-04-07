@@ -755,6 +755,14 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             let results = values::ret_type(&func.ret_ty);
             let type_idx = emitter.register_type(params, results);
             let func_idx = emitter.register_func(&prefixed_name, type_idx);
+            // Also register by bare name so lifted closures from this module
+            // can call module-local functions. ClosureConversion lifts lambdas
+            // from modules to program.functions, but their Named call targets
+            // use the unqualified function name.
+            let bare_name = func.name.to_string();
+            if !emitter.func_map.contains_key(&bare_name) {
+                emitter.func_map.insert(bare_name, func_idx);
+            }
             module_func_meta.push((mi, fi, type_idx));
             user_func_indices.push(func_idx);
             if func.is_effect {

@@ -1,0 +1,33 @@
+import varlib
+
+test "cross-module variant value (no payload)" {
+  let p = varlib.Never
+  let s = match p {
+    varlib.Never => "never",
+    varlib.OnFailure => "on_failure",
+    varlib.Always => "always",
+  }
+  assert_eq(s, "never")
+}
+
+test "cross-module variant constructor call (with payload)" {
+  let w = varlib.Wrap(42)
+  let n = match w {
+    varlib.Wrap(x) => x,
+    varlib.Empty => 0,
+  }
+  assert_eq(n, 42)
+}
+
+test "cross-module variant as default value" {
+  let w = varlib.Empty
+  let fallback = varlib.Wrap(99)
+  let n = match w {
+    varlib.Wrap(x) => x,
+    varlib.Empty => match fallback {
+      varlib.Wrap(x) => x,
+      varlib.Empty => 0,
+    },
+  }
+  assert_eq(n, 99)
+}

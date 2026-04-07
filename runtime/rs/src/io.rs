@@ -28,6 +28,30 @@ pub fn almide_rt_io_read_all() -> String {
     buf
 }
 
+pub fn almide_rt_io_read_byte() -> i64 {
+    use std::io::Read;
+    let mut buf = [0u8; 1];
+    match std::io::stdin().read(&mut buf) {
+        Ok(1) => buf[0] as i64,
+        _ => -1,
+    }
+}
+
+pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
+    use std::io::Read;
+    let n = n as usize;
+    let mut buf = vec![0u8; n];
+    let mut total = 0;
+    while total < n {
+        match std::io::stdin().read(&mut buf[total..]) {
+            Ok(0) => break,
+            Ok(k) => total += k,
+            Err(_) => break,
+        }
+    }
+    buf[..total].iter().map(|&b| b as i64).collect()
+}
+
 pub fn almide_rt_io_write_bytes(data: &Vec<i64>) {
     STDOUT_BUF.with(|buf| {
         let mut w = buf.borrow_mut();

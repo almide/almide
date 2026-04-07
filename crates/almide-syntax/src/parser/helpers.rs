@@ -37,6 +37,12 @@ impl Parser {
         self.tokens[self.pos - 1].line < self.current().line
     }
 
+    /// Peek ahead: current is Ident, next is `.`, then TypeName → module-qualified type.
+    pub(crate) fn peek_dot_type_name(&self) -> bool {
+        self.peek_at(1).map(|t| t.token_type == TokenType::Dot).unwrap_or(false)
+            && self.peek_at(2).map(|t| t.token_type == TokenType::TypeName).unwrap_or(false)
+    }
+
     pub(crate) fn peek_type_args_call(&self) -> bool {
         if self.current().token_type != TokenType::LBracket { return false; }
         let mut depth = 0;

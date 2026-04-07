@@ -129,7 +129,16 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             // not expressions), so construct IR directly without calling lower_expr.
             let (kind, ty) = match &value.kind {
                 ast::ExprKind::Int { raw, .. } => {
-                    let v = raw.parse::<i64>().unwrap_or(0);
+                    let clean = raw.replace('_', "");
+                    let v = if clean.starts_with("0x") || clean.starts_with("0X") {
+                        i64::from_str_radix(&clean[2..], 16).unwrap_or(0)
+                    } else if clean.starts_with("0b") || clean.starts_with("0B") {
+                        i64::from_str_radix(&clean[2..], 2).unwrap_or(0)
+                    } else if clean.starts_with("0o") || clean.starts_with("0O") {
+                        i64::from_str_radix(&clean[2..], 8).unwrap_or(0)
+                    } else {
+                        clean.parse::<i64>().unwrap_or(0)
+                    };
                     (IrExprKind::LitInt { value: v }, Ty::Int)
                 }
                 ast::ExprKind::Float { value: v, .. } => (IrExprKind::LitFloat { value: *v }, Ty::Float),
@@ -144,13 +153,14 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Literal { expr: ir_expr }
         }
         ast::Pattern::Constructor { name, args } => {
-            let payload_tys = get_constructor_payload_tys_from_subject(ctx, name, ty);
+            // Normalize module-qualified names: "binary.Unreachable" → "Unreachable"
+            let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
+            let payload_tys = get_constructor_payload_tys_from_subject(ctx, &bare_name, ty);
             let ir_args = args.iter().enumerate().map(|(i, a)| {
                 let arg_ty = payload_tys.get(i).cloned().unwrap_or(Ty::Unknown);
-                let p = lower_pattern(ctx, a, &arg_ty);
-                p
+                lower_pattern(ctx, a, &arg_ty)
             }).collect();
-            IrPattern::Constructor { name: name.to_string(), args: ir_args }
+            IrPattern::Constructor { name: bare_name.to_string(), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } => {
             let ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {

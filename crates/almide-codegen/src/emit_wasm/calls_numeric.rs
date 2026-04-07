@@ -116,6 +116,11 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { call(self.emitter.rt.float_to_fixed); });
             }
+            "to_bits" => {
+                // float.to_bits(f: Float) → Int: reinterpret f64 as i64
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i64_reinterpret_f64; });
+            }
             _ => return false,
         }
         true
@@ -340,6 +345,11 @@ impl FuncCompiler<'_> {
             "from_hex" => {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { call(self.emitter.rt.int_from_hex); });
+            }
+            "bits_to_float" => {
+                // int.bits_to_float(bits: Int) → Float: reinterpret i64 as f64
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { f64_reinterpret_i64; });
             }
             "rotate_right" | "rotate_left" => {
                 // rotate_{left,right}(a, n, bits)

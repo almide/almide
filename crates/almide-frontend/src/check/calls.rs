@@ -10,7 +10,7 @@ use super::Checker;
 pub(crate) use super::builtin_calls::{builtin_module_for_type, types_mismatch};
 
 /// Substitute named TypeVars in a type with replacement types.
-fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
+pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
     match ty {
         Ty::TypeVar(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
         Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| subst_ty(a, subst)).collect()),
@@ -312,7 +312,7 @@ impl Checker {
         }
     }
 
-    fn check_constructor_args(&mut self, name: &str, case: &crate::types::VariantCase, arg_tys: &[Ty]) {
+    pub(super) fn check_constructor_args(&mut self, name: &str, case: &crate::types::VariantCase, arg_tys: &[Ty]) {
         if let crate::types::VariantPayload::Tuple(expected_tys) = &case.payload {
             if arg_tys.len() != expected_tys.len() {
                 self.emit(super::err(

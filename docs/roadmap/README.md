@@ -6,10 +6,11 @@
 
 ## Active
 
-3 items
+4 items
 
 | Item | Description |
 |------|-------------|
+| [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with Flow[T] and compiler-driven optimization |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
@@ -25,7 +26,6 @@
 | [API Diff & Automatic Versioning](on-hold/api-diff-auto-versioning.md) | Automatic semver bump detection via public API diffing |
 | [LLM Benchmark: Next Phase](on-hold/benchmark-next-phase.md) | LLM benchmark Phase 2-3: cross-language comparison, harder problems, publication |
 | [Compile-Time Contracts](on-hold/compile-time-contracts.md) | Compile-time preconditions and type invariants via where clauses |
-| [Effect System: Capability-Based Agent Containers](on-hold/effect-system-capability.md) | Capability-based effect system for AI agent harness containers |
 | [Error-Fix Database](on-hold/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
@@ -41,15 +41,16 @@
 | [Snapshot Testing](on-hold/snapshot-testing.md) | Built-in snapshot testing for output regression detection |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
 | [WASM Component Model](on-hold/wasm-component-model.md) | WebAssembly Component Model support with WIT bindings |
+| [WASM Exception Handling](on-hold/wasm-exception-handling.md) | WASM native exception handling (try_table/throw) for zero-cost effect fn error propagation |
 | [WASM HTTP Client](on-hold/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
 | [Web Framework](on-hold/web-framework.md) | First-party Hono-like web framework with template and Codec integration |
 
 ## Done
 
-191 items
+197 items
 
 <details>
-<summary>Show all 191 completed items</summary>
+<summary>Show all 197 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|

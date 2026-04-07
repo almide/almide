@@ -106,6 +106,15 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                     || ctx.env.user_modules.contains(module)
                     || ctx.env.import_table.aliases.contains_key(module))
                 {
+                    // Cross-module variant constructor call: binary.ImportFunc(0)
+                    if let Some((type_name, _)) = ctx.env.constructors.get(field) {
+                        let resolved = ctx.env.import_table.aliases.get(module).copied()
+                            .unwrap_or(*module);
+                        let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());
+                        if ctx.env.types.contains_key(&sym(&qualified)) {
+                            return CallTarget::Named { name: *field };
+                        }
+                    }
                     let resolved = ctx.env.import_table.aliases.get(module).copied()
                         .unwrap_or(*module);
                     return CallTarget::Module { module: resolved, func: *field };

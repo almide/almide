@@ -37,8 +37,27 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::ExprKind::Ident { name, .. } => {
             if let Some(var_id) = ctx.lookup_var(name) {
                 ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
+            } else if let Ty::Fn { params: param_tys, ret } = &ty {
+                // Function/top-let used as a value → eta-expand to lambda
+                // so borrow insertion handles param types correctly (e.g. String → &str).
+                // Use the type (not env.functions) to detect: module-scoped functions
+                // have their bare names removed after type checking (restore_keys).
+                let params: Vec<(VarId, Ty)> = param_tys.iter().enumerate().map(|(i, pt)| {
+                    let vid = ctx.var_table.alloc(sym(&format!("_fn_arg{}", i)), pt.clone(), Mutability::Let, None);
+                    (vid, pt.clone())
+                }).collect();
+                let call_args: Vec<IrExpr> = params.iter().map(|(vid, pt)| {
+                    ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span)
+                }).collect();
+                let ret_ty = ret.as_ref().clone();
+                let body = ctx.mk(IrExprKind::Call {
+                    target: CallTarget::Named { name: sym(name) },
+                    args: call_args, type_args: vec![],
+                }, ret_ty, span);
+                ctx.mk(IrExprKind::Lambda {
+                    params, body: Box::new(body), lambda_id: None,
+                }, ty, span)
             } else if ctx.env.functions.contains_key(&sym(name)) {
-                // Function used as a value (e.g., passed to HOF)
                 ctx.mk(IrExprKind::FnRef { name: sym(name) }, ty, span)
             } else {
                 ctx.mk(IrExprKind::Var { id: VarId(0) }, ty, span) // error recovery
@@ -46,7 +65,37 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
         ast::ExprKind::TypeName { name, .. } => {
             // Variant constructor used as value (e.g., Red)
-            if ctx.env.constructors.contains_key(&sym(name)) {
+            if let Some((_, case)) = ctx.env.constructors.get(&sym(name)) {
+                if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
+                    if !param_tys.is_empty() && matches!(&ty, Ty::Fn { .. }) {
+                        // Constructor with payload as function value → generate lambda
+                        // Use instantiated types from `ty` (type checker output) instead
+                        // of raw `case.payload` (which may contain unresolved TypeVars
+                        // for generic constructors like Box[T]).
+                        let inst_params = match &ty {
+                            Ty::Fn { params: ip, .. } => ip.clone(),
+                            _ => param_tys.clone(),
+                        };
+                        let params: Vec<(VarId, Ty)> = inst_params.iter().enumerate().map(|(i, pt)| {
+                            let vid = ctx.var_table.alloc(sym(&format!("_ctor_arg{}", i)), pt.clone(), Mutability::Let, None);
+                            (vid, pt.clone())
+                        }).collect();
+                        let ctor_args: Vec<IrExpr> = params.iter().map(|(vid, pt)| {
+                            ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span)
+                        }).collect();
+                        let ret_ty = match &ty {
+                            Ty::Fn { ret, .. } => ret.as_ref().clone(),
+                            _ => ty.clone(),
+                        };
+                        let body = ctx.mk(IrExprKind::Call {
+                            target: CallTarget::Named { name: sym(name) },
+                            args: ctor_args, type_args: vec![],
+                        }, ret_ty, span);
+                        return ctx.mk(IrExprKind::Lambda {
+                            params, body: Box::new(body), lambda_id: None,
+                        }, ty, span);
+                    }
+                }
                 ctx.mk(IrExprKind::Call {
                     target: CallTarget::Named { name: sym(name) },
                     args: vec![], type_args: vec![],
@@ -311,9 +360,47 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             if let ast::ExprKind::Ident { name: mod_name, .. } = &object.kind {
                 if let Ty::Fn { params, ret } = &ty {
                     let is_module_fn = crate::stdlib::lookup_sig(mod_name, field).is_some()
-                        || ctx.env.functions.contains_key(&sym(&format!("{}.{}", mod_name, field)));
+                        || ctx.env.functions.contains_key(&sym(&format!("{}.{}", mod_name, field)))
+                        || ctx.env.user_modules.contains(&sym(mod_name))
+                        || ctx.env.import_table.aliases.contains_key(&sym(mod_name));
                     if is_module_fn {
                         return eta_expand_module_fn(ctx, *mod_name, *field, params.clone(), (**ret).clone(), span);
+                    }
+                }
+                // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
+                if let Some((type_name, case)) = ctx.env.constructors.get(field).cloned() {
+                    let resolved = ctx.env.import_table.aliases.get(mod_name).copied()
+                        .unwrap_or(*mod_name);
+                    let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());
+                    if ctx.env.types.contains_key(&sym(&qualified)) {
+                        // Constructor with payload as function value → generate lambda
+                        if let crate::types::VariantPayload::Tuple(ref param_tys) = case.payload {
+                            if !param_tys.is_empty() && matches!(&ty, Ty::Fn { .. }) {
+                                let params: Vec<(VarId, Ty)> = param_tys.iter().enumerate().map(|(i, pt)| {
+                                    let vid = ctx.var_table.alloc(sym(&format!("_ctor_arg{}", i)), pt.clone(), Mutability::Let, None);
+                                    (vid, pt.clone())
+                                }).collect();
+                                let ctor_args: Vec<IrExpr> = params.iter().map(|(vid, pt)| {
+                                    ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span)
+                                }).collect();
+                                let ret_ty = match &ty {
+                                    Ty::Fn { ret, .. } => ret.as_ref().clone(),
+                                    _ => ty.clone(),
+                                };
+                                let body = ctx.mk(IrExprKind::Call {
+                                    target: CallTarget::Named { name: *field },
+                                    args: ctor_args, type_args: vec![],
+                                }, ret_ty, span);
+                                return ctx.mk(IrExprKind::Lambda {
+                                    params, body: Box::new(body), lambda_id: None,
+                                }, ty, span);
+                            }
+                        }
+                        // No-payload constructor: emit as Call
+                        return ctx.mk(IrExprKind::Call {
+                            target: CallTarget::Named { name: *field },
+                            args: vec![], type_args: vec![],
+                        }, ty, span);
                     }
                 }
             }

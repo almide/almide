@@ -22,6 +22,22 @@ return = "String"
 effect = true
 rust = "almide_rt_io_read_all()?"
 
+[read_byte]
+description = "Read a single byte from stdin (returns -1 on EOF)"
+example = 'let b = io.read_byte()'
+params = []
+return = "Int"
+impure = true
+rust = "almide_rt_io_read_byte()"
+
+[read_n_bytes]
+description = "Read N bytes from stdin (may return fewer on EOF)"
+example = 'let bytes = io.read_n_bytes(4)'
+params = [{ name = "n", type = "Int" }]
+return = "List[Int]"
+impure = true
+rust = "almide_rt_io_read_n_bytes({n})"
+
 [write_bytes]
 description = "Write raw bytes to stdout (no UTF-8 conversion)"
 example = 'io.write_bytes([0x50, 0x34, 0x0A])'

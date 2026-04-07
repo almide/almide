@@ -1,0 +1,58 @@
+// Variant constructors used as function values
+
+type Color = | Red | Green | Blue
+type Wrapped = | Wrap(Int) | Tag(String) | Empty
+
+fn apply_int(ctor: (Int) -> Wrapped, v: Int) -> Wrapped = ctor(v)
+fn apply_str(ctor: (String) -> Wrapped, v: String) -> Wrapped = ctor(v)
+
+test "single-field constructor as function argument" {
+  let w = apply_int(Wrap, 42)
+  match w {
+    Wrap(n) => assert_eq(n, 42),
+    _ => assert(false),
+  }
+}
+
+test "string constructor as function argument" {
+  let w = apply_str(Tag, "hello")
+  match w {
+    Tag(s) => assert_eq(s, "hello"),
+    _ => assert(false),
+  }
+}
+
+test "constructor in list.map" {
+  let xs = [1, 2, 3] |> list.map(Wrap)
+  assert_eq(list.len(xs), 3)
+  match list.get(xs, 1) ?? Empty {
+    Wrap(n) => assert_eq(n, 2),
+    _ => assert(false),
+  }
+}
+
+test "constructor passed as variable" {
+  let ctor = Wrap
+  let result = ctor(10)
+  match result {
+    Wrap(n) => assert_eq(n, 10),
+    _ => assert(false),
+  }
+}
+
+// Generics
+type Box[T] = | Box(T) | NoBox
+
+test "generic constructor as function" {
+  let xs = [1, 2, 3] |> list.map(Box)
+  assert_eq(list.len(xs), 3)
+}
+
+// Unit constructors remain as values, not functions
+test "unit constructor is still a value" {
+  let c = Red
+  match c {
+    Red => assert(true),
+    _ => assert(false),
+  }
+}

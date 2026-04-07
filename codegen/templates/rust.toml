@@ -293,25 +293,25 @@ template = "move |{params}| {body}"
 template = "type {name} = {type};"
 
 [[struct_decl]]
-when_attr = "repr_c"
-template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub struct {name} {{\n{fields}\n}}"
-
-[[struct_decl]]
-template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub struct {name} {{\n{fields}\n}}"
-
-[[struct_decl]]
 when_attr = "has_fn_fields"
 template = "#[derive(Clone)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+when_attr = "repr_c"
+template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+template = "#[derive(Clone, Debug, PartialEq)]\npub struct {name} {{\n{fields}\n}}"
 
 [struct_field]
 template = "    pub {name}: {type},"
 
 [[enum_decl]]
 when_attr = "repr_c"
-template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub enum {name} {{\n{variants}\n}}"
+template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq)]\npub enum {name} {{\n{variants}\n}}"
 
 [[enum_decl]]
-template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\npub enum {name} {{\n{variants}\n}}"
+template = "#[derive(Clone, Debug, PartialEq)]\npub enum {name} {{\n{variants}\n}}"
 
 [enum_variant]
 template = "    {name}({fields})"
@@ -482,10 +482,10 @@ template = "const {name}: {type} = {value};"
 template = "static {name}: std::sync::LazyLock<{type}> = std::sync::LazyLock::new(|| {value});"
 
 [generic_bound]
-template = "{name}: Clone + PartialEq + PartialOrd"
+template = "{name}: Clone + PartialEq"
 
 [generic_bound_full]
-template = "{name}: Clone + std::fmt::Debug + PartialEq + PartialOrd"
+template = "{name}: Clone + std::fmt::Debug + PartialEq"
 
 [generic_bound_minimal]
 template = "{name}: Clone"

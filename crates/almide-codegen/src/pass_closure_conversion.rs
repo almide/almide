@@ -100,8 +100,10 @@ fn convert_expr(
                 .collect();
             captures.sort_by_key(|(vid, _)| vid.0);
 
-            // 3. Generate lifted function name
-            let id = lambda_id.unwrap_or_else(|| { let c = *counter; *counter = c + 1; c });
+            // 3. Generate lifted function name (always use counter for global uniqueness;
+            // lambda_id is per-module and can collide across main program and imports)
+            let id = *counter;
+            *counter = id + 1;
             let func_name = sym(&format!("__closure_{}", id));
 
             // 4. Create env parameter (i32 pointer in WASM)

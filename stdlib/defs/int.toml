@@ -166,3 +166,11 @@ return = "Float"
 rust = "almide_rt_int_to_float({n})"
 ts = "__almd_int.to_float({n})"
 ufcs = true
+
+[bits_to_float]
+description = "Reinterpret an integer's bits as an IEEE 754 float (f64)."
+example = "int.bits_to_float(4607182418800017408) // => 1.0"
+params = [{ name = "bits", type = "Int" }]
+return = "Float"
+rust = "almide_rt_int_bits_to_float({bits})"
+ts = "__almd_int.bits_to_float({bits})"

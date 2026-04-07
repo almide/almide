@@ -89,11 +89,11 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         macro_args.extend(args);
                         return IrExpr { kind: IrExprKind::RustMacro { name: "panic".into(), args: macro_args }, ty, span };
                     }
-                    // println → RustMacro
-                    if name == "println" {
+                    // println / eprintln → RustMacro
+                    if name == "println" || name == "eprintln" {
                         let mut macro_args = vec![IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None }];
                         macro_args.extend(args);
-                        return IrExpr { kind: IrExprKind::RustMacro { name: "println".into(), args: macro_args }, ty, span };
+                        return IrExpr { kind: IrExprKind::RustMacro { name: name.clone(), args: macro_args }, ty, span };
                     }
                     // value_* → almide_rt_value_*
                     if name.starts_with("value_") {

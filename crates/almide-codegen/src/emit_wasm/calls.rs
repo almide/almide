@@ -4340,6 +4340,109 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(capacity);
                 self.scratch.free_i32(buf);
             }
+            "read_byte" => {
+                // io.read_byte() -> Int
+                // Read 1 byte from stdin via fd_read. Return byte as i64, or -1i64 on EOF.
+                let byte_buf = self.scratch.alloc_i32();
+                let iov_ptr = self.scratch.alloc_i32();
+                let nread_ptr = self.scratch.alloc_i32();
+
+                wasm!(self.func, {
+                    i32_const(1); call(self.emitter.rt.alloc); local_set(byte_buf);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    // iov: buf = byte_buf, len = 1
+                    local_get(iov_ptr); local_get(byte_buf); i32_store(0);
+                    local_get(iov_ptr); i32_const(1); i32_store(4);
+                    // fd_read(stdin=0, iov, 1, nread_ptr)
+                    i32_const(0); local_get(iov_ptr); i32_const(1); local_get(nread_ptr);
+                    call(self.emitter.rt.fd_read);
+                    drop;
+                    // if nread == 0 → -1i64, else byte as i64
+                    local_get(nread_ptr); i32_load(0); i32_eqz;
+                    if_i64;
+                      i64_const(-1);
+                    else_;
+                      local_get(byte_buf); i32_load8_u(0); i64_extend_i32_u;
+                    end;
+                });
+
+                self.scratch.free_i32(nread_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(byte_buf);
+            }
+            "read_n_bytes" => {
+                // io.read_n_bytes(n: Int) -> List[Int]
+                // Read up to n bytes from stdin, return as List[Int].
+                // List[Int] layout: [count:i32][elem0:i64][elem1:i64]...
+                let n = self.scratch.alloc_i32();
+                let raw_buf = self.scratch.alloc_i32();
+                let iov_ptr = self.scratch.alloc_i32();
+                let nread_ptr = self.scratch.alloc_i32();
+                let total = self.scratch.alloc_i32();
+                let nread_val = self.scratch.alloc_i32();
+                let list_ptr = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(n);
+                    // Allocate raw read buffer of n bytes
+                    local_get(n); call(self.emitter.rt.alloc); local_set(raw_buf);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    i32_const(0); local_set(total);
+                });
+
+                // Read loop: keep reading until total == n or EOF
+                wasm!(self.func, {
+                    block_empty; loop_empty;
+                      // Check if done
+                      local_get(total); local_get(n); i32_ge_u; br_if(1);
+                      // iov: buf = raw_buf + total, len = n - total
+                      local_get(iov_ptr); local_get(raw_buf); local_get(total); i32_add; i32_store(0);
+                      local_get(iov_ptr); local_get(n); local_get(total); i32_sub; i32_store(4);
+                      // fd_read(stdin=0, iov, 1, nread_ptr)
+                      i32_const(0); local_get(iov_ptr); i32_const(1); local_get(nread_ptr);
+                      call(self.emitter.rt.fd_read);
+                      drop;
+                      // Check nread
+                      local_get(nread_ptr); i32_load(0); local_set(nread_val);
+                      local_get(nread_val); i32_eqz; br_if(1); // EOF → break
+                      local_get(total); local_get(nread_val); i32_add; local_set(total);
+                      br(0);
+                    end; end;
+                });
+
+                // Build List[Int]: [total:i32][i64 * total]
+                wasm!(self.func, {
+                    // Allocate: 4 + total * 8
+                    local_get(total); i32_const(8); i32_mul; i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(list_ptr);
+                    local_get(list_ptr); local_get(total); i32_store(0);
+                    // Copy bytes → i64 elements
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(total); i32_ge_u; br_if(1);
+                      local_get(list_ptr); i32_const(4); i32_add;
+                      local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(raw_buf); local_get(i); i32_add; i32_load8_u(0); i64_extend_i32_u;
+                      i64_store(0);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(list_ptr);
+                });
+
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(list_ptr);
+                self.scratch.free_i32(nread_val);
+                self.scratch.free_i32(total);
+                self.scratch.free_i32(nread_ptr);
+                self.scratch.free_i32(iov_ptr);
+                self.scratch.free_i32(raw_buf);
+                self.scratch.free_i32(n);
+            }
             "write" | "write_bytes" => {
                 // io.write(data: Bytes) — layout [len:i32][u8 data...], same as print
                 // io.write_bytes(data: List[Int]) — layout [len:i32][i64 elements...]
