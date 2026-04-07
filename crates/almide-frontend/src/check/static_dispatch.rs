@@ -187,6 +187,31 @@ impl Checker {
                 s.to_string()
             });
             if let Some(m) = resolved_module {
+                // Cross-module variant constructor call: binary.ImportFunc(0)
+                if let Some((type_name, case)) = self.env.constructors.get(&sym(field)).cloned() {
+                    let qualified = format!("{}.{}", m, type_name.as_str());
+                    if self.env.types.contains_key(&sym(&qualified)) {
+                        self.check_constructor_args(field, &case, arg_tys);
+                        let generic_args = self.instantiate_type_generics(type_name.as_str());
+                        if !generic_args.is_empty() {
+                            if let Some(ty_def) = self.env.types.get(&type_name).cloned() {
+                                let mut type_var_names = Vec::new();
+                                crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
+                                let subst: std::collections::HashMap<almide_base::intern::Sym, Ty> = type_var_names.iter()
+                                    .zip(generic_args.iter())
+                                    .map(|(tv, fresh)| (*tv, fresh.clone()))
+                                    .collect();
+                                if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
+                                    for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
+                                        let substituted = super::calls::subst_ty(ety, &subst);
+                                        self.unify_infer(aty, &substituted);
+                                    }
+                                }
+                            }
+                        }
+                        return Some(Ty::Named(type_name, generic_args));
+                    }
+                }
                 return Some(self.check_named_call(&format!("{}.{}", m, field), arg_tys));
             }
         }

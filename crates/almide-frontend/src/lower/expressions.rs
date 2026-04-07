@@ -37,28 +37,28 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::ExprKind::Ident { name, .. } => {
             if let Some(var_id) = ctx.lookup_var(name) {
                 ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
+            } else if let Ty::Fn { params: param_tys, ret } = &ty {
+                // Function/top-let used as a value → eta-expand to lambda
+                // so borrow insertion handles param types correctly (e.g. String → &str).
+                // Use the type (not env.functions) to detect: module-scoped functions
+                // have their bare names removed after type checking (restore_keys).
+                let params: Vec<(VarId, Ty)> = param_tys.iter().enumerate().map(|(i, pt)| {
+                    let vid = ctx.var_table.alloc(sym(&format!("_fn_arg{}", i)), pt.clone(), Mutability::Let, None);
+                    (vid, pt.clone())
+                }).collect();
+                let call_args: Vec<IrExpr> = params.iter().map(|(vid, pt)| {
+                    ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span)
+                }).collect();
+                let ret_ty = ret.as_ref().clone();
+                let body = ctx.mk(IrExprKind::Call {
+                    target: CallTarget::Named { name: sym(name) },
+                    args: call_args, type_args: vec![],
+                }, ret_ty, span);
+                ctx.mk(IrExprKind::Lambda {
+                    params, body: Box::new(body), lambda_id: None,
+                }, ty, span)
             } else if ctx.env.functions.contains_key(&sym(name)) {
-                // Function used as a value (e.g., passed to HOF) → eta-expand to lambda
-                // so borrow insertion handles param types correctly (e.g. String → &str)
-                if let Ty::Fn { params: param_tys, ret } = &ty {
-                    let params: Vec<(VarId, Ty)> = param_tys.iter().map(|pt| {
-                        let vid = ctx.var_table.alloc(sym("_fn_arg"), pt.clone(), Mutability::Let, None);
-                        (vid, pt.clone())
-                    }).collect();
-                    let call_args: Vec<IrExpr> = params.iter().map(|(vid, pt)| {
-                        ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span)
-                    }).collect();
-                    let ret_ty = ret.as_ref().clone();
-                    let body = ctx.mk(IrExprKind::Call {
-                        target: CallTarget::Named { name: sym(name) },
-                        args: call_args, type_args: vec![],
-                    }, ret_ty, span);
-                    ctx.mk(IrExprKind::Lambda {
-                        params, body: Box::new(body), lambda_id: None,
-                    }, ty, span)
-                } else {
-                    ctx.mk(IrExprKind::FnRef { name: sym(name) }, ty, span)
-                }
+                ctx.mk(IrExprKind::FnRef { name: sym(name) }, ty, span)
             } else {
                 ctx.mk(IrExprKind::Var { id: VarId(0) }, ty, span) // error recovery
             }
@@ -69,8 +69,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
                     if !param_tys.is_empty() && matches!(&ty, Ty::Fn { .. }) {
                         // Constructor with payload as function value → generate lambda
-                        let params: Vec<(VarId, Ty)> = param_tys.iter().map(|pt| {
-                            let vid = ctx.var_table.alloc(sym("_ctor_arg"), pt.clone(), Mutability::Let, None);
+                        let params: Vec<(VarId, Ty)> = param_tys.iter().enumerate().map(|(i, pt)| {
+                            let vid = ctx.var_table.alloc(sym(&format!("_ctor_arg{}", i)), pt.clone(), Mutability::Let, None);
                             (vid, pt.clone())
                         }).collect();
                         let ctor_args: Vec<IrExpr> = params.iter().map(|(vid, pt)| {
@@ -367,8 +367,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                         // Constructor with payload as function value → generate lambda
                         if let crate::types::VariantPayload::Tuple(ref param_tys) = case.payload {
                             if !param_tys.is_empty() && matches!(&ty, Ty::Fn { .. }) {
-                                let params: Vec<(VarId, Ty)> = param_tys.iter().map(|pt| {
-                                    let vid = ctx.var_table.alloc(sym("_ctor_arg"), pt.clone(), Mutability::Let, None);
+                                let params: Vec<(VarId, Ty)> = param_tys.iter().enumerate().map(|(i, pt)| {
+                                    let vid = ctx.var_table.alloc(sym(&format!("_ctor_arg{}", i)), pt.clone(), Mutability::Let, None);
                                     (vid, pt.clone())
                                 }).collect();
                                 let ctor_args: Vec<IrExpr> = params.iter().map(|(vid, pt)| {

@@ -1,0 +1,12 @@
+import varlib
+
+test "cross-module function reference in filter_map" {
+  let items = ["tag:a", "nope", "tag:b"]
+  let result = items |> list.filter_map(varlib.parse_tag)
+  assert_eq(result, ["a", "b"])
+}
+
+test "intra-module function reference (fn ref used within defining module)" {
+  let items = ["tag:x", "no", "tag:y", "tag:z"]
+  assert_eq(varlib.tag_count(items), 3)
+}

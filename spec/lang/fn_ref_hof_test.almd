@@ -27,3 +27,20 @@ test "function reference assigned to variable" {
   let f = double
   assert_eq(f(5), 10)
 }
+
+fn add(a: Int, b: Int) -> Int = a + b
+
+test "multi-arg function reference in fold" {
+  let result = [1, 2, 3, 4] |> list.fold(0, add)
+  assert_eq(result, 10)
+}
+
+fn transform_pair(pair: (String, Int)) -> String =
+  let (s, n) = pair
+  "${s}:${int.to_string(n)}"
+
+test "function reference with tuple param in map" {
+  let pairs = [("a", 1), ("b", 2)]
+  let result = pairs |> list.map(transform_pair)
+  assert_eq(result, ["a:1", "b:2"])
+}

@@ -312,7 +312,7 @@ impl Checker {
         }
     }
 
-    fn check_constructor_args(&mut self, name: &str, case: &crate::types::VariantCase, arg_tys: &[Ty]) {
+    pub(super) fn check_constructor_args(&mut self, name: &str, case: &crate::types::VariantCase, arg_tys: &[Ty]) {
         if let crate::types::VariantPayload::Tuple(expected_tys) = &case.payload {
             if arg_tys.len() != expected_tys.len() {
                 self.emit(super::err(

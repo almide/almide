@@ -152,6 +152,24 @@ impl Checker {
                             ret: Box::new(sig.ret.clone()),
                         };
                     }
+                    // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
+                    if let Some((type_name, case)) = self.env.constructors.get(&sym(field)).cloned() {
+                        let resolved_mod = self.env.import_table.resolve(mod_name)
+                            .unwrap_or(sym(mod_name));
+                        let qualified = format!("{}.{}", resolved_mod.as_str(), type_name.as_str());
+                        if self.env.types.contains_key(&sym(&qualified)) {
+                            self.type_map.insert(object.id, Ty::Unit);
+                            let generic_args = self.instantiate_type_generics(type_name.as_str());
+                            return match &case.payload {
+                                VariantPayload::Unit => Ty::Named(type_name, generic_args),
+                                VariantPayload::Tuple(param_tys) => Ty::Fn {
+                                    params: param_tys.clone(),
+                                    ret: Box::new(Ty::Named(type_name, generic_args)),
+                                },
+                                VariantPayload::Record(_) => Ty::Named(type_name, generic_args),
+                            };
+                        }
+                    }
                 }
                 let obj_ty = self.infer_expr(object);
                 let concrete = resolve_ty(&obj_ty, &self.uf);
