@@ -6,7 +6,7 @@
 
 ## Active
 
-5 items
+4 items
 
 | Item | Description |
 |------|-------------|
@@ -14,7 +14,6 @@
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with Flow[T] and compiler-driven optimization |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
-| [Fix WASM fs.list_dir Memory Corruption](active/wasm-fs-list-dir-corruption.md) | Fix WASM fs.list_dir memory corruption when building List[String] result |
 
 ## On Hold
 
@@ -48,10 +47,10 @@
 
 ## Done
 
-198 items
+199 items
 
 <details>
-<summary>Show all 198 completed items</summary>
+<summary>Show all 199 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|

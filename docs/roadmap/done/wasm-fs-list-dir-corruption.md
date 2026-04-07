@@ -1,4 +1,5 @@
 <!-- description: Fix WASM fs.list_dir memory corruption when building List[String] result -->
+<!-- done: 2026-04-08 -->
 # Fix WASM fs.list_dir Memory Corruption
 
 ## Symptom
