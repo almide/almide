@@ -69,7 +69,14 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
                     if !param_tys.is_empty() && matches!(&ty, Ty::Fn { .. }) {
                         // Constructor with payload as function value → generate lambda
-                        let params: Vec<(VarId, Ty)> = param_tys.iter().enumerate().map(|(i, pt)| {
+                        // Use instantiated types from `ty` (type checker output) instead
+                        // of raw `case.payload` (which may contain unresolved TypeVars
+                        // for generic constructors like Box[T]).
+                        let inst_params = match &ty {
+                            Ty::Fn { params: ip, .. } => ip.clone(),
+                            _ => param_tys.clone(),
+                        };
+                        let params: Vec<(VarId, Ty)> = inst_params.iter().enumerate().map(|(i, pt)| {
                             let vid = ctx.var_table.alloc(sym(&format!("_ctor_arg{}", i)), pt.clone(), Mutability::Let, None);
                             (vid, pt.clone())
                         }).collect();
@@ -353,7 +360,9 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             if let ast::ExprKind::Ident { name: mod_name, .. } = &object.kind {
                 if let Ty::Fn { params, ret } = &ty {
                     let is_module_fn = crate::stdlib::lookup_sig(mod_name, field).is_some()
-                        || ctx.env.functions.contains_key(&sym(&format!("{}.{}", mod_name, field)));
+                        || ctx.env.functions.contains_key(&sym(&format!("{}.{}", mod_name, field)))
+                        || ctx.env.user_modules.contains(&sym(mod_name))
+                        || ctx.env.import_table.aliases.contains_key(&sym(mod_name));
                     if is_module_fn {
                         return eta_expand_module_fn(ctx, *mod_name, *field, params.clone(), (**ret).clone(), span);
                     }

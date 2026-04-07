@@ -115,6 +115,29 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
             }
         }
     }
+
+    // Register lifted closure functions (from ClosureConversion pass) in the
+    // function table. After ClosureConversion, Lambda nodes become ClosureCreate
+    // nodes referencing lifted __closure_N functions. These functions must be in
+    // the table so call_indirect can dispatch them.
+    let mut closure_create_names: HashSet<String> = HashSet::new();
+    for func in &program.functions {
+        collect_closure_creates(&func.body, &mut closure_create_names);
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            collect_closure_creates(&func.body, &mut closure_create_names);
+        }
+    }
+    for name in &closure_create_names {
+        if let Some(&func_idx) = emitter.func_map.get(name.as_str()) {
+            if !emitter.func_to_table_idx.contains_key(&func_idx) {
+                let table_idx = emitter.func_table.len() as u32;
+                emitter.func_table.push(func_idx);
+                emitter.func_to_table_idx.insert(func_idx, table_idx);
+            }
+        }
+    }
 }
 
 /// Compile lambda bodies and FnRef wrappers.
@@ -497,4 +520,18 @@ impl IrVisitor for VarRefCollector<'_> {
 
 pub(super) fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
     VarRefCollector { vars }.visit_expr(expr);
+}
+
+/// Collect all ClosureCreate func_names referenced in an expression tree.
+fn collect_closure_creates(expr: &IrExpr, names: &mut HashSet<String>) {
+    struct Collector<'a> { names: &'a mut HashSet<String> }
+    impl IrVisitor for Collector<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::ClosureCreate { func_name, .. } = &expr.kind {
+                self.names.insert(func_name.to_string());
+            }
+            walk_expr(self, expr);
+        }
+    }
+    Collector { names }.visit_expr(expr);
 }
