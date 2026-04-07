@@ -1,0 +1,317 @@
+import string
+import list
+
+fn str_to_int(s: String) -> Result[Int, String] =
+  int.parse(s)
+
+fn parse_student(line: String) -> Result[List[String], String] = {
+  let parts = string.split(line, ":")
+  match parts {
+    [name, scores_str] => {
+      guard string.len(name) > 0 else err("empty name")
+      guard string.len(scores_str) > 0 else err("no scores")
+      
+      let score_parts = string.split(scores_str, ",")
+      match validate_scores(score_parts) {
+        err(e) => err(e),
+        ok(_) => ok([name] + score_parts),
+      }
+    },
+    _ => err("invalid format"),
+  }
+}
+
+fn validate_scores(scores: List[String]) -> Result[Unit, String] = {
+  match scores {
+    [] => ok(()),
+    [s, ...rest] => {
+      match str_to_int(s) {
+        err(_) => err("invalid score: " + s),
+        ok(n) => {
+          if n < 0 or n > 100 then
+            err("score out of range: " + s)
+          else
+            validate_scores(rest)
+        },
+      }
+    },
+  }
+}
+
+fn parse_all(input: String) -> Result[List[List[String]], String] = {
+  guard string.len(input) > 0 else err("empty input")
+  
+  let lines = string.split(input, "\n")
+  parse_all_lines(lines, 1, [])
+}
+
+fn parse_all_lines(lines: List[String], line_num: Int, acc: List[List[String]]) -> Result[List[List[String]], String] = {
+  match lines {
+    [] => ok(acc),
+    [line, ...rest] => {
+      match parse_student(line) {
+        err(e) => err("line " + int.to_string(line_num) + ": " + e),
+        ok(student) => {
+          let name = match list.get(student, 0) {
+            some(n) => n,
+            none => "",
+          }
+          
+          let is_dup = list.find(acc, (s) => {
+            match list.get(s, 0) {
+              some(existing_name) => existing_name == name,
+              none => false,
+            }
+          })
+          
+          match is_dup {
+            some(_) => err("duplicate name: " + name),
+            none => parse_all_lines(rest, line_num + 1, acc + [student]),
+          }
+        },
+      }
+    },
+  }
+}
+
+fn average(student: List[String]) -> Result[Int, String] = {
+  let scores_str = match student {
+    [] => [],
+    [_] => [],
+    [_, ...rest] => rest,
+  }
+  
+  guard list.len(scores_str) > 0 else err("no scores")
+  
+  let scores = scores_str
+    |> list.map((s) => {
+      match str_to_int(s) {
+        ok(n) => n,
+        err(_) => 0,
+      }
+    })
+  
+  let sum = list.fold(scores, 0, (acc, n) => acc + n)
+  let avg = sum / list.len(scores)
+  
+  ok(avg)
+}
+
+fn letter_grade(avg: Int) -> String =
+  if avg >= 90 then "A"
+  else if avg >= 80 then "B"
+  else if avg >= 70 then "C"
+  else if avg >= 60 then "D"
+  else "F"
+
+fn honor_roll(students: List[List[String]]) -> Result[List[String], String] = {
+  let qualifiers = students
+    |> list.filter_map((student) => {
+      match average(student) {
+        ok(avg) => {
+          if avg >= 85 then
+            some(list.get(student, 0) ?? "")
+          else
+            none
+        },
+        err(_) => none,
+      }
+    })
+  
+  let sorted = list.sort(qualifiers, (a, b) => {
+    if a < b then -1
+    else if a > b then 1
+    else 0
+  })
+  
+  ok(sorted)
+}
+
+fn class_average(students: List[List[String]]) -> Result[Int, String] = {
+  let averages = students
+    |> list.filter_map((student) => {
+      match average(student) {
+        ok(avg) => some(avg),
+        err(_) => none,
+      }
+    })
+  
+  if list.len(averages) == 0 then
+    err("no valid students")
+  else {
+    let sum = list.fold(averages, 0, (acc, a) => acc + a)
+    let class_avg = sum / list.len(averages)
+    ok(class_avg)
+  }
+}
+
+fn format_student(student: List[String]) -> Result[String, String] = {
+  match average(student) {
+    err(e) => err(e),
+    ok(avg) => {
+      let name = list.get(student, 0) ?? ""
+      let grade = letter_grade(avg)
+      let result = "${name}: ${int.to_string(avg)} (${grade})"
+      ok(result)
+    },
+  }
+}
+
+fn generate_report(input: String) -> Result[String, String] = {
+  match parse_all(input) {
+    err(e) => err(e),
+    ok(students) => {
+      match class_average(students) {
+        err(e) => err(e),
+        ok(class_avg) => {
+          match honor_roll(students) {
+            err(e) => err(e),
+            ok(hr) => {
+              let summaries = students
+                |> list.map((student) => {
+                  match format_student(student) {
+                    ok(s) => s,
+                    err(_) => "",
+                  }
+                })
+              
+              let summaries_str = string.join(summaries, "\n")
+              let class_avg_str = "class average: " + int.to_string(class_avg)
+              let honor_roll_str = "honor roll: " + string.join(hr, ", ")
+              
+              let result = summaries_str + "\n" + class_avg_str + "\n" + honor_roll_str
+              ok(result)
+            },
+          }
+        },
+      }
+    },
+  }
+}
+
+test "parse single student" {
+  assert_eq(parse_student("Alice:85,92,78"), ok(["Alice", "85", "92", "78"]))
+}
+
+test "parse student with single score" {
+  assert_eq(parse_student("Bob:100"), ok(["Bob", "100"]))
+}
+
+test "parse student empty name" {
+  assert_eq(parse_student(":85,92"), err("empty name"))
+}
+
+test "parse student invalid score" {
+  assert_eq(parse_student("Alice:85,abc,78"), err("invalid score: abc"))
+}
+
+test "parse student score too high" {
+  assert_eq(parse_student("Alice:85,101,78"), err("score out of range: 101"))
+}
+
+test "parse student score negative" {
+  assert_eq(parse_student("Alice:85,-1,78"), err("score out of range: -1"))
+}
+
+test "parse student no scores" {
+  assert_eq(parse_student("Alice:"), err("no scores"))
+}
+
+test "parse student no colon" {
+  assert_eq(parse_student("Alice"), err("invalid format"))
+}
+
+test "parse all basic" {
+  let result = parse_all("Alice:85,92\nBob:70,80")
+  assert_eq(result, ok([["Alice", "85", "92"], ["Bob", "70", "80"]]))
+}
+
+test "parse all empty input" {
+  assert_eq(parse_all(""), err("empty input"))
+}
+
+test "parse all duplicate names" {
+  assert_eq(parse_all("Alice:85\nAlice:90"), err("duplicate name: Alice"))
+}
+
+test "parse all error with line number" {
+  assert_eq(parse_all("Alice:85\n:90"), err("line 2: empty name"))
+}
+
+test "average basic" {
+  assert_eq(average(["Alice", "80", "90", "100"]), ok(90))
+}
+
+test "average single score" {
+  assert_eq(average(["Bob", "75"]), ok(75))
+}
+
+test "average rounds down" {
+  assert_eq(average(["Carol", "80", "81"]), ok(80))
+}
+
+test "letter grade A" {
+  assert_eq(letter_grade(95), "A")
+}
+
+test "letter grade B" {
+  assert_eq(letter_grade(85), "B")
+}
+
+test "letter grade C" {
+  assert_eq(letter_grade(75), "C")
+}
+
+test "letter grade D" {
+  assert_eq(letter_grade(65), "D")
+}
+
+test "letter grade F" {
+  assert_eq(letter_grade(55), "F")
+}
+
+test "letter grade boundary 90" {
+  assert_eq(letter_grade(90), "A")
+}
+
+test "letter grade boundary 80" {
+  assert_eq(letter_grade(80), "B")
+}
+
+test "honor roll basic" {
+  let students = [["Alice", "90", "95"], ["Bob", "70", "80"], ["Carol", "85", "90"]]
+  assert_eq(honor_roll(students), ok(["Alice", "Carol"]))
+}
+
+test "honor roll none qualify" {
+  let students = [["Alice", "70", "75"], ["Bob", "60", "65"]]
+  assert_eq(honor_roll(students), ok([]))
+}
+
+test "honor roll sorted" {
+  let students = [["Zara", "90", "95"], ["Alice", "85", "90"]]
+  assert_eq(honor_roll(students), ok(["Alice", "Zara"]))
+}
+
+test "class average basic" {
+  let students = [["Alice", "80", "90"], ["Bob", "70", "80"]]
+  assert_eq(class_average(students), ok(80))
+}
+
+test "format student" {
+  assert_eq(format_student(["Alice", "85", "92", "78"]), ok("Alice: 85 (B)"))
+}
+
+test "generate report" {
+  let input = "Alice:90,95,100\nBob:70,75,80"
+  let expected = "Alice: 95 (A)\nBob: 75 (C)\nclass average: 85\nhonor roll: Alice"
+  assert_eq(generate_report(input), ok(expected))
+}
+
+test "generate report error propagation" {
+  assert_eq(generate_report("Alice:90\n:bad"), err("line 2: empty name"))
+}
+
+test "generate report empty" {
+  assert_eq(generate_report(""), err("empty input"))
+}

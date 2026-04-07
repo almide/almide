@@ -1,0 +1,25 @@
+fn is_isogram(phrase: String) -> Bool = {
+  let letters = phrase
+    |> string.to_lowercase
+    |> string.split(_, "")
+    |> list.filter(_, (c) => {
+      let code = string.char_code(c)
+      code >= 97 and code <= 122
+    })
+  
+  list.len(letters) == (letters |> list.to_set |> set.len)
+}
+
+test "empty string" { assert_eq(is_isogram(""), true) }
+test "isogram with only lower case characters" { assert_eq(is_isogram("isogram"), true) }
+test "word with one duplicated character" { assert_eq(is_isogram("eleven"), false) }
+test "word with one duplicated character from end" { assert_eq(is_isogram("zzyzx"), false) }
+test "longest reported english isogram" { assert_eq(is_isogram("subdermatoglyphic"), true) }
+test "word with duplicated character in mixed case" { assert_eq(is_isogram("Alphabet"), false) }
+test "word with duplicated character in mixed case lowercase first" { assert_eq(is_isogram("alphAbet"), false) }
+test "hypothetical isogrammic word with hyphen" { assert_eq(is_isogram("thumbscrew-japingly"), true) }
+test "hypothetical word with duplicated character following hyphen" { assert_eq(is_isogram("thumbscrew-jappingly"), false) }
+test "isogram with duplicated hyphen" { assert_eq(is_isogram("six-year-old"), true) }
+test "made-up name that is an isogram" { assert_eq(is_isogram("Emily Jung Schwartzkopf"), true) }
+test "duplicated character in the middle" { assert_eq(is_isogram("accentor"), false) }
+test "same first and last characters" { assert_eq(is_isogram("angola"), false) }

@@ -5,9 +5,24 @@
   "target": "rust",
   "model": "haiku",
   "exercises": 25,
-  "passed": 25,
-  "failed": 0,
-  "check_failures": 0,
-  "test_failures": 0,
-  "msr": 1.0
+  "passed": 12,
+  "failed": 13,
+  "check_failures": 10,
+  "test_failures": 3,
+  "msr": 0.48,
+  "failures": [
+    {"name": "affine-cipher", "stage": "check", "error": "nested fn inside function body"},
+    {"name": "collatz", "stage": "check", "error": "nested fn inside function body"},
+    {"name": "config-merger", "stage": "check", "error": "nested fn inside function body"},
+    {"name": "data-table", "stage": "test", "error": "test assertion failure"},
+    {"name": "grade-report", "stage": "check", "error": "DotDotDot pattern not supported"},
+    {"name": "isbn-verifier", "stage": "check", "error": "undefined function string.char_code"},
+    {"name": "isogram", "stage": "check", "error": "undefined function string.to_lowercase"},
+    {"name": "markdown-renderer", "stage": "check", "error": "non-exhaustive match"},
+    {"name": "named-things", "stage": "test", "error": "test assertion failure"},
+    {"name": "phone-number", "stage": "check", "error": "undefined function string.to_list"},
+    {"name": "pipeline", "stage": "check", "error": "let mut is not valid in Almide"},
+    {"name": "roman-numerals", "stage": "check", "error": "nested fn inside function body"},
+    {"name": "todo-app", "stage": "test", "error": "test assertion failure"}
+  ]
 }

@@ -1,0 +1,42 @@
+fn is_valid(isbn: String) -> Bool = {
+  let clean = string.replace(isbn, "-", "")
+  guard string.len(clean) == 10 else false
+  
+  let chars = string.chars(clean)
+  let is_digit = (c: String) => {
+    let code = string.char_code(c)
+    code >= 48 and code <= 57
+  }
+  
+  let valid_chars = chars |> list.enumerate |> list.all((entry) => {
+    let (idx, c) = entry
+    if idx < 9 then is_digit(c) else c == "X" or is_digit(c)
+  })
+  guard valid_chars else false
+  
+  let sum = chars |> list.enumerate |> list.fold(0, (acc, entry) => {
+    let (idx, c) = entry
+    let weight = 10 - idx
+    let value = if c == "X" then 10 else string.char_code(c) - 48
+    acc + value * weight
+  })
+  
+  sum % 11 == 0
+}
+
+test "valid isbn" { assert_eq(is_valid("3-598-21508-8"), true) }
+test "invalid isbn check digit" { assert_eq(is_valid("3-598-21508-9"), false) }
+test "valid isbn with X check digit" { assert_eq(is_valid("3-598-21507-X"), true) }
+test "invalid isbn with X not at end" { assert_eq(is_valid("3-598-2X507-0"), false) }
+test "valid isbn without dashes" { assert_eq(is_valid("3598215088"), true) }
+test "invalid isbn without dashes" { assert_eq(is_valid("3598215089"), false) }
+test "too short" { assert_eq(is_valid("3-598-2150"), false) }
+test "too long" { assert_eq(is_valid("3-598-21508-88"), false) }
+test "empty" { assert_eq(is_valid(""), false) }
+test "invalid characters" { assert_eq(is_valid("3-598-abc-8"), false) }
+test "valid with X check digit no dashes" { assert_eq(is_valid("359821507X"), true) }
+test "invalid with letters" { assert_eq(is_valid("3-598-P1581-X"), false) }
+test "X only at end" { assert_eq(is_valid("X-598-21507-0"), false) }
+test "all valid isbns" {
+  assert_eq(is_valid("0-306-40615-2"), true)
+}

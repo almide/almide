@@ -1,0 +1,11 @@
+let TABLE = [
+  { id: 1, name: "alpha", value: 10 },
+  { id: 2, name: "beta", value: 20 },
+  { id: 3, name: "gamma", value: 25 }
+]
+
+fn pluck_ids(rows: List[Row]) -> List[Int] =
+  rows |> list.map((r) => r.id)
+
+fn find_by_id(rows: List[Row], id: Int) -> Option[Row] =
+  rows |> list.find((r) => r.id == id)

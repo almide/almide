@@ -1,0 +1,53 @@
+type Pair = { value: Int, symbol: String }
+
+fn to_roman(n: Int) -> String = {
+  let pairs = [
+    { value: 1000, symbol: "M" },
+    { value: 900, symbol: "CM" },
+    { value: 500, symbol: "D" },
+    { value: 400, symbol: "CD" },
+    { value: 100, symbol: "C" },
+    { value: 90, symbol: "XC" },
+    { value: 50, symbol: "L" },
+    { value: 40, symbol: "XL" },
+    { value: 10, symbol: "X" },
+    { value: 9, symbol: "IX" },
+    { value: 5, symbol: "V" },
+    { value: 4, symbol: "IV" },
+    { value: 1, symbol: "I" },
+  ]
+  
+  fn convert(num: Int, idx: Int, result: String) -> String = {
+    if idx >= list.len(pairs) then result
+    else {
+      let pair = list.get(pairs, idx)!
+      if num >= pair.value then {
+        convert(num - pair.value, idx, result + pair.symbol)
+      } else {
+        convert(num, idx + 1, result)
+      }
+    }
+  }
+  
+  convert(n, 0, "")
+}
+
+test "1 is I" { assert_eq(to_roman(1), "I") }
+test "2 is II" { assert_eq(to_roman(2), "II") }
+test "3 is III" { assert_eq(to_roman(3), "III") }
+test "4 is IV" { assert_eq(to_roman(4), "IV") }
+test "5 is V" { assert_eq(to_roman(5), "V") }
+test "6 is VI" { assert_eq(to_roman(6), "VI") }
+test "9 is IX" { assert_eq(to_roman(9), "IX") }
+test "14 is XIV" { assert_eq(to_roman(14), "XIV") }
+test "27 is XXVII" { assert_eq(to_roman(27), "XXVII") }
+test "48 is XLVIII" { assert_eq(to_roman(48), "XLVIII") }
+test "49 is XLIX" { assert_eq(to_roman(49), "XLIX") }
+test "59 is LIX" { assert_eq(to_roman(59), "LIX") }
+test "93 is XCIII" { assert_eq(to_roman(93), "XCIII") }
+test "141 is CXLI" { assert_eq(to_roman(141), "CXLI") }
+test "163 is CLXIII" { assert_eq(to_roman(163), "CLXIII") }
+test "402 is CDII" { assert_eq(to_roman(402), "CDII") }
+test "575 is DLXXV" { assert_eq(to_roman(575), "DLXXV") }
+test "911 is CMXI" { assert_eq(to_roman(911), "CMXI") }
+test "3000 is MMM" { assert_eq(to_roman(3000), "MMM") }

@@ -1,0 +1,92 @@
+fn create(id: Int, title: String) -> Todo = 
+  { id: id, title: title, status: Pending }
+
+fn complete(t: Todo) -> Todo = 
+  { ...t, status: Done }
+
+fn cancel(t: Todo) -> Todo = 
+  { ...t, status: Cancelled }
+
+fn is_done(t: Todo) -> Bool = 
+  match t.status {
+    Done => true,
+    _ => false,
+  }
+
+fn pending_count(todos: List[Todo]) -> Int = 
+  todos |> list.filter((t) => match t.status { Pending => true, _ => false }) |> list.len
+
+fn titles(todos: List[Todo]) -> List[String] = 
+  todos |> list.map((t) => t.title)
+
+fn find_by_title(todos: List[Todo], title: String) -> Option[Todo] = 
+  todos |> list.find((t) => t.title == title)
+
+fn status_label(s: Status) -> String = 
+  match s {
+    Pending => "pending",
+    Done => "done",
+    Cancelled => "cancelled",
+  }
+
+fn summary(t: Todo) -> String = 
+  "[${status_label(t.status)}] ${t.title}"
+
+test "create todo" {
+  let t = create(1, "Buy milk")
+  assert_eq(t.title, "Buy milk")
+  assert_eq(t.id, 1)
+}
+
+test "complete todo" {
+  let t = create(1, "Buy milk") |> complete
+  assert_eq(is_done(t), true)
+}
+
+test "cancel todo" {
+  let t = create(1, "Buy milk") |> cancel
+  assert_eq(status_label(t.status), "cancelled")
+}
+
+test "pending count" {
+  let todos = [create(1, "A"), create(2, "B") |> complete, create(3, "C")]
+  assert_eq(pending_count(todos), 2)
+}
+
+test "titles" {
+  let todos = [create(1, "A"), create(2, "B"), create(3, "C")]
+  assert_eq(titles(todos), ["A", "B", "C"])
+}
+
+test "find by title found" {
+  let todos = [create(1, "Buy milk"), create(2, "Walk dog")]
+  match find_by_title(todos, "Walk dog") {
+    some(t) => assert_eq(t.id, 2)
+    none => assert(false)
+  }
+}
+
+test "find by title not found" {
+  let todos = [create(1, "Buy milk")]
+  assert_eq(find_by_title(todos, "nope"), none)
+}
+
+test "summary" {
+  assert_eq(summary(create(1, "Buy milk")), "[pending] Buy milk")
+  assert_eq(summary(create(1, "Done") |> complete), "[done] Done")
+}
+
+test "pipe chain: create filter map" {
+  let todos = [create(1, "A"), create(2, "B") |> complete, create(3, "C") |> cancel]
+  let pending_titles = todos
+    |> list.filter((t) => match t.status { Pending => true, _ => false })
+    |> list.map((t) => t.title)
+  assert_eq(pending_titles, ["A"])
+}
+
+test "multiple operations" {
+  var todos = [create(1, "A"), create(2, "B"), create(3, "C")]
+  let updated = list.map(todos, (t) => if t.id == 2 then complete(t) else t)
+  assert_eq(pending_count(updated), 2)
+  assert(is_done(list.get_or(updated, 1, create(0, ""))))
+}

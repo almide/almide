@@ -1,0 +1,50 @@
+type Token =
+  | Heading(Int, String)
+  | Paragraph(String)
+  | Bullet(String)
+  | Divider
+
+fn parse_line(line: String) -> Token =
+  if string.starts_with(line, "### ") then
+    Heading(3, string.slice(line, 4, string.len(line)))
+  else if string.starts_with(line, "## ") then
+    Heading(2, string.slice(line, 3, string.len(line)))
+  else if string.starts_with(line, "# ") then
+    Heading(1, string.slice(line, 2, string.len(line)))
+  else if string.starts_with(line, "- ") then
+    Bullet(string.slice(line, 2, string.len(line)))
+  else if line == "---" then
+    Divider
+  else
+    Paragraph(line)
+
+fn render(token: Token) -> String =
+  match token {
+    Heading(1, text) => {
+      let upper = string.to_upper(text)
+      let underline = string.repeat("=", string.len(upper))
+      "${upper}\n${underline}"
+    },
+    Heading(2, text) => {
+      let underline = string.repeat("-", string.len(text))
+      "${text}\n${underline}"
+    },
+    Heading(3, text) => {
+      let underline = string.repeat("~", string.len(text))
+      "${text}\n${underline}"
+    },
+    Paragraph(text) => "  ${text}",
+    Bullet(item) => "  * ${item}",
+    Divider => "---",
+  }
+
+test "h1" { assert_eq(parse_line("# Hello"), Heading(1, "Hello")) }
+test "h2" { assert_eq(parse_line("## World"), Heading(2, "World")) }
+test "h3" { assert_eq(parse_line("### Sub"), Heading(3, "Sub")) }
+test "bullet" { assert_eq(parse_line("- item"), Bullet("item")) }
+test "divider" { assert_eq(parse_line("---"), Divider) }
+test "paragraph" { assert_eq(parse_line("plain text"), Paragraph("plain text")) }
+test "render h1" { assert_eq(render(Heading(1, "Hi")), "HI\n==") }
+test "render h2" { assert_eq(render(Heading(2, "Hi")), "Hi\n--") }
+test "render paragraph" { assert_eq(render(Paragraph("text")), "  text") }
+test "render bullet" { assert_eq(render(Bullet("item")), "  * item") }
