@@ -129,7 +129,16 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             // not expressions), so construct IR directly without calling lower_expr.
             let (kind, ty) = match &value.kind {
                 ast::ExprKind::Int { raw, .. } => {
-                    let v = raw.parse::<i64>().unwrap_or(0);
+                    let clean = raw.replace('_', "");
+                    let v = if clean.starts_with("0x") || clean.starts_with("0X") {
+                        i64::from_str_radix(&clean[2..], 16).unwrap_or(0)
+                    } else if clean.starts_with("0b") || clean.starts_with("0B") {
+                        i64::from_str_radix(&clean[2..], 2).unwrap_or(0)
+                    } else if clean.starts_with("0o") || clean.starts_with("0O") {
+                        i64::from_str_radix(&clean[2..], 8).unwrap_or(0)
+                    } else {
+                        clean.parse::<i64>().unwrap_or(0)
+                    };
                     (IrExprKind::LitInt { value: v }, Ty::Int)
                 }
                 ast::ExprKind::Float { value: v, .. } => (IrExprKind::LitFloat { value: *v }, Ty::Float),

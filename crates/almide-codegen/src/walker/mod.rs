@@ -305,6 +305,16 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             }
         }
     }
+    // Also register constructors from imported modules
+    for module in &program.modules {
+        for td in &module.type_decls {
+            if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                for c in cases {
+                    ctx.ann.ctor_to_enum.insert(c.name.to_string(), td.name.to_string());
+                }
+            }
+        }
+    }
 
     // Build anonymous record maps (populated by target-specific pipeline)
     ctx.ann.named_records = collect_named_records(program);
