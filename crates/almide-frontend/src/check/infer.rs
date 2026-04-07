@@ -786,9 +786,11 @@ impl Checker {
             ast::Pattern::Ident { name } => { self.env.define_var(name, ty.clone()); }
             ast::Pattern::Constructor { name, args } => {
                 let resolved = self.env.resolve_named(ty);
+                // Normalize module-qualified names: "binary.Unreachable" → "Unreachable"
+                let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
                 let payload_tys: Vec<Ty> = match &resolved {
                     Ty::Variant { cases, .. } => cases.iter()
-                        .find(|c| c.name == *name)
+                        .find(|c| c.name == bare_name)
                         .map(|c| match &c.payload {
                             VariantPayload::Tuple(tys) => tys.clone(),
                             _ => vec![],

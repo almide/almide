@@ -153,13 +153,14 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Literal { expr: ir_expr }
         }
         ast::Pattern::Constructor { name, args } => {
-            let payload_tys = get_constructor_payload_tys_from_subject(ctx, name, ty);
+            // Normalize module-qualified names: "binary.Unreachable" → "Unreachable"
+            let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
+            let payload_tys = get_constructor_payload_tys_from_subject(ctx, &bare_name, ty);
             let ir_args = args.iter().enumerate().map(|(i, a)| {
                 let arg_ty = payload_tys.get(i).cloned().unwrap_or(Ty::Unknown);
-                let p = lower_pattern(ctx, a, &arg_ty);
-                p
+                lower_pattern(ctx, a, &arg_ty)
             }).collect();
-            IrPattern::Constructor { name: name.to_string(), args: ir_args }
+            IrPattern::Constructor { name: bare_name.to_string(), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } => {
             let ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {

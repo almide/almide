@@ -1,7 +1,7 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
 use crate::ast::ExprKind;
-use crate::intern::sym;
+use crate::intern::{Sym, sym};
 use super::Parser;
 
 impl Parser {
@@ -99,6 +99,15 @@ impl Parser {
         if self.check(TokenType::TypeName) {
             return self.parse_constructor_pattern();
         }
+        // Module-qualified constructor pattern: module.TypeName (e.g. binary.Unreachable)
+        if self.check(TokenType::Ident) && self.peek_dot_type_name() {
+            let module = self.advance_and_get_sym();
+            self.advance(); // skip '.'
+            // Merge into a single constructor name for downstream resolution
+            let ctor = self.advance_and_get_sym();
+            let name = sym(&format!("{}.{}", module, ctor));
+            return self.parse_constructor_pattern_with_name(name);
+        }
         if self.check(TokenType::Ident) {
             let name = sym(&self.current().value);
             self.advance();
@@ -119,6 +128,10 @@ impl Parser {
     fn parse_constructor_pattern(&mut self) -> Result<Pattern, String> {
         let name = sym(&self.current().value);
         self.advance();
+        self.parse_constructor_pattern_with_name(name)
+    }
+
+    fn parse_constructor_pattern_with_name(&mut self, name: Sym) -> Result<Pattern, String> {
         if self.check(TokenType::LParen) {
             self.advance();
             let mut args = Vec::new();

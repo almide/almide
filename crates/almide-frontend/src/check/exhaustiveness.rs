@@ -58,10 +58,15 @@ fn lower(pat: &ast::Pattern) -> Pat {
     match pat {
         ast::Pattern::Wildcard | ast::Pattern::Ident { .. } => Pat::Wild,
         ast::Pattern::Constructor { name, args, .. } => {
-            Pat::Ctor(CtorId::Variant(*name), args.iter().map(lower).collect())
+            // Normalize module-qualified names: "binary.Unreachable" → "Unreachable"
+            let bare = name.as_str().rsplit_once('.').map(|(_, b)| almide_base::intern::sym(b)).unwrap_or(*name);
+            Pat::Ctor(CtorId::Variant(bare), args.iter().map(lower).collect())
         }
         // Record variant: constructor-level only (field depth deferred to Phase 4).
-        ast::Pattern::RecordPattern { name, .. } => Pat::Ctor(CtorId::Variant(*name), vec![]),
+        ast::Pattern::RecordPattern { name, .. } => {
+            let bare = name.as_str().rsplit_once('.').map(|(_, b)| almide_base::intern::sym(b)).unwrap_or(*name);
+            Pat::Ctor(CtorId::Variant(bare), vec![])
+        }
         ast::Pattern::Some { inner, .. } => Pat::Ctor(CtorId::Some, vec![lower(inner)]),
         ast::Pattern::None => Pat::Ctor(CtorId::None, vec![]),
         ast::Pattern::Ok { inner, .. } => Pat::Ctor(CtorId::Ok, vec![lower(inner)]),
