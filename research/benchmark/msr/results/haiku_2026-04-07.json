@@ -1,0 +1,13 @@
+{
+  "date": "2026-04-07",
+  "language": "almide",
+  "target": "rust",
+  "model": "haiku",
+  "exercises": 25,
+  "passed": 14,
+  "failed": 11,
+  "check_failures": 9,
+  "test_failures": 2,
+  "msr": .56,
+  "results": [{"name":"affine-cipher","passed":false,"error":"type_check"},{"name":"bob","passed":true},{"name":"calculator","passed":true},{"name":"collatz-conjecture","passed":false,"error":"type_check"},{"name":"collatz","passed":true},{"name":"config-merger","passed":false,"error":"type_check"},{"name":"data-table","passed":true},{"name":"expression-eval","passed":true},{"name":"grade-report","passed":false,"error":"type_check"},{"name":"hamming","passed":true},{"name":"isbn-verifier","passed":false,"error":"test_fail"},{"name":"isogram","passed":false,"error":"type_check"},{"name":"json-config","passed":false,"error":"type_check"},{"name":"markdown-renderer","passed":false,"error":"type_check"},{"name":"named-things","passed":false,"error":"type_check"},{"name":"pangram","passed":true},{"name":"phone-number","passed":true},{"name":"pipeline","passed":true},{"name":"raindrops","passed":true},{"name":"roman-numerals","passed":true},{"name":"scrabble-score","passed":false,"error":"type_check"},{"name":"sortable","passed":true},{"name":"todo-app","passed":true},{"name":"traffic-light","passed":true},{"name":"wasm-smoke","passed":false,"error":"zero_tests"}]
+}

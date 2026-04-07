@@ -2,74 +2,84 @@ fn gcd(a: Int, b: Int) -> Int =
   if b == 0 then a else gcd(b, a % b)
 
 fn mod_inverse(a: Int, m: Int) -> Int = {
-  fn extended_gcd(a: Int, b: Int) -> (Int, Int, Int) =
-    if b == 0 then (a, 1, 0)
-    else {
-      let (g, x1, y1) = extended_gcd(b, a % b)
-      (g, y1, x1 - (a / b) * y1)
-    }
-  
-  let (g, x, _) = extended_gcd(a, m)
-  if g == 1 then ((x % m) + m) % m else -1
+  var result = 0
+  for i in 1..m {
+    if (a * i) % m == 1 then result = i
+  }
+  result
 }
 
 fn char_to_num(c: String) -> Int = {
-  let code = string.char_code(c, 0)
-  code - string.char_code("a", 0)
+  let code = string.code_at(c, 0) ?? 0
+  code - 97
 }
 
-fn num_to_char(n: Int) -> String = {
-  let normalized = ((n % 26) + 26) % 26
-  string.from_char_code(normalized + string.char_code("a", 0))
-}
-
-fn is_letter(c: String) -> Bool = {
-  let lower = string.to_lower(c)
-  let code = string.char_code(lower, 0)
-  code >= string.char_code("a", 0) and code <= string.char_code("z", 0)
-}
-
-fn is_digit(c: String) -> Bool = {
-  let code = string.char_code(c, 0)
-  code >= string.char_code("0", 0) and code <= string.char_code("9", 0)
-}
-
-fn process_char(c: String, a: Int, b: Int, decode: Bool) -> String = {
-  if is_letter(c) then {
-    let x = char_to_num(c)
-    let y = if decode then (a * (x - b)) % 26 else (a * x + b) % 26
-    num_to_char(y)
-  } else if is_digit(c) or c == " " then c
-  else ""
-}
+fn num_to_char(n: Int) -> String =
+  string.from_code((n % 26) + 97)
 
 effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = {
   guard gcd(a, 26) == 1 else err("a and m must be coprime")
   
-  let lower = string.to_lower(text)
-  let chars = string.split(lower, "")
+  let alphabet_size = 26
+  let lower_text = string.to_lower(text)
   
-  let encoded = chars
-    |> list.map((c) => process_char(c, a, b, false))
-    |> list.join("")
+  var filtered_and_encoded: String = ""
+  for i in 0..string.len(lower_text) {
+    let ch = string.slice(lower_text, i, i + 1)
+    let code = string.code_at(ch, 0) ?? 0
+    if code >= 48 and code <= 57 then {
+      filtered_and_encoded = filtered_and_encoded + ch
+    } else if code >= 97 and code <= 122 then {
+      let x = code - 97
+      let y = (a * x + b) % alphabet_size
+      filtered_and_encoded = filtered_and_encoded + string.from_code(y + 97)
+    }
+  }
   
-  ok(encoded)
+  var result: String = ""
+  for i in 0..string.len(filtered_and_encoded) {
+    if i > 0 and i % 5 == 0 then
+      result = result + " "
+    result = result + string.slice(filtered_and_encoded, i, i + 1)
+  }
+  
+  ok(result)
 }
 
 effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = {
   guard gcd(a, 26) == 1 else err("a and m must be coprime")
   
-  let a_inv = mod_inverse(a, 26)
-  guard a_inv != -1 else err("a and m must be coprime")
+  let alphabet_size = 26
+  let a_inv = mod_inverse(a, alphabet_size)
   
-  let chars = string.split(text, "")
+  var no_spaces: String = ""
+  for i in 0..string.len(text) {
+    let ch = string.slice(text, i, i + 1)
+    if ch != " " then
+      no_spaces = no_spaces + ch
+  }
   
-  let decoded = chars
-    |> list.map((c) => process_char(c, a_inv, b, true))
-    |> list.join("")
-    |> string.trim
+  var result: String = ""
+  for i in 0..string.len(no_spaces) {
+    let ch = string.slice(no_spaces, i, i + 1)
+    let code = string.code_at(ch, 0)
+    match code {
+      some(c) => {
+        if c >= 48 and c <= 57 then {
+          result = result + ch
+        } else if c >= 97 and c <= 122 then {
+          let y = c - 97
+          let x = ((a_inv * (y - b)) % alphabet_size + alphabet_size) % alphabet_size
+          result = result + string.from_code(x + 97)
+        } else {
+          result = result + ch
+        }
+      },
+      none => {},
+    }
+  }
   
-  ok(decoded)
+  ok(result)
 }
 
 test "encode yes" { assert_eq(encode(5, 7, "yes"), ok("xbt")) }

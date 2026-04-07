@@ -1,109 +1,92 @@
 import fs
 import string
 import list
-import set
 
 fn parse_config(content: String) -> Result[List[List[String]], String] = {
   let lines = string.split(content, "\n")
+  var pairs: List[List[String]] = []
+  var keys_seen: Set[String] = set.new()
+  var line_num = 0
   
-  fn parse_lines(idx: Int, pairs: List[List[String]], seen: Set[String]) -> Result[List[List[String]], String] = {
-    match list.get(lines, idx) {
-      some(line) => {
-        let trimmed = string.trim(line)
-        let line_num = idx + 1
-        
-        if string.len(trimmed) == 0 then
-          parse_lines(idx + 1, pairs, seen)
-        else if string.starts_with(trimmed, "#") then
-          parse_lines(idx + 1, pairs, seen)
-        else {
-          let parts = string.split(trimmed, "=")
-          if list.len(parts) < 2 then
-            err("line ${int.to_string(line_num)}: missing '='")
-          else {
-            let key = list.get(parts, 0) ?? ""
-            if string.len(key) == 0 then
-              err("line ${int.to_string(line_num)}: empty key")
-            else if set.contains(seen, key) then
-              err("line ${int.to_string(line_num)}: duplicate key: ${key}")
-            else {
-              let value = list.slice(parts, 1, list.len(parts)) |> list.join("=")
-              parse_lines(idx + 1, pairs + [[key, value]], set.insert(seen, key))
-            }
-          }
+  for line in lines {
+    line_num = line_num + 1
+    let trimmed = string.trim(line)
+    
+    if not (string.is_empty(trimmed) or string.starts_with(trimmed, "#")) then {
+      let parts = string.split(trimmed, "=")
+      match list.get(parts, 0) {
+        some(key) => {
+          let key_trimmed = string.trim(key)
+          guard not string.is_empty(key_trimmed) else err("line ${int.to_string(line_num)}: empty key")
+          guard not set.contains(keys_seen, key_trimmed) else err("line ${int.to_string(line_num)}: duplicate key: ${key_trimmed}")
+          
+          let value_parts = list.skip(parts, 1)
+          let value = string.join(value_parts, "=")
+          keys_seen = set.insert(keys_seen, key_trimmed)
+          pairs = pairs + [[key_trimmed, value]]
+        },
+        none => {
+          guard false else err("line ${int.to_string(line_num)}: missing '='")
         }
-      },
-      none => ok(pairs),
+      }
     }
   }
   
-  parse_lines(0, [], set.empty())
+  ok(pairs)
 }
 
 fn merge_configs(base: List[List[String]], overlay: List[List[String]]) -> List[List[String]] = {
-  let overlay_map: Map[String, String] = [:]
-  var om: Map[String, String] = [:]
-  for entry in overlay {
-    match entry {
-      [k, v] => om = om + [(k, v)],
-      _ => {},
-    }
-  }
-  
-  let merged = base |> list.map((entry) => {
-    match entry {
-      [k, v] => [k, om[k] ?? v],
-      _ => entry,
+  let merged_base = list.map(base, (pair) => {
+    let key = list.get(pair, 0) ?? ""
+    match list.find(overlay, (op) => (list.get(op, 0) ?? "") == key) {
+      some(op) => op,
+      none => pair
     }
   })
   
-  let new_keys = overlay |> list.filter_map((entry) => {
-    match entry {
-      [k, _v] => {
-        let found = base |> list.any((e) => match e { [ek, _ev] => ek == k, _ => false })
-        if found then none else some([k, om[k] ?? ""])
-      },
-      _ => none,
-    }
+  let new_from_overlay = list.filter(overlay, (pair) => {
+    let key = list.get(pair, 0) ?? ""
+    not list.any(base, (bp) => (list.get(bp, 0) ?? "") == key)
   })
   
-  merged + new_keys
+  merged_base + new_from_overlay
 }
 
 fn serialize_config(pairs: List[List[String]]) -> String = {
   pairs
-    |> list.map((entry) => {
-      match entry {
-        [k, v] => "${k}=${v}",
-        _ => "",
-      }
+    |> list.map((pair) => {
+      let key = list.get(pair, 0) ?? ""
+      let value = list.get(pair, 1) ?? ""
+      key + "=" + value
     })
-    |> list.join("\n")
+    |> string.join("\n")
 }
 
 effect fn load_config(path: String) -> Result[List[List[String]], String] = {
-  let content = fs.read_text(path).map_err((e) => e)!
-  parse_config(content).map_err((e) => "${path}: ${e}")
+  let content = fs.read_text(path)!
+  match parse_config(content) {
+    ok(config) => ok(config),
+    err(e) => err(path + ": " + e)
+  }
 }
 
 effect fn save_config(path: String, pairs: List[List[String]]) -> Result[Unit, String] = {
   let content = serialize_config(pairs)
-  fs.write(path, content).map_err((e) => e)!
-  ok(())
+  fs.write(path, content)
 }
 
 effect fn merge_files(paths: List[String]) -> Result[List[List[String]], String] = {
-  fn merge_from_list(idx: Int, acc: List[List[String]]) -> Result[List[List[String]], String] = {
-    match list.get(paths, idx) {
-      some(path) => {
-        let loaded = load_config(path)!
-        merge_from_list(idx + 1, merge_configs(acc, loaded))
-      },
-      none => ok(acc),
-    }
+  guard not list.is_empty(paths) else ok([])
+  
+  let first = list.get(paths, 0)!
+  var result = load_config(first)!
+  
+  for path in list.skip(paths, 1) {
+    let overlay = load_config(path)!
+    result = merge_configs(result, overlay)
   }
   
-  merge_from_list(0, [])
+  ok(result)
 }
 
 effect fn merge_and_save(paths: List[String], output: String) -> Result[Int, String] = {
@@ -113,17 +96,16 @@ effect fn merge_and_save(paths: List[String], output: String) -> Result[Int, Str
 }
 
 fn lookup(pairs: List[List[String]], key: String) -> Option[String] = {
-  pairs
-    |> list.find((entry) => match entry { [k, _v] => k == key, _ => false })
-    |> option.map((entry) => match entry { [_k, v] => v, _ => "" })
+  match list.find(pairs, (pair) => (list.get(pair, 0) ?? "") == key) {
+    some(pair) => list.get(pair, 1),
+    none => none
+  }
 }
 
 fn filter_by_prefix(pairs: List[List[String]], prefix: String) -> List[List[String]] = {
-  pairs |> list.filter((entry) => {
-    match entry {
-      [k, _v] => string.starts_with(k, prefix),
-      _ => false,
-    }
+  pairs |> list.filter((pair) => {
+    let key = list.get(pair, 0) ?? ""
+    string.starts_with(key, prefix)
   })
 }
 

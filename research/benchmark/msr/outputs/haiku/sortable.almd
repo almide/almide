@@ -3,7 +3,7 @@ type Product = { name: String, price: Int, stock: Int }
 type Keyed = { key: Int, label: String }
 
 fn sort_by_key(items: List[Keyed]) -> List[Keyed] =
-  list.sort_by(items, (a) => a.key)
+  list.sort_by(items, (x) => x.key)
 
 test "sort by key" {
   let items = [Keyed { key: 3, label: "c" }, Keyed { key: 1, label: "a" }, Keyed { key: 2, label: "b" }]

@@ -1,7 +1,19 @@
-type Pair = { value: Int, symbol: String }
+type Mapping = { value: Int, symbol: String }
+
+local fn convert_helper(remaining: Int, index: Int, mappings: List[Mapping], result: String) -> String = {
+  if index >= list.len(mappings) then
+    result
+  else {
+    let mapping = list.get(mappings, index) ?? { value: 0, symbol: "" }
+    if remaining >= mapping.value then
+      convert_helper(remaining - mapping.value, index, mappings, result + mapping.symbol)
+    else
+      convert_helper(remaining, index + 1, mappings, result)
+  }
+}
 
 fn to_roman(n: Int) -> String = {
-  let pairs = [
+  let mappings = [
     { value: 1000, symbol: "M" },
     { value: 900, symbol: "CM" },
     { value: 500, symbol: "D" },
@@ -16,20 +28,7 @@ fn to_roman(n: Int) -> String = {
     { value: 4, symbol: "IV" },
     { value: 1, symbol: "I" },
   ]
-  
-  fn convert(num: Int, idx: Int, result: String) -> String = {
-    if idx >= list.len(pairs) then result
-    else {
-      let pair = list.get(pairs, idx)!
-      if num >= pair.value then {
-        convert(num - pair.value, idx, result + pair.symbol)
-      } else {
-        convert(num, idx + 1, result)
-      }
-    }
-  }
-  
-  convert(n, 0, "")
+  convert_helper(n, 0, mappings, "")
 }
 
 test "1 is I" { assert_eq(to_roman(1), "I") }

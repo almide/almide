@@ -1,47 +1,53 @@
 effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] = {
-  let lines = string.split(input, "\n")
-  let mut pairs: List[(String, String)] = []
-  
+  let lines = string.split(input, "\n") |> list.filter((l) => string.len(l) > 0)
+  var result: List[(String, String)] = []
+  var has_error = false
+  var error_msg = ""
   for line in lines {
-    let trimmed = string.trim(line)
-    if string.len(trimmed) > 0 then {
-      let parts = string.split(trimmed, "=")
-      guard list.len(parts) == 2 else err("invalid line: ${trimmed}")!
+    let parts = string.split(line, "=")
+    if list.len(parts) != 2 then {
+      has_error = true
+      error_msg = "invalid line found"
+    } else {
       let key = list.get(parts, 0) ?? ""
       let value = list.get(parts, 1) ?? ""
-      pairs = pairs + [(key, value)]
+      if string.len(key) == 0 then {
+        has_error = true
+        error_msg = "empty key found"
+      } else {
+        result = result + [(key, value)]
+      }
     }
   }
-  
-  ok(pairs)
+  if has_error then err(error_msg) else ok(result)
 }
 
 effect fn validate_keys(pairs: List[(String, String)]) -> Result[List[(String, String)], String] = {
   for (key, value) in pairs {
-    guard string.len(key) > 0 else err("empty key found")!
+    guard string.len(key) > 0 else err("empty key found")
   }
   ok(pairs)
 }
 
 fn transform(pairs: List[(String, String)]) -> List[(String, String)] = {
-  pairs |> list.map((pair) => {
-    let (key, value) = pair
+  pairs |> list.map((entry) => {
+    let (key, value) = entry
     (string.to_upper(key), string.trim(value))
   })
 }
 
 fn format_output(pairs: List[(String, String)]) -> String = {
   pairs
-    |> list.map((pair) => {
-      let (key, value) = pair
+    |> list.map((entry) => {
+      let (key, value) = entry
       "${key}: ${value}"
     })
     |> list.join("\n")
 }
 
 effect fn run_pipeline(input: String) -> Result[String, String] = {
-  let parsed = parse_pairs(input)!
-  let validated = validate_keys(parsed)!
+  let pairs = parse_pairs(input)!
+  let validated = validate_keys(pairs)!
   let transformed = transform(validated)
   let output = format_output(transformed)
   ok(output)

@@ -1,40 +1,38 @@
-type Token =
-  | Heading(Int, String)
-  | Paragraph(String)
-  | Bullet(String)
-  | Divider
+fn count_hashes(line: String) -> Int =
+  if string.len(line) == 0 then 0
+  else if string.starts_with(line, "#") then 1 + count_hashes(string.slice(line, 1, string.len(line)))
+  else 0
+
+fn repeat_char(c: String, count: Int) -> String =
+  if count <= 0 then ""
+  else c + repeat_char(c, count - 1)
 
 fn parse_line(line: String) -> Token =
-  if string.starts_with(line, "### ") then
-    Heading(3, string.slice(line, 4, string.len(line)))
-  else if string.starts_with(line, "## ") then
-    Heading(2, string.slice(line, 3, string.len(line)))
-  else if string.starts_with(line, "# ") then
-    Heading(1, string.slice(line, 2, string.len(line)))
-  else if string.starts_with(line, "- ") then
-    Bullet(string.slice(line, 2, string.len(line)))
+  if string.starts_with(line, "#") then
+    let hash_count = count_hashes(line)
+    let content = string.trim(string.slice(line, hash_count, string.len(line)))
+    Heading(hash_count, content)
   else if line == "---" then
     Divider
+  else if string.starts_with(line, "- ") then
+    let content = string.slice(line, 2, string.len(line))
+    Bullet(content)
   else
     Paragraph(line)
 
 fn render(token: Token) -> String =
   match token {
     Heading(1, text) => {
-      let upper = string.to_upper(text)
-      let underline = string.repeat("=", string.len(upper))
-      "${upper}\n${underline}"
+      let upper_text = string.to_upper(text)
+      let underline = repeat_char("=", string.len(text))
+      "${upper_text}\n${underline}"
     },
-    Heading(2, text) => {
-      let underline = string.repeat("-", string.len(text))
-      "${text}\n${underline}"
-    },
-    Heading(3, text) => {
-      let underline = string.repeat("~", string.len(text))
+    Heading(_, text) => {
+      let underline = repeat_char("-", string.len(text))
       "${text}\n${underline}"
     },
     Paragraph(text) => "  ${text}",
-    Bullet(item) => "  * ${item}",
+    Bullet(text) => "  * ${text}",
     Divider => "---",
   }
 

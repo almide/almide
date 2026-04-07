@@ -1,25 +1,51 @@
 effect fn clean(input: String) -> Result[String, String] = {
-  let cleaned_digits = string.to_list(input)
-    |> list.filter((c) => string.contains("0123456789", c))
+  let digits = string.split(input, "") 
+    |> list.filter((c) => {
+      match c {
+        "0" => true,
+        "1" => true,
+        "2" => true,
+        "3" => true,
+        "4" => true,
+        "5" => true,
+        "6" => true,
+        "7" => true,
+        "8" => true,
+        "9" => true,
+        _ => false,
+      }
+    })
     |> list.join("")
   
-  let len = string.len(cleaned_digits)
-  guard len == 10 or len == 11 else err("incorrect number of digits")
+  let len = string.len(digits)
   
-  let final = match len {
-    11 => {
-      guard string.charAt(cleaned_digits, 0) == "1" else err("11 digits must start with 1")
-      string.substring(cleaned_digits, 1, 11)
-    },
-    _ => cleaned_digits,
+  if len == 11 then {
+    guard string.slice(digits, 0, 1) == "1" else err("11 digits must start with 1")
+    
+    let area_first = string.slice(digits, 1, 2)
+    guard area_first != "0" else err("area code cannot start with zero")
+    guard area_first != "1" else err("area code cannot start with one")
+    
+    let exchange_first = string.slice(digits, 4, 5)
+    guard exchange_first != "0" else err("exchange code cannot start with zero")
+    guard exchange_first != "1" else err("exchange code cannot start with one")
+    
+    ok(string.slice(digits, 1, 11))
   }
-  
-  guard string.charAt(final, 0) != "0" else err("area code cannot start with zero")
-  guard string.charAt(final, 0) != "1" else err("area code cannot start with one")
-  guard string.charAt(final, 3) != "0" else err("exchange code cannot start with zero")
-  guard string.charAt(final, 3) != "1" else err("exchange code cannot start with one")
-  
-  ok(final)
+  else if len == 10 then {
+    let area_first = string.slice(digits, 0, 1)
+    guard area_first != "0" else err("area code cannot start with zero")
+    guard area_first != "1" else err("area code cannot start with one")
+    
+    let exchange_first = string.slice(digits, 3, 4)
+    guard exchange_first != "0" else err("exchange code cannot start with zero")
+    guard exchange_first != "1" else err("exchange code cannot start with one")
+    
+    ok(digits)
+  }
+  else {
+    err("incorrect number of digits")
+  }
 }
 
 test "cleans number" { assert_eq(clean("(223) 456-7890"), ok("2234567890")) }

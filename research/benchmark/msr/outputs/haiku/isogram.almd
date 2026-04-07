@@ -1,13 +1,22 @@
 fn is_isogram(phrase: String) -> Bool = {
-  let letters = phrase
-    |> string.to_lowercase
-    |> string.split(_, "")
-    |> list.filter(_, (c) => {
-      let code = string.char_code(c)
-      code >= 97 and code <= 122
-    })
-  
-  list.len(letters) == (letters |> list.to_set |> set.len)
+  let lower = string.to_lower(phrase)
+  check_isogram(lower, set.new(), 0)
+}
+
+local fn check_isogram(text: String, seen: Set[String], idx: Int) -> Bool = {
+  if idx >= string.len(text) then true
+  else {
+    let c = string.slice(text, idx, idx + 1)
+    let code = string.char_code(c)
+    let is_letter = code >= 97 and code <= 122
+    
+    if not is_letter then
+      check_isogram(text, seen, idx + 1)
+    else if set.contains(seen, c) then
+      false
+    else
+      check_isogram(text, set.insert(seen, c), idx + 1)
+  }
 }
 
 test "empty string" { assert_eq(is_isogram(""), true) }

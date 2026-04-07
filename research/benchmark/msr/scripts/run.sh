@@ -10,7 +10,7 @@
 #
 # Prerequisites:
 #   - claude CLI installed and authenticated
-#   - msr/prompts/ populated (run extract.sh first)
+#   - research/benchmark/msr/prompts/ populated (run extract.sh first)
 
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -28,8 +28,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PROMPT_DIR="msr/prompts"
-OUTPUT_DIR="msr/outputs/$MODEL"
+PROMPT_DIR="research/benchmark/msr/prompts"
+OUTPUT_DIR="research/benchmark/msr/outputs/$MODEL"
 CHEATSHEET="docs/CHEATSHEET.md"
 
 mkdir -p "$OUTPUT_DIR"
@@ -53,14 +53,14 @@ IMPORTANT RULES:
 
 # Collect exercises to run
 if [ -n "$EXERCISE" ]; then
-  PROMPTS="$PROMPT_DIR/$EXERCISE.almd"
+  PROMPTS="$PROMPT_DIR/$EXERCISE.almd.prompt"
   if [ ! -f "$PROMPTS" ]; then
     echo "Exercise not found: $PROMPTS"
     exit 1
   fi
   PROMPTS_LIST="$PROMPTS"
 else
-  PROMPTS_LIST=$(ls "$PROMPT_DIR"/*.almd 2>/dev/null)
+  PROMPTS_LIST=$(ls "$PROMPT_DIR"/*.almd.prompt 2>/dev/null)
 fi
 
 PASS=0
@@ -77,7 +77,7 @@ echo "╚═══════════════════════�
 echo ""
 
 for prompt_file in $PROMPTS_LIST; do
-  name=$(basename "$prompt_file" .almd)
+  name=$(basename "$prompt_file" .almd.prompt)
   output_file="$OUTPUT_DIR/${name}.almd"
   TOTAL=$((TOTAL + 1))
 
@@ -95,10 +95,10 @@ for prompt_file in $PROMPTS_LIST; do
 
 Implement the functions above (replace \`todo\` with working code). Output ONLY the complete .almd file."
 
-  claude --model "$MODEL" --print -s "$SYSTEM_PROMPT" "$PROMPT" > "$output_file" 2>/dev/null || true
+  claude --model "$MODEL" --print --system-prompt "$SYSTEM_PROMPT" "$PROMPT" > "$output_file" 2>/dev/null || true
 
-  # Strip markdown code fences if present
-  sed -i.bak '/^```/d' "$output_file" 2>/dev/null && rm -f "${output_file}.bak" || true
+  # Strip markdown code fences (ERE for macOS; match ```almide, ```almd, or bare ```)
+  sed -i.bak -E '/^```(almide|almd)?$/d' "$output_file" 2>/dev/null && rm -f "${output_file}.bak" || true
 
   # Verify: type check
   if ! almide check "$output_file" > /dev/null 2>&1; then
@@ -109,16 +109,22 @@ Implement the functions above (replace \`todo\` with working code). Output ONLY 
     continue
   fi
 
-  # Verify: run tests
-  if almide test "$output_file" > /dev/null 2>&1; then
-    echo "✅"
-    PASS=$((PASS + 1))
-    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":true},"
-  else
+  # Verify: run tests + detect 0-test false positive
+  TEST_OUTPUT=$(almide test "$output_file" 2>&1) && TEST_EXIT=0 || TEST_EXIT=$?
+  if [ "$TEST_EXIT" -ne 0 ]; then
     echo "❌ test failed"
     FAIL=$((FAIL + 1))
     TEST_FAIL=$((TEST_FAIL + 1))
     RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":false,\"error\":\"test_fail\"},"
+  elif echo "$TEST_OUTPUT" | grep -q "ok\. 0 passed"; then
+    echo "❌ 0 tests detected (code fence or parse issue)"
+    FAIL=$((FAIL + 1))
+    TEST_FAIL=$((TEST_FAIL + 1))
+    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":false,\"error\":\"zero_tests\"},"
+  else
+    echo "✅"
+    PASS=$((PASS + 1))
+    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":true},"
   fi
 done
 
@@ -143,7 +149,7 @@ echo "  │  MSR: ${MSR}%             │"
 echo "  └─────────────────────┘"
 
 # Save JSON result
-RESULTS_DIR="msr/results"
+RESULTS_DIR="research/benchmark/msr/results"
 mkdir -p "$RESULTS_DIR"
 DATE=$(date +%Y-%m-%d)
 RESULTS="${RESULTS%,}"

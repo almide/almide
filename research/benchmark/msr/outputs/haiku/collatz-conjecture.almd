@@ -1,18 +1,19 @@
 import string
 import list
 
-// Calculate the number of steps to reach 1 using the Collatz conjecture
-// If n is even: n / 2
-// If n is odd: 3 * n + 1
-// Return err for non-positive numbers
 fn steps(n: Int) -> Result[Int, String] =
-  if n <= 0 then err("Only positive integers are allowed")
-  else ok(count_steps(n))
+  if n <= 0 then
+    err("Only positive integers are allowed")
+  else
+    ok(steps_helper(n))
 
-local fn count_steps(n: Int) -> Int =
-  if n == 1 then 0
-  else if n % 2 == 0 then 1 + count_steps(n / 2)
-  else 1 + count_steps(3 * n + 1)
+local fn steps_helper(n: Int) -> Int =
+  if n == 1 then
+    0
+  else if int.mod(n, 2) == 0 then
+    1 + steps_helper(int.div(n, 2))
+  else
+    1 + steps_helper(3 * n + 1)
 
 test "zero steps for one" {
   assert_eq(steps(1), ok(0))

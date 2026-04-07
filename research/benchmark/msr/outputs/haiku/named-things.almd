@@ -1,28 +1,31 @@
 protocol Named {
-  fn get_name(obj: Self) -> String
-  fn set_name_value(obj: Self, name: String) -> Self
+  fn name_get(x: Self) -> String
+  fn name_set(x: Self, name: String) -> Self
 }
 
-type Dog: Named = { name: String, breed: String }
-fn Dog.get_name(d: Dog) -> String = d.name
-fn Dog.set_name_value(d: Dog, n: String) -> Dog = { ...d, name: n }
+type Dog = { name: String, breed: String }
+type Dog: Named
+fn Dog.name_get(d: Dog) -> String = d.name
+fn Dog.name_set(d: Dog, name: String) -> Dog = { ...d, name: name }
 
-type Person: Named = { name: String, age: Int, email: String }
-fn Person.get_name(p: Person) -> String = p.name
-fn Person.set_name_value(p: Person, n: String) -> Person = { ...p, name: n }
+type Person = { name: String, age: Int, email: String }
+type Person: Named
+fn Person.name_get(p: Person) -> String = p.name
+fn Person.name_set(p: Person, name: String) -> Person = { ...p, name: name }
 
-type City: Named = { name: String, population: Int, country: String }
-fn City.get_name(c: City) -> String = c.name
-fn City.set_name_value(c: City, n: String) -> City = { ...c, name: n }
+type City = { name: String, population: Int, country: String }
+type City: Named
+fn City.name_get(c: City) -> String = c.name
+fn City.name_set(c: City, name: String) -> City = { ...c, name: name }
 
-fn describe[T: Named](obj: T) -> String =
-  "name: " + obj.get_name()
+fn describe[T: Named](x: T) -> String =
+  "name: ${name_get(x)}"
 
-fn names[T: Named](list: List[T]) -> List[String] =
-  list |> list.map((obj) => obj.get_name())
+fn names[T: Named](xs: List[T]) -> List[String] =
+  xs |> list.map((x) => name_get(x))
 
-fn set_name[T: Named](obj: T, name: String) -> T =
-  obj.set_name_value(name)
+fn set_name[T: Named](x: T, new_name: String) -> T =
+  name_set(x, new_name)
 
 test "describe dog" { assert_eq(describe(Dog { name: "Rex", breed: "Lab" }), "name: Rex") }
 test "describe person" { assert_eq(describe(Person { name: "Alice", age: 30, email: "a@b" }), "name: Alice") }

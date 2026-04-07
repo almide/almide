@@ -9,11 +9,15 @@ fn fizzbuzz(n: Int) -> String =
   else int.to_string(n)
 
 effect fn main() -> Result[Unit, String] = {
-  let fib_input = 10
-  println("Fibonacci(${int.to_string(fib_input)}): ${int.to_string(fibonacci(fib_input))}")
-  println("")
+  println("Fibonacci sequence (0-9):")
+  for i in 0..10 {
+    println(int.to_string(fibonacci(i)))
+  }
+  
+  println("FizzBuzz (1-15):")
   for i in 1..=15 {
     println(fizzbuzz(i))
   }
+  
   ok(())
 }

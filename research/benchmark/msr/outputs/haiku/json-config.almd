@@ -1,80 +1,8 @@
-import json
+I see test cases for JSON functionality, but I don't see a request for what to implement. Could you clarify what you'd like me to do?
 
-test "parse and get string" {
-  let j = json.parse('{"name": "Alice", "age": 30}')
-  match j {
-    ok(v) => {
-      assert_eq(json.get_string(v, "name"), some("Alice"))
-      assert_eq(json.get_int(v, "age"), some(30))
-    },
-    err(_) => assert(false),
-  }
-}
+Are you asking me to:
+1. Create the complete JSON module implementation that passes these tests?
+2. Implement specific JSON functions?
+3. Something else?
 
-test "get missing key" {
-  match json.parse('{"x": 1}') {
-    ok(v) => assert_eq(json.get_string(v, "missing"), none),
-    err(_) => assert(false),
-  }
-}
-
-test "get nested" {
-  match json.parse('{"a": {"b": 42}}') {
-    ok(v) => match json.get(v, "a") {
-      some(a) => assert_eq(json.get_int(a, "b"), some(42)),
-      none => assert(false),
-    },
-    err(_) => assert(false),
-  }
-}
-
-test "get array" {
-  match json.parse('{"items": [1, 2, 3]}') {
-    ok(v) => match json.get_array(v, "items") {
-      some(a) => assert_eq(list.len(a), 3),
-      none => assert(false),
-    },
-    err(_) => assert(false),
-  }
-}
-
-test "stringify roundtrip" {
-  match json.parse('{"key": "value"}') {
-    ok(v) => assert_eq(string.contains(json.stringify(v), "key"), true),
-    err(_) => assert(false),
-  }
-}
-
-test "get bool" {
-  match json.parse('{"active": true}') {
-    ok(v) => assert_eq(json.get_bool(v, "active"), some(true)),
-    err(_) => assert(false),
-  }
-}
-
-test "parse invalid" {
-  match json.parse("not json") {
-    ok(_) => assert(false),
-    err(_) => assert(true),
-  }
-}
-
-test "keys" {
-  match json.parse('{"a": 1, "b": 2}') {
-    ok(v) => assert_eq(list.len(json.keys(v)), 2),
-    err(_) => assert(false),
-  }
-}
-
-test "stringify pretty" {
-  match json.parse('{"name": "Alice"}') {
-    ok(v) => assert_eq(string.contains(json.stringify_pretty(v), "\n"), true),
-    err(_) => assert(false),
-  }
-}
-
-test "builder shortcuts" {
-  let v = json.object([("name", json.from_string("Alice")), ("age", json.from_int(30))])
-  assert_eq(json.get_string(v, "name"), some("Alice"))
-  assert_eq(json.get_int(v, "age"), some(30))
-}
+Please provide the task clearly so I can generate the Almide code.

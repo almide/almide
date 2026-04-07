@@ -1,30 +1,26 @@
 fn respond(input: String) -> String = {
   let trimmed = string.trim(input)
   
-  if string.len(trimmed) == 0 then {
+  if string.len(trimmed) == 0 then
     "Fine. Be that way!"
-  } else {
+  else {
     let is_question = string.ends_with(trimmed, "?")
-    let is_shouting = is_shouting_check(trimmed)
     
-    match (is_shouting, is_question) {
-      (true, true) => "Calm down, I know what I'm doing!",
-      (true, false) => "Whoa, chill out!",
-      (false, true) => "Sure.",
-      (false, false) => "Whatever.",
-    }
+    let upper = string.to_upper(trimmed)
+    let lower = string.to_lower(trimmed)
+    let has_letters = upper != lower
+    let all_upper = trimmed == upper
+    let is_shouting = has_letters and all_upper
+    
+    if is_shouting and is_question then
+      "Calm down, I know what I'm doing!"
+    else if is_shouting then
+      "Whoa, chill out!"
+    else if is_question then
+      "Sure."
+    else
+      "Whatever."
   }
-}
-
-local fn is_shouting_check(s: String) -> Bool = {
-  let letters = string.split(s, "") |> list.filter((c) => is_letter(c))
-  list.len(letters) > 0 and list.all(letters, (c) => string.to_lower(c) != c)
-}
-
-local fn is_letter(c: String) -> Bool = {
-  let lower = string.to_lower(c)
-  let upper = string.to_upper(c)
-  lower != upper
 }
 
 test "stating something" { assert_eq(respond("Tom-ay-to, tom-ah-to."), "Whatever.") }

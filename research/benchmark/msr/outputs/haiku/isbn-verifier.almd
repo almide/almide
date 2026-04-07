@@ -1,27 +1,41 @@
+fn is_digit(c: String) -> Bool =
+  list.contains(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], c)
+
+fn char_to_int(c: String) -> Int =
+  match c {
+    "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
+    "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
+    _ => 0,
+  }
+
 fn is_valid(isbn: String) -> Bool = {
-  let clean = string.replace(isbn, "-", "")
-  guard string.len(clean) == 10 else false
+  let cleaned = isbn |> string.replace("-", "")
   
-  let chars = string.chars(clean)
-  let is_digit = (c: String) => {
-    let code = string.char_code(c)
-    code >= 48 and code <= 57
+  guard string.len(cleaned) == 10 else false
+  
+  var sum = 0
+  var valid = true
+  
+  for i in 0..10 {
+    let c = string.slice(cleaned, i, i + 1)
+    
+    if i < 9 then {
+      guard is_digit(c) else {
+        valid = false
+      }
+      sum = sum + (char_to_int(c) * (10 - i))
+    } else {
+      if c == "X" then {
+        sum = sum + 10
+      } else if is_digit(c) then {
+        sum = sum + char_to_int(c)
+      } else {
+        valid = false
+      }
+    }
   }
   
-  let valid_chars = chars |> list.enumerate |> list.all((entry) => {
-    let (idx, c) = entry
-    if idx < 9 then is_digit(c) else c == "X" or is_digit(c)
-  })
-  guard valid_chars else false
-  
-  let sum = chars |> list.enumerate |> list.fold(0, (acc, entry) => {
-    let (idx, c) = entry
-    let weight = 10 - idx
-    let value = if c == "X" then 10 else string.char_code(c) - 48
-    acc + value * weight
-  })
-  
-  sum % 11 == 0
+  valid and sum % 11 == 0
 }
 
 test "valid isbn" { assert_eq(is_valid("3-598-21508-8"), true) }

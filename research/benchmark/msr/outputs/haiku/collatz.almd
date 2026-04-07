@@ -1,14 +1,12 @@
 effect fn steps(n: Int) -> Result[Int, String] = {
   guard n > 0 else err("Only positive integers are allowed")
-  
-  fn count_steps(num: Int, acc: Int) -> Int = {
-    if num == 1 then acc
-    else if int.mod(num, 2) == 0 then count_steps(int.div(num, 2), acc + 1)
-    else count_steps(num * 3 + 1, acc + 1)
-  }
-  
   ok(count_steps(n, 0))
 }
+
+fn count_steps(n: Int, count: Int) -> Int =
+  if n == 1 then count
+  else if n % 2 == 0 then count_steps(n / 2, count + 1)
+  else count_steps(3 * n + 1, count + 1)
 
 test "zero steps for one" { assert_eq(steps(1), ok(0)) }
 test "divide if even" { assert_eq(steps(16), ok(4)) }

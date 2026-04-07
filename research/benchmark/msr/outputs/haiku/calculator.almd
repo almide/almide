@@ -7,21 +7,20 @@ type Expr =
 
 effect fn eval(e: Expr) -> Result[Float, String] = {
   match e {
-    Lit(n) => ok(n),
+    Lit(val) => ok(val),
     Neg(inner) => {
-      let val = eval(inner)!
-      ok(-val)
+      let v = eval(inner)!
+      ok(-v)
     },
     BinOp { op, left, right } => {
-      let left_val = eval(left)!
-      let right_val = eval(right)!
+      let l = eval(left)!
+      let r = eval(right)!
       match op {
-        Add => ok(left_val + right_val),
-        Sub => ok(left_val - right_val),
-        Mul => ok(left_val * right_val),
+        Add => ok(l + r),
+        Sub => ok(l - r),
+        Mul => ok(l * r),
         Div => {
-          guard right_val != 0.0 else err("division by zero")
-          ok(left_val / right_val)
+          if r == 0.0 then err("division by zero") else ok(l / r)
         },
       }
     },

@@ -1,7 +1,11 @@
-fn is_pangram(sentence: String) -> Bool =
-  "abcdefghijklmnopqrstuvwxyz"
-    |> string.chars
-    |> list.all((letter) => string.contains(string.to_lower(sentence), letter))
+fn is_pangram(sentence: String) -> Bool = {
+  let lower = string.to_lower(sentence)
+  let letters = [
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+    "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"
+  ]
+  letters |> list.all((letter) => string.contains(lower, letter))
+}
 
 test "empty sentence" {
   assert_eq(is_pangram(""), false)

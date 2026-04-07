@@ -1,42 +1,21 @@
-fn letter_score(c: String) -> Int = 
+fn letter_score(c: String) -> Int =
   match string.to_lower(c) {
-    "a" => 1,
-    "b" => 3,
-    "c" => 3,
-    "d" => 2,
-    "e" => 1,
-    "f" => 4,
-    "g" => 2,
-    "h" => 4,
-    "i" => 1,
-    "j" => 8,
+    "a" | "e" | "i" | "o" | "u" | "l" | "n" | "r" | "s" | "t" => 1,
+    "d" | "g" => 2,
+    "b" | "c" | "m" | "p" => 3,
+    "f" | "h" | "v" | "w" | "y" => 4,
     "k" => 5,
-    "l" => 1,
-    "m" => 3,
-    "n" => 1,
-    "o" => 1,
-    "p" => 3,
-    "q" => 10,
-    "r" => 1,
-    "s" => 1,
-    "t" => 1,
-    "u" => 1,
-    "v" => 4,
-    "w" => 4,
-    "x" => 8,
-    "y" => 4,
-    "z" => 10,
+    "j" | "x" => 8,
+    "q" | "z" => 10,
     _ => 0,
   }
 
-fn score(word: String) -> Int = {
-  let chars = string.split(word, "")
-  var total = 0
-  for c in chars {
-    total = total + letter_score(c)
-  }
-  total
-}
+fn score(word: String) -> Int =
+  word
+    |> string.to_lower
+    |> string.split("")
+    |> list.map((c) => letter_score(c))
+    |> list.fold(0, (acc, val) => acc + val)
 
 test "lowercase letter" { assert_eq(score("a"), 1) }
 test "uppercase letter" { assert_eq(score("A"), 1) }

@@ -4,21 +4,19 @@ type Expr =
   | Mul(Expr, Expr)
   | Sub(Expr, Expr)
 
-fn eval(e: Expr) -> Int =
-  match e {
-    Lit(n) => n,
-    Add(e1, e2) => eval(e1) + eval(e2),
-    Mul(e1, e2) => eval(e1) * eval(e2),
-    Sub(e1, e2) => eval(e1) - eval(e2),
-  }
+fn eval(e: Expr) -> Int = match e {
+  Lit(n) => n,
+  Add(l, r) => eval(l) + eval(r),
+  Mul(l, r) => eval(l) * eval(r),
+  Sub(l, r) => eval(l) - eval(r),
+}
 
-fn to_string(e: Expr) -> String =
-  match e {
-    Lit(n) => int.to_string(n),
-    Add(e1, e2) => "(${to_string(e1)} + ${to_string(e2)})",
-    Mul(e1, e2) => "(${to_string(e1)} * ${to_string(e2)})",
-    Sub(e1, e2) => "(${to_string(e1)} - ${to_string(e2)})",
-  }
+fn to_string(e: Expr) -> String = match e {
+  Lit(n) => int.to_string(n),
+  Add(l, r) => "(${to_string(l)} + ${to_string(r)})",
+  Mul(l, r) => "(${to_string(l)} * ${to_string(r)})",
+  Sub(l, r) => "(${to_string(l)} - ${to_string(r)})",
+}
 
 test "literal" { assert_eq(eval(Lit(5)), 5) }
 test "add" { assert_eq(eval(Add(Lit(2), Lit(3))), 5) }

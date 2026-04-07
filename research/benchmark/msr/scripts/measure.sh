@@ -4,7 +4,7 @@
 # Usage: ./msr/scripts/measure.sh <model-name> [--target rust|ts]
 #
 # Prerequisites:
-#   - Place LLM solutions in msr/outputs/<model-name>/*.almd
+#   - Place LLM solutions in research/benchmark/msr/outputs/<model-name>/*.almd
 #   - Each solution file must have the same name as the exercise
 #
 # Example:
@@ -16,8 +16,8 @@ cd "$(git rev-parse --show-toplevel)"
 
 MODEL="${1:?Usage: measure.sh <model-name> [--target rust|ts]}"
 TARGET="${3:-rust}"
-SOLUTIONS_DIR="msr/outputs/$MODEL"
-RESULTS_DIR="msr/results"
+SOLUTIONS_DIR="research/benchmark/msr/outputs/$MODEL"
+RESULTS_DIR="research/benchmark/msr/results"
 
 if [ ! -d "$SOLUTIONS_DIR" ]; then
   echo "Error: $SOLUTIONS_DIR not found"
@@ -43,9 +43,8 @@ for solution in "$SOLUTIONS_DIR"/*.almd; do
   name=$(basename "$solution" .almd)
   TOTAL=$((TOTAL + 1))
 
-  # Step 1: Type check
-  check_output=$(almide check "$solution" 2>&1) || true
-  if echo "$check_output" | grep -q "error"; then
+  # Step 1: Type check (use exit code, not string matching)
+  if ! almide check "$solution" > /dev/null 2>&1; then
     echo "❌ $name — type check failed"
     FAIL=$((FAIL + 1))
     CHECK_FAIL=$((CHECK_FAIL + 1))
@@ -53,16 +52,22 @@ for solution in "$SOLUTIONS_DIR"/*.almd; do
     continue
   fi
 
-  # Step 2: Run tests
-  if almide test "$solution" > /dev/null 2>&1; then
-    echo "✅ $name"
-    PASS=$((PASS + 1))
-    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":true},"
-  else
+  # Step 2: Run tests + detect 0-test false positive
+  TEST_OUTPUT=$(almide test "$solution" 2>&1) && TEST_EXIT=0 || TEST_EXIT=$?
+  if [ "$TEST_EXIT" -ne 0 ]; then
     echo "❌ $name — test failed"
     FAIL=$((FAIL + 1))
     TEST_FAIL=$((TEST_FAIL + 1))
     RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":false,\"error\":\"test_fail\"},"
+  elif echo "$TEST_OUTPUT" | grep -q "ok\. 0 passed"; then
+    echo "❌ $name — 0 tests detected"
+    FAIL=$((FAIL + 1))
+    TEST_FAIL=$((TEST_FAIL + 1))
+    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":false,\"error\":\"zero_tests\"},"
+  else
+    echo "✅ $name"
+    PASS=$((PASS + 1))
+    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":true},"
   fi
 done
 
