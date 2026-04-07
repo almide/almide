@@ -1,0 +1,29 @@
+fn double(x: Int) -> Int = x * 2
+
+fn is_positive(x: Int) -> Bool = x > 0
+
+fn parse_opt(s: String) -> Option[Int] =
+  if s == "yes" then Some(1) else None
+
+test "function reference in map" {
+  let xs = [1, 2, 3]
+  let result = xs |> list.map(double)
+  assert_eq(result, [2, 4, 6])
+}
+
+test "function reference in filter" {
+  let xs = [3, -1, 4, -2, 5]
+  let result = xs |> list.filter(is_positive)
+  assert_eq(result, [3, 4, 5])
+}
+
+test "function reference in filter_map" {
+  let items = ["yes", "no", "yes"]
+  let result = items |> list.filter_map(parse_opt)
+  assert_eq(result, [1, 1])
+}
+
+test "function reference assigned to variable" {
+  let f = double
+  assert_eq(f(5), 10)
+}
