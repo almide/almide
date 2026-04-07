@@ -357,8 +357,16 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
 
 fn resolve_file(file: Option<String>) -> String {
     file.unwrap_or_else(|| {
-        if std::path::Path::new("almide.toml").exists() && std::path::Path::new("src/main.almd").exists() {
-            "src/main.almd".to_string()
+        if std::path::Path::new("almide.toml").exists() {
+            // src/mod.almd = package entry point, src/main.almd = executable entry point
+            for entry in &["src/mod.almd", "src/main.almd"] {
+                if std::path::Path::new(entry).exists() {
+                    return entry.to_string();
+                }
+            }
+            eprintln!("almide.toml found but no entry point (src/mod.almd or src/main.almd).");
+            eprintln!("Create src/mod.almd (library) or src/main.almd (executable).");
+            std::process::exit(1);
         } else {
             eprintln!("No file specified and no almide.toml found.");
             eprintln!("Run 'almide init' to create a project, or specify a file.");
