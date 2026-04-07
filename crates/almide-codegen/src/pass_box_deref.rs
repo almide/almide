@@ -38,6 +38,7 @@ impl NanoPass for BoxDerefPass {
 
         // Build boxed_fields: for each recursive enum, find which variant fields reference the enum
         program.codegen_annotations.boxed_fields = program.type_decls.iter()
+            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
             .filter(|td| recursive.contains(&*td.name))
             .filter_map(|td| match &td.kind {
                 IrTypeDeclKind::Variant { cases, .. } => Some((td, cases)),

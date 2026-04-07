@@ -833,9 +833,12 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
 
 /// Render an enum constructor call with optional Box wrapping for recursive types.
 fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str, args: &[IrExpr]) -> String {
-    let boxed_args: Vec<String> = args.iter().map(|a| {
+    let boxed_args: Vec<String> = args.iter().enumerate().map(|(i, a)| {
         let rendered = render_expr(ctx, a);
-        if ctx.ann.recursive_enums.contains(enum_name) && ty_contains_name(&a.ty, enum_name) {
+        let needs_box = ctx.ann.recursive_enums.contains(enum_name)
+            && (ty_contains_name(&a.ty, enum_name)
+                || ctx.ann.boxed_fields.contains(&(ctor_name.to_string(), format!("{}", i))));
+        if needs_box {
             format!("Box::new({})", rendered)
         } else {
             rendered
