@@ -65,7 +65,33 @@ impl Checker {
             }
 
             ExprKind::TypeName { name, .. } => {
-                if let Some((type_name, _)) = self.env.constructors.get(&sym(name)) { Ty::Named(*type_name, vec![]) }
+                if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
+                    match &case.payload {
+                        VariantPayload::Tuple(tys) if !tys.is_empty() => {
+                            // Constructor with payload used as value → function type
+                            let generic_args = self.instantiate_type_generics(type_name.as_str());
+                            let ret = Ty::Named(type_name, generic_args.clone());
+                            let params = if generic_args.is_empty() {
+                                tys.clone()
+                            } else {
+                                // Substitute TypeVars with fresh inference vars
+                                if let Some(ty_def) = self.env.types.get(&type_name).cloned() {
+                                    let mut type_var_names = Vec::new();
+                                    crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
+                                    let subst: std::collections::HashMap<Sym, Ty> = type_var_names.iter()
+                                        .zip(generic_args.iter())
+                                        .map(|(tv, fresh)| (*tv, fresh.clone()))
+                                        .collect();
+                                    tys.iter().map(|t| super::calls::subst_ty(t, &subst)).collect()
+                                } else {
+                                    tys.clone()
+                                }
+                            };
+                            Ty::Fn { params, ret: Box::new(ret) }
+                        }
+                        _ => Ty::Named(type_name, vec![])
+                    }
+                }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
                 else { Ty::Named(sym(name), vec![]) }
             }

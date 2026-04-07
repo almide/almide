@@ -1,4 +1,5 @@
 <!-- description: Add int.bits_to_float and float.to_bits for raw IEEE 754 conversion -->
+<!-- done: 2026-04-07 -->
 # Float Bits Conversion
 
 Add stdlib functions for reinterpreting between Int (i64) and Float (f64) at the bit level.

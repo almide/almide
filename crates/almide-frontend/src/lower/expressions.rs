@@ -46,7 +46,30 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
         ast::ExprKind::TypeName { name, .. } => {
             // Variant constructor used as value (e.g., Red)
-            if ctx.env.constructors.contains_key(&sym(name)) {
+            if let Some((_, case)) = ctx.env.constructors.get(&sym(name)) {
+                if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
+                    if !param_tys.is_empty() && matches!(&ty, Ty::Fn { .. }) {
+                        // Constructor with payload as function value → generate lambda
+                        let params: Vec<(VarId, Ty)> = param_tys.iter().map(|pt| {
+                            let vid = ctx.var_table.alloc(sym("_ctor_arg"), pt.clone(), Mutability::Let, None);
+                            (vid, pt.clone())
+                        }).collect();
+                        let ctor_args: Vec<IrExpr> = params.iter().map(|(vid, pt)| {
+                            ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span)
+                        }).collect();
+                        let ret_ty = match &ty {
+                            Ty::Fn { ret, .. } => ret.as_ref().clone(),
+                            _ => ty.clone(),
+                        };
+                        let body = ctx.mk(IrExprKind::Call {
+                            target: CallTarget::Named { name: sym(name) },
+                            args: ctor_args, type_args: vec![],
+                        }, ret_ty, span);
+                        return ctx.mk(IrExprKind::Lambda {
+                            params, body: Box::new(body), lambda_id: None,
+                        }, ty, span);
+                    }
+                }
                 ctx.mk(IrExprKind::Call {
                     target: CallTarget::Named { name: sym(name) },
                     args: vec![], type_args: vec![],

@@ -195,3 +195,22 @@ test "float.sqrt via module call large" {
 test "float.to_int via module call" {
   assert_eq(float.to_int(7.9), 7)
 }
+
+// ── to_bits ──
+test "float.to_bits 1.0" {
+  assert_eq(float.to_bits(1.0), 4607182418800017408)
+}
+
+test "float.to_bits 0.0" {
+  assert_eq(float.to_bits(0.0), 0)
+}
+
+test "float.to_bits round-trip" {
+  let bits = float.to_bits(3.14159)
+  assert_eq(int.bits_to_float(bits), 3.14159)
+}
+
+test "float.to_bits negative" {
+  let bits = float.to_bits(-1.0)
+  assert_eq(int.bits_to_float(bits), -1.0)
+}

@@ -23,3 +23,4 @@ pub fn almide_rt_float_from_int(n: i64) -> f64 { n as f64 }
 pub fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> String { format!("{:.1$}", n, decimals as usize) }
 pub fn almide_rt_float_is_nan(n: f64) -> bool { n.is_nan() }
 pub fn almide_rt_float_is_infinite(n: f64) -> bool { n.is_infinite() }
+pub fn almide_rt_float_to_bits(f: f64) -> i64 { f.to_bits() as i64 }

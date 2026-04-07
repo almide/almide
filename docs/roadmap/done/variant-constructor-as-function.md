@@ -1,4 +1,5 @@
 <!-- description: Allow variant constructors to be passed as first-class functions -->
+<!-- done: 2026-04-07 -->
 # Variant Constructor as Function
 
 Variant constructors like `Br(Int)` should be usable as `(Int) -> Instr` — i.e., passable to higher-order functions.

@@ -125,3 +125,11 @@ params = [{ name = "n", type = "Float" }]
 return = "Bool"
 rust = "({n}).is_infinite()"
 ts = "!Number.isFinite({n}) && !Number.isNaN({n})"
+
+[to_bits]
+description = "Reinterpret a float as its IEEE 754 bit representation (i64)."
+example = "float.to_bits(1.0) // => 4607182418800017408"
+params = [{ name = "f", type = "Float" }]
+return = "Int"
+rust = "almide_rt_float_to_bits({f})"
+ts = "__almd_float.to_bits({f})"

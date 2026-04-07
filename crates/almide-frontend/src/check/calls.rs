@@ -10,7 +10,7 @@ use super::Checker;
 pub(crate) use super::builtin_calls::{builtin_module_for_type, types_mismatch};
 
 /// Substitute named TypeVars in a type with replacement types.
-fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
+pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
     match ty {
         Ty::TypeVar(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
         Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| subst_ty(a, subst)).collect()),

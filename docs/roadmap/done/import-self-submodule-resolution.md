@@ -1,4 +1,5 @@
 <!-- description: Fix import self.sub.module resolution for nested submodules -->
+<!-- done: 2026-04-07 -->
 # Import Self Submodule Resolution
 
 `import self.wasm.binary` fails to resolve when building from `src/mod.almd` even though `src/wasm/binary.almd` exists and `almide.toml` is present.
