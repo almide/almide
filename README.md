@@ -32,26 +32,36 @@ The flywheel: LLMs write Almide reliably → more code is produced → training 
 
 **[Try it in your browser →](https://almide.github.io/playground/)** — No installation required.
 
-### Prerequisites
+### Install from prebuilt binaries
 
-- [Rust](https://rustup.rs/) (stable, 1.89+)
+Download the latest release for your platform from [GitHub Releases](https://github.com/almide/almide/releases/latest):
+
+```bash
+# macOS (Apple Silicon)
+curl -LO https://github.com/almide/almide/releases/latest/download/almide-macos-aarch64.tar.gz
+tar xzf almide-macos-aarch64.tar.gz
+cp almide-macos-aarch64/almide ~/.local/bin/
+
+# macOS (Intel)
+curl -LO https://github.com/almide/almide/releases/latest/download/almide-macos-x86_64.tar.gz
+tar xzf almide-macos-x86_64.tar.gz
+cp almide-macos-x86_64/almide ~/.local/bin/
+
+# Linux (x86_64)
+curl -LO https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz
+tar xzf almide-linux-x86_64.tar.gz
+cp almide-linux-x86_64/almide ~/.local/bin/
+```
 
 ### Install from source
+
+Requires [Rust](https://rustup.rs/) (stable, 1.89+):
 
 ```bash
 git clone https://github.com/almide/almide.git
 cd almide
 cargo build --release
-```
-
-Copy the binary to a directory on your `PATH`:
-
-```bash
-# macOS / Linux
 cp target/release/almide ~/.local/bin/
-
-# or system-wide
-sudo cp target/release/almide /usr/local/bin/
 ```
 
 ### Hello World
