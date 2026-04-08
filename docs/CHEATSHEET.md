@@ -329,7 +329,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [args](stdlib/args.md) | CLI argument parsing | `import args` | 4 |
 | [fs](stdlib/fs.md) | File system | `import fs` | 24 |
 | [env](stdlib/env.md) | Environment and system | `import env` | 9 |
-| [process](stdlib/process.md) | Process execution | `import process` | 6 |
+| [process](stdlib/process.md) | Process execution, env vars, signals | `import process` | 11 |
 | [io](stdlib/io.md) | Standard I/O | `import io` | 5 |
 | [http](stdlib/http.md) | HTTP client and server | `import http` | 20 |
 | [random](stdlib/random.md) | Random number generation | `import random` | 4 |

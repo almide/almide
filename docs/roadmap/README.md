@@ -6,14 +6,16 @@
 
 ## Active
 
-4 items
+6 items
 
 | Item | Description |
 |------|-------------|
+| [Distribution UX](active/distribution-ux.md) | Prebuilt binaries, one-line installer, package managers, and self-update |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with Flow[T] and compiler-driven optimization |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
+| [Custom WASM Host Imports](active/wasm-host-imports.md) | Allow WASM target to import functions from custom host modules |
 
 ## On Hold
 
@@ -47,10 +49,10 @@
 
 ## Done
 
-200 items
+203 items
 
 <details>
-<summary>Show all 200 completed items</summary>
+<summary>Show all 203 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|

@@ -32,26 +32,36 @@ The flywheel: LLMs write Almide reliably → more code is produced → training 
 
 **[Try it in your browser →](https://almide.github.io/playground/)** — No installation required.
 
-### Prerequisites
+### Install from prebuilt binaries
 
-- [Rust](https://rustup.rs/) (stable, 1.89+)
+Download the latest release for your platform from [GitHub Releases](https://github.com/almide/almide/releases/latest):
+
+```bash
+# macOS (Apple Silicon)
+curl -LO https://github.com/almide/almide/releases/latest/download/almide-macos-aarch64.tar.gz
+tar xzf almide-macos-aarch64.tar.gz
+cp almide-macos-aarch64/almide ~/.local/bin/
+
+# macOS (Intel)
+curl -LO https://github.com/almide/almide/releases/latest/download/almide-macos-x86_64.tar.gz
+tar xzf almide-macos-x86_64.tar.gz
+cp almide-macos-x86_64/almide ~/.local/bin/
+
+# Linux (x86_64)
+curl -LO https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz
+tar xzf almide-linux-x86_64.tar.gz
+cp almide-linux-x86_64/almide ~/.local/bin/
+```
 
 ### Install from source
+
+Requires [Rust](https://rustup.rs/) (stable, 1.89+):
 
 ```bash
 git clone https://github.com/almide/almide.git
 cd almide
 cargo build --release
-```
-
-Copy the binary to a directory on your `PATH`:
-
-```bash
-# macOS / Linux
 cp target/release/almide ~/.local/bin/
-
-# or system-wide
-sudo cp target/release/almide /usr/local/bin/
 ```
 
 ### Hello World
@@ -156,37 +166,17 @@ almide fmt app.almd              # Format source code
 almide clean                     # Clear build + dependency cache
 ```
 
-## Benchmark
-
-<p align="center">
-  <img src="./docs/assets/benchmark.png" alt="MiniGit Benchmark: Almide vs 15 languages" width="720">
-</p>
-
-Tested with the MiniGit benchmark — Claude Code implements a mini version control system from a spec, with multiple trials per language.
-
-| Language | Total Time | Avg Cost | Pass Rate |
-|----------|-----------|----------|-----------|
-| Ruby | 73.1s | $0.36 | 40/40 |
-| Python | 77.5s | $0.39 | 48/48 |
-| Go | 102.0s | $0.50 | 46/46 |
-| Rust | 113.7s | $0.54 | 38/40 |
-| TypeScript | 133.0s | $0.62 | 40/40 |
-| **Almide (no warmup)** | **239.1s** | **$1.13** | **20/20** |
-| **Almide (with warmup)** | **261.6s** | **$1.03** | **20/20** |
-
-Almide has no training data in any public LLM corpus yet — the generation speed gap is expected to narrow as more Almide code enters training sets. Despite being slower, Almide achieves **100% pass rate** with zero failures across 40 trials.
-
 ## WASM Binary Size
 
 Almide emits WASM bytecode directly (no Rust/C intermediary). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency.
 
 | Program | Binary Size |
 |---------|------------:|
-| Hello World | **1,028 B** |
-| FizzBuzz | **1,286 B** |
-| Fibonacci | **1,361 B** |
-| Closure | **1,443 B** |
-| Variant | **1,777 B** |
+| Hello World | **2,368 B** |
+| FizzBuzz | **2,662 B** |
+| Fibonacci | **2,699 B** |
+| Closure | **2,894 B** |
+| Variant | **3,391 B** |
 
 ## Native Performance
 
@@ -194,9 +184,9 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 
 | Metric | Value |
 |--------|-------|
-| Binary size (minigit CLI) | 635 KB (stripped) |
-| Runtime (100 ops) | 1.6s |
-| Dependencies | 0 (single static binary) |
+| Binary size (minigit CLI) | **444 KB** (stripped) |
+| Runtime (100 ops) | **1.1s** |
+| Dependencies | **0** (single static binary) |
 | WASM target | `almide build app.almd --target wasm` |
 
 ## Project Status
@@ -209,8 +199,19 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Stdlib | 430 functions across 23 modules |
 | Tests | 177 test files pass (Rust), 278 pass (WASM) |
 | MSR | 23/25 exercises pass (Sonnet 4.6, WASM, max 3 attempts) |
+| MiniGit Bench | 41/41 tests pass, 100% success rate ([ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench)) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
+
+### AI Coding Language Benchmark
+
+Comparison with 15 established languages using [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (MiniGit implementation task).
+
+![Execution Time](docs/figures/lang-bench-time.png?v=1775655978)
+![Code Size](docs/figures/lang-bench-loc.png?v=1775655978)
+![Pass Rate](docs/figures/lang-bench-pass-rate.png?v=1775655978)
+
+> Almide uses Sonnet 4.6 (unknown language); all others use Opus 4.6 (known language). Almide achieves 100% pass rate with fewer lines of code than most languages, despite needing more time due to the model having no prior training data for the language.
 
 ## Ecosystem
 

@@ -91,3 +91,39 @@ pub fn almide_rt_process_exec_status(cmd: String, args: Vec<String>) -> Result<(
         Err(e) => Err(format!("exec failed: {}", e)),
     }
 }
+
+pub fn almide_rt_process_pid() -> i64 {
+    std::process::id() as i64
+}
+
+pub fn almide_rt_process_env(key: String) -> Option<String> {
+    std::env::var(&key).ok()
+}
+
+pub fn almide_rt_process_spawn(cmd: String, args: Vec<String>) -> Result<i64, String> {
+    std::process::Command::new(&cmd)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .spawn()
+        .map(|child| child.id() as i64)
+        .map_err(|e| format!("spawn '{}' failed: {}", cmd, e))
+}
+
+pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), String> {
+    std::process::Command::new("kill")
+        .args([&format!("-{}", signal), &pid.to_string()])
+        .output()
+        .map_err(|e| format!("kill failed: {}", e))
+        .and_then(|out| {
+            if out.status.success() { Ok(()) }
+            else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+        })
+}
+
+pub fn almide_rt_process_is_alive(pid: i64) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}

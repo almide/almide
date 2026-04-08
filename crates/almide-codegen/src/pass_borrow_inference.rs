@@ -412,6 +412,8 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
 
             let callee_name = match &target {
                 CallTarget::Named { name } => Some(name.to_string()),
+                // Module-scoped calls: wasm_rt.wt_exec_command → "wasm_rt::wt_exec_command"
+                CallTarget::Module { module, func } => Some(format!("{}::{}", module, func)),
                 // Convention methods: Walker renders as UFCS `TypeName_method(object, args)`
                 // The method name in IR is "TypeName.method" — sigs use the same format
                 CallTarget::Method { method, .. } if method.contains('.') => Some(method.to_string()),

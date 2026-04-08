@@ -6,8 +6,10 @@
 use super::{CompiledFunc, WasmEmitter, SCRATCH_ITOA, NEWLINE_OFFSET};
 use wasm_encoder::{Function, ValType};
 
-/// Register WASI imports and runtime function signatures.
-pub fn register_runtime(emitter: &mut WasmEmitter) {
+/// Register WASI host imports only. Must be called before any register_func.
+/// After this, callers may register additional imports (e.g. @extern(wasm))
+/// before calling `register_runtime_functions`.
+pub fn register_runtime_imports(emitter: &mut WasmEmitter) {
     // fd_write(fd: i32, iovs: i32, iovs_len: i32, nwritten: i32) -> i32
     let fd_write_ty = emitter.register_type(
         vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
@@ -124,7 +126,11 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
         vec![ValType::I32],
     );
     emitter.rt.fd_readdir = emitter.register_import(fd_readdir_ty);
+}
 
+/// Register runtime defined function signatures.
+/// Must be called after all imports (WASI + @extern) are registered.
+pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // __alloc(size: i32) -> i32
     let alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.alloc = emitter.register_func("__alloc", alloc_ty);
