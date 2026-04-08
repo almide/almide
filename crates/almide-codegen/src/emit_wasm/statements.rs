@@ -90,7 +90,17 @@ impl FuncCompiler<'_> {
 
             IrStmtKind::Assign { var, value } => {
                 let is_cell = self.emitter.mutable_captures.contains(&var.0);
-                let local_idx = self.var_map[&var.0];
+                let local_idx = match self.var_map.get(&var.0) {
+                    Some(&idx) => idx,
+                    None => {
+                        // Variable not in local scope — skip (closure captures handled at closure level)
+                        self.emit_expr(value);
+                        if values::ty_to_valtype(&value.ty).is_some() {
+                            wasm!(self.func, { drop; });
+                        }
+                        return;
+                    }
+                };
                 if is_cell {
                     // Cell: local holds ptr, store new value into cell
                     wasm!(self.func, { local_get(local_idx); });
