@@ -217,9 +217,9 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 
 Comparison with 15 established languages using [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (MiniGit implementation task).
 
-![Execution Time](docs/figures/lang-bench-time.png)
-![Code Size](docs/figures/lang-bench-loc.png)
-![Pass Rate](docs/figures/lang-bench-pass-rate.png)
+![Execution Time](docs/figures/lang-bench-time.png?v=1775655978)
+![Code Size](docs/figures/lang-bench-loc.png?v=1775655978)
+![Pass Rate](docs/figures/lang-bench-pass-rate.png?v=1775655978)
 
 > Almide uses Sonnet 4.6 (unknown language); all others use Opus 4.6 (known language). Almide achieves 100% pass rate with fewer lines of code than most languages, despite needing more time due to the model having no prior training data for the language.
 

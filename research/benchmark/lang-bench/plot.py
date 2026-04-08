@@ -9,7 +9,9 @@ Data source: https://github.com/mame/ai-coding-lang-bench
 """
 
 import json
+import re
 import argparse
+import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -19,6 +21,11 @@ import numpy as np
 SCRIPT_DIR = Path(__file__).parent
 DEFAULT_DATA = SCRIPT_DIR / "data.json"
 DEFAULT_OUTPUT = SCRIPT_DIR / "../../../docs/figures"
+README_PATH = SCRIPT_DIR / "../../../README.md"
+
+LANG_BENCH_IMAGE_RE = re.compile(
+    r"(\!\[[^\]]*\]\(docs/figures/lang-bench-[^)]+\.png)(?:\?v=\d+)?(\))"
+)
 
 ALMIDE_COLOR = "#FF6B35"
 OTHER_COLOR = "#6B9BFF"
@@ -149,6 +156,17 @@ def plot_pass_rate(langs: list[dict], output: Path):
     print(f"  -> {output / 'lang-bench-pass-rate.png'}")
 
 
+def bust_readme_cache(readme: Path):
+    if not readme.exists():
+        return
+    v = int(time.time())
+    text = readme.read_text()
+    new_text = LANG_BENCH_IMAGE_RE.sub(rf"\g<1>?v={v}\2", text)
+    if new_text != text:
+        readme.write_text(new_text)
+        print(f"  -> README.md cache busted (v={v})")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate AI Coding Language Benchmark charts")
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA, help="Path to data.json")
@@ -162,6 +180,8 @@ def main():
     plot_time(langs, args.output_dir)
     plot_loc(langs, args.output_dir)
     plot_pass_rate(langs, args.output_dir)
+
+    bust_readme_cache(README_PATH)
     print("Done.")
 
 
