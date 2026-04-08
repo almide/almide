@@ -209,8 +209,19 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Stdlib | 430 functions across 23 modules |
 | Tests | 177 test files pass (Rust), 278 pass (WASM) |
 | MSR | 23/25 exercises pass (Sonnet 4.6, WASM, max 3 attempts) |
+| MiniGit Bench | 41/41 tests pass, 100% success rate ([ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench)) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
+
+### AI Coding Language Benchmark
+
+Comparison with 15 established languages using [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (MiniGit implementation task).
+
+![Execution Time](docs/figures/lang-bench-time.png)
+![Code Size](docs/figures/lang-bench-loc.png)
+![Pass Rate](docs/figures/lang-bench-pass-rate.png)
+
+> Almide and MoonBit use Sonnet 4.6 (unknown language); all others use Opus 4.6 (known language). Almide achieves 100% pass rate with fewer lines of code than most languages, despite needing more time due to the model having no prior training data for the language.
 
 ## Ecosystem
 
