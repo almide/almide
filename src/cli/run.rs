@@ -30,12 +30,19 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool) -> Result<
         return Ok(bin_path);
     }
 
-    // Load native deps from almide.toml if present
-    let parsed = std::path::Path::new("almide.toml").exists()
-        .then(|| crate::project::parse_toml(std::path::Path::new("almide.toml")).ok())
+    // Load native deps from almide.toml if present (search in input file's directory, then CWD)
+    let file_dir = std::path::Path::new(file).parent()
+        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let toml_path = {
+        let candidate = file_dir.join("almide.toml");
+        if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
+    };
+    let parsed = toml_path.exists()
+        .then(|| crate::project::parse_toml(&toml_path).ok())
         .flatten();
     let native_deps = parsed.as_ref().map(|p| p.native_deps.as_slice()).unwrap_or(&[]);
-    let source_root = if native_deps.is_empty() { None } else { Some(std::path::Path::new(".")) };
+    let source_root = if native_deps.is_empty() { None } else { Some(file_dir.as_path()) };
 
     let result = if use_test_harness {
         cargo_build_test_with_native(&rs_code, &project_dir, native_deps, source_root)

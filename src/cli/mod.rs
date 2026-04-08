@@ -208,17 +208,22 @@ fn cargo_build_generated_with_native(
         base_toml.to_string()
     } else {
         let mut toml = base_toml.to_string();
-        if !toml.contains("[dependencies]") {
-            toml.push_str("\n[dependencies]\n");
-        }
+        let mut extra_deps = String::new();
         for dep in native_deps {
-            // spec can be a version string ("42.0.0") or an inline table
             let dep_line = if dep.spec.starts_with('{') {
                 format!("{} = {}\n", dep.name, dep.spec)
             } else {
                 format!("{} = \"{}\"\n", dep.name, dep.spec)
             };
-            toml.push_str(&dep_line);
+            extra_deps.push_str(&dep_line);
+        }
+        if let Some(pos) = toml.find("[dependencies]") {
+            // Insert after the [dependencies] line
+            let insert_pos = toml[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(toml.len());
+            toml.insert_str(insert_pos, &extra_deps);
+        } else {
+            toml.push_str("\n[dependencies]\n");
+            toml.push_str(&extra_deps);
         }
         toml
     };

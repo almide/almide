@@ -72,12 +72,19 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
     // Native target: use cargo to resolve rustls/webpki-roots for HTTPS support
     let use_release = release || fast;
     let project_dir = std::env::temp_dir().join("almide-build");
-    // Load native deps from almide.toml if present
-    let parsed = std::path::Path::new("almide.toml").exists()
-        .then(|| project::parse_toml(std::path::Path::new("almide.toml")).ok())
+    // Load native deps from almide.toml if present (search in input file's directory, then CWD)
+    let file_dir = std::path::Path::new(file).parent()
+        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let toml_path = {
+        let candidate = file_dir.join("almide.toml");
+        if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
+    };
+    let parsed = toml_path.exists()
+        .then(|| project::parse_toml(&toml_path).ok())
         .flatten();
     let native_deps = parsed.as_ref().map(|p| p.native_deps.as_slice()).unwrap_or(&[]);
-    let source_root = if native_deps.is_empty() { None } else { Some(std::path::Path::new(".")) };
+    let source_root = if native_deps.is_empty() { None } else { Some(file_dir.as_path()) };
     match super::cargo_build_generated_with_native(&rs_code, &project_dir, use_release, native_deps, source_root) {
         Ok(bin_path) => {
             // Copy the built binary to the desired output location
