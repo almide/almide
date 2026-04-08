@@ -213,7 +213,10 @@ impl Checker {
                 if let Some((module, func)) = name.split_once('.') {
                     let module_funcs = crate::stdlib::module_functions(module);
                     if !module_funcs.is_empty() {
-                        if let Some(suggestion) = almide_base::diagnostic::suggest(func, module_funcs.iter().copied()) {
+                        // Check known alias map first (catches common hallucinations)
+                        if let Some(alias) = crate::stdlib::suggest_alias(module, func) {
+                            format!("Did you mean `{}`?", alias)
+                        } else if let Some(suggestion) = almide_base::diagnostic::suggest(func, module_funcs.iter().copied()) {
                             format!("Did you mean `{}.{}`?", module, suggestion)
                         } else {
                             format!("No function '{}' in module '{}'. See docs/CHEATSHEET.md for available functions", func, module)

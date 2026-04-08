@@ -84,6 +84,49 @@ pub fn min_params(module: &str, func: &str) -> Option<usize> {
     }
 }
 
+/// Suggest the correct stdlib function for a commonly hallucinated name.
+/// Returns `Some("module.function")` if a known alias exists.
+pub fn suggest_alias(module: &str, func: &str) -> Option<&'static str> {
+    match (module, func) {
+        // size → len
+        ("set", "size") | ("list", "size") | ("map", "size") | ("string", "size") => {
+            Some(match module { "set" => "set.len", "list" => "list.len", "map" => "map.len", _ => "string.len" })
+        }
+        ("set", "count") | ("list", "count") | ("map", "count") => {
+            Some(match module { "set" => "set.len", "list" => "list.len", _ => "map.len" })
+        }
+        // skip → drop
+        ("list", "skip") => Some("list.drop"),
+        // string parse functions → int/float module
+        ("string", "to_int") | ("string", "to_integer") | ("string", "parse_int") => Some("int.parse"),
+        ("string", "to_float") | ("string", "parse_float") => Some("float.parse"),
+        // int.from_string → int.parse
+        ("int", "from_string") | ("int", "from_str") => Some("int.parse"),
+        ("float", "from_string") | ("float", "from_str") => Some("float.parse"),
+        // char code
+        ("string", "char_code") | ("string", "char_code_at") | ("string", "code_at")
+        | ("string", "char_at_code") | ("string", "ord") => Some("string.codepoint"),
+        // case conversion
+        ("string", "to_lowercase") | ("string", "lowercase") | ("string", "lower") => Some("string.to_lower"),
+        ("string", "to_uppercase") | ("string", "uppercase") | ("string", "upper") => Some("string.to_upper"),
+        // substring
+        ("string", "substring") | ("string", "substr") => Some("string.slice"),
+        // length
+        ("string", "length") | ("list", "length") | ("map", "length") | ("set", "length") => {
+            Some(match module { "string" => "string.len", "list" => "list.len", "map" => "map.len", _ => "set.len" })
+        }
+        // list operations
+        ("list", "push") | ("list", "append") => Some("list.concat (use [xs, [x]] or xs + [x])"),
+        ("list", "contains") => Some("list.has"),
+        ("list", "find_index") => Some("list.index_of"),
+        // string
+        ("string", "includes") | ("string", "has") => Some("string.contains"),
+        ("string", "index") => Some("string.index_of"),
+        ("string", "all") => Some("string.chars + list.all"),
+        _ => None,
+    }
+}
+
 /// Names of built-in effect functions (not module-scoped).
 pub fn builtin_effect_fns() -> Vec<&'static str> {
     vec!["println", "eprintln", "panic"]
