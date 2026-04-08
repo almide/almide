@@ -182,11 +182,11 @@ Almide emits WASM bytecode directly (no Rust/C intermediary). Each binary is sel
 
 | Program | Binary Size |
 |---------|------------:|
-| Hello World | **1,028 B** |
-| FizzBuzz | **1,286 B** |
-| Fibonacci | **1,361 B** |
-| Closure | **1,443 B** |
-| Variant | **1,777 B** |
+| Hello World | **2,368 B** |
+| FizzBuzz | **2,662 B** |
+| Fibonacci | **2,699 B** |
+| Closure | **2,894 B** |
+| Variant | **3,391 B** |
 
 ## Native Performance
 

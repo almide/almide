@@ -1,0 +1,18 @@
+type Shape =
+  | Circle(Float)
+  | Rectangle(Float, Float)
+  | Triangle(Float, Float)
+
+fn area(s: Shape) -> Float =
+  match s {
+    Circle(r) => 3.14159 * r * r,
+    Rectangle(w, h) => w * h,
+    Triangle(b, h) => 0.5 * b * h,
+  }
+
+fn main() -> Unit = {
+  let shapes = [Circle(5.0), Rectangle(3.0, 4.0), Triangle(6.0, 8.0)]
+  for s in shapes {
+    println(float.to_string(area(s)))
+  }
+}
