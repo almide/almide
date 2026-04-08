@@ -166,13 +166,57 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             }
             // Runtime dependency: json depends on value
             if needed.contains("json") { needed.insert("value"); }
+            // Collect runtime modules, hoist top-level `use` to front and deduplicate
+            let mut use_set = std::collections::HashSet::new();
+            let mut use_lines = Vec::new();
+            let mut body_lines = Vec::new();
             for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
                 if needed.contains(name) {
-                    output.push_str(&strip_test_blocks(source));
-                    output.push('\n');
+                    for line in strip_test_blocks(source).lines() {
+                        let trimmed = line.trim();
+                        // Top-level use: not indented and starts with "use "
+                        if !line.starts_with(' ') && !line.starts_with('\t')
+                            && trimmed.starts_with("use ") && trimmed.ends_with(';')
+                        {
+                            if use_set.insert(trimmed.to_string()) {
+                                use_lines.push(trimmed.to_string());
+                            }
+                        } else {
+                            body_lines.push(line.to_string());
+                        }
+                    }
+                    body_lines.push(String::new());
                 }
             }
-            output.push('\n');
+            // Remove single-item `use a::b::X;` when a group `use a::b::{..., X, ...};` exists
+            let use_lines: Vec<String> = use_lines.into_iter().filter(|line| {
+                // Parse: use path::Item;
+                if let Some(rest) = line.strip_prefix("use ").and_then(|s| s.strip_suffix(';')) {
+                    if !rest.contains('{') {
+                        if let Some(pos) = rest.rfind("::") {
+                            let prefix = &rest[..pos];
+                            let item = &rest[pos + 2..];
+                            // Check if any group import covers this item
+                            let dominated = use_set.iter().any(|other| {
+                                if let Some(orest) = other.strip_prefix("use ").and_then(|s| s.strip_suffix(';')) {
+                                    if let Some(opos) = orest.find("::{") {
+                                        let oprefix = &orest[..opos];
+                                        if oprefix == prefix {
+                                            let items_str = &orest[opos + 3..orest.len() - 1]; // strip ::{ and }
+                                            return items_str.split(',').any(|i| i.trim() == item);
+                                        }
+                                    }
+                                }
+                                false
+                            });
+                            if dominated { return false; }
+                        }
+                    }
+                }
+                true
+            }).collect();
+            for u in &use_lines { output.push_str(u); output.push('\n'); }
+            for line in &body_lines { output.push_str(line); output.push('\n'); }
         }
         Target::TypeScript => {
             output.push_str("// TypeScript target removed — use --target wasm for JS runtimes\n");
