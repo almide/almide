@@ -6,7 +6,7 @@
 
 ## Active
 
-5 items
+4 items
 
 | Item | Description |
 |------|-------------|
@@ -14,7 +14,6 @@
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with Flow[T] and compiler-driven optimization |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
-| [WASM Closure Mutable Capture](active/wasm-closure-mutable-capture.md) | WASM closure mutable capture via heap cell for var mutation in lambdas |
 
 ## On Hold
 
@@ -48,10 +47,10 @@
 
 ## Done
 
-199 items
+200 items
 
 <details>
-<summary>Show all 199 completed items</summary>
+<summary>Show all 200 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|

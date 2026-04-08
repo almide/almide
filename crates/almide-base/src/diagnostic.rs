@@ -50,6 +50,8 @@ pub struct SecondarySpan {
     pub label: String,
 }
 
+// NOTE: This struct is part of the public API consumed by almide/playground.
+// Do not rename fields or remove public methods without updating playground/crate/src/lib.rs.
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub level: Level,
@@ -109,6 +111,7 @@ impl Diagnostic {
     }
 
     /// Plain-text display (no color, no source annotation).
+    /// NOTE: Called by almide/playground — do not rename without updating playground.
     pub fn display(&self) -> String {
         let prefix = match self.level {
             Level::Error => "error",
