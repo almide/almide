@@ -7,7 +7,7 @@ type Expr =
 
 effect fn eval(e: Expr) -> Result[Float, String] =
   match e {
-    Lit(f) => ok(f),
+    Lit(v) => ok(v),
     Neg(inner) => {
       let v = eval(inner)!
       ok(0.0 - v)

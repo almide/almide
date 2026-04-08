@@ -1,18 +1,20 @@
 fn fibonacci(n: Int) -> Int =
-  if n <= 0 then 0
-  else if n == 1 then 1
+  if n <= 1 then n
   else fibonacci(n - 1) + fibonacci(n - 2)
 
 fn fizzbuzz(n: Int) -> String =
-  match n {
-    _ if n % 15 == 0 => "FizzBuzz",
-    _ if n % 3 == 0  => "Fizz",
-    _ if n % 5 == 0  => "Buzz",
-    _                => int.to_string(n),
-  }
+  if n % 15 == 0 then "FizzBuzz"
+  else if n % 3 == 0 then "Fizz"
+  else if n % 5 == 0 then "Buzz"
+  else int.to_string(n)
 
 effect fn main() -> Result[Unit, String] = {
-  for i in 1..=100 {
+  println("--- Fibonacci ---")
+  for i in 0..10 {
+    println("fibonacci(${int.to_string(i)}) = ${int.to_string(fibonacci(i))}")
+  }
+  println("--- FizzBuzz ---")
+  for i in 1..=20 {
     println(fizzbuzz(i))
   }
   ok(())

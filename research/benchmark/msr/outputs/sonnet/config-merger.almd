@@ -1,103 +1,107 @@
 import fs
 import env
 
-fn parse_lines_rec(lines: List[String], idx: Int, pairs: List[List[String]], seen: List[String]) -> Result[List[List[String]], String] = {
-  match list.get(lines, idx) {
-    none => ok(pairs),
-    some(line) => {
-      let line_num = idx + 1
-      let trimmed = string.trim(line)
-      if string.len(trimmed) == 0 or string.starts_with(trimmed, "#") then
-        parse_lines_rec(lines, idx + 1, pairs, seen)
-      else {
-        let parts = string.split(trimmed, "=")
-        if list.len(parts) < 2 then
-          err("line ${int.to_string(line_num)}: missing '='")
+type ParseState = { pairs: List[List[String]], seen: List[String] }
+
+fn parse_config(content: String) -> Result[List[List[String]], String] = {
+  let lines = string.lines(content)
+  let indexed = list.enumerate(lines)
+  let init: Result[ParseState, String] = ok({ pairs: [], seen: [] })
+  let folded = list.fold(indexed, init, (acc, entry) => {
+    match acc {
+      err(e) => err(e),
+      ok(state) => {
+        let (idx, line) = entry
+        let line_num = idx + 1
+        let trimmed = string.trim(line)
+        if string.is_empty(trimmed) or string.starts_with(trimmed, "#") then
+          ok(state)
         else {
-          let key = list.get(parts, 0) ?? ""
-          if string.len(key) == 0 then
-            err("line ${int.to_string(line_num)}: empty key")
-          else if list.any(seen, (k) => k == key) then
-            err("line ${int.to_string(line_num)}: duplicate key: ${key}")
+          let parts = string.split(trimmed, "=")
+          if list.len(parts) == 1 then
+            err("line ${int.to_string(line_num)}: missing '='")
           else {
-            let value_parts = list.drop(parts, 1)
-            let value = list.join(value_parts, "=")
-            parse_lines_rec(lines, idx + 1, pairs + [[key, value]], seen + [key])
+            let key = list.get(parts, 0) ?? ""
+            let value = list.drop(parts, 1) |> list.join("=")
+            if string.is_empty(key) then
+              err("line ${int.to_string(line_num)}: empty key")
+            else if list.contains(state.seen, key) then
+              err("line ${int.to_string(line_num)}: duplicate key: ${key}")
+            else
+              ok({ ...state, pairs: state.pairs + [[key, value]], seen: state.seen + [key] })
           }
         }
-      }
+      },
     }
+  })
+  match folded {
+    err(e) => err(e),
+    ok(state) => ok(state.pairs),
   }
 }
 
-fn parse_config(content: String) -> Result[List[List[String]], String] = {
-  let lines = string.split(content, "\n")
-  parse_lines_rec(lines, 0, [], [])
-}
-
 fn merge_configs(base: List[List[String]], overlay: List[List[String]]) -> List[List[String]] = {
-  let base_keys = list.map(base, (pair) => list.get(pair, 0) ?? "")
-  let updated_base = list.map(base, (pair) => {
+  let updated_base = base |> list.map((pair) => {
     let key = list.get(pair, 0) ?? ""
-    match list.find(overlay, (op) => (list.get(op, 0) ?? "") == key) {
-      some(op) => op,
-      none => pair,
-    }
+    let found = overlay |> list.find((op) => (list.get(op, 0) ?? "") == key)
+    found ?? pair
   })
-  let new_overlay = list.filter(overlay, (op) => {
+  let base_keys = base |> list.map((pair) => list.get(pair, 0) ?? "")
+  let new_overlay = overlay |> list.filter((op) => {
     let key = list.get(op, 0) ?? ""
-    not list.any(base_keys, (k) => k == key)
+    not list.contains(base_keys, key)
   })
   updated_base + new_overlay
 }
 
 fn serialize_config(pairs: List[List[String]]) -> String =
   pairs
-    |> list.map((pair) => (list.get(pair, 0) ?? "") + "=" + (list.get(pair, 1) ?? ""))
+    |> list.map((pair) => {
+      let key = list.get(pair, 0) ?? ""
+      let value = list.get(pair, 1) ?? ""
+      "${key}=${value}"
+    })
     |> list.join("\n")
 
 effect fn load_config(path: String) -> Result[List[List[String]], String] = {
   let content = fs.read_text(path)!
   match parse_config(content) {
+    err(e) => err("${path}: ${e}"),
     ok(pairs) => ok(pairs),
-    err(e) => err(path + ": " + e),
   }
 }
 
-effect fn save_config(path: String, pairs: List[List[String]]) -> Result[Unit, String] =
-  fs.write(path, serialize_config(pairs))
+effect fn save_config(path: String, pairs: List[List[String]]) -> Result[Unit, String] = {
+  let content = serialize_config(pairs)
+  fs.write(path, content)!
+  ok(())
+}
 
-effect fn merge_files_fold(paths: List[String], acc: List[List[String]]) -> Result[List[List[String]], String] = {
-  match list.get(paths, 0) {
+effect fn merge_files_step(remaining: List[String], acc: List[List[String]]) -> Result[List[List[String]], String] =
+  match list.get(remaining, 0) {
     none => ok(acc),
     some(path) => {
       let overlay = load_config(path)!
-      let merged = merge_configs(acc, overlay)
-      merge_files_fold(list.drop(paths, 1), merged)
-    }
+      merge_files_step(list.drop(remaining, 1), merge_configs(acc, overlay))
+    },
   }
-}
 
 effect fn merge_files(paths: List[String]) -> Result[List[List[String]], String] = {
-  match list.get(paths, 0) {
-    none => ok([]),
-    some(first) => {
-      let base = load_config(first)!
-      merge_files_fold(list.drop(paths, 1), base)
-    }
-  }
+  guard not list.is_empty(paths) else ok([])
+  let base = load_config(list.get(paths, 0) ?? "")!
+  merge_files_step(list.drop(paths, 1), base)
 }
 
 effect fn merge_and_save(paths: List[String], output: String) -> Result[Int, String] = {
-  let pairs = merge_files(paths)!
-  save_config(output, pairs)!
-  ok(list.len(pairs))
+  let merged = merge_files(paths)!
+  save_config(output, merged)!
+  ok(list.len(merged))
 }
 
 fn lookup(pairs: List[List[String]], key: String) -> Option[String] =
   match list.find(pairs, (pair) => (list.get(pair, 0) ?? "") == key) {
-    some(pair) => some(list.get(pair, 1) ?? ""),
     none => none,
+    some(pair) => list.get(pair, 1),
   }
 
 fn filter_by_prefix(pairs: List[List[String]], prefix: String) -> List[List[String]] =

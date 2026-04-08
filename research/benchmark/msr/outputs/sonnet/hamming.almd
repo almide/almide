@@ -1,9 +1,9 @@
 effect fn distance(a: String, b: String) -> Result[Int, String] = {
   guard string.len(a) == string.len(b) else err("strands must be of equal length")
   let pairs = list.zip(string.chars(a), string.chars(b))
-  let diffs = pairs |> list.filter((pair) => {
-    let (ca, cb) = pair
-    ca != cb
+  let diffs = list.filter(pairs, (pair) => {
+    let (x, y) = pair
+    x != y
   })
   ok(list.len(diffs))
 }

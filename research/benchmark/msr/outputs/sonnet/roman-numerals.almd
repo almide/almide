@@ -1,22 +1,17 @@
-fn str_repeat(s: String, n: Int) -> String =
-  if n <= 0 then "" else s + str_repeat(s, n - 1)
+let roman_values = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+let roman_symbols = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
 
-fn apply_numeral(state: (Int, String), entry: (Int, String)) -> (Int, String) = {
-  let (remaining, acc) = state
-  let (value, symbol) = entry
-  let count = remaining / value
-  (remaining % value, acc + str_repeat(symbol, count))
-}
+fn to_roman_helper(n: Int, idx: Int) -> String =
+  if n == 0 then ""
+  else if idx >= list.len(roman_values) then ""
+  else {
+    let val = list.get(roman_values, idx) ?? 0
+    let sym = list.get(roman_symbols, idx) ?? ""
+    if n >= val then sym + to_roman_helper(n - val, idx)
+    else to_roman_helper(n, idx + 1)
+  }
 
-fn to_roman(n: Int) -> String = {
-  let table: List[(Int, String)] = [
-    (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
-    (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
-    (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
-  ]
-  let (_, roman) = list.fold(table, (n, ""), (state, entry) => apply_numeral(state, entry))
-  roman
-}
+fn to_roman(n: Int) -> String = to_roman_helper(n, 0)
 
 test "1 is I" { assert_eq(to_roman(1), "I") }
 test "2 is II" { assert_eq(to_roman(2), "II") }

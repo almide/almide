@@ -1,36 +1,21 @@
-fn is_digit_char(c: String) -> Bool =
-  c >= "0" and c <= "9"
-
-fn char_to_val(c: String) -> Int =
-  if c == "X" then 10
-  else match c {
-    "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
-    "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
-    _ => 0,
-  }
-
-fn is_valid_isbn_char(i: Int, c: String) -> Bool =
-  if i == 9 then is_digit_char(c) or c == "X"
-  else is_digit_char(c)
-
 fn is_valid(isbn: String) -> Bool = {
-  let stripped = string.replace(isbn, "-", "")
-  if string.len(stripped) != 10 then false
+  let cleaned = isbn |> string.chars |> list.filter((c) => c != "-") |> list.join("")
+  if string.len(cleaned) != 10 then false
   else {
-    let chars = string.chars(stripped)
-    let chars_valid = list.enumerate(chars)
-      |> list.all((entry) => {
-        let (i, c) = entry
-        is_valid_isbn_char(i, c)
-      })
-    if not chars_valid then false
+    let chars = string.chars(cleaned)
+    let valid_chars = chars |> list.enumerate |> list.all((entry) => {
+      let (i, c) = entry
+      if i < 9 then c >= "0" and c <= "9"
+      else (c >= "0" and c <= "9") or c == "X"
+    })
+    if not valid_chars then false
     else {
-      let total = list.enumerate(chars)
-        |> list.fold(0, (acc, entry) => {
-          let (i, c) = entry
-          acc + (10 - i) * char_to_val(c)
-        })
-      total % 11 == 0
+      let sum = chars |> list.enumerate |> list.fold(0, (acc, entry) => {
+        let (i, c) = entry
+        let digit = if c == "X" then 10 else int.parse(c) ?? 0
+        acc + digit * (10 - i)
+      })
+      sum % 11 == 0
     }
   }
 }

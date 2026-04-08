@@ -4,29 +4,31 @@ type Token =
   | Bullet(String)
   | Divider
 
-fn repeat_char(ch: String, n: Int) -> String =
-  if n <= 0 then "" else ch + repeat_char(ch, n - 1)
+fn count_hashes(line: String, i: Int) -> Int =
+  if i < string.len(line) and string.slice(line, i, i + 1) == "#"
+  then count_hashes(line, i + 1)
+  else i
 
-fn parse_line(line: String) -> Token =
-  if string.starts_with(line, "### ") then
-    Heading(3, string.slice(line, 4, string.len(line)))
-  else if string.starts_with(line, "## ") then
-    Heading(2, string.slice(line, 3, string.len(line)))
-  else if string.starts_with(line, "# ") then
-    Heading(1, string.slice(line, 2, string.len(line)))
-  else if string.starts_with(line, "- ") then
-    Bullet(string.slice(line, 2, string.len(line)))
-  else if line == "---" then
-    Divider
-  else
-    Paragraph(line)
+fn parse_line(line: String) -> Token = {
+  let n = count_hashes(line, 0)
+  if n > 0 and n < string.len(line) and string.slice(line, n, n + 1) == " "
+  then Heading(n, string.slice(line, n + 1, string.len(line)))
+  else if string.starts_with(line, "- ")
+  then Bullet(string.slice(line, 2, string.len(line)))
+  else if line == "---"
+  then Divider
+  else Paragraph(line)
+}
+
+fn make_line(ch: String, n: Int) -> String =
+  list.map(0..n, (_) => ch) |> list.join("")
 
 fn render(token: Token) -> String =
   match token {
-    Heading(1, text) => string.to_upper(text) + "\n" + repeat_char("=", string.len(text)),
-    Heading(_, text) => text + "\n" + repeat_char("-", string.len(text)),
-    Paragraph(text) => "  " + text,
-    Bullet(text) => "  * " + text,
+    Heading(1, text) => "${string.to_upper(text)}\n${make_line("=", string.len(text))}",
+    Heading(_, text) => "${text}\n${make_line("-", string.len(text))}",
+    Paragraph(text) => "  ${text}",
+    Bullet(text) => "  * ${text}",
     Divider => "---",
   }
 

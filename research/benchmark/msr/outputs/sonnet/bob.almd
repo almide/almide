@@ -1,16 +1,15 @@
 fn is_shouting(s: String) -> Bool =
-  s == string.to_upper(s) and s != string.to_lower(s)
+  string.to_upper(s) == s and string.to_upper(s) != string.to_lower(s)
 
-fn respond(input: String) -> String = {
-  let trimmed = string.trim(input)
-  let shouting = is_shouting(trimmed)
-  let question = string.ends_with(trimmed, "?")
-  if string.len(trimmed) == 0 then "Fine. Be that way!"
-  else if shouting and question then "Calm down, I know what I'm doing!"
-  else if shouting then "Whoa, chill out!"
-  else if question then "Sure."
+fn is_question(s: String) -> Bool =
+  string.ends_with(string.trim(s), "?")
+
+fn respond(input: String) -> String =
+  if string.trim(input) == "" then "Fine. Be that way!"
+  else if is_shouting(input) and is_question(input) then "Calm down, I know what I'm doing!"
+  else if is_shouting(input) then "Whoa, chill out!"
+  else if is_question(input) then "Sure."
   else "Whatever."
-}
 
 test "stating something" { assert_eq(respond("Tom-ay-to, tom-ah-to."), "Whatever.") }
 test "shouting" { assert_eq(respond("WATCH OUT!"), "Whoa, chill out!") }

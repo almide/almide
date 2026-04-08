@@ -1,52 +1,46 @@
-// Affine cipher: E(x) = (ax + b) mod m, D(x) = a^-1 * (x - b) mod m
-
 fn gcd(a: Int, b: Int) -> Int =
   if b == 0 then a else gcd(b, a % b)
 
+fn mod_inverse_search(a: Int, m: Int, i: Int) -> Int =
+  if i >= m then -1
+  else if (a * i) % m == 1 then i
+  else mod_inverse_search(a, m, i + 1)
+
 fn mod_inverse(a: Int, m: Int) -> Int =
-  list.find(0..m, (x) => (a * x) % m == 1) ?? 0
+  mod_inverse_search(a % m, m, 1)
 
 fn char_to_num(c: String) -> Int =
-  list.find(0..26, (i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1) == c) ?? 0
+  (string.codepoint(c) ?? 97) - 97
 
 fn num_to_char(n: Int) -> String =
-  string.slice("abcdefghijklmnopqrstuvwxyz", n, n + 1)
-
-local fn is_letter(c: String) -> Bool =
-  string.contains("abcdefghijklmnopqrstuvwxyz", c)
-
-local fn is_digit(c: String) -> Bool =
-  string.contains("0123456789", c)
-
-local fn chunk_join(s: String, size: Int) -> String =
-  if string.len(s) <= size then s
-  else string.slice(s, 0, size) + " " + chunk_join(string.slice(s, size, string.len(s)), size)
+  string.from_codepoint(n + 97)
 
 effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = {
   guard gcd(a, 26) == 1 else err("a and m must be coprime")
   let chars = string.chars(string.to_lower(text))
-  let encoded = chars
-    |> list.filter_map((c) =>
-      if is_letter(c) then some(num_to_char((a * char_to_num(c) + b) % 26))
-      else if is_digit(c) then some(c)
-      else none
-    )
-    |> list.join("")
-  ok(chunk_join(encoded, 5))
+  let encoded = chars |> list.filter_map((c) =>
+    if string.is_alpha(c) then some(num_to_char((a * char_to_num(c) + b) % 26))
+    else if string.is_digit(c) then some(c)
+    else none
+  )
+  let grouped = list.chunk(encoded, 5) |> list.map((chunk) => list.join(chunk, ""))
+  ok(list.join(grouped, " "))
 }
 
 effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = {
   guard gcd(a, 26) == 1 else err("a and m must be coprime")
   let inv = mod_inverse(a, 26)
   let chars = string.chars(text)
-  let decoded = chars
-    |> list.filter_map((c) =>
-      if c == " " then none
-      else if is_letter(c) then some(num_to_char((inv * (char_to_num(c) - b + 26)) % 26))
-      else some(c)
-    )
-    |> list.join("")
-  ok(decoded)
+  let decoded = chars |> list.filter_map((c) =>
+    if string.is_alpha(c) then {
+      let x = char_to_num(string.to_lower(c))
+      let d = ((inv * (x - b)) % 26 + 26) % 26
+      some(num_to_char(d))
+    }
+    else if string.is_whitespace(c) then none
+    else some(c)
+  )
+  ok(list.join(decoded, ""))
 }
 
 test "encode yes" { assert_eq(encode(5, 7, "yes"), ok("xbt")) }

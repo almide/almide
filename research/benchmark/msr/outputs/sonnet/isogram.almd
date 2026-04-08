@@ -1,6 +1,9 @@
 fn is_isogram(phrase: String) -> Bool = {
-  let chars = string.chars(string.to_lower(phrase)) |> list.filter((c) => c != "-" and c != " ")
-  list.len(chars) == set.len(set.from_list(chars))
+  let letters = phrase
+    |> string.to_lower
+    |> string.chars
+    |> list.filter((c) => c != "-" and c != " ")
+  set.len(set.from_list(letters)) == list.len(letters)
 }
 
 test "empty string" { assert_eq(is_isogram(""), true) }

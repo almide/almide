@@ -7,9 +7,9 @@ fn letter_score(c: String) -> Int =
     "u" => 1,
     "l" => 1,
     "n" => 1,
+    "r" => 1,
     "s" => 1,
     "t" => 1,
-    "r" => 1,
     "d" => 2,
     "g" => 2,
     "b" => 3,
@@ -32,7 +32,7 @@ fn letter_score(c: String) -> Int =
 fn score(word: String) -> Int =
   string.chars(word)
     |> list.map((c) => letter_score(c))
-    |> list.fold(0, (acc, x) => acc + x)
+    |> list.sum
 
 test "lowercase letter" { assert_eq(score("a"), 1) }
 test "uppercase letter" { assert_eq(score("A"), 1) }

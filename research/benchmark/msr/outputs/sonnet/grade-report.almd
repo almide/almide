@@ -1,99 +1,66 @@
-Looking at the errors, the WASM trap on "parse single student" strongly suggests `guard` in non-effect functions is generating an `unreachable` instruction in the WASM target. Also, `list.sum` may not exist and could cause a runtime trap. The fix is to replace all `guard` statements in non-effect functions with explicit `if/else`, and replace `list.sum` with `list.fold`.
+type ParseState = { line_num: Int, students: List[List[String]] }
 
-// Student grade report processor
-// Input format: "name:score1,score2,score3" (one student per line)
-// Scores are integers 0-100
+fn str_to_int(s: String) -> Result[Int, String] =
+  int.parse(s)
 
-local fn validate_score_str(s: String) -> Result[Unit, String] =
-  match int.parse(s) {
-    err(_) => err("invalid score: " + s),
-    ok(v) => if v < 0 or v > 100 then err("score out of range: " + s) else ok(()),
-  }
-
-// Parse a single student line like "Alice:85,92,78"
-// Errors: empty name, invalid score, score out of range 0-100
 fn parse_student(line: String) -> Result[List[String], String] = {
   let parts = string.split(line, ":")
-  if list.len(parts) < 2 then err("invalid format")
-  else {
-    let name = list.get(parts, 0) ?? ""
-    let scores_str = list.get(parts, 1) ?? ""
-    if string.len(name) == 0 then err("empty name")
-    else if string.len(scores_str) == 0 then err("no scores")
-    else {
-      let score_strs = string.split(scores_str, ",")
-      let init: Result[List[String], String] = ok([name])
-      list.fold(score_strs, init, (acc, s) =>
-        match acc {
-          err(e) => err(e),
-          ok(lst) => match validate_score_str(s) {
-            err(e) => err(e),
-            ok(_) => ok(lst + [s]),
-          }
-        }
-      )
-    }
-  }
-}
-
-local fn parse_lines(lines: List[String], line_num: Int) -> Result[List[List[String]], String] =
-  if list.len(lines) == 0 then ok([])
-  else {
-    let line = list.get(lines, 0) ?? ""
-    match parse_student(line) {
-      err(e) => err("line " + int.to_string(line_num) + ": " + e),
-      ok(student) =>
-        match parse_lines(list.drop(lines, 1), line_num + 1) {
-          err(e) => err(e),
-          ok(rest) => ok([student] + rest),
-        }
-    }
-  }
-
-local fn find_duplicate(names: List[String], seen: List[String]) -> Option[String] =
-  if list.len(names) == 0 then none
-  else {
-    let name = list.get(names, 0) ?? ""
-    if list.contains(seen, name) then some(name)
-    else find_duplicate(list.drop(names, 1), seen + [name])
-  }
-
-local fn check_duplicates(students: List[List[String]]) -> Result[List[List[String]], String] = {
-  let names = students |> list.map((s) => list.get(s, 0) ?? "")
-  match find_duplicate(names, []) {
-    some(name) => err("duplicate name: " + name),
-    none => ok(students),
-  }
-}
-
-// Parse multiple students from newline-separated input
-// Errors: empty input, any parse_student error (include line number in error)
-// Also error on duplicate student names
-fn parse_all(input: String) -> Result[List[List[String]], String] = {
-  if string.len(input) == 0 then err("empty input")
-  else {
-    let lines = string.split(input, "\n")
-    match parse_lines(lines, 1) {
+  guard list.len(parts) >= 2 else err("invalid format")
+  let name = list.get(parts, 0) ?? ""
+  let scores_str = list.get(parts, 1) ?? ""
+  guard string.len(name) > 0 else err("empty name")
+  guard string.len(scores_str) > 0 else err("no scores")
+  let score_parts = string.split(scores_str, ",")
+  let init: Result[List[String], String] = ok([])
+  let scores_result = list.fold(score_parts, init, (acc, s) =>
+    match acc {
       err(e) => err(e),
-      ok(students) => check_duplicates(students),
+      ok(valid) => match str_to_int(s) {
+        err(_) => err("invalid score: " + s),
+        ok(n) => if n < 0 or n > 100
+                 then err("score out of range: " + s)
+                 else ok(valid + [s]),
+      },
     }
+  )
+  match scores_result {
+    err(e) => err(e),
+    ok(scores) => ok([name] + scores),
   }
 }
 
-// Calculate average score for a student record [name, score1, score2, ...]
-// Error if no scores
+fn parse_all(input: String) -> Result[List[List[String]], String] = {
+  guard string.len(input) > 0 else err("empty input")
+  let lines = string.split(input, "\n")
+  let init: Result[ParseState, String] = ok({ line_num: 1, students: [] })
+  let result = list.fold(lines, init, (acc, line) =>
+    match acc {
+      err(e) => err(e),
+      ok(state) => match parse_student(line) {
+        err(e) => err("line " + int.to_string(state.line_num) + ": " + e),
+        ok(student) => {
+          let name = list.get(student, 0) ?? ""
+          match list.find(state.students, (s) => (list.get(s, 0) ?? "") == name) {
+            some(_) => err("duplicate name: " + name),
+            none => ok({ line_num: state.line_num + 1, students: state.students + [student] }),
+          }
+        },
+      },
+    }
+  )
+  match result {
+    err(e) => err(e),
+    ok(state) => ok(state.students),
+  }
+}
+
 fn average(student: List[String]) -> Result[Int, String] = {
-  let score_strs = list.drop(student, 1)
-  if list.len(score_strs) == 0 then err("no scores")
-  else {
-    let scores = score_strs |> list.map((s) => int.parse(s) ?? 0)
-    let total = list.fold(scores, 0, (acc, x) => acc + x)
-    ok(total / list.len(score_strs))
-  }
+  let scores = list.drop(student, 1)
+  guard list.len(scores) > 0 else err("no scores")
+  let total = list.fold(scores, 0, (sum, s) => sum + (int.parse(s) ?? 0))
+  ok(total / list.len(scores))
 }
 
-// Convert numeric average to letter grade
-// 90-100: "A", 80-89: "B", 70-79: "C", 60-69: "D", below 60: "F"
 fn letter_grade(avg: Int) -> String =
   if avg >= 90 then "A"
   else if avg >= 80 then "B"
@@ -101,82 +68,87 @@ fn letter_grade(avg: Int) -> String =
   else if avg >= 60 then "D"
   else "F"
 
-// Find students on honor roll (average >= 85)
-// Returns list of names, sorted alphabetically
 fn honor_roll(students: List[List[String]]) -> Result[List[String], String] = {
   let init: Result[List[String], String] = ok([])
-  let roll_result = list.fold(students, init, (acc, student) =>
+  let result = list.fold(students, init, (acc, student) =>
     match acc {
       err(e) => err(e),
       ok(names) => match average(student) {
         err(e) => err(e),
-        ok(avg) =>
-          if avg >= 85
-          then ok(names + [list.get(student, 0) ?? ""])
-          else ok(names),
-      }
+        ok(avg) => {
+          let name = list.get(student, 0) ?? ""
+          if avg >= 85 then ok(names + [name]) else ok(names)
+        },
+      },
     }
   )
-  match roll_result {
+  match result {
     err(e) => err(e),
     ok(names) => ok(list.sort(names)),
   }
 }
 
-// Calculate class average across all students
 fn class_average(students: List[List[String]]) -> Result[Int, String] = {
-  if list.len(students) == 0 then err("no students")
-  else {
-    let init: Result[Int, String] = ok(0)
-    let total_result = list.fold(students, init, (acc, student) =>
-      match acc {
-        err(e) => err(e),
-        ok(total) => match average(student) {
-          err(e) => err(e),
-          ok(avg) => ok(total + avg),
-        }
-      }
-    )
-    match total_result {
-      err(e) => err(e),
-      ok(total) => ok(total / list.len(students)),
-    }
-  }
-}
-
-// Format a single student summary: "name: avg (grade)"
-fn format_student(student: List[String]) -> Result[String, String] = {
-  let name = list.get(student, 0) ?? ""
-  match average(student) {
-    err(e) => err(e),
-    ok(avg) => ok("${name}: ${int.to_string(avg)} (${letter_grade(avg)})"),
-  }
-}
-
-local fn collect_string_results(results: List[Result[String, String]]) -> Result[List[String], String] = {
-  let init: Result[List[String], String] = ok([])
-  list.fold(results, init, (acc, r) =>
+  guard list.len(students) > 0 else err("no students")
+  let init: Result[Int, String] = ok(0)
+  let result = list.fold(students, init, (acc, student) =>
     match acc {
       err(e) => err(e),
-      ok(lines) => match r {
+      ok(total) => match average(student) {
         err(e) => err(e),
-        ok(line) => ok(lines + [line]),
-      }
+        ok(avg) => ok(total + avg),
+      },
     }
   )
+  match result {
+    err(e) => err(e),
+    ok(total) => ok(total / list.len(students)),
+  }
 }
 
-// Generate full report as multi-line string
-effect fn generate_report(input: String) -> Result[String, String] = {
-  let students = parse_all(input)!
-  let formatted = students |> list.map((s) => format_student(s))
-  let lines = collect_string_results(formatted)!
-  let class_avg = class_average(students)!
-  let honor = honor_roll(students)!
-  let honor_str = list.join(honor, ", ")
-  let summary = ["class average: " + int.to_string(class_avg), "honor roll: " + honor_str]
-  ok(list.join(lines + summary, "\n"))
-}
+fn format_student(student: List[String]) -> Result[String, String] =
+  match average(student) {
+    err(e) => err(e),
+    ok(avg) => {
+      let name = list.get(student, 0) ?? ""
+      let grade = letter_grade(avg)
+      ok("${name}: ${int.to_string(avg)} (${grade})")
+    },
+  }
+
+fn generate_report(input: String) -> Result[String, String] =
+  match parse_all(input) {
+    err(e) => err(e),
+    ok(students) => {
+      let init: Result[List[String], String] = ok([])
+      let lines_result = list.fold(students, init, (acc, student) =>
+        match acc {
+          err(e) => err(e),
+          ok(lines) => match format_student(student) {
+            err(e) => err(e),
+            ok(line) => ok(lines + [line]),
+          },
+        }
+      )
+      match lines_result {
+        err(e) => err(e),
+        ok(lines) => match class_average(students) {
+          err(e) => err(e),
+          ok(avg) => match honor_roll(students) {
+            err(e) => err(e),
+            ok(honorees) => {
+              let honor_str = list.join(honorees, ", ")
+              let report_lines = lines + [
+                "class average: " + int.to_string(avg),
+                "honor roll: " + honor_str,
+              ]
+              ok(list.join(report_lines, "\n"))
+            },
+          },
+        },
+      }
+    },
+  }
 
 test "parse single student" {
   assert_eq(parse_student("Alice:85,92,78"), ok(["Alice", "85", "92", "78"]))

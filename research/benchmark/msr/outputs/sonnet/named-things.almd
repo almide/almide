@@ -1,24 +1,24 @@
 protocol Named {
-  fn named_get(x: Self) -> String
-  fn named_set(x: Self, name: String) -> Self
+  fn get_name(a: Self) -> String
+  fn with_name(a: Self, name: String) -> Self
 }
 
 type Dog: Named = { name: String, breed: String }
 type Person: Named = { name: String, age: Int, email: String }
 type City: Named = { name: String, population: Int, country: String }
 
-fn Dog.named_get(d: Dog) -> String = d.name
-fn Dog.named_set(d: Dog, name: String) -> Dog = { ...d, name: name }
+fn Dog.get_name(d: Dog) -> String = d.name
+fn Dog.with_name(d: Dog, name: String) -> Dog = { ...d, name: name }
 
-fn Person.named_get(p: Person) -> String = p.name
-fn Person.named_set(p: Person, name: String) -> Person = { ...p, name: name }
+fn Person.get_name(p: Person) -> String = p.name
+fn Person.with_name(p: Person, name: String) -> Person = { ...p, name: name }
 
-fn City.named_get(c: City) -> String = c.name
-fn City.named_set(c: City, name: String) -> City = { ...c, name: name }
+fn City.get_name(c: City) -> String = c.name
+fn City.with_name(c: City, name: String) -> City = { ...c, name: name }
 
-fn describe[T: Named](x: T) -> String = "name: " + x.named_get()
-fn names[T: Named](xs: List[T]) -> List[String] = xs |> list.map((x) => x.named_get())
-fn set_name[T: Named](x: T, name: String) -> T = x.named_set(name)
+fn describe[T: Named](t: T) -> String = "name: " + t.get_name()
+fn names[T: Named](xs: List[T]) -> List[String] = xs |> list.map((x) => x.get_name())
+fn set_name[T: Named](t: T, name: String) -> T = t.with_name(name)
 
 test "describe dog" { assert_eq(describe(Dog { name: "Rex", breed: "Lab" }), "name: Rex") }
 test "describe person" { assert_eq(describe(Person { name: "Alice", age: 30, email: "a@b" }), "name: Alice") }

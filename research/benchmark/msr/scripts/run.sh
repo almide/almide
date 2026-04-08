@@ -111,16 +111,14 @@ Implement the functions above (replace \`todo\` with working code). Output ONLY 
     else
       # Retry: include previous code + error for the model to fix
       PREV_CODE=$(cat "$output_file" 2>/dev/null || echo "")
-      PROMPT="Here is my previous attempt at this Almide code, which had errors:
+      PROMPT="Previous code:
 
-\`\`\`
 $PREV_CODE
-\`\`\`
 
-The compiler reported these errors:
+Compiler errors:
 $ERROR_MSG
 
-Fix the errors and output ONLY the complete corrected .almd file. No markdown, no explanation."
+Output the corrected .almd file below. ALL code, ALL tests. Nothing else — no analysis, no explanation, no markdown fences. Start directly with the first line of code."
     fi
 
     claude --model "$MODEL" --print --system-prompt-file "$SYSTEM_PROMPT_FILE" "$PROMPT" > "$output_file" 2>/dev/null || true

@@ -1,24 +1,24 @@
+fn is_digit(c: String) -> Bool =
+  string.contains("0123456789", c)
+
+fn is_valid_char(c: String) -> Bool =
+  is_digit(c) or c == " " or c == "-" or c == "." or c == "(" or c == ")"
+
 effect fn clean(input: String) -> Result[String, String] = {
-  let digits = string.chars(input)
-    |> list.filter((c) => string.contains("0123456789", c))
-    |> list.join("")
-
-  let n = string.len(digits)
-
-  let ten = match n {
-    10 => ok(digits),
-    11 => if string.slice(digits, 0, 1) == "1"
-          then ok(string.slice(digits, 1, 11))
-          else err("11 digits must start with 1"),
-    _  => err("incorrect number of digits"),
-  }!
-
-  guard string.slice(ten, 0, 1) != "0" else err("area code cannot start with zero")
-  guard string.slice(ten, 0, 1) != "1" else err("area code cannot start with one")
-  guard string.slice(ten, 3, 4) != "0" else err("exchange code cannot start with zero")
-  guard string.slice(ten, 3, 4) != "1" else err("exchange code cannot start with one")
-
-  ok(ten)
+  let chars = string.chars(input)
+  guard chars |> list.all((c) => is_valid_char(c)) else err("incorrect number of digits")
+  let digits = chars |> list.filter((c) => is_digit(c)) |> list.join("")
+  let len = string.len(digits)
+  guard len == 10 or len == 11 else err("incorrect number of digits")
+  guard not (len == 11 and string.get(digits, 0) != some("1")) else err("11 digits must start with 1")
+  let normalized = if len == 11 then string.slice(digits, 1, 11) else digits
+  let area = string.get(normalized, 0) ?? ""
+  guard area != "0" else err("area code cannot start with zero")
+  guard area != "1" else err("area code cannot start with one")
+  let exchange = string.get(normalized, 3) ?? ""
+  guard exchange != "0" else err("exchange code cannot start with zero")
+  guard exchange != "1" else err("exchange code cannot start with one")
+  ok(normalized)
 }
 
 test "cleans number" { assert_eq(clean("(223) 456-7890"), ok("2234567890")) }

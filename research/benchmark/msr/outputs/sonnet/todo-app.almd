@@ -2,13 +2,20 @@ type Status = | Pending | Done | Cancelled
 
 type Todo = { id: Int, title: String, status: Status }
 
-fn create(id: Int, title: String) -> Todo = { id: id, title: title, status: Pending }
+fn create(id: Int, title: String) -> Todo =
+  { id: id, title: title, status: Pending }
 
-fn complete(t: Todo) -> Todo = { ...t, status: Done }
+fn complete(t: Todo) -> Todo =
+  { ...t, status: Done }
 
-fn cancel(t: Todo) -> Todo = { ...t, status: Cancelled }
+fn cancel(t: Todo) -> Todo =
+  { ...t, status: Cancelled }
 
-fn is_done(t: Todo) -> Bool = match t.status { Done => true, _ => false }
+fn is_done(t: Todo) -> Bool =
+  match t.status {
+    Done => true,
+    _ => false,
+  }
 
 fn pending_count(todos: List[Todo]) -> Int =
   todos |> list.filter((t) => match t.status { Pending => true, _ => false }) |> list.len

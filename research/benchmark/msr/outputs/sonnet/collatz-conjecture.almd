@@ -1,14 +1,14 @@
 import string
 import list
 
-fn collatz_count(n: Int, acc: Int) -> Int =
-  if n == 1 then acc
-  else if n % 2 == 0 then collatz_count(n / 2, acc + 1)
-  else collatz_count(3 * n + 1, acc + 1)
+fn collatz_steps(n: Int, acc: Int) -> Result[Int, String] =
+  if n == 1 then ok(acc)
+  else if n % 2 == 0 then collatz_steps(n / 2, acc + 1)
+  else collatz_steps(3 * n + 1, acc + 1)
 
 fn steps(n: Int) -> Result[Int, String] =
   if n <= 0 then err("Only positive integers are allowed")
-  else ok(collatz_count(n, 0))
+  else collatz_steps(n, 0)
 
 test "zero steps for one" {
   assert_eq(steps(1), ok(0))

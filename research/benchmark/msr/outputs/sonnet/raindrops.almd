@@ -1,9 +1,8 @@
 fn convert(n: Int) -> String = {
-  let result =
-    (if n % 3 == 0 then "Pling" else "") +
-    (if n % 5 == 0 then "Plang" else "") +
-    (if n % 7 == 0 then "Plong" else "")
-  if string.len(result) > 0 then result else int.to_string(n)
+  let result = (if n % 3 == 0 then "Pling" else "") +
+               (if n % 5 == 0 then "Plang" else "") +
+               (if n % 7 == 0 then "Plong" else "")
+  if string.len(result) == 0 then int.to_string(n) else result
 }
 
 test "the sound for 1 is 1" { assert_eq(convert(1), "1") }

@@ -1,17 +1,14 @@
-fn parse_line(line: String) -> Result[(String, String), String] =
-  match string.index_of(line, "=") {
-    none => err("invalid line: ${line}"),
-    some(idx) => {
-      let key = string.slice(line, 0, idx)
-      let value = string.slice(line, idx + 1, string.len(line))
-      ok((key, value))
-    },
-  }
+fn parse_line(line: String) -> Result[(String, String), String] = {
+  let parts = string.split(line, "=")
+  guard list.len(parts) >= 2 else err("invalid line: " + line)
+  let key = list.get(parts, 0) ?? ""
+  let value = list.drop(parts, 1) |> list.join("=")
+  ok((key, value))
+}
 
 effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] = {
-  let lines = string.split(input, "\n")
-  let init: Result[List[(String, String)], String] = ok([])
-  list.fold(lines, init, (acc, line) =>
+  let lines = string.split(input, "\n") |> list.filter((l) => string.len(l) > 0)
+  list.fold(lines, ok([]), (acc, line) =>
     match acc {
       err(e) => err(e),
       ok(pairs) => match parse_line(line) {
@@ -22,32 +19,38 @@ effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] =
   )
 }
 
-effect fn validate_keys(pairs: List[(String, String)]) -> Result[List[(String, String)], String] =
-  if pairs |> list.any((pair) => {
-    let (k, _) = pair
-    string.len(k) == 0
-  })
-  then err("empty key found")
-  else ok(pairs)
+effect fn validate_keys(pairs: List[(String, String)]) -> Result[List[(String, String)], String] = {
+  list.fold(pairs, ok([]), (acc, pair) =>
+    match acc {
+      err(e) => err(e),
+      ok(valid) => {
+        let (k, v) = pair
+        if string.len(k) == 0 then err("empty key found")
+        else ok(valid + [(k, v)])
+      },
+    }
+  )
+}
 
 fn transform(pairs: List[(String, String)]) -> List[(String, String)] =
   pairs |> list.map((pair) => {
-    let (key, value) = pair
-    (string.to_upper(key), string.trim(value))
+    let (k, v) = pair
+    (string.to_upper(k), string.trim(v))
   })
 
 fn format_output(pairs: List[(String, String)]) -> String =
   pairs
     |> list.map((pair) => {
-      let (key, value) = pair
-      "${key}: ${value}"
+      let (k, v) = pair
+      k + ": " + v
     })
     |> list.join("\n")
 
 effect fn run_pipeline(input: String) -> Result[String, String] = {
   let pairs = parse_pairs(input)!
   let valid = validate_keys(pairs)!
-  ok(format_output(transform(valid)))
+  let transformed = transform(valid)
+  ok(format_output(transformed))
 }
 
 test "simple pipeline" {
