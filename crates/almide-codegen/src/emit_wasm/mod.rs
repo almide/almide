@@ -453,7 +453,8 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     let mut emitter = WasmEmitter::new();
 
     // Phase 1: Register types and function indices
-    runtime::register_runtime(&mut emitter);
+    // Step 1a: WASI imports (must come first — all imports before any defined functions)
+    runtime::register_runtime_imports(&mut emitter);
 
     // Store import info for fd_write
     emitter.imports.push(ImportInfo {
@@ -639,6 +640,33 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         type_idx: fd_readdir_type_idx,
     });
 
+    // Step 1b: @extern(wasm, ...) imports — must be registered before any
+    // defined functions so import indices are contiguous at the start.
+    let mut extern_wasm_set: HashSet<usize> = HashSet::new();
+    for (i, func) in program.functions.iter().enumerate() {
+        if let Some(attr) = func.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") {
+            let params: Vec<ValType> = func.params.iter()
+                .filter_map(|p| values::ty_to_valtype(&p.ty))
+                .collect();
+            let results = values::ret_type(&func.ret_ty);
+            let type_idx = emitter.register_type(params, results);
+            let func_idx = emitter.register_import(type_idx);
+            emitter.imports.push(ImportInfo {
+                module: attr.module.as_str().to_string(),
+                name: attr.function.as_str().to_string(),
+                type_idx,
+            });
+            emitter.func_map.insert(func.name.to_string(), func_idx);
+            if func.is_effect {
+                emitter.effect_fns.insert(func.name.to_string());
+            }
+            extern_wasm_set.insert(i);
+        }
+    }
+
+    // Step 1c: Runtime defined functions (after all imports are registered)
+    runtime::register_runtime_functions(&mut emitter);
+
     // Register type declarations (record and variant field layouts).
     // Include both the main program and all imported modules so nominal
     // types from `import mod` resolve during codegen.
@@ -737,7 +765,11 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     let mut test_func_indices: Vec<(u32, String)> = Vec::new(); // (func_idx, test_name)
     let has_main = program.functions.iter().any(|f| f.name == "main" && !f.is_test);
 
-    for func in &program.functions {
+    for (func_enum_idx, func) in program.functions.iter().enumerate() {
+        // Skip @extern(wasm) — already registered as imports above
+        if extern_wasm_set.contains(&func_enum_idx) {
+            continue;
+        }
         // Resolve param and ret types: Unknown/TypeVar can leak through from
         // lifted lambdas whose outer `Ty::Fn` had unresolved entries. Fall back
         // to VarTable (for params) and expression inspection (for ret).
@@ -850,9 +882,12 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     // Phase 2: Compile function bodies (order must match registration order)
     runtime::compile_runtime(&mut emitter);
 
-    // User + test functions
+    // User + test functions (skip @extern(wasm) — they are imports, not defined)
     let mut user_idx = 0;
-    for func in &program.functions {
+    for (func_enum_idx, func) in program.functions.iter().enumerate() {
+        if extern_wasm_set.contains(&func_enum_idx) {
+            continue;
+        }
         let type_idx = user_meta[user_idx];
         // Pass init_globals_idx to main function so top-level lets get initialized
         let is_main = func.name == "main" && !func.is_test;
@@ -889,8 +924,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     // Phase 2.5: Dead Code Elimination
     let dce_count = dce::eliminate_dead_code(&mut emitter);
 
-    // Collect public user functions for WASM export
-    for func in &program.functions {
+    // Collect public user functions for WASM export (skip imports)
+    for (func_enum_idx, func) in program.functions.iter().enumerate() {
+        if extern_wasm_set.contains(&func_enum_idx) { continue; }
         if func.is_test { continue; }
         if !matches!(func.visibility, almide_ir::IrVisibility::Public) { continue; }
         if func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
