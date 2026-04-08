@@ -221,7 +221,7 @@ Comparison with 15 established languages using [mame/ai-coding-lang-bench](https
 ![Code Size](docs/figures/lang-bench-loc.png)
 ![Pass Rate](docs/figures/lang-bench-pass-rate.png)
 
-> Almide and MoonBit use Sonnet 4.6 (unknown language); all others use Opus 4.6 (known language). Almide achieves 100% pass rate with fewer lines of code than most languages, despite needing more time due to the model having no prior training data for the language.
+> Almide uses Sonnet 4.6 (unknown language); all others use Opus 4.6 (known language). Almide achieves 100% pass rate with fewer lines of code than most languages, despite needing more time due to the model having no prior training data for the language.
 
 ## Ecosystem
 

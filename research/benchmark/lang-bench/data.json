@@ -1,0 +1,202 @@
+{
+  "source": "https://github.com/mame/ai-coding-lang-bench",
+  "description": "AI Coding Language Benchmark — MiniGit implementation task",
+  "notes": {
+    "official_15": "Data from mame/ai-coding-lang-bench results.json (Opus 4.6, 20 trials each)",
+    "almide": "Almide data from internal runs (Sonnet 4.6, 10 trials). Model differs because Almide has no training data in Opus corpus."
+  },
+  "languages": [
+    {
+      "name": "Ruby",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 73.1,
+      "stddev_time": 4.2,
+      "avg_v2_loc": 218,
+      "stddev_loc": 15,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.36
+    },
+    {
+      "name": "Python",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 74.6,
+      "stddev_time": 4.5,
+      "avg_v2_loc": 235,
+      "stddev_loc": 18,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.38
+    },
+    {
+      "name": "JavaScript",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 81.1,
+      "stddev_time": 5.0,
+      "avg_v2_loc": 248,
+      "stddev_loc": 20,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.39
+    },
+    {
+      "name": "Go",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 101.6,
+      "stddev_time": 37.0,
+      "avg_v2_loc": 324,
+      "stddev_loc": 25,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.50
+    },
+    {
+      "name": "Rust",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 113.7,
+      "stddev_time": 54.8,
+      "avg_v2_loc": 303,
+      "stddev_loc": 30,
+      "v1_pass": 19,
+      "v2_pass": 19,
+      "avg_cost": 0.54
+    },
+    {
+      "name": "Java",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 115.4,
+      "stddev_time": 34.4,
+      "avg_v2_loc": 303,
+      "stddev_loc": 22,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.50
+    },
+    {
+      "name": "Python/mypy",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 125.3,
+      "stddev_time": 19.0,
+      "avg_v2_loc": 326,
+      "stddev_loc": 28,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.57
+    },
+    {
+      "name": "OCaml",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 128.1,
+      "stddev_time": 28.9,
+      "avg_v2_loc": 216,
+      "stddev_loc": 15,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.58
+    },
+    {
+      "name": "Perl",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 130.2,
+      "stddev_time": 44.2,
+      "avg_v2_loc": 315,
+      "stddev_loc": 35,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.55
+    },
+    {
+      "name": "Scheme",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 130.6,
+      "stddev_time": 39.9,
+      "avg_v2_loc": 310,
+      "stddev_loc": 30,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.60
+    },
+    {
+      "name": "TypeScript",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 133.0,
+      "stddev_time": 29.4,
+      "avg_v2_loc": 310,
+      "stddev_loc": 25,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.62
+    },
+    {
+      "name": "Lua",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 143.6,
+      "stddev_time": 43.0,
+      "avg_v2_loc": 398,
+      "stddev_loc": 40,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.58
+    },
+    {
+      "name": "C",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 155.8,
+      "stddev_time": 40.9,
+      "avg_v2_loc": 516,
+      "stddev_loc": 45,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.74
+    },
+    {
+      "name": "Haskell",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 174.0,
+      "stddev_time": 44.2,
+      "avg_v2_loc": 224,
+      "stddev_loc": 20,
+      "v1_pass": 19,
+      "v2_pass": 20,
+      "avg_cost": 0.74
+    },
+    {
+      "name": "Ruby/Steep",
+      "model": "opus",
+      "trials": 20,
+      "avg_total_time": 186.6,
+      "stddev_time": 69.7,
+      "avg_v2_loc": 304,
+      "stddev_loc": 35,
+      "v1_pass": 20,
+      "v2_pass": 20,
+      "avg_cost": 0.84
+    },
+    {
+      "name": "Almide",
+      "model": "sonnet",
+      "trials": 10,
+      "avg_total_time": 1159,
+      "stddev_time": 180,
+      "avg_v2_loc": 325,
+      "stddev_loc": 45,
+      "v1_pass": 10,
+      "v2_pass": 10,
+      "avg_cost": 5.20
+    }
+  ]
+}
