@@ -61,6 +61,15 @@ effect = true
 rust = "almide_rt_process_exec_status(&*{cmd}, &{ let __a: Vec<String> = {args}; __a })?"
 ts = "__almd_process.exec_status({cmd}, {args})"
 
+[pid]
+description = "Get the current process ID"
+example = 'let my_pid = process.pid()'
+params = []
+return = "Int"
+effect = false
+rust = "almide_rt_process_pid()"
+ts = "process.pid"
+
 [env]
 description = "Get the value of an environment variable, or None if not set"
 example = 'let home = process.env("HOME") ?? "/tmp"'

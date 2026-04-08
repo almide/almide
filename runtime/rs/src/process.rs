@@ -92,6 +92,10 @@ pub fn almide_rt_process_exec_status(cmd: String, args: Vec<String>) -> Result<(
     }
 }
 
+pub fn almide_rt_process_pid() -> i64 {
+    std::process::id() as i64
+}
+
 pub fn almide_rt_process_env(key: String) -> Option<String> {
     std::env::var(&key).ok()
 }

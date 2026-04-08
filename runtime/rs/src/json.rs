@@ -101,6 +101,22 @@ pub fn almide_json_keys(j: &Value) -> Vec<String> {
     match j { Value::Object(entries) => entries.iter().map(|(k, _)| k.clone()).collect(), _ => vec![] }
 }
 
+pub fn almide_json_to_map(j: &Value) -> Option<HashMap<String, String>> {
+    match j {
+        Value::Object(entries) => {
+            let map: HashMap<String, String> = entries.iter().map(|(k, v)| {
+                let s = match v {
+                    Value::Str(s) => s.clone(),
+                    _ => almide_rt_value_stringify(v),
+                };
+                (k.clone(), s)
+            }).collect();
+            Some(map)
+        }
+        _ => None,
+    }
+}
+
 pub fn almide_json_object(entries: Vec<(String, Value)>) -> Value {
     Value::Object(entries)
 }

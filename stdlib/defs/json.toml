@@ -229,3 +229,11 @@ params = [{ name = "j", type = "Value" }, { name = "path", type = "JsonPath" }]
 return = "Value"
 rust = "almide_json_remove_path(&{j}, &{path})"
 ts = "__almd_json.remove_path({j}, {path})"
+
+[to_map]
+description = "Convert a JSON object to a Map[String, String]. Values are stringified. Returns none if not an object."
+example = 'let m = json.to_map(obj) ?? map.new()'
+params = [{ name = "j", type = "Value" }]
+return = "Option[Map[String, String]]"
+rust = "almide_json_to_map(&{j})"
+ts = "__almd_json.to_map({j})"
