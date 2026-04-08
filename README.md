@@ -32,25 +32,16 @@ The flywheel: LLMs write Almide reliably → more code is produced → training 
 
 **[Try it in your browser →](https://almide.github.io/playground/)** — No installation required.
 
-### Install from prebuilt binaries
-
-Download the latest release for your platform from [GitHub Releases](https://github.com/almide/almide/releases/latest):
+### Install (macOS / Linux)
 
 ```bash
-# macOS (Apple Silicon)
-curl -LO https://github.com/almide/almide/releases/latest/download/almide-macos-aarch64.tar.gz
-tar xzf almide-macos-aarch64.tar.gz
-cp almide-macos-aarch64/almide ~/.local/bin/
+curl -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh
+```
 
-# macOS (Intel)
-curl -LO https://github.com/almide/almide/releases/latest/download/almide-macos-x86_64.tar.gz
-tar xzf almide-macos-x86_64.tar.gz
-cp almide-macos-x86_64/almide ~/.local/bin/
+### Install (Windows)
 
-# Linux (x86_64)
-curl -LO https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz
-tar xzf almide-linux-x86_64.tar.gz
-cp almide-linux-x86_64/almide ~/.local/bin/
+```powershell
+irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex
 ```
 
 ### Install from source
