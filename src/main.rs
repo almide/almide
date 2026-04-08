@@ -141,6 +141,12 @@ enum Commands {
         /// Dependency name (as declared in almide.toml)
         name: String,
     },
+    /// Update almide to the latest version
+    #[command(name = "self-update")]
+    SelfUpdate {
+        /// Target version (e.g., v0.13.0); defaults to latest
+        version: Option<String>,
+    },
     /// Emit source code or AST
     #[command(hide = true)]
     Emit {
@@ -522,6 +528,9 @@ fn dispatch(cli: Cli) {
                     std::process::exit(1);
                 }
             }
+        }
+        Commands::SelfUpdate { version } => {
+            cli::cmd_self_update(version.as_deref());
         }
         Commands::Emit { file, target, emit_ast, emit_ir, no_check, repr_c } => {
             cli::cmd_emit(&file, &target, emit_ast, emit_ir, no_check, repr_c);
