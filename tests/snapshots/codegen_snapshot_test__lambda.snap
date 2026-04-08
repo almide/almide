@@ -2,10 +2,6 @@
 source: tests/codegen_snapshot_test.rs
 expression: code
 ---
-pub fn apply(f: impl Fn(i64) -> i64 + Clone, x: i64) -> i64 {
-    f.clone()(x)
-}
-
 pub fn main() -> i64 {
     apply(move |x| (x + 1i64), 41i64)
 }
