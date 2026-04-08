@@ -194,9 +194,9 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 
 | Metric | Value |
 |--------|-------|
-| Binary size (minigit CLI) | 635 KB (stripped) |
-| Runtime (100 ops) | 1.6s |
-| Dependencies | 0 (single static binary) |
+| Binary size (minigit CLI) | **444 KB** (stripped) |
+| Runtime (100 ops) | **1.1s** |
+| Dependencies | **0** (single static binary) |
 | WASM target | `almide build app.almd --target wasm` |
 
 ## Project Status

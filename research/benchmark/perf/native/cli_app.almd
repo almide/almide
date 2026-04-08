@@ -1,0 +1,354 @@
+import fs
+import process
+import datetime
+
+let FNV_OFFSET = 1469598103934665603
+let FNV_PRIME = 1099511628211
+
+fn hex_digit(n: Int) -> String =
+  match n {
+    0 => "0", 1 => "1", 2 => "2", 3 => "3",
+    4 => "4", 5 => "5", 6 => "6", 7 => "7",
+    8 => "8", 9 => "9", 10 => "a", 11 => "b",
+    12 => "c", 13 => "d", 14 => "e", 15 => "f",
+    _ => "0",
+  }
+
+fn to_hex16(n: Int) -> String = {
+  var result = ""
+  for i in 0..16 {
+    let shift = (15 - i) * 4
+    let digit = int.band(int.bshr(n, shift), 15)
+    result = result + hex_digit(digit)
+  }
+  result
+}
+
+fn minihash(data: List[Int]) -> String = {
+  var h = FNV_OFFSET
+  for b in data {
+    h = int.bxor(h, b)
+    h = int.wrap_mul(h, FNV_PRIME, 64)
+  }
+  to_hex16(h)
+}
+
+fn hash_str(s: String) -> String =
+  minihash(string.to_bytes(s))
+
+fn parse_commit_files(content: String) -> Map[String, String] = {
+  let lines = string.split(content, "\n")
+  var in_files = false
+  var result: Map[String, String] = [:]
+  for line in lines {
+    if in_files then {
+      let trimmed = string.trim(line)
+      if string.len(trimmed) > 0 then {
+        let parts = string.split(trimmed, " ")
+        let fname = list.get(parts, 0) ?? ""
+        let fhash = list.get(parts, 1) ?? ""
+        if string.len(fname) > 0 and string.len(fhash) > 0 then {
+          result[fname] = fhash
+        }
+      }
+    }
+    if string.trim(line) == "files:" then {
+      in_files = true
+    }
+  }
+  result
+}
+
+effect fn cmd_init() -> Result[Unit, String] = {
+  guard not fs.exists(".minigit") else {
+    println("Repository already initialized")
+    ok(())
+  }
+  fs.mkdir_p(".minigit/objects")!
+  fs.mkdir_p(".minigit/commits")!
+  fs.write(".minigit/index", "")!
+  fs.write(".minigit/HEAD", "")!
+  ok(())
+}
+
+effect fn cmd_add(filename: String) -> Result[Unit, String] = {
+  guard fs.exists(filename) else {
+    println("File not found")
+    err("file not found")
+  }
+  let content = fs.read_text(filename)!
+  let hash = hash_str(content)
+  fs.write(".minigit/objects/" + hash, content)!
+  let index_content = fs.read_text(".minigit/index")? ?? ""
+  let lines = list.filter(string.split(index_content, "\n"), (l) => string.len(l) > 0)
+  guard not list.contains(lines, filename) else {
+    ok(())
+  }
+  fs.write(".minigit/index", index_content + filename + "\n")!
+  ok(())
+}
+
+effect fn cmd_commit(message: String) -> Result[Unit, String] = {
+  let index_content = fs.read_text(".minigit/index")? ?? ""
+  guard string.len(string.trim(index_content)) > 0 else {
+    println("Nothing to commit")
+    err("nothing to commit")
+  }
+  let files = list.filter(string.split(index_content, "\n"), (l) => string.len(l) > 0)
+  let sorted_files = list.sort(files)
+  let head_content = fs.read_text(".minigit/HEAD")? ?? ""
+  let parent = string.trim(head_content)
+  let parent_str = if string.len(parent) > 0 then parent else "NONE"
+  let ts = datetime.to_unix(datetime.now())
+  var commit_text = "parent: " + parent_str + "\n"
+  commit_text = commit_text + "timestamp: " + int.to_string(ts) + "\n"
+  commit_text = commit_text + "message: " + message + "\n"
+  commit_text = commit_text + "files:\n"
+  for fname in sorted_files {
+    let file_content = fs.read_text(fname)!
+    let fhash = hash_str(file_content)
+    commit_text = commit_text + fname + " " + fhash + "\n"
+  }
+  let commit_hash = hash_str(commit_text)
+  fs.write(".minigit/commits/" + commit_hash, commit_text)!
+  fs.write(".minigit/HEAD", commit_hash)!
+  fs.write(".minigit/index", "")!
+  println("Committed " + commit_hash)
+  ok(())
+}
+
+effect fn cmd_status() -> Result[Unit, String] = {
+  let index_content = fs.read_text(".minigit/index")? ?? ""
+  let files = list.filter(string.split(index_content, "\n"), (l) => string.len(l) > 0)
+  println("Staged files:")
+  if list.len(files) == 0 then {
+    println("(none)")
+  } else {
+    for f in files {
+      println(f)
+    }
+  }
+  ok(())
+}
+
+effect fn cmd_log() -> Result[Unit, String] = {
+  let head_content = fs.read_text(".minigit/HEAD")? ?? ""
+  let head = string.trim(head_content)
+  guard string.len(head) > 0 else {
+    println("No commits")
+    ok(())
+  }
+  var current = head
+  while string.len(current) > 0 {
+    let commit_path = ".minigit/commits/" + current
+    match fs.read_text(commit_path) {
+      ok(content) => {
+        let lines = string.split(content, "\n")
+        let pline = list.get(lines, 0) ?? ""
+        let tline = list.get(lines, 1) ?? ""
+        let mline = list.get(lines, 2) ?? ""
+        let parent = string.trim(string.slice(pline, 8, string.len(pline)))
+        let ts = string.trim(string.slice(tline, 11, string.len(tline)))
+        let msg = string.trim(string.slice(mline, 9, string.len(mline)))
+        println("commit " + current)
+        println("Date: " + ts)
+        println("Message: " + msg)
+        println("")
+        current = if parent == "NONE" then "" else parent
+      },
+      err(_) => {
+        current = ""
+      },
+    }
+  }
+  ok(())
+}
+
+effect fn cmd_diff(hash1: String, hash2: String) -> Result[Unit, String] = {
+  guard fs.exists(".minigit/commits/" + hash1) else {
+    println("Invalid commit")
+    err("invalid commit")
+  }
+  guard fs.exists(".minigit/commits/" + hash2) else {
+    println("Invalid commit")
+    err("invalid commit")
+  }
+  let content1 = fs.read_text(".minigit/commits/" + hash1)!
+  let content2 = fs.read_text(".minigit/commits/" + hash2)!
+  let files1 = parse_commit_files(content1)
+  let files2 = parse_commit_files(content2)
+  var all_files: List[String] = []
+  for (k, v) in files1 {
+    if not list.contains(all_files, k) then {
+      all_files = all_files + [k]
+    }
+  }
+  for (k, v) in files2 {
+    if not list.contains(all_files, k) then {
+      all_files = all_files + [k]
+    }
+  }
+  let sorted_all = list.sort(all_files)
+  for fname in sorted_all {
+    let h1 = files1[fname]
+    let h2 = files2[fname]
+    match h1 {
+      none => {
+        match h2 {
+          some(_) => println("Added: " + fname),
+          none => (),
+        }
+      },
+      some(v1) => {
+        match h2 {
+          none => println("Removed: " + fname),
+          some(v2) => {
+            if v1 != v2 then println("Modified: " + fname)
+          },
+        }
+      },
+    }
+  }
+  ok(())
+}
+
+effect fn cmd_checkout(commit_hash: String) -> Result[Unit, String] = {
+  guard fs.exists(".minigit/commits/" + commit_hash) else {
+    println("Invalid commit")
+    err("invalid commit")
+  }
+  let content = fs.read_text(".minigit/commits/" + commit_hash)!
+  let files = parse_commit_files(content)
+  for (fname, blob_hash) in files {
+    let blob_content = fs.read_text(".minigit/objects/" + blob_hash)!
+    fs.write(fname, blob_content)!
+  }
+  fs.write(".minigit/HEAD", commit_hash)!
+  fs.write(".minigit/index", "")!
+  println("Checked out " + commit_hash)
+  ok(())
+}
+
+effect fn cmd_reset(commit_hash: String) -> Result[Unit, String] = {
+  guard fs.exists(".minigit/commits/" + commit_hash) else {
+    println("Invalid commit")
+    err("invalid commit")
+  }
+  fs.write(".minigit/HEAD", commit_hash)!
+  fs.write(".minigit/index", "")!
+  println("Reset to " + commit_hash)
+  ok(())
+}
+
+effect fn cmd_rm(filename: String) -> Result[Unit, String] = {
+  let index_content = fs.read_text(".minigit/index")? ?? ""
+  let lines = list.filter(string.split(index_content, "\n"), (l) => string.len(l) > 0)
+  guard list.contains(lines, filename) else {
+    println("File not in index")
+    err("file not in index")
+  }
+  let new_lines = list.filter(lines, (l) => l != filename)
+  var new_content = ""
+  for l in new_lines {
+    new_content = new_content + l + "\n"
+  }
+  fs.write(".minigit/index", new_content)!
+  ok(())
+}
+
+effect fn cmd_show(commit_hash: String) -> Result[Unit, String] = {
+  guard fs.exists(".minigit/commits/" + commit_hash) else {
+    println("Invalid commit")
+    err("invalid commit")
+  }
+  let content = fs.read_text(".minigit/commits/" + commit_hash)!
+  let lines = string.split(content, "\n")
+  let tline = list.get(lines, 1) ?? ""
+  let mline = list.get(lines, 2) ?? ""
+  let ts = string.trim(string.slice(tline, 11, string.len(tline)))
+  let msg = string.trim(string.slice(mline, 9, string.len(mline)))
+  println("commit " + commit_hash)
+  println("Date: " + ts)
+  println("Message: " + msg)
+  println("Files:")
+  let files = parse_commit_files(content)
+  var file_keys: List[String] = []
+  for (k, v) in files {
+    file_keys = file_keys + [k]
+  }
+  let sorted_keys = list.sort(file_keys)
+  for fname in sorted_keys {
+    match files[fname] {
+      some(fhash) => println("  " + fname + " " + fhash),
+      none => (),
+    }
+  }
+  ok(())
+}
+
+effect fn main() -> Unit = {
+  let args = process.args()
+  let cmd = list.get(args, 1) ?? ""
+  match cmd {
+    "init" => {
+      cmd_init()!
+    },
+    "add" => {
+      let fname = list.get(args, 2) ?? ""
+      match cmd_add(fname) {
+        ok(_) => (),
+        err(_) => process.exit(1),
+      }
+    },
+    "commit" => {
+      let msg = list.get(args, 3) ?? ""
+      match cmd_commit(msg) {
+        ok(_) => (),
+        err(_) => process.exit(1),
+      }
+    },
+    "status" => {
+      cmd_status()!
+    },
+    "log" => {
+      cmd_log()!
+    },
+    "diff" => {
+      let h1 = list.get(args, 2) ?? ""
+      let h2 = list.get(args, 3) ?? ""
+      match cmd_diff(h1, h2) {
+        ok(_) => (),
+        err(_) => process.exit(1),
+      }
+    },
+    "checkout" => {
+      let hash = list.get(args, 2) ?? ""
+      match cmd_checkout(hash) {
+        ok(_) => (),
+        err(_) => process.exit(1),
+      }
+    },
+    "reset" => {
+      let hash = list.get(args, 2) ?? ""
+      match cmd_reset(hash) {
+        ok(_) => (),
+        err(_) => process.exit(1),
+      }
+    },
+    "rm" => {
+      let fname = list.get(args, 2) ?? ""
+      match cmd_rm(fname) {
+        ok(_) => (),
+        err(_) => process.exit(1),
+      }
+    },
+    "show" => {
+      let hash = list.get(args, 2) ?? ""
+      match cmd_show(hash) {
+        ok(_) => (),
+        err(_) => process.exit(1),
+      }
+    },
+    _ => (),
+  }
+}
