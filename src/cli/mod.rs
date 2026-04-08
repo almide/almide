@@ -132,6 +132,65 @@ codegen-units = 1
 
 const BURN_MATRIX_RUNTIME: &str = include_str!("../../runtime/rs/burn/matrix_burn.rs");
 
+/// Build a Cargo.toml string by inserting native deps into the [dependencies] section.
+fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::NativeDep]) -> String {
+    if native_deps.is_empty() {
+        return base_toml.to_string();
+    }
+    let mut toml = base_toml.to_string();
+    let mut extra_deps = String::new();
+    for dep in native_deps {
+        let dep_line = if dep.spec.starts_with('{') {
+            format!("{} = {}\n", dep.name, dep.spec)
+        } else {
+            format!("{} = \"{}\"\n", dep.name, dep.spec)
+        };
+        extra_deps.push_str(&dep_line);
+    }
+    if let Some(pos) = toml.find("[dependencies]") {
+        let insert_pos = toml[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(toml.len());
+        toml.insert_str(insert_pos, &extra_deps);
+    } else {
+        toml.push_str("\n[dependencies]\n");
+        toml.push_str(&extra_deps);
+    }
+    toml
+}
+
+/// Copy native/*.rs files from source_root into src_dir and inject mod declarations into code.
+fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path>, src_dir: &std::path::Path) -> Result<(), String> {
+    let root = match source_root {
+        Some(r) => r,
+        None => return Ok(()),
+    };
+    let native_dir = root.join("native");
+    if !native_dir.is_dir() { return Ok(()); }
+    let mut mod_decls = String::new();
+    if let Ok(entries) = std::fs::read_dir(&native_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "rs") {
+                let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
+                std::fs::write(src_dir.join(entry.file_name()), &content)
+                    .map_err(|e| format!("failed to write native module {}: {}", stem, e))?;
+                mod_decls.push_str(&format!("mod {};\n", stem));
+            }
+        }
+    }
+    if !mod_decls.is_empty() {
+        if let Some(pos) = code.find("\nuse ") {
+            code.insert_str(pos, &format!("\n{}", mod_decls));
+        } else if let Some(pos) = code.find("\nfn ") {
+            code.insert_str(pos, &format!("\n{}", mod_decls));
+        } else {
+            *code = format!("{}\n{}", mod_decls, code);
+        }
+    }
+    Ok(())
+}
+
 /// Build generated Rust code as a cdylib shared library (.dylib/.so).
 fn cargo_build_cdylib(rs_code: &str, project_dir: &std::path::Path, lib_name: &str, release: bool) -> Result<std::path::PathBuf, String> {
     let src_dir = project_dir.join("src");
@@ -204,29 +263,7 @@ fn cargo_build_generated_with_native(
 
     // Build Cargo.toml: start with base template, append native deps
     let base_toml = if uses_matrix { GENERATED_CARGO_TOML_ML } else if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
-    let cargo_toml = if native_deps.is_empty() {
-        base_toml.to_string()
-    } else {
-        let mut toml = base_toml.to_string();
-        let mut extra_deps = String::new();
-        for dep in native_deps {
-            let dep_line = if dep.spec.starts_with('{') {
-                format!("{} = {}\n", dep.name, dep.spec)
-            } else {
-                format!("{} = \"{}\"\n", dep.name, dep.spec)
-            };
-            extra_deps.push_str(&dep_line);
-        }
-        if let Some(pos) = toml.find("[dependencies]") {
-            // Insert after the [dependencies] line
-            let insert_pos = toml[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(toml.len());
-            toml.insert_str(insert_pos, &extra_deps);
-        } else {
-            toml.push_str("\n[dependencies]\n");
-            toml.push_str(&extra_deps);
-        }
-        toml
-    };
+    let cargo_toml = build_cargo_toml(base_toml, native_deps);
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
@@ -236,36 +273,7 @@ fn cargo_build_generated_with_native(
         rs_code.to_string()
     };
 
-    // Copy native/*.rs files and add mod declarations
-    if let Some(root) = source_root {
-        let native_dir = root.join("native");
-        if native_dir.is_dir() {
-            let mut mod_decls = String::new();
-            if let Ok(entries) = std::fs::read_dir(&native_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().map_or(false, |e| e == "rs") {
-                        let stem = path.file_stem().unwrap().to_string_lossy().to_string();
-                        let content = std::fs::read_to_string(&path)
-                            .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
-                        std::fs::write(src_dir.join(entry.file_name()), &content)
-                            .map_err(|e| format!("failed to write native module {}: {}", stem, e))?;
-                        mod_decls.push_str(&format!("mod {};\n", stem));
-                    }
-                }
-            }
-            if !mod_decls.is_empty() {
-                // Insert mod declarations after #![allow(...)] inner attributes
-                if let Some(pos) = final_code.find("\nuse ") {
-                    final_code.insert_str(pos, &format!("\n{}", mod_decls));
-                } else if let Some(pos) = final_code.find("\nfn ") {
-                    final_code.insert_str(pos, &format!("\n{}", mod_decls));
-                } else {
-                    final_code = format!("{}\n{}", mod_decls, final_code);
-                }
-            }
-        }
-    }
+    inject_native_modules(&mut final_code, source_root, &src_dir)?;
 
     std::fs::write(src_dir.join("main.rs"), &final_code)
         .map_err(|e| format!("failed to write main.rs: {}", e))?;
@@ -305,57 +313,14 @@ fn cargo_build_test_with_native(
 ) -> Result<std::path::PathBuf, String> {
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
     let base_toml = if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
-    let cargo_toml = if native_deps.is_empty() {
-        base_toml.to_string()
-    } else {
-        let mut toml = base_toml.to_string();
-        if !toml.contains("[dependencies]") {
-            toml.push_str("\n[dependencies]\n");
-        }
-        for dep in native_deps {
-            let dep_line = if dep.spec.starts_with('{') {
-                format!("{} = {}\n", dep.name, dep.spec)
-            } else {
-                format!("{} = \"{}\"\n", dep.name, dep.spec)
-            };
-            toml.push_str(&dep_line);
-        }
-        toml
-    };
+    let cargo_toml = build_cargo_toml(base_toml, native_deps);
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
     let mut final_code = rs_code.to_string();
-    if let Some(root) = source_root {
-        let native_dir = root.join("native");
-        if native_dir.is_dir() {
-            let mut mod_decls = String::new();
-            if let Ok(entries) = std::fs::read_dir(&native_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().map_or(false, |e| e == "rs") {
-                        let stem = path.file_stem().unwrap().to_string_lossy().to_string();
-                        let content = std::fs::read_to_string(&path)
-                            .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
-                        std::fs::write(src_dir.join(entry.file_name()), &content)
-                            .map_err(|e| format!("failed to write native module {}: {}", stem, e))?;
-                        mod_decls.push_str(&format!("mod {};\n", stem));
-                    }
-                }
-            }
-            if !mod_decls.is_empty() {
-                if let Some(pos) = final_code.find("\nuse ") {
-                    final_code.insert_str(pos, &format!("\n{}", mod_decls));
-                } else if let Some(pos) = final_code.find("\nfn ") {
-                    final_code.insert_str(pos, &format!("\n{}", mod_decls));
-                } else {
-                    final_code = format!("{}\n{}", mod_decls, final_code);
-                }
-            }
-        }
-    }
+    inject_native_modules(&mut final_code, source_root, &src_dir)?;
 
     std::fs::write(src_dir.join("main.rs"), &final_code)
         .map_err(|e| format!("failed to write main.rs: {}", e))?;
