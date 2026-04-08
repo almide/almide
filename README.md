@@ -156,26 +156,6 @@ almide fmt app.almd              # Format source code
 almide clean                     # Clear build + dependency cache
 ```
 
-## Benchmark
-
-<p align="center">
-  <img src="./docs/assets/benchmark.png" alt="MiniGit Benchmark: Almide vs 15 languages" width="720">
-</p>
-
-Tested with the MiniGit benchmark — Claude Code implements a mini version control system from a spec, with multiple trials per language.
-
-| Language | Total Time | Avg Cost | Pass Rate |
-|----------|-----------|----------|-----------|
-| Ruby | 73.1s | $0.36 | 40/40 |
-| Python | 77.5s | $0.39 | 48/48 |
-| Go | 102.0s | $0.50 | 46/46 |
-| Rust | 113.7s | $0.54 | 38/40 |
-| TypeScript | 133.0s | $0.62 | 40/40 |
-| **Almide (no warmup)** | **239.1s** | **$1.13** | **20/20** |
-| **Almide (with warmup)** | **261.6s** | **$1.03** | **20/20** |
-
-Almide has no training data in any public LLM corpus yet — the generation speed gap is expected to narrow as more Almide code enters training sets. Despite being slower, Almide achieves **100% pass rate** with zero failures across 40 trials.
-
 ## WASM Binary Size
 
 Almide emits WASM bytecode directly (no Rust/C intermediary). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency.
