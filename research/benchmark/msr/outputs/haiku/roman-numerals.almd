@@ -1,1 +1,52 @@
+type Mapping = { value: Int, symbol: String }
 
+local fn convert_helper(remaining: Int, index: Int, mappings: List[Mapping], result: String) -> String = {
+  if index >= list.len(mappings) then
+    result
+  else {
+    let mapping = list.get(mappings, index) ?? { value: 0, symbol: "" }
+    if remaining >= mapping.value then
+      convert_helper(remaining - mapping.value, index, mappings, result + mapping.symbol)
+    else
+      convert_helper(remaining, index + 1, mappings, result)
+  }
+}
+
+fn to_roman(n: Int) -> String = {
+  let mappings = [
+    { value: 1000, symbol: "M" },
+    { value: 900, symbol: "CM" },
+    { value: 500, symbol: "D" },
+    { value: 400, symbol: "CD" },
+    { value: 100, symbol: "C" },
+    { value: 90, symbol: "XC" },
+    { value: 50, symbol: "L" },
+    { value: 40, symbol: "XL" },
+    { value: 10, symbol: "X" },
+    { value: 9, symbol: "IX" },
+    { value: 5, symbol: "V" },
+    { value: 4, symbol: "IV" },
+    { value: 1, symbol: "I" },
+  ]
+  convert_helper(n, 0, mappings, "")
+}
+
+test "1 is I" { assert_eq(to_roman(1), "I") }
+test "2 is II" { assert_eq(to_roman(2), "II") }
+test "3 is III" { assert_eq(to_roman(3), "III") }
+test "4 is IV" { assert_eq(to_roman(4), "IV") }
+test "5 is V" { assert_eq(to_roman(5), "V") }
+test "6 is VI" { assert_eq(to_roman(6), "VI") }
+test "9 is IX" { assert_eq(to_roman(9), "IX") }
+test "14 is XIV" { assert_eq(to_roman(14), "XIV") }
+test "27 is XXVII" { assert_eq(to_roman(27), "XXVII") }
+test "48 is XLVIII" { assert_eq(to_roman(48), "XLVIII") }
+test "49 is XLIX" { assert_eq(to_roman(49), "XLIX") }
+test "59 is LIX" { assert_eq(to_roman(59), "LIX") }
+test "93 is XCIII" { assert_eq(to_roman(93), "XCIII") }
+test "141 is CXLI" { assert_eq(to_roman(141), "CXLI") }
+test "163 is CLXIII" { assert_eq(to_roman(163), "CLXIII") }
+test "402 is CDII" { assert_eq(to_roman(402), "CDII") }
+test "575 is DLXXV" { assert_eq(to_roman(575), "DLXXV") }
+test "911 is CMXI" { assert_eq(to_roman(911), "CMXI") }
+test "3000 is MMM" { assert_eq(to_roman(3000), "MMM") }

@@ -1,0 +1,44 @@
+type Token =
+  | Heading(Int, String)
+  | Paragraph(String)
+  | Bullet(String)
+  | Divider
+
+fn count_hashes(line: String, i: Int) -> Int =
+  if i < string.len(line) and string.slice(line, i, i + 1) == "#"
+  then count_hashes(line, i + 1)
+  else i
+
+fn parse_line(line: String) -> Token = {
+  let n = count_hashes(line, 0)
+  if n > 0 and n < string.len(line) and string.slice(line, n, n + 1) == " "
+  then Heading(n, string.slice(line, n + 1, string.len(line)))
+  else if string.starts_with(line, "- ")
+  then Bullet(string.slice(line, 2, string.len(line)))
+  else if line == "---"
+  then Divider
+  else Paragraph(line)
+}
+
+fn make_line(ch: String, n: Int) -> String =
+  list.map(0..n, (_) => ch) |> list.join("")
+
+fn render(token: Token) -> String =
+  match token {
+    Heading(1, text) => "${string.to_upper(text)}\n${make_line("=", string.len(text))}",
+    Heading(_, text) => "${text}\n${make_line("-", string.len(text))}",
+    Paragraph(text) => "  ${text}",
+    Bullet(text) => "  * ${text}",
+    Divider => "---",
+  }
+
+test "h1" { assert_eq(parse_line("# Hello"), Heading(1, "Hello")) }
+test "h2" { assert_eq(parse_line("## World"), Heading(2, "World")) }
+test "h3" { assert_eq(parse_line("### Sub"), Heading(3, "Sub")) }
+test "bullet" { assert_eq(parse_line("- item"), Bullet("item")) }
+test "divider" { assert_eq(parse_line("---"), Divider) }
+test "paragraph" { assert_eq(parse_line("plain text"), Paragraph("plain text")) }
+test "render h1" { assert_eq(render(Heading(1, "Hi")), "HI\n==") }
+test "render h2" { assert_eq(render(Heading(2, "Hi")), "Hi\n--") }
+test "render paragraph" { assert_eq(render(Paragraph("text")), "  text") }
+test "render bullet" { assert_eq(render(Bullet("item")), "  * item") }

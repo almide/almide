@@ -243,6 +243,12 @@ impl TypeEnv {
         for &b in &["println", "eprintln", "panic", "assert", "assert_eq", "assert_ne", "to_string"] {
             names.push(b.to_string());
         }
+        // Stdlib module-qualified function names (e.g. "string.trim", "list.map")
+        for &module in crate::stdlib::STDLIB_MODULES {
+            for func in crate::stdlib::module_functions(module) {
+                names.push(format!("{}.{}", module, func));
+            }
+        }
         names
     }
 

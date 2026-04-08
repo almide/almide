@@ -1,1 +1,48 @@
+type Op = | Add | Sub | Mul | Div
 
+type Expr =
+  | Lit(Float)
+  | BinOp { op: Op, left: Expr, right: Expr }
+  | Neg(Expr)
+
+effect fn eval(e: Expr) -> Result[Float, String] = {
+  match e {
+    Lit(val) => ok(val),
+    Neg(inner) => {
+      let v = eval(inner)!
+      ok(-v)
+    },
+    BinOp { op, left, right } => {
+      let l = eval(left)!
+      let r = eval(right)!
+      match op {
+        Add => ok(l + r),
+        Sub => ok(l - r),
+        Mul => ok(l * r),
+        Div => {
+          if r == 0.0 then err("division by zero") else ok(l / r)
+        },
+      }
+    },
+  }
+}
+
+test "literal" { assert_eq(eval(Lit(42.0)), ok(42.0)) }
+test "addition" { assert_eq(eval(BinOp { op: Add, left: Lit(2.0), right: Lit(3.0) }), ok(5.0)) }
+test "subtraction" { assert_eq(eval(BinOp { op: Sub, left: Lit(10.0), right: Lit(4.0) }), ok(6.0)) }
+test "multiplication" { assert_eq(eval(BinOp { op: Mul, left: Lit(3.0), right: Lit(7.0) }), ok(21.0)) }
+test "division" { assert_eq(eval(BinOp { op: Div, left: Lit(10.0), right: Lit(4.0) }), ok(2.5)) }
+test "division by zero" { assert_eq(eval(BinOp { op: Div, left: Lit(1.0), right: Lit(0.0) }), err("division by zero")) }
+test "negation" { assert_eq(eval(Neg(Lit(5.0))), ok(-5.0)) }
+test "nested" {
+  let e = BinOp { op: Add, left: Lit(1.0), right: BinOp { op: Mul, left: Lit(2.0), right: Lit(3.0) } }
+  assert_eq(eval(e), ok(7.0))
+}
+test "complex" {
+  let e = BinOp { op: Sub, left: BinOp { op: Add, left: Lit(10.0), right: Lit(5.0) }, right: Neg(Lit(3.0)) }
+  assert_eq(eval(e), ok(18.0))
+}
+test "deeply nested" {
+  let e = Neg(BinOp { op: Mul, left: Neg(Lit(2.0)), right: BinOp { op: Add, left: Lit(3.0), right: Lit(4.0) } })
+  assert_eq(eval(e), ok(14.0))
+}

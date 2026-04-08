@@ -78,9 +78,15 @@ effect fn main() -> Result[Unit, String] = {
             ok(_) => {
               // Verify: run tests
               match process.exec("almide", ["test", output_path]) {
-                ok(_) => {
-                  println("  OK " + name)
-                  pass = pass + 1
+                ok(test_output) => {
+                  // Detect 0-test false positive
+                  if string.contains(test_output, "ok. 0 passed") then {
+                    println("  NG " + name + " (0 tests)")
+                    fail = fail + 1
+                  } else {
+                    println("  OK " + name)
+                    pass = pass + 1
+                  }
                 }
                 err(_) => {
                   println("  NG " + name + " (test)")

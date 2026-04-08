@@ -79,7 +79,7 @@ almide run hello.almd
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
-- **Standard library** — 381 functions across 22 modules (string, list, map, json, http, fs, etc.)
+- **Standard library** — 430 functions across 23 modules (string, list, map, json, http, fs, etc.)
 - **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
@@ -206,8 +206,9 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Compiler | Pure Rust, single binary, 0 ICE |
 | Targets | Rust (native), WASM (direct emit) |
 | Codegen | v3 — Nanopass + TOML templates, fully target-agnostic walker |
-| Stdlib | 381 functions across 22 modules |
-| Tests | 142 test files pass (Rust), 129 pass (WASM) |
+| Stdlib | 430 functions across 23 modules |
+| Tests | 177 test files pass (Rust), 278 pass (WASM) |
+| MSR | 23/25 exercises pass (Sonnet 4.6, WASM, max 3 attempts) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
 

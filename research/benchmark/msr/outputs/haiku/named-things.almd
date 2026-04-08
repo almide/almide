@@ -1,1 +1,73 @@
+protocol Named {
+  fn name_get(x: Self) -> String
+  fn name_set(x: Self, name: String) -> Self
+}
 
+type Dog = { name: String, breed: String }
+type Dog: Named
+fn Dog.name_get(d: Dog) -> String = d.name
+fn Dog.name_set(d: Dog, name: String) -> Dog = { ...d, name: name }
+
+type Person = { name: String, age: Int, email: String }
+type Person: Named
+fn Person.name_get(p: Person) -> String = p.name
+fn Person.name_set(p: Person, name: String) -> Person = { ...p, name: name }
+
+type City = { name: String, population: Int, country: String }
+type City: Named
+fn City.name_get(c: City) -> String = c.name
+fn City.name_set(c: City, name: String) -> City = { ...c, name: name }
+
+fn describe[T: Named](x: T) -> String =
+  "name: ${name_get(x)}"
+
+fn names[T: Named](xs: List[T]) -> List[String] =
+  xs |> list.map((x) => name_get(x))
+
+fn set_name[T: Named](x: T, new_name: String) -> T =
+  name_set(x, new_name)
+
+test "describe dog" { assert_eq(describe(Dog { name: "Rex", breed: "Lab" }), "name: Rex") }
+test "describe person" { assert_eq(describe(Person { name: "Alice", age: 30, email: "a@b" }), "name: Alice") }
+test "describe city" { assert_eq(describe(City { name: "Tokyo", population: 14000000, country: "Japan" }), "name: Tokyo") }
+test "names from dogs" {
+  assert_eq(names([Dog { name: "Rex", breed: "Lab" }, Dog { name: "Fido", breed: "Poodle" }]), ["Rex", "Fido"])
+}
+test "names from cities" {
+  assert_eq(names([City { name: "Tokyo", population: 14000000, country: "Japan" }, City { name: "Paris", population: 2100000, country: "France" }]), ["Tokyo", "Paris"])
+}
+test "set_name dog preserves breed" {
+  let d2 = set_name(Dog { name: "Rex", breed: "Lab" }, "Max")
+  assert_eq(d2.name, "Max")
+  assert_eq(d2.breed, "Lab")
+}
+test "set_name person preserves age" {
+  let p2 = set_name(Person { name: "Alice", age: 30, email: "a@b" }, "Bob")
+  assert_eq(p2.name, "Bob")
+  assert_eq(p2.age, 30)
+}
+test "set_name then describe" {
+  assert_eq(describe(set_name(Dog { name: "Rex", breed: "Lab" }, "Buddy")), "name: Buddy")
+}
+test "describe different types" {
+  assert_eq(describe(Dog { name: "Rex", breed: "Lab" }), "name: Rex")
+  assert_eq(describe(Person { name: "Alice", age: 30, email: "a@b" }), "name: Alice")
+}
+test "set_name on multiple types" {
+  let d = set_name(Dog { name: "A", breed: "B" }, "C")
+  let p = set_name(Person { name: "X", age: 1, email: "e" }, "Y")
+  assert_eq(d.name, "C")
+  assert_eq(p.name, "Y")
+}
+
+test "names via map lambda" {
+  let result = [Dog { name: "Rex", breed: "Lab" }, Dog { name: "Fido", breed: "Poodle" }]
+    |> list.map((d) => describe(d))
+  assert_eq(result, ["name: Rex", "name: Fido"])
+}
+test "set_name in map lambda" {
+  let renamed = [Dog { name: "Rex", breed: "Lab" }, Dog { name: "Fido", breed: "Poodle" }]
+    |> list.map((d) => set_name(d, string.to_upper(d.name)))
+    |> names
+  assert_eq(renamed, ["REX", "FIDO"])
+}

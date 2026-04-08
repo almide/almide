@@ -91,6 +91,22 @@ fn convert_expr(
             let mut free = HashSet::new();
             collect_free_vars(&body, &param_ids, &mut free);
 
+            // 2b. If any captured variable is mutable AND assigned to in the body,
+            //     skip conversion. The WASM emitter's Lambda-based path handles
+            //     mutable captures via heap cells (shared cell pointer in env).
+            //     ClosureConversion's value-copy semantics would break mutation
+            //     visibility across multiple calls to the closure.
+            let has_mutable_assign = free.iter().any(|vid| {
+                body_assigns_to(&body, *vid)
+            });
+            if has_mutable_assign {
+                return IrExpr {
+                    kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },
+                    ty,
+                    span,
+                };
+            }
+
             // Sort captures for deterministic env layout
             let mut captures: Vec<(VarId, Ty)> = free.into_iter()
                 .map(|vid| {
@@ -516,6 +532,34 @@ fn collect_pattern_bindings(pattern: &IrPattern, bound: &mut HashSet<VarId>) {
     }
 }
 
+// ── Mutable capture detection ───────────────────────────────────
+
+/// Check if an expression tree contains an `Assign` statement targeting the given VarId.
+fn body_assigns_to(expr: &IrExpr, target: VarId) -> bool {
+    struct AssignChecker { target: VarId, found: bool }
+    impl IrVisitor for AssignChecker {
+        fn visit_stmt(&mut self, stmt: &IrStmt) {
+            match &stmt.kind {
+                IrStmtKind::Assign { var, .. }
+                | IrStmtKind::IndexAssign { target: var, .. }
+                | IrStmtKind::MapInsert { target: var, .. }
+                | IrStmtKind::FieldAssign { target: var, .. }
+                | IrStmtKind::ListSwap { target: var, .. } => {
+                    if *var == self.target { self.found = true; }
+                }
+                _ => {}
+            }
+            if !self.found { walk_stmt(self, stmt); }
+        }
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if !self.found { walk_expr(self, expr); }
+        }
+    }
+    let mut checker = AssignChecker { target, found: false };
+    checker.visit_expr(expr);
+    checker.found
+}
+
 // ── Variable ID rewriting ────────────────────────────────────────
 
 /// Rewrite Var references: replace original captured VarIds with new local VarIds.
@@ -673,6 +717,9 @@ fn rewrite_var_ids(expr: &IrExpr, mappings: &[(VarId, VarId, Ty)]) -> IrExpr {
 
 fn rewrite_var_ids_stmt(stmt: &IrStmt, mappings: &[(VarId, VarId, Ty)]) -> IrStmt {
     let rw = |e: &IrExpr| rewrite_var_ids(e, mappings);
+    let rw_var = |var: &VarId| -> VarId {
+        mappings.iter().find(|(orig, _, _)| orig == var).map(|(_, new_id, _)| *new_id).unwrap_or(*var)
+    };
     let kind = match &stmt.kind {
         IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
             var: *var, mutability: *mutability, ty: ty.clone(), value: rw(value),
@@ -681,23 +728,23 @@ fn rewrite_var_ids_stmt(stmt: &IrStmt, mappings: &[(VarId, VarId, Ty)]) -> IrStm
             pattern: pattern.clone(), value: rw(value),
         },
         IrStmtKind::Assign { var, value } => IrStmtKind::Assign {
-            var: *var, value: rw(value),
+            var: rw_var(var), value: rw(value),
         },
         IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
-            target: *target, index: rw(index), value: rw(value),
+            target: rw_var(target), index: rw(index), value: rw(value),
         },
         IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
-            target: *target, key: rw(key), value: rw(value),
+            target: rw_var(target), key: rw(key), value: rw(value),
         },
         IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
-            target: *target, field: *field, value: rw(value),
+            target: rw_var(target), field: *field, value: rw(value),
         },
         IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
             cond: rw(cond), else_: rw(else_),
         },
         IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: rw(expr) },
         IrStmtKind::ListSwap { target, a, b } => IrStmtKind::ListSwap {
-            target: *target, a: rw(a), b: rw(b),
+            target: rw_var(target), a: rw(a), b: rw(b),
         },
         other => other.clone(),
     };

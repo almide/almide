@@ -1,0 +1,23 @@
+fn fibonacci(n: Int) -> Int =
+  if n <= 1 then n
+  else fibonacci(n - 1) + fibonacci(n - 2)
+
+fn fizzbuzz(n: Int) -> String =
+  if n % 15 == 0 then "FizzBuzz"
+  else if n % 3 == 0 then "Fizz"
+  else if n % 5 == 0 then "Buzz"
+  else int.to_string(n)
+
+effect fn main() -> Result[Unit, String] = {
+  println("Fibonacci sequence (0-9):")
+  for i in 0..10 {
+    println(int.to_string(fibonacci(i)))
+  }
+  
+  println("FizzBuzz (1-15):")
+  for i in 1..=15 {
+    println(fizzbuzz(i))
+  }
+  
+  ok(())
+}

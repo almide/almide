@@ -1,1 +1,79 @@
+effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] = {
+  let lines = string.split(input, "\n") |> list.filter((l) => string.len(l) > 0)
+  var result: List[(String, String)] = []
+  var has_error = false
+  var error_msg = ""
+  for line in lines {
+    let parts = string.split(line, "=")
+    if list.len(parts) != 2 then {
+      has_error = true
+      error_msg = "invalid line found"
+    } else {
+      let key = list.get(parts, 0) ?? ""
+      let value = list.get(parts, 1) ?? ""
+      if string.len(key) == 0 then {
+        has_error = true
+        error_msg = "empty key found"
+      } else {
+        result = result + [(key, value)]
+      }
+    }
+  }
+  if has_error then err(error_msg) else ok(result)
+}
 
+effect fn validate_keys(pairs: List[(String, String)]) -> Result[List[(String, String)], String] = {
+  for (key, value) in pairs {
+    guard string.len(key) > 0 else err("empty key found")
+  }
+  ok(pairs)
+}
+
+fn transform(pairs: List[(String, String)]) -> List[(String, String)] = {
+  pairs |> list.map((entry) => {
+    let (key, value) = entry
+    (string.to_upper(key), string.trim(value))
+  })
+}
+
+fn format_output(pairs: List[(String, String)]) -> String = {
+  pairs
+    |> list.map((entry) => {
+      let (key, value) = entry
+      "${key}: ${value}"
+    })
+    |> list.join("\n")
+}
+
+effect fn run_pipeline(input: String) -> Result[String, String] = {
+  let pairs = parse_pairs(input)!
+  let validated = validate_keys(pairs)!
+  let transformed = transform(validated)
+  let output = format_output(transformed)
+  ok(output)
+}
+
+test "simple pipeline" {
+  match run_pipeline("name=Alice\nage=30") {
+    ok(r) => {
+      assert_eq(string.contains(r, "NAME: Alice"), true)
+      assert_eq(string.contains(r, "AGE: 30"), true)
+    }
+    err(_) => assert(false)
+  }
+}
+test "pipeline with spaces" {
+  assert_eq(run_pipeline("key= value "), ok("KEY: value"))
+}
+test "empty key error" {
+  assert_eq(run_pipeline("=value"), err("empty key found"))
+}
+test "single pair" {
+  assert_eq(run_pipeline("host=localhost"), ok("HOST: localhost"))
+}
+test "invalid line" {
+  match run_pipeline("no-equals") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(string.contains(e, "invalid line"), true)
+  }
+}

@@ -122,10 +122,8 @@ Do not omit any tests."
   # Call LLM
   claude --model "$MODEL" --print --system-prompt "$SYSTEM_PROMPT" "$PROMPT" > "$output_file" 2>/dev/null || true
 
-  # Strip markdown code fences if present
-  sed -i.bak '/^```/d' "$output_file" 2>/dev/null && rm -f "${output_file}.bak" || true
-  # Strip language identifier lines (e.g., "almide" after opening fence)
-  sed -i.bak '/^almide$/d' "$output_file" 2>/dev/null && rm -f "${output_file}.bak" || true
+  # Strip markdown code fences (ERE for macOS; match ```almide, ```almd, or bare ```)
+  sed -i.bak -E '/^```(almide|almd)?$/d' "$output_file" 2>/dev/null && rm -f "${output_file}.bak" || true
 
   # Count tests in output
   OUTPUT_TEST_COUNT=$(grep -c '^test ' "$output_file" 2>/dev/null || true)

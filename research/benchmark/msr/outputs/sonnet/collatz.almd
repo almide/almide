@@ -1,0 +1,17 @@
+local fn collatz(n: Int, acc: Int) -> Int =
+  if n == 1 then acc
+  else if n % 2 == 0 then collatz(n / 2, acc + 1)
+  else collatz(n * 3 + 1, acc + 1)
+
+effect fn steps(n: Int) -> Result[Int, String] =
+  if n <= 0 then err("Only positive integers are allowed")
+  else ok(collatz(n, 0))
+
+test "zero steps for one" { assert_eq(steps(1), ok(0)) }
+test "divide if even" { assert_eq(steps(16), ok(4)) }
+test "even and odd steps" { assert_eq(steps(12), ok(9)) }
+test "large number" { assert_eq(steps(1000000), ok(152)) }
+test "zero is error" { assert_eq(steps(0), err("Only positive integers are allowed")) }
+test "negative is error" { assert_eq(steps(-1), err("Only positive integers are allowed")) }
+test "reach one from two" { assert_eq(steps(2), ok(1)) }
+test "reach one from three" { assert_eq(steps(3), ok(7)) }

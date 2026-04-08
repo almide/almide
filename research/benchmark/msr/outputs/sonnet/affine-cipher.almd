@@ -1,0 +1,57 @@
+fn gcd(a: Int, b: Int) -> Int =
+  if b == 0 then a else gcd(b, a % b)
+
+fn mod_inverse_search(a: Int, m: Int, i: Int) -> Int =
+  if i >= m then -1
+  else if (a * i) % m == 1 then i
+  else mod_inverse_search(a, m, i + 1)
+
+fn mod_inverse(a: Int, m: Int) -> Int =
+  mod_inverse_search(a % m, m, 1)
+
+fn char_to_num(c: String) -> Int =
+  (string.codepoint(c) ?? 97) - 97
+
+fn num_to_char(n: Int) -> String =
+  string.from_codepoint(n + 97)
+
+effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = {
+  guard gcd(a, 26) == 1 else err("a and m must be coprime")
+  let chars = string.chars(string.to_lower(text))
+  let encoded = chars |> list.filter_map((c) =>
+    if string.is_alpha(c) then some(num_to_char((a * char_to_num(c) + b) % 26))
+    else if string.is_digit(c) then some(c)
+    else none
+  )
+  let grouped = list.chunk(encoded, 5) |> list.map((chunk) => list.join(chunk, ""))
+  ok(list.join(grouped, " "))
+}
+
+effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = {
+  guard gcd(a, 26) == 1 else err("a and m must be coprime")
+  let inv = mod_inverse(a, 26)
+  let chars = string.chars(text)
+  let decoded = chars |> list.filter_map((c) =>
+    if string.is_alpha(c) then {
+      let x = char_to_num(string.to_lower(c))
+      let d = ((inv * (x - b)) % 26 + 26) % 26
+      some(num_to_char(d))
+    }
+    else if string.is_whitespace(c) then none
+    else some(c)
+  )
+  ok(list.join(decoded, ""))
+}
+
+test "encode yes" { assert_eq(encode(5, 7, "yes"), ok("xbt")) }
+test "encode no" { assert_eq(encode(15, 18, "no"), ok("fu")) }
+test "encode OMG" { assert_eq(encode(21, 3, "OMG"), ok("lvz")) }
+test "encode mindblowingly" { assert_eq(encode(21, 3, "mindblowingly"), ok("vpqoy alxpq zan")) }
+test "encode numbers" { assert_eq(encode(3, 4, "Testing,1 2 3, testing."), ok("jqgjc rw123 jqgjc rw")) }
+test "encode deep thought" { assert_eq(encode(5, 17, "Truth"), ok("iynia")) }
+test "encode not coprime" { assert_eq(encode(6, 17, "test"), err("a and m must be coprime")) }
+
+test "decode exercism" { assert_eq(decode(3, 7, "tytgn fjr"), ok("exercism")) }
+test "decode sentence" { assert_eq(decode(19, 16, "qdber jeppp ewbn plqce"), ok("anrylbypppyortpxacy")) }
+test "decode numbers" { assert_eq(decode(25, 7, "odpoz ub123 , "), ok("testing123,")) }
+test "decode not coprime" { assert_eq(decode(13, 11, "test"), err("a and m must be coprime")) }

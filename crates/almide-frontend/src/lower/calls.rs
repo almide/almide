@@ -206,8 +206,34 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             }
             // Protocol method on TypeVar: item.show() where item: T, T: Showable
             // Lower as "T.show" convention key — monomorphizer will substitute T → ConcreteType
-            if let Ty::TypeVar(tv) = &obj_ty {
-                if let Some(proto_names) = ctx.protocol_bounds.get(tv).cloned() {
+            // Also check variable's declared type: inside lambdas, the type checker may
+            // resolve the expression type to Fn (partial application), but the variable's
+            // declared type retains the TypeVar.
+            // Also check for TypeVar behind Fn wrapper: inside lambdas, the type checker
+            // may assign Fn type to the parameter (partial application of protocol method),
+            // but the generic function's param list may have the real TypeVar.
+            let tv_from_obj = match &obj_ty {
+                Ty::TypeVar(tv) => Some(tv.clone()),
+                _ => {
+                    // Check all protocol bounds to see if this method belongs to one,
+                    // and identify which TypeVar it corresponds to.
+                    let mut found = None;
+                    for (tv, protos) in ctx.protocol_bounds.iter() {
+                        for proto_name in protos {
+                            if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
+                                if proto_def.methods.iter().any(|m| m.name == *field) {
+                                    found = Some(tv.clone());
+                                    break;
+                                }
+                            }
+                        }
+                        if found.is_some() { break; }
+                    }
+                    found
+                }
+            };
+            if let Some(tv) = tv_from_obj {
+                if let Some(proto_names) = ctx.protocol_bounds.get(&tv).cloned() {
                     for proto_name in &proto_names {
                         if let Some(proto_def) = ctx.env.protocols.get(&sym(proto_name)) {
                             if proto_def.methods.iter().any(|m| m.name == *field) {

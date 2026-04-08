@@ -461,11 +461,20 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         }
         for func in &module.functions {
             let rendered = render_function(&mod_ctx, func);
-            let prefixed = rendered.replacen(
-                &format!("fn {}", func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
-                &format!("fn almide_rt_{}_{}", mod_ident, func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
-                1
-            );
+            let clean_name = func.name.replace(' ', "_").replace('-', "_").replace('.', "_");
+            let prefixed_name = format!("almide_rt_{}_{}", mod_ident, clean_name);
+            let prefixed = rendered
+                .replacen(
+                    &format!("fn {}", clean_name),
+                    &format!("fn {}", prefixed_name),
+                    1
+                )
+                // Also rename @extern(rs) use-as aliases to match the prefixed name
+                .replacen(
+                    &format!(" as {};", clean_name),
+                    &format!(" as {};", prefixed_name),
+                    1
+                );
             parts.push(prefixed);
         }
     }

@@ -1,0 +1,42 @@
+type Expr =
+  | Lit(Int)
+  | Add(Expr, Expr)
+  | Mul(Expr, Expr)
+  | Sub(Expr, Expr)
+
+fn eval(e: Expr) -> Int =
+  match e {
+    Lit(n)    => n,
+    Add(l, r) => eval(l) + eval(r),
+    Mul(l, r) => eval(l) * eval(r),
+    Sub(l, r) => eval(l) - eval(r),
+  }
+
+fn to_string(e: Expr) -> String =
+  match e {
+    Lit(n)    => int.to_string(n),
+    Add(l, r) => "(${to_string(l)} + ${to_string(r)})",
+    Mul(l, r) => "(${to_string(l)} * ${to_string(r)})",
+    Sub(l, r) => "(${to_string(l)} - ${to_string(r)})",
+  }
+
+test "literal" { assert_eq(eval(Lit(5)), 5) }
+test "add" { assert_eq(eval(Add(Lit(2), Lit(3))), 5) }
+test "mul" { assert_eq(eval(Mul(Lit(4), Lit(5))), 20) }
+test "sub" { assert_eq(eval(Sub(Lit(10), Lit(3))), 7) }
+test "nested add mul" { assert_eq(eval(Add(Lit(1), Mul(Lit(2), Lit(3)))), 7) }
+test "deep nesting" { assert_eq(eval(Mul(Add(Lit(1), Lit(2)), Sub(Lit(10), Lit(4)))), 18) }
+test "to_string literal" { assert_eq(to_string(Lit(42)), "42") }
+test "to_string add" { assert_eq(to_string(Add(Lit(1), Lit(2))), "(1 + 2)") }
+test "to_string nested" { assert_eq(to_string(Mul(Add(Lit(1), Lit(2)), Lit(3))), "((1 + 2) * 3)") }
+test "eval matches to_string" {
+  let e = Add(Mul(Lit(2), Lit(3)), Sub(Lit(10), Lit(1)))
+  assert_eq(eval(e), 15)
+}
+test "deeply nested eval" {
+  let e = Sub(Mul(Add(Lit(1), Lit(2)), Lit(5)), Add(Lit(3), Lit(4)))
+  assert_eq(eval(e), 8)
+}
+test "single negative via sub" {
+  assert_eq(eval(Sub(Lit(0), Lit(5))), -5)
+}

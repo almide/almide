@@ -32,6 +32,9 @@ pub fn eliminate_dead_code(emitter: &mut WasmEmitter) -> usize {
 
     // Also include __alloc as always-needed (called by many stubs indirectly)
     entry_points.insert(emitter.rt.alloc);
+    // __init_preopen_dirs and __resolve_path are called from main at startup
+    entry_points.insert(emitter.rt.init_preopen_dirs);
+    entry_points.insert(emitter.rt.resolve_path);
 
     // Functions in the element table (called via call_indirect)
     for &func_idx in &emitter.func_table {

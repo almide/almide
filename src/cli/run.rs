@@ -1,6 +1,6 @@
 use std::process::Command;
 use crate::try_compile;
-use super::{hash64, cargo_build_generated, cargo_build_test};
+use super::{hash64, cargo_build_generated_with_native, cargo_build_test_with_native};
 
 /// Compile an .almd file to a native binary, returning the path to the executable.
 /// Uses incremental caching: if the generated Rust code hasn't changed, skips cargo build.
@@ -30,10 +30,17 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool) -> Result<
         return Ok(bin_path);
     }
 
+    // Load native deps from almide.toml if present
+    let parsed = std::path::Path::new("almide.toml").exists()
+        .then(|| crate::project::parse_toml(std::path::Path::new("almide.toml")).ok())
+        .flatten();
+    let native_deps = parsed.as_ref().map(|p| p.native_deps.as_slice()).unwrap_or(&[]);
+    let source_root = if native_deps.is_empty() { None } else { Some(std::path::Path::new(".")) };
+
     let result = if use_test_harness {
-        cargo_build_test(&rs_code, &project_dir)
+        cargo_build_test_with_native(&rs_code, &project_dir, native_deps, source_root)
     } else {
-        cargo_build_generated(&rs_code, &project_dir, false)
+        cargo_build_generated_with_native(&rs_code, &project_dir, false, native_deps, source_root)
     };
 
     match result {

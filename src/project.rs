@@ -69,6 +69,15 @@ pub struct Project {
     /// If empty, all capabilities are allowed (backwards compatible).
     /// e.g., ["IO", "Net", "Log"]
     pub permissions: Vec<String>,
+    /// Native Rust crate dependencies added to generated Cargo.toml.
+    /// e.g., [("wasmtime", "42.0.0")]
+    pub native_deps: Vec<NativeDep>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NativeDep {
+    pub name: String,
+    pub spec: String,
 }
 
 /// Parse almide.toml (simple line-based, no toml crate)
@@ -80,6 +89,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let mut version = "0.1.0".to_string();
     let mut deps: Vec<Dependency> = Vec::new();
     let mut permissions: Vec<String> = Vec::new();
+    let mut native_deps: Vec<NativeDep> = Vec::new();
     let mut section = "";
 
     for line in content.lines() {
@@ -94,6 +104,8 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
                 "dependencies"
             } else if line == "[permissions]" {
                 "permissions"
+            } else if line == "[native-deps]" {
+                "native-deps"
             } else {
                 ""
             };
@@ -124,6 +136,14 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
                     );
                 }
             }
+            "native-deps" => {
+                if let Some((dep_name, spec)) = parse_kv(line) {
+                    native_deps.push(NativeDep {
+                        name: dep_name.to_string(),
+                        spec,
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -132,6 +152,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
         package: Package { name, version },
         dependencies: deps,
         permissions,
+        native_deps,
     })
 }
 

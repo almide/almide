@@ -1,1 +1,62 @@
+effect fn clean(input: String) -> Result[String, String] = {
+  let digits = string.split(input, "") 
+    |> list.filter((c) => {
+      match c {
+        "0" => true,
+        "1" => true,
+        "2" => true,
+        "3" => true,
+        "4" => true,
+        "5" => true,
+        "6" => true,
+        "7" => true,
+        "8" => true,
+        "9" => true,
+        _ => false,
+      }
+    })
+    |> list.join("")
+  
+  let len = string.len(digits)
+  
+  if len == 11 then {
+    guard string.slice(digits, 0, 1) == "1" else err("11 digits must start with 1")
+    
+    let area_first = string.slice(digits, 1, 2)
+    guard area_first != "0" else err("area code cannot start with zero")
+    guard area_first != "1" else err("area code cannot start with one")
+    
+    let exchange_first = string.slice(digits, 4, 5)
+    guard exchange_first != "0" else err("exchange code cannot start with zero")
+    guard exchange_first != "1" else err("exchange code cannot start with one")
+    
+    ok(string.slice(digits, 1, 11))
+  }
+  else if len == 10 then {
+    let area_first = string.slice(digits, 0, 1)
+    guard area_first != "0" else err("area code cannot start with zero")
+    guard area_first != "1" else err("area code cannot start with one")
+    
+    let exchange_first = string.slice(digits, 3, 4)
+    guard exchange_first != "0" else err("exchange code cannot start with zero")
+    guard exchange_first != "1" else err("exchange code cannot start with one")
+    
+    ok(digits)
+  }
+  else {
+    err("incorrect number of digits")
+  }
+}
 
+test "cleans number" { assert_eq(clean("(223) 456-7890"), ok("2234567890")) }
+test "cleans with dots" { assert_eq(clean("223.456.7890"), ok("2234567890")) }
+test "cleans with spaces" { assert_eq(clean("223 456   7890   "), ok("2234567890")) }
+test "valid with 11 digits" { assert_eq(clean("12234567890"), ok("2234567890")) }
+test "invalid with letters" { assert_eq(clean("123-abc-7890"), err("incorrect number of digits")) }
+test "invalid with 9 digits" { assert_eq(clean("123456789"), err("incorrect number of digits")) }
+test "invalid 11 digits not starting with 1" { assert_eq(clean("22234567890"), err("11 digits must start with 1")) }
+test "invalid if area code starts with 0" { assert_eq(clean("(023) 456-7890"), err("area code cannot start with zero")) }
+test "invalid if area code starts with 1" { assert_eq(clean("(123) 456-7890"), err("area code cannot start with one")) }
+test "invalid if exchange code starts with 0" { assert_eq(clean("(223) 056-7890"), err("exchange code cannot start with zero")) }
+test "invalid if exchange code starts with 1" { assert_eq(clean("(223) 156-7890"), err("exchange code cannot start with one")) }
+test "invalid with punctuations" { assert_eq(clean("523-@:!-7890"), err("incorrect number of digits")) }

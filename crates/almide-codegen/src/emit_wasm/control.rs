@@ -386,8 +386,8 @@ impl FuncCompiler<'_> {
                     Ty::Float => { wasm!(self.func, { f64_eq; }); }
                     Ty::Bool => { wasm!(self.func, { i32_eq; }); }
                     Ty::String => {
-                        // String equality: compare pointers (interned literals are deduped)
-                        wasm!(self.func, { i32_eq; });
+                        // String equality: byte-level comparison (runtime strings have different pointers)
+                        wasm!(self.func, { call(self.emitter.rt.string.eq); });
                     }
                     _ => { wasm!(self.func, { i32_eq; }); }
                 }

@@ -424,76 +424,29 @@ pub fn demote_unused_mut(program: &mut IrProgram) {
 }
 
 fn collect_assigned_vars(expr: &IrExpr, assigned: &mut HashSet<u32>) {
-    match &expr.kind {
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { collect_assigned_vars_stmt(s, assigned); }
-            if let Some(e) = expr { collect_assigned_vars(e, assigned); }
+    use crate::visit::{IrVisitor, walk_expr, walk_stmt};
+    struct AssignCollector<'a> { assigned: &'a mut HashSet<u32> }
+    impl IrVisitor for AssignCollector<'_> {
+        fn visit_stmt(&mut self, stmt: &IrStmt) {
+            match &stmt.kind {
+                IrStmtKind::Assign { var, .. }
+                | IrStmtKind::IndexAssign { target: var, .. }
+                | IrStmtKind::MapInsert { target: var, .. }
+                | IrStmtKind::FieldAssign { target: var, .. }
+                | IrStmtKind::ListSwap { target: var, .. }
+                | IrStmtKind::ListReverse { target: var, .. }
+                | IrStmtKind::ListRotateLeft { target: var, .. } => {
+                    self.assigned.insert(var.0);
+                }
+                IrStmtKind::ListCopySlice { dst, .. } => {
+                    self.assigned.insert(dst.0);
+                }
+                _ => {}
+            }
+            walk_stmt(self, stmt);
         }
-        IrExprKind::If { cond, then, else_ } => {
-            collect_assigned_vars(cond, assigned);
-            collect_assigned_vars(then, assigned);
-            collect_assigned_vars(else_, assigned);
-        }
-        IrExprKind::Match { subject, arms } => {
-            collect_assigned_vars(subject, assigned);
-            for a in arms { collect_assigned_vars(&a.body, assigned); }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            collect_assigned_vars(iterable, assigned);
-            for s in body { collect_assigned_vars_stmt(s, assigned); }
-        }
-        IrExprKind::While { cond, body } => {
-            collect_assigned_vars(cond, assigned);
-            for s in body { collect_assigned_vars_stmt(s, assigned); }
-        }
-        IrExprKind::Lambda { body, .. } => collect_assigned_vars(body, assigned),
-        _ => {}
     }
-}
-
-fn collect_assigned_vars_stmt(stmt: &IrStmt, assigned: &mut HashSet<u32>) {
-    match &stmt.kind {
-        IrStmtKind::Assign { var, value } => {
-            assigned.insert(var.0);
-            collect_assigned_vars(value, assigned);
-        }
-        IrStmtKind::IndexAssign { target, index, value } => {
-            assigned.insert(target.0);
-            collect_assigned_vars(index, assigned);
-            collect_assigned_vars(value, assigned);
-        }
-        IrStmtKind::MapInsert { target, key, value } => {
-            assigned.insert(target.0);
-            collect_assigned_vars(key, assigned);
-            collect_assigned_vars(value, assigned);
-        }
-        IrStmtKind::FieldAssign { target, value, .. } => {
-            assigned.insert(target.0);
-            collect_assigned_vars(value, assigned);
-        }
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
-            collect_assigned_vars(value, assigned);
-        }
-        IrStmtKind::ListSwap { target, a, b } => {
-            assigned.insert(target.0);
-            collect_assigned_vars(a, assigned);
-            collect_assigned_vars(b, assigned);
-        }
-        IrStmtKind::ListReverse { target, end } | IrStmtKind::ListRotateLeft { target, end } => {
-            assigned.insert(target.0);
-            collect_assigned_vars(end, assigned);
-        }
-        IrStmtKind::ListCopySlice { dst, len, .. } => {
-            assigned.insert(dst.0);
-            collect_assigned_vars(len, assigned);
-        }
-        IrStmtKind::Expr { expr } => collect_assigned_vars(expr, assigned),
-        IrStmtKind::Guard { cond, else_ } => {
-            collect_assigned_vars(cond, assigned);
-            collect_assigned_vars(else_, assigned);
-        }
-        IrStmtKind::Comment { .. } => {}
-    }
+    AssignCollector { assigned }.visit_expr(expr);
 }
 
 /// Collect warnings for unused variables.
