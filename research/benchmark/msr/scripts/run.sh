@@ -2,11 +2,12 @@
 # msr/scripts/run.sh — Run MSR measurement using Claude Code CLI
 #
 # Usage:
-#   ./msr/scripts/run.sh                          # default: haiku, all exercises
-#   ./msr/scripts/run.sh --model sonnet            # use sonnet
+#   ./msr/scripts/run.sh                          # default: sonnet, all exercises
 #   ./msr/scripts/run.sh --model opus              # use opus
 #   ./msr/scripts/run.sh --exercise bob            # single exercise
 #   ./msr/scripts/run.sh --model sonnet --exercise bob
+#   ./msr/scripts/run.sh --target wasm             # WASM target
+#   ./msr/scripts/run.sh --max-attempts 1          # single-shot (no retry)
 #
 # Prerequisites:
 #   - claude CLI installed and authenticated
@@ -15,15 +16,17 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-MODEL="haiku"
+MODEL="sonnet"
 EXERCISE=""
-TARGET="rust"
+TARGET="wasm"
+MAX_ATTEMPTS=3
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --model) MODEL="$2"; shift 2 ;;
     --exercise) EXERCISE="$2"; shift 2 ;;
     --target) TARGET="$2"; shift 2 ;;
+    --max-attempts) MAX_ATTEMPTS="$2"; shift 2 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
@@ -34,8 +37,11 @@ CHEATSHEET="docs/CHEATSHEET.md"
 
 mkdir -p "$OUTPUT_DIR"
 
-# System prompt with language reference
-SYSTEM_PROMPT="You are writing Almide code (.almd files). Here is the language reference:
+# Write system prompt to temp file (avoids shell argument length limits)
+SYSTEM_PROMPT_FILE=$(mktemp)
+trap "rm -f '$SYSTEM_PROMPT_FILE'" EXIT
+cat > "$SYSTEM_PROMPT_FILE" <<SYSPROMPT
+You are writing Almide code (.almd files). Here is the language reference:
 
 $(cat "$CHEATSHEET")
 
@@ -49,7 +55,7 @@ IMPORTANT RULES:
 - String concat uses +
 - Use match for pattern matching, not if chains on variants
 - effect fn returns Result, auto-unwraps with ?
-"
+SYSPROMPT
 
 # Collect exercises to run
 if [ -n "$EXERCISE" ]; then
@@ -72,7 +78,7 @@ RESULTS=""
 
 echo ""
 echo "╔══════════════════════════════════════════════════╗"
-echo "║  MSR Measurement — $MODEL (target: $TARGET)"
+echo "║  MSR Measurement — $MODEL (target: $TARGET, max $MAX_ATTEMPTS attempts)"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
 
@@ -90,42 +96,95 @@ for prompt_file in $PROMPTS_LIST; do
 
   echo -n "⏳ $name ... "
 
-  # Generate solution via Claude Code CLI
-  PROMPT="$(cat "$prompt_file")
+  BASE_PROMPT="$(cat "$prompt_file")
 
 Implement the functions above (replace \`todo\` with working code). Output ONLY the complete .almd file."
 
-  claude --model "$MODEL" --print --system-prompt "$SYSTEM_PROMPT" "$PROMPT" > "$output_file" 2>/dev/null || true
+  ATTEMPT=0
+  EXERCISE_PASSED=false
 
-  # Strip markdown code fences (ERE for macOS; match ```almide, ```almd, or bare ```)
-  sed -i.bak -E '/^```(almide|almd)?$/d' "$output_file" 2>/dev/null && rm -f "${output_file}.bak" || true
+  while [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; do
+    ATTEMPT=$((ATTEMPT + 1))
 
-  # Verify: type check
-  if ! almide check "$output_file" > /dev/null 2>&1; then
-    echo "❌ type check failed"
-    FAIL=$((FAIL + 1))
-    CHECK_FAIL=$((CHECK_FAIL + 1))
-    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":false,\"error\":\"type_check\"},"
-    continue
-  fi
+    if [ "$ATTEMPT" -eq 1 ]; then
+      PROMPT="$BASE_PROMPT"
+    else
+      # Retry: include previous code + error for the model to fix
+      PREV_CODE=$(cat "$output_file" 2>/dev/null || echo "")
+      PROMPT="Here is my previous attempt at this Almide code, which had errors:
 
-  # Verify: run tests + detect 0-test false positive
-  TEST_OUTPUT=$(almide test "$output_file" 2>&1) && TEST_EXIT=0 || TEST_EXIT=$?
-  if [ "$TEST_EXIT" -ne 0 ]; then
-    echo "❌ test failed"
-    FAIL=$((FAIL + 1))
-    TEST_FAIL=$((TEST_FAIL + 1))
-    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":false,\"error\":\"test_fail\"},"
-  elif echo "$TEST_OUTPUT" | grep -q "ok\. 0 passed"; then
-    echo "❌ 0 tests detected (code fence or parse issue)"
-    FAIL=$((FAIL + 1))
-    TEST_FAIL=$((TEST_FAIL + 1))
-    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":false,\"error\":\"zero_tests\"},"
-  else
-    echo "✅"
+\`\`\`
+$PREV_CODE
+\`\`\`
+
+The compiler reported these errors:
+$ERROR_MSG
+
+Fix the errors and output ONLY the complete corrected .almd file. No markdown, no explanation."
+    fi
+
+    claude --model "$MODEL" --print --system-prompt-file "$SYSTEM_PROMPT_FILE" "$PROMPT" > "$output_file" 2>/dev/null || true
+
+    # Strip markdown code fences (ERE for macOS)
+    sed -i.bak -E '/^```(almide|almd)?$/d' "$output_file" 2>/dev/null && rm -f "${output_file}.bak" || true
+
+    # Verify: type check
+    ERROR_MSG=$(almide check "$output_file" 2>&1) && CHECK_OK=true || CHECK_OK=false
+    if [ "$CHECK_OK" = false ]; then
+      if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+        echo -n "retry($ATTEMPT) "
+        continue
+      fi
+      echo "❌ check failed (${ATTEMPT}/${MAX_ATTEMPTS})"
+      FAIL=$((FAIL + 1))
+      CHECK_FAIL=$((CHECK_FAIL + 1))
+      RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":false,\"error\":\"type_check\",\"attempts\":$ATTEMPT},"
+      break
+    fi
+
+    # Verify: run tests
+    TEST_CMD=(almide test "$output_file")
+    [ "$TARGET" = "wasm" ] && TEST_CMD+=(--target wasm)
+    TEST_OUTPUT=$("${TEST_CMD[@]}" 2>&1) && TEST_EXIT=0 || TEST_EXIT=$?
+
+    if [ "$TEST_EXIT" -ne 0 ]; then
+      ERROR_MSG="$TEST_OUTPUT"
+      if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+        echo -n "retry($ATTEMPT) "
+        continue
+      fi
+      echo "❌ test failed (${ATTEMPT}/${MAX_ATTEMPTS})"
+      FAIL=$((FAIL + 1))
+      TEST_FAIL=$((TEST_FAIL + 1))
+      RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":false,\"error\":\"test_fail\",\"attempts\":$ATTEMPT},"
+      break
+    fi
+
+    # Detect 0-test false positive
+    if echo "$TEST_OUTPUT" | grep -q "ok\. 0 passed"; then
+      ERROR_MSG="0 tests were found. The test blocks may be missing or malformed."
+      if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+        echo -n "retry($ATTEMPT) "
+        continue
+      fi
+      echo "❌ 0 tests (${ATTEMPT}/${MAX_ATTEMPTS})"
+      FAIL=$((FAIL + 1))
+      TEST_FAIL=$((TEST_FAIL + 1))
+      RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":false,\"error\":\"zero_tests\",\"attempts\":$ATTEMPT},"
+      break
+    fi
+
+    # Success
+    if [ "$ATTEMPT" -eq 1 ]; then
+      echo "✅"
+    else
+      echo "✅ (attempt $ATTEMPT)"
+    fi
     PASS=$((PASS + 1))
-    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":true},"
-  fi
+    EXERCISE_PASSED=true
+    RESULTS="$RESULTS{\"name\":\"$name\",\"passed\":true,\"attempts\":$ATTEMPT},"
+    break
+  done
 done
 
 echo ""
@@ -140,6 +199,7 @@ MSR=$((PASS * 100 / TOTAL))
 
 echo "  Model:          $MODEL"
 echo "  Target:         $TARGET"
+echo "  Max attempts:   $MAX_ATTEMPTS"
 echo "  Passed:         $PASS / $TOTAL"
 echo "  Check failures: $CHECK_FAIL"
 echo "  Test failures:  $TEST_FAIL"
@@ -160,6 +220,7 @@ cat > "$RESULTS_DIR/${MODEL}_${TARGET}_${DATE}.json" <<ENDJSON
   "language": "almide",
   "target": "$TARGET",
   "model": "$MODEL",
+  "max_attempts": $MAX_ATTEMPTS,
   "exercises": $TOTAL,
   "passed": $PASS,
   "failed": $FAIL,

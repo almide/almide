@@ -208,7 +208,7 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Codegen | v3 — Nanopass + TOML templates, fully target-agnostic walker |
 | Stdlib | 430 functions across 23 modules |
 | Tests | 177 test files pass (Rust), 278 pass (WASM) |
-| MSR | 12/25 exercises pass (Haiku 4.5, single-shot, no retry) |
+| MSR | 23/25 exercises pass (Sonnet 4.6, WASM, max 3 attempts) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
 

@@ -1,0 +1,26 @@
+type Student = { name: String, score: Int }
+type Product = { name: String, price: Int, stock: Int }
+type Keyed = { key: Int, label: String }
+
+fn sort_by_key(items: List[Keyed]) -> List[Keyed] = list.sort_by(items, (x) => x.key)
+
+test "sort by key" {
+  let items = [Keyed { key: 3, label: "c" }, Keyed { key: 1, label: "a" }, Keyed { key: 2, label: "b" }]
+  assert_eq(list.map(sort_by_key(items), (x) => x.label), ["a", "b", "c"])
+}
+test "sort single" {
+  assert_eq(list.map(sort_by_key([Keyed { key: 5, label: "only" }]), (x) => x.key), [5])
+}
+test "sort students by score" {
+  let students = [Student { name: "Alice", score: 85 }, Student { name: "Bob", score: 92 }, Student { name: "Carol", score: 78 }]
+  assert_eq(list.map(list.sort_by(students, (s) => s.score), (s) => s.name), ["Carol", "Alice", "Bob"])
+}
+test "sort products by price" {
+  let products = [Product { name: "Pen", price: 100, stock: 50 }, Product { name: "Book", price: 500, stock: 10 }, Product { name: "Eraser", price: 50, stock: 100 }]
+  assert_eq(list.map(list.sort_by(products, (p) => p.price), (p) => p.name), ["Eraser", "Pen", "Book"])
+}
+test "filter then sort" {
+  let items = [Keyed { key: 5, label: "e" }, Keyed { key: 2, label: "b" }, Keyed { key: 8, label: "h" }, Keyed { key: 1, label: "a" }]
+  let big = items |> list.filter((x) => x.key > 3) |> sort_by_key
+  assert_eq(list.map(big, (x) => x.label), ["e", "h"])
+}

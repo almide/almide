@@ -1,0 +1,39 @@
+fn str_repeat(s: String, n: Int) -> String =
+  if n <= 0 then "" else s + str_repeat(s, n - 1)
+
+fn apply_numeral(state: (Int, String), entry: (Int, String)) -> (Int, String) = {
+  let (remaining, acc) = state
+  let (value, symbol) = entry
+  let count = remaining / value
+  (remaining % value, acc + str_repeat(symbol, count))
+}
+
+fn to_roman(n: Int) -> String = {
+  let table: List[(Int, String)] = [
+    (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+    (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
+    (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+  ]
+  let (_, roman) = list.fold(table, (n, ""), (state, entry) => apply_numeral(state, entry))
+  roman
+}
+
+test "1 is I" { assert_eq(to_roman(1), "I") }
+test "2 is II" { assert_eq(to_roman(2), "II") }
+test "3 is III" { assert_eq(to_roman(3), "III") }
+test "4 is IV" { assert_eq(to_roman(4), "IV") }
+test "5 is V" { assert_eq(to_roman(5), "V") }
+test "6 is VI" { assert_eq(to_roman(6), "VI") }
+test "9 is IX" { assert_eq(to_roman(9), "IX") }
+test "14 is XIV" { assert_eq(to_roman(14), "XIV") }
+test "27 is XXVII" { assert_eq(to_roman(27), "XXVII") }
+test "48 is XLVIII" { assert_eq(to_roman(48), "XLVIII") }
+test "49 is XLIX" { assert_eq(to_roman(49), "XLIX") }
+test "59 is LIX" { assert_eq(to_roman(59), "LIX") }
+test "93 is XCIII" { assert_eq(to_roman(93), "XCIII") }
+test "141 is CXLI" { assert_eq(to_roman(141), "CXLI") }
+test "163 is CLXIII" { assert_eq(to_roman(163), "CLXIII") }
+test "402 is CDII" { assert_eq(to_roman(402), "CDII") }
+test "575 is DLXXV" { assert_eq(to_roman(575), "DLXXV") }
+test "911 is CMXI" { assert_eq(to_roman(911), "CMXI") }
+test "3000 is MMM" { assert_eq(to_roman(3000), "MMM") }

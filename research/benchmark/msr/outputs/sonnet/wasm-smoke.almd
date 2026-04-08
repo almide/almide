@@ -1,0 +1,19 @@
+fn fibonacci(n: Int) -> Int =
+  if n <= 0 then 0
+  else if n == 1 then 1
+  else fibonacci(n - 1) + fibonacci(n - 2)
+
+fn fizzbuzz(n: Int) -> String =
+  match n {
+    _ if n % 15 == 0 => "FizzBuzz",
+    _ if n % 3 == 0  => "Fizz",
+    _ if n % 5 == 0  => "Buzz",
+    _                => int.to_string(n),
+  }
+
+effect fn main() -> Result[Unit, String] = {
+  for i in 1..=100 {
+    println(fizzbuzz(i))
+  }
+  ok(())
+}
