@@ -60,3 +60,39 @@ return = "Result[{code: Int, stdout: String, stderr: String}, String]"
 effect = true
 rust = "almide_rt_process_exec_status(&*{cmd}, &{ let __a: Vec<String> = {args}; __a })?"
 ts = "__almd_process.exec_status({cmd}, {args})"
+
+[env]
+description = "Get the value of an environment variable, or None if not set"
+example = 'let home = process.env("HOME") ?? "/tmp"'
+params = [{ name = "key", type = "String" }]
+return = "Option[String]"
+effect = false
+rust = "almide_rt_process_env(&*{key})"
+ts = "process.env[{key}] ?? undefined"
+
+[spawn]
+description = "Spawn a child process without waiting, return its PID"
+example = 'let pid = process.spawn("node", ["server.js"])'
+params = [{ name = "cmd", type = "String" }, { name = "args", type = "List[String]" }]
+return = "Result[Int, String]"
+effect = true
+rust = "almide_rt_process_spawn(&*{cmd}, &{ let __a: Vec<String> = {args}; __a })?"
+ts = "__almd_process.spawn({cmd}, {args})"
+
+[kill]
+description = "Send a signal to a process by PID (e.g. 15 for SIGTERM, 9 for SIGKILL)"
+example = 'process.kill(pid, 15)'
+params = [{ name = "pid", type = "Int" }, { name = "signal", type = "Int" }]
+return = "Result[Unit, String]"
+effect = true
+rust = "almide_rt_process_kill({pid}, {signal})?"
+ts = "__almd_process.kill({pid}, {signal})"
+
+[is_alive]
+description = "Check if a process with the given PID is still running"
+example = 'let running = process.is_alive(pid)'
+params = [{ name = "pid", type = "Int" }]
+return = "Bool"
+effect = false
+rust = "almide_rt_process_is_alive({pid})"
+ts = "__almd_process.is_alive({pid})"

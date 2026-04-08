@@ -1,4 +1,5 @@
 <!-- description: Add HTTP client, process spawn, and signal stdlib modules -->
+<!-- done: 2026-04-08 -->
 
 # Stdlib System APIs
 

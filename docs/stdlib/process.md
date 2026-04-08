@@ -49,3 +49,35 @@ Execute a command and return exit code, stdout, and stderr
 ```almd
 let r = process.exec_status("ls", []) // {code, stdout, stderr}
 ```
+
+### `process.env(key: String) -> Option[String]`
+
+Get the value of an environment variable, or None if not set
+
+```almd
+let home = process.env("HOME") ?? "/tmp"
+```
+
+### `process.spawn(cmd: String, args: List[String]) -> Result[Int, String]`
+
+Spawn a child process without waiting, return its PID
+
+```almd
+let pid = process.spawn("node", ["server.js"])
+```
+
+### `process.kill(pid: Int, signal: Int) -> Result[Unit, String]`
+
+Send a signal to a process by PID (e.g. 15 for SIGTERM, 9 for SIGKILL)
+
+```almd
+process.kill(pid, 15)
+```
+
+### `process.is_alive(pid: Int) -> Bool`
+
+Check if a process with the given PID is still running
+
+```almd
+let running = process.is_alive(pid)
+```

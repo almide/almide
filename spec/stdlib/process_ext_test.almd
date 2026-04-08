@@ -1,0 +1,31 @@
+import process
+
+test "process.env reads HOME" {
+  let home = process.env("HOME") ?? ""
+  assert(string.len(home) > 0)
+}
+
+test "process.env returns None for missing var" {
+  let val = process.env("ALMIDE_NONEXISTENT_VAR_12345")
+  assert_eq(val, none)
+}
+
+test "process.spawn and kill" {
+  let pid = process.spawn("sleep", ["10"])!
+  assert(pid > 0)
+  let alive = process.is_alive(pid)
+  assert(alive)
+  process.kill(pid, 9)!
+}
+
+test "process.is_alive returns false for nonexistent PID" {
+  assert_eq(process.is_alive(99999999), false)
+}
+
+test "process.spawn failure for bad command" {
+  let result = process.spawn("nonexistent_command_xyz", [])
+  match result {
+    Ok(_) => assert(false),
+    Err(msg) => assert(string.len(msg) > 0),
+  }
+}
