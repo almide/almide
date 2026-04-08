@@ -162,6 +162,14 @@ pub struct RuntimeFuncs {
     pub path_unlink_file: u32,
     pub path_remove_directory: u32,
     pub fd_readdir: u32,
+    pub fd_prestat_get: u32,
+    pub fd_prestat_dir_name: u32,
+    /// __resolve_path(path_ptr, path_len) → (fd, rel_path_ptr, rel_path_len)
+    /// Resolves absolute/relative paths against preopened directories.
+    pub resolve_path: u32,
+    /// __init_preopen_dirs() → ()
+    /// Called at _start to discover preopened directories.
+    pub init_preopen_dirs: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -201,6 +209,10 @@ pub struct WasmEmitter {
     pub heap_ptr_global: u32,
     /// Memory 1 scratch pointer (string builder). Reset to 0 after each string op.
     pub scratch_ptr_global: u32,
+    /// Preopened dir table pointer (heap-allocated array of [fd:i32, path_ptr:i32, path_len:i32] entries)
+    pub preopen_table_global: u32,
+    /// Number of preopened directories discovered
+    pub preopen_count_global: u32,
     // Top-level let globals: VarId → (global index, ValType)
     pub top_let_globals: HashMap<u32, (u32, ValType)>,
     pub top_let_init: Vec<(u32, ValType, i64)>, // (global_idx, type, const_init_bits) in order
@@ -314,12 +326,18 @@ impl WasmEmitter {
                 path_unlink_file: 0,
                 path_remove_directory: 0,
                 fd_readdir: 0,
+                fd_prestat_get: 0,
+                fd_prestat_dir_name: 0,
+                resolve_path: 0,
+                init_preopen_dirs: 0,
             },
             heap_ptr_global: 0,
             scratch_ptr_global: 1,
+            preopen_table_global: 2,
+            preopen_count_global: 3,
             top_let_globals: HashMap::new(),
             top_let_init: Vec::new(),
-            next_global: 2, // 0 = heap_ptr, 1 = scratch_ptr
+            next_global: 4, // 0 = heap_ptr, 1 = scratch_ptr, 2 = preopen_table, 3 = preopen_count
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
             record_fields: HashMap::new(),
@@ -586,6 +604,28 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         module: "wasi_snapshot_preview1".to_string(),
         name: "path_remove_directory".to_string(),
         type_idx: path_remove_directory_type_idx,
+    });
+
+    // Import fd_prestat_get
+    let fd_prestat_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_prestat_get".to_string(),
+        type_idx: fd_prestat_get_type_idx,
+    });
+
+    // Import fd_prestat_dir_name
+    let fd_prestat_dir_name_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "fd_prestat_dir_name".to_string(),
+        type_idx: fd_prestat_dir_name_type_idx,
     });
 
     // Import fd_readdir
@@ -939,6 +979,24 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
         &wasm_encoder::ConstExpr::i32_const(heap_start_aligned as i32),
     );
     // Global 1: scratch pointer (memory 1) — string builder scratch
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+            shared: false,
+        },
+        &wasm_encoder::ConstExpr::i32_const(0),
+    );
+    // Global 2: preopen table pointer (set by __init_preopen_dirs at startup)
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+            shared: false,
+        },
+        &wasm_encoder::ConstExpr::i32_const(0),
+    );
+    // Global 3: preopen count (set by __init_preopen_dirs at startup)
     globals.global(
         GlobalType {
             val_type: ValType::I32,

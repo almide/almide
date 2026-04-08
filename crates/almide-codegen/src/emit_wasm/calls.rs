@@ -2202,6 +2202,7 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let fd_out_ptr = self.scratch.alloc_i32();
                 let opened_fd = self.scratch.alloc_i32();
                 let stat_buf = self.scratch.alloc_i32();
@@ -2214,31 +2215,18 @@ impl FuncCompiler<'_> {
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    // path_ptr = path_str + 4 (skip length prefix)
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    // path_len = *path_str
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 // Allocate fd_out (4 bytes) via bump allocator
                 wasm!(self.func, {
                     i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
                 });
 
-                // Strip leading '/' from path for WASI (requires relative path from preopened dir)
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq; // '/' == 47
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
-                // path_open(fd=3, dirflags=0, path_ptr, path_len, oflags=0,
+                // path_open(resolved_fd, dirflags=0, path_ptr, path_len, oflags=0,
                 //           rights=fd_read|fd_seek (2|4=6), inheriting=0, fdflags=0, fd_out_ptr)
                 wasm!(self.func, {
-                    i32_const(3);
+                    local_get(resolved_fd);
                     i32_const(0);
                     local_get(path_ptr);
                     local_get(path_len);
@@ -2366,6 +2354,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(stat_buf);
                 self.scratch.free_i32(opened_fd);
                 self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -2375,6 +2364,7 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let content_str = self.scratch.alloc_i32();
                 let fd_out_ptr = self.scratch.alloc_i32();
                 let opened_fd = self.scratch.alloc_i32();
@@ -2385,11 +2375,8 @@ impl FuncCompiler<'_> {
 
                 // Evaluate path
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 // Evaluate content
                 self.emit_expr(&args[1]);
@@ -2400,19 +2387,11 @@ impl FuncCompiler<'_> {
                     i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
                 });
 
-                // Strip leading '/' from path for WASI (requires relative path from preopened dir)
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
-                // path_open(fd=3, dirflags=0, path_ptr, path_len,
+                // path_open(resolved_fd, dirflags=0, path_ptr, path_len,
                 //           oflags=O_CREAT|O_TRUNC(=9),
                 //           rights=fd_write(=64), inheriting=0, fdflags=0, fd_out_ptr)
                 wasm!(self.func, {
-                    i32_const(3);
+                    local_get(resolved_fd);
                     i32_const(0);
                     local_get(path_ptr);
                     local_get(path_len);
@@ -2491,6 +2470,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(opened_fd);
                 self.scratch.free_i32(fd_out_ptr);
                 self.scratch.free_i32(content_str);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -2500,23 +2480,21 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let stat_buf = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 // Allocate 64-byte stat buffer (allocator guarantees 8-byte alignment)
                 wasm!(self.func, {
                     i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
                 });
 
-                // path_filestat_get(fd=3, flags=0, path_ptr, path_len, stat_buf)
+                // path_filestat_get(resolved_fd, flags=0, path_ptr, path_len, stat_buf)
                 wasm!(self.func, {
-                    i32_const(3);
+                    local_get(resolved_fd);
                     i32_const(0);
                     local_get(path_ptr);
                     local_get(path_len);
@@ -2527,6 +2505,7 @@ impl FuncCompiler<'_> {
                 });
 
                 self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -2536,6 +2515,7 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let fd_out_ptr = self.scratch.alloc_i32();
                 let opened_fd = self.scratch.alloc_i32();
                 let stat_buf = self.scratch.alloc_i32();
@@ -2549,28 +2529,16 @@ impl FuncCompiler<'_> {
                 let counter = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
                     i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
                 });
 
-                // Strip leading '/'
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
-
                 // path_open for reading
                 wasm!(self.func, {
-                    i32_const(3); i32_const(0);
+                    local_get(resolved_fd); i32_const(0);
                     local_get(path_ptr); local_get(path_len);
                     i32_const(0); i64_const(6); i64_const(0); i32_const(0);
                     local_get(fd_out_ptr);
@@ -2655,6 +2623,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(stat_buf);
                 self.scratch.free_i32(opened_fd);
                 self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -2664,6 +2633,7 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let list_ptr = self.scratch.alloc_i32();
                 let fd_out_ptr = self.scratch.alloc_i32();
                 let opened_fd = self.scratch.alloc_i32();
@@ -2676,11 +2646,8 @@ impl FuncCompiler<'_> {
                 let counter = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { local_set(list_ptr); });
@@ -2706,18 +2673,9 @@ impl FuncCompiler<'_> {
                     i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
                 });
 
-                // Strip leading '/'
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
-
                 // path_open for writing (O_CREAT|O_TRUNC=9)
                 wasm!(self.func, {
-                    i32_const(3); i32_const(0);
+                    local_get(resolved_fd); i32_const(0);
                     local_get(path_ptr); local_get(path_len);
                     i32_const(9); i64_const(64); i64_const(0); i32_const(0);
                     local_get(fd_out_ptr);
@@ -2768,6 +2726,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(opened_fd);
                 self.scratch.free_i32(fd_out_ptr);
                 self.scratch.free_i32(list_ptr);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -2777,6 +2736,7 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let content_str = self.scratch.alloc_i32();
                 let fd_out_ptr = self.scratch.alloc_i32();
                 let opened_fd = self.scratch.alloc_i32();
@@ -2786,11 +2746,8 @@ impl FuncCompiler<'_> {
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { local_set(content_str); });
@@ -2799,18 +2756,9 @@ impl FuncCompiler<'_> {
                     i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
                 });
 
-                // Strip leading '/'
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
-
                 // path_open: oflags=O_CREAT(1), rights=fd_write(64), fdflags=APPEND(1)
                 wasm!(self.func, {
-                    i32_const(3); i32_const(0);
+                    local_get(resolved_fd); i32_const(0);
                     local_get(path_ptr); local_get(path_len);
                     i32_const(1);
                     i64_const(64); i64_const(0);
@@ -2860,6 +2808,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(opened_fd);
                 self.scratch.free_i32(fd_out_ptr);
                 self.scratch.free_i32(content_str);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -2869,24 +2818,13 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let result_ptr = self.scratch.alloc_i32();
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
-
-                // Strip leading '/'
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 // Iterative mkdir_p: create each prefix segment
                 let seg_end = self.scratch.alloc_i32();
@@ -2905,7 +2843,7 @@ impl FuncCompiler<'_> {
                     br(0);
                     end; end;
                     // Try creating directory for path[0..seg_end]
-                    i32_const(3);
+                    local_get(resolved_fd);
                     local_get(path_ptr);
                     local_get(seg_end);
                     call(self.emitter.rt.path_create_directory);
@@ -2917,7 +2855,7 @@ impl FuncCompiler<'_> {
 
                 // Final attempt: create the full path and check error
                 wasm!(self.func, {
-                    i32_const(3);
+                    local_get(resolved_fd);
                     local_get(path_ptr);
                     local_get(path_len);
                     call(self.emitter.rt.path_create_directory);
@@ -2949,6 +2887,7 @@ impl FuncCompiler<'_> {
 
                 self.scratch.free_i32(errno);
                 self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -2996,6 +2935,7 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let fd_out_ptr = self.scratch.alloc_i32();
                 let opened_fd = self.scratch.alloc_i32();
                 let result_ptr = self.scratch.alloc_i32();
@@ -3011,29 +2951,17 @@ impl FuncCompiler<'_> {
                 let counter = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
                     i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
                 });
 
-                // Strip leading '/'
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
-
                 // path_open for directory: dirflags=1(symlink follow), oflags=O_DIRECTORY(2)
                 // rights = fd_readdir(0x4000)
                 wasm!(self.func, {
-                    i32_const(3); i32_const(1);
+                    local_get(resolved_fd); i32_const(1);
                     local_get(path_ptr); local_get(path_len);
                     i32_const(2);
                     i64_const(0x4000);
@@ -3203,6 +3131,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(result_ptr);
                 self.scratch.free_i32(opened_fd);
                 self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -3221,28 +3150,18 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let stat_buf = self.scratch.alloc_i32();
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
-
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
                     i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
                     // flags=0: do NOT follow symlinks
-                    i32_const(3); i32_const(0);
+                    local_get(resolved_fd); i32_const(0);
                     local_get(path_ptr); local_get(path_len);
                     local_get(stat_buf);
                     call(self.emitter.rt.path_filestat_get);
@@ -3258,6 +3177,7 @@ impl FuncCompiler<'_> {
 
                 self.scratch.free_i32(errno);
                 self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -3268,9 +3188,11 @@ impl FuncCompiler<'_> {
                 let src_str = self.scratch.alloc_i32();
                 let src_ptr = self.scratch.alloc_i32();
                 let src_len = self.scratch.alloc_i32();
+                let src_resolved_fd = self.scratch.alloc_i32();
                 let dst_str = self.scratch.alloc_i32();
                 let dst_ptr = self.scratch.alloc_i32();
                 let dst_len = self.scratch.alloc_i32();
+                let dst_resolved_fd = self.scratch.alloc_i32();
                 let fd_out_ptr = self.scratch.alloc_i32();
                 let opened_fd = self.scratch.alloc_i32();
                 let stat_buf = self.scratch.alloc_i32();
@@ -3282,34 +3204,20 @@ impl FuncCompiler<'_> {
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(src_str);
-                    local_get(src_str); i32_const(4); i32_add; local_set(src_ptr);
-                    local_get(src_str); i32_load(0); local_set(src_len);
-                });
+                wasm!(self.func, { local_set(src_str); });
+                self.emit_fs_resolve_path(src_str, src_ptr, src_len, src_resolved_fd);
+
                 self.emit_expr(&args[1]);
-                wasm!(self.func, {
-                    local_set(dst_str);
-                    local_get(dst_str); i32_const(4); i32_add; local_set(dst_ptr);
-                    local_get(dst_str); i32_load(0); local_set(dst_len);
-                });
+                wasm!(self.func, { local_set(dst_str); });
+                self.emit_fs_resolve_path(dst_str, dst_ptr, dst_len, dst_resolved_fd);
 
                 wasm!(self.func, {
                     i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
                 });
 
-                // Strip leading '/' from src
-                wasm!(self.func, {
-                    local_get(src_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(src_ptr); i32_const(1); i32_add; local_set(src_ptr);
-                      local_get(src_len); i32_const(1); i32_sub; local_set(src_len);
-                    end;
-                });
-
                 // Open source for reading
                 wasm!(self.func, {
-                    i32_const(3); i32_const(0);
+                    local_get(src_resolved_fd); i32_const(0);
                     local_get(src_ptr); local_get(src_len);
                     i32_const(0); i64_const(6); i64_const(0); i32_const(0);
                     local_get(fd_out_ptr);
@@ -3348,18 +3256,9 @@ impl FuncCompiler<'_> {
                     local_get(nrw_ptr); i32_load(0); local_set(file_size);
                 });
 
-                // Strip leading '/' from dst
-                wasm!(self.func, {
-                    local_get(dst_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(dst_ptr); i32_const(1); i32_add; local_set(dst_ptr);
-                      local_get(dst_len); i32_const(1); i32_sub; local_set(dst_len);
-                    end;
-                });
-
                 // Open dst for writing
                 wasm!(self.func, {
-                    i32_const(3); i32_const(0);
+                    local_get(dst_resolved_fd); i32_const(0);
                     local_get(dst_ptr); local_get(dst_len);
                     i32_const(9); i64_const(64); i64_const(0); i32_const(0);
                     local_get(fd_out_ptr);
@@ -3409,9 +3308,11 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(stat_buf);
                 self.scratch.free_i32(opened_fd);
                 self.scratch.free_i32(fd_out_ptr);
+                self.scratch.free_i32(dst_resolved_fd);
                 self.scratch.free_i32(dst_len);
                 self.scratch.free_i32(dst_ptr);
                 self.scratch.free_i32(dst_str);
+                self.scratch.free_i32(src_resolved_fd);
                 self.scratch.free_i32(src_len);
                 self.scratch.free_i32(src_ptr);
                 self.scratch.free_i32(src_str);
@@ -3421,44 +3322,27 @@ impl FuncCompiler<'_> {
                 let src_str = self.scratch.alloc_i32();
                 let src_ptr = self.scratch.alloc_i32();
                 let src_len = self.scratch.alloc_i32();
+                let src_resolved_fd = self.scratch.alloc_i32();
                 let dst_str = self.scratch.alloc_i32();
                 let dst_ptr = self.scratch.alloc_i32();
                 let dst_len = self.scratch.alloc_i32();
+                let dst_resolved_fd = self.scratch.alloc_i32();
                 let result_ptr = self.scratch.alloc_i32();
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(src_str);
-                    local_get(src_str); i32_const(4); i32_add; local_set(src_ptr);
-                    local_get(src_str); i32_load(0); local_set(src_len);
-                });
+                wasm!(self.func, { local_set(src_str); });
+                self.emit_fs_resolve_path(src_str, src_ptr, src_len, src_resolved_fd);
+
                 self.emit_expr(&args[1]);
-                wasm!(self.func, {
-                    local_set(dst_str);
-                    local_get(dst_str); i32_const(4); i32_add; local_set(dst_ptr);
-                    local_get(dst_str); i32_load(0); local_set(dst_len);
-                });
+                wasm!(self.func, { local_set(dst_str); });
+                self.emit_fs_resolve_path(dst_str, dst_ptr, dst_len, dst_resolved_fd);
 
-                // Strip leading '/' from src and dst
+                // path_rename(old_fd, old_path, old_len, new_fd, new_path, new_len)
                 wasm!(self.func, {
-                    local_get(src_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(src_ptr); i32_const(1); i32_add; local_set(src_ptr);
-                      local_get(src_len); i32_const(1); i32_sub; local_set(src_len);
-                    end;
-                    local_get(dst_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(dst_ptr); i32_const(1); i32_add; local_set(dst_ptr);
-                      local_get(dst_len); i32_const(1); i32_sub; local_set(dst_len);
-                    end;
-                });
-
-                // path_rename(old_fd=3, old_path, old_len, new_fd=3, new_path, new_len)
-                wasm!(self.func, {
-                    i32_const(3);
+                    local_get(src_resolved_fd);
                     local_get(src_ptr); local_get(src_len);
-                    i32_const(3);
+                    local_get(dst_resolved_fd);
                     local_get(dst_ptr); local_get(dst_len);
                     call(self.emitter.rt.path_rename);
                     local_set(errno);
@@ -3486,9 +3370,11 @@ impl FuncCompiler<'_> {
 
                 self.scratch.free_i32(errno);
                 self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(dst_resolved_fd);
                 self.scratch.free_i32(dst_len);
                 self.scratch.free_i32(dst_ptr);
                 self.scratch.free_i32(dst_str);
+                self.scratch.free_i32(src_resolved_fd);
                 self.scratch.free_i32(src_len);
                 self.scratch.free_i32(src_ptr);
                 self.scratch.free_i32(src_str);
@@ -3498,26 +3384,16 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let result_ptr = self.scratch.alloc_i32();
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
-
-                wasm!(self.func, {
-                    i32_const(3);
+                    local_get(resolved_fd);
                     local_get(path_ptr); local_get(path_len);
                     call(self.emitter.rt.path_unlink_file);
                     local_set(errno);
@@ -3545,6 +3421,7 @@ impl FuncCompiler<'_> {
 
                 self.scratch.free_i32(errno);
                 self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -3555,27 +3432,17 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let result_ptr = self.scratch.alloc_i32();
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
-
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 // Try path_unlink_file first
                 wasm!(self.func, {
-                    i32_const(3);
+                    local_get(resolved_fd);
                     local_get(path_ptr); local_get(path_len);
                     call(self.emitter.rt.path_unlink_file);
                     local_set(errno);
@@ -3595,7 +3462,7 @@ impl FuncCompiler<'_> {
 
                 // Try path_remove_directory
                 wasm!(self.func, {
-                    i32_const(3);
+                    local_get(resolved_fd);
                     local_get(path_ptr); local_get(path_len);
                     call(self.emitter.rt.path_remove_directory);
                     local_set(errno);
@@ -3624,6 +3491,7 @@ impl FuncCompiler<'_> {
 
                 self.scratch.free_i32(errno);
                 self.scratch.free_i32(result_ptr);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -3633,28 +3501,18 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let stat_buf = self.scratch.alloc_i32();
                 let result_ptr = self.scratch.alloc_i32();
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
-
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
                     i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
-                    i32_const(3); i32_const(1);
+                    local_get(resolved_fd); i32_const(1);
                     local_get(path_ptr); local_get(path_len);
                     local_get(stat_buf);
                     call(self.emitter.rt.path_filestat_get);
@@ -3689,6 +3547,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(errno);
                 self.scratch.free_i32(result_ptr);
                 self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -3699,28 +3558,18 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let stat_buf = self.scratch.alloc_i32();
                 let result_ptr = self.scratch.alloc_i32();
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
-
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
                     i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
-                    i32_const(3); i32_const(1);
+                    local_get(resolved_fd); i32_const(1);
                     local_get(path_ptr); local_get(path_len);
                     local_get(stat_buf);
                     call(self.emitter.rt.path_filestat_get);
@@ -3754,6 +3603,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(errno);
                 self.scratch.free_i32(result_ptr);
                 self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -3763,29 +3613,19 @@ impl FuncCompiler<'_> {
                 let path_str = self.scratch.alloc_i32();
                 let path_ptr = self.scratch.alloc_i32();
                 let path_len = self.scratch.alloc_i32();
+                let resolved_fd = self.scratch.alloc_i32();
                 let stat_buf = self.scratch.alloc_i32();
                 let result_ptr = self.scratch.alloc_i32();
                 let rec_ptr = self.scratch.alloc_i32();
                 let errno = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(path_str);
-                    local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-                    local_get(path_str); i32_load(0); local_set(path_len);
-                });
-
-                wasm!(self.func, {
-                    local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-                    if_empty;
-                      local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-                      local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-                    end;
-                });
+                wasm!(self.func, { local_set(path_str); });
+                self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
                     i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
-                    i32_const(3); i32_const(1);
+                    local_get(resolved_fd); i32_const(1);
                     local_get(path_ptr); local_get(path_len);
                     local_get(stat_buf);
                     call(self.emitter.rt.path_filestat_get);
@@ -3842,6 +3682,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(rec_ptr);
                 self.scratch.free_i32(result_ptr);
                 self.scratch.free_i32(stat_buf);
+                self.scratch.free_i32(resolved_fd);
                 self.scratch.free_i32(path_len);
                 self.scratch.free_i32(path_ptr);
                 self.scratch.free_i32(path_str);
@@ -3871,34 +3712,45 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Helper: resolve path using __resolve_path runtime function.
+    /// After calling, the scratch locals contain:
+    /// - resolved_fd: the preopened dir fd
+    /// - path_ptr: pointer to the relative path bytes
+    /// - path_len: length of the relative path
+    /// This replaces the old pattern of hardcoded fd=3 + strip leading '/'.
+    fn emit_fs_resolve_path(&mut self, path_str: u32, path_ptr: u32, path_len: u32, resolved_fd: u32) {
+        let resolve_result = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            // Call __resolve_path(path_ptr, path_len) → result_ptr [fd, rel_ptr, rel_len]
+            local_get(path_str); i32_const(4); i32_add; // raw path bytes (skip string length prefix)
+            local_get(path_str); i32_load(0);            // path byte length
+            call(self.emitter.rt.resolve_path);
+            local_set(resolve_result);
+            // Unpack result
+            local_get(resolve_result); i32_load(0); local_set(resolved_fd);
+            local_get(resolve_result); i32_load(4); local_set(path_ptr);
+            local_get(resolve_result); i32_load(8); local_set(path_len);
+        });
+        self.scratch.free_i32(resolve_result);
+    }
+
     /// Helper: check path filetype against expected value. Used by is_dir, is_file.
     fn emit_fs_filetype_check(&mut self, args: &[IrExpr], expected_filetype: i32) {
         let path_str = self.scratch.alloc_i32();
         let path_ptr = self.scratch.alloc_i32();
         let path_len = self.scratch.alloc_i32();
+        let resolved_fd = self.scratch.alloc_i32();
         let stat_buf = self.scratch.alloc_i32();
         let errno = self.scratch.alloc_i32();
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(path_str);
-            local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-            local_get(path_str); i32_load(0); local_set(path_len);
-        });
-
-        // Strip leading '/'
-        wasm!(self.func, {
-            local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-            if_empty;
-              local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-              local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-            end;
-        });
+        wasm!(self.func, { local_set(path_str); });
+        self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
         wasm!(self.func, {
             i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
             // flags=1 (follow symlinks) for is_dir/is_file
-            i32_const(3); i32_const(1);
+            local_get(resolved_fd); i32_const(1);
             local_get(path_ptr); local_get(path_len);
             local_get(stat_buf);
             call(self.emitter.rt.path_filestat_get);
@@ -3916,6 +3768,7 @@ impl FuncCompiler<'_> {
 
         self.scratch.free_i32(errno);
         self.scratch.free_i32(stat_buf);
+        self.scratch.free_i32(resolved_fd);
         self.scratch.free_i32(path_len);
         self.scratch.free_i32(path_ptr);
         self.scratch.free_i32(path_str);
@@ -3955,6 +3808,7 @@ impl FuncCompiler<'_> {
         let path_str = self.scratch.alloc_i32();
         let path_ptr = self.scratch.alloc_i32();
         let path_len = self.scratch.alloc_i32();
+        let resolved_fd = self.scratch.alloc_i32();
         let fd_out_ptr = self.scratch.alloc_i32();
         let opened_fd = self.scratch.alloc_i32();
         let stat_buf = self.scratch.alloc_i32();
@@ -3967,26 +3821,15 @@ impl FuncCompiler<'_> {
         let errno = self.scratch.alloc_i32();
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, {
-            local_set(path_str);
-            local_get(path_str); i32_const(4); i32_add; local_set(path_ptr);
-            local_get(path_str); i32_load(0); local_set(path_len);
-        });
+        wasm!(self.func, { local_set(path_str); });
+        self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
         wasm!(self.func, {
             i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
         });
 
         wasm!(self.func, {
-            local_get(path_ptr); i32_load8_u(0); i32_const(47); i32_eq;
-            if_empty;
-              local_get(path_ptr); i32_const(1); i32_add; local_set(path_ptr);
-              local_get(path_len); i32_const(1); i32_sub; local_set(path_len);
-            end;
-        });
-
-        wasm!(self.func, {
-            i32_const(3); i32_const(0);
+            local_get(resolved_fd); i32_const(0);
             local_get(path_ptr); local_get(path_len);
             i32_const(0); i64_const(6); i64_const(0); i32_const(0);
             local_get(fd_out_ptr);
@@ -4063,6 +3906,7 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(stat_buf);
         self.scratch.free_i32(opened_fd);
         self.scratch.free_i32(fd_out_ptr);
+        self.scratch.free_i32(resolved_fd);
         self.scratch.free_i32(path_len);
         self.scratch.free_i32(path_ptr);
         self.scratch.free_i32(path_str);

@@ -104,6 +104,20 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     );
     emitter.rt.path_remove_directory = emitter.register_import(path_remove_directory_ty);
 
+    // fd_prestat_get(fd, buf) -> errno
+    let fd_prestat_get_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.fd_prestat_get = emitter.register_import(fd_prestat_get_ty);
+
+    // fd_prestat_dir_name(fd, path, path_len) -> errno
+    let fd_prestat_dir_name_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.fd_prestat_dir_name = emitter.register_import(fd_prestat_dir_name_ty);
+
     // fd_readdir(fd, buf, buf_len, cookie, bufused_ptr) -> errno
     let fd_readdir_ty = emitter.register_type(
         vec![ValType::I32, ValType::I32, ValType::I32, ValType::I64, ValType::I32],
@@ -155,6 +169,16 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
         vec![ValType::I32, ValType::I32, ValType::I32], vec![ValType::I32],
     );
     emitter.rt.mem_eq = emitter.register_func("__mem_eq", mem_eq_ty);
+
+    // __init_preopen_dirs() -> ()
+    let init_preopen_ty = emitter.register_type(vec![], vec![]);
+    emitter.rt.init_preopen_dirs = emitter.register_func("__init_preopen_dirs", init_preopen_ty);
+
+    // __resolve_path(path_ptr: i32, path_len: i32) -> i32 (result ptr: [fd:i32, rel_ptr:i32, rel_len:i32])
+    let resolve_path_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32], vec![ValType::I32],
+    );
+    emitter.rt.resolve_path = emitter.register_func("__resolve_path", resolve_path_ty);
 
     // __list_eq(a: i32, b: i32, elem_size: i32) -> i32
     let list_eq_ty = emitter.register_type(
@@ -224,6 +248,10 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     emitter.heap_ptr_global = 0;
     // Global 1: __scratch_ptr (memory 1 string builder scratch)
     emitter.scratch_ptr_global = 1;
+    // Global 2: __preopen_table (ptr to heap-allocated table of [fd, path_ptr, path_len] entries)
+    emitter.preopen_table_global = 2;
+    // Global 3: __preopen_count (number of preopened dirs)
+    emitter.preopen_count_global = 3;
 }
 
 /// Compile all runtime function bodies.
@@ -240,6 +268,8 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::runtime_eq::compile_option_eq_str(emitter);
     super::runtime_eq::compile_result_eq_i64_str(emitter);
     super::runtime_eq::compile_mem_eq(emitter);
+    compile_init_preopen_dirs(emitter);
+    compile_resolve_path(emitter);
     super::runtime_eq::compile_list_eq(emitter);
     super::runtime_eq::compile_list_list_str_cmp(emitter);
     super::runtime_eq::compile_concat_list(emitter);
@@ -897,6 +927,225 @@ fn compile_scratch_finalize(emitter: &mut WasmEmitter) {
 
         // Return result pointer
         local_get(1);
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __init_preopen_dirs() → ()
+/// Discovers preopened directories via fd_prestat_get/fd_prestat_dir_name.
+/// Builds a heap table: [fd:i32, path_ptr:i32, path_len:i32] per entry.
+/// Sets globals: preopen_table (ptr), preopen_count (count).
+fn compile_init_preopen_dirs(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.init_preopen_dirs];
+    // locals: 0=$fd, 1=$buf(8 bytes for prestat), 2=$errno, 3=$path_len,
+    //         4=$count, 5=$table_ptr, 6=$path_buf
+    let mut f = Function::new([
+        (1, ValType::I32), // 0: $fd
+        (1, ValType::I32), // 1: $buf (prestat result: [tag:u8, padding:3, name_len:u32] = 8 bytes)
+        (1, ValType::I32), // 2: $errno
+        (1, ValType::I32), // 3: $path_len
+        (1, ValType::I32), // 4: $count
+        (1, ValType::I32), // 5: $table_ptr
+        (1, ValType::I32), // 6: $path_buf
+    ]);
+
+    wasm!(f, {
+        // Allocate prestat buf (8 bytes) and table (max 16 entries × 12 bytes = 192)
+        i32_const(8); call(emitter.rt.alloc); local_set(1);
+        i32_const(192); call(emitter.rt.alloc); local_set(5);
+
+        // Start from fd=3 (first possible preopened dir)
+        i32_const(3); local_set(0);
+        i32_const(0); local_set(4);
+
+        // Loop: try fd_prestat_get for each fd until it fails
+        block_empty; loop_empty;
+        // fd_prestat_get(fd, buf) -> errno
+        local_get(0); local_get(1);
+        call(emitter.rt.fd_prestat_get);
+        local_set(2);
+
+        // If errno != 0, we're done (EBADF = no more preopened dirs)
+        local_get(2); i32_const(0); i32_ne;
+        br_if(1);
+
+        // Read path_len from prestat buf: offset 4 (after tag byte + padding)
+        local_get(1); i32_load(4); local_set(3);
+
+        // Allocate path buffer and get dir name
+        local_get(3); i32_const(1); i32_add; call(emitter.rt.alloc); local_set(6);
+        local_get(0); local_get(6); local_get(3);
+        call(emitter.rt.fd_prestat_dir_name);
+        drop;
+
+        // Store entry in table: [fd, path_ptr, path_len]
+        local_get(5); local_get(4); i32_const(12); i32_mul; i32_add;
+        local_get(0); i32_store(0);
+        local_get(5); local_get(4); i32_const(12); i32_mul; i32_add;
+        local_get(6); i32_store(4);
+        local_get(5); local_get(4); i32_const(12); i32_mul; i32_add;
+        local_get(3); i32_store(8);
+
+        // count++, fd++
+        local_get(4); i32_const(1); i32_add; local_set(4);
+        local_get(0); i32_const(1); i32_add; local_set(0);
+
+        // Max 16 entries
+        local_get(4); i32_const(16); i32_ge_u; br_if(1);
+        br(0);
+        end; end;
+
+        // Set globals
+        local_get(5); global_set(emitter.preopen_table_global);
+        local_get(4); global_set(emitter.preopen_count_global);
+
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __resolve_path(path_ptr: i32, path_len: i32) → i32 (result_ptr)
+/// Result: [fd:i32, rel_path_ptr:i32, rel_path_len:i32] on heap.
+/// Finds longest matching preopened dir prefix. Falls back to fd=3 with stripped leading '/'.
+fn compile_resolve_path(emitter: &mut WasmEmitter) {
+    // Intern "." so we can use its data pointer for exact-match paths
+    let dot_str = emitter.intern_string(".");
+    let dot_ptr = dot_str + 4; // skip the 4-byte length prefix to get raw '.' byte
+    let type_idx = emitter.func_type_indices[&emitter.rt.resolve_path];
+    // params: 0=$path_ptr, 1=$path_len
+    // locals: 2=$result, 3=$i, 4=$best_fd, 5=$best_match_len,
+    //         6=$entry_ptr, 7=$entry_fd, 8=$entry_path_ptr, 9=$entry_path_len,
+    //         10=$j, 11=$match
+    let mut f = Function::new([
+        (1, ValType::I32), // 2: $result
+        (1, ValType::I32), // 3: $i
+        (1, ValType::I32), // 4: $best_fd
+        (1, ValType::I32), // 5: $best_match_len
+        (1, ValType::I32), // 6: $entry_ptr
+        (1, ValType::I32), // 7: $entry_fd
+        (1, ValType::I32), // 8: $entry_path_ptr
+        (1, ValType::I32), // 9: $entry_path_len
+        (1, ValType::I32), // 10: $j
+        (1, ValType::I32), // 11: $match
+    ]);
+
+    wasm!(f, {
+        // Allocate result: [fd, rel_path_ptr, rel_path_len]
+        i32_const(12); call(emitter.rt.alloc); local_set(2);
+
+        // Default: fd=3, no prefix match
+        i32_const(3); local_set(4);
+        i32_const(0); local_set(5);
+
+        // Loop over preopened dirs to find longest prefix match
+        i32_const(0); local_set(3);
+        block_empty; loop_empty;
+        local_get(3); global_get(emitter.preopen_count_global); i32_ge_u; br_if(1);
+
+        // Load entry [fd, path_ptr, path_len]
+        global_get(emitter.preopen_table_global);
+        local_get(3); i32_const(12); i32_mul; i32_add;
+        local_set(6);
+        local_get(6); i32_load(0); local_set(7);
+        local_get(6); i32_load(4); local_set(8);
+        local_get(6); i32_load(8); local_set(9);
+
+        // Skip if entry_path_len > path_len or entry_path_len <= best_match_len
+        local_get(9); local_get(1); i32_gt_u;
+        local_get(9); local_get(5); i32_le_u;
+        i32_or;
+        if_empty;
+        else_;
+
+        // Check prefix match: compare entry path bytes with input path bytes
+        i32_const(1); local_set(11);
+        i32_const(0); local_set(10);
+        block_empty; loop_empty;
+        local_get(10); local_get(9); i32_ge_u; br_if(1);
+        local_get(0); local_get(10); i32_add; i32_load8_u(0);
+        local_get(8); local_get(10); i32_add; i32_load8_u(0);
+        i32_ne;
+        if_empty;
+          i32_const(0); local_set(11);
+          br(2);
+        end;
+        local_get(10); i32_const(1); i32_add; local_set(10);
+        br(0);
+        end; end;
+
+        // If matched, update best
+        local_get(11);
+        if_empty;
+          local_get(7); local_set(4);
+          local_get(9); local_set(5);
+        end;
+
+        end;
+
+        local_get(3); i32_const(1); i32_add; local_set(3);
+        br(0);
+        end; end;
+
+        // Build result
+        local_get(5); i32_const(0); i32_gt_u;
+        if_empty;
+          // Prefix match found: strip prefix + optional '/' separator
+          local_get(2); local_get(4); i32_store(0);
+          local_get(1); local_get(5); i32_sub; i32_const(0); i32_gt_u;
+          if_empty;
+            local_get(0); local_get(5); i32_add; i32_load8_u(0);
+            i32_const(47); i32_eq;
+            if_empty;
+              local_get(2); local_get(0); local_get(5); i32_add; i32_const(1); i32_add; i32_store(4);
+              local_get(2); local_get(1); local_get(5); i32_sub; i32_const(1); i32_sub; i32_store(8);
+            else_;
+              local_get(2); local_get(0); local_get(5); i32_add; i32_store(4);
+              local_get(2); local_get(1); local_get(5); i32_sub; i32_store(8);
+            end;
+          else_;
+            // Exact match (e.g., path="/tmp", preopen="/tmp"): use "." as relative path
+            local_get(2); i32_const(dot_ptr as i32); i32_store(4);
+            local_get(2); i32_const(1); i32_store(8);
+          end;
+        else_;
+          // No prefix match. For relative paths, find "." preopened dir. For absolute, strip '/'.
+          local_get(0); i32_load8_u(0); i32_const(47); i32_eq;
+          if_empty;
+            // Absolute path with no match: strip '/' and use fd=3
+            local_get(2); i32_const(3); i32_store(0);
+            local_get(2); local_get(0); i32_const(1); i32_add; i32_store(4);
+            local_get(2); local_get(1); i32_const(1); i32_sub; i32_store(8);
+          else_;
+            // Relative path: find "." in preopened dirs, fallback to fd=3
+            local_get(2); i32_const(3); i32_store(0); // default fd=3
+            i32_const(0); local_set(3);
+            block_empty; loop_empty;
+            local_get(3); global_get(emitter.preopen_count_global); i32_ge_u; br_if(1);
+            global_get(emitter.preopen_table_global);
+            local_get(3); i32_const(12); i32_mul; i32_add;
+            local_set(6);
+            // Check if entry path is "." (len==1 && byte[0]=='.')
+            local_get(6); i32_load(8); i32_const(1); i32_eq;
+            if_empty;
+              local_get(6); i32_load(4); i32_load8_u(0); i32_const(46); i32_eq;
+              if_empty;
+                local_get(2); local_get(6); i32_load(0); i32_store(0); // use this fd
+                br(3); // break out of search loop
+              end;
+            end;
+            local_get(3); i32_const(1); i32_add; local_set(3);
+            br(0);
+            end; end;
+            // Pass relative path as-is
+            local_get(2); local_get(0); i32_store(4);
+            local_get(2); local_get(1); i32_store(8);
+          end;
+        end;
+
+        local_get(2);
         end;
     });
 
