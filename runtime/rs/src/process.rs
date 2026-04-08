@@ -110,20 +110,44 @@ pub fn almide_rt_process_spawn(cmd: String, args: Vec<String>) -> Result<i64, St
 }
 
 pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), String> {
-    std::process::Command::new("kill")
-        .args([&format!("-{}", signal), &pid.to_string()])
-        .output()
-        .map_err(|e| format!("kill failed: {}", e))
-        .and_then(|out| {
-            if out.status.success() { Ok(()) }
-            else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
-        })
+    #[cfg(unix)]
+    {
+        let cmd = std::process::Command::new("kill")
+            .args([&format!("-{}", signal), &pid.to_string()])
+            .output()
+            .map_err(|e| format!("kill failed: {}", e))?;
+        if cmd.status.success() { Ok(()) }
+        else { Err(String::from_utf8_lossy(&cmd.stderr).trim().to_string()) }
+    }
+    #[cfg(windows)]
+    {
+        let cmd = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output()
+            .map_err(|e| format!("kill failed: {}", e))?;
+        if cmd.status.success() { Ok(()) }
+        else { Err(String::from_utf8_lossy(&cmd.stderr).trim().to_string()) }
+    }
 }
 
 pub fn almide_rt_process_is_alive(pid: i64) -> bool {
-    std::process::Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false)
+    #[cfg(unix)]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/NH"])
+            .output()
+            .map(|out| {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                stdout.contains(&pid.to_string())
+            })
+            .unwrap_or(false)
+    }
 }
