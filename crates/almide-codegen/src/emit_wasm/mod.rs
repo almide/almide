@@ -642,6 +642,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Step 1b: @extern(wasm, ...) imports — must be registered before any
     // defined functions so import indices are contiguous at the start.
+    // Scan both program.functions and module functions.
     let mut extern_wasm_set: HashSet<usize> = HashSet::new();
     for (i, func) in program.functions.iter().enumerate() {
         if let Some(attr) = func.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") {
@@ -661,6 +662,41 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 emitter.effect_fns.insert(func.name.to_string());
             }
             extern_wasm_set.insert(i);
+        }
+    }
+    // Module @extern(wasm) imports: key = (module_idx, func_idx)
+    let mut extern_wasm_module_set: HashSet<(usize, usize)> = HashSet::new();
+    for (mi, module) in program.modules.iter().enumerate() {
+        let mod_ident = module.versioned_name
+            .map(|v| v.to_string().replace('.', "_"))
+            .unwrap_or_else(|| module.name.to_string().replace('.', "_"));
+        for (fi, func) in module.functions.iter().enumerate() {
+            if let Some(attr) = func.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") {
+                let params: Vec<ValType> = func.params.iter()
+                    .filter_map(|p| values::ty_to_valtype(&p.ty))
+                    .collect();
+                let results = values::ret_type(&func.ret_ty);
+                let type_idx = emitter.register_type(params, results);
+                let func_idx = emitter.register_import(type_idx);
+                emitter.imports.push(ImportInfo {
+                    module: attr.module.as_str().to_string(),
+                    name: attr.function.as_str().to_string(),
+                    type_idx,
+                });
+                // Register by both prefixed and bare name for call dispatch
+                let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");
+                let prefixed_name = format!("almide_rt_{}_{}", mod_ident, func_name_sanitized);
+                emitter.func_map.insert(prefixed_name, func_idx);
+                let bare_name = func.name.to_string();
+                if !emitter.func_map.contains_key(&bare_name) {
+                    emitter.func_map.insert(bare_name, func_idx);
+                }
+                if func.is_effect {
+                    let effect_prefixed = format!("almide_rt_{}_{}", mod_ident, func_name_sanitized);
+                    emitter.effect_fns.insert(effect_prefixed);
+                }
+                extern_wasm_module_set.insert((mi, fi));
+            }
         }
     }
 
@@ -819,6 +855,10 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             .map(|v| v.to_string().replace('.', "_"))
             .unwrap_or_else(|| module.name.to_string().replace('.', "_"));
         for (fi, func) in module.functions.iter().enumerate() {
+            // Skip @extern(wasm) — already registered as imports
+            if extern_wasm_module_set.contains(&(mi, fi)) {
+                continue;
+            }
             let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");
             let prefixed_name = format!("almide_rt_{}_{}", mod_ident, func_name_sanitized);
             let params: Vec<ValType> = func.params.iter()
