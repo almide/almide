@@ -1,4 +1,5 @@
 <!-- description: Fix almide test to compile tests that transitively import native-deps modules -->
+<!-- done: 2026-04-08 -->
 
 # Test Build with Native Deps
 
