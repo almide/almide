@@ -1,6 +1,12 @@
 <!-- description: Allow WASM target to import functions from custom host modules -->
-
+<!-- done: 2026-04-09 -->
 # Custom WASM Host Imports
+
+## Status
+
+完了。`@extern(wasm, "module", "func")` で任意の WASM ホストモジュールから関数をインポートできる。program-level / module-level の両方を `crates/almide-codegen/src/emit_wasm/mod.rs` でサポート。
+
+## Original Goal
 
 Allow Almide's WASM target to import functions from arbitrary host modules, not just `wasi_snapshot_preview1`.
 

@@ -1,5 +1,6 @@
 <!-- description: Fix 33 CLAUDE.md rule violations found by crate patrol audit -->
-<!-- done: 2026-04-06 --># Crate Responsibility Violations
+<!-- done: 2026-04-06 -->
+# Crate Responsibility Violations
 
 2026-04-06 のパトロール監査で 33 件の CLAUDE.md ルール違反を検出。**全 33 件対応完了。**
 
