@@ -169,3 +169,11 @@ Convert an integer to a floating-point number.
 ```almd
 int.to_float(42) // => 42.0
 ```
+
+### `int.bits_to_float(bits: Int) -> Float`
+
+Reinterpret an integer's bits as an IEEE 754 float (f64).
+
+```almd
+int.bits_to_float(4607182418800017408) // => 1.0
+```

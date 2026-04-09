@@ -129,3 +129,11 @@ Check if a float is positive or negative infinity.
 ```almd
 float.is_infinite(1.0 / 0.0) // => true
 ```
+
+### `float.to_bits(f: Float) -> Int`
+
+Reinterpret a float as its IEEE 754 bit representation (i64).
+
+```almd
+float.to_bits(1.0) // => 4607182418800017408
+```

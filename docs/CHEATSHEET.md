@@ -312,25 +312,23 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [list](stdlib/list.md) | List operations | auto-imported | 59 |
 | [map](stdlib/map.md) | Map (dictionary) operations | auto-imported | 24 |
 | [set](stdlib/set.md) | Set operations | auto-imported | 19 |
-| [int](stdlib/int.md) | Integer arithmetic and bitwise | auto-imported | 21 |
-| [float](stdlib/float.md) | Floating-point operations | auto-imported | 16 |
+| [int](stdlib/int.md) | Integer arithmetic and bitwise | auto-imported | 22 |
+| [float](stdlib/float.md) | Floating-point operations | auto-imported | 17 |
 | [value](stdlib/value.md) | Dynamic value manipulation | auto-imported | 19 |
 | [result](stdlib/result.md) | Result type operations | auto-imported | 12 |
 | [option](stdlib/option.md) | Option type operations | auto-imported | 12 |
-| [json](stdlib/json.md) | JSON parsing and querying | `import json` | 28 |
+| [json](stdlib/json.md) | JSON parsing and querying | `import json` | 29 |
 | [math](stdlib/math.md) | Mathematical functions | `import math` | 21 |
 | [regex](stdlib/regex.md) | Regular expressions | `import regex` | 8 |
 | [datetime](stdlib/datetime.md) | Date and time | `import datetime` | 21 |
-| [bytes](stdlib/bytes.md) | Binary data | `import bytes` | 14 |
+| [bytes](stdlib/bytes.md) | Binary data | `import bytes` | 30 |
 | [matrix](stdlib/matrix.md) | 2D matrix operations | `import matrix` | 13 |
 | [testing](stdlib/testing.md) | Test assertions | `import testing` | 7 |
 | [error](stdlib/error.md) | Error construction | `import error` | 3 |
-| [path](stdlib/path.md) | File path manipulation | `import path` | 5 |
-| [args](stdlib/args.md) | CLI argument parsing | `import args` | 4 |
 | [fs](stdlib/fs.md) | File system | `import fs` | 24 |
 | [env](stdlib/env.md) | Environment and system | `import env` | 9 |
-| [process](stdlib/process.md) | Process execution, env vars, signals | `import process` | 11 |
-| [io](stdlib/io.md) | Standard I/O | `import io` | 5 |
+| [process](stdlib/process.md) | Process execution, env vars, signals | `import process` | 12 |
+| [io](stdlib/io.md) | Standard I/O | `import io` | 7 |
 | [http](stdlib/http.md) | HTTP client and server | `import http` | 20 |
 | [random](stdlib/random.md) | Random number generation | `import random` | 4 |
 ## Key rules
