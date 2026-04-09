@@ -890,7 +890,7 @@ fn technically_pure(x: Int) -> Int =
 | `\|>` | Pipe |
 | `..` `..=` | Range (exclusive / inclusive) |
 
-In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equality. In TS/JS codegen, they emit `__deep_eq()`.
+In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equality. In WASM codegen, they emit byte-level comparison.
 
 ---
 
@@ -1197,11 +1197,7 @@ Almide compiles to multiple targets:
 | Target | Status | Approach |
 |--------|--------|----------|
 | **Rust** | Production | Full ownership analysis, borrow/clone passes |
-| **TypeScript** | Production | Result erasure (ok(x)->x, err(e)->throw) |
-| **JavaScript** | Production | Same as TypeScript, different module system |
-| **WASM** | Production | Via Rust target |
-| **Go** | Planned | Stub pipeline |
-| **Python** | Planned | Stub pipeline |
+| **WASM** | Production | Direct emit (linear memory, WASI) |
 
 ### 20.2 Codegen v3 Pipeline
 
@@ -1228,25 +1224,19 @@ Target source code
 6. BuiltinLowering -- assert_eq, println, etc. to Rust macros
 7. FanLowering -- fan blocks to tokio::join!/spawn
 
-**TypeScript/JavaScript pipeline passes:**
-1. MatchLowering -- match expressions to if/else chains
-2. ResultErasure -- ok(x)->x, err(e)->throw, some(x)->x, none->null
-3. ShadowResolve -- re-declarations to reassignment
-4. FanLowering -- fan blocks to Promise.all
-
-Templates are defined in TOML files (`codegen/templates/*.toml`), separating syntax from semantics. Adding a new target requires implementing passes and templates, not modifying the core emitter.
+Templates are defined in TOML files (`codegen/templates/*.toml`), separating syntax from semantics.
 
 ### 20.3 Cross-Target Semantics
 
-| Feature | Rust | TypeScript/JavaScript |
-|---------|------|---------------------|
-| `Result[T, E]` | `Result<T, String>` | erased: ok(x)->x, err(e)->throw |
-| `Option[T]` | `Option<T>` | erased: some(x)->x, none->null |
-| `effect fn` | returns `Result<T, String>`, auto `?` | normal function |
-| `==` / `!=` | `almide_eq!` macro (deep) | `__deep_eq()` (deep) |
-| `+` on String | `format!` / owned concat | `+` operator |
-| `+` on List | `[...a, ...b]` | `[...a, ...b]` |
-| `fan { }` | `tokio::join!` | `Promise.all` |
+| Feature | Rust | WASM |
+|---------|------|------|
+| `Result[T, E]` | `Result<T, String>` | Tag-based (0=Ok, 1=Err) |
+| `Option[T]` | `Option<T>` | Tag-based (0=None, 1=Some) |
+| `effect fn` | returns `Result<T, String>`, auto `?` | Tag check + early return |
+| `==` / `!=` | `almide_eq!` macro (deep) | Byte comparison |
+| `+` on String | `format!` / owned concat | `string_concat` runtime |
+| `+` on List | `[...a, ...b]` | `list_concat` runtime |
+| `fan { }` | `tokio::join!` | Sequential (single-threaded) |
 
 ---
 

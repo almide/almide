@@ -81,3 +81,19 @@ Check if a process with the given PID is still running
 ```almd
 let running = process.is_alive(pid)
 ```
+
+### `process.args() -> List[String]`
+
+Get command-line arguments as a list of strings.
+
+```almd
+let args = process.args()
+```
+
+### `process.pid() -> Int`
+
+Get the current process ID.
+
+```almd
+let my_pid = process.pid()
+```

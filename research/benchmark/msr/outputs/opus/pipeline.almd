@@ -1,0 +1,84 @@
+Here is the complete `.almd` file:
+
+effect fn parse_line(line: String) -> Result[(String, String), String] =
+  match string.index_of(line, "=") {
+    none => err("invalid line: ${line}"),
+    some(idx) => {
+      let key = string.trim(string.slice(line, 0, idx))
+      let val = string.trim(string.slice(line, idx + 1, string.len(line)))
+      ok((key, val))
+    },
+  }
+
+effect fn collect_pairs(lines: List[String], acc: List[(String, String)]) -> Result[List[(String, String)], String] =
+  match list.first(lines) {
+    none => ok(acc),
+    some(line) => {
+      let pair = parse_line(line)!
+      collect_pairs(list.drop(lines, 1), acc + [pair])
+    },
+  }
+
+effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] = {
+  let lines = list.filter(string.split(input, "\n"), (line) => string.len(string.trim(line)) > 0)
+  collect_pairs(lines, [])
+}
+
+effect fn validate_keys(pairs: List[(String, String)]) -> Result[List[(String, String)], String] =
+  match list.find(pairs, (pair) => { let (key, _val) = pair; string.len(key) == 0 }) {
+    some(_) => err("empty key found"),
+    none => ok(pairs),
+  }
+
+fn transform(pairs: List[(String, String)]) -> List[(String, String)] =
+  list.map(pairs, (pair) => {
+    let (key, val) = pair
+    (string.to_upper(key), val)
+  })
+
+fn format_output(pairs: List[(String, String)]) -> String =
+  pairs
+    |> list.map((pair) => { let (key, val) = pair; "${key}: ${val}" })
+    |> list.join("\n")
+
+effect fn run_pipeline(input: String) -> Result[String, String] = {
+  let pairs = parse_pairs(input)!
+  let pairs = validate_keys(pairs)!
+  let pairs = transform(pairs)
+  ok(format_output(pairs))
+}
+
+test "simple pipeline" {
+  match run_pipeline("name=Alice\nage=30") {
+    ok(r) => {
+      assert_eq(string.contains(r, "NAME: Alice"), true)
+      assert_eq(string.contains(r, "AGE: 30"), true)
+    }
+    err(_) => assert(false)
+  }
+}
+test "pipeline with spaces" {
+  assert_eq(run_pipeline("key= value "), ok("KEY: value"))
+}
+test "empty key error" {
+  assert_eq(run_pipeline("=value"), err("empty key found"))
+}
+test "single pair" {
+  assert_eq(run_pipeline("host=localhost"), ok("HOST: localhost"))
+}
+test "invalid line" {
+  match run_pipeline("no-equals") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(string.contains(e, "invalid line"), true)
+  }
+}
+
+**Design decisions:**
+
+- **`parse_line`** — Uses `string.index_of` to find the first `=`, then `string.slice` to split key/value. This correctly handles values containing `=` (e.g., `"base64=abc="`). Both key and value are trimmed.
+- **`collect_pairs`** — Recursive accumulator pattern (idiomatic Almide, avoids `var + for`). Each line is parsed with `!` to propagate errors immediately.
+- **`parse_pairs`** — Filters out blank lines before collecting, so trailing newlines don't cause spurious errors.
+- **`validate_keys`** — Uses `list.find` to locate the first empty key; returns `err("empty key found")` if one exists.
+- **`transform`** — Pure function, maps keys through `string.to_upper`.
+- **`format_output`** — Pipe chain: map to `"KEY: val"` strings, join with `"\n"`.
+- **`run_pipeline`** — Chains all stages with `!` for error propagation — clean linear pipeline.

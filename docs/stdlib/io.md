@@ -41,3 +41,19 @@ Write a Bytes buffer to stdout (zero-copy, buffered)
 ```almd
 io.write(buf)
 ```
+
+### `io.read_byte() -> Int`
+
+Read a single byte from stdin (returns -1 on EOF).
+
+```almd
+let b = io.read_byte()
+```
+
+### `io.read_n_bytes(n: Int) -> List[Int]`
+
+Read N bytes from stdin (may return fewer on EOF).
+
+```almd
+let bytes = io.read_n_bytes(4)
+```

@@ -1,6 +1,6 @@
 # Architecture
 
-Almide is a ~22,000-line pure-Rust compiler. Dependencies: `serde` + `serde_json` (AST serialization), `toml` (template loading), `clap` (CLI).
+Almide is a ~72,000-line pure-Rust compiler organized as a workspace of 9 crates + a CLI binary. Dependencies: `serde` + `serde_json` (AST serialization), `toml` (template loading), `clap` (CLI), `lasso` (string interning).
 
 ## Pipeline
 
@@ -9,11 +9,10 @@ Almide is a ~22,000-line pure-Rust compiler. Dependencies: `serde` + `serde_json
                     ┌──────────────────────────────────────────┐
                     │  grammar/*.toml ──┐                      │
                     │  runtime/rs/src/  ─┤                     │
-                    │  runtime/ts/      ─┼─→ build.rs ─→ src/generated/  │
-                    │  runtime/js/      ─┤     │  arg_transforms.rs      │
-                    │  stdlib/          ──┘     │  stdlib_sigs.rs         │
+                    │  stdlib/          ─┼─→ build.rs ─→ generated/       │
+                    │                          │  arg_transforms.rs      │
+                    │                          │  stdlib_sigs.rs         │
                     │                          │  rust_runtime.rs        │
-                    │                          │  ts_runtime.rs          │
                     │                          │  token_table.rs         │
                     └──────────────────────────────────────────┘
 
@@ -41,128 +40,113 @@ Almide is a ~22,000-line pure-Rust compiler. Dependencies: `serde` + `serde_json
     │                              └──────────────┬────────────────┘  │
     │                                             │                   │
     │                                             ▼                   │
-    │                              ┌───────────────────────────────┐  │
-    │                              │   Template Renderer            │  │
-    │                              │   (TOML-driven, target-agnostic)│ │
-    │                              └──────────────┬────────────────┘  │
-    │                                             │                   │
-    │                                             ▼                   │
-    │                                     .rs / .ts / .js             │
+    │                      ┌────────────────────────────────────────┐ │
+    │                      │   Rust target          WASM target     │ │
+    │                      │   Template Renderer    Direct Emit     │ │
+    │                      │   (TOML-driven)        (linear memory) │ │
+    │                      └──────────────┬─────────────────────────┘ │
+    │                                     │                           │
+    │                                     ▼                           │
+    │                              .rs / .wasm                        │
     └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Source Map
+## Crate Structure
 
 ```
-src/
-├── main.rs              CLI entry: subcommands, import resolution, orchestration
-├── lib.rs               Public API (used by playground WASM crate)
-├── ast.rs               AST node types (serde-serializable)
-├── lexer.rs             Tokenizer (42 keywords, string interpolation, heredocs)
-├── diagnostic.rs        Error/warning types with file:line + hint
-├── resolve.rs           Module resolution (filesystem + git deps)
-├── project.rs           almide.toml parsing, PkgId
-├── project_fetch.rs     Git dependency fetching
-├── stdlib.rs            UFCS candidate tables, module lists
-├── mono.rs              Monomorphization (generic instantiation)
-├── fmt.rs               Source code formatter (almide fmt)
+almide/                   Workspace root
+├── Cargo.toml            Workspace manifest
+├── src/                  CLI binary (almide)
+│   ├── main.rs           CLI entry: subcommands, orchestration
+│   ├── lib.rs            Public API (used by playground WASM crate)
+│   ├── resolve.rs        Module resolution (filesystem + git deps)
+│   ├── project.rs        almide.toml parsing, PkgId
+│   ├── project_fetch.rs  Git dependency fetching
+│   ├── diagnostic_render.rs  Diagnostic pretty-printing
+│   └── cli/
+│       ├── mod.rs         CLI module exports
+│       ├── run.rs         almide run: compile → rustc → execute
+│       ├── build.rs       almide build: compile → binary / WASM
+│       ├── check.rs       almide check: type check only
+│       ├── emit.rs        almide emit: output generated source
+│       ├── commands.rs    almide test: find + run test blocks
+│       └── selfupdate.rs  almide self-update: binary update from GitHub
 │
-├── parser/
-│   ├── mod.rs           Parser struct, token stream
-│   ├── entry.rs         Top-level: program, imports, declarations
-│   ├── declarations.rs  fn, type, trait, impl, test, top-let
-│   ├── expressions.rs   Binary, unary, pipe, match, if/then/else
-│   ├── primary.rs       Literals, identifiers, lambdas, blocks
-│   ├── statements.rs    let, var, guard, assignment
-│   ├── patterns.rs      Match arm patterns (variant, record, tuple)
-│   ├── types.rs         Type expressions (generics, records, functions)
-│   ├── collections.rs   List, map, record, tuple literals
-│   ├── compounds.rs     for-in, while, fan blocks
-│   ├── helpers.rs       Comma-separated lists, precedence
-│   ├── recovery.rs      Error recovery (skip to sync points)
-│   ├── diagnostics.rs   Parser error formatting
-│   └── hints/           Smart error hints
-│       ├── catalog.rs       Rejected keyword → Almide equivalent
-│       ├── keyword_typo.rs  Fuzzy keyword matching
-│       ├── operator.rs      ! → not, && → and, || → or
-│       ├── syntax_guide.rs  Context-specific fix suggestions
-│       ├── delimiter.rs     Bracket/paren mismatch hints
-│       └── missing_comma.rs Comma insertion suggestions
-│
-├── check/
-│   ├── mod.rs           Checker: constraint-based type inference, module registration
-│   ├── infer.rs         Expression inference (Pass 1: walk AST, assign types)
-│   ├── calls.rs         Call resolution: UFCS, builtins, constructors, conventions
-│   └── types.rs         Constraint solving, type unification
-│
-├── types/
-│   ├── mod.rs           Ty enum (Int, String, List, Record, Fn, Variant, ...)
-│   ├── env.rs           TypeEnv: scoped variables, functions, types, modules
-│   └── unify.rs         Structural type unification
-│
-├── lower/
-│   ├── mod.rs           AST + Types → IR lowering, VarId assignment
-│   ├── expressions.rs   Expression lowering (literals, blocks, lambdas, match)
-│   ├── calls.rs         Call target resolution (Module, Method, Named, Computed)
-│   ├── statements.rs    Statement + pattern lowering
-│   ├── types.rs         Type declaration lowering (records, variants, newtypes)
-│   ├── derive.rs        Auto-derive (Eq, Repr, Ord, Hash)
-│   └── derive_codec.rs  Codec auto-derive (encode/decode for records + variants)
-│
-├── ir/
-│   ├── mod.rs           IrProgram, IrExpr, IrStmt, IrPattern, CallTarget, VarTable
-│   ├── fold.rs          IR tree walker/transformer
-│   ├── result.rs        Result expression detection (shared Rust + TS logic)
-│   ├── unknown.rs       Unknown type handling
-│   └── use_count.rs     Variable use-count analysis (move vs clone decisions)
-│
-├── codegen/
-│   ├── mod.rs           emit(): orchestrates pipeline → walker → output
-│   ├── target.rs        Target config: pipeline + templates per target
-│   ├── pass.rs          NanoPass trait, Pipeline, Target enum
-│   ├── annotations.rs   Pre-pass: collect named/anon records, ctor→enum map
-│   ├── template.rs      TOML template engine ({var} substitution)
-│   ├── walker.rs        IR → source renderer (target-agnostic, 0 target checks)
+├── crates/
+│   ├── almide-base/       Shared primitives
+│   │   ├── diagnostic.rs  Error/warning types with file:line + hint
+│   │   ├── intern.rs      String interning (lasso)
+│   │   └── span.rs        Source span types
 │   │
-│   │── pass_stdlib_lowering.rs    Module/Method → Named + arg decoration
-│   │── pass_result_propagation.rs Insert Try (?) in effect fns (Rust)
-│   │── pass_result_erasure.rs     ok(x)→x, err(e)→throw (TS)
-│   │── pass_match_lowering.rs     match → if/else chains (TS)
-│   │── pass_clone.rs              Clone insertion (Rust borrow analysis)
-│   │── pass_box_deref.rs          Recursive type Box/deref (Rust)
-│   │── pass_builtin_lowering.rs   assert_eq→macro, println→macro (Rust)
-│   │── pass_fan_lowering.rs       Fan block → tokio/Promise.all
-│   └── pass_shadow_resolve.rs     let-rebinding → assignment (TS)
+│   ├── almide-syntax/     Parsing
+│   │   ├── ast.rs         AST node types (serde-serializable)
+│   │   ├── lexer.rs       Tokenizer (42 keywords, string interpolation, heredocs)
+│   │   └── parser/        Recursive descent parser with error recovery
+│   │       ├── entry.rs         Top-level: program, imports, declarations
+│   │       ├── declarations.rs  fn, type, trait, impl, test, top-let
+│   │       ├── expressions.rs   Binary, unary, pipe, match, if/then/else
+│   │       ├── primary.rs       Literals, identifiers, lambdas, blocks
+│   │       ├── statements.rs    let, var, guard, assignment
+│   │       ├── patterns.rs      Match arm patterns (variant, record, tuple)
+│   │       ├── types.rs         Type expressions (generics, records, functions)
+│   │       ├── collections.rs   List, map, record, tuple literals
+│   │       ├── compounds.rs     for-in, while, fan blocks
+│   │       └── hints/           Smart error hints (typos, keywords, delimiters)
+│   │
+│   ├── almide-types/      Type system
+│   │   ├── types/         Ty enum (Int, String, List, Record, Fn, Variant, ...)
+│   │   └── stdlib_info.rs UFCS candidate tables, auto-import module lists
+│   │
+│   ├── almide-frontend/   Type checking & lowering
+│   │   ├── check/         Constraint-based type inference + UFCS resolution
+│   │   ├── lower/         AST + Types → IR lowering, VarId assignment
+│   │   ├── canonicalize/  Import canonicalization
+│   │   ├── type_env.rs    Scoped variables, functions, types, modules
+│   │   ├── import_table.rs  Import resolution table
+│   │   └── stdlib.rs      Stdlib signature registration
+│   │
+│   ├── almide-ir/         Intermediate representation
+│   │   ├── lib.rs         IrProgram, IrExpr, IrStmt, IrPattern, CallTarget, VarTable
+│   │   ├── fold.rs        IR tree walker/transformer
+│   │   ├── visit.rs       Read-only IR visitor
+│   │   ├── use_count.rs   Variable use-count analysis (move vs clone)
+│   │   ├── result.rs      Result expression detection
+│   │   ├── effect.rs      Effect inference helpers
+│   │   └── wasm_repr.rs   WASM type representation
+│   │
+│   ├── almide-optimize/   Optimization
+│   │   ├── mono/          Monomorphization (generic instantiation, VarId alpha-renaming)
+│   │   └── optimize/      DCE, constant propagation, LICM, peephole, stream fusion
+│   │
+│   ├── almide-codegen/    Code generation
+│   │   ├── pass.rs        NanoPass trait, Pipeline, Target enum
+│   │   ├── target.rs      Target config: pipeline + templates per target
+│   │   ├── template.rs    TOML template engine ({var} substitution)
+│   │   ├── walker/        IR → Rust source renderer (target-agnostic)
+│   │   ├── emit_wasm/     Direct WASM binary emitter (linear memory, WASI)
+│   │   ├── pass_*.rs      Nanopass implementations (20+ passes)
+│   │   └── generated/     Auto-generated by build.rs (DO NOT EDIT)
+│   │       ├── arg_transforms.rs    Per-function argument decoration rules
+│   │       └── rust_runtime.rs      Embedded Rust runtime (include_str)
+│   │
+│   ├── almide-tools/      Tooling
+│   │   ├── fmt.rs         Source code formatter (almide fmt)
+│   │   ├── interface.rs   Module interface extraction (almide compile)
+│   │   └── almdi.rs       ALMDI metadata format
+│   │
+│   └── almide-lang/       Language metadata (version, feature flags)
 │
-├── optimize/
-│   ├── mod.rs           Optimization pipeline
-│   ├── dce.rs           Dead code elimination
-│   └── propagate.rs     Constant propagation
+├── grammar/               Grammar definitions
+│   ├── tokens.toml        Keyword → TokenType mapping
+│   ├── almide.toml        Grammar rules
+│   └── precedence.toml    Operator precedence table
 │
-├── cli/
-│   ├── mod.rs           CLI module exports
-│   ├── run.rs           almide run: compile → rustc → execute
-│   ├── build.rs         almide build: compile → binary / WASM / npm
-│   ├── check.rs         almide check: type check only
-│   ├── emit.rs          almide emit: output generated source
-│   └── commands.rs      almide test: find + run test blocks
+├── codegen/templates/
+│   └── rust.toml          Rust syntax templates (~330 rules)
 │
-└── generated/           Auto-generated by build.rs (DO NOT EDIT)
-    ├── arg_transforms.rs    Per-function argument decoration rules
-    ├── stdlib_sigs.rs       Function signatures for type checking
-    ├── emit_rust_calls.rs   Rust codegen dispatch
-    ├── emit_ts_calls.rs     TS codegen dispatch
-    ├── rust_runtime.rs      Embedded Rust runtime (include_str)
-    ├── ts_runtime.rs        Embedded TS runtime (include_str from runtime/ts/)
-    └── token_table.rs       Keyword → TokenType mapping
-
-codegen/templates/
-├── rust.toml            Rust syntax templates (~330 rules)
-└── typescript.toml      TypeScript syntax templates
-
-runtime/
-├── rs/src/              Rust runtime: 22 modules (string, list, map, json, fs, ...)
-└── ts/                  TypeScript runtime: 22 modules (Deno + Node --strip-types)
+├── stdlib/defs/           Stdlib TOML definitions (23 modules, 430+ functions)
+│
+└── runtime/rs/src/        Rust runtime: 22 modules (string, list, map, json, fs, ...)
 ```
 
 ## Codegen v3: Three-Layer Architecture
@@ -179,42 +163,35 @@ TypeConcretization → BorrowInsertion → CloneInsertion
   → StdlibLowering → ResultPropagation → BuiltinLowering → FanLowering
 ```
 
-**TypeScript pipeline:**
-```
-MatchLowering → ResultErasure → ShadowResolve → FanLowering
-```
+**WASM pipeline:**
+Direct binary emission — no template layer. The `emit_wasm/` module walks the IR and emits WASM bytecode directly, managing linear memory layout, stack frames, and WASI syscalls.
 
 | Pass | Target | What it does |
 |------|--------|------|
 | StdlibLowering | Rust | `Module { "list", "map" }` → `Named { "almide_rt_list_map" }` + arg decoration |
 | ResultPropagation | Rust | Insert `Try { expr }` (Rust `?`) on fallible calls in `effect fn` |
-| ResultErasure | TS | `ok(x)` → `x`, `err(e)` → `throw new Error(e)`, `Try` → identity |
-| MatchLowering | TS | `Match { subject, arms }` → `If/ElseIf/Else` chain |
 | CloneInsertion | Rust | Insert `Clone` nodes based on use-count analysis |
 | BoxDeref | Rust | Insert `Deref` for recursive type access through `Box` |
 | BuiltinLowering | Rust | `assert_eq` → `RustMacro`, `println` → `RustMacro` |
-| ShadowResolve | TS | `let x = 1; let x = 2` → `let x = 1; x = 2` (TS/JS has no shadowing) |
-| FanLowering | All | Strip auto-try from fan spawn closures |
+| FanLowering | Rust | Strip auto-try from fan spawn closures |
+| TailCallMark | WASM | Mark tail-recursive calls for `return_call` emission |
+| ClosureConversion | WASM | Lambda capture → explicit env struct passing |
 
-### Layer 2: Template Renderer
+### Layer 2: Template Renderer (Rust target only)
 
-TOML files define syntax patterns. The walker calls `templates.render_with("if_expr", ...)` and gets back target-specific syntax:
+TOML files define syntax patterns. The walker calls `templates.render_with("if_expr", ...)` and gets back Rust syntax:
 
 ```toml
 # rust.toml
 [if_expr]
 template = "if ({cond}) {{ {then} }} else {{ {else} }}"
-
-# typescript.toml
-[if_expr]
-template = "({cond}) ? ({then}) : ({else})"
 ```
 
-~330 template rules per target. All string rendering is done here — passes never produce text.
+~330 template rules. All string rendering is done here — passes never produce text.
 
 ### Layer 3: Walker
 
-`walker.rs` (1,676 lines) walks the IR tree and renders each node by calling the template engine. It is **fully target-agnostic** — zero `if target == Rust` checks. Target differences are handled entirely by passes (Layer 1) and templates (Layer 2).
+`walker/` walks the IR tree and renders each node by calling the template engine. It is **fully target-agnostic** — zero `if target == Rust` checks. Target differences are handled entirely by passes (Layer 1) and templates (Layer 2).
 
 Key rendering functions:
 - `render_expr()` — expressions (recursively renders sub-expressions)
@@ -223,16 +200,25 @@ Key rendering functions:
 - `render_pattern()` — match patterns (variants, records, tuples)
 - `render_function()` — function declarations with params, return type, body
 
+## WASM Direct Emitter
+
+The WASM target (`emit_wasm/`) bypasses templates entirely and emits binary WASM directly:
+
+- **Linear memory**: Stack allocator on memory 0, scratch buffer on memory 1 (multi-memory)
+- **Tail calls**: Native `return_call` / `return_call_indirect` (WASM 3.0)
+- **Strings**: UTF-8 in linear memory, length-prefixed
+- **Closures**: Explicit environment structs, function table indirect calls
+- **WASI**: File I/O, args, env vars via WASI preview1 imports
+
 ## Build System
 
 `build.rs` generates code at compile time:
 
 1. **Scans `runtime/rs/src/*.rs`** → extracts function signatures → generates `arg_transforms.rs` (per-function argument decoration: BorrowStr, BorrowRef, ToVec, LambdaClone, Direct)
-2. **Scans `runtime/ts/*.ts` + `runtime/js/*.js`** → embeds as `include_str!` → generates `ts_runtime.rs`
-3. **Reads stdlib definitions** → generates `stdlib_sigs.rs` (function signatures for type checking)
-4. **Reads grammar files** → generates `token_table.rs` (keyword → TokenType mapping)
+2. **Reads stdlib definitions** → generates `stdlib_sigs.rs` (function signatures for type checking)
+3. **Reads grammar files** → generates `token_table.rs` (keyword → TokenType mapping)
 
-The runtime is embedded in the compiler binary. When emitting JS/TS, the runtime preamble is prepended to the output. When emitting Rust, runtime functions are `include_str!`'d into the generated `.rs` file.
+The Rust runtime is embedded in the compiler binary via `include_str!` and prepended to generated `.rs` files.
 
 ## Type System
 

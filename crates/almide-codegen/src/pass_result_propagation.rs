@@ -28,9 +28,13 @@ impl NanoPass for ResultPropagationPass {
         let wrap_non_result = matches!(target, Target::Rust | Target::Wasm);
 
         // Phase 1a: Collect all effect fn names and lift return types.
+        // Extern functions are excluded: their signatures are fixed by the host
+        // environment and must not be wrapped in Result.
         let mut lifted_fns: HashMap<String, Ty> = HashMap::new();
         for func in &mut program.functions {
-            if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result() {
+            if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
+                && func.extern_attrs.is_empty()
+            {
                 let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                 func.ret_ty = Ty::result(orig, Ty::String);
                 lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
@@ -38,7 +42,9 @@ impl NanoPass for ResultPropagationPass {
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
-                if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result() {
+                if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
+                    && func.extern_attrs.is_empty()
+                {
                     let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                     func.ret_ty = Ty::result(orig, Ty::String);
                     lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
@@ -133,6 +139,34 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                     },
                     ty: result_ty, span,
                 }
+            }
+        }
+        // ForIn/While: execute as statement, then return Ok(Unit).
+        // These expressions have side effects but produce Unit, so wrapping
+        // them directly in ResultOk would let the emitter skip their execution.
+        kind @ (IrExprKind::ForIn { .. } | IrExprKind::While { .. }) => {
+            let result_ty = Ty::result(Ty::Unit, Ty::String);
+            IrExpr {
+                kind: IrExprKind::Block {
+                    stmts: vec![IrStmt {
+                        kind: IrStmtKind::Expr {
+                            expr: IrExpr { kind, ty, span },
+                        },
+                        span,
+                    }],
+                    expr: Some(Box::new(IrExpr {
+                        kind: IrExprKind::ResultOk {
+                            expr: Box::new(IrExpr {
+                                kind: IrExprKind::Unit,
+                                ty: Ty::Unit,
+                                span,
+                            }),
+                        },
+                        ty: result_ty.clone(),
+                        span,
+                    })),
+                },
+                ty: result_ty, span,
             }
         }
         // Everything else: wrap in Ok(expr)

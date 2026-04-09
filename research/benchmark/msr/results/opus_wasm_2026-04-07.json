@@ -1,0 +1,13 @@
+{
+  "date": "2026-04-07",
+  "language": "almide",
+  "target": "wasm",
+  "model": "opus",
+  "exercises": 1,
+  "passed": 1,
+  "failed": 0,
+  "check_failures": 0,
+  "test_failures": 0,
+  "msr": 1.0000,
+  "results": [{"name":"bob","passed":true}]
+}

@@ -385,6 +385,25 @@ macro_rules! wasm {
     (@emit $f:expr, i64_reinterpret_f64; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I64ReinterpretF64); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, f32_demote_f64; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F32DemoteF64); wasm!(@emit $f, $($rest)*)
+    };
+
+    // ── Memory (f32) ──
+    (@emit $f:expr, f32_store($off:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F32Store(wasm_encoder::MemArg {
+            offset: $off as u64, align: 2, memory_index: 0,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
+
+    // ── Memory (i32 store16) ──
+    (@emit $f:expr, i32_store16($off:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32Store16(wasm_encoder::MemArg {
+            offset: $off as u64, align: 1, memory_index: 0,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
 
     // ── Control flow ──
     (@emit $f:expr, call($v:expr); $($rest:tt)*) => {

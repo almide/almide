@@ -65,14 +65,39 @@ pub(crate) fn dce_stmts(stmts: &mut Vec<IrStmt>, var_table: &VarTable) {
     stmts.retain(|stmt| {
         match &stmt.kind {
             IrStmtKind::Bind { var, value, .. } => {
-                if var_table.use_count(*var) == 0 && is_pure(value) {
+                if var_table.use_count(*var) == 0 && is_pure(value) && !contains_call(value) {
                     return false; // remove
                 }
                 true
             }
+            // Bare expression statements are always kept — even if the expression
+            // type is Unit it may have side effects (e.g. extern function calls).
+            IrStmtKind::Expr { .. } => true,
             _ => true,
         }
     });
+}
+
+/// Returns true if an expression tree contains any Call/TailCall node.
+/// Used as a safety check to prevent elimination of side-effectful expressions.
+fn contains_call(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Call { .. } | IrExprKind::TailCall { .. } => true,
+        IrExprKind::Block { stmts, expr: tail } => {
+            stmts.iter().any(|s| match &s.kind {
+                IrStmtKind::Bind { value, .. } => contains_call(value),
+                IrStmtKind::Expr { expr } => contains_call(expr),
+                _ => false,
+            }) || tail.as_ref().map_or(false, |e| contains_call(e))
+        }
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Unwrap { expr } => contains_call(expr),
+        IrExprKind::If { cond, then, else_ } => {
+            contains_call(cond) || contains_call(then) || contains_call(else_)
+        }
+        _ => false,
+    }
 }
 
 /// An expression is pure if evaluating it has no side effects.

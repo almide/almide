@@ -225,3 +225,11 @@ Remove a value at a JSON path. Returns the Json with the value removed.
 ```almd
 json.remove_path(j, json.field(json.root(), "temp"))
 ```
+
+### `json.to_map(j: Value) -> Option[Map[String, String]]`
+
+Convert a JSON object to a Map[String, String]. Values are stringified. Returns none if not an object.
+
+```almd
+let m = json.to_map(obj) ?? map.new()
+```

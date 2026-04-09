@@ -1,0 +1,55 @@
+fn digit_value(c: String, pos: Int) -> Option[Int] =
+  match c {
+    "0" => some(0),
+    "1" => some(1),
+    "2" => some(2),
+    "3" => some(3),
+    "4" => some(4),
+    "5" => some(5),
+    "6" => some(6),
+    "7" => some(7),
+    "8" => some(8),
+    "9" => some(9),
+    "X" => if pos == 9 then some(10) else none,
+    _ => none,
+  }
+
+fn is_valid(isbn: String) -> Bool = {
+  let stripped = string.replace(isbn, "-", "")
+  if string.len(stripped) != 10 then false
+  else {
+    let values = string.chars(stripped)
+      |> list.enumerate
+      |> list.map((entry) => {
+        let (i, c) = entry
+        digit_value(c, i)
+      })
+    if list.any(values, (v) => v == none) then false
+    else {
+      let sum = values
+        |> list.enumerate
+        |> list.fold(0, (acc, entry) => {
+          let (i, v) = entry
+          acc + (v ?? 0) * (10 - i)
+        })
+      sum % 11 == 0
+    }
+  }
+}
+
+test "valid isbn" { assert_eq(is_valid("3-598-21508-8"), true) }
+test "invalid isbn check digit" { assert_eq(is_valid("3-598-21508-9"), false) }
+test "valid isbn with X check digit" { assert_eq(is_valid("3-598-21507-X"), true) }
+test "invalid isbn with X not at end" { assert_eq(is_valid("3-598-2X507-0"), false) }
+test "valid isbn without dashes" { assert_eq(is_valid("3598215088"), true) }
+test "invalid isbn without dashes" { assert_eq(is_valid("3598215089"), false) }
+test "too short" { assert_eq(is_valid("3-598-2150"), false) }
+test "too long" { assert_eq(is_valid("3-598-21508-88"), false) }
+test "empty" { assert_eq(is_valid(""), false) }
+test "invalid characters" { assert_eq(is_valid("3-598-abc-8"), false) }
+test "valid with X check digit no dashes" { assert_eq(is_valid("359821507X"), true) }
+test "invalid with letters" { assert_eq(is_valid("3-598-P1581-X"), false) }
+test "X only at end" { assert_eq(is_valid("X-598-21507-0"), false) }
+test "all valid isbns" {
+  assert_eq(is_valid("0-306-40615-2"), true)
+}
