@@ -1,0 +1,32 @@
+fn score(word: String) -> Int =
+  word
+    |> string.to_lower
+    |> string.split("")
+    |> list.filter((c) => c != "")
+    |> list.map(letter_score)
+    |> list.sum
+
+fn letter_score(c: String) -> Int =
+  match c {
+    "a" => 1, "e" => 1, "i" => 1, "o" => 1, "u" => 1,
+    "l" => 1, "n" => 1, "r" => 1, "s" => 1, "t" => 1,
+    "d" => 2, "g" => 2,
+    "b" => 3, "c" => 3, "m" => 3, "p" => 3,
+    "f" => 4, "h" => 4, "v" => 4, "w" => 4, "y" => 4,
+    "k" => 5,
+    "j" => 8, "x" => 8,
+    "q" => 10, "z" => 10,
+    _ => 0,
+  }
+
+test "lowercase letter" { assert_eq(score("a"), 1) }
+test "uppercase letter" { assert_eq(score("A"), 1) }
+test "valuable letter" { assert_eq(score("f"), 4) }
+test "short word" { assert_eq(score("at"), 2) }
+test "short valuable word" { assert_eq(score("zoo"), 12) }
+test "medium word" { assert_eq(score("street"), 6) }
+test "medium valuable word" { assert_eq(score("quirky"), 22) }
+test "long mixed-case word" { assert_eq(score("OxyphenButaworzone"), 47) }
+test "english-like word" { assert_eq(score("pinball"), 11) }
+test "empty input" { assert_eq(score(""), 0) }
+test "entire alphabet" { assert_eq(score("abcdefghijklmnopqrstuvwxyz"), 87) }

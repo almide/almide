@@ -204,3 +204,23 @@ description = "Copy Bytes to a raw pointer. Returns bytes written."
 params = [{ name = "b", type = "Bytes" }, { name = "ptr", type = "RawPtr" }, { name = "cap", type = "Int" }]
 return = "Int"
 rust = "almide_rt_bytes_copy_to_ptr(&{b}, {ptr}, {cap})"
+
+# ── In-place little-endian writes & data pointer ──
+
+[set_f32_le]
+description = "Write a Float as f32 little-endian at position pos."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Float" }]
+return = "Unit"
+rust = "almide_rt_bytes_set_f32_le(&mut {b}, {pos}, {val})"
+
+[set_u16_le]
+description = "Write an Int as u16 little-endian at position pos."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_set_u16_le(&mut {b}, {pos}, {val})"
+
+[data_ptr]
+description = "Return the data pointer (after the 4-byte length prefix) as Int."
+params = [{ name = "b", type = "Bytes" }]
+return = "Int"
+rust = "almide_rt_bytes_data_ptr(&{b})"

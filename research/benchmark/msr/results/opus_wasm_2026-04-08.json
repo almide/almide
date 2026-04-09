@@ -1,0 +1,13 @@
+{
+  "date": "2026-04-08",
+  "language": "almide",
+  "target": "wasm",
+  "model": "opus",
+  "exercises": 25,
+  "passed": 19,
+  "failed": 6,
+  "check_failures": 4,
+  "test_failures": 2,
+  "msr": .7600,
+  "results": [{"name":"affine-cipher","passed":true},{"name":"bob","passed":true},{"name":"calculator","passed":true},{"name":"collatz-conjecture","passed":true},{"name":"collatz","passed":true},{"name":"config-merger","passed":true},{"name":"data-table","passed":true},{"name":"expression-eval","passed":true},{"name":"grade-report","passed":true},{"name":"hamming","passed":true},{"name":"isbn-verifier","passed":false,"error":"test_fail"},{"name":"isogram","passed":true},{"name":"json-config","passed":true},{"name":"markdown-renderer","passed":false,"error":"type_check"},{"name":"named-things","passed":false,"error":"type_check"},{"name":"pangram","passed":false,"error":"type_check"},{"name":"phone-number","passed":true},{"name":"pipeline","passed":false,"error":"type_check"},{"name":"raindrops","passed":true},{"name":"roman-numerals","passed":true},{"name":"scrabble-score","passed":false,"error":"test_fail"},{"name":"sortable","passed":true},{"name":"todo-app","passed":true},{"name":"traffic-light","passed":true},{"name":"wasm-smoke","passed":true}]
+}

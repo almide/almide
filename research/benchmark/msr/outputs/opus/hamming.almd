@@ -1,0 +1,19 @@
+effect fn distance(a: String, b: String) -> Result[Int, String] = {
+  guard string.len(a) == string.len(b) else err("strands must be of equal length")
+  let pairs = list.zip(string.chars(a), string.chars(b))
+  ok(list.count(pairs, (p) => {
+    let (x, y) = p
+    x != y
+  }))
+}
+
+test "empty strands" { assert_eq(distance("", ""), ok(0)) }
+test "single letter identical" { assert_eq(distance("A", "A"), ok(0)) }
+test "single letter different" { assert_eq(distance("G", "T"), ok(1)) }
+test "long identical" { assert_eq(distance("GGACTGAAATCTG", "GGACTGAAATCTG"), ok(0)) }
+test "long different" { assert_eq(distance("GGACGGATTCTG", "AGGACGGATTCT"), ok(9)) }
+test "different lengths" { assert_eq(distance("AATG", "AAA"), err("strands must be of equal length")) }
+test "first strand longer" { assert_eq(distance("AATG", "AAA"), err("strands must be of equal length")) }
+test "short mutation" { assert_eq(distance("GAGCCTACTAACGGGAT", "CATCGTAATGACGGCCT"), ok(7)) }
+test "all different" { assert_eq(distance("GATACA", "GCATAA"), ok(4)) }
+test "no difference" { assert_eq(distance("GAT", "GAT"), ok(0)) }

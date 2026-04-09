@@ -395,6 +395,61 @@ impl FuncCompiler<'_> {
                 // Just return the string pointer (effectively a cast)
                 self.emit_expr(&args[0]);
             }
+            "set_f32_le" => {
+                // bytes.set_f32_le(b, pos, val) → Unit
+                // f32.store [addr, f32_val]: addr = buf + 4 + pos
+                let buf = self.scratch.alloc_i32();
+                let addr = self.scratch.alloc_i32();
+                let fval = self.scratch.alloc_f64();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(buf); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64;
+                    local_get(buf); i32_const(4); i32_add; i32_add;
+                    local_set(addr);
+                });
+                self.emit_expr(&args[2]); // val: f64 on stack
+                wasm!(self.func, {
+                    local_set(fval);
+                    // push addr, then demoted val, then store
+                    local_get(addr);
+                    local_get(fval);
+                    f32_demote_f64;
+                    f32_store(0);
+                });
+                self.scratch.free_f64(fval);
+                self.scratch.free_i32(addr);
+                self.scratch.free_i32(buf);
+            }
+            "set_u16_le" => {
+                // bytes.set_u16_le(b, pos, val) → Unit
+                // Store u16 little-endian at buf + 4 + pos
+                let buf = self.scratch.alloc_i32();
+                let pos = self.scratch.alloc_i32();
+                let val = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(buf); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i32_wrap_i64; local_set(pos); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(val);
+                    // address = buf + 4 + pos
+                    local_get(buf); i32_const(4); i32_add; local_get(pos); i32_add;
+                    local_get(val);
+                    i32_store16(0);
+                });
+                self.scratch.free_i32(val);
+                self.scratch.free_i32(pos);
+                self.scratch.free_i32(buf);
+            }
+            "data_ptr" => {
+                // bytes.data_ptr(b) → Int (i64)
+                // Return pointer to data region: buf + 4
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_const(4); i32_add; i64_extend_i32_u; });
+            }
             _ => return false,
         }
         true

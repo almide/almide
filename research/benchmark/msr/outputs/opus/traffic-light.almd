@@ -1,0 +1,33 @@
+
+
+type Light = | Red | Yellow | Green
+
+fn next(l: Light) -> Light =
+  match l {
+    Red => Green,
+    Green => Yellow,
+    Yellow => Red,
+  }
+
+fn duration(l: Light) -> Int =
+  match l {
+    Red => 60,
+    Yellow => 5,
+    Green => 45,
+  }
+
+fn describe(l: Light) -> String =
+  match l {
+    Red => "stop",
+    Yellow => "caution",
+    Green => "go",
+  }
+
+test "next red" { assert_eq(next(Red), Green) }
+test "next green" { assert_eq(next(Green), Yellow) }
+test "next yellow" { assert_eq(next(Yellow), Red) }
+test "full cycle" { assert_eq(next(next(next(Red))), Red) }
+test "duration red" { assert_eq(duration(Red), 60) }
+test "duration yellow" { assert_eq(duration(Yellow), 5) }
+test "duration green" { assert_eq(duration(Green), 45) }
+test "describe" { assert_eq(describe(Red), "stop") }

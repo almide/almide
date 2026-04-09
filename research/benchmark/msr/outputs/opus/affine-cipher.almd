@@ -1,0 +1,79 @@
+// Affine cipher: E(x) = (ax + b) mod m, D(x) = a^-1 * (x - b) mod m
+
+fn gcd(a: Int, b: Int) -> Int =
+  if b == 0 then int.abs(a) else gcd(b, a % b)
+
+fn mod_inverse(a: Int, m: Int) -> Int =
+  1..m |> list.find((x) => (a * x) % m == 1) ?? 0
+
+fn char_to_num(c: String) -> Int =
+  (string.codepoint(c) ?? 0) - 97
+
+fn num_to_char(n: Int) -> String =
+  string.from_codepoint(n + 97)
+
+fn is_letter(c: String) -> Bool = {
+  let code = string.codepoint(c) ?? 0
+  (code >= 97 and code <= 122) or (code >= 65 and code <= 90)
+}
+
+fn is_digit(c: String) -> Bool = {
+  let code = string.codepoint(c) ?? 0
+  code >= 48 and code <= 57
+}
+
+fn group(s: String, size: Int) -> String = {
+  let chars = string.chars(s)
+  let len = list.len(chars)
+  if len <= size then s
+  else {
+    let num_groups = (len + size - 1) / size
+    0..num_groups
+      |> list.map((i) => string.slice(s, i * size, int.min(i * size + size, len)))
+      |> list.join(" ")
+  }
+}
+
+effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = {
+  guard gcd(a, 26) == 1 else err("a and m must be coprime")
+  let lower = string.to_lower(text)
+  let encoded = string.chars(lower)
+    |> list.filter_map((c) => {
+      if is_letter(c) then {
+        let n = (a * char_to_num(c) + b) % 26
+        some(num_to_char(n))
+      } else if is_digit(c) then some(c)
+      else none
+    })
+    |> list.join("")
+  ok(group(encoded, 5))
+}
+
+effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = {
+  guard gcd(a, 26) == 1 else err("a and m must be coprime")
+  let inv = mod_inverse(a, 26)
+  let decoded = string.chars(text)
+    |> list.filter_map((c) => {
+      if c == " " then none
+      else if is_letter(c) then {
+        let n = char_to_num(string.to_lower(c))
+        let dec = ((inv * (n - b)) % 26 + 26) % 26
+        some(num_to_char(dec))
+      } else some(c)
+    })
+    |> list.join("")
+  ok(decoded)
+}
+
+test "encode yes" { assert_eq(encode(5, 7, "yes"), ok("xbt")) }
+test "encode no" { assert_eq(encode(15, 18, "no"), ok("fu")) }
+test "encode OMG" { assert_eq(encode(21, 3, "OMG"), ok("lvz")) }
+test "encode mindblowingly" { assert_eq(encode(21, 3, "mindblowingly"), ok("vpqoy alxpq zan")) }
+test "encode numbers" { assert_eq(encode(3, 4, "Testing,1 2 3, testing."), ok("jqgjc rw123 jqgjc rw")) }
+test "encode deep thought" { assert_eq(encode(5, 17, "Truth"), ok("iynia")) }
+test "encode not coprime" { assert_eq(encode(6, 17, "test"), err("a and m must be coprime")) }
+
+test "decode exercism" { assert_eq(decode(3, 7, "tytgn fjr"), ok("exercism")) }
+test "decode sentence" { assert_eq(decode(19, 16, "qdber jeppp ewbn plqce"), ok("anrylbypppyortpxacy")) }
+test "decode numbers" { assert_eq(decode(25, 7, "odpoz ub123 , "), ok("testing123,")) }
+test "decode not coprime" { assert_eq(decode(13, 11, "test"), err("a and m must be coprime")) }

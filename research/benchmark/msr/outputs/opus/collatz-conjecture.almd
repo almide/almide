@@ -1,0 +1,32 @@
+fn steps(n: Int) -> Result[Int, String] =
+  if n <= 0 then err("Only positive integers are allowed")
+  else ok(collatz(n, 0))
+
+fn collatz(n: Int, count: Int) -> Int =
+  if n == 1 then count
+  else if n % 2 == 0 then collatz(n / 2, count + 1)
+  else collatz(3 * n + 1, count + 1)
+
+test "zero steps for one" {
+  assert_eq(steps(1), ok(0))
+}
+
+test "divide if even" {
+  assert_eq(steps(16), ok(4))
+}
+
+test "even and odd steps" {
+  assert_eq(steps(12), ok(9))
+}
+
+test "large number of even and odd steps" {
+  assert_eq(steps(1000000), ok(152))
+}
+
+test "zero is an error" {
+  assert_eq(steps(0), err("Only positive integers are allowed"))
+}
+
+test "negative value is an error" {
+  assert_eq(steps(-15), err("Only positive integers are allowed"))
+}

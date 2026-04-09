@@ -77,3 +77,19 @@ pub fn almide_rt_bytes_copy_to_ptr(b: &Vec<u8>, ptr: *mut u8, cap: i64) -> i64 {
     unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), ptr, n); }
     n as i64
 }
+
+// ── In-place little-endian writes & data pointer ──
+
+pub fn almide_rt_bytes_set_f32_le(b: &mut Vec<u8>, pos: i64, val: f64) {
+    let p = pos as usize;
+    let bytes = (val as f32).to_le_bytes();
+    if p + 4 <= b.len() { b[p..p+4].copy_from_slice(&bytes); }
+}
+pub fn almide_rt_bytes_set_u16_le(b: &mut Vec<u8>, pos: i64, val: i64) {
+    let p = pos as usize;
+    let bytes = (val as u16).to_le_bytes();
+    if p + 2 <= b.len() { b[p..p+2].copy_from_slice(&bytes); }
+}
+pub fn almide_rt_bytes_data_ptr(b: &Vec<u8>) -> i64 {
+    b.as_ptr() as i64
+}
