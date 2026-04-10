@@ -377,6 +377,9 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { local_get(scratch); });
                     self.emit_expr(inner);
                     self.emit_store_at(&inner_ty, 4);
+                } else {
+                    // Unit or zero-sized: still emit for side effects
+                    self.emit_expr(inner);
                 }
                 wasm!(self.func, { local_get(scratch); });
                 self.scratch.free_i32(scratch);
@@ -401,6 +404,9 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { local_get(scratch); });
                     self.emit_expr(inner);
                     self.emit_store_at(&inner_ty, 4);
+                } else {
+                    // Unit or zero-sized: still emit for side effects
+                    self.emit_expr(inner);
                 }
                 wasm!(self.func, { local_get(scratch); });
                 self.scratch.free_i32(scratch);
