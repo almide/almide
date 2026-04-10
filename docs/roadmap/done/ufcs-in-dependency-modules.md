@@ -1,5 +1,6 @@
 <!-- description: UFCS method calls fail type resolution in dependency module context -->
-<!-- done: 2026-04-02 --># UFCS Resolution in Dependency Modules
+<!-- done: 2026-04-02 -->
+# UFCS Resolution in Dependency Modules
 
 ## Status
 

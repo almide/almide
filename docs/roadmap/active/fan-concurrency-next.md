@@ -1,4 +1,4 @@
-<!-- description: fan as a language-level concurrency primitive with Flow[T] and compiler-driven optimization -->
+<!-- description: fan as a language-level concurrency primitive with rush/spawn/link/cancel -->
 # Fan Concurrency — Next Generation
 
 ## Vision
@@ -13,7 +13,7 @@ fan.map(items, f)          // 並行マップ
 fan.race([a, b])           // 最速が勝つ
 ```
 
-3つの構文が fan の全表面。ストリーミングは `Flow[T]` 型 + 既存の `list` 操作で表現し、新しいモジュールは導入しない。
+3 つの構文が fan の全表面。ストリーミングは [`flow-design.md`](./flow-design.md) で扱う `Flow[T]` 型と統合される。
 
 ## Why Language-Level
 
@@ -69,71 +69,61 @@ let results = fan.map(urls, (url) => fetch(url))
 let fastest = fan.race([fetch(url1), fetch(url2)])
 ```
 
-### Flow[T] — Typed Lazy Sequence
+### Flow[T] との統合
 
-`Flow[T]` は遅延シーケンスの型。`List[T]` とは別の型にすることで、危険な操作（`list.len`, `list.get`, `list.reverse`）をコンパイル時に弾く。
+`Flow[T]` (lazy streaming sequence) の設計は別 roadmap [`flow-design.md`](./flow-design.md) に切り出した。**`flow.*` 名前空間**で提供され、動詞は `list.*` と揃える (`flow.map`, `flow.filter`, `flow.fold`, ...)。
 
-新しいモジュールは導入しない。前方走査のみの `list` 操作（`list.filter`, `list.map`, `list.fold` 等）が `Flow[T]` にもそのまま動く。
+ここでは fan との interaction 原則のみを述べる。詳細は `flow-design.md` 参照。
+
+#### 原則 1: `fan.map` は入力型で戻り型がディスパッチされる
 
 ```almide
-let lines: Flow[String] = file.lines(path)
+// List 入力 → List 出力 (バッチ並行)
+fan.map(xs: List[T], limit: Int?, f: (T) -> U) -> List[U]
 
-// OK — 前方走査操作は Flow で動く
-lines
-  |> list.filter((line) => string.contains(line, "ERROR"))
-  |> list.map((line) => parse_log(line))
-  |> list.fold(0, (acc, _) => acc + 1)
-
-// OK — fan.map は List でも Flow でも動く
-lines
-  |> list.filter((line) => line != "")
-  |> fan.map(limit: 10, (line) => process(line))
-
-// コンパイルエラー — Flow は有限長・ランダムアクセスを保証しない
-list.len(lines)       // error: list.len requires List[T], got Flow[T]
-list.get(lines, 5)    // error: list.get requires List[T], got Flow[T]
-list.reverse(lines)   // error: list.reverse requires List[T], got Flow[T]
+// Flow 入力 → Flow 出力 (ストリーミング並行)
+fan.map(xs: Flow[T], limit: Int?, f: (T) -> U) -> Flow[U]
 ```
 
-### list Operations on Flow[T]
+戻り型が入力型に追従するので、`file.lines(path) |> fan.map(limit: 10, f) |> flow.filter(p) |> flow.collect()` が自然に書ける。
 
-`list` 操作を2カテゴリに分類し、`Flow[T]` で使えるものをコンパイラが判別する。
+#### 原則 2: Flow + `fan.map(limit: n)` で自動バックプレッシャー
 
-| 使える（前方走査） | 使えない（ランダムアクセス / 全体走査） |
+`limit` は「最大同時ワーカー数」。Flow に対して使うと、**ワーカーが空くまで上流から pull しない** ので、upstream のメモリ圧迫を防ぐ。ユーザーは buffer サイズや channel 容量を明示的に書かなくていい。
+
+#### 原則 3: `limit:` 省略時の挙動
+
+| 入力型 | `limit:` 省略時 |
 |---|---|
-| `list.filter` | `list.len` |
-| `list.map` | `list.get` |
-| `list.fold` / `list.reduce` | `list.reverse` |
-| `list.take` | `list.sort` |
-| `list.drop` | `list.contains` |
-| `list.each` | `list.find` (※後述) |
-| `list.flat_map` | `list.zip` (List 同士のみ) |
-| `list.enumerate` | |
+| `List[T]` | 要素数分の並列 (上限なし) |
+| `Flow[T]` | **コンパイラ警告** (unbounded parallel on possibly-infinite source) |
 
-`list.find` は前方走査で短絡するため Flow で使える可能性があるが、見つからなかった場合に全要素を消費する。要検討。
+#### 原則 4: fan スコープの cancel が Flow を cancel する
+
+```almide
+fan(timeout: 30000) {
+  file.lines("huge.log")!
+    |> flow.filter(is_error)
+    |> fan.map(limit: 10, process)
+    |> flow.each(write_result)
+}
+// 30 秒で timeout → 全 worker cancel、file handle close、upstream Flow drop
+```
+
+**構造的キャンセル** が Flow にも波及する。Rust `thread::scope` + `Drop` で自然に実現。
+
+#### 原則 5: 順序保証
+
+`fan.map(flow, limit: n, f)` の出力順は **未定義** (worker 終了順)。入力順保証が必要な場合は `fan.ordered_map` (将来追加検討) か、`enumerate + sort` を手動で。Phase 2 はまず unordered で実装。
 
 ### Compiler Responsibilities
 
 | 判断 | コンパイラの挙動 |
 |---|---|
-| パイプライン融合 | `list.filter \|> list.map \|> fan.map` → 単一 Iterator chain + parallel consumer |
+| `fan.map` ディスパッチ | 入力が List なら batch、Flow なら streaming |
 | バックプレッシャー | `Flow[T]` + `fan.map(limit: n)` → bounded pipeline が自動成立 |
 | バックエンド選択 | Rust → threads/tokio、WASM → sequential/JSPI |
-| 並行度 | `limit:` あり → bounded、なし → 要素数分（List）/ コンパイラ警告（Flow） |
-
-### fan.map on Flow[T]
-
-`fan.map` は入力が `List[T]` ならバッチ並行、`Flow[T]` ならストリーミング並行。同じ構文。
-
-```almide
-// バッチ: 全部メモリに乗る
-fan.map([1, 2, 3, 4, 5], (n) => compute(n))
-
-// ストリーミング: pull 駆動、バックプレッシャーあり
-fan.map(file.lines(path), limit: 10, (line) => process(line))
-```
-
-`Flow[T]` に対する `fan.map` で `limit:` が省略された場合、コンパイラ警告を出す（unbounded parallel on infinite source）。
+| 並行度 | `limit:` あり → bounded、なし → 要素数分 (List) / 警告 (Flow) |
 
 ### Advanced: Progressive Disclosure
 
@@ -191,7 +181,7 @@ effect fn pipeline(items: List[String]) -> Unit = {
 }
 ```
 
-`fan.link(capacity)` は `(Sender[T], Flow[T])` を返す。`rx` は `Flow[T]` なので `list.len` 等は使えない（コンパイルエラー）。
+`fan.link(capacity)` は `(Sender[T], Flow[T])` を返す。`rx` は `Flow[T]` なので `list.len` 等は使えない (コンパイルエラー)。Flow 側の詳細は [`flow-design.md`](./flow-design.md) 参照。
 
 ### Scoped Cancellation
 
@@ -230,25 +220,18 @@ target がバックエンドを決める。Almide コードは同一。
 
 ### Phase 1: Flow[T] Type
 
-言語の型システムに `Flow[T]` を追加する。
+別 roadmap [`flow-design.md`](./flow-design.md) の Phase 1 で実装。`Flow[T]` 型、`flow.*` 12 関数 API、`file.lines` の runtime、forbidden ops のエラー、Rust codegen までを扱う。fan との interaction はこの段階では入れない (Flow 単体で完結)。
 
-- [ ] `Flow[T]` 型を checker に追加
-- [ ] `list` 操作の Flow 互換性を分類（前方走査 = OK、ランダムアクセス = エラー）
-- [ ] `file.lines(path)` → `Flow[String]` を返すように
-- [ ] `Flow[T]` に対する禁止操作のコンパイルエラーメッセージ
-- [ ] Rust codegen: `Flow[T]` → `Box<dyn Iterator<Item = T>>`
-- [ ] WASM codegen: eager fallback（即時 List として実行）
-- [ ] テスト: `spec/lang/flow_test.almd`
+### Phase 2: fan.map × Flow Integration
 
-### Phase 2: Pipeline Fusion
+`fan.map` を Flow 対応させる。これは fan 側の作業。
 
-`list` 操作 + `fan.map` のパイプラインをコンパイラが融合する。
-
-- [ ] `list.filter |> list.map |> fan.map` → 単一 Iterator chain + parallel consumer
-- [ ] `fan.map(flow, limit: n, f)` → bounded parallel streaming
-- [ ] `Flow[T]` に対する `fan.map` で `limit:` 省略時にコンパイラ警告
-- [ ] Rust codegen: `Iterator` chain + thread pool
-- [ ] テスト: 大量データのストリーミングパイプライン、バックプレッシャー検証
+- [ ] `fan.map(xs: Flow[T], limit: Int?, f)` → `Flow[U]` のディスパッチ
+- [ ] Rust codegen: `thread::scope` + channel で bounded parallel consumer
+- [ ] `limit:` 省略時の Flow 警告
+- [ ] 構造的 cancel: fan scope 抜けで Flow drop、file handle close
+- [ ] テスト: 大量データのストリーミングパイプライン、backpressure 検証
+- [ ] 前提: `flow-design.md` Phase 1 完了
 
 ### Phase 3: fan.rush + fan.spawn
 
@@ -294,12 +277,14 @@ target がバックエンドを決める。Almide コードは同一。
 
 ## Files to Modify
 
-### Phase 1-2 (Flow + Fusion)
-- `crates/almide-frontend/src/check/infer.rs` — `Flow[T]` 型推論、list 操作の互換性チェック
-- `crates/almide-ir/src/lib.rs` — Flow ソース IR 表現
-- `crates/almide-codegen/src/walker/expressions.rs` — Iterator chain codegen
-- `crates/almide-codegen/src/pass_fan_lowering.rs` — pipeline fusion pass
-- `runtime/rs/src/fan.rs` — bounded parallel consumer
+### Phase 1 (Flow[T])
+[`flow-design.md`](./flow-design.md) の Files to Modify 参照。
+
+### Phase 2 (fan × Flow)
+- `runtime/rs/src/fan.rs` — `fan_map_flow` bounded consumer
+- `crates/almide-codegen/src/pass_fan_lowering.rs` — Flow 対応
+- `stdlib/defs/fan.toml` — `fan.map` の Flow overload 定義
+- `spec/integration/flow_fan_test.almd` — ストリーミング × 並行のテスト
 
 ### Phase 3-4 (Fan modes + Channel + Cancel)
 - `crates/almide-frontend/src/check/infer.rs` — rush, spawn, link の型推論
@@ -318,16 +303,15 @@ target がバックエンドを決める。Almide コードは同一。
 
 ## Scope Boundary
 
-**やること:**
-- `Flow[T]` 型（list 操作の互換性をコンパイル時チェック）
-- パイプライン融合（list 操作 + fan.map の最適化）
-- fan の語彙拡張（rush, spawn, link）
-- 構造的キャンセル
+**やること (fan スコープ):**
+- `fan.map` の Flow 対応 (入力型で戻り型をディスパッチ)
+- fan の語彙拡張 (rush, spawn, link)
+- 構造的キャンセル (fan スコープ抜けで Flow も含めて drop)
 - Rust target の async 移行
 - WASM の JSPI / WASI 0.3 対応
 
 **やらないこと:**
-- ストリーム専用モジュール（`flow.*`）— list 操作が Flow にも効く
+- `Flow[T]` 型自体の設計 — [`flow-design.md`](./flow-design.md) で扱う
 - Actor モデル — effect fn + fan + 不変性で不要
 - ユーザー定義 effect
 - 分散並行、GPU 並列、トランザクショナルメモリ
