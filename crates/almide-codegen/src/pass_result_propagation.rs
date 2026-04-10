@@ -192,9 +192,11 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
     let span = expr.span;
     let kind = match expr.kind {
         IrExprKind::Call { target, args, type_args } => {
+            // The lifted map is keyed by bare function names, so module-qualified
+            // calls look up by the function name alone (not "module.func").
             let fn_name: Option<String> = match &target {
                 CallTarget::Named { name } => Some(name.to_string()),
-                CallTarget::Module { module, func } => Some(format!("{}.{}", module, func)),
+                CallTarget::Module { func, .. } => Some(func.to_string()),
                 CallTarget::Method { method, .. } => Some(method.to_string()),
                 _ => None,
             };
@@ -373,7 +375,7 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
         IrExprKind::Call { ref target, .. } => {
             let lifted_ty = match target {
                 CallTarget::Named { name } => lifted.get::<str>(name),
-                CallTarget::Module { module, func } => lifted.get(&format!("{}.{}", module, func)),
+                CallTarget::Module { func, .. } => lifted.get::<str>(func),
                 CallTarget::Method { method, .. } => lifted.get::<str>(method),
                 _ => None,
             };
@@ -449,7 +451,7 @@ fn insert_try_for_lifted_no_unwrap(expr: IrExpr, lifted: &HashMap<String, Ty>) -
         IrExprKind::Call { ref target, ref args, .. } => {
             let lifted_ty = match target {
                 CallTarget::Named { name } => lifted.get::<str>(name),
-                CallTarget::Module { module, func } => lifted.get(&format!("{}.{}", module, func)),
+                CallTarget::Module { func, .. } => lifted.get::<str>(func),
                 CallTarget::Method { method, .. } => lifted.get::<str>(method),
                 _ => None,
             };
