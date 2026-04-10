@@ -6,7 +6,7 @@
 
 ## Active
 
-6 items
+7 items
 
 | Item | Description |
 |------|-------------|
@@ -14,6 +14,7 @@
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with rush/spawn/link/cancel |
 | [Flow[T] — Lazy Streaming Sequences](active/flow-design.md) | Flow[T] lazy streaming sequences with flow.* namespace aligned with list.* verbs |
+| [Flow[T] — User Specification (Draft)](active/flow-spec-draft.md) | Draft user-facing spec for Flow[T] — to be promoted to docs/specs/flow.md after Phase 1 |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 
