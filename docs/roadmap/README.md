@@ -6,13 +6,14 @@
 
 ## Active
 
-5 items
+6 items
 
 | Item | Description |
 |------|-------------|
 | [Compiler Version Pin](active/compiler-version-pin.md) | minimum compiler version pinning in almide.toml (Cargo rust-version style) |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
-| [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with Flow[T] and compiler-driven optimization |
+| [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with rush/spawn/link/cancel |
+| [Flow[T] — Lazy Streaming Sequences](active/flow-design.md) | Flow[T] lazy streaming sequences with separate flow.* namespace aligned with list.* |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 
