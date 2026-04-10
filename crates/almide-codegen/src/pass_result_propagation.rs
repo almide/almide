@@ -122,10 +122,14 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
         },
         // Already Result — don't double-wrap
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => expr,
-        // Call to another lifted effect fn — already returns Result, don't wrap
+        // Call to another lifted effect fn — already returns Result, don't wrap.
+        // Both free-function (`Named`) and module-qualified (`Module`) forms are
+        // checked against the lifted set so cross-module effect fn calls don't
+        // get double-wrapped in ResultOk.
         IrExprKind::Call { ref target, .. } => {
             let callee_name = match target {
                 CallTarget::Named { name } => Some(name.to_string()),
+                CallTarget::Module { func, .. } => Some(func.to_string()),
                 _ => None,
             };
             if callee_name.as_ref().is_some_and(|n| lifted.contains_key(n)) {
