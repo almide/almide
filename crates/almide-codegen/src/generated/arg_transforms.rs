@@ -128,7 +128,7 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("fs", "temp_dir") => Some(StdlibCallInfo { args: &[], effect: false, pure_: true, name: "almide_rt_fs_temp_dir", required: 0 }),
             ("fs", "walk") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: true, pure_: false, name: "almide_rt_fs_walk", required: 1 }),
             ("fs", "write") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: true, pure_: false, name: "almide_rt_fs_write", required: 2 }),
-            ("fs", "write_bytes") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::BorrowRef], effect: true, pure_: false, name: "almide_rt_fs_write_bytes", required: 2 }),
+            ("fs", "write_bytes") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: true, pure_: false, name: "almide_rt_fs_write_bytes", required: 2 }),
             ("http", "body") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_http_get_body", required: 1 }),
             ("http", "delete") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: true, pure_: false, name: "almide_http_delete", required: 1 }),
             ("http", "get") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: true, pure_: false, name: "almide_http_get", required: 1 }),

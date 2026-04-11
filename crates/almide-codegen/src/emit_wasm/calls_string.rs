@@ -470,7 +470,21 @@ impl FuncCompiler<'_> {
         wasm!(self.func, { call(self.emitter.rt.concat_str); });
     }
 
-    /// String interpolation: convert each part to string, then concat.
+    /// String interpolation: build the concatenated result inline without any
+    /// fixed-size scratch region.
+    ///
+    /// Strategy:
+    ///   1. Evaluate each part and stash the resulting string pointer in a
+    ///      scratch i32 local (one local per part).
+    ///   2. Sum the part lengths into `total_len`.
+    ///   3. Allocate `[len:i32][data...]` on the heap in a single `alloc()`.
+    ///   4. `memory.copy` each part's data bytes into the result buffer.
+    ///
+    /// This replaces the old scheme that wrote into a 256 KB reserved region
+    /// via `__scratch_write_str` / `__scratch_finalize`. The inline version
+    /// has no static size cap, so pathological multi-part interpolations no
+    /// longer trap, and the module no longer reserves memory for a scratch
+    /// that goes unused when no interpolation runs.
     pub(super) fn emit_string_interp(&mut self, parts: &[IrStringPart]) {
         if parts.is_empty() {
             let empty = self.emitter.intern_string("");
@@ -478,21 +492,91 @@ impl FuncCompiler<'_> {
             return;
         }
 
-        // Single part: no scratch buffer needed
+        // Single part: the value IS the result. Skip the whole dance.
         if parts.len() == 1 {
             self.emit_string_part(&parts[0]);
             return;
         }
 
-        // Multi-part: use memory 1 scratch buffer.
-        // Each part → string ptr → scratch_write_str (copies bytes to mem1).
-        // After all parts: scratch_finalize → alloc on mem0 heap + copy from mem1.
-        // Result: zero intermediate heap allocations.
+        // Stage 1: stash each part's pointer in a scratch local.
+        let mut part_locals: Vec<u32> = Vec::with_capacity(parts.len());
         for part in parts {
             self.emit_string_part(part);
-            wasm!(self.func, { call(self.emitter.rt.scratch_write_str); });
+            let local = self.scratch.alloc_i32();
+            wasm!(self.func, { local_set(local); });
+            part_locals.push(local);
         }
-        wasm!(self.func, { call(self.emitter.rt.scratch_finalize); });
+
+        // Stage 2: total_len = sum(load(part) for each part).
+        // String header layout: mem0[ptr + 0] = byte length.
+        let total_len_local = self.scratch.alloc_i32();
+        wasm!(self.func, { i32_const(0); local_set(total_len_local); });
+        for &p in &part_locals {
+            wasm!(self.func, {
+                local_get(total_len_local);
+                local_get(p);
+                i32_load(0);
+                i32_add;
+                local_set(total_len_local);
+            });
+        }
+
+        // Stage 3: alloc result = [len:i32][data...] with one heap bump.
+        let result_local = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            local_get(total_len_local);
+            i32_const(4);
+            i32_add;
+        });
+        let alloc_fn = self.emitter.rt.alloc;
+        wasm!(self.func, {
+            call(alloc_fn);
+            local_set(result_local);
+        });
+        // Write length prefix.
+        wasm!(self.func, {
+            local_get(result_local);
+            local_get(total_len_local);
+            i32_store(0);
+        });
+
+        // Stage 4: memory.copy each part's data bytes into the result buffer.
+        // dst starts at result + 4 and advances by each part's length.
+        let dst_local = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            local_get(result_local);
+            i32_const(4);
+            i32_add;
+            local_set(dst_local);
+        });
+        for &p in &part_locals {
+            wasm!(self.func, {
+                // memory.copy(dst, src=part+4, len=mem0[part])
+                local_get(dst_local);
+                local_get(p);
+                i32_const(4);
+                i32_add;
+                local_get(p);
+                i32_load(0);
+                memory_copy(0, 0);
+                // dst += part length
+                local_get(dst_local);
+                local_get(p);
+                i32_load(0);
+                i32_add;
+                local_set(dst_local);
+            });
+        }
+
+        // Leave the result pointer on the stack as the interp value, then
+        // release the scratch locals.
+        wasm!(self.func, { local_get(result_local); });
+        for p in part_locals {
+            self.scratch.free_i32(p);
+        }
+        self.scratch.free_i32(total_len_local);
+        self.scratch.free_i32(dst_local);
+        self.scratch.free_i32(result_local);
     }
 
     /// Emit a single string interpolation part as a string (i32 pointer).

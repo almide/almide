@@ -34,6 +34,11 @@ pub struct TypeEnv {
     /// Single source of truth for import resolution (aliases, accessible modules, stdlib, usage tracking).
     pub import_table: ImportTable,
 
+    /// Visibility of user-defined functions keyed by fn key ("module.func" or bare "func").
+    /// Absent entries default to `Public` (stdlib, derive-generated, builtins).
+    /// Checked in `resolve_module_call` to reject cross-module access to `mod fn` / `local fn`.
+    pub fn_visibility: std::collections::HashMap<Sym, almide_lang::ast::Visibility>,
+
     /// Track used variables (for unused variable warnings)
     pub used_vars: std::collections::HashSet<Sym>,
     /// Symbols that are local (file-private) in their module: "module.func" -> true
@@ -86,6 +91,7 @@ impl TypeEnv {
             user_modules: std::collections::HashSet::new(),
             self_module_name: None,
             import_table: ImportTable::new(),
+            fn_visibility: std::collections::HashMap::new(),
 
             used_vars: std::collections::HashSet::new(),
             local_symbols: std::collections::HashSet::new(),

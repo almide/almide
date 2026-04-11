@@ -31,7 +31,7 @@ example = 'fs.write_bytes("out.bin", [0, 1, 2])'
 params = [{ name = "path", type = "String" }, { name = "bytes", type = "List[Int]" }]
 return = "Result[Unit, String]"
 effect = true
-rust = "almide_rt_fs_write_bytes(&*{path}, &{bytes})?"
+rust = "almide_rt_fs_write_bytes(&*{path}, {bytes})?"
 ts = "__almd_fs.write_bytes({path}, {bytes})"
 
 [append]

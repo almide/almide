@@ -116,10 +116,6 @@ pub struct RuntimeFuncs {
     pub int_to_string: u32,
     pub println_int: u32,
     pub concat_str: u32,
-    /// Write string bytes to memory 1 scratch buffer, advance scratch_ptr.
-    pub scratch_write_str: u32,
-    /// Finalize scratch buffer: alloc on memory 0 heap, copy from memory 1, reset scratch_ptr.
-    pub scratch_finalize: u32,
     pub concat_list: u32,
     pub list_eq: u32,
     pub mem_eq: u32,
@@ -207,8 +203,6 @@ pub struct WasmEmitter {
 
     // Globals
     pub heap_ptr_global: u32,
-    /// Memory 1 scratch pointer (string builder). Reset to 0 after each string op.
-    pub scratch_ptr_global: u32,
     /// Preopened dir table pointer (heap-allocated array of [fd:i32, path_ptr:i32, path_len:i32] entries)
     pub preopen_table_global: u32,
     /// Number of preopened directories discovered
@@ -284,7 +278,7 @@ impl WasmEmitter {
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
                 math_sin: 0, math_cos: 0, math_tan: 0,
                 math_log: 0, math_log10: 0, math_log2: 0, math_exp: 0,
-                concat_str: 0, scratch_write_str: 0, scratch_finalize: 0,
+                concat_str: 0,
                 concat_list: 0,
                 list_eq: 0, mem_eq: 0, list_list_str_cmp: 0,
                 option_eq_i64: 0, option_eq_str: 0,
@@ -332,12 +326,11 @@ impl WasmEmitter {
                 init_preopen_dirs: 0,
             },
             heap_ptr_global: 0,
-            scratch_ptr_global: 1,
-            preopen_table_global: 2,
-            preopen_count_global: 3,
+            preopen_table_global: 1,
+            preopen_count_global: 2,
             top_let_globals: HashMap::new(),
             top_let_init: Vec::new(),
-            next_global: 4, // 0 = heap_ptr, 1 = scratch_ptr, 2 = preopen_table, 3 = preopen_count
+            next_global: 3, // 0 = heap_ptr, 1 = preopen_table, 2 = preopen_count
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
             record_fields: HashMap::new(),
@@ -976,11 +969,11 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Phase 3: Assemble (DCE already ran in Phase 2.5: {} functions eliminated)
     let _ = dce_count;
-    assemble(&emitter)
+    assemble(&mut emitter)
 }
 
 /// Assemble all sections into a final WASM binary.
-fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
+fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     let mut module = Module::new();
 
     // ── Type section ──
@@ -1021,19 +1014,15 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
         module.section(&tables);
     }
 
-    // ── Memory section (multi-memory: WASM 3.0) ──
+    // ── Memory section ──
+    // Single memory layout (iOS-Safari compatible):
+    //   [data segment][heap ...]
+    // The heap grows upward via `__alloc`. There is no reserved scratch
+    // region — string interpolation builds results inline directly on the
+    // heap (see `calls_string::emit_string_interp`).
     let mut memory = MemorySection::new();
-    // Memory 0: main memory (scratch + data segment + heap)
     memory.memory(MemoryType {
-        minimum: 64, // 4MB
-        maximum: None,
-        memory64: false,
-        shared: false,
-        page_size_log2: None,
-    });
-    // Memory 1: string builder scratch (temporary buffer for string operations)
-    memory.memory(MemoryType {
-        minimum: 1, // 64KB — grows on demand
+        minimum: 64, // 4MB initial
         maximum: None,
         memory64: false,
         shared: false,
@@ -1043,8 +1032,9 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
 
     // ── Global section ──
     let mut globals = GlobalSection::new();
-    let heap_start = NEWLINE_OFFSET + emitter.data_bytes.len() as u32;
-    let heap_start_aligned = (heap_start + 7) & !7;
+    // Data layout: [data bytes][8-byte alignment][heap...]
+    let data_end = NEWLINE_OFFSET + emitter.data_bytes.len() as u32;
+    let heap_start_aligned = (data_end + 7) & !7;
     // Global 0: heap pointer (memory 0)
     globals.global(
         GlobalType {
@@ -1054,7 +1044,7 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
         },
         &wasm_encoder::ConstExpr::i32_const(heap_start_aligned as i32),
     );
-    // Global 1: scratch pointer (memory 1) — string builder scratch
+    // Global 1: preopen table pointer (set by __init_preopen_dirs at startup)
     globals.global(
         GlobalType {
             val_type: ValType::I32,
@@ -1063,16 +1053,7 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
         },
         &wasm_encoder::ConstExpr::i32_const(0),
     );
-    // Global 2: preopen table pointer (set by __init_preopen_dirs at startup)
-    globals.global(
-        GlobalType {
-            val_type: ValType::I32,
-            mutable: true,
-            shared: false,
-        },
-        &wasm_encoder::ConstExpr::i32_const(0),
-    );
-    // Global 3: preopen count (set by __init_preopen_dirs at startup)
+    // Global 2: preopen count (set by __init_preopen_dirs at startup)
     globals.global(
         GlobalType {
             val_type: ValType::I32,

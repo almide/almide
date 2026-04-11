@@ -9,7 +9,7 @@ import effectlib
 
 effect fn main(_args: List[String]) -> Result[Unit, String] = {
   // effect fn callable from effect context
-  let config = effectlib.read_config()
+  let config = effectlib.read_config()!
   assert_eq(config, "config_value")
 
   // pure fn also callable

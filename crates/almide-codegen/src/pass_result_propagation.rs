@@ -40,14 +40,40 @@ impl NanoPass for ResultPropagationPass {
                 lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
             }
         }
+        // Track `almide_rt_<mod>_<func>` mangled names in addition to bare names.
+        //
+        // StdlibLoweringPass (Rust target only) rewrites intra-module
+        // `CallTarget::Named { name: "do_nothing" }` into
+        // `CallTarget::Named { name: "almide_rt_effectlib_do_nothing" }` to match
+        // the walker's renamed function definitions. StdlibLowering runs BEFORE
+        // ResultPropagation in the Rust pipeline, so by the time wrap_tail_in_ok
+        // / update_call_types / insert_try_for_lifted inspect call targets, the
+        // names are already mangled. We register the mangled form here too so
+        // lookups succeed and intra-module effect fn tail calls don't get
+        // double-wrapped in ResultOk.
+        //
+        // The WASM pipeline doesn't run StdlibLowering, so call targets stay
+        // bare there — the extra mangled entries are harmless no-ops.
         for module in &mut program.modules {
+            let mod_name = module
+                .versioned_name
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| module.name.to_string());
+            let mod_ident = mod_name.replace('.', "_");
             for func in &mut module.functions {
                 if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
                     && func.extern_attrs.is_empty()
                 {
                     let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                     func.ret_ty = Ty::result(orig, Ty::String);
-                    lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
+                    let bare = func.name.to_string();
+                    lifted_fns.insert(bare.clone(), func.ret_ty.clone());
+                    let sanitized = bare
+                        .replace(' ', "_")
+                        .replace('-', "_")
+                        .replace('.', "_");
+                    let mangled = format!("almide_rt_{}_{}", mod_ident, sanitized);
+                    lifted_fns.insert(mangled, func.ret_ty.clone());
                 }
             }
         }
