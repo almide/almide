@@ -7,7 +7,7 @@ codopsy-report.json
 .codopsy-baseline.json
 .codopsyrc.json
 .claude/settings.local.json
-.almide/cache/
+**/.almide/cache/
 tools/stdlib-crawler/data/
 __pycache__/
 *.pyc
