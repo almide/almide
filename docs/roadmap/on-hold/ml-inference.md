@@ -1,44 +1,46 @@
 <!-- description: Tiny ML inference runtime using compile-time model specialization -->
 # Tiny ML Inference Runtime
 
-**Status:** on-hold / draft memo
 **Priority:** after graphics stack reaches v1.0
-**Prerequisites:** wasm-simd128 intrinsics in Almide codegen, stable `bytes` API, DCE measurement across package boundaries
+**Prerequisites:** `wasm-simd128` intrinsics in Almide codegen, stable `bytes` API, DCE measurement across package boundaries
+**Principle:** Don't write an interpreter for ML graphs. Compile the graph. One model in, one tiny WASM binary out — containing only the operators that model actually needs.
+**Differentiator:** Every other browser-side inference runtime (ORT Web, transformers.js, WebLLM, llama.cpp-wasm, candle) ships a *general-purpose* graph executor. Almide compiles the model directly into specialized code, giving a binary size nobody else in the space can match.
 
-このドキュメントは「Almide で ONNX Runtime 相当を作るはどうだ」という問いに対する戦略メモ。結論は **「literal な ORT クローンは避ける、ただし Shape D (compile-time model specialization) として進めれば Almide 独自のニッチがある」**。今すぐ着手すべきではないが、graphics stack が安定したあとの第2の柱候補として保存しておく。
+> "1 model = 1 WASM. 30–80 KB per model, not 7–12 MB for a runtime that runs any model."
 
 ---
 
-## 1. 取り得る 4 つの形
+## Thesis
 
-### Shape A — 完全な ORT クローン (却下)
+ONNX Runtime is the wrong model to clone. It is a general-purpose graph interpreter with ~300 operators, multiple execution providers, and an irreducible 7–12 MB footprint on the browser. Almide cannot out-engineer Microsoft on that axis and shouldn't try.
 
-- ONNX 300+ ops、全 Execution Provider、graph optimizer、quantization suite をフルに実装
-- **見積もり:** 5〜7 年の engineering
-- Almide の tiny/focus 哲学と真逆、ORT に勝てる軸がない
-- **判定:** **やめろ**
+The interesting move is orthogonal: treat a model file as a *source file* and run it through the Almide compiler instead of through a runtime interpreter. Operators used by the model become inlined Almide functions. Weights become static data or externally-loaded `Bytes`. Unused operators never enter the binary at all. The result is an executable specialized to exactly one model, measured in tens of kilobytes rather than megabytes.
 
-### Shape B — Tiny LLM inference runtime (GGML-like)
+This roadmap item describes the staged path there, starting from a simple embedding runner and graduating to LLM inference and full model-as-code compilation.
 
-- Transformer 推論に限定
-- 必要 op は 15〜20 程度: `matmul, softmax, layernorm, rmsnorm, rotary, attention, gelu, silu, add, concat, reshape, embed_lookup`
-- Model format: **GGUF / Safetensors** (ONNX protobuf は避ける)
-- Backend: CPU SIMD + WebGPU compute shader
-- **目標サイズ:** < 500 KB WASM (llama.cpp.wasm の ~1/5)
-- **判定:** Almide 哲学と一致、でかい勝負ができる
+---
 
-### Shape C — 狭く深く、embedding model runner だけ
+## Shape Space
 
-- sentence-transformers / 画像 embedding / 画像分類限定
-- 自己回帰ループ無し、KV cache 無し、quantize は int8 程度
-- 対応モデル: `all-MiniLM-L6-v2` (22M), CLIP, MobileNet
-- **目標サイズ:** < 150 KB WASM
-- 用途: semantic search, RAG, on-device similarity
-- **判定:** 最も安全な第一歩、需要が明確
+Four possible shapes for this work. Only two are viable.
 
-### Shape D — Compile-time model specialization (本命)
+### Rejected: Full ORT clone
 
-Almide の AOT 性をそのまま ML inference に持ち込む。ORT が graph **interpreter** なのに対し、Almide は graph **compiler** になる。
+A complete ONNX Runtime clone — 300+ operators, graph optimizer, quantization suite, multiple execution providers — is 5–7 years of engineering that ends in a product that loses to Microsoft on every axis. It also directly contradicts the Almide philosophy of small, focused packages.
+
+### Rejected for now: Compile-time model specialization only (Shape D below)
+
+The final form. Powerful, but requires the previous shapes as scaffolding.
+
+### Viable, first target: Embedding model runner (Shape C)
+
+Narrow and deep. Loads an embedding model (sentence-transformers, CLIP, MobileNet) and runs forward inference. No autoregressive loop, no KV cache, no quantization beyond int8. Op set is small — `matmul`, `add`, `layernorm`, `gelu`, `softmax`, `mean_pool` — so the runtime stays tiny. Target: `almide/embed`, ≤ 150 KB WASM runtime plus externally-loaded weights. This proves the architecture with minimum risk.
+
+### Viable, second target: Tiny LLM inference (Shape B)
+
+Transformer inference, 15–20 operators covering matmul, attention, rotary embeddings, RMSNorm, KV cache, and int4/int8 quantization. Model format: GGUF or safetensors (never ONNX protobuf). Backend: CPU SIMD and WebGPU compute shaders. Target: `almide/llm`, ≤ 500 KB WASM to run TinyLlama-class models. This is where Almide's size advantage becomes visible to end users.
+
+### Final target: Compile-time model specialization (Shape D)
 
 ```
 ONNX / GGUF model
@@ -48,176 +50,144 @@ Almide model importer (written in Almide)
     │
     ▼
 Generated Almide source
-  ├─ used ops のみ inline
-  ├─ weights を data segment or 外部 bytes として埋め込み
-  ├─ control flow (autoregressive loop, attention) もコードで展開
+  ├─ used operators inlined as functions
+  ├─ weights as static data or external Bytes
+  ├─ control flow (autoregressive loop, attention) expanded as code
     │
     ▼
 Almide compiler (DCE, mono, inline, SIMD emit)
     │
     ▼
-tiny WASM (1 model = 1 binary, 使わない op は 1 byte も入らない)
+tiny WASM (one model, one binary, 30–80 KB)
 ```
 
-- 類似思想: MLC / TVM (Python で書かれた compiler stack)
-- 違い: Almide は言語から一貫。ユーザーが model-as-code を Almide で書き換え可能 (LLM authoring と完全一致)
-- **目標サイズ:** 30〜80 KB per model
-- **判定:** 唯一無二のニッチ、Almide の 5 軸がフルに乗る
+MLC / TVM do something similar at the compiler-stack level but depend on TVM's C++ infrastructure and target specific hardware. Almide does it at the *language* level, in one continuous toolchain. Target: `almide/ml-compile`.
 
 ---
 
-## 2. 競合マップ
+## Competitive Landscape
 
-| 選手 | サイズ | 特徴 | Shape D との差 |
+| Runtime | Size | Shape | Gap to Almide Shape D |
 |---|---|---|---|
-| ORT Web | 7〜12 MB | 汎用 interpreter、多 EP | interpreter、巨大 |
-| transformers.js | (ORT Web を呼ぶ) | HF モデル JS runner | ORT 依存 |
-| WebLLM / MLC | 数 MB〜 | TVM コンパイル、WebGPU 特化 | TVM 依存 |
-| llama.cpp WASM | ~2〜3 MB | C、GGML 派生、int4 quant 強い | C 手書き、model hardcoded |
-| candle (Rust) | ~5 MB | HuggingFace 公式、clean API | Rust runtime + std |
-| TensorFlow.js | ~2 MB | 汎用、老舗 | graph interpreter |
-| **Almide Shape D** | **30〜500 KB** | **Almide code gen、モデル単位で compile** | **1 model = 1 WASM** |
+| ORT Web | 7–12 MB | General-purpose interpreter, multi-EP | Interpreter, enormous |
+| transformers.js | ORT Web backend | HuggingFace JS wrapper | Inherits ORT's size |
+| WebLLM / MLC | Several MB | TVM-compiled, WebGPU-focused | Depends on TVM toolchain |
+| llama.cpp WASM | ~2–3 MB | Hand-written C, GGML, strong int4 quant | C-authored, not model-specific |
+| candle (Rust) | ~5 MB | Clean API, HuggingFace | Rust runtime + std |
+| TensorFlow.js | ~2 MB | General-purpose, legacy | Graph interpreter |
+| **Almide Shape D** | **30–500 KB** | **Per-model compile, DCE-stripped** | **1 model = 1 WASM** |
 
-**空白地帯:** 「モデル 1 個あたり 50 KB 以下で browser で動く inference」— ここは誰もいない。
-
----
-
-## 3. 技術前提 (prerequisites)
-
-どれも未達なら Phase 0 research が必要。
-
-### 前提 1: Almide に wasm-simd128 intrinsics
-
-matmul / convolution / dot product の速度は SIMD ありきで決まる。
-
-- 現状: `crates/almide-codegen/src/emit_wasm/` は scalar のみ
-- 必要: `v128` 型と 16-lane f32 / i32 / i8 の intrinsic を Almide 言語レベルで露出
-- 影響: compiler 側の工事 (op code emit + stdlib binding)
-- **優先度:** 最高。これなしでは Shape B/C/D どれもスタートできない
-
-### 前提 2: 巨大な静的データの扱い
-
-モデル weights = 数 MB 〜 数百 MB。WASM data segment に全部入れるのは非現実的。
-
-- 現実解: 別 file で bytes として runtime load、Almide 側で view として扱う
-- 既存: `bytes.data_ptr` + `bytes.set_f32_le` / `get_f32_le` のパターン (obsid が既に使っている zero-copy)
-- 追加必要かもしれないもの: `bytes.load_file(path)` (host に延長)、mmap 相当 API
-
-### 前提 3: Quantization 対応
-
-現代 tiny model は int8 / int4 / q4_0 / q8_0 の block-wise quantization layout を使う。
-
-- 必要: Almide に int8 / uint8 tensor の効率的な扱い、dequantize kernel
-- SIMD ありき (前提 1 に依存)
+The empty quadrant — "one model per binary, under 100 KB, browser-runnable" — is uncontested.
 
 ---
 
-## 4. 段階的ロードマップ
+## Technical Prerequisites
 
-### Phase 0 — Research PoC (1〜2 ヶ月)
+None of the phases start until these exist.
 
-- Almide で scalar matmul 実装、C WASM matmul と比較
-  - 2〜3x 遅い程度なら SIMD 追加で埋まる範囲
-  - 10x 以上なら compiler 側に別問題あり
-- wasm-simd128 intrinsic を Almide compiler に追加
-- MobileNet の 1 層を Almide で再現して走らせる (end-to-end feasibility check)
+### 1. `wasm-simd128` intrinsics
 
-### Phase 1 — `almide/embed` (3〜4 ヶ月)
+Matrix multiplication dominates the runtime cost of any inference engine. Scalar matmul is 4–10× slower than SIMD matmul and cannot be covered by compiler tricks alone. Almide's codegen currently emits only scalar operations; `crates/almide-codegen/src/emit_wasm/` needs a v128 type and the 16-lane f32 / i32 / i8 intrinsics surfaced to the language.
 
-- Safetensors loader
-- Op: `matmul, add, layernorm, gelu, softmax, mean_pool`
-- `all-MiniLM-L6-v2` を完走
-- **目標:** < 150 KB WASM runtime + 22 MB external weights
+**Priority:** highest. Nothing below can start without this.
 
-### Phase 2 — `almide/llm` (6〜9 ヶ月)
+### 2. Large static data handling
 
-- Rotary, KV cache, autoregressive loop, GQA attention
-- int8 / int4 quantization
-- TinyLlama-1.1B / Qwen2.5-0.5B 等を完走
-- **目標:** < 500 KB WASM + quantized weights
+A small transformer has tens to hundreds of megabytes of weights. Embedding them all in WASM data segments is non-viable. The realistic pattern is:
 
-### Phase 3 — `almide/ml-compile` (12 ヶ月〜)
+- Weights live in a separate file, loaded at runtime into a `Bytes` buffer.
+- Almide treats the buffer as a view, indexing directly via `bytes.data_ptr` + `get_f32_le` without copying.
+- The host provides either a `bytes.load_file(path)` extension or mmap-equivalent access.
 
-- ONNX / Safetensors → Almide source generator
-- 使用 op の DCE、model-specific optimization pass
-- **目標:** 1 model = 30〜80 KB
+The mechanism already exists for obsid (zero-copy vertex buffers). Extending it to multi-megabyte weight files is a small addition.
+
+### 3. Quantization support
+
+int8 / int4 / q4_0 / q8_0 block-wise layouts dominate modern tiny-model quantization. Almide needs efficient representation for these layouts (likely via typed `Bytes` views) and dequantize kernels. Both depend on SIMD.
 
 ---
 
-## 5. スコープアウト (やらないことを最初に決める)
+## Phases
 
-- **Training** — inference のみ。training は PyTorch に任せる
-- **ONNX op 完全 coverage** — Transformer に必要な ~20 op で止める。CNN/RNN は second priority
-- **CUDA / Metal 独自 backend** — browser WebGPU + CPU SIMD からスタート。native GPU backend は後
-- **Autotuning** — TVM の領域。手動チューニングで十分
-- **Dynamic shape** — 固定 batch / seq_len から始める。dynamic は後
+### Phase 0 — Research and PoC (1–2 months)
+
+- Implement scalar matmul in Almide, benchmark against hand-written C WASM.
+- Target: within 2–3× of C. If Almide is 10× slower, investigate compiler bottlenecks.
+- Add `wasm-simd128` intrinsics to the Almide compiler.
+- Run one layer of MobileNet end-to-end as a smoke test.
+
+### Phase 1 — `almide/embed` (3–4 months)
+
+- Safetensors loader written in Almide.
+- Operators: `matmul`, `add`, `layernorm`, `gelu`, `softmax`, `mean_pool`.
+- Run `sentence-transformers/all-MiniLM-L6-v2` (22 M parameters) end-to-end.
+- Target: < 150 KB WASM runtime, weights loaded from external file.
+- First shipped release: `almide/embed` v0.1.0.
+
+### Phase 2 — `almide/llm` (6–9 months)
+
+- Rotary embeddings, KV cache, autoregressive decode loop, grouped-query attention.
+- int8 and int4 quantization kernels.
+- Run `TinyLlama-1.1B` or `Qwen2.5-0.5B` end-to-end.
+- Target: < 500 KB WASM runtime plus quantized weights.
+
+### Phase 3 — `almide/ml-compile` (12+ months)
+
+- Model importer (Safetensors or ONNX subset) written in Almide.
+- Generates Almide source representing the forward pass.
+- Uses existing Almide DCE, monomorphization, and inlining to strip unused operators.
+- Target: 30–80 KB per compiled model.
 
 ---
 
-## 6. Almide ML の差別化軸 (graphics stack と同じ 5 軸)
+## Scope Out
 
-| 軸 | Almide ML の強み |
+- **Training.** Inference only. Training stays in PyTorch.
+- **Full ONNX operator coverage.** 20 operators suffice for modern transformers. CNN / RNN support is second priority.
+- **Native CUDA / Metal backends.** WebGPU and CPU SIMD first. Native GPU backends later if demand appears.
+- **Autotuning.** TVM's problem space. Manual tuning is sufficient for the target workloads.
+- **Dynamic shape inference.** Start with fixed batch and sequence length.
+
+---
+
+## Differentiator Axes
+
+Same five axes as the graphics stack and `porta-embedded`.
+
+| Axis | Standing |
 |---|---|
-| Binary size | Shape D なら 1/10〜1/100 — 破壊的 |
-| LLM authoring | 新規 op / モデル変種を LLM に書かせやすい (C++ より Almide) |
-| Zero-copy | linear memory 直書き、tensor → FFI 変換無し |
-| Cross-host | `@extern(wasm, "ml", ...)` で browser / native / headless 同契約 |
-| Compile-time specialization | 他の runtime は MLC/TVM のみ、Almide は言語から一貫 |
-
-**graphics stack と完全に同じ 5 軸で勝負できる。** Almide の核心思想が graphics と ML 両方に延びる、という意味でこの方向は示唆深い。
+| Binary size | 10–100× smaller than competing runtimes at the equivalent workload. |
+| LLM authoring | Writing a new operator or variant model in Almide is far easier than in C++. |
+| Zero-copy | Weights and activations live in linear memory, no FFI serialization. |
+| Cross-host | `@extern(wasm, "ml", ...)` keeps the host contract pluggable across browser, native, headless. |
+| Compile-time specialization | Shape D is structurally unique — MLC / TVM do it but only at the compiler-stack level, not the language level. |
 
 ---
 
-## 7. 戦略上の順序
+## Relationship to `porta-embedded`
 
-1. **現在:** Almide compiler + graphics stack (obsid, canvas2d, etc.) を v1.0 付近まで固める
-2. **次:** compiler に wasm-simd128 intrinsic を追加 (compiler roadmap へ)
-3. **次の次:** `almide/embed` で試作。最小リスクで Almide ML inference の可能性を証明
-4. **成功したら:** `almide/llm` → `almide/ml-compile` へ発展
+Both tracks depend on the same underlying investment: Almide guests that run under a thin WASI host. `porta-embedded` puts the Almide guest in charge of network policy and business rules; ML inference puts it in charge of tensor execution. They can share:
 
-**避けるべき誤り:**
+- WASI Preview 2 bindings in Almide stdlib.
+- `wasm-simd128` intrinsics.
+- Size-optimized WASM emit passes.
+- Host runtime choice (WAMR / wasm3).
 
-- 「ORT クローンやる」と言って Shape A に突っ込むこと (全敗する)
-- graphics stack と ML を同時進行で中途半端にすること
-- SIMD 無しで matmul を書いて遅さに絶望すること
+If both succeed, the unified Almide story becomes: *"One tiny WASI guest, same across desktop, browser, and MCU — whether it's running an MQTT agent, a 3D scene, or a transformer forward pass."*
 
 ---
 
-## 8. Graphics stack との関係
+## Resume Conditions
 
-同じ `@extern(wasm, ...)` 抽象契約の上に graphics と ML を乗せる、という意味で思想的には 1 本の柱。
+Move this item to `active/` when all of:
 
-```
-Application (Almide)
-  │
-  ├─ graphics layer: obsid / canvas2d / chart / graph / ui
-  │     └─ gfx (mesh, texture, shader, FBO)
-  │
-  ├─ ml layer: embed / llm / ml-compile
-  │     └─ tensor (bytes view, SIMD kernel, quantize)
-  │
-  └─ shared: bytes, math, wasm-webgl
-        │
-        ▼
-   host via @extern(wasm, ...)
-   (browser | native | headless)
-```
-
-graphics stack strategy doc (obsid repo の `docs/strategy.md`) で論じている C2 (abstract host interface) と同じ設計原則を ML 側にも適用する。**cross-host moat は graphics と ML の両方で効く**ので、strategic bet として補強し合う関係になる。
+1. At least one graphics stack package has frozen to v1.0 (signal that the compiler is stable enough).
+2. `wasm-simd128` intrinsics have landed in Almide codegen.
+3. Phase 0 prototype matmul benchmarks are within 2–3× of C.
 
 ---
 
-## 9. 保留理由 (なぜ今ではないか)
+## Related Roadmap
 
-- graphics stack の 論点 D1〜D7 (obsid strategy doc 参照) がまだ詰まっていない
-- Almide compiler が SIMD をまだ emit できない
-- Almide 本体の stdlib / package system / v1.0 凍結ポリシーが未確定
-- ML inference は 6〜12 ヶ月フル commit が必要な領域、graphics と並列では不可能
-
-**再開条件:**
-
-1. graphics stack で少なくとも 1 パッケージが v1.0 凍結される
-2. wasm-simd128 intrinsic が Almide compiler に landing
-3. Phase 0 PoC に着手できる時間的余裕がある
-
-これらが揃ったら `active/` へ移動。
+- **`on-hold/porta-embedded.md`** — shares the WASI guest + tiny host architecture.
+- **`obsid/docs/strategy.md`** (external repo) — shares the cross-host design principle in its §C2.
