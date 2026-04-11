@@ -20,7 +20,7 @@
 
 ## On Hold
 
-25 items
+26 items
 
 | Item | Description |
 |------|-------------|
@@ -38,6 +38,7 @@
 | [Tiny ML Inference Runtime](on-hold/ml-inference.md) | Tiny ML inference runtime using compile-time model specialization |
 | [Package Registry](on-hold/package-registry.md) | Lock file, semver resolution, and central package registry |
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
+| [Porta Embedded — Sub-10KB Almide IoT Agents on WASI Hosts](on-hold/porta-embedded.md) | Porta-style WASI agent runtime for IoT: <10KB Almide guests on tiny hosts |
 | [Rainbow Bridge — Wrap External Code as Almide Packages](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
 | [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy |
