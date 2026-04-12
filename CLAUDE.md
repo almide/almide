@@ -245,6 +245,13 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 - **`+`**: Concatenation for strings and lists (overloaded with addition)
 - **Diagnostics**: Every error includes file:line, context, and actionable hint
 
+## Repo Boundary: almide vs almide-dojo
+
+- **This repo** = compiler correctness. `spec/` tests, `cargo test`, grammar-lab experiments, lang-bench.
+- **[almide/almide-dojo](https://github.com/almide/almide-dojo)** = LLM writability. Daily MSR measurement, task bank, malicious-hint detection, diagnostics feedback loop.
+- New MSR work goes to Dojo. `research/benchmark/msr/` and `research/benchmark/framework/` are archived.
+- The bridge: Dojo's PR gate will run a task subset as part of this repo's CI (future).
+
 ## Documentation
 
 - 言語仕様: `docs/specs/` — ルールは [docs/specs/CLAUDE.md](./docs/specs/CLAUDE.md)
