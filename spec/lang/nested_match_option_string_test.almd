@@ -1,0 +1,33 @@
+// Regression test: matching Option[String] with string literal inside a fold callback.
+//
+// Previously, MatchSubjectPass only inserted .as_deref() for top-level Option[String]
+// matches. Inside a lambda (e.g. list.fold callback), the inner type could be
+// TypeVar or Unknown, so the pass didn't trigger, causing Rust String vs &str mismatch.
+
+fn is_balanced(s: String) -> Bool =
+  match list.fold(string.chars(s), some([]), (acc, c) =>
+    match acc {
+      none => none,
+      some(stack) =>
+        match c {
+          "(" => some(stack + ["("]),
+          ")" => match list.last(stack) {
+            some("(") => some(list.drop_end(stack, 1)),
+            _ => none,
+          },
+          _ => some(stack),
+        },
+    }
+  ) {
+    some(stack) => list.is_empty(stack),
+    none => false,
+  }
+
+test "balanced empty" { assert_eq(is_balanced(""), true) }
+test "balanced simple" { assert_eq(is_balanced("()"), true) }
+test "balanced nested" { assert_eq(is_balanced("(())"), true) }
+test "balanced sequential" { assert_eq(is_balanced("()()"), true) }
+test "unbalanced open" { assert_eq(is_balanced("("), false) }
+test "unbalanced close" { assert_eq(is_balanced(")"), false) }
+test "unbalanced cross" { assert_eq(is_balanced(")("), false) }
+test "with non-parens" { assert_eq(is_balanced("a(b)c"), true) }

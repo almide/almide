@@ -349,8 +349,10 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         }
     }
 
-    // Type declarations
+    // Type declarations — track emitted names to deduplicate across modules
+    let mut emitted_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     for td in &program.type_decls {
+        emitted_types.insert(td.name.as_str().to_string());
         let mut rendered = render_type_decl(&ctx, td);
         if let Some(ref doc) = td.doc {
             let doc_lines: String = doc.lines()
@@ -422,6 +424,12 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         // Bundled .almd modules use minimal generic bounds (Clone only)
         // because their functions don't require PartialEq/PartialOrd/Debug.
         let is_bundled = almide_lang::stdlib_info::is_bundled_module(&module.name);
+        let mut mod_ann = ctx.ann.clone();
+        // Each module has its own VarTable, so VarIds from the parent's
+        // lazy_vars would collide with module-local variables (parameters,
+        // match bindings) that share the same numeric id.
+        // Clear inherited lazy_vars; module-specific ones are added below.
+        mod_ann.lazy_vars.clear();
         let mut mod_ctx = RenderContext {
             templates: ctx.templates,
             var_table: &module.var_table,
@@ -429,15 +437,19 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             target: ctx.target,
             auto_unwrap: false,
             is_test: false,
-            ann: ctx.ann.clone(),
+            ann: mod_ann,
             type_aliases: ctx.type_aliases.clone(),
             generic_types: ctx.generic_types.clone(),
             minimal_generic_bounds: is_bundled,
             repr_c: ctx.repr_c,
         };
-        // Module type decls
+        // Module type decls — skip if already emitted by parent or another module
         for td in &module.type_decls {
-            parts.push(render_type_decl(&mod_ctx, td));
+            let name = td.name.as_str().to_string();
+            if !emitted_types.contains(&name) {
+                emitted_types.insert(name);
+                parts.push(render_type_decl(&mod_ctx, td));
+            }
         }
         // Module functions (prefixed with module name or versioned name)
         let mod_ident = module.versioned_name

@@ -1,4 +1,6 @@
-# Almide LLM Benchmark
+# Almide LLM Benchmark (archived)
+
+> **Daily MSR measurement has moved to [almide/almide-dojo](https://github.com/almide/almide-dojo).** This Python-based framework is superseded by the Dojo's Almide-native harness. Preserved for historical reference and cross-language comparison data.
 
 Measures LLM code generation accuracy across Almide, Python, and TypeScript.
 

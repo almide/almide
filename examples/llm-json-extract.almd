@@ -1,0 +1,42 @@
+// llm-json-extract — Extract structured data from text using LLM + JSON mode
+//
+// Usage:
+//   almide run examples/llm-json-extract.almd
+//
+// Demonstrates almai's JSON mode for structured output.
+
+import almai
+import json
+
+effect fn main() -> Unit = {
+  let text = "John Smith is a 35-year-old software engineer from San Francisco. " +
+    "He has 10 years of experience and speaks English and Japanese."
+
+  let opts = almai.defaults()
+    |> almai.with_system("Extract person info as JSON with fields: name, age, occupation, city, languages (array).")
+    |> almai.with_json_mode
+
+  let model = "anthropic/claude-sonnet-4-6"
+  println("Extracting from: " + string.take(text, 50) + "...")
+
+  match almai.call_with(model, [almai.user(text)], opts) {
+    err(e) => println("Error: " + e)
+    ok(r) => {
+      println("\nRaw JSON:")
+      println(r.content)
+      println("")
+
+      match almai.parse_content_as_json(r) {
+        err(e) => println("Parse error: " + e)
+        ok(data) => {
+          let name = json.get_string(data, "name") |> option.unwrap_or("?")
+          let age = json.get_int(data, "age") |> option.unwrap_or(0)
+          let city = json.get_string(data, "city") |> option.unwrap_or("?")
+          println("Name: " + name)
+          println("Age: " + int.to_string(age))
+          println("City: " + city)
+        }
+      }
+    }
+  }
+}

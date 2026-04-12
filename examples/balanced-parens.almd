@@ -1,0 +1,59 @@
+// balanced-parens — Check if brackets are balanced using list.fold
+//
+// Demonstrates: list.fold with Option accumulator, match on Option[String],
+// immutable list building with +, pattern matching on string literals.
+//
+//   almide run examples/balanced-parens.almd
+
+fn is_balanced(s: String) -> Bool =
+  match list.fold(string.chars(s), some([]), (acc, c) =>
+    match acc {
+      none => none,
+      some(stack) =>
+        match c {
+          "(" => some(stack + ["("]),
+          "[" => some(stack + ["["]),
+          "{" => some(stack + ["{"]),
+          ")" => match list.last(stack) {
+            some("(") => some(list.drop_end(stack, 1)),
+            _ => none,
+          },
+          "]" => match list.last(stack) {
+            some("[") => some(list.drop_end(stack, 1)),
+            _ => none,
+          },
+          "}" => match list.last(stack) {
+            some("{") => some(list.drop_end(stack, 1)),
+            _ => none,
+          },
+          _ => some(stack),
+        },
+    }
+  ) {
+    some(stack) => list.is_empty(stack),
+    none => false,
+  }
+
+effect fn main() -> Unit = {
+  let cases = [
+    ("()", true), ("([{}])", true), ("()[]{}(())", true),
+    ("(]", false), ("([)]", false), ("(", false), (")", false),
+    ("hello (world) [!]", true),
+  ]
+  for c in cases {
+    let (input, expected) = c
+    let result = is_balanced(input)
+    let mark = if result == expected then "PASS" else "FAIL"
+    println(mark + ": is_balanced(\"" + input + "\") = " + if result then "true" else "false")
+  }
+}
+
+test "empty" { assert_eq(is_balanced(""), true) }
+test "simple parens" { assert_eq(is_balanced("()"), true) }
+test "nested" { assert_eq(is_balanced("([{}])"), true) }
+test "sequential" { assert_eq(is_balanced("()[]{}"), true) }
+test "mismatch" { assert_eq(is_balanced("(]"), false) }
+test "cross" { assert_eq(is_balanced("([)]"), false) }
+test "unclosed" { assert_eq(is_balanced("("), false) }
+test "extra close" { assert_eq(is_balanced(")"), false) }
+test "with text" { assert_eq(is_balanced("a(b)c"), true) }

@@ -277,6 +277,11 @@ fn cargo_build_generated_with_native(
 
     inject_native_modules(&mut final_code, source_root, &src_dir)?;
 
+    // Library modules may not define main — auto-generate an empty one
+    if !final_code.contains("fn main(") && !final_code.contains("fn almide_main(") {
+        final_code.push_str("\nfn main() {}\n");
+    }
+
     std::fs::write(src_dir.join("main.rs"), &final_code)
         .map_err(|e| format!("failed to write main.rs: {}", e))?;
 
@@ -323,6 +328,11 @@ fn cargo_build_test_with_native(
 
     let mut final_code = rs_code.to_string();
     inject_native_modules(&mut final_code, source_root, &src_dir)?;
+
+    // Library modules may not define main — auto-generate an empty one for test builds
+    if !final_code.contains("fn main(") && !final_code.contains("fn almide_main(") {
+        final_code.push_str("\nfn main() {}\n");
+    }
 
     std::fs::write(src_dir.join("main.rs"), &final_code)
         .map_err(|e| format!("failed to write main.rs: {}", e))?;

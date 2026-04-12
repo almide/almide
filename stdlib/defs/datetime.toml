@@ -47,7 +47,7 @@ ts = "{seconds}"
 
 [format]
 description = "Format a timestamp using a pattern string."
-example = 'datetime.format(ts, "%Y-%m-%d") // => "2024-01-15"'
+example = 'datetime.format(ts, "YYYY-MM-DD") // => "2024-01-15"'
 params = [
     { name = "ts", type = "Int" },
     { name = "pattern", type = "String" },

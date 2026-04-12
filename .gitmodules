@@ -1,3 +1,6 @@
 [submodule "grammar"]
 	path = grammar
 	url = https://github.com/almide/almide-grammar.git
+[submodule "research/benchmark/lang-bench/upstream"]
+	path = research/benchmark/lang-bench/upstream
+	url = https://github.com/mame/ai-coding-lang-bench.git

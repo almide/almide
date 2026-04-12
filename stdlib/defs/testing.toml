@@ -41,7 +41,8 @@ ts = "__almd_testing.assert_lt({a}, {b})"
 [assert_some]
 description = "Assert that an Option is some (not none)."
 example = 'testing.assert_some(some("value"))'
-params = [{ name = "opt", type = "Option[String]" }]
+type_params = ["A"]
+params = [{ name = "opt", type = "Option[A]" }]
 return = "Unit"
 rust = "almide_rt_test_assert_some(&{opt})"
 ts = "__almd_testing.assert_some({opt})"
@@ -49,7 +50,8 @@ ts = "__almd_testing.assert_some({opt})"
 [assert_ok]
 description = "Assert that a Result is ok (not err)."
 example = 'testing.assert_ok(ok("success"))'
-params = [{ name = "result", type = "Result[String, String]" }]
+type_params = ["A", "B"]
+params = [{ name = "result", type = "Result[A, B]" }]
 return = "Unit"
 rust = "almide_rt_test_assert_ok(&{result})"
 ts = "__almd_testing.assert_ok({result})"

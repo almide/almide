@@ -26,6 +26,7 @@ HAPPY_TESTS=(
   "alias_test.almd"
   "submodule_call_test.almd"
   "vis_effect_test.almd"
+  "cross_module_unit_effect_test.almd"
 )
 
 echo "=== Module System — Specification Tests ==="

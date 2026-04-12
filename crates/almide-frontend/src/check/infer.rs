@@ -47,7 +47,11 @@ impl Checker {
                     }
                 }
                 else {
-                    let hint = if crate::stdlib::is_any_stdlib(name) {
+                    // Only suggest `import` for modules that require explicit import
+                    // and whose names won't be confused with common variable names.
+                    // e.g. `value`, `error`, `string`, `list` are too common as
+                    // variable names — suggesting `import value` is misleading.
+                    let hint = if crate::stdlib::is_import_suggestable(name) {
                         let desc = crate::stdlib::module_description(name);
                         format!("Add `import {}` (stdlib: {})\nOr run `almide fmt` to auto-add missing imports", name, desc)
                     } else {
@@ -917,7 +921,9 @@ impl Checker {
         if let ExprKind::Ident { name: module, .. } = &object.kind {
             if let Some(canonical) = self.env.import_table.resolve(module) {
                 self.env.import_table.mark_used(module);
-                return Some(format!("{}.{}", canonical, field));
+                let key = format!("{}.{}", canonical, field);
+                self.check_fn_visibility(&canonical, field, &key);
+                return Some(key);
             }
             // Check if Ident.field is a Type.method (protocol implementation)
             let key = format!("{}.{}", module, field);
@@ -946,6 +952,45 @@ impl Checker {
             }
         }
         None
+    }
+
+    /// Reject cross-module access to `mod fn` / `local fn` functions.
+    ///
+    /// A function has `Public` visibility by default — we only store entries
+    /// for restricted (`Mod` / `Local`) declarations in `env.fn_visibility`.
+    /// If the caller's own module (`self_module_name`) matches the callee's
+    /// canonical module, the call is intra-module and all visibilities are
+    /// allowed. Otherwise only `Public` is reachable.
+    pub(super) fn check_fn_visibility(&mut self, callee_module: &str, field: &str, key: &str) {
+        let vis = match self.env.fn_visibility.get(&sym(key)) {
+            Some(v) => *v,
+            None => return,
+        };
+        // Intra-module access (same package) is always allowed, regardless of
+        // whether it's `mod fn` or `local fn`. This matches the spec for
+        // `mod fn` and is a pragmatic relaxation for `local fn` (strict
+        // same-file enforcement needs per-fn file tracking — TODO).
+        if let Some(self_mod) = self.env.self_module_name {
+            if self_mod.as_str() == callee_module {
+                return;
+            }
+        }
+        let (kind, scope_hint) = match vis {
+            ast::Visibility::Mod => (
+                "mod fn",
+                "accessible only within the same project",
+            ),
+            ast::Visibility::Local => (
+                "local fn",
+                "accessible only within the same file",
+            ),
+            ast::Visibility::Public => return,
+        };
+        self.emit(super::err(
+            format!("function '{}.{}' is not accessible", callee_module, field),
+            format!("'{}' is declared as `{}` ({})", field, kind, scope_hint),
+            format!("call to {}.{}", callee_module, field),
+        ).with_code("E420"));
     }
 
 }

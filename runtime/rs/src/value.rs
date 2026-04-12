@@ -209,13 +209,21 @@ pub fn almide_rt_value_stringify(v: &Value) -> String {
         Value::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
         Value::Int(n) => n.to_string(),
         Value::Float(f) => format!("{}", f),
-        Value::Str(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+        Value::Str(s) => format!("\"{}\"", s
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")),
         Value::Array(items) => {
             let inner: Vec<String> = items.iter().map(almide_rt_value_stringify).collect();
             format!("[{}]", inner.join(","))
         }
         Value::Object(pairs) => {
-            let inner: Vec<String> = pairs.iter().map(|(k, v)| format!("\"{}\":{}", k, almide_rt_value_stringify(v))).collect();
+            let inner: Vec<String> = pairs.iter().map(|(k, v)| {
+                let ek = k.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
+                format!("\"{}\":{}", ek, almide_rt_value_stringify(v))
+            }).collect();
             format!("{{{}}}", inner.join(","))
         }
     }

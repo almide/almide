@@ -1,0 +1,74 @@
+// llm-code-review — Automated code review using almai + tool calling
+//
+// Usage:
+//   almide run examples/llm-code-review.almd
+//
+// Demonstrates tool calling: the LLM requests file contents,
+// then provides a review.
+
+import almai
+import fs
+import json
+
+effect fn main() -> Unit = {
+  let read_file_tool = almai.Tool {
+    name: "read_file",
+    description: "Read the contents of a source file",
+    parameters: json.object([
+      ("type", json.from_string("object")),
+      ("properties", json.object([
+        ("path", json.object([
+          ("type", json.from_string("string")),
+          ("description", json.from_string("File path to read")),
+        ])),
+      ])),
+      ("required", json.array([json.from_string("path")])),
+    ]),
+  }
+
+  let opts = almai.defaults()
+    |> almai.with_system("You are a code reviewer. Review Almide source files for quality, correctness, and style.")
+    |> almai.with_tools([read_file_tool])
+
+  let model = "anthropic/claude-sonnet-4-6"
+
+  // First call: ask for review, model may request to read a file
+  match almai.call_with(model, [
+    almai.user("Review this project's examples/csv-to-json.almd for code quality."),
+  ], opts) {
+    err(e) => println("Error: " + e)
+    ok(r) =>
+      if almai.has_tool_calls(r) then {
+        let tc = almai.first_tool_call(r) |> option.unwrap_or(almai.ToolCall { id: "", name: "", arguments: "{}" })
+        println("LLM requested tool: " + tc.name)
+        println("Arguments: " + tc.arguments)
+
+        // Execute the tool
+        match json.parse(tc.arguments) {
+          err(_) => println("Failed to parse tool arguments")
+          ok(args) => {
+            let path = json.get_string(args, "path") |> option.unwrap_or("examples/csv-to-json.almd")
+            match fs.read_text(path) {
+              err(e) => println("Failed to read file: " + e)
+              ok(content) => {
+                // Send tool result back
+                match almai.call_with(model, [
+                  almai.user("Review this project's examples/csv-to-json.almd"),
+                  almai.assistant(""),
+                  almai.tool_result(tc.id, content),
+                ], almai.defaults() |> almai.with_system("Provide a concise code review.")) {
+                  err(e) => println("Error: " + e)
+                  ok(review) => {
+                    println("\n--- Code Review ---\n")
+                    println(review.content)
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else {
+        println(r.content)
+      }
+  }
+}

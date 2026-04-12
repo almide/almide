@@ -1,0 +1,40 @@
+// llm-chat — Interactive LLM chat using almai
+//
+// Usage:
+//   almide run examples/llm-chat.almd
+//
+// Set ANTHROPIC_API_KEY in your environment, or use a different provider:
+//   MODEL=cf/@cf/meta/llama-3.3-70b-instruct-fp8-fast almide run examples/llm-chat.almd
+
+import almai
+import almai.conv
+import env
+import io
+
+effect fn main() -> Unit = {
+  let model = env.get("MODEL") |> option.unwrap_or("anthropic/claude-sonnet-4-6")
+  println("almai chat (model: " + model + ")")
+  println("Type a message. Empty line to quit.\n")
+
+  chat_loop(model, conv.empty() |> conv.add_system("You are a helpful assistant. Be concise."))
+}
+
+effect fn chat_loop(model: String, conversation: conv.Conversation) -> Unit = {
+  print("> ")
+  let input = io.read_line()
+  if string.trim(input) == "" then
+    println("Bye!")
+  else {
+    let updated = conversation |> conv.add_user(input)
+    match almai.call(model, conv.messages(updated)) {
+      err(e) => {
+        println("Error: " + e)
+        chat_loop(model, updated)
+      }
+      ok(r) => {
+        println("\n" + r.content + "\n")
+        chat_loop(model, updated |> conv.add_assistant(r.content))
+      }
+    }
+  }
+}

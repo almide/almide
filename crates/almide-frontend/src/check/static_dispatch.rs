@@ -212,7 +212,12 @@ impl Checker {
                         return Some(Ty::Named(type_name, generic_args));
                     }
                 }
-                return Some(self.check_named_call(&format!("{}.{}", m, field), arg_tys));
+                let key = format!("{}.{}", m, field);
+                // Enforce cross-module visibility (`mod fn` / `local fn`)
+                // before lowering the call — the key now lives in
+                // `env.fn_visibility` thanks to registration.
+                self.check_fn_visibility(&m, field, &key);
+                return Some(self.check_named_call(&key, arg_tys));
             }
         }
 

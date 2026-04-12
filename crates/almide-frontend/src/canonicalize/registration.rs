@@ -76,6 +76,7 @@ pub fn register_fn_sig(
     name: &str, params: &[ast::Param], return_type: &ast::TypeExpr,
     effect: &Option<bool>, r#async: &Option<bool>, generics: &Option<Vec<ast::GenericParam>>,
     prefix: Option<&str>, span: Option<&ast::Span>,
+    visibility: ast::Visibility,
 ) {
     let gnames: Vec<Sym> = generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default();
     let sb = collect_structural_bounds(env, generics);
@@ -89,6 +90,13 @@ pub fn register_fn_sig(
     if prefix.is_none() && is_effect { env.effect_fns.insert(sym(name)); }
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
     env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb });
+    // Record visibility so `resolve_module_call` can reject cross-module access
+    // to `mod fn` / `local fn`. Only non-Public entries need to be stored — the
+    // lookup in the checker treats "missing" as Public (stdlib, impl methods,
+    // derived stubs).
+    if !matches!(visibility, ast::Visibility::Public) {
+        env.fn_visibility.insert(sym(&key), visibility);
+    }
     if let Some(s) = span {
         env.fn_decl_spans.insert(sym(&key), (s.line, s.col));
     }
@@ -253,10 +261,12 @@ pub fn register_impl_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
                 }),
                 format!("impl {} for {}", trait_name, for_type),
             ));
-            // Still register methods as convention functions so downstream doesn't break
+            // Still register methods as convention functions so downstream doesn't break.
+            // `impl` methods follow the trait's visibility, not a custom modifier, so they
+            // are always publicly callable through the trait interface.
             for m in methods {
                 if let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, .. } = m {
-                    register_fn_sig(env, name, params, return_type, effect, r#async, generics, Some(for_type), span.as_ref());
+                    register_fn_sig(env, name, params, return_type, effect, r#async, generics, Some(for_type), span.as_ref(), ast::Visibility::Public);
                 }
             }
             return;
@@ -269,7 +279,7 @@ pub fn register_impl_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
 
     for m in methods {
         if let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, .. } = m {
-            register_fn_sig(env, name, params, return_type, effect, r#async, generics, Some(for_type), span.as_ref());
+            register_fn_sig(env, name, params, return_type, effect, r#async, generics, Some(for_type), span.as_ref(), ast::Visibility::Public);
             impl_methods.insert(name.to_string());
 
             // 3. Validate signature matches protocol definition
@@ -380,8 +390,8 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
 pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decls: &[ast::Decl], prefix: Option<&str>) {
     for decl in decls {
         match decl {
-            ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, .. } => {
-                register_fn_sig(env, name, params, return_type, effect, r#async, generics, prefix, span.as_ref());
+            ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, visibility, .. } => {
+                register_fn_sig(env, name, params, return_type, effect, r#async, generics, prefix, span.as_ref(), *visibility);
             }
             ast::Decl::Type { name, ty, deriving, generics, .. } => {
                 register_type_decl(env, diagnostics, name, ty, deriving, generics, prefix);

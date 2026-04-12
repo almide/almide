@@ -1,0 +1,26 @@
+// Regression test: json.stringify must escape newlines, tabs, quotes in strings.
+// Works on both Rust and WASM targets.
+
+import json
+
+let NL = string.from_codepoint(10)
+let TAB = string.from_codepoint(9)
+
+test "stringify escapes newline" {
+  let v = json.from_string("a" + NL + "b")
+  let s = json.stringify(v)
+  assert_eq(string.contains(s, NL), false)
+  assert_eq(string.contains(s, "\\n"), true)
+}
+
+test "stringify escapes tab" {
+  let v = json.from_string("a" + TAB + "b")
+  let s = json.stringify(v)
+  assert_eq(string.contains(s, "\\t"), true)
+}
+
+test "stringify escapes quotes" {
+  let v = json.from_string("say " + string.from_codepoint(34) + "hello" + string.from_codepoint(34))
+  let s = json.stringify(v)
+  assert_eq(string.contains(s, "\\\""), true)
+}

@@ -1,0 +1,57 @@
+// ============================================================
+// Cross-module Unit-returning effect fn calls
+// ============================================================
+//
+// Regression test for the ResultPropagation pass. When an effect fn
+// in one module calls an effect fn in another module that returns Unit,
+// the compiler must:
+//
+//   1. Recognise the callee as already-lifted (its signature has been
+//      rewritten to Result[Unit, String]) and NOT wrap the call site
+//      in an extra ResultOk. Previously `wrap_tail_in_ok` only checked
+//      `CallTarget::Named`, so module-qualified calls escaped detection
+//      and were double-wrapped, producing invalid WASM stack operations
+//      (`expected 1 elements on the stack for fallthru, found 2`).
+//
+//   2. Update the call-site type in `update_call_types` and
+//      `insert_try_for_lifted`. These passes previously keyed the lifted
+//      lookup by `format!("{}.{}", module, func)` while `lifted_fns` was
+//      populated with bare function names, causing all cross-module
+//      lookups to miss.
+//
+// A passing test here means:
+//   - The test file compiles (cross-module lifted calls resolve)
+//   - The emitted WASM validates at instantiate time
+//   - Effect fns called across module boundaries execute correctly
+
+import effectlib
+
+// Cross-module Unit-returning call in tail position
+// (triggers wrap_tail_in_ok on a module-qualified Call)
+effect fn tail_unit_call() -> Result[Unit, String] = {
+  effectlib.do_nothing()
+}
+
+// Cross-module Unit-returning calls as statements + tail ok(())
+effect fn stmt_unit_calls() -> Result[Unit, String] = {
+  effectlib.do_nothing()
+  effectlib.do_nothing_twice()
+  ok(())
+}
+
+// Cross-module nested Unit call (tail position, single call)
+effect fn nested_unit_call() -> Result[Unit, String] = {
+  effectlib.do_nothing_twice()
+}
+
+effect fn main(_args: List[String]) -> Result[Unit, String] = {
+  // Invoking effect fns that call across module boundaries with Unit
+  // return type. If the compiler double-wraps in ResultOk the WASM
+  // stack validation fails and instantiate throws at load time.
+  tail_unit_call()!
+  stmt_unit_calls()!
+  nested_unit_call()!
+
+  println("cross_module_unit_effect: all calls succeeded")
+  ok(())
+}

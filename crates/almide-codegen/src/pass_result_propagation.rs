@@ -40,14 +40,40 @@ impl NanoPass for ResultPropagationPass {
                 lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
             }
         }
+        // Track `almide_rt_<mod>_<func>` mangled names in addition to bare names.
+        //
+        // StdlibLoweringPass (Rust target only) rewrites intra-module
+        // `CallTarget::Named { name: "do_nothing" }` into
+        // `CallTarget::Named { name: "almide_rt_effectlib_do_nothing" }` to match
+        // the walker's renamed function definitions. StdlibLowering runs BEFORE
+        // ResultPropagation in the Rust pipeline, so by the time wrap_tail_in_ok
+        // / update_call_types / insert_try_for_lifted inspect call targets, the
+        // names are already mangled. We register the mangled form here too so
+        // lookups succeed and intra-module effect fn tail calls don't get
+        // double-wrapped in ResultOk.
+        //
+        // The WASM pipeline doesn't run StdlibLowering, so call targets stay
+        // bare there — the extra mangled entries are harmless no-ops.
         for module in &mut program.modules {
+            let mod_name = module
+                .versioned_name
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| module.name.to_string());
+            let mod_ident = mod_name.replace('.', "_");
             for func in &mut module.functions {
                 if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
                     && func.extern_attrs.is_empty()
                 {
                     let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                     func.ret_ty = Ty::result(orig, Ty::String);
-                    lifted_fns.insert(func.name.to_string(), func.ret_ty.clone());
+                    let bare = func.name.to_string();
+                    lifted_fns.insert(bare.clone(), func.ret_ty.clone());
+                    let sanitized = bare
+                        .replace(' ', "_")
+                        .replace('-', "_")
+                        .replace('.', "_");
+                    let mangled = format!("almide_rt_{}_{}", mod_ident, sanitized);
+                    lifted_fns.insert(mangled, func.ret_ty.clone());
                 }
             }
         }
@@ -122,10 +148,14 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
         },
         // Already Result — don't double-wrap
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => expr,
-        // Call to another lifted effect fn — already returns Result, don't wrap
+        // Call to another lifted effect fn — already returns Result, don't wrap.
+        // Both free-function (`Named`) and module-qualified (`Module`) forms are
+        // checked against the lifted set so cross-module effect fn calls don't
+        // get double-wrapped in ResultOk.
         IrExprKind::Call { ref target, .. } => {
             let callee_name = match target {
                 CallTarget::Named { name } => Some(name.to_string()),
+                CallTarget::Module { func, .. } => Some(func.to_string()),
                 _ => None,
             };
             if callee_name.as_ref().is_some_and(|n| lifted.contains_key(n)) {
@@ -188,9 +218,11 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
     let span = expr.span;
     let kind = match expr.kind {
         IrExprKind::Call { target, args, type_args } => {
+            // The lifted map is keyed by bare function names, so module-qualified
+            // calls look up by the function name alone (not "module.func").
             let fn_name: Option<String> = match &target {
                 CallTarget::Named { name } => Some(name.to_string()),
-                CallTarget::Module { module, func } => Some(format!("{}.{}", module, func)),
+                CallTarget::Module { func, .. } => Some(func.to_string()),
                 CallTarget::Method { method, .. } => Some(method.to_string()),
                 _ => None,
             };
@@ -369,7 +401,7 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
         IrExprKind::Call { ref target, .. } => {
             let lifted_ty = match target {
                 CallTarget::Named { name } => lifted.get::<str>(name),
-                CallTarget::Module { module, func } => lifted.get(&format!("{}.{}", module, func)),
+                CallTarget::Module { func, .. } => lifted.get::<str>(func),
                 CallTarget::Method { method, .. } => lifted.get::<str>(method),
                 _ => None,
             };
@@ -445,7 +477,7 @@ fn insert_try_for_lifted_no_unwrap(expr: IrExpr, lifted: &HashMap<String, Ty>) -
         IrExprKind::Call { ref target, ref args, .. } => {
             let lifted_ty = match target {
                 CallTarget::Named { name } => lifted.get::<str>(name),
-                CallTarget::Module { module, func } => lifted.get(&format!("{}.{}", module, func)),
+                CallTarget::Module { func, .. } => lifted.get::<str>(func),
                 CallTarget::Method { method, .. } => lifted.get::<str>(method),
                 _ => None,
             };

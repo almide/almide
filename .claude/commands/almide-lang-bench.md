@@ -1,31 +1,44 @@
 # Lang Bench Chart Generation
 
-Regenerate AI Coding Language Benchmark charts from data and update README figures.
+Regenerate AI Coding Language Benchmark charts and (optionally) run additional Almide trials.
 
-## Steps
+## Regenerate charts only
 
-1. Run the plot script:
-   ```bash
-   python3 research/benchmark/lang-bench/plot.py
-   ```
+If `data.json` is already up to date:
 
-2. Verify the generated PNGs in `docs/figures/`:
-   - `lang-bench-time.png` — Execution time chart
-   - `lang-bench-loc.png` — Code size chart
-   - `lang-bench-pass-rate.png` — Pass rate chart
+```bash
+python3 research/benchmark/lang-bench/plot.py
+```
 
-3. If data has changed, update `research/benchmark/lang-bench/data.json` first, then re-run
+Outputs `docs/figures/lang-bench-{time,loc,pass-rate}.png` and cache-busts README image URLs.
 
-4. Commit: `Update lang-bench charts: {brief summary}`
+## Run additional Almide trials
 
-## Data Source
+```bash
+# One-time setup
+git submodule update --init research/benchmark/lang-bench/upstream
 
-- `research/benchmark/lang-bench/data.json` — All benchmark data (15 official languages + Almide)
-- Official 15 languages: [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (Opus 4.6, 20 trials)
-- Almide: Internal runs (Sonnet 4.6, model differs because Almide has no training data in Opus corpus)
+# Run N trials (each ~20-30 min, appended to raw/almide.jsonl)
+ruby research/benchmark/lang-bench/runner.rb --trials 10
+
+# Recompute Almide stats in data.json
+ruby research/benchmark/lang-bench/aggregate.rb
+
+# Regenerate charts
+python3 research/benchmark/lang-bench/plot.py
+```
+
+Details in `research/benchmark/lang-bench/README.md`.
+
+## Data source
+
+- `research/benchmark/lang-bench/data.json` — aggregated stats for all languages (plot.py input)
+- `research/benchmark/lang-bench/raw/almide.jsonl` — append-only raw Almide trial records
+- Other 15 languages sourced from [mame/ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench) (Opus 4.6, 20 trials each)
+- Almide: Sonnet 4.6 (Almide has no Opus training data)
 
 ## Notes
 
-- Charts are output to `docs/figures/` and referenced from README's "AI Coding Language Benchmark" section
+- Charts are referenced from README's "AI Coding Language Benchmark" section
 - Almide is highlighted in orange; all other languages in blue
-- To add/remove languages, edit `data.json` and re-run `plot.py`
+- Commit message: `Update lang-bench charts: {brief summary}`

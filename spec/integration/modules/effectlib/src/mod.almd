@@ -1,5 +1,27 @@
+// effectlib — test fixtures for cross-module effect fn calls
+
 effect fn read_config() -> Result[String, String] = {
   ok("config_value")
 }
 
 fn pure_() -> String = "pure"
+
+// ── Effect fns returning Unit ──
+// These trigger the ResultPropagation lifting path:
+//   fn foo() -> Unit  becomes  fn foo() -> Result[Unit, String]
+// with the body wrapped in ResultOk(Unit). Callers across module
+// boundaries must recognize these as already-lifted.
+
+effect fn do_nothing() -> Unit = {
+  ()
+}
+
+effect fn do_nothing_twice() -> Unit = {
+  do_nothing()
+  do_nothing()
+}
+
+// Effect fn returning Int (triggers lifting to Result[Int, String])
+effect fn compute(x: Int) -> Int = {
+  x * 2
+}
