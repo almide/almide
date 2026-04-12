@@ -324,9 +324,12 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
         func.ret_ty.clone()
     };
 
-    // Mark all param VarIds as mutable (they'll be reassigned in the loop)
-    for param in &func.params {
+    // Mark all param VarIds as mutable (they'll be reassigned in the loop).
+    // Also reset any borrow annotations to Own — TCO loops need owned values
+    // because the parameter persists across iterations, not just one call.
+    for param in &mut func.params {
         var_table.entries[param.var.0 as usize].mutability = Mutability::Var;
+        param.borrow = almide_ir::ParamBorrow::Own;
     }
 
     // Allocate a result variable
@@ -506,6 +509,15 @@ fn rewrite_tail_expr(
 /// param1 = __tco_tmp_1
 /// continue
 /// ```
+/// Strip a Borrow wrapper from an expression (if present).
+/// TCO params become owned, so borrow annotations from BorrowInsertion must be removed.
+fn strip_borrow(expr: IrExpr) -> IrExpr {
+    match expr.kind {
+        IrExprKind::Borrow { expr: inner, .. } => *inner,
+        _ => expr,
+    }
+}
+
 fn emit_tail_call_replacement(
     args: Vec<IrExpr>,
     params: &[(VarId, Ty)],
@@ -514,15 +526,17 @@ fn emit_tail_call_replacement(
 ) -> IrExpr {
     let mut stmts: Vec<IrStmt> = Vec::new();
 
-    // Bind temporaries to argument expressions
+    // Bind temporaries to argument expressions.
+    // Strip Borrow nodes from args — TCO params are now owned, not borrowed.
     for (i, arg) in args.into_iter().enumerate() {
         let (tmp_var, tmp_ty) = &temps[i];
+        let unwrapped = strip_borrow(arg);
         stmts.push(IrStmt {
             kind: IrStmtKind::Bind {
                 var: *tmp_var,
                 mutability: Mutability::Let,
                 ty: tmp_ty.clone(),
-                value: arg,
+                value: unwrapped,
             },
             span: None,
         });

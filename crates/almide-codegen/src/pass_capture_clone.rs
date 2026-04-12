@@ -585,7 +585,7 @@ fn needs_clone_type(ty: &Ty) -> bool {
     matches!(ty,
         Ty::String | Ty::Applied(_, _) |
         Ty::Record { .. } | Ty::OpenRecord { .. } |
-        Ty::Named(_, _) |
+        Ty::Named(_, _) | Ty::Matrix | Ty::Bytes |
         Ty::Variant { .. } | Ty::Fn { .. } |
         Ty::TypeVar(_)
     )
