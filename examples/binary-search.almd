@@ -1,0 +1,40 @@
+// binary-search — Search a sorted list using recursion
+//
+// Demonstrates: recursion instead of while+break, Option return,
+// list.get with option.unwrap_or, integer arithmetic.
+//
+//   almide run examples/binary-search.almd
+
+fn search(xs: List[Int], target: Int, lo: Int, hi: Int) -> Option[Int] =
+  if lo > hi then none
+  else {
+    let mid = lo + (hi - lo) / 2
+    let v = list.get(xs, mid) |> option.unwrap_or(0)
+    if v == target then some(mid)
+    else if v < target then search(xs, target, mid + 1, hi)
+    else search(xs, target, lo, mid - 1)
+  }
+
+fn binary_search(xs: List[Int], target: Int) -> Option[Int] =
+  if list.is_empty(xs) then none
+  else search(xs, target, 0, list.len(xs) - 1)
+
+effect fn main() -> Unit = {
+  let sorted = [2, 5, 8, 12, 16, 23, 38, 56, 72, 91]
+  let targets = [23, 91, 2, 50, 72]
+  for t in targets {
+    let result = match binary_search(sorted, t) {
+      some(idx) => "found at index " + int.to_string(idx)
+      none => "not found"
+    }
+    println(int.to_string(t) + ": " + result)
+  }
+}
+
+test "empty" { assert_eq(binary_search([], 1), none) }
+test "single found" { assert_eq(binary_search([5], 5), some(0)) }
+test "single not found" { assert_eq(binary_search([5], 3), none) }
+test "first" { assert_eq(binary_search([1, 3, 5, 7, 9], 1), some(0)) }
+test "middle" { assert_eq(binary_search([1, 3, 5, 7, 9], 5), some(2)) }
+test "last" { assert_eq(binary_search([1, 3, 5, 7, 9], 9), some(4)) }
+test "not found" { assert_eq(binary_search([1, 3, 5, 7, 9], 4), none) }

@@ -1,0 +1,42 @@
+// roman-numeral — Convert integers to Roman numerals
+//
+// Demonstrates: List[(Int, String)] lookup table, recursive greedy algorithm,
+// tuple destructuring, string concatenation.
+//
+//   almide run examples/roman-numeral.almd
+
+let NUMERALS = [
+  (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+  (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
+  (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+]
+
+fn to_roman_step(n: Int, values: List[(Int, String)]) -> String =
+  if n == 0 then ""
+  else if list.is_empty(values) then ""
+  else {
+    let pair = list.get(values, 0) |> option.unwrap_or((0, ""))
+    let v = pair.0
+    let s = pair.1
+    if n >= v then s + to_roman_step(n - v, values)
+    else to_roman_step(n, list.drop(values, 1))
+  }
+
+fn to_roman(n: Int) -> String =
+  to_roman_step(n, NUMERALS)
+
+effect fn main() -> Unit = {
+  let examples = [1, 4, 9, 14, 42, 99, 399, 500, 1994, 3999]
+  for n in examples {
+    println(int.to_string(n) + " = " + to_roman(n))
+  }
+}
+
+test "1" { assert_eq(to_roman(1), "I") }
+test "4" { assert_eq(to_roman(4), "IV") }
+test "9" { assert_eq(to_roman(9), "IX") }
+test "14" { assert_eq(to_roman(14), "XIV") }
+test "42" { assert_eq(to_roman(42), "XLII") }
+test "99" { assert_eq(to_roman(99), "XCIX") }
+test "1994" { assert_eq(to_roman(1994), "MCMXCIV") }
+test "3999" { assert_eq(to_roman(3999), "MMMCMXCIX") }
