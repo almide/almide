@@ -422,6 +422,12 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         // Bundled .almd modules use minimal generic bounds (Clone only)
         // because their functions don't require PartialEq/PartialOrd/Debug.
         let is_bundled = almide_lang::stdlib_info::is_bundled_module(&module.name);
+        let mut mod_ann = ctx.ann.clone();
+        // Each module has its own VarTable, so VarIds from the parent's
+        // lazy_vars would collide with module-local variables (parameters,
+        // match bindings) that share the same numeric id.
+        // Clear inherited lazy_vars; module-specific ones are added below.
+        mod_ann.lazy_vars.clear();
         let mut mod_ctx = RenderContext {
             templates: ctx.templates,
             var_table: &module.var_table,
@@ -429,7 +435,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             target: ctx.target,
             auto_unwrap: false,
             is_test: false,
-            ann: ctx.ann.clone(),
+            ann: mod_ann,
             type_aliases: ctx.type_aliases.clone(),
             generic_types: ctx.generic_types.clone(),
             minimal_generic_bounds: is_bundled,
