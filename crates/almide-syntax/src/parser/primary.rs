@@ -149,6 +149,15 @@ impl Parser {
             return Ok(Expr::new(self.next_id(), span, ExprKind::Ident { name }));
         }
 
+        // `let x = expr in body` — ML-style let-in expression
+        if tok.token_type == TokenType::Let {
+            let msg = "'let ... in ...' expression syntax is not supported in Almide";
+            let hint = "Use a block instead: { let x = expr; body }. Or inline the value directly.";
+            let diag = self.diag_error(msg, hint, "let-in");
+            self.errors.push(diag);
+            return Err(format!("{} at line {}:{}", msg, tok.line, tok.col));
+        }
+
         Err(format!(
             "Expected expression at line {}:{} (got {:?} '{}')",
             tok.line, tok.col, tok.token_type, tok.value
