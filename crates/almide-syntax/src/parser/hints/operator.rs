@@ -73,6 +73,18 @@ fn check_standalone(ctx: &HintContext) -> Option<HintResult> {
             message: Some("Semicolons are not used in Almide".into()),
             hint: "Remove the ';'. Almide uses newlines to separate statements.".into(),
         }),
+        // `::` — Rust-style path separator
+        (TokenType::Colon, _) => {
+            if let Some(next) = ctx.next {
+                if matches!(next.token_type, TokenType::Colon) {
+                    return Some(HintResult {
+                        message: Some("'::' is not valid in Almide".into()),
+                        hint: "Almide uses '.' for module access, not '::'. Write `list.map(...)` instead of `list::map(...)`".into(),
+                    });
+                }
+            }
+            None
+        }
         _ => None,
     }
 }

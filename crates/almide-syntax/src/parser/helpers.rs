@@ -275,6 +275,18 @@ impl Parser {
     pub(crate) fn expect_closing(&mut self, close: TokenType, open_line: usize, open_col: usize, context: &str) -> Result<&Token, String> {
         if self.check(close.clone()) { return Ok(self.advance()); }
         let (tok_line, tok_col) = (self.current().line, self.current().col);
+
+        // Detect bare lambda `c =>` inside a function call — LLMs often write
+        // `list.map(xs, c => ...)` instead of `list.map(xs, (c) => ...)`.
+        if close == TokenType::RParen && self.check(TokenType::FatArrow) {
+            // Walk backwards from the current position to find the bare identifier
+            let msg = "Lambda parameter must be wrapped in parentheses";
+            let hint = "Almide lambdas require parentheses around parameters. Write `(x) => expr` instead of `x => expr`";
+            let diag = self.diag_error(msg, hint, "lambda syntax");
+            self.errors.push(diag);
+            return Err(format!("{} at line {}:{}", msg, tok_line, tok_col));
+        }
+
         let (close_name, open_name) = match close {
             TokenType::RParen => ("')'", "'('"),
             TokenType::RBracket => ("']'", "'['"),

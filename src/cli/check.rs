@@ -29,8 +29,9 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     checker.diagnostics = canon.diagnostics;
     let diagnostics = checker.infer_program(&mut program);
 
-    // Lower to IR for unused variable analysis (only if no parse errors)
-    let unused_warnings = if parse_errors.is_empty() {
+    // Lower to IR for unused variable analysis (only if no parse or type errors)
+    let has_type_errors = diagnostics.iter().any(|d| d.level == diagnostic::Level::Error);
+    let unused_warnings = if parse_errors.is_empty() && !has_type_errors {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
         almide::ir::collect_unused_var_warnings(&ir, file)
     } else {
@@ -122,8 +123,9 @@ pub fn cmd_check_json(file: &str) {
         println!("{}", crate::diagnostic_render::to_json(d));
     }
 
-    // Lower to IR for unused variable warnings
-    if parse_errors.is_empty() {
+    // Lower to IR for unused variable warnings (skip if type errors)
+    let has_type_errors = diagnostics.iter().any(|d| d.level == diagnostic::Level::Error);
+    if parse_errors.is_empty() && !has_type_errors {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
         let unused = almide::ir::collect_unused_var_warnings(&ir, file);
         for d in &unused {

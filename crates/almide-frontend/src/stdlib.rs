@@ -9,6 +9,13 @@ pub use almide_lang::stdlib_info::{
     resolve_ufcs_module, resolve_ufcs_candidates,
 };
 
+/// Modules that can safely be suggested via "Add `import X`" in error hints.
+/// Excludes auto-imported modules and names that are common as variable names
+/// (e.g. `value`, `error`, `string`, `list`, `map`, `set`, `option`, `result`).
+pub fn is_import_suggestable(name: &str) -> bool {
+    matches!(name, "json" | "http" | "fs" | "process" | "regex" | "datetime" | "io" | "random" | "testing" | "bytes" | "matrix" | "env")
+}
+
 /// Short description of a stdlib module (for error hints).
 pub fn module_description(name: &str) -> &'static str {
     match name {

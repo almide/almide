@@ -47,7 +47,11 @@ impl Checker {
                     }
                 }
                 else {
-                    let hint = if crate::stdlib::is_any_stdlib(name) {
+                    // Only suggest `import` for modules that require explicit import
+                    // and whose names won't be confused with common variable names.
+                    // e.g. `value`, `error`, `string`, `list` are too common as
+                    // variable names — suggesting `import value` is misleading.
+                    let hint = if crate::stdlib::is_import_suggestable(name) {
                         let desc = crate::stdlib::module_description(name);
                         format!("Add `import {}` (stdlib: {})\nOr run `almide fmt` to auto-add missing imports", name, desc)
                     } else {
