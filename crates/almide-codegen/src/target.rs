@@ -57,8 +57,6 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(ListPatternLoweringPass)
             // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
             .add(BoxDerefPass)
-            // TCO: convert self-recursive tail calls to loops (before any lowering)
-            .add(TailCallOptPass)
             // LICM: hoist loop-invariant expressions before loops
             .add(LICMPass)
             // Global passes
@@ -66,6 +64,9 @@ fn build_pipeline(target: Target) -> Pipeline {
             // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
             .add(StreamFusionPass)
             .add(BorrowInsertionPass)
+            // TCO: convert self-recursive tail calls to loops AFTER BorrowInsertion
+            // (so that param types are already finalized — avoids String/&str mismatch)
+            .add(TailCallOptPass)
             .add(CaptureClonePass)
             .add(CloneInsertionPass)
             // Match subject transforms: String → .as_str(), Option<String> → .as_deref()
