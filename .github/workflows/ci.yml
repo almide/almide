@@ -81,6 +81,11 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test spec/
 
+      - name: Almide examples tests
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE test examples/
+
   test-wasm:
     name: Test WASM
     needs: build
