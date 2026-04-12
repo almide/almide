@@ -405,3 +405,71 @@ test "greet succeeds" {
   assert_eq(string.len("hello"), 5)
 }
 ```
+
+## Common mistakes from other languages
+
+These are the most frequent errors when generating Almide from LLM training on Rust/Python/JS/Scala.
+
+### ✗ `if cond { }` → ✓ `if cond then ... else ...`
+```
+✗ if x > 0 { "positive" } else { "negative" }
+✓ if x > 0 then "positive" else "negative"
+```
+
+### ✗ `x => expr` → ✓ `(x) => expr`
+Lambda parameters **must** be wrapped in parentheses.
+```
+✗ list.map(xs, x => x + 1)
+✓ list.map(xs, (x) => x + 1)
+```
+
+### ✗ `module::func()` → ✓ `module.func()`
+Almide uses `.` for module access, not `::`.
+```
+✗ list::len(xs)
+✓ list.len(xs)
+```
+
+### ✗ `list.push(xs, item)` for value → ✓ `xs + [item]`
+`list.push` mutates a `var` and returns `Unit`. For immutable list building, use `+`.
+```
+✗ some(list.push(stack, "("))     // returns Option[Unit]
+✓ some(stack + ["("])             // returns Option[List[String]]
+```
+
+### ✗ `let x = e in body` → ✓ `{ let x = e; body }`
+ML-style let-in is not supported. Use a block.
+```
+✗ let y = f(x) in y + 1
+✓ { let y = f(x); y + 1 }
+```
+
+### ✗ `foldLeft` / `foldRight` → ✓ `list.fold`
+```
+✗ xs.foldLeft(0, (acc, x) => acc + x)
+✓ list.fold(xs, 0, (acc, x) => acc + x)
+```
+
+### ✗ `Char` type → ✓ `String`
+Almide has no `Char` type. Single characters are `String`: `"a"`, `"("`.
+
+### ✗ `break` / `continue` → ✓ recursion
+Use a recursive helper function instead of loop control keywords.
+```
+✗ while cond { if done then break }
+✓ fn loop(state) = if done then state else loop(next_state)
+```
+
+### ✗ `return expr` → ✓ just `expr`
+The last expression in a block is the return value. No `return` keyword.
+```
+✗ fn f(x: Int) -> Int = { return x + 1 }
+✓ fn f(x: Int) -> Int = x + 1
+```
+
+### ✗ Reassigning function parameters → ✓ `var` copy
+Function parameters are immutable. Copy to `var` first.
+```
+✗ fn f(n: Int) -> Int = { n = n - 1; n }
+✓ fn f(n: Int) -> Int = { var m = n; m = m - 1; m }
+```
