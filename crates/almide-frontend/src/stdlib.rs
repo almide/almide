@@ -124,12 +124,21 @@ pub fn suggest_alias(module: &str, func: &str) -> Option<&'static str> {
         }
         // list operations
         ("list", "push") | ("list", "append") => Some("list.concat (use [xs, [x]] or xs + [x])"),
-        ("list", "contains") => Some("list.has"),
+        ("list", "has") | ("list", "includes") => Some("list.contains"),
         ("list", "find_index") => Some("list.index_of"),
         // string
         ("string", "includes") | ("string", "has") => Some("string.contains"),
         ("string", "index") => Some("string.index_of"),
         ("string", "all") => Some("string.chars + list.all"),
+        // Common LLM hallucinations from MSR testing
+        ("string", "get_char") | ("string", "charAt") | ("string", "get") => Some("string.char_at"),
+        ("string", "from_char") | ("string", "from_char_code") | ("string", "chr") => Some("string.from_codepoint"),
+        ("list", "foldLeft") | ("list", "foldRight") | ("list", "reduce") | ("list", "foldl") | ("list", "foldr") => Some("list.fold"),
+        ("list", "empty") | ("list", "new") => Some("[] (empty list literal)"),
+        ("list", "head") => Some("list.first"),
+        ("list", "tail") => Some("list.drop(xs, 1)"),
+        ("map", "new") | ("map", "empty") => Some("[:] (empty map literal)"),
+        ("map", "has_key") | ("map", "has") | ("map", "includes") => Some("map.contains"),
         _ => None,
     }
 }
