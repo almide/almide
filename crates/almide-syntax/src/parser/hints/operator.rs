@@ -17,7 +17,7 @@ pub fn check(ctx: &HintContext) -> Option<HintResult> {
         // `then` missing
         (TokenType::Then, _, _) => Some(HintResult {
             message: None,
-            hint: "if requires 'then'. Write: if condition then expr else expr".into(),
+            hint: "if requires 'then', not '{'. Write: if x > 0 then \"positive\" else \"negative\"".into(),
         }),
         // `if` without `else`
         (TokenType::Else, _, _) => Some(HintResult {
