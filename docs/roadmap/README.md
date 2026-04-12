@@ -6,7 +6,7 @@
 
 ## Active
 
-14 items
+15 items
 
 | Item | Description |
 |------|-------------|
@@ -24,6 +24,7 @@
 | [Stdlib Defs / Runtime Consistency Check](active/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | [Stdlib Symmetry Audit](active/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
 | [Variant Exhaustiveness Refinement](active/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
+| [Whisper in Pure Almide](active/whisper-almide.md) | Whisper speech recognition implemented entirely in Almide |
 
 ## On Hold
 
