@@ -818,9 +818,11 @@ fn error_unclosed_lambda_params() {
     let errors = parse_errors("fn f() -> Int = {\n  let g = (x => x\n  g(1)\n}");
     assert!(!errors.is_empty());
     let msg = &errors[0];
-    assert!(msg.contains("Expected ')'"), "should mention missing ')': {}", msg);
-    // Lambda context may show as "lambda parameters" or "parenthesized expression"
-    assert!(msg.contains("lambda") || msg.contains("parenthesized"), "should mention context: {}", msg);
+    // Our hint detects `x =>` inside parens and suggests `(x) =>` with parentheses
+    assert!(
+        msg.contains("Lambda parameter must be wrapped") || msg.contains("Expected ')'"),
+        "should mention lambda parens or missing ')': {}", msg
+    );
 }
 
 #[test]

@@ -35,6 +35,10 @@ pub(super) fn register(emitter: &mut WasmEmitter) {
     // __json_remove_path(value: i32, path: i32) -> i32 (Value)
     let rp_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.json_remove_path = emitter.register_func("__json_remove_path", rp_ty);
+
+    // Register at end to avoid shifting existing function indices
+    let esc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.rt.json_escape_string = emitter.register_func("__json_escape_string", esc_ty);
 }
 
 /// Compile all runtime function bodies.
@@ -44,6 +48,45 @@ pub(super) fn compile(emitter: &mut WasmEmitter) {
     compile_json_get_path(emitter);
     compile_json_set_path(emitter);
     compile_json_remove_path(emitter);
+    compile_json_escape_string(emitter);
+}
+
+/// __json_escape_string(str_ptr: i32) -> i32
+/// Escapes \, ", \n, \t, \r in a string for JSON output.
+/// Uses string.replace chain for simplicity and correctness.
+fn compile_json_escape_string(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.json_escape_string];
+
+    // Source chars to escape (single-char strings)
+    let backslash_char = emitter.intern_string("\\");
+    let quote_char = emitter.intern_string("\"");
+    let newline_char = emitter.intern_string("\n");
+    let tab_char = emitter.intern_string("\t");
+    let cr_char = emitter.intern_string("\r");
+
+    // Replacement sequences (two-char strings)
+    let esc_backslash = emitter.intern_string("\\\\");
+    let esc_quote = emitter.intern_string("\\\"");
+    let esc_newline = emitter.intern_string("\\n");
+    let esc_tab = emitter.intern_string("\\t");
+    let esc_cr = emitter.intern_string("\\r");
+
+    let replace = emitter.rt.string.replace;
+
+    // Chain: replace(\, \\) → replace(", \") → replace(\n, \\n) → replace(\t, \\t) → replace(\r, \\r)
+    // Order matters: backslash first to avoid double-escaping
+    // local 0 = input, local 1 = result
+    let mut f = Function::new([(1, ValType::I32)]);
+    wasm!(f, { local_get(0); local_set(1); });
+    // Replace \ first (before others to avoid double-escaping)
+    wasm!(f, { local_get(1); i32_const(backslash_char as i32); i32_const(esc_backslash as i32); call(replace); local_set(1); });
+    wasm!(f, { local_get(1); i32_const(quote_char as i32); i32_const(esc_quote as i32); call(replace); local_set(1); });
+    wasm!(f, { local_get(1); i32_const(newline_char as i32); i32_const(esc_newline as i32); call(replace); local_set(1); });
+    wasm!(f, { local_get(1); i32_const(tab_char as i32); i32_const(esc_tab as i32); call(replace); local_set(1); });
+    wasm!(f, { local_get(1); i32_const(cr_char as i32); i32_const(esc_cr as i32); call(replace); local_set(1); });
+    wasm!(f, { local_get(1); end; });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
 /// __value_stringify(v: i32) -> i32
@@ -108,12 +151,13 @@ fn compile_value_stringify(emitter: &mut WasmEmitter) {
         end;
     });
 
-    // Tag 4: string -> "\"" + s + "\""
+    // Tag 4: string -> "\"" + escape(s) + "\""
+    let escape_fn = emitter.rt.json_escape_string;
     wasm!(f, {
         local_get(1); i32_const(4); i32_eq;
         if_empty;
           i32_const(quote_str as i32);
-          local_get(0); i32_load(4);
+          local_get(0); i32_load(4); call(escape_fn);
           call(concat);
           i32_const(quote_str as i32);
           call(concat);
