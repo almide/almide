@@ -201,7 +201,7 @@ fn needs_clone(ty: &Ty) -> bool {
     match ty {
         Ty::String | Ty::Applied(_, _) |
         Ty::Record { .. } | Ty::OpenRecord { .. } |
-        Ty::Named(_, _) |
+        Ty::Named(_, _) | Ty::Matrix | Ty::Bytes |
         Ty::Variant { .. } | Ty::Fn { .. } |
         Ty::TypeVar(_) => true,
         // A tuple needs cloning when any element needs cloning. Pure numeric
