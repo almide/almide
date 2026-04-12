@@ -58,8 +58,8 @@ fn split_top_level_comma(s: &str) -> Option<usize> {
     let bytes = s.as_bytes();
     for i in 0..bytes.len() {
         match bytes[i] {
-            b'[' | b'{' => depth += 1,
-            b']' | b'}' => depth -= 1,
+            b'[' | b'{' | b'(' => depth += 1,
+            b']' | b'}' | b')' => depth -= 1,
             b',' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b' ' => return Some(i),
             _ => {}
         }
