@@ -1,0 +1,46 @@
+// Regression test: json.stringify must escape newlines, tabs, quotes in strings.
+//
+// Previously, json.stringify output raw newlines inside JSON string values,
+// producing invalid JSON that failed HTTP API calls.
+
+import json
+
+test "stringify escapes newline" {
+  let v = json.from_string("line1\nline2")
+  let s = json.stringify(v)
+  assert(not string.contains(s, "\n"))
+  assert(string.contains(s, "\\n"))
+}
+
+test "stringify escapes tab" {
+  let v = json.from_string("a\tb")
+  let s = json.stringify(v)
+  assert(string.contains(s, "\\t"))
+}
+
+test "stringify escapes quotes" {
+  let v = json.from_string("say \"hello\"")
+  let s = json.stringify(v)
+  assert(string.contains(s, "\\\""))
+}
+
+let NL = string.from_codepoint(10)
+
+test "stringify round-trips through parse" {
+  let original = "hello" + NL + "world"
+  let stringified = json.stringify(json.from_string(original))
+  match json.parse(stringified) {
+    ok(parsed) => assert_eq(json.as_string(parsed) |> option.unwrap_or(""), original)
+    err(e) => assert(false)
+  }
+}
+
+test "stringify object with newline value" {
+  let msg = "hello" + NL + "world"
+  let obj = json.object([("msg", json.from_string(msg))])
+  let s = json.stringify(obj)
+  match json.parse(s) {
+    ok(parsed) => assert_eq(json.get_string(parsed, "msg") |> option.unwrap_or(""), msg)
+    err(_) => assert(false)
+  }
+}
