@@ -1,4 +1,4 @@
-<!-- description: Daily automated MSR loop — LLMs write, compile, fix, retry; track modification survival rate -->
+<!-- description: Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration -->
 # Almide Dojo — Continuous MSR Measurement
 
 ## Motivation
