@@ -160,10 +160,10 @@ rust = "almide_rt_fs_temp_dir()"
 ts = "__almd_fs.temp_dir()"
 
 [stat]
-description = "Get file metadata: size, type, and modification time"
-example = 'let info = fs.stat("file.txt") // {size, is_dir, is_file, modified}'
+description = "Get file metadata as (size, is_dir, is_file, modified) tuple. Use destructuring at the call site."
+example = 'let (size, is_dir, is_file, modified) = fs.stat("file.txt")!'
 params = [{ name = "path", type = "String" }]
-return = "Result[{size: Int, is_dir: Bool, is_file: Bool, modified: Int}, String]"
+return = "Result[(Int, Bool, Bool, Int), String]"
 effect = true
 rust = "almide_rt_fs_stat(&*{path})?"
 ts = "__almd_fs.stat({path})"

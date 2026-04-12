@@ -53,10 +53,10 @@ rust = "almide_rt_process_exec_with_stdin(&*{cmd}, &{ let __a: Vec<String> = {ar
 ts = "__almd_process.exec_with_stdin({cmd}, {args}, {input})"
 
 [exec_status]
-description = "Execute a command and return exit code, stdout, and stderr"
-example = 'let r = process.exec_status("ls", []) // {code, stdout, stderr}'
+description = "Execute a command and return (code, stdout, stderr) as a tuple. Use destructuring at the call site."
+example = 'let (code, stdout, stderr) = process.exec_status("ls", [])!'
 params = [{ name = "cmd", type = "String" }, { name = "args", type = "List[String]" }]
-return = "Result[{code: Int, stdout: String, stderr: String}, String]"
+return = "Result[(Int, String, String), String]"
 effect = true
 rust = "almide_rt_process_exec_status(&*{cmd}, &{ let __a: Vec<String> = {args}; __a })?"
 ts = "__almd_process.exec_status({cmd}, {args})"
