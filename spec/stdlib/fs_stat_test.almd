@@ -1,26 +1,22 @@
-// wasm:skip — fs.stat is native-only
 import fs
 
 test "fs.stat returns tuple for existing file" {
-  // Create a temp file with known content
-  let tmp = fs.temp_dir() + "/almide-stat-test.txt"
-  fs.write(tmp, "hello")!
-  let (size, is_dir, is_file, _modified) = fs.stat(tmp)!
-  assert_eq(size, 5)
+  // Stat the test file itself — guaranteed to exist when this test runs
+  let (size, is_dir, is_file, modified) = fs.stat("spec/stdlib/fs_stat_test.almd")!
+  assert(size > 0)
   assert_eq(is_dir, false)
   assert_eq(is_file, true)
-  fs.remove(tmp)!
+  assert(modified > 0)
 }
 
 test "fs.stat returns tuple for directory" {
-  let tmp = fs.temp_dir()
-  let (_size, is_dir, is_file, _modified) = fs.stat(tmp)!
+  let (_size, is_dir, is_file, _modified) = fs.stat("spec")!
   assert_eq(is_dir, true)
   assert_eq(is_file, false)
 }
 
 test "fs.stat on nonexistent path returns err" {
-  let r = fs.stat("/nonexistent/path/xyz/12345")
+  let r = fs.stat("nonexistent_path_xyz_12345")
   match r {
     ok(_) => assert(false)
     err(msg) => assert(string.len(msg) > 0)
