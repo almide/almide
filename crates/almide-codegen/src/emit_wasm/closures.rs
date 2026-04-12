@@ -409,22 +409,17 @@ fn collect_pattern_var_ids(pattern: &almide_ir::IrPattern, out: &mut HashSet<u32
 
 /// Resolve a lambda parameter type when it's TypeVar or Unknown.
 fn resolve_lambda_param_ty(param_ty: &almide_lang::types::Ty, _body_ty: &almide_lang::types::Ty, var_table: &almide_ir::VarTable, vid: VarId) -> almide_lang::types::Ty {
-    match param_ty {
-        _ if param_ty.is_unresolved_structural() => {
-            // Try VarTable for the resolved type
-            if (vid.0 as usize) < var_table.len() {
-                let info = var_table.get(vid);
-                if !info.ty.is_unresolved_structural() {
-                    return info.ty.clone();
-                }
-            }
-            // Fallback: default to Int. This matches the most common case (numeric).
-            // For non-numeric types (String, List, etc.), the caller must resolve
-            // the type from call context (e.g., list element type, fn signature).
-            almide_lang::types::Ty::Int
+    // Always try VarTable first — it has the type-checker's resolved types.
+    if (vid.0 as usize) < var_table.len() {
+        let info = var_table.get(vid);
+        if !info.ty.is_unresolved() {
+            return info.ty.clone();
         }
-        _ => param_ty.clone(),
     }
+    if !param_ty.is_unresolved() {
+        return param_ty.clone();
+    }
+    almide_lang::types::Ty::Int
 }
 
 /// Resolve the effective type of an expression tree, using VarTable for Var references
@@ -496,6 +491,23 @@ pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &almide_ir::VarTable, re
         IrExprKind::Block { expr: Some(e), .. } => {
             resolve_expr_ty(e, var_table, record_fields)
         }
+        // BinOp: resolve from operands (e.g. pair.0 + pair.1 → Float)
+        IrExprKind::BinOp { left, right, .. } => {
+            let lt = resolve_expr_ty(left, var_table, record_fields);
+            if !lt.is_unresolved() { lt }
+            else { resolve_expr_ty(right, var_table, record_fields) }
+        }
+        // TupleIndex: resolve from tuple element type
+        IrExprKind::TupleIndex { object, index } => {
+            let obj_ty = resolve_expr_ty(object, var_table, record_fields);
+            if let Ty::Tuple(elems) = &obj_ty {
+                elems.get(*index).cloned().unwrap_or(expr.ty.clone())
+            } else {
+                expr.ty.clone()
+            }
+        }
+        // If: resolve from then branch
+        IrExprKind::If { then, .. } => resolve_expr_ty(then, var_table, record_fields),
         _ => expr.ty.clone(),
     }
 }

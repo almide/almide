@@ -806,6 +806,8 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         // to VarTable (for params) and expression inspection (for ret).
         let params: Vec<ValType> = func.params.iter()
             .filter_map(|p| {
+                if func.name.contains("closure") || func.name.contains("lambda") {
+                }
                 let pty = if p.ty.is_unresolved_structural() {
                     let vt_ty = &program.var_table.get(p.var).ty;
                     if !vt_ty.is_unresolved_structural() {
@@ -819,6 +821,8 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 values::ty_to_valtype(&pty)
             })
             .collect();
+        if func.name.contains("closure") || func.name.contains("lambda") {
+        }
         let resolved_ret_ty = if func.ret_ty.is_unresolved() {
             closures::resolve_expr_ty(&func.body, &program.var_table, &emitter.record_fields)
         } else {

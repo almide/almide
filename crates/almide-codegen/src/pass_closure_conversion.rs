@@ -798,7 +798,14 @@ fn propagate_list_elem_to_lambda_params(
             None
         })
     });
-    let Some(elem_ty) = list_elem else { return args; };
+    let Some(elem_ty) = list_elem else {
+        return args;
+    };
+    // Debug: check all lambda arg types BEFORE and AFTER propagation
+    for (i, arg) in args.iter().enumerate() {
+        if let IrExprKind::Lambda { params, .. } = &arg.kind {
+        }
+    }
     // Walk args and update any inline Lambda whose first param is unresolved.
     args.into_iter().map(|arg| {
         match arg.kind {
@@ -813,12 +820,19 @@ fn propagate_list_elem_to_lambda_params(
                 }
                 // Also refresh the Lambda's outer `Ty::Fn.params[0]` so later
                 // lookups of `lambda.ty` see the resolved element type.
+                // Also infer the return type from the body if still unresolved.
+                // For `list.map(xs, (pair) => pair.0 + pair.1)` where pair: (Float, Float),
+                // the return type is Float — but the type checker may have left it as TypeVar.
+                let body_ret = infer_body_result_ty_with_params(&body, &params);
                 let refreshed_ty = match arg.ty {
                     Ty::Fn { params: fparams, ret } => {
                         let new_params: Vec<Ty> = fparams.into_iter().enumerate().map(|(i, p)| {
                             if i == 0 && p.is_unresolved_structural() { elem_ty.clone() } else { p }
                         }).collect();
-                        Ty::Fn { params: new_params, ret }
+                        let new_ret = if ret.is_unresolved_structural() {
+                            Box::new(body_ret.unwrap_or(*ret))
+                        } else { ret };
+                        Ty::Fn { params: new_params, ret: new_ret }
                     }
                     other => other,
                 };
@@ -835,6 +849,32 @@ fn propagate_list_elem_to_lambda_params(
 
 /// Infer a Lambda body's result type when both its own `.ty` and the
 /// enclosing `Ty::Fn` `ret` are unresolved. Traces the "tail" of the
+/// Infer body return type using resolved lambda parameter types.
+/// For `(pair) => pair.0 + pair.1` where pair: (Float, Float),
+/// TupleIndex(.0) on Tuple([Float, Float]) gives Float, so BinOp returns Float.
+fn infer_body_result_ty_with_params(expr: &IrExpr, params: &[(VarId, Ty)]) -> Option<Ty> {
+    fn resolve_tuple_index(expr: &IrExpr, params: &[(VarId, Ty)]) -> Option<Ty> {
+        if let IrExprKind::TupleIndex { object, index } = &expr.kind {
+            if let IrExprKind::Var { id } = &object.kind {
+                if let Some((_, ty)) = params.iter().find(|(vid, _)| vid == id) {
+                    if let Ty::Tuple(elems) = ty {
+                        return elems.get(*index).cloned();
+                    }
+                }
+            }
+        }
+        None
+    }
+    match &expr.kind {
+        IrExprKind::BinOp { left, right, .. } => {
+            resolve_tuple_index(left, params)
+                .or_else(|| resolve_tuple_index(right, params))
+        }
+        IrExprKind::Block { expr: Some(tail), .. } => infer_body_result_ty_with_params(tail, params),
+        _ => None,
+    }
+}
+
 /// expression tree (final value of blocks, branches of if/match, binop
 /// results) to find a concrete type.
 fn infer_body_result_ty(expr: &IrExpr) -> Option<Ty> {
