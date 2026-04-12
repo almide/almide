@@ -215,7 +215,9 @@ fn load_self_module(
             if is_self {
                 if path.len() >= 2 {
                     let sub_mod_path = &path[1..];
-                    let sub_mod_name = alias.as_deref().unwrap_or_else(|| sub_mod_path.last().expect("guarded by path.len() >= 2"));
+                    // Always use canonical name (last path segment), not alias.
+                    // Aliases are handled by import_table — module identity must be stable.
+                    let sub_mod_name = sub_mod_path.last().expect("guarded by path.len() >= 2").as_str();
                     load_self_module(sub_mod_name, sub_mod_path, src_dir, base_dir, dep_paths, loaded, loaded_names, loading, false)?;
                 }
             } else {
