@@ -232,13 +232,13 @@ fn rx_find_at(rx: &RxPat, s: &[char], start: usize) -> Option<(usize, usize, RxC
 
 // ---- Public API ----
 
-fn almide_regex_is_match(pat: &str, s: &str) -> bool {
+pub fn almide_regex_is_match(pat: &str, s: &str) -> bool {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     rx_find_at(&rx, &chars, 0).is_some()
 }
 
-fn almide_regex_full_match(pat: &str, s: &str) -> bool {
+pub fn almide_regex_full_match(pat: &str, s: &str) -> bool {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut caps: RxCaps = vec![None; rx.ncap];
@@ -249,13 +249,13 @@ fn almide_regex_full_match(pat: &str, s: &str) -> bool {
     }
 }
 
-fn almide_regex_find(pat: &str, s: &str) -> Option<String> {
+pub fn almide_regex_find(pat: &str, s: &str) -> Option<String> {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     rx_find_at(&rx, &chars, 0).map(|(start, end, _)| chars[start..end].iter().collect())
 }
 
-fn almide_regex_find_all(pat: &str, s: &str) -> Vec<String> {
+pub fn almide_regex_find_all(pat: &str, s: &str) -> Vec<String> {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut results: Vec<String> = vec![];
@@ -271,7 +271,7 @@ fn almide_regex_find_all(pat: &str, s: &str) -> Vec<String> {
     results
 }
 
-fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> String {
+pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> String {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut result = String::new();
@@ -289,7 +289,7 @@ fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> String {
     result
 }
 
-fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> String {
+pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> String {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     if let Some((start, end, _)) = rx_find_at(&rx, &chars, 0) {
@@ -303,7 +303,7 @@ fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> String {
     }
 }
 
-fn almide_regex_split(pat: &str, s: &str) -> Vec<String> {
+pub fn almide_regex_split(pat: &str, s: &str) -> Vec<String> {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut results: Vec<String> = vec![];
@@ -330,7 +330,7 @@ fn almide_regex_split(pat: &str, s: &str) -> Vec<String> {
     results
 }
 
-fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<String>> {
+pub fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<String>> {
     let rx = rx_compile(pat);
     if rx.ncap == 0 { return None; }
     let chars: Vec<char> = s.chars().collect();

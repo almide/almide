@@ -24,7 +24,7 @@ ts = "__almd_int.parse({s})"
 
 [from_hex]
 description = "Parse a hexadecimal string into an integer. Returns err if the string is not valid hex."
-example = "int.parse_hex(\"ff\") // => ok(255)"
+example = "int.from_hex(\"ff\") // => ok(255)"
 params = [{ name = "s", type = "String" }]
 return = "Result[Int, String]"
 rust = "almide_rt_int_parse_hex(&*{s})"

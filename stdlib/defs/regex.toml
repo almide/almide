@@ -56,7 +56,7 @@ ts = "__almd_regex.split({pat}, {s})"
 
 [captures]
 description = "Extract capture groups from the first match."
-example = 'regex.captures("(\\w+)@(\\w+)", "user@host") // => some(["user@host", "user", "host"])'
+example = 'regex.captures("(\\w+)@(\\w+)", "user@host") // => some(["user", "host"])'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
 return = "Option[List[String]]"
 rust = "almide_regex_captures(&{pat}, &{s})"
