@@ -349,8 +349,10 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         }
     }
 
-    // Type declarations
+    // Type declarations — track emitted names to deduplicate across modules
+    let mut emitted_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     for td in &program.type_decls {
+        emitted_types.insert(td.name.as_str().to_string());
         let mut rendered = render_type_decl(&ctx, td);
         if let Some(ref doc) = td.doc {
             let doc_lines: String = doc.lines()
@@ -441,9 +443,13 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             minimal_generic_bounds: is_bundled,
             repr_c: ctx.repr_c,
         };
-        // Module type decls
+        // Module type decls — skip if already emitted by parent or another module
         for td in &module.type_decls {
-            parts.push(render_type_decl(&mod_ctx, td));
+            let name = td.name.as_str().to_string();
+            if !emitted_types.contains(&name) {
+                emitted_types.insert(name);
+                parts.push(render_type_decl(&mod_ctx, td));
+            }
         }
         // Module functions (prefixed with module name or versioned name)
         let mod_ident = module.versioned_name
