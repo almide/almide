@@ -28,6 +28,15 @@ The core metric is **modification survival rate** — how often code still compi
 
 The flywheel: LLMs write Almide reliably → more code is produced → training data grows → LLMs write it better → the ecosystem expands.
 
+### MSR Scorecard
+
+Measured by [almide-dojo](https://github.com/almide/almide-dojo) across 30 tasks (basic / intermediate / advanced):
+
+| Model | Pass Rate | 1-Shot Rate |
+|---|---|---|
+| Claude Sonnet 4.6 | **100%** (30/30) | 47% |
+| Llama 3.3 70B | 61% (17/28) | 33% |
+
 ## Quick Start
 
 **[Try it in your browser →](https://almide.github.io/playground/)** — No installation required.
