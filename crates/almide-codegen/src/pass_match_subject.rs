@@ -146,8 +146,11 @@ fn transform_match_subject(subject: &mut Box<IrExpr>, arms: &[IrMatchArm]) {
     }
 
     // Option<String> subject with Some("literal") patterns → wrap with method call .as_deref()
+    // Also trigger when inner type is Unknown/TypeVar — if patterns contain string literals,
+    // the subject is Option<String> even if not fully resolved at this point.
     if let Ty::Applied(TypeConstructorId::Option, args) = &subject.ty {
-        if args.len() == 1 && matches!(&args[0], Ty::String) {
+        let inner_is_string = args.len() == 1 && matches!(&args[0], Ty::String | Ty::Unknown | Ty::TypeVar(_));
+        if inner_is_string {
             let has_some_str_pat = arms.iter().any(|a| {
                 if let IrPattern::Some { inner } = &a.pattern {
                     matches!(inner.as_ref(), IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. }))
