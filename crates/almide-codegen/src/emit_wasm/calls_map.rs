@@ -32,6 +32,11 @@ impl FuncCompiler<'_> {
             }
             "get" => {
                 // get(m, key) → Option[V]
+                //
+                // Emits an Option pointer (i32, where 0 = none, non-zero = some(val_ptr)).
+                // Must use `br` to exit the loop on match — NOT `return_` — because
+                // this emit is inlined into the caller's function body, and the
+                // caller may have a different return type.
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let _val_ty = self.map_val_ty(&args[0].ty);
@@ -41,11 +46,13 @@ impl FuncCompiler<'_> {
                 let sk_i64 = self.scratch.alloc_i64();
                 let i = self.scratch.alloc_i32();
                 let val_copy = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]); // key
                 self.emit_search_key_store(&key_ty, sk_i32, sk_i64);
                 wasm!(self.func, {
+                    i32_const(0); local_set(result); // default: none
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
@@ -58,7 +65,7 @@ impl FuncCompiler<'_> {
                 self.emit_key_eq(&key_ty);
                 wasm!(self.func, {
                       if_empty;
-                        // Found: return some(val)
+                        // Found: build some(val) and stash in `result`, then exit loop
                         i32_const(vs as i32); call(self.emitter.rt.alloc); local_set(val_copy);
                         local_get(val_copy);
                         local_get(map_ptr); i32_const(4); i32_add;
@@ -67,13 +74,14 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_elem_copy_sized(vs);
                 wasm!(self.func, {
-                        local_get(val_copy); return_;
+                        local_get(val_copy); local_set(result); br(2);
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    i32_const(0); // none
+                    local_get(result);
                 });
+                self.scratch.free_i32(result);
                 self.scratch.free_i32(val_copy);
                 self.scratch.free_i32(i);
                 self.scratch.free_i64(sk_i64);
@@ -81,20 +89,26 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(map_ptr);
             }
             "get_or" => {
+                // get_or(m, key, default) → V
+                //
+                // If key found → return map value. Else → return default.
+                // Must use `br` to exit the loop, NOT `return_` — inline emit.
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
                 let entry = ks + vs;
+                let vt = values::ty_to_valtype(&val_ty).unwrap_or(ValType::I32);
                 let map_ptr = self.scratch.alloc_i32();
                 let sk_i32 = self.scratch.alloc_i32();
                 let sk_i64 = self.scratch.alloc_i64();
                 let i = self.scratch.alloc_i32();
-                let _vt = values::ty_to_valtype(&val_ty).unwrap_or(ValType::I32);
+                let found = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]); // key
                 self.emit_search_key_store(&key_ty, sk_i32, sk_i64);
                 wasm!(self.func, {
+                    i32_const(0); local_set(found);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
@@ -106,20 +120,32 @@ impl FuncCompiler<'_> {
                 self.emit_key_eq(&key_ty);
                 wasm!(self.func, {
                       if_empty;
-                        local_get(map_ptr); i32_const(4); i32_add;
-                        local_get(i); i32_const(entry as i32); i32_mul; i32_add;
-                        i32_const(ks as i32); i32_add;
-                });
-                self.emit_load_at(&val_ty, 0);
-                wasm!(self.func, {
-                        return_;
+                        i32_const(1); local_set(found);
+                        br(2);
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
                 });
-                // Not found: return default
-                self.emit_expr(&args[2]);
+                // If found → load val at (map_ptr + 4 + i*entry + ks); else → emit default.
+                wasm!(self.func, {
+                    local_get(found); i32_eqz;
+                });
+                match vt {
+                    ValType::I64 => { wasm!(self.func, { if_i64; }); }
+                    ValType::F64 => { wasm!(self.func, { if_f64; }); }
+                    _ => { wasm!(self.func, { if_i32; }); }
+                }
+                self.emit_expr(&args[2]); // default
+                wasm!(self.func, { else_; });
+                wasm!(self.func, {
+                    local_get(map_ptr); i32_const(4); i32_add;
+                    local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                    i32_const(ks as i32); i32_add;
+                });
+                self.emit_load_at(&val_ty, 0);
+                wasm!(self.func, { end; });
+                self.scratch.free_i32(found);
                 self.scratch.free_i32(i);
                 self.scratch.free_i64(sk_i64);
                 self.scratch.free_i32(sk_i32);
@@ -136,8 +162,11 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]);
+                // Inline emit: stash result in a local, use `br` to exit (not return_).
+                let contains_result = self.scratch.alloc_i32();
                 self.emit_search_key_store(&key_ty, sk_i32, sk_i64);
                 wasm!(self.func, {
+                    i32_const(0); local_set(contains_result); // default: not found
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
@@ -148,12 +177,16 @@ impl FuncCompiler<'_> {
                 self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
                 self.emit_key_eq(&key_ty);
                 wasm!(self.func, {
-                      if_empty; i32_const(1); return_; end;
+                      if_empty;
+                        i32_const(1); local_set(contains_result);
+                        br(2);
+                      end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    i32_const(0);
+                    local_get(contains_result);
                 });
+                self.scratch.free_i32(contains_result);
                 self.scratch.free_i32(i);
                 self.scratch.free_i64(sk_i64);
                 self.scratch.free_i32(sk_i32);

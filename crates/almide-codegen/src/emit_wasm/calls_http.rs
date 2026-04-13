@@ -98,17 +98,21 @@ impl FuncCompiler<'_> {
             }
             "get_header" => {
                 // http.get_header(resp, key) → Option[String]
+                //
+                // Inline emit: use `br` to exit the search loop, NOT `return_`.
                 let resp = self.scratch.alloc_i32();
                 let key = self.scratch.alloc_i32();
                 let hdrs = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 let pair_ptr = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(resp); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     local_set(key);
+                    i32_const(0); local_set(result); // default: none
                     local_get(resp); i32_load(12); local_set(hdrs);
                     local_get(hdrs); i32_load(0); local_set(len);
                     i32_const(0); local_set(i);
@@ -121,13 +125,15 @@ impl FuncCompiler<'_> {
                       local_get(key);
                       call(self.emitter.rt.string.eq);
                       if_empty;
-                        local_get(pair_ptr); i32_load(4); return_;
+                        local_get(pair_ptr); i32_load(4); local_set(result);
+                        br(2);
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    i32_const(0); // none
+                    local_get(result);
                 });
+                self.scratch.free_i32(result);
                 self.scratch.free_i32(pair_ptr);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(len);
