@@ -504,6 +504,17 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(pos);
                 self.scratch.free_i32(buf);
             }
+            "set_u8" => self.emit_bytes_set_i(args, 1),
+            "set_u32_le" => self.emit_bytes_set_i(args, 4),
+            "set_i32_le" => self.emit_bytes_set_i(args, 4),
+            "set_i64_le" => self.emit_bytes_set_i(args, 8),
+            "set_f64_le" => self.emit_bytes_set_f(args, /*size_bytes=*/8, /*as_f32=*/false),
+            "append_u16_be" => self.emit_bytes_append_i_be(args, 2),
+            "append_u32_be" => self.emit_bytes_append_i_be(args, 4),
+            "append_i32_be" => self.emit_bytes_append_i_be(args, 4),
+            "append_i64_be" => self.emit_bytes_append_i_be(args, 8),
+            "append_f32_be" => self.emit_bytes_append_f_be(args, 4),
+            "append_f64_be" => self.emit_bytes_append_f_be(args, 8),
             "data_ptr" => {
                 // bytes.data_ptr(b) → Int (i64)
                 // Return pointer to data region: buf + 4
@@ -535,6 +546,11 @@ impl FuncCompiler<'_> {
             "read_f16_le" => {
                 self.emit_typed_byte_read(&args[0], &args[1], ByteReadOp::F16Le);
             }
+            "read_u32_be" => self.emit_byte_read_be_int(&args[0], &args[1], 4, /*signed=*/false),
+            "read_i32_be" => self.emit_byte_read_be_int(&args[0], &args[1], 4, true),
+            "read_i64_be" => self.emit_byte_read_be_int(&args[0], &args[1], 8, true),
+            "read_f32_be" => self.emit_byte_read_be_float(&args[0], &args[1], 4),
+            "read_f64_be" => self.emit_byte_read_be_float(&args[0], &args[1], 8),
             "read_string_at" => {
                 // bytes.read_string_at(b, pos, len) → String
                 // Copy `len` bytes from [data + pos] into a newly allocated
@@ -660,10 +676,13 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(buf);
             }
             "read_i32_le_array" | "read_u32_le_array" | "read_i64_le_array"
-            | "read_f32_le_array" | "read_f64_le_array" | "read_f16_le_array" => {
-                // bytes.read_XX_le_array(b, pos, count) → List[T]
+            | "read_f32_le_array" | "read_f64_le_array" | "read_f16_le_array"
+            | "read_i32_be_array" | "read_u32_be_array" | "read_i64_be_array"
+            | "read_f32_be_array" | "read_f64_be_array" => {
+                // bytes.read_XX_<endian>_array(b, pos, count) → List[T]
                 // Element width in source bytes; output cell is always 8 bytes
                 // (Almide Int = i64, Float = f64).
+                let is_be = method.contains("_be_");
                 let buf = self.scratch.alloc_i32();
                 let pos = self.scratch.alloc_i32();
                 let n = self.scratch.alloc_i32();
@@ -671,8 +690,8 @@ impl FuncCompiler<'_> {
                 let i = self.scratch.alloc_i32();
                 let elem_bytes: i32 = match method {
                     "read_f16_le_array" => 2,
-                    "read_i64_le_array" | "read_f64_le_array" => 8,
-                    _ => 4, // i32 / u32 / f32
+                    "read_i64_le_array" | "read_f64_le_array" | "read_i64_be_array" | "read_f64_be_array" => 8,
+                    _ => 4, // i32 / u32 / f32 (LE or BE)
                 };
                 let out_bytes: i32 = 8;  // list elem size (i64 or f64)
                 self.emit_expr(&args[0]);
@@ -696,31 +715,89 @@ impl FuncCompiler<'_> {
                       local_get(buf); i32_const(4); i32_add; local_get(pos); i32_add;
                       local_get(i); i32_const(elem_bytes); i32_mul; i32_add;
                 });
-                match method {
-                    "read_i32_le_array" => {
-                        wasm!(self.func, { i32_load(0); i64_extend_i32_s; i64_store(0); });
-                    }
-                    "read_u32_le_array" => {
-                        wasm!(self.func, { i32_load(0); i64_extend_i32_u; i64_store(0); });
-                    }
-                    "read_i64_le_array" => {
-                        wasm!(self.func, { i64_load(0); i64_store(0); });
-                    }
-                    "read_f32_le_array" => {
-                        wasm!(self.func, { f32_load(0); f64_promote_f32; f64_store(0); });
-                    }
-                    "read_f64_le_array" => {
-                        wasm!(self.func, { f64_load(0); f64_store(0); });
-                    }
-                    "read_f16_le_array" => {
-                        // f16 bits → f64 via runtime
+                if is_be {
+                    // BE path: load each byte and reassemble manually.
+                    // Stack already has dst address. Save it, then build value.
+                    let dst_addr = self.scratch.alloc_i32();
+                    let src_addr = self.scratch.alloc_i32();
+                    let acc = self.scratch.alloc_i64();
+                    wasm!(self.func, { local_set(src_addr); local_set(dst_addr); });
+                    // Build acc = (b[0] << (8*(n-1))) | (b[1] << (8*(n-2))) | ... | b[n-1]
+                    wasm!(self.func, { i64_const(0); local_set(acc); });
+                    for i in 0..(elem_bytes as u32) {
+                        let shift = 8 * ((elem_bytes as u32) - 1 - i) as i64;
                         wasm!(self.func, {
-                            i32_load16_u(0);
-                            call(self.emitter.rt.bytes_f16_to_f64);
-                            f64_store(0);
+                            local_get(acc);
+                            local_get(src_addr);
+                            i32_load8_u(i as u64);
+                            i64_extend_i32_u;
+                            i64_const(shift); i64_shl;
+                            i64_or;
+                            local_set(acc);
                         });
                     }
-                    _ => {}
+                    // Now write into dst_addr based on method
+                    match method {
+                        "read_i32_be_array" => {
+                            // sign-extend 32-bit value
+                            wasm!(self.func, {
+                                local_get(dst_addr);
+                                local_get(acc); i32_wrap_i64; i64_extend_i32_s;
+                                i64_store(0);
+                            });
+                        }
+                        "read_u32_be_array" => {
+                            wasm!(self.func, { local_get(dst_addr); local_get(acc); i64_store(0); });
+                        }
+                        "read_i64_be_array" => {
+                            wasm!(self.func, { local_get(dst_addr); local_get(acc); i64_store(0); });
+                        }
+                        "read_f32_be_array" => {
+                            wasm!(self.func, {
+                                local_get(dst_addr);
+                                local_get(acc); i32_wrap_i64; f32_reinterpret_i32; f64_promote_f32;
+                                f64_store(0);
+                            });
+                        }
+                        "read_f64_be_array" => {
+                            wasm!(self.func, {
+                                local_get(dst_addr);
+                                local_get(acc); f64_reinterpret_i64;
+                                f64_store(0);
+                            });
+                        }
+                        _ => {}
+                    }
+                    self.scratch.free_i64(acc);
+                    self.scratch.free_i32(src_addr);
+                    self.scratch.free_i32(dst_addr);
+                } else {
+                    match method {
+                        "read_i32_le_array" => {
+                            wasm!(self.func, { i32_load(0); i64_extend_i32_s; i64_store(0); });
+                        }
+                        "read_u32_le_array" => {
+                            wasm!(self.func, { i32_load(0); i64_extend_i32_u; i64_store(0); });
+                        }
+                        "read_i64_le_array" => {
+                            wasm!(self.func, { i64_load(0); i64_store(0); });
+                        }
+                        "read_f32_le_array" => {
+                            wasm!(self.func, { f32_load(0); f64_promote_f32; f64_store(0); });
+                        }
+                        "read_f64_le_array" => {
+                            wasm!(self.func, { f64_load(0); f64_store(0); });
+                        }
+                        "read_f16_le_array" => {
+                            // f16 bits → f64 via runtime
+                            wasm!(self.func, {
+                                i32_load16_u(0);
+                                call(self.emitter.rt.bytes_f16_to_f64);
+                                f64_store(0);
+                            });
+                        }
+                        _ => {}
+                    }
                 }
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -863,6 +940,216 @@ impl FuncCompiler<'_> {
             }
         }
         self.scratch.free_f64(fval);
+        self.scratch.free_i32(new_buf);
+        self.scratch.free_i32(old_len);
+        self.scratch.free_i32(buf);
+    }
+
+    /// Emit `bytes.read_<int_type>_be(b, pos)` — single-value big-endian integer read.
+    /// Pushes an i64 onto the WASM stack (the Almide `Int`).
+    pub(super) fn emit_byte_read_be_int(&mut self, buf_expr: &IrExpr, pos_expr: &IrExpr, size_bytes: u32, signed: bool) {
+        let buf = self.scratch.alloc_i32();
+        let src = self.scratch.alloc_i32();
+        let acc = self.scratch.alloc_i64();
+        self.emit_expr(buf_expr);
+        wasm!(self.func, { local_set(buf); });
+        self.emit_expr(pos_expr);
+        wasm!(self.func, {
+            i32_wrap_i64;
+            local_get(buf); i32_const(4); i32_add; i32_add; local_set(src);
+            i64_const(0); local_set(acc);
+        });
+        for i in 0..size_bytes {
+            let shift = 8 * (size_bytes - 1 - i) as i64;
+            wasm!(self.func, {
+                local_get(acc);
+                local_get(src);
+                i32_load8_u(i as u64);
+                i64_extend_i32_u;
+                i64_const(shift); i64_shl;
+                i64_or;
+                local_set(acc);
+            });
+        }
+        if signed && size_bytes < 8 {
+            // Sign-extend a sub-64-bit value to i64. Shift left then arithmetic right.
+            let pad = 64 - 8 * size_bytes as i64;
+            wasm!(self.func, {
+                local_get(acc); i64_const(pad); i64_shl;
+                i64_const(pad); i64_shr_s;
+            });
+        } else {
+            wasm!(self.func, { local_get(acc); });
+        }
+        self.scratch.free_i64(acc);
+        self.scratch.free_i32(src);
+        self.scratch.free_i32(buf);
+    }
+
+    /// Emit `bytes.read_<float_type>_be(b, pos)` — single-value BE float read.
+    pub(super) fn emit_byte_read_be_float(&mut self, buf_expr: &IrExpr, pos_expr: &IrExpr, size_bytes: u32) {
+        // Reuse the int reader to get the bit pattern, then reinterpret.
+        self.emit_byte_read_be_int(buf_expr, pos_expr, size_bytes, /*signed=*/false);
+        if size_bytes == 4 {
+            wasm!(self.func, { i32_wrap_i64; f32_reinterpret_i32; f64_promote_f32; });
+        } else {
+            wasm!(self.func, { f64_reinterpret_i64; });
+        }
+    }
+
+    /// Emit `bytes.set_<int_type>_le(b, pos, val)` — overwrite an integer in place.
+    /// Args: `b: Bytes`, `pos: Int`, `val: Int`. Returns Unit.
+    pub(super) fn emit_bytes_set_i(&mut self, args: &[IrExpr], size_bytes: u32) {
+        let buf = self.scratch.alloc_i32();
+        let pos = self.scratch.alloc_i32();
+        let val_i64 = self.scratch.alloc_i64();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]);
+        wasm!(self.func, { i32_wrap_i64; local_set(pos); });
+        self.emit_expr(&args[2]);
+        wasm!(self.func, {
+            local_set(val_i64);
+            // address = buf + 4 + pos
+            local_get(buf); i32_const(4); i32_add; local_get(pos); i32_add;
+        });
+        match size_bytes {
+            1 => { wasm!(self.func, { local_get(val_i64); i32_wrap_i64; i32_store8(0); }); }
+            2 => { wasm!(self.func, { local_get(val_i64); i32_wrap_i64; i32_store16(0); }); }
+            4 => { wasm!(self.func, { local_get(val_i64); i32_wrap_i64; i32_store(0); }); }
+            8 => { wasm!(self.func, { local_get(val_i64); i64_store(0); }); }
+            _ => panic!("emit_bytes_set_i: unsupported size_bytes {size_bytes}"),
+        }
+        self.scratch.free_i64(val_i64);
+        self.scratch.free_i32(pos);
+        self.scratch.free_i32(buf);
+    }
+
+    /// Emit `bytes.set_<float_type>_le(b, pos, val)`.
+    pub(super) fn emit_bytes_set_f(&mut self, args: &[IrExpr], size_bytes: u32, as_f32: bool) {
+        let buf = self.scratch.alloc_i32();
+        let pos = self.scratch.alloc_i32();
+        let fval = self.scratch.alloc_f64();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]);
+        wasm!(self.func, { i32_wrap_i64; local_set(pos); });
+        self.emit_expr(&args[2]);
+        wasm!(self.func, {
+            local_set(fval);
+            local_get(buf); i32_const(4); i32_add; local_get(pos); i32_add;
+        });
+        if as_f32 {
+            wasm!(self.func, { local_get(fval); f32_demote_f64; f32_store(0); });
+        } else {
+            wasm!(self.func, { local_get(fval); f64_store(0); });
+        }
+        let _ = size_bytes; // fixed by `as_f32` (4 vs 8); kept for parity with append helper
+        self.scratch.free_f64(fval);
+        self.scratch.free_i32(pos);
+        self.scratch.free_i32(buf);
+    }
+
+    /// Emit `bytes.append_<int_type>_be(b, val)`.
+    /// WASM has no native big-endian store, so we write byte-by-byte from MSB to LSB.
+    pub(super) fn emit_bytes_append_i_be(&mut self, args: &[IrExpr], size_bytes: u32) {
+        let buf = self.scratch.alloc_i32();
+        let old_len = self.scratch.alloc_i32();
+        let new_buf = self.scratch.alloc_i32();
+        let val_i64 = self.scratch.alloc_i64();
+        let dst = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]);
+        wasm!(self.func, {
+            local_set(val_i64);
+            local_get(buf); i32_load(0); local_set(old_len);
+            local_get(old_len); i32_const(4 + size_bytes as i32); i32_add;
+            call(self.emitter.rt.alloc); local_set(new_buf);
+            local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(0);
+            local_get(new_buf); i32_const(4); i32_add;
+            local_get(buf); i32_const(4); i32_add;
+            local_get(old_len);
+            memory_copy;
+            local_get(new_buf); i32_const(4); i32_add; local_get(old_len); i32_add;
+            local_set(dst);
+        });
+        // Write MSB-first: byte at offset i = (val >> (8*(size-1-i))) & 0xff
+        for i in 0..size_bytes {
+            let shift = 8 * (size_bytes - 1 - i) as i64;
+            wasm!(self.func, {
+                local_get(dst);
+                local_get(val_i64); i64_const(shift); i64_shr_u;
+                i32_wrap_i64;
+                i32_const(0xFF); i32_and;
+                i32_store8(i as u64);
+            });
+        }
+        if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
+            if let Some(&local_idx) = self.var_map.get(&id.0) {
+                wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
+            }
+        }
+        self.scratch.free_i32(dst);
+        self.scratch.free_i64(val_i64);
+        self.scratch.free_i32(new_buf);
+        self.scratch.free_i32(old_len);
+        self.scratch.free_i32(buf);
+    }
+
+    /// Emit `bytes.append_<float_type>_be(b, val)` — reinterpret as int bits, then BE store.
+    pub(super) fn emit_bytes_append_f_be(&mut self, args: &[IrExpr], size_bytes: u32) {
+        let buf = self.scratch.alloc_i32();
+        let old_len = self.scratch.alloc_i32();
+        let new_buf = self.scratch.alloc_i32();
+        let bits = self.scratch.alloc_i64();
+        let dst = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]); // f64 on stack
+        if size_bytes == 4 {
+            // Demote to f32, reinterpret as i32 bits, extend to i64 for shifting.
+            wasm!(self.func, {
+                f32_demote_f64;
+                i32_reinterpret_f32;
+                i64_extend_i32_u;
+                local_set(bits);
+            });
+        } else {
+            wasm!(self.func, {
+                i64_reinterpret_f64;
+                local_set(bits);
+            });
+        }
+        wasm!(self.func, {
+            local_get(buf); i32_load(0); local_set(old_len);
+            local_get(old_len); i32_const(4 + size_bytes as i32); i32_add;
+            call(self.emitter.rt.alloc); local_set(new_buf);
+            local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(0);
+            local_get(new_buf); i32_const(4); i32_add;
+            local_get(buf); i32_const(4); i32_add;
+            local_get(old_len);
+            memory_copy;
+            local_get(new_buf); i32_const(4); i32_add; local_get(old_len); i32_add;
+            local_set(dst);
+        });
+        for i in 0..size_bytes {
+            let shift = 8 * (size_bytes - 1 - i) as i64;
+            wasm!(self.func, {
+                local_get(dst);
+                local_get(bits); i64_const(shift); i64_shr_u;
+                i32_wrap_i64;
+                i32_const(0xFF); i32_and;
+                i32_store8(i as u64);
+            });
+        }
+        if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
+            if let Some(&local_idx) = self.var_map.get(&id.0) {
+                wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
+            }
+        }
+        self.scratch.free_i32(dst);
+        self.scratch.free_i64(bits);
         self.scratch.free_i32(new_buf);
         self.scratch.free_i32(old_len);
         self.scratch.free_i32(buf);

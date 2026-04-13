@@ -71,8 +71,13 @@ Each returns a `List[T]` — one native call beats `count` Almide-side reads.
 
 | Signature | Effect |
 |---|---|
-| `bytes.set_f32_le(b, pos, val)` | Overwrite 4 bytes |
+| `bytes.set_u8(b, pos, val)` | Overwrite 1 byte |
 | `bytes.set_u16_le(b, pos, val)` | Overwrite 2 bytes |
+| `bytes.set_u32_le(b, pos, val)` | Overwrite 4 bytes |
+| `bytes.set_i32_le(b, pos, val)` | Overwrite 4 bytes |
+| `bytes.set_i64_le(b, pos, val)` | Overwrite 8 bytes |
+| `bytes.set_f32_le(b, pos, val)` | Overwrite 4 bytes (demoted from f64) |
+| `bytes.set_f64_le(b, pos, val)` | Overwrite 8 bytes |
 | `bytes.append_u8(b, val)` | Append 1 byte |
 | `bytes.append_u16_le(b, val)` | Append 2 bytes |
 | `bytes.append_u32_le(b, val)` | Append 4 bytes |
@@ -81,21 +86,42 @@ Each returns a `List[T]` — one native call beats `count` Almide-side reads.
 | `bytes.append_f32_le(b, val)` | Append 4 bytes (demoted from f64) |
 | `bytes.append_f64_le(b, val)` | Append 8 bytes |
 
-## Big-endian (legacy / network protocols)
+## Big-endian (network protocols)
 
-| Signature | Purpose |
+Single-value readers (returns 0 on out-of-bounds — see roadmap for `_at` variants):
+
+| Signature | Width |
 |---|---|
-| `bytes.read_u32_be(b, pos)` | u32 BE |
-| `bytes.read_i64_be(b, pos)` | i64 BE |
-| `bytes.read_f64_be(b, pos)` | f64 BE |
-| `bytes.read_string_be(b, pos)` | length-prefixed BE string |
+| `bytes.read_u32_be(b, pos)` | 4 bytes |
+| `bytes.read_i32_be(b, pos)` | 4 bytes (sign-extended) |
+| `bytes.read_i64_be(b, pos)` | 8 bytes |
+| `bytes.read_f32_be(b, pos)` | 4 bytes → Float |
+| `bytes.read_f64_be(b, pos)` | 8 bytes → Float |
+| `bytes.read_string_be(b, pos)` | length-prefixed string |
 | `bytes.read_bool(b, pos)` | 1-byte bool |
-| `bytes.write_u8(b, val)` | Append u8 |
-| `bytes.write_u32_be(b, val)` | Append u32 BE |
-| `bytes.write_i64_be(b, val)` | Append i64 BE |
-| `bytes.write_f64_be(b, val)` | Append f64 BE |
-| `bytes.write_string_be(b, s)` | Length-prefixed BE string |
-| `bytes.write_bool(b, val)` | Append 1-byte bool |
+
+Bulk readers (symmetric to LE):
+
+| Signature | Element width |
+|---|---|
+| `bytes.read_u32_be_array(b, pos, count)` | 4 bytes → `List[Int]` |
+| `bytes.read_i32_be_array(b, pos, count)` | 4 bytes → `List[Int]` |
+| `bytes.read_i64_be_array(b, pos, count)` | 8 bytes → `List[Int]` |
+| `bytes.read_f32_be_array(b, pos, count)` | 4 bytes → `List[Float]` |
+| `bytes.read_f64_be_array(b, pos, count)` | 8 bytes → `List[Float]` |
+
+Appenders (preferred). The `write_*_be` family is the older spelling and remains as an alias.
+
+| Signature | Width |
+|---|---|
+| `bytes.append_u16_be(b, val)` | 2 bytes |
+| `bytes.append_u32_be(b, val)` | 4 bytes |
+| `bytes.append_i32_be(b, val)` | 4 bytes |
+| `bytes.append_i64_be(b, val)` | 8 bytes |
+| `bytes.append_f32_be(b, val)` | 4 bytes (demoted from f64) |
+| `bytes.append_f64_be(b, val)` | 8 bytes |
+| `bytes.write_string_be(b, s)` | Length-prefixed string |
+| `bytes.write_bool(b, val)` | 1-byte bool |
 
 ## Higher-level readers
 

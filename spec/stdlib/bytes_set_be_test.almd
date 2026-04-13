@@ -1,0 +1,91 @@
+// bytes.set_*_le, append_*_be, read_*_be_array — symmetric writers/readers.
+
+test "set_u8 overwrites byte at position" {
+  var b = bytes.new(4)
+  bytes.set_u8(b, 1, 0x42)
+  assert_eq(bytes.read_u8(b, 1), 0x42)
+}
+
+test "set_u32_le round-trip" {
+  var b = bytes.new(8)
+  bytes.set_u32_le(b, 0, 0xDEADBEEF)
+  bytes.set_u32_le(b, 4, 0x12345678)
+  assert_eq(bytes.read_u32_le(b, 0), 0xDEADBEEF)
+  assert_eq(bytes.read_u32_le(b, 4), 0x12345678)
+}
+
+test "set_i64_le round-trip" {
+  var b = bytes.new(8)
+  bytes.set_i64_le(b, 0, -1)
+  assert_eq(bytes.read_i64_le(b, 0), -1)
+}
+
+test "set_f64_le round-trip" {
+  var b = bytes.new(8)
+  bytes.set_f64_le(b, 0, 3.14159265358979)
+  assert_eq(bytes.read_f64_le(b, 0), 3.14159265358979)
+}
+
+test "append_u32_be writes most-significant byte first" {
+  var b = bytes.new(0)
+  bytes.append_u32_be(b, 0x01020304)
+  assert_eq(bytes.len(b), 4)
+  assert_eq(bytes.read_u8(b, 0), 0x01)
+  assert_eq(bytes.read_u8(b, 1), 0x02)
+  assert_eq(bytes.read_u8(b, 2), 0x03)
+  assert_eq(bytes.read_u8(b, 3), 0x04)
+  // Cross-check round-trip via existing read_u32_be
+  assert_eq(bytes.read_u32_be(b, 0), 0x01020304)
+}
+
+test "append_i32_be negative" {
+  var b = bytes.new(0)
+  bytes.append_i32_be(b, -1)
+  assert_eq(bytes.read_u8(b, 0), 0xFF)
+  assert_eq(bytes.read_u8(b, 3), 0xFF)
+}
+
+test "append_i64_be / read_i64_be round-trip" {
+  var b = bytes.new(0)
+  bytes.append_i64_be(b, 0x0102030405060708)
+  assert_eq(bytes.len(b), 8)
+  assert_eq(bytes.read_u8(b, 0), 0x01)
+  assert_eq(bytes.read_u8(b, 7), 0x08)
+  assert_eq(bytes.read_i64_be(b, 0), 0x0102030405060708)
+}
+
+test "append_f64_be round-trip via read_f64_be" {
+  var b = bytes.new(0)
+  bytes.append_f64_be(b, 1.5)
+  assert_eq(bytes.read_f64_be(b, 0), 1.5)
+}
+
+test "read_u32_be_array round-trip" {
+  var b = bytes.new(0)
+  bytes.append_u32_be(b, 100)
+  bytes.append_u32_be(b, 200)
+  bytes.append_u32_be(b, 300)
+  let xs = bytes.read_u32_be_array(b, 0, 3)
+  assert_eq(list.len(xs), 3)
+  assert_eq(list.get(xs, 0) |> option.unwrap_or(0), 100)
+  assert_eq(list.get(xs, 1) |> option.unwrap_or(0), 200)
+  assert_eq(list.get(xs, 2) |> option.unwrap_or(0), 300)
+}
+
+test "read_i64_be_array round-trip" {
+  var b = bytes.new(0)
+  bytes.append_i64_be(b, -1)
+  bytes.append_i64_be(b, 42)
+  let xs = bytes.read_i64_be_array(b, 0, 2)
+  assert_eq(list.get(xs, 0) |> option.unwrap_or(0), -1)
+  assert_eq(list.get(xs, 1) |> option.unwrap_or(0), 42)
+}
+
+test "read_f64_be_array round-trip" {
+  var b = bytes.new(0)
+  bytes.append_f64_be(b, 1.5)
+  bytes.append_f64_be(b, -0.25)
+  let xs = bytes.read_f64_be_array(b, 0, 2)
+  assert_eq(list.get(xs, 0) |> option.unwrap_or(0.0), 1.5)
+  assert_eq(list.get(xs, 1) |> option.unwrap_or(0.0), -0.25)
+}

@@ -321,7 +321,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [math](stdlib/math.md) | Mathematical functions | `import math` | 21 |
 | [regex](stdlib/regex.md) | Regular expressions | `import regex` | 8 |
 | [datetime](stdlib/datetime.md) | Date and time | `import datetime` | 21 |
-| [bytes](stdlib/bytes.md) | Binary data | `import bytes` | 56 |
+| [bytes](stdlib/bytes.md) | Binary data | `import bytes` | 67 |
 | [matrix](stdlib/matrix.md) | 2D matrix operations | `import matrix` | 39 |
 | [testing](stdlib/testing.md) | Test assertions | `import testing` | 7 |
 | [error](stdlib/error.md) | Error construction | `import error` | 3 |

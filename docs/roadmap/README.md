@@ -6,12 +6,13 @@
 
 ## Active
 
-16 items
+17 items
 
 | Item | Description |
 |------|-------------|
 | [almai — Multi-Provider LLM Client](active/almai-llm-client.md) | almai — multi-provider LLM client library, 8 providers shipped |
 | [Almide Dojo — Continuous MSR Measurement](active/almide-dojo.md) | Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration |
+| [bytes: unify bounds-check semantics](active/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
 | [Codegen Ideal Form](active/codegen-ideal-form.md) | WASM codegen redesign toward declarative dispatch and explicit symbol resolution |
 | [Compiler Version Pin](active/compiler-version-pin.md) | minimum compiler version pinning in almide.toml (Cargo rust-version style) |
 | [Diagnostics: Here / Try / Hint Format](active/diagnostics-here-try-hint.md) | Standardize diagnostics to Here/Try/Hint three-part format with CI-verified hint correctness |
