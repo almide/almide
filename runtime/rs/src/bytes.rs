@@ -121,6 +121,84 @@ pub fn almide_rt_bytes_set_f64_be(b: &mut Vec<u8>, pos: i64, val: f64) {
     if p + 8 <= b.len() { b[p..p+8].copy_from_slice(&bytes); }
 }
 
+// ── Transform / split ──
+
+pub fn almide_rt_bytes_reverse(b: &Vec<u8>) -> Vec<u8> {
+    let mut out = b.clone();
+    out.reverse();
+    out
+}
+
+pub fn almide_rt_bytes_fill(b: &mut Vec<u8>, val: i64) {
+    let v = val as u8;
+    for byte in b.iter_mut() {
+        *byte = v;
+    }
+}
+
+pub fn almide_rt_bytes_map_each(b: &Vec<u8>, f: impl Fn(i64) -> i64) -> Vec<u8> {
+    b.iter().map(|x| f(*x as i64) as u8).collect()
+}
+
+pub fn almide_rt_bytes_insert(b: &Vec<u8>, pos: i64, val: i64) -> Vec<u8> {
+    let mut out = b.clone();
+    let p = (pos.max(0) as usize).min(out.len());
+    out.insert(p, val as u8);
+    out
+}
+
+pub fn almide_rt_bytes_remove_at(b: &Vec<u8>, pos: i64) -> Vec<u8> {
+    let p = pos as usize;
+    if p >= b.len() {
+        return b.clone();
+    }
+    let mut out = b.clone();
+    out.remove(p);
+    out
+}
+
+pub fn almide_rt_bytes_chunks(b: &Vec<u8>, size: i64) -> Vec<Vec<u8>> {
+    if size <= 0 {
+        return vec![];
+    }
+    b.chunks(size as usize).map(|c| c.to_vec()).collect()
+}
+
+pub fn almide_rt_bytes_split(b: &Vec<u8>, sep: &Vec<u8>) -> Vec<Vec<u8>> {
+    if sep.is_empty() {
+        return vec![b.clone()];
+    }
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i + sep.len() <= b.len() {
+        if &b[i..i + sep.len()] == sep.as_slice() {
+            out.push(b[start..i].to_vec());
+            i += sep.len();
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push(b[start..].to_vec());
+    out
+}
+
+pub fn almide_rt_bytes_lines(b: &Vec<u8>) -> Vec<Vec<u8>> {
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    let mut start = 0usize;
+    for (i, &byte) in b.iter().enumerate() {
+        if byte == b'\n' {
+            out.push(b[start..i].to_vec());
+            start = i + 1;
+        }
+    }
+    if start < b.len() {
+        out.push(b[start..].to_vec());
+    }
+    out
+}
+
 // ── Search & comparison ──
 
 pub fn almide_rt_bytes_contains(b: &Vec<u8>, pat: &Vec<u8>) -> bool {

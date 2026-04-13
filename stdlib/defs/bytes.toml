@@ -100,6 +100,62 @@ params = [{ name = "b", type = "Bytes" }]
 return = "Unit"
 rust = "almide_rt_bytes_clear(&mut {b})"
 
+[reverse]
+description = "Return a new Bytes with the bytes in reverse order."
+example = 'bytes.reverse(b)'
+params = [{ name = "b", type = "Bytes" }]
+return = "Bytes"
+rust = "almide_rt_bytes_reverse(&{b})"
+
+[fill]
+description = "Overwrite every byte in `b` with `val` (truncated to u8). Mutates in place; returns Unit."
+example = 'bytes.fill(buf, 0)'
+params = [{ name = "b", type = "Bytes" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_fill(&mut {b}, {val})"
+
+[map_each]
+description = "Apply a per-byte function to every element and return a new Bytes."
+example = 'bytes.map_each(b, (x) => x + 1)'
+params = [{ name = "b", type = "Bytes" }, { name = "f", type = "fn(Int) -> Int" }]
+return = "Bytes"
+rust = "almide_rt_bytes_map_each(&{b}, {f})"
+
+[insert]
+description = "Return a new Bytes with `val` inserted at `pos`. Out-of-range `pos` clamps to `[0, len(b)]`."
+example = 'bytes.insert(b, 2, 0xFF)'
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Int" }]
+return = "Bytes"
+rust = "almide_rt_bytes_insert(&{b}, {pos}, {val})"
+
+[remove_at]
+description = "Return a new Bytes with the byte at `pos` removed. Out-of-range `pos` returns the original buffer unchanged."
+example = 'bytes.remove_at(b, 0)'
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Bytes"
+rust = "almide_rt_bytes_remove_at(&{b}, {pos})"
+
+[chunks]
+description = "Split `b` into a list of fresh Bytes of length `size` each. The last chunk may be shorter."
+example = 'bytes.chunks(b, 16)'
+params = [{ name = "b", type = "Bytes" }, { name = "size", type = "Int" }]
+return = "List[Bytes]"
+rust = "almide_rt_bytes_chunks(&{b}, {size})"
+
+[split]
+description = "Split `b` on every occurrence of `sep` (as a Bytes pattern). Empty `sep` returns `[b]`."
+example = 'bytes.split(b, bytes.from_string(\",\"))'
+params = [{ name = "b", type = "Bytes" }, { name = "sep", type = "Bytes" }]
+return = "List[Bytes]"
+rust = "almide_rt_bytes_split(&{b}, &{sep})"
+
+[lines]
+description = "Split `b` on `0x0A` (LF). A trailing newline produces no extra empty element. `\\r\\n` keeps the `\\r` (use `string.lines` for trimmed text lines)."
+example = 'bytes.lines(b)'
+params = [{ name = "b", type = "Bytes" }]
+return = "List[Bytes]"
+rust = "almide_rt_bytes_lines(&{b})"
+
 [contains]
 description = "True if `pattern` appears as a contiguous subsequence of `b`."
 example = 'bytes.contains(b, bytes.from_string("HTTP"))'

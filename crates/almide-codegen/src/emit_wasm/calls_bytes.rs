@@ -451,6 +451,13 @@ impl FuncCompiler<'_> {
             "append_u32_le" => self.emit_bytes_append_i(args, 4),
             "append_i32_le" => self.emit_bytes_append_i(args, 4),
             "append_i64_le" => self.emit_bytes_append_i(args, 8),
+            "reverse" => self.emit_bytes_reverse(args),
+            "fill" => self.emit_bytes_fill(args),
+            "insert" => self.emit_bytes_insert(args),
+            "remove_at" => self.emit_bytes_remove_at(args),
+            "chunks" => self.emit_bytes_chunks(args),
+            "split" => self.emit_bytes_split(args, /*single_byte=*/false, /*lf=*/false),
+            "lines" => self.emit_bytes_split(args, /*single_byte=*/true, /*lf=*/true),
             "starts_with" => self.emit_bytes_prefix_match(args, /*at_end=*/false),
             "ends_with" => self.emit_bytes_prefix_match(args, /*at_end=*/true),
             "contains" => {
@@ -1399,6 +1406,368 @@ impl FuncCompiler<'_> {
             local_get(pos); local_get(buf); i32_load(0); i32_ge_u;
         });
         self.scratch.free_i32(pos);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.reverse(b) -> Bytes`. Allocates a fresh buffer.
+    pub(super) fn emit_bytes_reverse(&mut self, args: &[IrExpr]) {
+        let buf = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let dst = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, {
+            local_set(buf);
+            local_get(buf); i32_load(0); local_set(len);
+            local_get(len); i32_const(4); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+            local_get(dst); local_get(len); i32_store(0);
+            i32_const(0); local_set(i);
+            block_empty; loop_empty;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                // dst[4 + i] = buf[4 + (len - 1 - i)]
+                local_get(dst); i32_const(4); i32_add; local_get(i); i32_add;
+                local_get(buf); i32_const(4); i32_add;
+                local_get(len); i32_const(1); i32_sub; local_get(i); i32_sub; i32_add;
+                i32_load8_u(0);
+                i32_store8(0);
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+            end; end;
+            local_get(dst);
+        });
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(dst);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.fill(b, val)` — overwrite all bytes in place.
+    pub(super) fn emit_bytes_fill(&mut self, args: &[IrExpr]) {
+        let buf = self.scratch.alloc_i32();
+        let val = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]);
+        wasm!(self.func, {
+            i32_wrap_i64; local_set(val);
+            local_get(buf); i32_load(0); local_set(len);
+            i32_const(0); local_set(i);
+            block_empty; loop_empty;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                local_get(buf); i32_const(4); i32_add; local_get(i); i32_add;
+                local_get(val); i32_store8(0);
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+            end; end;
+        });
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(val);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.insert(b, pos, val) -> Bytes`. Returns a fresh buffer of length
+    /// `len(b) + 1`. `pos` clamps to `[0, len(b)]`.
+    pub(super) fn emit_bytes_insert(&mut self, args: &[IrExpr]) {
+        let buf = self.scratch.alloc_i32();
+        let pos = self.scratch.alloc_i32();
+        let val = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let dst = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]); wasm!(self.func, { i32_wrap_i64; local_set(pos); });
+        self.emit_expr(&args[2]); wasm!(self.func, {
+            i32_wrap_i64; local_set(val);
+            local_get(buf); i32_load(0); local_set(len);
+            // Clamp pos to [0, len]
+            local_get(pos); i32_const(0); i32_lt_s;
+            if_empty; i32_const(0); local_set(pos); end;
+            local_get(pos); local_get(len); i32_gt_u;
+            if_empty; local_get(len); local_set(pos); end;
+            // alloc len + 5
+            local_get(len); i32_const(5); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+            local_get(dst); local_get(len); i32_const(1); i32_add; i32_store(0);
+            // memcpy [0, pos)
+            local_get(dst); i32_const(4); i32_add;
+            local_get(buf); i32_const(4); i32_add;
+            local_get(pos);
+            memory_copy;
+            // store val at dst+4+pos
+            local_get(dst); i32_const(4); i32_add; local_get(pos); i32_add;
+            local_get(val); i32_store8(0);
+            // memcpy [pos, len)
+            local_get(dst); i32_const(5); i32_add; local_get(pos); i32_add;
+            local_get(buf); i32_const(4); i32_add; local_get(pos); i32_add;
+            local_get(len); local_get(pos); i32_sub;
+            memory_copy;
+            local_get(dst);
+        });
+        self.scratch.free_i32(dst);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(val);
+        self.scratch.free_i32(pos);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.remove_at(b, pos) -> Bytes`. Out-of-range returns clone.
+    pub(super) fn emit_bytes_remove_at(&mut self, args: &[IrExpr]) {
+        let buf = self.scratch.alloc_i32();
+        let pos = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let dst = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]); wasm!(self.func, {
+            i32_wrap_i64; local_set(pos);
+            local_get(buf); i32_load(0); local_set(len);
+            // If pos out of range → clone len+4 bytes
+            local_get(pos); local_get(len); i32_ge_u;
+            if_i32;
+                local_get(len); i32_const(4); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+                local_get(dst); local_get(buf); local_get(len); i32_const(4); i32_add; memory_copy;
+                local_get(dst);
+            else_;
+                local_get(len); i32_const(3); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+                local_get(dst); local_get(len); i32_const(1); i32_sub; i32_store(0);
+                // memcpy [0, pos)
+                local_get(dst); i32_const(4); i32_add;
+                local_get(buf); i32_const(4); i32_add;
+                local_get(pos);
+                memory_copy;
+                // memcpy [pos+1, len)
+                local_get(dst); i32_const(4); i32_add; local_get(pos); i32_add;
+                local_get(buf); i32_const(5); i32_add; local_get(pos); i32_add;
+                local_get(len); local_get(pos); i32_sub; i32_const(1); i32_sub;
+                memory_copy;
+                local_get(dst);
+            end;
+        });
+        self.scratch.free_i32(dst);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(pos);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.chunks(b, size) -> List[Bytes]`. Builds a fresh List with one
+    /// fresh Bytes per chunk (last may be shorter).
+    pub(super) fn emit_bytes_chunks(&mut self, args: &[IrExpr]) {
+        let buf = self.scratch.alloc_i32();
+        let size = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let n_chunks = self.scratch.alloc_i32();
+        let result = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        let off = self.scratch.alloc_i32();
+        let chunk_len = self.scratch.alloc_i32();
+        let chunk = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]); wasm!(self.func, {
+            i32_wrap_i64; local_set(size);
+            local_get(buf); i32_load(0); local_set(len);
+            // n_chunks = ceil(len / size); if size == 0 → 0
+            local_get(size); i32_eqz;
+            if_i32; i32_const(0);
+            else_;
+                local_get(len); local_get(size); i32_add; i32_const(1); i32_sub;
+                local_get(size); i32_div_u;
+            end;
+            local_set(n_chunks);
+            // alloc List header: 4 + n_chunks*4
+            local_get(n_chunks); i32_const(4); i32_mul; i32_const(4); i32_add;
+            call(self.emitter.rt.alloc); local_set(result);
+            local_get(result); local_get(n_chunks); i32_store(0);
+            i32_const(0); local_set(i);
+            i32_const(0); local_set(off);
+            block_empty; loop_empty;
+                local_get(i); local_get(n_chunks); i32_ge_u; br_if(1);
+                // chunk_len = min(size, len - off)
+                local_get(len); local_get(off); i32_sub;
+                local_get(size); local_get(len); local_get(off); i32_sub; i32_lt_u;
+                if_i32; local_get(size); else_; local_get(len); local_get(off); i32_sub; end;
+                local_set(chunk_len);
+                // alloc chunk: 4 + chunk_len
+                local_get(chunk_len); i32_const(4); i32_add;
+                call(self.emitter.rt.alloc); local_set(chunk);
+                local_get(chunk); local_get(chunk_len); i32_store(0);
+                local_get(chunk); i32_const(4); i32_add;
+                local_get(buf); i32_const(4); i32_add; local_get(off); i32_add;
+                local_get(chunk_len);
+                memory_copy;
+                // result.elems[i] = chunk
+                local_get(result); i32_const(4); i32_add; local_get(i); i32_const(4); i32_mul; i32_add;
+                local_get(chunk); i32_store(0);
+                local_get(off); local_get(size); i32_add; local_set(off);
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+            end; end;
+            local_get(result);
+        });
+        self.scratch.free_i32(chunk);
+        self.scratch.free_i32(chunk_len);
+        self.scratch.free_i32(off);
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(result);
+        self.scratch.free_i32(n_chunks);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(size);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.split(b, sep) -> List[Bytes]` and `bytes.lines(b) -> List[Bytes]`.
+    /// Two-pass implementation: first count parts, then alloc List + chunks.
+    /// `lf=true` uses a hardcoded `'\n'` separator (and ignores `sep` arg).
+    pub(super) fn emit_bytes_split(&mut self, args: &[IrExpr], _single_byte: bool, lf: bool) {
+        let buf = self.scratch.alloc_i32();
+        let sep = self.scratch.alloc_i32();
+        let blen = self.scratch.alloc_i32();
+        let plen = self.scratch.alloc_i32();
+        let count = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        let j = self.scratch.alloc_i32();
+        let start = self.scratch.alloc_i32();
+        let result = self.scratch.alloc_i32();
+        let chunk = self.scratch.alloc_i32();
+        let chunk_len = self.scratch.alloc_i32();
+        let out_idx = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(buf); });
+        if lf {
+            // sep is implicit "\n" — alloc a 1-byte sep buffer at runtime.
+            wasm!(self.func, {
+                i32_const(5); call(self.emitter.rt.alloc); local_set(sep);
+                local_get(sep); i32_const(1); i32_store(0);
+                local_get(sep); i32_const(10); i32_store8(4);
+            });
+        } else {
+            self.emit_expr(&args[1]);
+            wasm!(self.func, { local_set(sep); });
+        }
+        wasm!(self.func, {
+            local_get(buf); i32_load(0); local_set(blen);
+            local_get(sep); i32_load(0); local_set(plen);
+        });
+        if lf {
+            // For lines: count = number of '\n' bytes; trailing '\n' adds nothing.
+            wasm!(self.func, {
+                i32_const(0); local_set(count);
+                i32_const(0); local_set(i);
+                block_empty; loop_empty;
+                    local_get(i); local_get(blen); i32_ge_u; br_if(1);
+                    local_get(buf); i32_const(4); i32_add; local_get(i); i32_add;
+                    i32_load8_u(0); i32_const(10); i32_eq;
+                    if_empty; local_get(count); i32_const(1); i32_add; local_set(count); end;
+                    local_get(i); i32_const(1); i32_add; local_set(i);
+                    br(0);
+                end; end;
+                // If buffer doesn't end with newline, add 1 for the final line.
+                local_get(blen); i32_eqz;
+                if_empty;
+                    // empty buffer → count stays 0
+                else_;
+                    local_get(buf); i32_const(4); i32_add; local_get(blen); i32_const(1); i32_sub; i32_add;
+                    i32_load8_u(0); i32_const(10); i32_ne;
+                    if_empty; local_get(count); i32_const(1); i32_add; local_set(count); end;
+                end;
+            });
+        } else {
+            // Generic split. Empty sep → 1 part (whole buffer).
+            wasm!(self.func, {
+                i32_const(1); local_set(count);
+                local_get(plen); i32_eqz;
+                if_empty;
+                    // empty sep — count stays 1, skip scan
+                else_;
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                        local_get(i); local_get(plen); i32_add; local_get(blen); i32_gt_u; br_if(1);
+                        // compare buf[i..i+plen] == sep[0..plen]; out_idx = match flag
+                        i32_const(0); local_set(j);
+                        i32_const(1); local_set(out_idx);
+                        block_empty; loop_empty;
+                            local_get(j); local_get(plen); i32_ge_u; br_if(1);
+                            local_get(buf); i32_const(4); i32_add; local_get(i); i32_add; local_get(j); i32_add;
+                            i32_load8_u(0);
+                            local_get(sep); i32_const(4); i32_add; local_get(j); i32_add;
+                            i32_load8_u(0);
+                            i32_ne;
+                            if_empty;
+                                i32_const(0); local_set(out_idx); br(2);
+                            end;
+                            local_get(j); i32_const(1); i32_add; local_set(j);
+                            br(0);
+                        end; end;
+                        local_get(out_idx);
+                        if_empty;
+                            local_get(count); i32_const(1); i32_add; local_set(count);
+                            local_get(i); local_get(plen); i32_add; local_set(i);
+                        else_;
+                            local_get(i); i32_const(1); i32_add; local_set(i);
+                        end;
+                        br(0);
+                    end; end;
+                end;
+            });
+        }
+        // Second pass: build the actual list using count chunks.
+        wasm!(self.func, {
+            local_get(count); i32_const(4); i32_mul; i32_const(4); i32_add;
+            call(self.emitter.rt.alloc); local_set(result);
+            local_get(result); local_get(count); i32_store(0);
+            i32_const(0); local_set(start);
+            i32_const(0); local_set(out_idx);
+            i32_const(0); local_set(i);
+            block_empty; loop_empty;
+                local_get(out_idx); local_get(count); i32_ge_u; br_if(1);
+                // Find next sep starting at i (or end).
+                block_empty; loop_empty;
+                    local_get(i); local_get(plen); i32_add; local_get(blen); i32_gt_u; br_if(1);
+                    // compare buf[i..i+plen] == sep
+                    i32_const(0); local_set(j);
+                    i32_const(1); local_set(chunk_len); // reuse: match flag
+                    block_empty; loop_empty;
+                        local_get(j); local_get(plen); i32_ge_u; br_if(1);
+                        local_get(buf); i32_const(4); i32_add; local_get(i); i32_add; local_get(j); i32_add;
+                        i32_load8_u(0);
+                        local_get(sep); i32_const(4); i32_add; local_get(j); i32_add;
+                        i32_load8_u(0);
+                        i32_ne; if_empty; i32_const(0); local_set(chunk_len); br(2); end;
+                        local_get(j); i32_const(1); i32_add; local_set(j);
+                        br(0);
+                    end; end;
+                    local_get(chunk_len); br_if(1); // matched → break inner
+                    local_get(i); i32_const(1); i32_add; local_set(i);
+                    br(0);
+                end; end;
+                // chunk = buf[start..i] (or buf[start..blen] when no further match)
+                local_get(i); local_get(plen); i32_add; local_get(blen); i32_gt_u;
+                if_empty; local_get(blen); local_set(i); end;
+                local_get(i); local_get(start); i32_sub; local_set(chunk_len);
+                local_get(chunk_len); i32_const(4); i32_add; call(self.emitter.rt.alloc); local_set(chunk);
+                local_get(chunk); local_get(chunk_len); i32_store(0);
+                local_get(chunk); i32_const(4); i32_add;
+                local_get(buf); i32_const(4); i32_add; local_get(start); i32_add;
+                local_get(chunk_len);
+                memory_copy;
+                local_get(result); i32_const(4); i32_add; local_get(out_idx); i32_const(4); i32_mul; i32_add;
+                local_get(chunk); i32_store(0);
+                local_get(out_idx); i32_const(1); i32_add; local_set(out_idx);
+                local_get(i); local_get(plen); i32_add; local_set(i);
+                local_get(i); local_set(start);
+                br(0);
+            end; end;
+            local_get(result);
+        });
+        self.scratch.free_i32(out_idx);
+        self.scratch.free_i32(chunk_len);
+        self.scratch.free_i32(chunk);
+        self.scratch.free_i32(result);
+        self.scratch.free_i32(start);
+        self.scratch.free_i32(j);
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(count);
+        self.scratch.free_i32(plen);
+        self.scratch.free_i32(blen);
+        self.scratch.free_i32(sep);
         self.scratch.free_i32(buf);
     }
 

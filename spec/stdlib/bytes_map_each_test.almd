@@ -1,0 +1,20 @@
+// bytes.map_each — closure-taking transform. Currently Rust target only;
+// WASM closure emit is tracked separately.
+// @skip-wasm
+
+test "map_each adds 1 to every byte" {
+  let b = bytes.from_string("abc")
+  let r = bytes.map_each(b, (x) => x + 1)
+  assert_eq(bytes.read_u8(r, 0), 0x62)  // 'b'
+  assert_eq(bytes.read_u8(r, 1), 0x63)  // 'c'
+  assert_eq(bytes.read_u8(r, 2), 0x64)  // 'd'
+}
+
+test "map_each xor with constant" {
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0xFF)
+  bytes.append_u8(b, 0x0F)
+  let r = bytes.map_each(b, (x) => int.bxor(x, 0xFF))
+  assert_eq(bytes.read_u8(r, 0), 0x00)
+  assert_eq(bytes.read_u8(r, 1), 0xF0)
+}
