@@ -8,11 +8,19 @@ use wasm_encoder::Instruction;
 impl FuncCompiler<'_> {
     /// Dispatch a float stdlib method call. Returns true if handled.
     pub(super) fn emit_float_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
+        use super::stdlib_dispatch::StdlibOp;
+
+        // Declarative table: simple runtime-call patterns.
+        let op: Option<StdlibOp> = match method {
+            "to_string" => Some(StdlibOp::Call1(self.emitter.rt.float_to_string)),
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.emit_stdlib_op(op, args);
+            return true;
+        }
+
         match method {
-            "to_string" => {
-                self.emit_expr(&args[0]);
-                wasm!(self.func, { call(self.emitter.rt.float_to_string); });
-            }
             "to_int" => {
                 // truncate f64 → i64 (saturating: NaN→0, ±Inf→i64::MAX/MIN)
                 self.emit_expr(&args[0]);
@@ -407,7 +415,29 @@ impl FuncCompiler<'_> {
     }
 
     /// Dispatch a math stdlib method call. Returns true if handled.
+    ///
+    /// Simple patterns (unary runtime calls, constants, builtin WASM instrs)
+    /// live in a declarative table via [`StdlibOp`]. Custom patterns (loops,
+    /// conditionals) are inlined below.
     pub(super) fn emit_math_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
+        use super::stdlib_dispatch::StdlibOp;
+
+        // ── Declarative table: simple runtime-call patterns ──
+        let op: Option<StdlibOp> = match method {
+            "sin"   => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_sin)),
+            "cos"   => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_cos)),
+            "tan"   => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_tan)),
+            "log"   => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_log)),
+            "exp"   => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_exp)),
+            "log10" => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_log10)),
+            "log2"  => Some(StdlibOp::FloatUnaryCall(self.emitter.rt.math_log2)),
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.emit_stdlib_op(op, args);
+            return true;
+        }
+
         match method {
             "pi" => {
                 wasm!(self.func, { f64_const(std::f64::consts::PI); });
@@ -416,6 +446,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { f64_const(std::f64::consts::E); });
             }
             "sqrt" => {
+                // f64_convert (if Int) → f64_sqrt (builtin)
                 self.emit_expr(&args[0]);
                 if matches!(&args[0].ty, Ty::Int) {
                     wasm!(self.func, { f64_convert_i64_s; });
@@ -473,55 +504,6 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
                 self.func.instruction(&Instruction::F64Max);
-            }
-            "sin" => {
-                self.emit_expr(&args[0]);
-                if matches!(&args[0].ty, Ty::Int) {
-                    wasm!(self.func, { f64_convert_i64_s; });
-                }
-                wasm!(self.func, { call(self.emitter.rt.math_sin); });
-            }
-            "cos" => {
-                self.emit_expr(&args[0]);
-                if matches!(&args[0].ty, Ty::Int) {
-                    wasm!(self.func, { f64_convert_i64_s; });
-                }
-                wasm!(self.func, { call(self.emitter.rt.math_cos); });
-            }
-            "tan" => {
-                self.emit_expr(&args[0]);
-                if matches!(&args[0].ty, Ty::Int) {
-                    wasm!(self.func, { f64_convert_i64_s; });
-                }
-                wasm!(self.func, { call(self.emitter.rt.math_tan); });
-            }
-            "log" => {
-                self.emit_expr(&args[0]);
-                if matches!(&args[0].ty, Ty::Int) {
-                    wasm!(self.func, { f64_convert_i64_s; });
-                }
-                wasm!(self.func, { call(self.emitter.rt.math_log); });
-            }
-            "exp" => {
-                self.emit_expr(&args[0]);
-                if matches!(&args[0].ty, Ty::Int) {
-                    wasm!(self.func, { f64_convert_i64_s; });
-                }
-                wasm!(self.func, { call(self.emitter.rt.math_exp); });
-            }
-            "log10" => {
-                self.emit_expr(&args[0]);
-                if matches!(&args[0].ty, Ty::Int) {
-                    wasm!(self.func, { f64_convert_i64_s; });
-                }
-                wasm!(self.func, { call(self.emitter.rt.math_log10); });
-            }
-            "log2" => {
-                self.emit_expr(&args[0]);
-                if matches!(&args[0].ty, Ty::Int) {
-                    wasm!(self.func, { f64_convert_i64_s; });
-                }
-                wasm!(self.func, { call(self.emitter.rt.math_log2); });
             }
             "sign" => {
                 // math.sign(n: Int) → Int (-1, 0, 1)

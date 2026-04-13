@@ -23,7 +23,15 @@ mod rt_string;
 mod rt_string_extra;
 mod rt_numeric;
 mod expressions;
+mod stdlib_dispatch;
 mod calls;
+mod calls_env;
+mod calls_random;
+mod calls_datetime;
+mod calls_http;
+mod calls_fs;
+mod calls_io;
+mod calls_process;
 mod calls_string;
 mod calls_option;
 mod calls_numeric;
@@ -823,8 +831,10 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             .collect();
         if func.name.contains("closure") || func.name.contains("lambda") {
         }
+        // Function return type: use declared ret_ty, fall back to body.ty
+        // (concretized by the ConcretizeTypes pass) when declared is Unknown.
         let resolved_ret_ty = if func.ret_ty.is_unresolved() {
-            closures::resolve_expr_ty(&func.body, &program.var_table, &emitter.record_fields)
+            func.body.ty.clone()
         } else {
             func.ret_ty.clone()
         };
@@ -859,7 +869,13 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 continue;
             }
             let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");
-            let prefixed_name = format!("almide_rt_{}_{}", mod_ident, func_name_sanitized);
+            // Test functions use __test_ prefix so they don't collide with
+            // identically-named user functions (e.g. fn broadcast_add + test "broadcast_add").
+            let prefixed_name = if func.is_test {
+                format!("almide_rt_{}___test_{}", mod_ident, func_name_sanitized)
+            } else {
+                format!("almide_rt_{}_{}", mod_ident, func_name_sanitized)
+            };
             let params: Vec<ValType> = func.params.iter()
                 .filter_map(|p| values::ty_to_valtype(&p.ty))
                 .collect();
@@ -869,10 +885,13 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             // Also register by bare name so lifted closures from this module
             // can call module-local functions. ClosureConversion lifts lambdas
             // from modules to program.functions, but their Named call targets
-            // use the unqualified function name.
-            let bare_name = func.name.to_string();
-            if !emitter.func_map.contains_key(&bare_name) {
-                emitter.func_map.insert(bare_name, func_idx);
+            // use the unqualified function name. Skip tests — tests must not
+            // shadow user functions.
+            if !func.is_test {
+                let bare_name = func.name.to_string();
+                if !emitter.func_map.contains_key(&bare_name) {
+                    emitter.func_map.insert(bare_name, func_idx);
+                }
             }
             module_func_meta.push((mi, fi, type_idx));
             user_func_indices.push(func_idx);
