@@ -788,7 +788,9 @@ impl FuncCompiler<'_> {
     }
 
     pub(super) fn emit_stub_call_named(&mut self, module: &str, func: &str, args: &[IrExpr]) {
-        eprintln!("[WASM STUB] {}::{} — will trap at runtime", module, func);
+        if std::env::var("ALMIDE_WASM_STUB_VERBOSE").is_ok() {
+            eprintln!("[WASM STUB] {}::{} — will trap at runtime", module, func);
+        }
         self.emit_stub_call(args);
     }
 
@@ -797,18 +799,16 @@ impl FuncCompiler<'_> {
         // After ResolveCalls pass, user-module unresolved calls are a compile error —
         // so any stub_call reaching here must be an unimplemented stdlib method.
         //
-        // DEFAULT: warn + continue (emit `unreachable` WASM — runtime trap).
+        // DEFAULT: silent + continue. Most stub_call sites end up dead-code
+        // eliminated by the post-emit DCE pass, so the warning was pure noise.
         // ALMIDE_WASM_STUB_PANIC=1: panic at compile time (hard assertion for CI).
-        //
-        // Today's audit confirmed all 183 spec + 60 nn WASM tests compile
-        // without hitting any stub_call, so in practice this is dead code.
-        // We keep the branch to have a graceful fallback for future stdlib
-        // additions that haven't got WASM impls yet.
+        // ALMIDE_WASM_STUB_VERBOSE=1: print the warning anyway (for debugging).
         if std::env::var("ALMIDE_WASM_STUB_PANIC").is_ok() {
             panic!("[WASM STUB] stub_call reached — compile-time hard failure (ALMIDE_WASM_STUB_PANIC=1)");
         }
-        eprintln!("[WASM STUB] stub_call emitted — will trap at runtime. \
-                   Set ALMIDE_WASM_STUB_PANIC=1 to fail compile instead.");
+        if std::env::var("ALMIDE_WASM_STUB_VERBOSE").is_ok() {
+            eprintln!("[WASM STUB] stub_call emitted — will trap at runtime if reached.");
+        }
         if std::env::var("ALMIDE_WASM_STUB_TRACE").is_ok() {
             eprintln!("  trace: {}", std::backtrace::Backtrace::force_capture());
         }
