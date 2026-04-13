@@ -1,0 +1,78 @@
+// bytes search & comparison.
+
+test "starts_with prefix match" {
+  let b = bytes.from_string("Hello, World!")
+  assert_eq(bytes.starts_with(b, bytes.from_string("Hello")), true)
+  assert_eq(bytes.starts_with(b, bytes.from_string("World")), false)
+  assert_eq(bytes.starts_with(b, bytes.from_string("")), true)
+  assert_eq(bytes.starts_with(b, bytes.from_string("Hello, World!")), true)
+  assert_eq(bytes.starts_with(b, bytes.from_string("Hello, World!!")), false)
+}
+
+test "ends_with suffix match" {
+  let b = bytes.from_string("Hello, World!")
+  assert_eq(bytes.ends_with(b, bytes.from_string("World!")), true)
+  assert_eq(bytes.ends_with(b, bytes.from_string("Hello")), false)
+  assert_eq(bytes.ends_with(b, bytes.from_string("")), true)
+  assert_eq(bytes.ends_with(b, bytes.from_string("!")), true)
+}
+
+test "contains finds subsequence" {
+  let b = bytes.from_string("Hello, World!")
+  assert_eq(bytes.contains(b, bytes.from_string("lo, W")), true)
+  assert_eq(bytes.contains(b, bytes.from_string("xyz")), false)
+  assert_eq(bytes.contains(b, bytes.from_string("")), true)
+  assert_eq(bytes.contains(b, bytes.from_string("Hello")), true)
+  assert_eq(bytes.contains(b, bytes.from_string("World!")), true)
+}
+
+test "index_of returns position" {
+  let b = bytes.from_string("Hello, World!")
+  match bytes.index_of(b, bytes.from_string("World")) {
+    some(p) => assert_eq(p, 7)
+    none => assert(false)
+  }
+  match bytes.index_of(b, bytes.from_string("Hello")) {
+    some(p) => assert_eq(p, 0)
+    none => assert(false)
+  }
+}
+
+test "index_of empty pattern is 0" {
+  let b = bytes.from_string("xyz")
+  match bytes.index_of(b, bytes.from_string("")) {
+    some(p) => assert_eq(p, 0)
+    none => assert(false)
+  }
+}
+
+test "index_of returns none on miss" {
+  let b = bytes.from_string("xyz")
+  match bytes.index_of(b, bytes.from_string("abc")) {
+    some(_) => assert(false)
+    none => assert(true)
+  }
+}
+
+test "cmp lexicographic ordering" {
+  let a = bytes.from_string("apple")
+  let b = bytes.from_string("banana")
+  assert_eq(bytes.cmp(a, b), -1)
+  assert_eq(bytes.cmp(b, a), 1)
+  assert_eq(bytes.cmp(a, a), 0)
+}
+
+test "cmp shorter is less when prefix-equal" {
+  let short = bytes.from_string("abc")
+  let long = bytes.from_string("abcd")
+  assert_eq(bytes.cmp(short, long), -1)
+  assert_eq(bytes.cmp(long, short), 1)
+}
+
+test "cmp empty bytes" {
+  let empty = bytes.new(0)
+  let any = bytes.from_string("x")
+  assert_eq(bytes.cmp(empty, empty), 0)
+  assert_eq(bytes.cmp(empty, any), -1)
+  assert_eq(bytes.cmp(any, empty), 1)
+}

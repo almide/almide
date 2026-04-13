@@ -100,6 +100,41 @@ params = [{ name = "b", type = "Bytes" }]
 return = "Unit"
 rust = "almide_rt_bytes_clear(&mut {b})"
 
+[contains]
+description = "True if `pattern` appears as a contiguous subsequence of `b`."
+example = 'bytes.contains(b, bytes.from_string("HTTP"))'
+params = [{ name = "b", type = "Bytes" }, { name = "pattern", type = "Bytes" }]
+return = "Bool"
+rust = "almide_rt_bytes_contains(&{b}, &{pattern})"
+
+[index_of]
+description = "Return the byte offset of the first occurrence of `pattern` in `b`, or `none`."
+example = 'bytes.index_of(b, bytes.from_string("X"))'
+params = [{ name = "b", type = "Bytes" }, { name = "pattern", type = "Bytes" }]
+return = "Option[Int]"
+rust = "almide_rt_bytes_index_of(&{b}, &{pattern})"
+
+[starts_with]
+description = "True if `b` begins with the `prefix` byte sequence."
+example = 'bytes.starts_with(b, bytes.from_string("\\x7fELF"))'
+params = [{ name = "b", type = "Bytes" }, { name = "prefix", type = "Bytes" }]
+return = "Bool"
+rust = "almide_rt_bytes_starts_with(&{b}, &{prefix})"
+
+[ends_with]
+description = "True if `b` ends with the `suffix` byte sequence."
+example = 'bytes.ends_with(b, bytes.from_string(".png"))'
+params = [{ name = "b", type = "Bytes" }, { name = "suffix", type = "Bytes" }]
+return = "Bool"
+rust = "almide_rt_bytes_ends_with(&{b}, &{suffix})"
+
+[cmp]
+description = "Lexicographic byte comparison: returns `-1` if `a < b`, `0` if equal, `+1` if `a > b`. Useful for sort_by."
+example = 'bytes.cmp(a, b)'
+params = [{ name = "a", type = "Bytes" }, { name = "b", type = "Bytes" }]
+return = "Int"
+rust = "almide_rt_bytes_cmp(&{a}, &{b})"
+
 [from_string]
 description = "Convert a string to its UTF-8 byte representation."
 example = 'bytes.from_string("Hello") // => <72, 101, 108, 108, 111>'
@@ -311,6 +346,126 @@ description = "Write a Float as f64 little-endian at position pos."
 params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Float" }]
 return = "Unit"
 rust = "almide_rt_bytes_set_f64_le(&mut {b}, {pos}, {val})"
+
+# ── i16 single-value reads ──
+
+[read_i16_le]
+description = "Read an Int from 2 bytes little-endian (sign-extended i16) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_read_i16_le(&{b}, {pos})"
+
+[read_i16_be]
+description = "Read an Int from 2 bytes big-endian (sign-extended i16) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_read_i16_be(&{b}, {pos})"
+
+[read_u16_be]
+description = "Read an Int from 2 bytes big-endian (u16, zero-extended) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_read_u16_be(&{b}, {pos})"
+
+[read_i32_be]
+description = "Read an Int from 4 bytes big-endian (sign-extended i32) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_read_i32_be(&{b}, {pos})"
+
+[read_f32_be]
+description = "Read a Float from 4 bytes big-endian (f32, promoted to f64) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Float"
+rust = "almide_rt_bytes_read_f32_be(&{b}, {pos})"
+
+# ── i16 / u16 array readers ──
+
+[read_i16_le_array]
+description = "Read `count` consecutive little-endian i16 values starting at `pos` as a List[Int]."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "count", type = "Int" }]
+return = "List[Int]"
+rust = "almide_rt_bytes_read_i16_le_array(&{b}, {pos}, {count})"
+
+[read_u16_le_array]
+description = "Read `count` consecutive little-endian u16 values starting at `pos` as a List[Int] (zero-extended)."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "count", type = "Int" }]
+return = "List[Int]"
+rust = "almide_rt_bytes_read_u16_le_array(&{b}, {pos}, {count})"
+
+[read_i16_be_array]
+description = "Read `count` consecutive big-endian i16 values starting at `pos` as a List[Int]."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "count", type = "Int" }]
+return = "List[Int]"
+rust = "almide_rt_bytes_read_i16_be_array(&{b}, {pos}, {count})"
+
+[read_u16_be_array]
+description = "Read `count` consecutive big-endian u16 values starting at `pos` as a List[Int] (zero-extended)."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "count", type = "Int" }]
+return = "List[Int]"
+rust = "almide_rt_bytes_read_u16_be_array(&{b}, {pos}, {count})"
+
+# ── i16 / u16 / set BE writers ──
+
+[append_i16_le]
+description = "Append an Int as i16 little-endian (2 bytes) to the end of the buffer."
+params = [{ name = "b", type = "Bytes" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_append_i16_le(&mut {b}, {val})"
+
+[append_i16_be]
+description = "Append an Int as i16 big-endian (2 bytes) to the end of the buffer."
+params = [{ name = "b", type = "Bytes" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_append_i16_be(&mut {b}, {val})"
+
+[set_i16_le]
+description = "Write an Int as i16 little-endian (2 bytes) at position pos."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_set_i16_le(&mut {b}, {pos}, {val})"
+
+[set_u16_be]
+description = "Write an Int as u16 big-endian (2 bytes) at position pos."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_set_u16_be(&mut {b}, {pos}, {val})"
+
+[set_i16_be]
+description = "Write an Int as i16 big-endian (2 bytes) at position pos."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_set_i16_be(&mut {b}, {pos}, {val})"
+
+[set_u32_be]
+description = "Write an Int as u32 big-endian (4 bytes) at position pos."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_set_u32_be(&mut {b}, {pos}, {val})"
+
+[set_i32_be]
+description = "Write an Int as i32 big-endian (4 bytes) at position pos."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_set_i32_be(&mut {b}, {pos}, {val})"
+
+[set_i64_be]
+description = "Write an Int as i64 big-endian (8 bytes) at position pos."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Int" }]
+return = "Unit"
+rust = "almide_rt_bytes_set_i64_be(&mut {b}, {pos}, {val})"
+
+[set_f32_be]
+description = "Write a Float as f32 big-endian (4 bytes) at position pos."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Float" }]
+return = "Unit"
+rust = "almide_rt_bytes_set_f32_be(&mut {b}, {pos}, {val})"
+
+[set_f64_be]
+description = "Write a Float as f64 big-endian (8 bytes) at position pos."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Float" }]
+return = "Unit"
+rust = "almide_rt_bytes_set_f64_be(&mut {b}, {pos}, {val})"
 
 # ── Cursor family ──
 # Immutable cursor as `(next_pos, Option[T])` tuple. Each read advances the

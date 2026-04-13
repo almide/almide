@@ -20,6 +20,138 @@ pub fn almide_rt_bytes_push(b: &mut Vec<u8>, val: i64) { b.push(val as u8); }
 pub fn almide_rt_bytes_clear(b: &mut Vec<u8>) { b.clear(); }
 pub fn almide_rt_bytes_from_string(s: &str) -> Vec<u8> { s.as_bytes().to_vec() }
 
+// ── i16 / u16 BE single-value reads ──
+
+pub fn almide_rt_bytes_read_i16_le(b: &Vec<u8>, pos: i64) -> i64 {
+    let p = pos as usize;
+    if p + 2 > b.len() { return 0; }
+    i16::from_le_bytes([b[p], b[p+1]]) as i64
+}
+pub fn almide_rt_bytes_read_i16_be(b: &Vec<u8>, pos: i64) -> i64 {
+    let p = pos as usize;
+    if p + 2 > b.len() { return 0; }
+    i16::from_be_bytes([b[p], b[p+1]]) as i64
+}
+pub fn almide_rt_bytes_read_u16_be(b: &Vec<u8>, pos: i64) -> i64 {
+    let p = pos as usize;
+    if p + 2 > b.len() { return 0; }
+    u16::from_be_bytes([b[p], b[p+1]]) as i64
+}
+pub fn almide_rt_bytes_read_i32_be(b: &Vec<u8>, pos: i64) -> i64 {
+    let p = pos as usize;
+    if p + 4 > b.len() { return 0; }
+    i32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64
+}
+pub fn almide_rt_bytes_read_f32_be(b: &Vec<u8>, pos: i64) -> f64 {
+    let p = pos as usize;
+    if p + 4 > b.len() { return 0.0; }
+    f32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as f64
+}
+
+// ── i16 / u16 array readers ──
+
+macro_rules! u16_le_array_impl {
+    ($name:ident, $ty:ty, $from:expr) => {
+        pub fn $name(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+            let mut p = pos as usize;
+            let n = count as usize;
+            let mut out = Vec::with_capacity(n);
+            for _ in 0..n {
+                if p + 2 > b.len() { out.push(0); p += 2; continue; }
+                let v: $ty = $from([b[p], b[p+1]]);
+                out.push(v as i64);
+                p += 2;
+            }
+            out
+        }
+    };
+}
+
+u16_le_array_impl!(almide_rt_bytes_read_i16_le_array, i16, i16::from_le_bytes);
+u16_le_array_impl!(almide_rt_bytes_read_u16_le_array, u16, u16::from_le_bytes);
+u16_le_array_impl!(almide_rt_bytes_read_i16_be_array, i16, i16::from_be_bytes);
+u16_le_array_impl!(almide_rt_bytes_read_u16_be_array, u16, u16::from_be_bytes);
+
+// ── i16 append + set i16/BE writers ──
+
+pub fn almide_rt_bytes_append_i16_le(b: &mut Vec<u8>, val: i64) {
+    b.extend_from_slice(&((val as i16).to_le_bytes()));
+}
+pub fn almide_rt_bytes_append_i16_be(b: &mut Vec<u8>, val: i64) {
+    b.extend_from_slice(&((val as i16).to_be_bytes()));
+}
+pub fn almide_rt_bytes_set_i16_le(b: &mut Vec<u8>, pos: i64, val: i64) {
+    let p = pos as usize;
+    let bytes = (val as i16).to_le_bytes();
+    if p + 2 <= b.len() { b[p..p+2].copy_from_slice(&bytes); }
+}
+pub fn almide_rt_bytes_set_u16_be(b: &mut Vec<u8>, pos: i64, val: i64) {
+    let p = pos as usize;
+    let bytes = (val as u16).to_be_bytes();
+    if p + 2 <= b.len() { b[p..p+2].copy_from_slice(&bytes); }
+}
+pub fn almide_rt_bytes_set_i16_be(b: &mut Vec<u8>, pos: i64, val: i64) {
+    let p = pos as usize;
+    let bytes = (val as i16).to_be_bytes();
+    if p + 2 <= b.len() { b[p..p+2].copy_from_slice(&bytes); }
+}
+pub fn almide_rt_bytes_set_u32_be(b: &mut Vec<u8>, pos: i64, val: i64) {
+    let p = pos as usize;
+    let bytes = (val as u32).to_be_bytes();
+    if p + 4 <= b.len() { b[p..p+4].copy_from_slice(&bytes); }
+}
+pub fn almide_rt_bytes_set_i32_be(b: &mut Vec<u8>, pos: i64, val: i64) {
+    let p = pos as usize;
+    let bytes = (val as i32).to_be_bytes();
+    if p + 4 <= b.len() { b[p..p+4].copy_from_slice(&bytes); }
+}
+pub fn almide_rt_bytes_set_i64_be(b: &mut Vec<u8>, pos: i64, val: i64) {
+    let p = pos as usize;
+    let bytes = val.to_be_bytes();
+    if p + 8 <= b.len() { b[p..p+8].copy_from_slice(&bytes); }
+}
+pub fn almide_rt_bytes_set_f32_be(b: &mut Vec<u8>, pos: i64, val: f64) {
+    let p = pos as usize;
+    let bytes = (val as f32).to_be_bytes();
+    if p + 4 <= b.len() { b[p..p+4].copy_from_slice(&bytes); }
+}
+pub fn almide_rt_bytes_set_f64_be(b: &mut Vec<u8>, pos: i64, val: f64) {
+    let p = pos as usize;
+    let bytes = val.to_be_bytes();
+    if p + 8 <= b.len() { b[p..p+8].copy_from_slice(&bytes); }
+}
+
+// ── Search & comparison ──
+
+pub fn almide_rt_bytes_contains(b: &Vec<u8>, pat: &Vec<u8>) -> bool {
+    if pat.is_empty() { return true; }
+    if pat.len() > b.len() { return false; }
+    b.windows(pat.len()).any(|w| w == pat.as_slice())
+}
+
+pub fn almide_rt_bytes_index_of(b: &Vec<u8>, pat: &Vec<u8>) -> Option<i64> {
+    if pat.is_empty() { return Some(0); }
+    if pat.len() > b.len() { return None; }
+    b.windows(pat.len()).position(|w| w == pat.as_slice()).map(|i| i as i64)
+}
+
+pub fn almide_rt_bytes_starts_with(b: &Vec<u8>, prefix: &Vec<u8>) -> bool {
+    b.starts_with(prefix.as_slice())
+}
+
+pub fn almide_rt_bytes_ends_with(b: &Vec<u8>, suffix: &Vec<u8>) -> bool {
+    b.ends_with(suffix.as_slice())
+}
+
+pub fn almide_rt_bytes_cmp(a: &Vec<u8>, b: &Vec<u8>) -> i64 {
+    use std::cmp::Ordering;
+    match a.as_slice().cmp(b.as_slice()) {
+        Ordering::Less => -1,
+        Ordering::Equal => 0,
+        Ordering::Greater => 1,
+    }
+}
+
 pub fn almide_rt_bytes_to_string(b: &Vec<u8>) -> Result<String, String> {
     std::str::from_utf8(b)
         .map(|s| s.to_string())

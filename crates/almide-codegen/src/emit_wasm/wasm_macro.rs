@@ -381,6 +381,9 @@ macro_rules! wasm {
     (@emit $f:expr, f64_neg; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64Neg); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, i32_shr_s; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32ShrS); wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, i32_reinterpret_f32; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I32ReinterpretF32); wasm!(@emit $f, $($rest)*)
     };
