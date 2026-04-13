@@ -868,6 +868,14 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             if extern_wasm_module_set.contains(&(mi, fi)) {
                 continue;
             }
+            // Skip test functions defined in dependency modules: they are
+            // only relevant when running tests on that module directly,
+            // not when it's imported by another file. Including them would
+            // emit extra closures whose function-table layout can conflict
+            // with the top-level program's own closures.
+            if func.is_test {
+                continue;
+            }
             let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");
             // Test functions use __test_ prefix so they don't collide with
             // identically-named user functions (e.g. fn broadcast_add + test "broadcast_add").
