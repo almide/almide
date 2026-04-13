@@ -291,6 +291,104 @@ params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name
 return = "Unit"
 rust = "almide_rt_bytes_set_f64_le(&mut {b}, {pos}, {val})"
 
+# ── Cursor family ──
+# Immutable cursor as `(next_pos, Option[T])` tuple. Each read advances the
+# logical position via the returned `Int` — no shared mutable state needed.
+# Out-of-bounds returns `(pos, none)` (pos unchanged), so callers can stop
+# parsing on the first miss.
+
+[skip]
+description = "Advance a cursor position by `n` bytes. Returns `min(pos + n, len)`."
+example = 'let p1 = bytes.skip(b, p0, 4)'
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "n", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_skip(&{b}, {pos}, {n})"
+
+[eof]
+description = "True if `pos >= bytes.len(b)`."
+example = 'if bytes.eof(b, pos) then ...'
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Bool"
+rust = "almide_rt_bytes_eof(&{b}, {pos})"
+
+[read_u8_at]
+description = "Cursor read: u8 at `pos`. Returns `(new_pos, Option[Int])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Int])"
+rust = "almide_rt_bytes_read_u8_at(&{b}, {pos})"
+
+[read_u16_le_at]
+description = "Cursor read: u16 little-endian at `pos`. Returns `(new_pos, Option[Int])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Int])"
+rust = "almide_rt_bytes_read_u16_le_at(&{b}, {pos})"
+
+[read_u32_le_at]
+description = "Cursor read: u32 little-endian at `pos`. Returns `(new_pos, Option[Int])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Int])"
+rust = "almide_rt_bytes_read_u32_le_at(&{b}, {pos})"
+
+[read_i32_le_at]
+description = "Cursor read: i32 little-endian at `pos`. Returns `(new_pos, Option[Int])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Int])"
+rust = "almide_rt_bytes_read_i32_le_at(&{b}, {pos})"
+
+[read_i64_le_at]
+description = "Cursor read: i64 little-endian at `pos`. Returns `(new_pos, Option[Int])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Int])"
+rust = "almide_rt_bytes_read_i64_le_at(&{b}, {pos})"
+
+[read_f32_le_at]
+description = "Cursor read: f32 little-endian at `pos`. Returns `(new_pos, Option[Float])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Float])"
+rust = "almide_rt_bytes_read_f32_le_at(&{b}, {pos})"
+
+[read_f64_le_at]
+description = "Cursor read: f64 little-endian at `pos`. Returns `(new_pos, Option[Float])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Float])"
+rust = "almide_rt_bytes_read_f64_le_at(&{b}, {pos})"
+
+[read_u32_be_at]
+description = "Cursor read: u32 big-endian at `pos`. Returns `(new_pos, Option[Int])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Int])"
+rust = "almide_rt_bytes_read_u32_be_at(&{b}, {pos})"
+
+[read_i32_be_at]
+description = "Cursor read: i32 big-endian at `pos`. Returns `(new_pos, Option[Int])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Int])"
+rust = "almide_rt_bytes_read_i32_be_at(&{b}, {pos})"
+
+[read_i64_be_at]
+description = "Cursor read: i64 big-endian at `pos`. Returns `(new_pos, Option[Int])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Int])"
+rust = "almide_rt_bytes_read_i64_be_at(&{b}, {pos})"
+
+[read_f32_be_at]
+description = "Cursor read: f32 big-endian at `pos`. Returns `(new_pos, Option[Float])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Float])"
+rust = "almide_rt_bytes_read_f32_be_at(&{b}, {pos})"
+
+[read_f64_be_at]
+description = "Cursor read: f64 big-endian at `pos`. Returns `(new_pos, Option[Float])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "(Int, Option[Float])"
+rust = "almide_rt_bytes_read_f64_be_at(&{b}, {pos})"
+
+[take_at]
+description = "Cursor read: copy `n` bytes starting at `pos`. Returns `(new_pos, Option[Bytes])`."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "n", type = "Int" }]
+return = "(Int, Option[Bytes])"
+rust = "almide_rt_bytes_take_at(&{b}, {pos}, {n})"
+
 # ── Big-endian appenders (symmetric to append_*_le) ──
 # Network protocols and legacy formats often use big-endian. The older
 # `write_*_be` family is preserved as an alias for backward compatibility.

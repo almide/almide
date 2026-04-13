@@ -115,6 +115,69 @@ pub fn almide_rt_bytes_set_f64_le(b: &mut Vec<u8>, pos: i64, val: f64) {
     if p + 8 <= b.len() { b[p..p+8].copy_from_slice(&bytes); }
 }
 
+// ── Cursor family ──
+
+pub fn almide_rt_bytes_skip(b: &Vec<u8>, pos: i64, n: i64) -> i64 {
+    let np = (pos + n) as i64;
+    if np > b.len() as i64 { b.len() as i64 } else { np }
+}
+
+pub fn almide_rt_bytes_eof(b: &Vec<u8>, pos: i64) -> bool {
+    (pos as usize) >= b.len()
+}
+
+// Each cursor read returns (next_pos, Option<T>). On EOF the position is
+// unchanged so the caller can detect the end without losing track.
+
+macro_rules! cursor_read_int {
+    ($name:ident, $width:expr, $convert:expr) => {
+        pub fn $name(b: &Vec<u8>, pos: i64) -> (i64, Option<i64>) {
+            let p = pos as usize;
+            if p + $width > b.len() {
+                return (pos, None);
+            }
+            let bytes = &b[p..p + $width];
+            (pos + $width, Some($convert(bytes)))
+        }
+    };
+}
+
+macro_rules! cursor_read_float {
+    ($name:ident, $width:expr, $convert:expr) => {
+        pub fn $name(b: &Vec<u8>, pos: i64) -> (i64, Option<f64>) {
+            let p = pos as usize;
+            if p + $width > b.len() {
+                return (pos, None);
+            }
+            let bytes = &b[p..p + $width];
+            (pos + $width, Some($convert(bytes)))
+        }
+    };
+}
+
+cursor_read_int!(almide_rt_bytes_read_u8_at, 1, |b: &[u8]| b[0] as i64);
+cursor_read_int!(almide_rt_bytes_read_u16_le_at, 2, |b: &[u8]| u16::from_le_bytes([b[0], b[1]]) as i64);
+cursor_read_int!(almide_rt_bytes_read_u32_le_at, 4, |b: &[u8]| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as i64);
+cursor_read_int!(almide_rt_bytes_read_i32_le_at, 4, |b: &[u8]| i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as i64);
+cursor_read_int!(almide_rt_bytes_read_i64_le_at, 8, |b: &[u8]| i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
+cursor_read_int!(almide_rt_bytes_read_u32_be_at, 4, |b: &[u8]| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as i64);
+cursor_read_int!(almide_rt_bytes_read_i32_be_at, 4, |b: &[u8]| i32::from_be_bytes([b[0], b[1], b[2], b[3]]) as i64);
+cursor_read_int!(almide_rt_bytes_read_i64_be_at, 8, |b: &[u8]| i64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
+
+cursor_read_float!(almide_rt_bytes_read_f32_le_at, 4, |b: &[u8]| f32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64);
+cursor_read_float!(almide_rt_bytes_read_f64_le_at, 8, |b: &[u8]| f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
+cursor_read_float!(almide_rt_bytes_read_f32_be_at, 4, |b: &[u8]| f32::from_be_bytes([b[0], b[1], b[2], b[3]]) as f64);
+cursor_read_float!(almide_rt_bytes_read_f64_be_at, 8, |b: &[u8]| f64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
+
+pub fn almide_rt_bytes_take_at(b: &Vec<u8>, pos: i64, n: i64) -> (i64, Option<Vec<u8>>) {
+    let p = pos as usize;
+    let nn = n as usize;
+    if p + nn > b.len() {
+        return (pos, None);
+    }
+    (pos + n, Some(b[p..p + nn].to_vec()))
+}
+
 // ── Big-endian appenders ──
 
 pub fn almide_rt_bytes_append_u16_be(b: &mut Vec<u8>, val: i64) {

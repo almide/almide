@@ -387,6 +387,9 @@ macro_rules! wasm {
     (@emit $f:expr, f32_reinterpret_i32; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F32ReinterpretI32); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, i32_load16_s($off:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32Load16S(wasm_encoder::MemArg{ offset: $off as u64, align: 1, memory_index: 0 })); wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, f64_min; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64Min); wasm!(@emit $f, $($rest)*)
     };
