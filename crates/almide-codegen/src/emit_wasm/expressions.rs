@@ -756,9 +756,7 @@ impl FuncCompiler<'_> {
     }
 
     pub(super) fn emit_binop(&mut self, op: BinOp, left: &IrExpr, right: &IrExpr) {
-        // Fix mistyped BinOp: lowering may default to Int ops when operand types
-        // were Unknown, but by codegen time we know the actual types from VarTable.
-        let op = self.fix_binop_type(op, left, right);
+        // BinOp is already reconciled with operand types by ConcretizeTypes pass.
         match op {
             // ── Arithmetic ──
             BinOp::AddInt => {
@@ -1180,24 +1178,4 @@ impl FuncCompiler<'_> {
         }
     }
 
-    /// Fix BinOp type when lowering defaulted to Int but operands are actually Float.
-    /// This happens when lambda params have Unknown type at lowering time but are
-    /// resolved by monomorphization/ClosureConversion to concrete types.
-    fn fix_binop_type(&self, op: BinOp, left: &IrExpr, right: &IrExpr) -> BinOp {
-        use super::closures::resolve_expr_ty;
-        let is_int_op = matches!(op, BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt | BinOp::ModInt);
-        if !is_int_op { return op; }
-        let lt = resolve_expr_ty(left, self.var_table, &self.emitter.record_fields);
-        let rt = resolve_expr_ty(right, self.var_table, &self.emitter.record_fields);
-        if matches!(lt, almide_lang::types::Ty::Float) || matches!(rt, almide_lang::types::Ty::Float) {
-            match op {
-                BinOp::AddInt => BinOp::AddFloat,
-                BinOp::SubInt => BinOp::SubFloat,
-                BinOp::MulInt => BinOp::MulFloat,
-                BinOp::DivInt => BinOp::DivFloat,
-                BinOp::ModInt => BinOp::ModFloat,
-                _ => op,
-            }
-        } else { op }
-    }
 }

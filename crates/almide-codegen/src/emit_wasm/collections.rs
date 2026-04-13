@@ -350,17 +350,20 @@ impl FuncCompiler<'_> {
 
     /// Emit a tuple index access: load from tuple pointer + element offset.
     pub(super) fn emit_tuple_index(&mut self, object: &IrExpr, index: usize, result_ty: &Ty) {
-        // Resolve object type — try VarTable if object.ty is not Tuple
-        let obj_ty = if let Ty::Tuple(_) = &object.ty {
-            object.ty.clone()
-        } else if let almide_ir::IrExprKind::Var { id } = &object.kind {
-            let vt_ty = &self.var_table.get(*id).ty;
-            if let Ty::Tuple(_) = vt_ty { vt_ty.clone() } else { object.ty.clone() }
-        } else {
-            object.ty.clone()
+        // After ConcretizeTypes pass, object.ty is reliably the Tuple type.
+        // VarTable fallback kept as a safety net for edge cases (EnvLoad inside
+        // lifted closures where ConcretizeTypes may not reach, or unresolved
+        // paths from error-recovery).
+        let obj_ty = match &object.ty {
+            Ty::Tuple(_) => object.ty.clone(),
+            _ => match &object.kind {
+                almide_ir::IrExprKind::Var { id } => self.var_table.get(*id).ty.clone(),
+                almide_ir::IrExprKind::EnvLoad { env_var, .. } => self.var_table.get(*env_var).ty.clone(),
+                _ => object.ty.clone(),
+            },
         };
 
-        // Compute offset by summing sizes of elements before `index`
+        // Compute offset by summing sizes of elements before `index`.
         let (offset, elem_ty) = if let Ty::Tuple(elem_types) = &obj_ty {
             let off = elem_types.iter().take(index).map(|t| values::byte_size(t)).sum::<u32>();
             let ty = elem_types.get(index).cloned();
@@ -369,7 +372,7 @@ impl FuncCompiler<'_> {
             (0, None)
         };
 
-        // Use result_ty if concrete, otherwise fall back to tuple element type
+        // Use result_ty if concrete, otherwise fall back to tuple element type.
         let load_ty = if result_ty.is_unresolved() {
             elem_ty.as_ref().unwrap_or(result_ty)
         } else {

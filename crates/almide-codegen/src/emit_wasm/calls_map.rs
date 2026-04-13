@@ -557,7 +557,7 @@ impl FuncCompiler<'_> {
             }
             "from_list" => {
                 // from_list(pairs: List[(K,V)]) → Map
-                let pair_ty = self.list_elem_ty(&args[0].ty);
+                let pair_ty = self.resolve_list_elem(&args[0], None);
                 let (ks, vs) = if let Ty::Tuple(elems) = &pair_ty {
                     let k = elems.first().map(|t| values::byte_size(t)).unwrap_or(4);
                     let v = elems.get(1).map(|t| values::byte_size(t)).unwrap_or(4);

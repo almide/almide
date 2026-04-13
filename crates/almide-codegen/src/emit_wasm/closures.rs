@@ -57,12 +57,8 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
                 wasm_params.push(vt);
             }
         }
-        // Resolve body return type: if Unknown, infer from expression tree + VarTable
-        let body_ret_ty = if _body.ty.is_unresolved() {
-            resolve_expr_ty(_body, &program.var_table, &emitter.record_fields)
-        } else {
-            _body.ty.clone()
-        };
+        // Body return type: trust `.ty` set by ConcretizeTypes.
+        let body_ret_ty = _body.ty.clone();
         let ret_types = values::ret_type(&body_ret_ty);
         let closure_type_idx = emitter.register_type(wasm_params, ret_types);
 
@@ -420,96 +416,6 @@ fn resolve_lambda_param_ty(param_ty: &almide_lang::types::Ty, _body_ty: &almide_
         return param_ty.clone();
     }
     almide_lang::types::Ty::Int
-}
-
-/// Resolve the effective type of an expression tree, using VarTable for Var references
-/// and record_fields from the emitter for Member accesses.
-/// This is needed because lambda body expressions may have Unknown type from the type
-/// checker when the lambda is inside a generic function.
-pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &almide_ir::VarTable, record_fields: &HashMap<String, Vec<(String, almide_lang::types::Ty)>>) -> almide_lang::types::Ty {
-    use almide_lang::types::Ty;
-    // If the expression already has a concrete type, use it
-    if !expr.ty.is_unresolved() {
-        return expr.ty.clone();
-    }
-    match &expr.kind {
-        IrExprKind::Var { id } => {
-            if (id.0 as usize) < var_table.len() {
-                let info = var_table.get(*id);
-                if !info.ty.is_unresolved() {
-                    return info.ty.clone();
-                }
-            }
-            expr.ty.clone()
-        }
-        IrExprKind::Member { object, field } => {
-            let obj_ty = resolve_expr_ty(object, var_table, record_fields);
-            match &obj_ty {
-                Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                    if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field) {
-                        return fty.clone();
-                    }
-                }
-                Ty::Named(name, _) => {
-                    if let Some(fields) = record_fields.get(name.as_str()) {
-                        if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field) {
-                            return fty.clone();
-                        }
-                    }
-                }
-                _ => {
-                    // Unknown object type: search record_fields for a type that has this field
-                    for (_name, fields) in record_fields {
-                        if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field) {
-                            return fty.clone();
-                        }
-                    }
-                }
-            }
-            expr.ty.clone()
-        }
-        IrExprKind::TupleIndex { object, index } => {
-            let obj_ty = resolve_expr_ty(object, var_table, record_fields);
-            if let Ty::Tuple(elems) = &obj_ty {
-                if let Some(t) = elems.get(*index as usize) {
-                    return t.clone();
-                }
-            }
-            expr.ty.clone()
-        }
-        IrExprKind::If { then, .. } => resolve_expr_ty(then, var_table, record_fields),
-        IrExprKind::Match { arms, .. } => {
-            // Resolve from the first arm's body
-            if let Some(arm) = arms.first() {
-                let resolved = resolve_expr_ty(&arm.body, var_table, record_fields);
-                if !resolved.is_unresolved() {
-                    return resolved;
-                }
-            }
-            expr.ty.clone()
-        }
-        IrExprKind::Block { expr: Some(e), .. } => {
-            resolve_expr_ty(e, var_table, record_fields)
-        }
-        // BinOp: resolve from operands (e.g. pair.0 + pair.1 → Float)
-        IrExprKind::BinOp { left, right, .. } => {
-            let lt = resolve_expr_ty(left, var_table, record_fields);
-            if !lt.is_unresolved() { lt }
-            else { resolve_expr_ty(right, var_table, record_fields) }
-        }
-        // TupleIndex: resolve from tuple element type
-        IrExprKind::TupleIndex { object, index } => {
-            let obj_ty = resolve_expr_ty(object, var_table, record_fields);
-            if let Ty::Tuple(elems) = &obj_ty {
-                elems.get(*index).cloned().unwrap_or(expr.ty.clone())
-            } else {
-                expr.ty.clone()
-            }
-        }
-        // If: resolve from then branch
-        IrExprKind::If { then, .. } => resolve_expr_ty(then, var_table, record_fields),
-        _ => expr.ty.clone(),
-    }
 }
 
 // ── VarRefCollector: IrVisitor-based variable reference collector ────

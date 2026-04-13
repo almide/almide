@@ -31,7 +31,7 @@ impl FuncCompiler<'_> {
             }
             "from_list" => {
                 // from_list(xs) → Set[A]: copy list, dedup
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let s = self.scratch.alloc_i32();
                 let s1 = self.scratch.alloc_i32();

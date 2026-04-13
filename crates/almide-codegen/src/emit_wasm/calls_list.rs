@@ -16,7 +16,7 @@ impl FuncCompiler<'_> {
             }
             "get_or" => {
                 // get_or(xs, i, default) → A
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
                 let vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let xs = self.scratch.alloc_i32();
@@ -88,7 +88,7 @@ impl FuncCompiler<'_> {
             }
             "take" => {
                 // take(xs, n) → List[A]: first min(n, len) elements
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let n = self.scratch.alloc_i32();
@@ -130,7 +130,7 @@ impl FuncCompiler<'_> {
             }
             "drop" => {
                 // drop(xs, n): skip first n
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let start = self.scratch.alloc_i32();
@@ -176,7 +176,7 @@ impl FuncCompiler<'_> {
             }
             "slice" => {
                 // slice(xs, start, end) → List[A]
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let start = self.scratch.alloc_i32();
@@ -218,7 +218,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(xs);
             }
             "reverse" => {
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
                 let xs = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
@@ -296,7 +296,7 @@ impl FuncCompiler<'_> {
             }
             "first" => {
                 // first(xs) → Option[A]: xs[0] or none
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
                 let xs = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
@@ -316,7 +316,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(xs);
             }
             "last" => {
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
                 let xs = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
@@ -402,7 +402,7 @@ impl FuncCompiler<'_> {
             "flatten" => {
                 // flatten(xss: List[List[T]]) → List[T]
                 // Two-pass: count total, then copy
-                let inner_list_ty = self.list_elem_ty(&args[0].ty); // List[T]
+                let inner_list_ty = self.resolve_list_elem(&args[0], None); // List[T]
                 let elem_ty = self.list_elem_ty(&inner_list_ty); // T
                 let elem_size = values::byte_size(&elem_ty); // size of T
                 let xss = self.scratch.alloc_i32();
@@ -528,7 +528,7 @@ impl FuncCompiler<'_> {
             }
             "intersperse" => {
                 // intersperse(xs, sep) → List[A]: insert sep between elements
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
                 let vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let xs = self.scratch.alloc_i32();
@@ -598,8 +598,8 @@ impl FuncCompiler<'_> {
             "zip" => {
                 // zip(xs, ys) → List[(A, B)]
                 // Each tuple is heap-allocated: [a_value, b_value]
-                let a_ty = self.list_elem_ty(&args[0].ty);
-                let b_ty = self.list_elem_ty(&args[1].ty);
+                let a_ty = self.resolve_list_elem(&args[0], None);
+                let b_ty = self.resolve_list_elem(&args[1], None);
                 let a_size = values::byte_size(&a_ty);
                 let b_size = values::byte_size(&b_ty);
                 let tuple_size = a_size + b_size;
@@ -665,7 +665,7 @@ impl FuncCompiler<'_> {
             }
             "set" => {
                 // set(xs, i, val) → List[A]: copy + replace element at i
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
@@ -713,7 +713,7 @@ impl FuncCompiler<'_> {
             }
             "insert" => {
                 // insert(xs, i, val) → List[A]: copy with element inserted at i
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
@@ -777,7 +777,7 @@ impl FuncCompiler<'_> {
             }
             "remove_at" => {
                 // remove_at(xs, i) → List[A]
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
@@ -840,9 +840,7 @@ impl FuncCompiler<'_> {
             }
             "get" => {
                 // list.get(list, index) → Option[T]
-                let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
-                    a.first().cloned().unwrap_or(Ty::Int)
-                } else { Ty::Int };
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
 
                 let list = self.scratch.alloc_i32();
@@ -892,9 +890,7 @@ impl FuncCompiler<'_> {
             }
             "contains" => {
                 // list.contains(list, elem) -> Bool (i32)
-                let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
-                    a.first().cloned().unwrap_or(Ty::Int)
-                } else { Ty::Int };
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
                 let list_ptr = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
@@ -964,7 +960,7 @@ impl FuncCompiler<'_> {
             "push" => {
                 // push(xs, v) → Unit. Mutates xs in place by reallocating.
                 // args[0] = xs (var), args[1] = value
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
                 let vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let old_ptr = self.scratch.alloc_i32();
@@ -1034,7 +1030,7 @@ impl FuncCompiler<'_> {
             "pop" => {
                 // pop(xs) → Option[A]. Removes last element, mutates xs.
                 // Option layout: 0 = none, non-zero ptr = some (payload at ptr)
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
                 let list_ptr = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
