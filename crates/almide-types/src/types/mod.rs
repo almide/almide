@@ -203,6 +203,34 @@ impl Ty {
         matches!(self, Ty::Unknown | Ty::TypeVar(_) | Ty::OpenRecord { .. })
     }
 
+    /// Recursively check whether this type contains any unresolved component.
+    ///
+    /// `Tuple([Unknown, Float])` returns `true` even though the top-level
+    /// constructor is `Tuple`. Use this when the type must be fully concrete
+    /// — e.g. before generating memory layouts, when resolving tuple element
+    /// offsets, or when propagating the type to downstream passes.
+    ///
+    /// This is the canonical "is this type complete?" check. Prefer it over
+    /// `is_unresolved()` / `is_unresolved_structural()` unless you specifically
+    /// only care about the outermost layer.
+    pub fn has_unresolved_deep(&self) -> bool {
+        match self {
+            Ty::Unknown | Ty::TypeVar(_) | Ty::OpenRecord { .. } => true,
+            Ty::Tuple(elems) => elems.iter().any(Self::has_unresolved_deep),
+            Ty::Applied(_, args) => args.iter().any(Self::has_unresolved_deep),
+            Ty::Fn { params, ret } => {
+                params.iter().any(Self::has_unresolved_deep) || ret.has_unresolved_deep()
+            }
+            Ty::Record { fields } => fields.iter().any(|(_, t)| t.has_unresolved_deep()),
+            Ty::Variant { cases, .. } => cases.iter().any(|case| match &case.payload {
+                VariantPayload::Unit => false,
+                VariantPayload::Tuple(ts) => ts.iter().any(Self::has_unresolved_deep),
+                VariantPayload::Record(fs) => fs.iter().any(|(_, t)| t.has_unresolved_deep()),
+            }),
+            _ => false,
+        }
+    }
+
     /// Construct a normalized union type: flatten nested unions, deduplicate, sort.
     /// Returns the inner type if only one member remains.
     pub fn union(mut members: Vec<Ty>) -> Ty {
