@@ -335,6 +335,35 @@ impl FuncCompiler<'_> {
                             self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
+                    _ if module == "base64" => {
+                        let rt_fn = match func.as_str() {
+                            "encode" => Some(self.emitter.rt.base64_encode),
+                            "decode" => Some(self.emitter.rt.base64_decode),
+                            "encode_url" => Some(self.emitter.rt.base64_encode_url),
+                            "decode_url" => Some(self.emitter.rt.base64_decode_url),
+                            _ => None,
+                        };
+                        if let Some(rt) = rt_fn {
+                            self.emit_expr(&args[0]);
+                            wasm!(self.func, { call(rt); });
+                        } else {
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        }
+                    }
+                    _ if module == "hex" => {
+                        let rt_fn = match func.as_str() {
+                            "encode" => Some(self.emitter.rt.hex_encode),
+                            "encode_upper" => Some(self.emitter.rt.hex_encode_upper),
+                            "decode" => Some(self.emitter.rt.hex_decode),
+                            _ => None,
+                        };
+                        if let Some(rt) = rt_fn {
+                            self.emit_expr(&args[0]);
+                            wasm!(self.func, { call(rt); });
+                        } else {
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        }
+                    }
                     _ if module == "map" => {
                         if !self.emit_map_call(func, args) {
                             self.emit_stub_call_named(module.as_str(), func.as_str(), args);

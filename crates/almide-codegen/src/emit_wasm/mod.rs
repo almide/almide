@@ -49,6 +49,7 @@ mod calls_value;
 mod calls_regex;
 mod rt_value;
 pub(crate) mod rt_regex;
+mod rt_encoding;
 mod closures;
 mod equality;
 mod collections;
@@ -146,6 +147,14 @@ pub struct RuntimeFuncs {
     pub math_exp: u32,
     /// IEEE-754 half-precision → f64 (for bytes.read_f16_le).
     pub bytes_f16_to_f64: u32,
+    /// base64 / hex stdlib runtime helpers.
+    pub base64_encode: u32,
+    pub base64_decode: u32,
+    pub base64_encode_url: u32,
+    pub base64_decode_url: u32,
+    pub hex_encode: u32,
+    pub hex_encode_upper: u32,
+    pub hex_decode: u32,
     pub string: StringRuntime,
     pub value_stringify: u32,
     pub json_escape_string: u32,
@@ -290,6 +299,9 @@ impl WasmEmitter {
                 math_sin: 0, math_cos: 0, math_tan: 0,
                 math_log: 0, math_log10: 0, math_log2: 0, math_exp: 0,
                 bytes_f16_to_f64: 0,
+                base64_encode: 0, base64_decode: 0,
+                base64_encode_url: 0, base64_decode_url: 0,
+                hex_encode: 0, hex_encode_upper: 0, hex_decode: 0,
                 concat_str: 0,
                 concat_list: 0,
                 list_eq: 0, mem_eq: 0, list_list_str_cmp: 0,

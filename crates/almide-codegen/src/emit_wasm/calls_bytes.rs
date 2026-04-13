@@ -455,6 +455,44 @@ impl FuncCompiler<'_> {
                 // Just return the string pointer (effectively a cast)
                 self.emit_expr(&args[0]);
             }
+            "to_string_lossy" => {
+                // Same layout as String. WASM target does not yet validate UTF-8;
+                // invalid sequences pass through unchanged (the JS host will see
+                // garbage but no panic). Real lossy substitution lives in the
+                // Rust runtime.
+                self.emit_expr(&args[0]);
+            }
+            "is_valid_utf8" => self.emit_bytes_is_valid_utf8(args),
+            "to_string" => {
+                // Validate UTF-8 first; on success wrap as ok(b), else err.
+                let buf = self.scratch.alloc_i32();
+                let res = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(buf); });
+                // Push buf, validate, branch on result
+                let dummy_arg = IrExpr {
+                    kind: args[0].kind.clone(),
+                    ty: args[0].ty.clone(),
+                    span: args[0].span,
+                };
+                self.emit_bytes_is_valid_utf8(std::slice::from_ref(&dummy_arg));
+                let err_str = self.emitter.intern_string("invalid UTF-8");
+                wasm!(self.func, {
+                    if_i32;
+                        i32_const(8); call(self.emitter.rt.alloc); local_set(res);
+                        local_get(res); i32_const(0); i32_store(0);
+                        local_get(res); local_get(buf); i32_store(4);
+                        local_get(res);
+                    else_;
+                        i32_const(8); call(self.emitter.rt.alloc); local_set(res);
+                        local_get(res); i32_const(1); i32_store(0);
+                        local_get(res); i32_const(err_str as i32); i32_store(4);
+                        local_get(res);
+                    end;
+                });
+                self.scratch.free_i32(res);
+                self.scratch.free_i32(buf);
+            }
             "set_f32_le" => {
                 // bytes.set_f32_le(b, pos, val) → Unit
                 // f32.store [addr, f32_val]: addr = buf + 4 + pos
@@ -1231,6 +1269,88 @@ impl FuncCompiler<'_> {
             local_get(pos); local_get(buf); i32_load(0); i32_ge_u;
         });
         self.scratch.free_i32(pos);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.is_valid_utf8(b) -> Bool`. Shape-validates UTF-8 (catches invalid
+    /// lead/follow bytes and short sequences; does not flag overlong forms or
+    /// surrogates). Sufficient to reject obvious garbage like `0xFF` and to
+    /// accept all well-formed Unicode strings.
+    pub(super) fn emit_bytes_is_valid_utf8(&mut self, args: &[IrExpr]) {
+        let buf = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
+        let need = self.scratch.alloc_i32();
+        let valid = self.scratch.alloc_i32();
+        let k = self.scratch.alloc_i32();
+        let fb = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, {
+            local_set(buf);
+            local_get(buf); i32_load(0); local_set(len);
+            i32_const(0); local_set(i);
+            i32_const(1); local_set(valid);
+            block_empty; loop_empty;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                local_get(buf); i32_const(4); i32_add; local_get(i); i32_add; i32_load8_u(0); local_set(b);
+                // ASCII fast path
+                local_get(b); i32_const(128); i32_lt_u;
+                if_empty;
+                    local_get(i); i32_const(1); i32_add; local_set(i);
+                    br(2); // continue outer loop
+                end;
+                // Determine number of follow-bytes
+                local_get(b); i32_const(0xC2); i32_lt_u;
+                if_empty;
+                    i32_const(0); local_set(valid); br(2);
+                end;
+                local_get(b); i32_const(0xE0); i32_lt_u;
+                if_i32; i32_const(1); else_;
+                  local_get(b); i32_const(0xF0); i32_lt_u;
+                  if_i32; i32_const(2); else_;
+                    local_get(b); i32_const(0xF5); i32_lt_u;
+                    if_i32; i32_const(3); else_; i32_const(-1); end;
+                  end;
+                end;
+                local_set(need);
+                // need == -1 → invalid
+                local_get(need); i32_const(-1); i32_eq;
+                if_empty;
+                    i32_const(0); local_set(valid); br(2);
+                end;
+                // Bounds: i + 1 + need > len → invalid
+                local_get(i); i32_const(1); i32_add; local_get(need); i32_add; local_get(len); i32_gt_u;
+                if_empty;
+                    i32_const(0); local_set(valid); br(2);
+                end;
+                // Walk follow-bytes
+                i32_const(0); local_set(k);
+                block_empty; loop_empty;
+                    local_get(k); local_get(need); i32_ge_u; br_if(1);
+                    local_get(buf); i32_const(5); i32_add;
+                    local_get(i); i32_add; local_get(k); i32_add;
+                    i32_load8_u(0); local_set(fb);
+                    local_get(fb); i32_const(0x80); i32_lt_u;
+                    local_get(fb); i32_const(0xC0); i32_ge_u; i32_or;
+                    if_empty;
+                        i32_const(0); local_set(valid); br(4);
+                    end;
+                    local_get(k); i32_const(1); i32_add; local_set(k);
+                    br(0);
+                end; end;
+                local_get(i); i32_const(1); i32_add; local_get(need); i32_add; local_set(i);
+                br(0);
+            end; end;
+            local_get(valid);
+        });
+        self.scratch.free_i32(fb);
+        self.scratch.free_i32(k);
+        self.scratch.free_i32(valid);
+        self.scratch.free_i32(need);
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(len);
         self.scratch.free_i32(buf);
     }
 

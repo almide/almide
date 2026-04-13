@@ -241,6 +241,16 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     let i32_f64_ty = emitter.register_type(vec![ValType::I32], vec![ValType::F64]);
     emitter.rt.bytes_f16_to_f64 = emitter.register_func("__bytes_f16_to_f64", i32_f64_ty);
 
+    // base64 / hex runtime helpers. All take (bytes_or_str_ptr: i32) -> ptr: i32.
+    let i32_i32_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.rt.base64_encode = emitter.register_func("__base64_encode", i32_i32_ty);
+    emitter.rt.base64_decode = emitter.register_func("__base64_decode", i32_i32_ty);
+    emitter.rt.base64_encode_url = emitter.register_func("__base64_encode_url", i32_i32_ty);
+    emitter.rt.base64_decode_url = emitter.register_func("__base64_decode_url", i32_i32_ty);
+    emitter.rt.hex_encode = emitter.register_func("__hex_encode", i32_i32_ty);
+    emitter.rt.hex_encode_upper = emitter.register_func("__hex_encode_upper", i32_i32_ty);
+    emitter.rt.hex_decode = emitter.register_func("__hex_decode", i32_i32_ty);
+
     // String stdlib runtime (delegated to rt_string module)
     super::rt_string::register(emitter);
 
@@ -288,6 +298,14 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_numeric::compile_math_log2(emitter);
     super::rt_numeric::compile_math_exp(emitter);
     compile_bytes_f16_to_f64(emitter);
+    // Compile order MUST match registration order in `register_runtime`.
+    super::rt_encoding::compile_base64_encode(emitter, /*url_safe=*/false);
+    super::rt_encoding::compile_base64_decode(emitter, /*url_safe=*/false);
+    super::rt_encoding::compile_base64_encode(emitter, /*url_safe=*/true);
+    super::rt_encoding::compile_base64_decode(emitter, /*url_safe=*/true);
+    super::rt_encoding::compile_hex_encode(emitter, /*upper=*/false);
+    super::rt_encoding::compile_hex_encode(emitter, /*upper=*/true);
+    super::rt_encoding::compile_hex_decode(emitter);
     // String stdlib runtime (delegated)
     super::rt_string::compile(emitter);
     // Value/JSON runtime
