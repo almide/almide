@@ -13,21 +13,31 @@ impl FuncCompiler<'_> {
         method: &str,
         args: &[IrExpr],
     ) -> bool {
+        use super::stdlib_dispatch::StdlibOp;
+
+        // ── Declarative table: simple runtime-call patterns ──
+        // Each entry maps method name → (arity, runtime function index).
+        let rt = &self.emitter.rt.string;
+        let op: Option<StdlibOp> = match method {
+            "trim"       => Some(StdlibOp::Call1(rt.trim)),
+            "trim_start" => Some(StdlibOp::Call1(rt.trim_start)),
+            "trim_end"   => Some(StdlibOp::Call1(rt.trim_end)),
+            "reverse"    => Some(StdlibOp::Call1(rt.reverse)),
+            "len"        => Some(StdlibOp::Call1(rt.char_count)),
+            "contains"   => Some(StdlibOp::Call2(rt.contains)),
+            "split"      => Some(StdlibOp::Call2(rt.split)),
+            "join"       => Some(StdlibOp::Call2(rt.join)),
+            "count"      => Some(StdlibOp::Call2(rt.count)),
+            "replace"    => Some(StdlibOp::Call3(rt.replace)),
+            // pad_start / pad_end need i32_wrap_i64 on the length arg — stay inline.
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.emit_stdlib_op(op, args);
+            return true;
+        }
+
         match method {
-            "trim" => {
-                self.emit_expr(&args[0]);
-                wasm!(self.func, { call(self.emitter.rt.string.trim); });
-            }
-            "len" => {
-                // UTF-8 char count, matching Rust `s.chars().count()` semantics.
-                self.emit_expr(&args[0]);
-                wasm!(self.func, { call(self.emitter.rt.string.char_count); });
-            }
-            "contains" => {
-                self.emit_expr(&args[0]);
-                self.emit_expr(&args[1]);
-                wasm!(self.func, { call(self.emitter.rt.string.contains); });
-            }
             "starts_with" => {
                 let s0 = self.scratch.alloc_i32();
                 let s1 = self.scratch.alloc_i32();
@@ -109,30 +119,10 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s1);
                 self.scratch.free_i32(s);
             }
-            "reverse" => {
-                self.emit_expr(&args[0]);
-                wasm!(self.func, { call(self.emitter.rt.string.reverse); });
-            }
             "repeat" => {
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { i32_wrap_i64; call(self.emitter.rt.string.repeat); });
-            }
-            "replace" => {
-                self.emit_expr(&args[0]);
-                self.emit_expr(&args[1]);
-                self.emit_expr(&args[2]);
-                wasm!(self.func, { call(self.emitter.rt.string.replace); });
-            }
-            "split" => {
-                self.emit_expr(&args[0]);
-                self.emit_expr(&args[1]);
-                wasm!(self.func, { call(self.emitter.rt.string.split); });
-            }
-            "join" => {
-                self.emit_expr(&args[0]);
-                self.emit_expr(&args[1]);
-                wasm!(self.func, { call(self.emitter.rt.string.join); });
             }
             "slice" => {
                 self.emit_expr(&args[0]);
@@ -187,11 +177,6 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s32);
                 self.scratch.free_i64(s64);
             }
-            "count" => {
-                self.emit_expr(&args[0]);
-                self.emit_expr(&args[1]);
-                wasm!(self.func, { call(self.emitter.rt.string.count); });
-            }
             "pad_start" => {
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
@@ -205,14 +190,6 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { i32_wrap_i64; });
                 self.emit_expr(&args[2]);
                 wasm!(self.func, { call(self.emitter.rt.string.pad_end); });
-            }
-            "trim_start" => {
-                self.emit_expr(&args[0]);
-                wasm!(self.func, { call(self.emitter.rt.string.trim_start); });
-            }
-            "trim_end" => {
-                self.emit_expr(&args[0]);
-                wasm!(self.func, { call(self.emitter.rt.string.trim_end); });
             }
             "to_upper" => {
                 self.emit_expr(&args[0]);

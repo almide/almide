@@ -321,8 +321,8 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [math](stdlib/math.md) | Mathematical functions | `import math` | 21 |
 | [regex](stdlib/regex.md) | Regular expressions | `import regex` | 8 |
 | [datetime](stdlib/datetime.md) | Date and time | `import datetime` | 21 |
-| [bytes](stdlib/bytes.md) | Binary data | `import bytes` | 30 |
-| [matrix](stdlib/matrix.md) | 2D matrix operations | `import matrix` | 13 |
+| [bytes](stdlib/bytes.md) | Binary data | `import bytes` | 67 |
+| [matrix](stdlib/matrix.md) | 2D matrix operations | `import matrix` | 39 |
 | [testing](stdlib/testing.md) | Test assertions | `import testing` | 7 |
 | [error](stdlib/error.md) | Error construction | `import error` | 3 |
 | [fs](stdlib/fs.md) | File system | `import fs` | 24 |
@@ -348,6 +348,12 @@ Full function signatures: [docs/stdlib/](stdlib/)
 - **No nested functions.** All `fn` must be at the top level. Use lambdas for local helpers
 - **No `mut` keyword.** Use `var` for mutable bindings, not `let mut`
 - Almide is NOT Rust. No `&`, `mut`, `impl`, `trait` (use `protocol`), `pub`, `mod` (as declaration)
+
+## Naming conventions across stdlib
+
+- `bytes`: `read_<dtype>_le|be(b, pos)` for one value, `read_<dtype>_le_array(b, pos, count)` for bulk, `set_<dtype>_le(b, pos, val)` to overwrite, `append_<dtype>_le(b, val)` to grow. `<dtype>` ∈ `u8|u16|u32|i32|i64|f16|f32|f64`.
+- `matrix`: row-shaped ops use `_rows` suffix (`softmax_rows`, `slice_rows`, `gather_rows`, `layer_norm_rows`); singular `_row` when an op consumes/produces *one* row (`linear_row`, `dot_row`, `broadcast_add_row`); column ops use `_cols` (`split_cols_even`, `concat_cols`).
+- `from_X` builds from another representation, `to_X` is its inverse (e.g. `from_bytes_f64_le` ↔ `to_bytes_f64_le`).
 
 ## Common mistakes (DO NOT)
 - `list[1, 2, 3]` → **WRONG**. Write `[1, 2, 3]`. `list` is a module, not a type constructor

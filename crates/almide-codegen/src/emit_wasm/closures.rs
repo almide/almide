@@ -57,12 +57,8 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
                 wasm_params.push(vt);
             }
         }
-        // Resolve body return type: if Unknown, infer from expression tree + VarTable
-        let body_ret_ty = if _body.ty.is_unresolved() {
-            resolve_expr_ty(_body, &program.var_table, &emitter.record_fields)
-        } else {
-            _body.ty.clone()
-        };
+        // Body return type: trust `.ty` set by ConcretizeTypes.
+        let body_ret_ty = _body.ty.clone();
         let ret_types = values::ret_type(&body_ret_ty);
         let closure_type_idx = emitter.register_type(wasm_params, ret_types);
 
@@ -220,7 +216,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
         // ScratchAllocator locals
         let scratch_i32_cap = 32usize;
         let scratch_i64_cap = 16usize;
-        let scratch_f64_cap = 4usize;
+        let scratch_f64_cap = 16usize;
         let scratch_i32_base = local_idx;
         for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); local_idx += 1; }
         let scratch_i64_base = local_idx;
@@ -409,95 +405,17 @@ fn collect_pattern_var_ids(pattern: &almide_ir::IrPattern, out: &mut HashSet<u32
 
 /// Resolve a lambda parameter type when it's TypeVar or Unknown.
 fn resolve_lambda_param_ty(param_ty: &almide_lang::types::Ty, _body_ty: &almide_lang::types::Ty, var_table: &almide_ir::VarTable, vid: VarId) -> almide_lang::types::Ty {
-    match param_ty {
-        _ if param_ty.is_unresolved_structural() => {
-            // Try VarTable for the resolved type
-            if (vid.0 as usize) < var_table.len() {
-                let info = var_table.get(vid);
-                if !info.ty.is_unresolved_structural() {
-                    return info.ty.clone();
-                }
-            }
-            // Fallback: default to Int. This matches the most common case (numeric).
-            // For non-numeric types (String, List, etc.), the caller must resolve
-            // the type from call context (e.g., list element type, fn signature).
-            almide_lang::types::Ty::Int
+    // Always try VarTable first — it has the type-checker's resolved types.
+    if (vid.0 as usize) < var_table.len() {
+        let info = var_table.get(vid);
+        if !info.ty.is_unresolved() {
+            return info.ty.clone();
         }
-        _ => param_ty.clone(),
     }
-}
-
-/// Resolve the effective type of an expression tree, using VarTable for Var references
-/// and record_fields from the emitter for Member accesses.
-/// This is needed because lambda body expressions may have Unknown type from the type
-/// checker when the lambda is inside a generic function.
-pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &almide_ir::VarTable, record_fields: &HashMap<String, Vec<(String, almide_lang::types::Ty)>>) -> almide_lang::types::Ty {
-    use almide_lang::types::Ty;
-    // If the expression already has a concrete type, use it
-    if !expr.ty.is_unresolved() {
-        return expr.ty.clone();
+    if !param_ty.is_unresolved() {
+        return param_ty.clone();
     }
-    match &expr.kind {
-        IrExprKind::Var { id } => {
-            if (id.0 as usize) < var_table.len() {
-                let info = var_table.get(*id);
-                if !info.ty.is_unresolved() {
-                    return info.ty.clone();
-                }
-            }
-            expr.ty.clone()
-        }
-        IrExprKind::Member { object, field } => {
-            let obj_ty = resolve_expr_ty(object, var_table, record_fields);
-            match &obj_ty {
-                Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                    if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field) {
-                        return fty.clone();
-                    }
-                }
-                Ty::Named(name, _) => {
-                    if let Some(fields) = record_fields.get(name.as_str()) {
-                        if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field) {
-                            return fty.clone();
-                        }
-                    }
-                }
-                _ => {
-                    // Unknown object type: search record_fields for a type that has this field
-                    for (_name, fields) in record_fields {
-                        if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field) {
-                            return fty.clone();
-                        }
-                    }
-                }
-            }
-            expr.ty.clone()
-        }
-        IrExprKind::TupleIndex { object, index } => {
-            let obj_ty = resolve_expr_ty(object, var_table, record_fields);
-            if let Ty::Tuple(elems) = &obj_ty {
-                if let Some(t) = elems.get(*index as usize) {
-                    return t.clone();
-                }
-            }
-            expr.ty.clone()
-        }
-        IrExprKind::If { then, .. } => resolve_expr_ty(then, var_table, record_fields),
-        IrExprKind::Match { arms, .. } => {
-            // Resolve from the first arm's body
-            if let Some(arm) = arms.first() {
-                let resolved = resolve_expr_ty(&arm.body, var_table, record_fields);
-                if !resolved.is_unresolved() {
-                    return resolved;
-                }
-            }
-            expr.ty.clone()
-        }
-        IrExprKind::Block { expr: Some(e), .. } => {
-            resolve_expr_ty(e, var_table, record_fields)
-        }
-        _ => expr.ty.clone(),
-    }
+    almide_lang::types::Ty::Int
 }
 
 // ── VarRefCollector: IrVisitor-based variable reference collector ────

@@ -16,7 +16,7 @@ impl FuncCompiler<'_> {
         match method {
             "find" => {
                 // find(xs, pred) → Option[A]: first element where pred(x) is true
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -67,7 +67,7 @@ impl FuncCompiler<'_> {
             }
             "find_index" if args.len() == 2 && matches!(&args[1].ty, Ty::Fn { .. }) => {
                 // find_index(xs, pred) → Option[Int]
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -109,7 +109,7 @@ impl FuncCompiler<'_> {
             }
             "any" => {
                 // any(xs, pred) → Bool
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -144,7 +144,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(xs);
             }
             "all" => {
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -180,7 +180,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(xs);
             }
             "each" => {
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -211,7 +211,7 @@ impl FuncCompiler<'_> {
             }
             "take_end" => {
                 // take_end(xs, n) = drop(xs, max(0, len-n))
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let n = self.scratch.alloc_i32();
@@ -260,7 +260,7 @@ impl FuncCompiler<'_> {
             }
             "drop_end" => {
                 // drop_end(xs, n) = take(xs, max(0, len-n))
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let n = self.scratch.alloc_i32();
@@ -338,7 +338,7 @@ impl FuncCompiler<'_> {
             }
             "reduce" => {
                 // reduce(xs, f) → Option[A]: fold starting from xs[0]
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let acc_vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I64);
                 let xs = self.scratch.alloc_i32();
@@ -398,7 +398,7 @@ impl FuncCompiler<'_> {
             }
             "flat_map" => {
                 // flat_map(xs, f) → List[B]: f returns List[B], flatten results
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 // Output element type B: infer from fn return type List[B]
                 let out_elem_ty = if let Ty::Fn { ret, .. } = &args[1].ty {
                     self.list_elem_ty(ret) // List[B] → B
@@ -577,7 +577,7 @@ impl FuncCompiler<'_> {
             }
             "swap" => {
                 // swap(xs, i, j) → List[A]: copy with elements at i and j swapped
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let elem_vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let xs = self.scratch.alloc_i32();
@@ -649,7 +649,7 @@ impl FuncCompiler<'_> {
             "chunk" => {
                 // chunk(xs, n) → List[List[A]]
                 // Outer list of inner lists. Each inner list has up to n elements.
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let n = self.scratch.alloc_i32();
@@ -723,7 +723,7 @@ impl FuncCompiler<'_> {
             }
             "windows" | "window" => {
                 // windows(xs, n) → List[List[A]]: sliding windows of size n
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let n = self.scratch.alloc_i32();
@@ -793,7 +793,7 @@ impl FuncCompiler<'_> {
             }
             "dedup" => {
                 // dedup(xs) → List[A]: remove consecutive duplicates
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
@@ -864,7 +864,7 @@ impl FuncCompiler<'_> {
             "sort_by" => {
                 // sort_by(xs, f) → List[A]: bubble sort by key function
                 // Strategy: copy list, compute keys into parallel array, bubble sort both
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let elem_vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 // Infer key type from closure return type. The closure's

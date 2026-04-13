@@ -20,10 +20,20 @@
 //! This eliminates stack growth for self-recursive tail calls, critical for
 //! WASM where the stack is limited and there is no native tail call support.
 
+use std::cell::RefCell;
+use std::collections::HashSet;
 use almide_ir::*;
 use almide_lang::types::Ty;
 use almide_lang::types::constructor::TypeConstructorId;
 use super::pass::{NanoPass, PassResult, Target};
+
+// Param indices for the currently-being-rewritten TCO function whose borrow
+// should be preserved across loop iterations (currently: Bytes params).
+// Filled in `rewrite_to_loop`, read by `emit_tail_call_replacement` to decide
+// whether to strip a `Borrow` wrapper from that arg position.
+thread_local! {
+    static TCO_BORROWED_PARAMS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
+}
 
 #[derive(Debug)]
 pub struct TailCallOptPass;
@@ -324,10 +334,30 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
         func.ret_ty.clone()
     };
 
-    // Mark all param VarIds as mutable (they'll be reassigned in the loop)
-    for param in &func.params {
+    // Mark all param VarIds as mutable (they'll be reassigned in the loop).
+    //
+    // Historically all borrow annotations were reset to Own here, because a
+    // param that persists across loop iterations needs an owned value. BUT
+    // that causes massive clones in binary parsers: a self-recursive walker
+    // over a 77MB Bytes buffer would clone the buffer on every iteration.
+    //
+    // For Bytes specifically, holding a `&Vec<u8>` across iterations is
+    // safe — the reference targets something owned by the outermost caller,
+    // and reassigning it inside the loop (to the same or a derived &Vec<u8>)
+    // is a no-op lifetime-wise. Keep the borrow there; force ownership
+    // everywhere else.
+    let mut bytes_borrowed_params: HashSet<usize> = HashSet::new();
+    for (i, param) in func.params.iter_mut().enumerate() {
         var_table.entries[param.var.0 as usize].mutability = Mutability::Var;
+        let keep_borrow = matches!(param.ty, Ty::Bytes)
+            && !matches!(param.borrow, almide_ir::ParamBorrow::Own);
+        if keep_borrow {
+            bytes_borrowed_params.insert(i);
+        } else {
+            param.borrow = almide_ir::ParamBorrow::Own;
+        }
     }
+    TCO_BORROWED_PARAMS.with(|s| *s.borrow_mut() = bytes_borrowed_params.clone());
 
     // Allocate a result variable
     let result_var = var_table.alloc(
@@ -337,15 +367,23 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
         None,
     );
 
-    // Allocate temporaries for each param (to avoid order-dependent assignment)
-    let temps: Vec<(VarId, Ty)> = func.params.iter().map(|p| {
+    // Allocate temporaries for each param. For borrow-preserved params the
+    // temp's type is `Ty::Unknown` so the walker emits `let __tco_tmp_data = data;`
+    // (no explicit type annotation). That lets Rust infer `&Vec<u8>` from the
+    // RHS, which matches the reassignment `data = __tco_tmp_data`.
+    let temps: Vec<(VarId, Ty)> = func.params.iter().enumerate().map(|(i, p)| {
+        let tmp_ty = if bytes_borrowed_params.contains(&i) {
+            Ty::Unknown
+        } else {
+            p.ty.clone()
+        };
         let tmp = var_table.alloc(
             format!("__tco_tmp_{}", p.name).into(),
-            p.ty.clone(),
+            tmp_ty.clone(),
             Mutability::Let,
             None,
         );
-        (tmp, p.ty.clone())
+        (tmp, tmp_ty)
     }).collect();
 
     // Collect param info for rewrite
@@ -506,6 +544,15 @@ fn rewrite_tail_expr(
 /// param1 = __tco_tmp_1
 /// continue
 /// ```
+/// Strip a Borrow wrapper from an expression (if present).
+/// TCO params become owned, so borrow annotations from BorrowInsertion must be removed.
+fn strip_borrow(expr: IrExpr) -> IrExpr {
+    match expr.kind {
+        IrExprKind::Borrow { expr: inner, .. } => *inner,
+        _ => expr,
+    }
+}
+
 fn emit_tail_call_replacement(
     args: Vec<IrExpr>,
     params: &[(VarId, Ty)],
@@ -514,15 +561,19 @@ fn emit_tail_call_replacement(
 ) -> IrExpr {
     let mut stmts: Vec<IrStmt> = Vec::new();
 
-    // Bind temporaries to argument expressions
+    // Bind temporaries to argument expressions.
+    // Strip Borrow from arg unless this param position is kept-borrowed
+    // (e.g. Bytes borrow preserved across iterations).
     for (i, arg) in args.into_iter().enumerate() {
         let (tmp_var, tmp_ty) = &temps[i];
+        let keep = TCO_BORROWED_PARAMS.with(|s| s.borrow().contains(&i));
+        let unwrapped = if keep { arg } else { strip_borrow(arg) };
         stmts.push(IrStmt {
             kind: IrStmtKind::Bind {
                 var: *tmp_var,
                 mutability: Mutability::Let,
                 ty: tmp_ty.clone(),
-                value: arg,
+                value: unwrapped,
             },
             span: None,
         });

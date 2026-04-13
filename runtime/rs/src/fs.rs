@@ -166,3 +166,11 @@ fn glob_match(pattern: &str, name: &str) -> bool {
     }
     true
 }
+
+pub fn almide_rt_fs_read_bytes_raw(path: String) -> Result<Vec<u8>, String> {
+    std::fs::read(&path).map_err(io_err)
+}
+
+pub fn almide_rt_fs_write_bytes_raw(path: &str, data: &Vec<u8>) -> Result<(), String> {
+    std::fs::write(path, data).map_err(io_err)
+}

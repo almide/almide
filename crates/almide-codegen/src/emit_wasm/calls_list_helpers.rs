@@ -65,45 +65,45 @@ impl FuncCompiler<'_> {
         } else { Ty::Int }
     }
 
-    /// Resolve the element type of a list expression, checking multiple sources
-    /// to handle cases where the expression-level type is still TypeVar/Unknown.
+    /// Resolve the element type of a list expression.
+    ///
+    /// After the `ConcretizeTypes` pass runs, `list_expr.ty` is reliably a
+    /// concrete `Applied(List, [T])`, so the happy path is a single lookup.
+    /// The remaining branches are safety nets for IR paths that ConcretizeTypes
+    /// may not touch (e.g. error recovery paths, edge cases in lifted closures).
     pub(super) fn resolve_list_elem(&self, list_expr: &IrExpr, fn_expr: Option<&IrExpr>) -> Ty {
-        // 1. From list expression type directly
-        let from_expr = if let Ty::Applied(_, args) = &list_expr.ty {
-            args.first().cloned()
-        } else { None };
-        if from_expr.as_ref().is_some_and(|t| !t.is_unresolved()) {
-            return from_expr.unwrap();
-        }
-        // 2. From VarTable (if list_expr is a Var)
-        if let almide_ir::IrExprKind::Var { id } = &list_expr.kind {
-            if let Ty::Applied(_, a) = &self.var_table.get(*id).ty {
-                let t = a.first().cloned();
-                if t.as_ref().is_some_and(|t| !t.is_unresolved()) {
-                    return t.unwrap();
-                }
+        // Primary: the expression's type (set by ConcretizeTypes)
+        if let Ty::Applied(_, args) = &list_expr.ty {
+            if let Some(t) = args.first().filter(|t| !t.has_unresolved_deep()) {
+                return t.clone();
             }
         }
-        // 3. From fn expression's Fn type (first param = elem type for map/filter/each)
+        // Safety net: VarTable for Var / EnvLoad
+        let vt_ty = match &list_expr.kind {
+            almide_ir::IrExprKind::Var { id } => Some(&self.var_table.get(*id).ty),
+            almide_ir::IrExprKind::EnvLoad { env_var, .. } => Some(&self.var_table.get(*env_var).ty),
+            _ => None,
+        };
+        if let Some(Ty::Applied(_, a)) = vt_ty {
+            if let Some(t) = a.first().filter(|t| !t.has_unresolved_deep()) {
+                return t.clone();
+            }
+        }
+        // Safety net: closure/lambda first param (for map/filter/each)
         if let Some(fn_e) = fn_expr {
             if let Ty::Fn { params, .. } = &fn_e.ty {
-                let t = params.first().cloned();
-                if t.as_ref().is_some_and(|t| !t.is_unresolved()) {
-                    return t.unwrap();
+                if let Some(t) = params.first().filter(|t| !t.has_unresolved_deep()) {
+                    return t.clone();
                 }
             }
-            // 4. From Lambda params directly
             if let almide_ir::IrExprKind::Lambda { params, .. } = &fn_e.kind {
-                let t = params.first().map(|(_, t)| t.clone());
-                if t.as_ref().is_some_and(|t| !t.is_unresolved()) {
-                    return t.unwrap();
+                if let Some((_, t)) = params.first().filter(|(_, t)| !t.has_unresolved_deep()) {
+                    return t.clone();
                 }
             }
         }
-        // Fallback: if still TypeVar/Unknown, default to Int
-        from_expr
-            .filter(|t| !t.is_unresolved())
-            .unwrap_or(Ty::Int)
+        // Final fallback: Int (best-effort, likely produces wrong but sized code)
+        Ty::Int
     }
 
     /// Resolve the concrete return type of a closure argument. Handles the case
@@ -224,7 +224,7 @@ impl FuncCompiler<'_> {
         // Resolve the element type aggressively — use the expression type
         // first, then fall back to VarTable when the expression was left
         // generic by inference.
-        let mut elem_ty = self.list_elem_ty(&args[0].ty);
+        let mut elem_ty = self.resolve_list_elem(&args[0], None);
         if elem_ty.is_unresolved() {
             if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
                 let vt = self.var_table.get(*id).ty.clone();
@@ -339,7 +339,7 @@ impl FuncCompiler<'_> {
 
     /// Emit list.index_of(xs, x) → Option[Int].
     pub(super) fn emit_list_index_of(&mut self, args: &[IrExpr]) {
-        let elem_ty = self.list_elem_ty(&args[0].ty);
+        let elem_ty = self.resolve_list_elem(&args[0], None);
         let elem_size = values::byte_size(&elem_ty);
         let xs_ptr = self.scratch.alloc_i32();
         let i = self.scratch.alloc_i32();
@@ -424,7 +424,7 @@ impl FuncCompiler<'_> {
 
     /// Emit list.unique(xs) → List[A]: O(n²) dedup.
     pub(super) fn emit_list_unique(&mut self, args: &[IrExpr]) {
-        let elem_ty = self.list_elem_ty(&args[0].ty);
+        let elem_ty = self.resolve_list_elem(&args[0], None);
         let es = values::byte_size(&elem_ty) as i32;
         let src = self.scratch.alloc_i32();
         let src_len = self.scratch.alloc_i32();
@@ -493,9 +493,7 @@ impl FuncCompiler<'_> {
 
     /// Emit list.enumerate(xs) → List[(Int, A)].
     pub(super) fn emit_list_enumerate(&mut self, args: &[IrExpr]) {
-        let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
-            a.first().cloned().unwrap_or(Ty::Int)
-        } else { Ty::Int };
+        let elem_ty = self.resolve_list_elem(&args[0], None);
         let elem_size = values::byte_size(&elem_ty);
         let tuple_size = 8 + elem_size; // Int(8) + elem
 

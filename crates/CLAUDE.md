@@ -1,5 +1,7 @@
 # Almide Compiler Crates
 
+> **Active redesign**: [docs/roadmap/active/codegen-ideal-form.md](../docs/roadmap/active/codegen-ideal-form.md) — codegen の理想形に向けたリファクタ計画。新しいパスや emit 修正を入れる前に一読。
+
 ## Pipeline
 
 ```

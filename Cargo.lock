@@ -22,7 +22,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "almide"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "almide-base",
  "almide-codegen",

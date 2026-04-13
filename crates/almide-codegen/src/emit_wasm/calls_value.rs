@@ -211,7 +211,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(v);
             }
             _ => {
-                self.emit_stub_call(args);
+                self.emit_stub_call_named("value", func, args);
             }
         }
     }
@@ -347,7 +347,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.json_remove_path); });
             }
             _ => {
-                self.emit_stub_call(args);
+                self.emit_stub_call_named("value", func, args);
             }
         }
     }

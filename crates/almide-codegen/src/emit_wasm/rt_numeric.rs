@@ -1051,6 +1051,25 @@ pub(super) fn compile_math_exp(emitter: &mut WasmEmitter) {
         end;
     });
 
+    // Saturate: above ~709 the result is +Inf in IEEE-754; below ~-745 it is 0.
+    // Without this clamp the Taylor path's `i64.trunc_f64_s` traps on huge or
+    // NaN inputs (encoder softmax can momentarily push scores way out of range).
+    wasm!(f, {
+        // x != x  →  NaN check (NaN compares unequal to itself)
+        local_get(0); local_get(0); f64_ne;
+        if_empty;
+          local_get(0); return_;  // propagate NaN unchanged
+        end;
+        local_get(0); f64_const(709.78); f64_gt;
+        if_empty;
+          f64_const(f64::INFINITY); return_;
+        end;
+        local_get(0); f64_const(-745.13); f64_lt;
+        if_empty;
+          f64_const(0.0); return_;
+        end;
+    });
+
     // int_part = trunc(x)
     wasm!(f, {
         local_get(0);

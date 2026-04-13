@@ -1,0 +1,89 @@
+// Symmetry sweep: i16 family, u16/i16/i32/i64/f32/f64 BE writers/setters.
+
+test "i16_le round-trip" {
+  var b = bytes.new(0)
+  bytes.append_i16_le(b, -1)
+  bytes.append_i16_le(b, 32767)
+  bytes.append_i16_le(b, -32768)
+  assert_eq(bytes.read_i16_le(b, 0), -1)
+  assert_eq(bytes.read_i16_le(b, 2), 32767)
+  assert_eq(bytes.read_i16_le(b, 4), -32768)
+}
+
+test "i16_be round-trip" {
+  var b = bytes.new(0)
+  bytes.append_i16_be(b, -1)
+  bytes.append_i16_be(b, 32767)
+  bytes.append_i16_be(b, -32768)
+  assert_eq(bytes.read_i16_be(b, 0), -1)
+  assert_eq(bytes.read_i16_be(b, 2), 32767)
+  assert_eq(bytes.read_i16_be(b, 4), -32768)
+}
+
+test "u16_be single read" {
+  var b = bytes.new(0)
+  bytes.append_u16_be(b, 0xCAFE)
+  assert_eq(bytes.read_u16_be(b, 0), 0xCAFE)
+}
+
+test "set_i16_le and read back" {
+  var b = bytes.new(4)
+  bytes.set_i16_le(b, 0, -100)
+  bytes.set_i16_le(b, 2, 100)
+  assert_eq(bytes.read_i16_le(b, 0), -100)
+  assert_eq(bytes.read_i16_le(b, 2), 100)
+}
+
+test "set_u16_be and set_i16_be" {
+  var b = bytes.new(4)
+  bytes.set_u16_be(b, 0, 0x1234)
+  bytes.set_i16_be(b, 2, -2)
+  assert_eq(bytes.read_u16_be(b, 0), 0x1234)
+  assert_eq(bytes.read_i16_be(b, 2), -2)
+}
+
+test "set_u32_be / set_i32_be / set_i64_be" {
+  var b = bytes.new(16)
+  bytes.set_u32_be(b, 0, 0xDEADBEEF)
+  bytes.set_i32_be(b, 4, -1)
+  bytes.set_i64_be(b, 8, -100)
+  assert_eq(bytes.read_u32_be(b, 0), 0xDEADBEEF)
+  assert_eq(bytes.read_i32_be(b, 4), -1)
+  assert_eq(bytes.read_i64_be(b, 8), -100)
+}
+
+test "set_f32_be / set_f64_be" {
+  var b = bytes.new(12)
+  bytes.set_f32_be(b, 0, 1.5)
+  bytes.set_f64_be(b, 4, -3.14159)
+  assert_eq(bytes.read_f32_be(b, 0), 1.5)
+  assert_eq(bytes.read_f64_be(b, 4), -3.14159)
+}
+
+test "i16_le_array bulk read" {
+  var b = bytes.new(0)
+  bytes.append_i16_le(b, -1)
+  bytes.append_i16_le(b, 100)
+  bytes.append_i16_le(b, -200)
+  let xs = bytes.read_i16_le_array(b, 0, 3)
+  assert_eq(list.len(xs), 3)
+  assert_eq(list.get(xs, 0) |> option.unwrap_or(0), -1)
+  assert_eq(list.get(xs, 1) |> option.unwrap_or(0), 100)
+  assert_eq(list.get(xs, 2) |> option.unwrap_or(0), -200)
+}
+
+test "u16_be_array bulk read" {
+  var b = bytes.new(0)
+  bytes.append_u16_be(b, 0x0001)
+  bytes.append_u16_be(b, 0xFFFF)
+  let xs = bytes.read_u16_be_array(b, 0, 2)
+  assert_eq(list.get(xs, 0) |> option.unwrap_or(-1), 1)
+  assert_eq(list.get(xs, 1) |> option.unwrap_or(-1), 65535)
+}
+
+test "i16_be_array sign-extends" {
+  var b = bytes.new(0)
+  bytes.append_i16_be(b, -1)
+  let xs = bytes.read_i16_be_array(b, 0, 1)
+  assert_eq(list.get(xs, 0) |> option.unwrap_or(0), -1)
+}

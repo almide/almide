@@ -415,6 +415,37 @@ fn collect_free_vars(expr: &IrExpr, bound: &HashSet<VarId>, free: &mut HashSet<V
                 collect_free_vars(v, bound, free);
             }
         }
+        IrExprKind::Borrow { expr: e, .. }
+        | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::ToVec { expr: e }
+        | IrExprKind::Await { expr: e } => {
+            collect_free_vars(e, bound, free);
+        }
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { collect_free_vars(a, bound, free); }
+        }
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            collect_free_vars(source, bound, free);
+            for step in steps {
+                match step {
+                    IterStep::Map { lambda } | IterStep::Filter { lambda }
+                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                        collect_free_vars(lambda, bound, free);
+                    }
+                }
+            }
+            match collector {
+                IterCollector::Collect => {}
+                IterCollector::Fold { init, lambda } => {
+                    collect_free_vars(init, bound, free);
+                    collect_free_vars(lambda, bound, free);
+                }
+                IterCollector::Any { lambda } | IterCollector::All { lambda }
+                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+                    collect_free_vars(lambda, bound, free);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -548,6 +579,40 @@ fn replace_vars(expr: &mut IrExpr, renames: &std::collections::HashMap<VarId, Va
         IrExprKind::MapLiteral { entries } => {
             for (k, v) in entries { replace_vars(k, renames); replace_vars(v, renames); }
         }
+        IrExprKind::Borrow { expr: e, .. }
+        | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::ToVec { expr: e }
+        | IrExprKind::Await { expr: e } => {
+            replace_vars(e, renames);
+        }
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { replace_vars(a, renames); }
+        }
+        IrExprKind::Fan { exprs } => {
+            for e in exprs { replace_vars(e, renames); }
+        }
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            replace_vars(source, renames);
+            for step in steps {
+                match step {
+                    IterStep::Map { lambda } | IterStep::Filter { lambda }
+                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                        replace_vars(lambda, renames);
+                    }
+                }
+            }
+            match collector {
+                IterCollector::Collect => {}
+                IterCollector::Fold { init, lambda } => {
+                    replace_vars(init, renames);
+                    replace_vars(lambda, renames);
+                }
+                IterCollector::Any { lambda } | IterCollector::All { lambda }
+                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+                    replace_vars(lambda, renames);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -585,7 +650,7 @@ fn needs_clone_type(ty: &Ty) -> bool {
     matches!(ty,
         Ty::String | Ty::Applied(_, _) |
         Ty::Record { .. } | Ty::OpenRecord { .. } |
-        Ty::Named(_, _) |
+        Ty::Named(_, _) | Ty::Matrix | Ty::Bytes |
         Ty::Variant { .. } | Ty::Fn { .. } |
         Ty::TypeVar(_)
     )

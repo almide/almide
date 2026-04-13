@@ -180,7 +180,7 @@ fn try_detect_vec_init(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrStmt> 
 
     // s3: Expr { ForIn { var: _, iterable: Range { 0, n }, body: [Assign { var: x, value: Concat(x, __licm) }] } }
     let IrStmtKind::Expr { expr: for_expr } = &s3.kind else { return None; };
-    let IrExprKind::ForIn { var_tuple, iterable, body, .. } = &for_expr.kind else { return None; };
+    let IrExprKind::ForIn { iterable, body, .. } = &for_expr.kind else { return None; };
     let IrExprKind::Range { start, end, inclusive: false } = &iterable.kind else { return None; };
     if !matches!(&start.kind, IrExprKind::LitInt { value: 0 }) { return None; }
     if body.len() != 1 { return None; }

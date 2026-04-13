@@ -53,7 +53,7 @@ pub fn compile_function_with_init(
     // (e.g. sum(map(filter([...], λ), λ)) needs ~14 simultaneous i32 scratch)
     let scratch_i32_cap = 32usize;
     let scratch_i64_cap = 16usize;
-    let scratch_f64_cap = 4usize;
+    let scratch_f64_cap = 16usize;
     let scratch_i32_base = param_count + local_decls.len() as u32;
     for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
     let scratch_i64_base = param_count + local_decls.len() as u32;

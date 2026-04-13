@@ -772,13 +772,32 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
             }
         }
         CallTarget::Computed { callee } => {
-            let s = render_expr(ctx, callee);
-            // Wrap in parens for lambda and field-access calls:
-            // Lambda: (|x| x + 1)(5)
-            // Member: (h.run)("hello") — required in Rust to call Fn-typed fields
-            if matches!(&callee.kind, IrExprKind::Lambda { .. } | IrExprKind::Member { .. }) {
-                format!("({})", s)
-            } else { s }
+            // Pipe terminus case: `expr |> (lambda)` lowers to `(lambda)(expr)`.
+            // The lambda is the computed callee. Here — and ONLY here — we
+            // annotate the lambda's params so rustc can infer types.
+            // (Lambda elsewhere, e.g. as arg to `.filter(...)`, must stay
+            // unannotated because iterator adapters want `&T` not `T`.)
+            if let IrExprKind::Lambda { params, body, .. } = &callee.kind {
+                let params_str = params.iter()
+                    .map(|(id, ty)| {
+                        let name = ctx.var_name(*id).to_string();
+                        if ty.has_unresolved_deep() {
+                            name
+                        } else {
+                            let ty_str = super::types::render_type(ctx, ty);
+                            format!("{}: {}", name, ty_str)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let body_str = render_expr(ctx, body);
+                format!("(move |{}| {})", params_str, body_str)
+            } else if matches!(&callee.kind, IrExprKind::Member { .. }) {
+                // Member: (h.run)("hello") — required in Rust to call Fn-typed fields
+                format!("({})", render_expr(ctx, callee))
+            } else {
+                render_expr(ctx, callee)
+            }
         }
         CallTarget::Module { .. } => unreachable!(),
     };

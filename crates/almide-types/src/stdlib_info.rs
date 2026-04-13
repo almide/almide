@@ -7,6 +7,7 @@ pub const STDLIB_MODULES: &[&str] = &[
     "string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map",
     "json", "http", "process", "math", "random", "regex", "io", "result",
     "option", "error", "datetime", "testing", "value", "set",
+    "base64", "hex",
 ];
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).

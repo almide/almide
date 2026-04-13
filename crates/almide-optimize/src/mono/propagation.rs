@@ -118,7 +118,24 @@ fn propagate_expr(expr: &mut IrExpr, vt: &mut VarTable) {
         IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
             for (_, e) in fields.iter_mut() { propagate_expr(e, vt); }
         }
-        IrExprKind::Lambda { body, .. } => propagate_expr(body, vt),
+        IrExprKind::Lambda { params, body, .. } => {
+            // Sync lambda param types between IR and VarTable — whichever
+            // has the concrete type wins. After mono, one or both may still
+            // have TypeVar; propagation from call sites resolves them.
+            for (vid, ty) in params.iter_mut() {
+                if (vid.0 as usize) < vt.len() {
+                    let vt_ty = &vt.get(*vid).ty;
+                    if has_typevar(ty) && !has_typevar(vt_ty) {
+                        // VarTable has concrete type → update IR param
+                        *ty = vt_ty.clone();
+                    } else if !has_typevar(ty) && has_typevar(vt_ty) {
+                        // IR has concrete type → update VarTable
+                        vt.entries[vid.0 as usize].ty = ty.clone();
+                    }
+                }
+            }
+            propagate_expr(body, vt);
+        }
         IrExprKind::OptionSome { expr: inner } | IrExprKind::ResultOk { expr: inner }
         | IrExprKind::ResultErr { expr: inner } | IrExprKind::Try { expr: inner }
         | IrExprKind::Await { expr: inner } | IrExprKind::Clone { expr: inner }

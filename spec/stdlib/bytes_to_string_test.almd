@@ -1,0 +1,59 @@
+// bytes ↔ String conversions: strict, lossy, validation.
+
+test "to_string round-trip with ASCII" {
+  let b = bytes.from_string("hello")
+  match bytes.to_string(b) {
+    ok(s) => assert_eq(s, "hello")
+    err(_) => assert(false)
+  }
+}
+
+test "to_string round-trip with UTF-8" {
+  let b = bytes.from_string("こんにちは")
+  match bytes.to_string(b) {
+    ok(s) => assert_eq(s, "こんにちは")
+    err(_) => assert(false)
+  }
+}
+
+test "to_string fails on invalid UTF-8" {
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0xFF)
+  bytes.append_u8(b, 0xFE)
+  match bytes.to_string(b) {
+    ok(_) => assert(false)
+    err(_) => assert(true)
+  }
+}
+
+test "to_string_lossy replaces invalid bytes" {
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0x68)  // 'h'
+  bytes.append_u8(b, 0xFF)  // invalid
+  bytes.append_u8(b, 0x69)  // 'i'
+  let s = bytes.to_string_lossy(b)
+  // Replacement char in UTF-8 is 3 bytes; total length depends on string.len semantics
+  assert(string.contains(s, "h"), "should contain h")
+  assert(string.contains(s, "i"), "should contain i")
+}
+
+test "is_valid_utf8 true for ASCII" {
+  let b = bytes.from_string("hello")
+  assert_eq(bytes.is_valid_utf8(b), true)
+}
+
+test "is_valid_utf8 true for multibyte" {
+  let b = bytes.from_string("日本語")
+  assert_eq(bytes.is_valid_utf8(b), true)
+}
+
+test "is_valid_utf8 false on invalid sequences" {
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0xFF)
+  assert_eq(bytes.is_valid_utf8(b), false)
+}
+
+test "is_valid_utf8 true on empty" {
+  let b = bytes.new(0)
+  assert_eq(bytes.is_valid_utf8(b), true)
+}

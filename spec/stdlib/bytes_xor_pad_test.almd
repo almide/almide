@@ -1,0 +1,91 @@
+// bytes.xor / pad_left / pad_right / copy_from
+
+test "xor pairwise" {
+  var a = bytes.new(0)
+  bytes.append_u8(a, 0xFF)
+  bytes.append_u8(a, 0x0F)
+  bytes.append_u8(a, 0xAA)
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0x55)
+  bytes.append_u8(b, 0xF0)
+  bytes.append_u8(b, 0xAA)
+  let r = bytes.xor(a, b)
+  assert_eq(bytes.len(r), 3)
+  assert_eq(bytes.read_u8(r, 0), 0xAA)  // 0xFF ^ 0x55
+  assert_eq(bytes.read_u8(r, 1), 0xFF)  // 0x0F ^ 0xF0
+  assert_eq(bytes.read_u8(r, 2), 0x00)  // 0xAA ^ 0xAA
+}
+
+test "xor short result is min length" {
+  var a = bytes.new(0)
+  bytes.append_u8(a, 1)
+  bytes.append_u8(a, 2)
+  bytes.append_u8(a, 3)
+  var b = bytes.new(0)
+  bytes.append_u8(b, 1)
+  let r = bytes.xor(a, b)
+  assert_eq(bytes.len(r), 1)
+  assert_eq(bytes.read_u8(r, 0), 0)
+}
+
+test "pad_left fills with val" {
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0xAA)
+  bytes.append_u8(b, 0xBB)
+  let p = bytes.pad_left(b, 5, 0)
+  assert_eq(bytes.len(p), 5)
+  assert_eq(bytes.read_u8(p, 0), 0)
+  assert_eq(bytes.read_u8(p, 2), 0)
+  assert_eq(bytes.read_u8(p, 3), 0xAA)
+  assert_eq(bytes.read_u8(p, 4), 0xBB)
+}
+
+test "pad_right fills with val" {
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0xAA)
+  bytes.append_u8(b, 0xBB)
+  let p = bytes.pad_right(b, 5, 0xFF)
+  assert_eq(bytes.len(p), 5)
+  assert_eq(bytes.read_u8(p, 0), 0xAA)
+  assert_eq(bytes.read_u8(p, 1), 0xBB)
+  assert_eq(bytes.read_u8(p, 2), 0xFF)
+  assert_eq(bytes.read_u8(p, 4), 0xFF)
+}
+
+test "pad_left already long enough returns clone" {
+  let b = bytes.from_string("hello")
+  let p = bytes.pad_left(b, 3, 0)
+  assert_eq(bytes.len(p), 5)
+}
+
+test "copy_from in-place" {
+  var dst = bytes.new(8)
+  bytes.fill(dst, 0)
+  let src = bytes.from_string("ABCD")
+  bytes.copy_from(dst, src, 2, 0, 4)
+  assert_eq(bytes.read_u8(dst, 0), 0)
+  assert_eq(bytes.read_u8(dst, 1), 0)
+  assert_eq(bytes.read_u8(dst, 2), 0x41)
+  assert_eq(bytes.read_u8(dst, 5), 0x44)
+  assert_eq(bytes.read_u8(dst, 6), 0)
+}
+
+test "copy_from clamps length" {
+  var dst = bytes.new(4)
+  bytes.fill(dst, 0)
+  let src = bytes.from_string("ABCDEFGH")
+  // Try to copy 100 bytes — should clamp to dst size remaining
+  bytes.copy_from(dst, src, 1, 0, 100)
+  assert_eq(bytes.read_u8(dst, 0), 0)
+  assert_eq(bytes.read_u8(dst, 1), 0x41)
+  assert_eq(bytes.read_u8(dst, 3), 0x43)
+}
+
+test "copy_from out-of-range no-op" {
+  var dst = bytes.new(4)
+  bytes.fill(dst, 0xFF)
+  let src = bytes.from_string("ABCD")
+  bytes.copy_from(dst, src, 100, 0, 4)
+  // dst unchanged (no out-of-range write)
+  assert_eq(bytes.read_u8(dst, 0), 0xFF)
+}

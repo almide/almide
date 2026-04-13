@@ -620,7 +620,7 @@ impl FuncCompiler<'_> {
             }
             "collect" => {
                 // collect(rs: List[Result[T, E]]) -> Result[List[T], List[E]]
-                let inner_result_ty = self.list_elem_ty(&args[0].ty);
+                let inner_result_ty = self.resolve_list_elem(&args[0], None);
                 let ok_ty = self.result_ok_ty(&inner_result_ty);
                 let err_ty = self.result_err_ty(&inner_result_ty);
                 let ok_size = values::byte_size(&ok_ty) as i32;
@@ -687,7 +687,7 @@ impl FuncCompiler<'_> {
             }
             "partition" => {
                 // partition(rs: List[Result[T, E]]) -> (List[T], List[E])
-                let inner_result_ty = self.list_elem_ty(&args[0].ty);
+                let inner_result_ty = self.resolve_list_elem(&args[0], None);
                 let ok_ty = self.result_ok_ty(&inner_result_ty);
                 let err_ty = self.result_err_ty(&inner_result_ty);
                 let ok_size = values::byte_size(&ok_ty) as i32;
@@ -748,7 +748,7 @@ impl FuncCompiler<'_> {
             }
             "collect_map" => {
                 // collect_map(xs: List[T], f: Fn[T] -> Result[U, E]) -> Result[List[U], List[E]]
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let ret_ty = self.fn_ret_ty(&args[1].ty);
                 let ok_ty = self.result_ok_ty(&ret_ty);

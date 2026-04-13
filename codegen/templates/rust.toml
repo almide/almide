@@ -297,6 +297,10 @@ when_attr = "has_fn_fields"
 template = "#[derive(Clone)]\npub struct {name} {{\n{fields}\n}}"
 
 [[struct_decl]]
+when_attr = "has_non_eq_fields"
+template = "#[derive(Clone, Debug)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
 when_attr = "repr_c"
 template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq)]\npub struct {name} {{\n{fields}\n}}"
 

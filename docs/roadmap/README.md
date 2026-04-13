@@ -6,23 +6,27 @@
 
 ## Active
 
-13 items
+17 items
 
 | Item | Description |
 |------|-------------|
 | [almai — Multi-Provider LLM Client](active/almai-llm-client.md) | almai — multi-provider LLM client library, 8 providers shipped |
 | [Almide Dojo — Continuous MSR Measurement](active/almide-dojo.md) | Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration |
+| [bytes: unify bounds-check semantics](active/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
+| [Codegen Ideal Form](active/codegen-ideal-form.md) | WASM codegen redesign toward declarative dispatch and explicit symbol resolution |
 | [Compiler Version Pin](active/compiler-version-pin.md) | minimum compiler version pinning in almide.toml (Cargo rust-version style) |
 | [Diagnostics: Here / Try / Hint Format](active/diagnostics-here-try-hint.md) | Standardize diagnostics to Here/Try/Hint three-part format with CI-verified hint correctness |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with rush/spawn/link/cancel |
 | [Flow[T] — Lazy Streaming Sequences](active/flow-design.md) | Flow[T] lazy streaming sequences with flow.* namespace aligned with list.* verbs |
 | [Flow[T] — User Specification (Draft)](active/flow-spec-draft.md) | Draft user-facing spec for Flow[T] — to be promoted to docs/specs/flow.md after Phase 1 |
+| [lumen — Pure Graphics Math](active/lumen-graphics-math.md) | lumen — pure graphics math library (vec3, mat4, color), used by webgl/canvas/obsid |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Stdlib Defs / Runtime Consistency Check](active/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | [Stdlib Symmetry Audit](active/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
 | [Variant Exhaustiveness Refinement](active/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
+| [Whisper in Pure Almide](active/whisper-almide.md) | Whisper speech recognition implemented entirely in Almide |
 
 ## On Hold
 

@@ -318,7 +318,7 @@ fn extract_invariants_from_stmt(
             // the RHS may be hoistable (e.g., total = total + square(n) → hoist square(n)).
             try_hoist_expr(value, loop_defined, vt, hoisted, pure_fns);
         }
-        IrStmtKind::Guard { cond, else_ } => {
+        IrStmtKind::Guard { cond, .. } => {
             try_hoist_expr(cond, loop_defined, vt, hoisted, pure_fns);
             // Do NOT hoist guard else — it's a control flow value (break/return),
             // not a computed expression. Hoisting ok(()) out of a guard makes

@@ -1,0 +1,91 @@
+// bytes cursor family — immutable position-threaded reads.
+// Each read returns (next_pos, Option[T]); EOF returns (pos, none).
+
+test "skip clamps to len" {
+  let b = bytes.new(8)
+  assert_eq(bytes.skip(b, 0, 4), 4)
+  assert_eq(bytes.skip(b, 6, 5), 8)
+  assert_eq(bytes.skip(b, 8, 1), 8)
+}
+
+test "eof detection" {
+  let b = bytes.new(4)
+  assert_eq(bytes.eof(b, 0), false)
+  assert_eq(bytes.eof(b, 4), true)
+  assert_eq(bytes.eof(b, 5), true)
+}
+
+test "read_u8_at advances and returns Some when in-range" {
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0xAA)
+  bytes.append_u8(b, 0xBB)
+  let (p1, v1) = bytes.read_u8_at(b, 0)
+  assert_eq(p1, 1)
+  assert_eq(v1 |> option.unwrap_or(0), 0xAA)
+  let (p2, v2) = bytes.read_u8_at(b, p1)
+  assert_eq(p2, 2)
+  assert_eq(v2 |> option.unwrap_or(0), 0xBB)
+}
+
+test "read_u8_at returns none at EOF without advancing" {
+  let b = bytes.new(1)
+  let (p, v) = bytes.read_u8_at(b, 1)
+  assert_eq(p, 1)
+  assert(option.is_none(v), "expected none at eof")
+}
+
+test "chained u32 reads via cursor pattern" {
+  var b = bytes.new(0)
+  bytes.append_u32_le(b, 100)
+  bytes.append_u32_le(b, 200)
+  bytes.append_u32_le(b, 300)
+  let (p1, a) = bytes.read_u32_le_at(b, 0)
+  let (p2, c) = bytes.read_u32_le_at(b, p1)
+  let (p3, _e) = bytes.read_u32_le_at(b, p2)
+  assert_eq(p1, 4)
+  assert_eq(p2, 8)
+  assert_eq(p3, 12)
+  assert_eq(a |> option.unwrap_or(0), 100)
+  assert_eq(c |> option.unwrap_or(0), 200)
+}
+
+test "read_f64_le_at round-trip" {
+  var b = bytes.new(0)
+  bytes.append_f64_le(b, 1.5)
+  bytes.append_f64_le(b, -2.25)
+  let (p1, x) = bytes.read_f64_le_at(b, 0)
+  let (p2, y) = bytes.read_f64_le_at(b, p1)
+  assert_eq(p1, 8)
+  assert_eq(p2, 16)
+  assert_eq(x |> option.unwrap_or(0.0), 1.5)
+  assert_eq(y |> option.unwrap_or(0.0), -2.25)
+}
+
+test "read_u32_be_at" {
+  var b = bytes.new(0)
+  bytes.append_u32_be(b, 0x01020304)
+  let (p, v) = bytes.read_u32_be_at(b, 0)
+  assert_eq(p, 4)
+  assert_eq(v |> option.unwrap_or(0), 0x01020304)
+}
+
+test "take_at copies n bytes" {
+  var b = bytes.new(0)
+  bytes.append_u8(b, 1)
+  bytes.append_u8(b, 2)
+  bytes.append_u8(b, 3)
+  bytes.append_u8(b, 4)
+  let (p, slice) = bytes.take_at(b, 1, 2)
+  assert_eq(p, 3)
+  let s = slice |> option.unwrap_or(bytes.new(0))
+  assert_eq(bytes.len(s), 2)
+  assert_eq(bytes.read_u8(s, 0), 2)
+  assert_eq(bytes.read_u8(s, 1), 3)
+}
+
+test "take_at returns none when not enough bytes" {
+  let b = bytes.new(2)
+  let (p, slice) = bytes.take_at(b, 1, 5)
+  assert_eq(p, 1)
+  assert(option.is_none(slice), "expected none")
+}

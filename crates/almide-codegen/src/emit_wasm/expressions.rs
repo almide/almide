@@ -756,6 +756,7 @@ impl FuncCompiler<'_> {
     }
 
     pub(super) fn emit_binop(&mut self, op: BinOp, left: &IrExpr, right: &IrExpr) {
+        // BinOp is already reconciled with operand types by ConcretizeTypes pass.
         match op {
             // ── Arithmetic ──
             BinOp::AddInt => {
@@ -1176,4 +1177,5 @@ impl FuncCompiler<'_> {
             _ => false,
         }
     }
+
 }

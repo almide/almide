@@ -23,7 +23,15 @@ mod rt_string;
 mod rt_string_extra;
 mod rt_numeric;
 mod expressions;
+mod stdlib_dispatch;
 mod calls;
+mod calls_env;
+mod calls_random;
+mod calls_datetime;
+mod calls_http;
+mod calls_fs;
+mod calls_io;
+mod calls_process;
 mod calls_string;
 mod calls_option;
 mod calls_numeric;
@@ -41,6 +49,7 @@ mod calls_value;
 mod calls_regex;
 mod rt_value;
 pub(crate) mod rt_regex;
+mod rt_encoding;
 mod closures;
 mod equality;
 mod collections;
@@ -136,6 +145,16 @@ pub struct RuntimeFuncs {
     pub math_log10: u32,
     pub math_log2: u32,
     pub math_exp: u32,
+    /// IEEE-754 half-precision → f64 (for bytes.read_f16_le).
+    pub bytes_f16_to_f64: u32,
+    /// base64 / hex stdlib runtime helpers.
+    pub base64_encode: u32,
+    pub base64_decode: u32,
+    pub base64_encode_url: u32,
+    pub base64_decode_url: u32,
+    pub hex_encode: u32,
+    pub hex_encode_upper: u32,
+    pub hex_decode: u32,
     pub string: StringRuntime,
     pub value_stringify: u32,
     pub json_escape_string: u32,
@@ -279,6 +298,10 @@ impl WasmEmitter {
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
                 math_sin: 0, math_cos: 0, math_tan: 0,
                 math_log: 0, math_log10: 0, math_log2: 0, math_exp: 0,
+                bytes_f16_to_f64: 0,
+                base64_encode: 0, base64_decode: 0,
+                base64_encode_url: 0, base64_decode_url: 0,
+                hex_encode: 0, hex_encode_upper: 0, hex_decode: 0,
                 concat_str: 0,
                 concat_list: 0,
                 list_eq: 0, mem_eq: 0, list_list_str_cmp: 0,
@@ -739,6 +762,29 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }
     }
 
+    // Stdlib runtime types that aren't declared as Almide records but must
+    // resolve for Member access (e.g. `resp.status`). Field offsets must
+    // match the layout chosen by the corresponding stdlib emit (see
+    // calls_http.rs `response`/`json`).
+    use almide_lang::types::Ty as _Ty;
+    emitter.record_fields.insert("Response".to_string(), vec![
+        ("status".to_string(),  _Ty::Int),     // i64 @ 0
+        ("body".to_string(),    _Ty::String),  // i32 ptr @ 8
+        ("headers".to_string(),
+            _Ty::Applied(almide_lang::types::TypeConstructorId::List, vec![
+                _Ty::Tuple(vec![_Ty::String, _Ty::String]),
+            ])),                                // i32 ptr @ 12
+    ]);
+    emitter.record_fields.insert("Request".to_string(), vec![
+        ("method".to_string(),  _Ty::String),
+        ("path".to_string(),    _Ty::String),
+        ("body".to_string(),    _Ty::String),
+        ("headers".to_string(),
+            _Ty::Applied(almide_lang::types::TypeConstructorId::List, vec![
+                _Ty::Tuple(vec![_Ty::String, _Ty::String]),
+            ])),
+    ]);
+
     // Also register all anonymous record shapes found in the IR under synthetic
     // names so `emit_member`'s Unknown-type fallback (which searches
     // `record_fields` by field name) can resolve Member access on Lambda
@@ -806,6 +852,8 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         // to VarTable (for params) and expression inspection (for ret).
         let params: Vec<ValType> = func.params.iter()
             .filter_map(|p| {
+                if func.name.contains("closure") || func.name.contains("lambda") {
+                }
                 let pty = if p.ty.is_unresolved_structural() {
                     let vt_ty = &program.var_table.get(p.var).ty;
                     if !vt_ty.is_unresolved_structural() {
@@ -819,8 +867,12 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 values::ty_to_valtype(&pty)
             })
             .collect();
+        if func.name.contains("closure") || func.name.contains("lambda") {
+        }
+        // Function return type: use declared ret_ty, fall back to body.ty
+        // (concretized by the ConcretizeTypes pass) when declared is Unknown.
         let resolved_ret_ty = if func.ret_ty.is_unresolved() {
-            closures::resolve_expr_ty(&func.body, &program.var_table, &emitter.record_fields)
+            func.body.ty.clone()
         } else {
             func.ret_ty.clone()
         };
@@ -854,8 +906,22 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             if extern_wasm_module_set.contains(&(mi, fi)) {
                 continue;
             }
+            // Skip test functions defined in dependency modules: they are
+            // only relevant when running tests on that module directly,
+            // not when it's imported by another file. Including them would
+            // emit extra closures whose function-table layout can conflict
+            // with the top-level program's own closures.
+            if func.is_test {
+                continue;
+            }
             let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");
-            let prefixed_name = format!("almide_rt_{}_{}", mod_ident, func_name_sanitized);
+            // Test functions use __test_ prefix so they don't collide with
+            // identically-named user functions (e.g. fn broadcast_add + test "broadcast_add").
+            let prefixed_name = if func.is_test {
+                format!("almide_rt_{}___test_{}", mod_ident, func_name_sanitized)
+            } else {
+                format!("almide_rt_{}_{}", mod_ident, func_name_sanitized)
+            };
             let params: Vec<ValType> = func.params.iter()
                 .filter_map(|p| values::ty_to_valtype(&p.ty))
                 .collect();
@@ -865,10 +931,13 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             // Also register by bare name so lifted closures from this module
             // can call module-local functions. ClosureConversion lifts lambdas
             // from modules to program.functions, but their Named call targets
-            // use the unqualified function name.
-            let bare_name = func.name.to_string();
-            if !emitter.func_map.contains_key(&bare_name) {
-                emitter.func_map.insert(bare_name, func_idx);
+            // use the unqualified function name. Skip tests — tests must not
+            // shadow user functions.
+            if !func.is_test {
+                let bare_name = func.name.to_string();
+                if !emitter.func_map.contains_key(&bare_name) {
+                    emitter.func_map.insert(bare_name, func_idx);
+                }
             }
             module_func_meta.push((mi, fi, type_idx));
             user_func_indices.push(func_idx);
@@ -1024,8 +1093,8 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // heap (see `calls_string::emit_string_interp`).
     let mut memory = MemorySection::new();
     memory.memory(MemoryType {
-        minimum: 64, // 4MB initial
-        maximum: None,
+        minimum: 64,            // 4MB initial
+        maximum: Some(65536),   // 4GB max (WASM32 hard limit) — explicit so V8 doesn't apply a smaller default
         memory64: false,
         shared: false,
         page_size_log2: None,
@@ -1143,7 +1212,7 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     // ScratchAllocator locals
     let scratch_i32_cap = 32usize;
     let scratch_i64_cap = 16usize;
-    let scratch_f64_cap = 4usize;
+    let scratch_f64_cap = 16usize;
     let scratch_i32_base = local_decls.len() as u32;
     for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
     let scratch_i64_base = local_decls.len() as u32;

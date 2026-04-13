@@ -22,6 +22,7 @@ mod fold;
 mod use_count;
 mod verify;
 pub mod visit;
+pub mod visit_mut;
 pub mod result;
 pub mod substitute;
 pub mod effect;
@@ -36,6 +37,7 @@ pub use result::is_ir_result_expr;
 pub use verify::{verify_program, IrVerifyError};
 pub use wasm_repr::wasm_types_compatible;
 pub use visit::{IrVisitor, walk_expr, walk_stmt, walk_pattern};
+pub use visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut, walk_pattern_mut};
 pub use substitute::{substitute_var_in_expr, substitute_var_in_stmt};
 
 // ── Identifiers ─────────────────────────────────────────────────

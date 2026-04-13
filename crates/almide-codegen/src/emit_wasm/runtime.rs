@@ -237,6 +237,20 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // __math_exp(x: f64) -> f64  (e^x)
     emitter.rt.math_exp = emitter.register_func("__math_exp", f64_f64_ty);
 
+    // __bytes_f16_to_f64(bits: i32) -> f64  (IEEE-754 half-precision expand)
+    let i32_f64_ty = emitter.register_type(vec![ValType::I32], vec![ValType::F64]);
+    emitter.rt.bytes_f16_to_f64 = emitter.register_func("__bytes_f16_to_f64", i32_f64_ty);
+
+    // base64 / hex runtime helpers. All take (bytes_or_str_ptr: i32) -> ptr: i32.
+    let i32_i32_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.rt.base64_encode = emitter.register_func("__base64_encode", i32_i32_ty);
+    emitter.rt.base64_decode = emitter.register_func("__base64_decode", i32_i32_ty);
+    emitter.rt.base64_encode_url = emitter.register_func("__base64_encode_url", i32_i32_ty);
+    emitter.rt.base64_decode_url = emitter.register_func("__base64_decode_url", i32_i32_ty);
+    emitter.rt.hex_encode = emitter.register_func("__hex_encode", i32_i32_ty);
+    emitter.rt.hex_encode_upper = emitter.register_func("__hex_encode_upper", i32_i32_ty);
+    emitter.rt.hex_decode = emitter.register_func("__hex_decode", i32_i32_ty);
+
     // String stdlib runtime (delegated to rt_string module)
     super::rt_string::register(emitter);
 
@@ -283,6 +297,15 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_numeric::compile_math_log10(emitter);
     super::rt_numeric::compile_math_log2(emitter);
     super::rt_numeric::compile_math_exp(emitter);
+    compile_bytes_f16_to_f64(emitter);
+    // Compile order MUST match registration order in `register_runtime`.
+    super::rt_encoding::compile_base64_encode(emitter, /*url_safe=*/false);
+    super::rt_encoding::compile_base64_decode(emitter, /*url_safe=*/false);
+    super::rt_encoding::compile_base64_encode(emitter, /*url_safe=*/true);
+    super::rt_encoding::compile_base64_decode(emitter, /*url_safe=*/true);
+    super::rt_encoding::compile_hex_encode(emitter, /*upper=*/false);
+    super::rt_encoding::compile_hex_encode(emitter, /*upper=*/true);
+    super::rt_encoding::compile_hex_decode(emitter);
     // String stdlib runtime (delegated)
     super::rt_string::compile(emitter);
     // Value/JSON runtime
@@ -1006,3 +1029,71 @@ fn compile_resolve_path(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
+
+/// __bytes_f16_to_f64(bits: i32) -> f64
+///
+/// IEEE-754 half-precision expansion. Computes:
+///   sign = (bits >> 15) & 1
+///   exp  = (bits >> 10) & 0x1f
+///   mant = bits & 0x3ff
+///   if exp == 0:  sign * mant * 2^-24           (subnormal / zero)
+///   if exp == 31: sign * inf  (mant==0) or NaN  (mant!=0)
+///   else:         sign * (1 + mant/1024) * 2^(exp-15)
+///
+/// Implemented with plain WASM math ops — no external float-pow call needed
+/// because we can build 2^n with integer shifts into f64 exponent bits.
+pub(super) fn compile_bytes_f16_to_f64(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.bytes_f16_to_f64];
+    let mut f = Function::new(vec![
+        (4, ValType::I32), // locals 1..=4 i32: sign, exp, mant, tmp
+        (2, ValType::F64), // locals 5..=6 f64: sign_f, result
+    ]);
+    wasm!(f, {
+        // sign = bits >> 15
+        local_get(0); i32_const(15); i32_shr_u; local_set(1);
+        // exp = (bits >> 10) & 0x1f
+        local_get(0); i32_const(10); i32_shr_u; i32_const(31); i32_and; local_set(2);
+        // mant = bits & 0x3ff
+        local_get(0); i32_const(1023); i32_and; local_set(3);
+        // sign_f = sign ? -1.0 : 1.0
+        local_get(1);
+        if_f64; f64_const(-1.0);
+        else_; f64_const(1.0); end;
+        local_set(5);
+
+        // Branch on exp
+        local_get(2); i32_eqz;
+        if_f64;
+            // subnormal: sign_f * mant * 2^-24
+            local_get(5);
+            local_get(3); f64_convert_i32_u;
+            f64_mul;
+            f64_const(5.960464477539063e-8); // 2^-24
+            f64_mul;
+        else_;
+            local_get(2); i32_const(31); i32_eq;
+            if_f64;
+                // inf/nan: return sign-preserving large value for simplicity
+                local_get(5); f64_const(3.4028235e38); f64_mul;
+            else_;
+                // normal: sign_f * (1 + mant/1024) * 2^(exp-15)
+                // 2^(exp-15) computed as f64 bit pattern:
+                //   f64 exponent bias = 1023, so exp_f64 = exp - 15 + 1023 = exp + 1008
+                //   bits = (exp_f64) << 52
+                local_get(5);
+                f64_const(1.0);
+                local_get(3); f64_convert_i32_u;
+                f64_const(1024.0); f64_div;
+                f64_add;
+                f64_mul;
+                // Multiply by 2^(exp - 15): construct that power via i64 bit tricks.
+                local_get(2); i32_const(1008); i32_add; i64_extend_i32_u;
+                i64_const(52); i64_shl;
+                f64_reinterpret_i64;
+                f64_mul;
+            end;
+        end;
+        end;  // close function body
+    });
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}

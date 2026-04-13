@@ -15,7 +15,7 @@ impl FuncCompiler<'_> {
         match method {
             "take_while" => {
                 // take_while(xs, pred) → List[A]: take while pred returns true
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -75,7 +75,7 @@ impl FuncCompiler<'_> {
             }
             "drop_while" => {
                 // drop_while(xs, pred) → List[A]: drop while pred returns true
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -140,7 +140,7 @@ impl FuncCompiler<'_> {
             }
             "count" => {
                 // count(xs, pred) → Int
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -180,7 +180,7 @@ impl FuncCompiler<'_> {
             }
             "partition" => {
                 // partition(xs, pred) → (List[A], List[A])
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -260,7 +260,7 @@ impl FuncCompiler<'_> {
             }
             "update" => {
                 // update(xs, i, f) → List[A]: copy with xs[i] replaced by f(xs[i])
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
@@ -320,7 +320,7 @@ impl FuncCompiler<'_> {
             }
             "scan" => {
                 // scan(xs, init, f) → List[B]: like fold but collect intermediates
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let acc_vt = values::ty_to_valtype(&args[1].ty).unwrap_or(ValType::I64);
                 let acc_size = values::byte_size(&args[1].ty) as i32;
@@ -383,8 +383,8 @@ impl FuncCompiler<'_> {
             }
             "zip_with" => {
                 // zip_with(xs, ys, f) → List[C]
-                let a_ty = self.list_elem_ty(&args[0].ty);
-                let b_ty = self.list_elem_ty(&args[1].ty);
+                let a_ty = self.resolve_list_elem(&args[0], None);
+                let b_ty = self.resolve_list_elem(&args[1], None);
                 let a_size = values::byte_size(&a_ty) as i32;
                 let b_size = values::byte_size(&b_ty) as i32;
                 let ret_elem_ty = self.list_elem_ty(&self.stub_ret_ty);
@@ -462,7 +462,7 @@ impl FuncCompiler<'_> {
             }
             "unique_by" => {
                 // unique_by(xs, f) → List[A]: remove dupes by key, keep first (O(n²))
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -805,9 +805,7 @@ impl FuncCompiler<'_> {
                 // fold(list, init, fn(acc, elem) → acc)
                 // Resolve types from closure Fn signature when available
                 // Derive element type from the input list (most reliable source)
-                let list_elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
-                    a.first().cloned().unwrap_or(Ty::Int)
-                } else { Ty::Int };
+                let list_elem_ty = self.resolve_list_elem(&args[0], None);
 
                 // Resolve elem_ty: use list element type, Fn param, or lambda param — first concrete wins
                 let elem_ty = [

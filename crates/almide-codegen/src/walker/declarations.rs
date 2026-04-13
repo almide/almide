@@ -28,6 +28,10 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     match &td.kind {
         IrTypeDeclKind::Record { fields } => {
             let has_fn_fields = fields.iter().any(|f| matches!(&f.ty, Ty::Fn { .. }));
+            // Matrix / Fn / transitively-blocking types prevent PartialEq derive.
+            // Uses the precomputed `eq_blocked_types` set so Named references
+            // to other blocked user types propagate correctly.
+            let has_non_eq_fields = fields.iter().any(|f| ty_blocks_eq_with(&f.ty, &ctx.ann.eq_blocked_types));
             let fields_str = fields.iter()
                 .map(|f| {
                     // Fn-typed struct fields: use Rc<dyn Fn> for cloneability
@@ -45,9 +49,12 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             let full_name = format!("{}{}", td.name, generics_str);
             let mut attrs = decl_attrs.clone();
             if has_fn_fields { attrs.push("has_fn_fields"); }
+            if has_non_eq_fields { attrs.push("has_non_eq_fields"); }
             let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
             let fallback = if has_fn_fields {
                 format!("#[derive(Clone)]\npub struct {} {{\n{}\n}}", full_name, &fields_str)
+            } else if has_non_eq_fields {
+                format!("{}#[derive(Clone, Debug)]\npub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
             } else {
                 format!("{}pub struct {} {{\n{}\n}}", repr_prefix, full_name, &fields_str)
             };
@@ -295,6 +302,74 @@ fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mu
         IrStmtKind::Expr { expr } => collect_anon_from_expr(expr, named, seen),
         _ => {}
     }
+}
+
+/// Does this type transitively hold a value that doesn't implement `PartialEq`
+/// in the Rust runtime? Returning true means the enclosing struct cannot
+/// derive PartialEq.
+///
+/// `eq_blocked_types` lists user-defined record names that have already
+/// been determined to lack PartialEq (computed in a first pass); referring
+/// to any of those transitively blocks eq as well.
+pub(super) fn ty_blocks_eq(ty: &Ty) -> bool {
+    ty_blocks_eq_with(ty, &HashSet::new())
+}
+
+pub(super) fn ty_blocks_eq_with(ty: &Ty, eq_blocked_types: &HashSet<String>) -> bool {
+    match ty {
+        // Burn Tensor doesn't implement PartialEq
+        Ty::Matrix => true,
+        // Function pointers can't be compared structurally
+        Ty::Fn { .. } => true,
+        // User-defined Named type: check against the precomputed blocked set
+        Ty::Named(name, args) => {
+            eq_blocked_types.contains(name.as_str())
+                || args.iter().any(|t| ty_blocks_eq_with(t, eq_blocked_types))
+        }
+        // Structural recursion for containers
+        Ty::Tuple(elems) => elems.iter().any(|t| ty_blocks_eq_with(t, eq_blocked_types)),
+        Ty::Applied(_, args) => args.iter().any(|t| ty_blocks_eq_with(t, eq_blocked_types)),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            fields.iter().any(|(_, t)| ty_blocks_eq_with(t, eq_blocked_types))
+        }
+        _ => false,
+    }
+}
+
+/// Precompute the set of user-defined type names whose generated Rust struct
+/// cannot derive `PartialEq` (because a field type blocks it, transitively).
+/// Reaches a fixed point by repeating until no new blocked type is added.
+pub(super) fn compute_eq_blocked_types(type_decls: &[IrTypeDecl]) -> HashSet<String> {
+    let mut blocked: HashSet<String> = HashSet::new();
+    loop {
+        let mut changed = false;
+        for td in type_decls {
+            if blocked.contains(td.name.as_str()) { continue }
+            let blocks = match &td.kind {
+                IrTypeDeclKind::Record { fields } => {
+                    fields.iter().any(|f| ty_blocks_eq_with(&f.ty, &blocked))
+                }
+                IrTypeDeclKind::Variant { cases, .. } => {
+                    cases.iter().any(|c| match &c.kind {
+                        IrVariantKind::Unit => false,
+                        IrVariantKind::Tuple { fields } => {
+                            fields.iter().any(|t| ty_blocks_eq_with(t, &blocked))
+                        }
+                        IrVariantKind::Record { fields } => {
+                            fields.iter().any(|f| ty_blocks_eq_with(&f.ty, &blocked))
+                        }
+                    })
+                }
+                _ => false,
+            };
+            if blocks {
+                blocked.insert(td.name.to_string());
+                changed = true;
+            }
+        }
+        if !changed { break }
+    }
+    blocked
 }
 
 fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {

@@ -32,6 +32,11 @@ impl FuncCompiler<'_> {
             }
             "get" => {
                 // get(m, key) → Option[V]
+                //
+                // Emits an Option pointer (i32, where 0 = none, non-zero = some(val_ptr)).
+                // Must use `br` to exit the loop on match — NOT `return_` — because
+                // this emit is inlined into the caller's function body, and the
+                // caller may have a different return type.
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let _val_ty = self.map_val_ty(&args[0].ty);
@@ -41,11 +46,13 @@ impl FuncCompiler<'_> {
                 let sk_i64 = self.scratch.alloc_i64();
                 let i = self.scratch.alloc_i32();
                 let val_copy = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]); // key
                 self.emit_search_key_store(&key_ty, sk_i32, sk_i64);
                 wasm!(self.func, {
+                    i32_const(0); local_set(result); // default: none
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
@@ -58,7 +65,7 @@ impl FuncCompiler<'_> {
                 self.emit_key_eq(&key_ty);
                 wasm!(self.func, {
                       if_empty;
-                        // Found: return some(val)
+                        // Found: build some(val) and stash in `result`, then exit loop
                         i32_const(vs as i32); call(self.emitter.rt.alloc); local_set(val_copy);
                         local_get(val_copy);
                         local_get(map_ptr); i32_const(4); i32_add;
@@ -67,13 +74,14 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_elem_copy_sized(vs);
                 wasm!(self.func, {
-                        local_get(val_copy); return_;
+                        local_get(val_copy); local_set(result); br(2);
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    i32_const(0); // none
+                    local_get(result);
                 });
+                self.scratch.free_i32(result);
                 self.scratch.free_i32(val_copy);
                 self.scratch.free_i32(i);
                 self.scratch.free_i64(sk_i64);
@@ -81,20 +89,26 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(map_ptr);
             }
             "get_or" => {
+                // get_or(m, key, default) → V
+                //
+                // If key found → return map value. Else → return default.
+                // Must use `br` to exit the loop, NOT `return_` — inline emit.
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
                 let entry = ks + vs;
+                let vt = values::ty_to_valtype(&val_ty).unwrap_or(ValType::I32);
                 let map_ptr = self.scratch.alloc_i32();
                 let sk_i32 = self.scratch.alloc_i32();
                 let sk_i64 = self.scratch.alloc_i64();
                 let i = self.scratch.alloc_i32();
-                let _vt = values::ty_to_valtype(&val_ty).unwrap_or(ValType::I32);
+                let found = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]); // key
                 self.emit_search_key_store(&key_ty, sk_i32, sk_i64);
                 wasm!(self.func, {
+                    i32_const(0); local_set(found);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
@@ -106,20 +120,32 @@ impl FuncCompiler<'_> {
                 self.emit_key_eq(&key_ty);
                 wasm!(self.func, {
                       if_empty;
-                        local_get(map_ptr); i32_const(4); i32_add;
-                        local_get(i); i32_const(entry as i32); i32_mul; i32_add;
-                        i32_const(ks as i32); i32_add;
-                });
-                self.emit_load_at(&val_ty, 0);
-                wasm!(self.func, {
-                        return_;
+                        i32_const(1); local_set(found);
+                        br(2);
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
                 });
-                // Not found: return default
-                self.emit_expr(&args[2]);
+                // If found → load val at (map_ptr + 4 + i*entry + ks); else → emit default.
+                wasm!(self.func, {
+                    local_get(found); i32_eqz;
+                });
+                match vt {
+                    ValType::I64 => { wasm!(self.func, { if_i64; }); }
+                    ValType::F64 => { wasm!(self.func, { if_f64; }); }
+                    _ => { wasm!(self.func, { if_i32; }); }
+                }
+                self.emit_expr(&args[2]); // default
+                wasm!(self.func, { else_; });
+                wasm!(self.func, {
+                    local_get(map_ptr); i32_const(4); i32_add;
+                    local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                    i32_const(ks as i32); i32_add;
+                });
+                self.emit_load_at(&val_ty, 0);
+                wasm!(self.func, { end; });
+                self.scratch.free_i32(found);
                 self.scratch.free_i32(i);
                 self.scratch.free_i64(sk_i64);
                 self.scratch.free_i32(sk_i32);
@@ -136,8 +162,11 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]);
+                // Inline emit: stash result in a local, use `br` to exit (not return_).
+                let contains_result = self.scratch.alloc_i32();
                 self.emit_search_key_store(&key_ty, sk_i32, sk_i64);
                 wasm!(self.func, {
+                    i32_const(0); local_set(contains_result); // default: not found
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
@@ -148,12 +177,16 @@ impl FuncCompiler<'_> {
                 self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
                 self.emit_key_eq(&key_ty);
                 wasm!(self.func, {
-                      if_empty; i32_const(1); return_; end;
+                      if_empty;
+                        i32_const(1); local_set(contains_result);
+                        br(2);
+                      end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    i32_const(0);
+                    local_get(contains_result);
                 });
+                self.scratch.free_i32(contains_result);
                 self.scratch.free_i32(i);
                 self.scratch.free_i64(sk_i64);
                 self.scratch.free_i32(sk_i32);
@@ -492,15 +525,23 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(map_ptr);
             }
             "merge" => {
-                // merge(a, b) → concat a entries then b entries (later values win on get)
+                // merge(a, b) → new map with a's entries then b's, where b overwrites
+                // any duplicate keys (matches Rust runtime's HashMap::insert semantics).
+                // Allocates worst-case (a_len + b_len) but stores actual unique count.
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
+                let key_ty = self.map_key_ty(&args[0].ty);
                 let entry = ks + vs;
                 let map_a = self.scratch.alloc_i32();
                 let map_b = self.scratch.alloc_i32();
                 let a_len = self.scratch.alloc_i32();
                 let b_len = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
+                let result_len = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
+                let j = self.scratch.alloc_i32();
+                let found_idx = self.scratch.alloc_i32();
+                let bk_i32 = self.scratch.alloc_i32();
+                let bk_i64 = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_a); });
                 self.emit_expr(&args[1]);
@@ -508,47 +549,92 @@ impl FuncCompiler<'_> {
                     local_set(map_b);
                     local_get(map_a); i32_load(0); local_set(a_len);
                     local_get(map_b); i32_load(0); local_set(b_len);
-                    // Alloc: a_len + b_len entries
+                    // Alloc result of worst case (a_len + b_len) entries
                     i32_const(4); local_get(a_len); local_get(b_len); i32_add;
                     i32_const(entry as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
-                    local_get(result); local_get(a_len); local_get(b_len); i32_add; i32_store(0);
-                    // Copy a entries
+                    // Copy a entries first
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(a_len); i32_ge_u; br_if(1);
-                      // Copy key
+                      // Copy entry i from a → result[i]
                       local_get(result); i32_const(4); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                       local_get(map_a); i32_const(4); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_elem_copy_sized(ks);
-                // Copy val
                 self.emit_merge_copy_val(entry, ks, vs, result, i, map_a);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    // Copy b entries after a
-                    i32_const(0); local_set(i);
+                    local_get(a_len); local_set(result_len);
+                    // For each b entry: search result for matching key, overwrite if found, else append
+                    i32_const(0); local_set(j);
                     block_empty; loop_empty;
-                      local_get(i); local_get(b_len); i32_ge_u; br_if(1);
-                      local_get(result); i32_const(4); i32_add;
-                      local_get(a_len); local_get(i); i32_add;
-                      i32_const(entry as i32); i32_mul; i32_add;
+                      local_get(j); local_get(b_len); i32_ge_u; br_if(1);
+                      // Load b's key into search slot
                       local_get(map_b); i32_const(4); i32_add;
-                      local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                      local_get(j); i32_const(entry as i32); i32_mul; i32_add;
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_store(&key_ty, bk_i32, bk_i64);
+                wasm!(self.func, {
+                      // Linear search result[0..result_len] for matching key
+                      i32_const(-1); local_set(found_idx);
+                      i32_const(0); local_set(i);
+                      block_empty; loop_empty;
+                        local_get(i); local_get(result_len); i32_ge_u; br_if(1);
+                        local_get(result); i32_const(4); i32_add;
+                        local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_load(&key_ty, bk_i32, bk_i64);
+                self.emit_key_eq(&key_ty);
+                wasm!(self.func, {
+                        if_empty; local_get(i); local_set(found_idx); end;
+                        local_get(i); i32_const(1); i32_add; local_set(i);
+                        br(0);
+                      end; end;
+                      // Choose insert position: found_idx if >=0 else result_len (append)
+                      local_get(found_idx); i32_const(0); i32_lt_s;
+                      if_empty;
+                        local_get(result_len); local_set(found_idx);
+                        local_get(result_len); i32_const(1); i32_add; local_set(result_len);
+                      end;
+                      // Copy entry j from b → result[found_idx]
+                      local_get(result); i32_const(4); i32_add;
+                      local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
+                      local_get(map_b); i32_const(4); i32_add;
+                      local_get(j); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_elem_copy_sized(ks);
-                self.emit_merge_copy_val2(entry, ks, vs, result, a_len, i, map_b);
+                // Copy value: dst = result + 4 + found_idx*entry + ks,
+                //             src = map_b + 4 + j*entry + ks.
                 wasm!(self.func, {
-                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      local_get(result); i32_const(4); i32_add;
+                      local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
+                      i32_const(ks as i32); i32_add;
+                      local_get(map_b); i32_const(4); i32_add;
+                      local_get(j); i32_const(entry as i32); i32_mul; i32_add;
+                      i32_const(ks as i32); i32_add;
+                });
+                self.emit_elem_copy_sized(vs);
+                wasm!(self.func, {
+                      local_get(j); i32_const(1); i32_add; local_set(j);
                       br(0);
                     end; end;
+                    // Store final length and return result
+                    local_get(result); local_get(result_len); i32_store(0);
                     local_get(result);
                 });
+                self.scratch.free_i64(bk_i64);
+                self.scratch.free_i32(bk_i32);
+                self.scratch.free_i32(found_idx);
+                self.scratch.free_i32(j);
                 self.scratch.free_i32(i);
+                self.scratch.free_i32(result_len);
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(b_len);
                 self.scratch.free_i32(a_len);
@@ -556,28 +642,34 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(map_a);
             }
             "from_list" => {
-                // from_list(pairs: List[(K,V)]) → Map
-                let pair_ty = self.list_elem_ty(&args[0].ty);
-                let (ks, vs) = if let Ty::Tuple(elems) = &pair_ty {
+                // from_list(pairs: List[(K,V)]) → Map, last-write-wins on duplicate keys
+                // (matches Rust runtime's HashMap::from semantics).
+                let pair_ty = self.resolve_list_elem(&args[0], None);
+                let (ks, vs, key_ty) = if let Ty::Tuple(elems) = &pair_ty {
                     let k = elems.first().map(|t| values::byte_size(t)).unwrap_or(4);
                     let v = elems.get(1).map(|t| values::byte_size(t)).unwrap_or(4);
-                    (k, v)
-                } else { (4u32, 4u32) };
+                    let kt = elems.first().cloned().unwrap_or(Ty::String);
+                    (k, v, kt)
+                } else { (4u32, 4u32, Ty::String) };
                 let entry = ks + vs;
                 let pairs = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
+                let result_len = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
+                let j = self.scratch.alloc_i32();
+                let found_idx = self.scratch.alloc_i32();
                 let tuple_ptr = self.scratch.alloc_i32();
+                let pk_i32 = self.scratch.alloc_i32();
+                let pk_i64 = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(pairs); // pairs list
+                    local_set(pairs);
                     local_get(pairs); i32_load(0); local_set(len);
-                    // Alloc map: 4 + len * entry
+                    // Alloc map: 4 + len * entry (worst case, no dedup)
                     i32_const(4); local_get(len); i32_const(entry as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
-                    local_get(result); local_get(len); i32_store(0);
-                    // Copy: for each pair, copy key and val into map entry
+                    i32_const(0); local_set(result_len);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
@@ -585,16 +677,44 @@ impl FuncCompiler<'_> {
                       local_get(pairs); i32_const(4); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(tuple_ptr);
-                      // Copy key: map[4 + i*entry] = tuple[0]
+                      // Load tuple's key into search slot
+                      local_get(tuple_ptr);
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_store(&key_ty, pk_i32, pk_i64);
+                wasm!(self.func, {
+                      // Linear search result[0..result_len] for matching key
+                      i32_const(-1); local_set(found_idx);
+                      i32_const(0); local_set(j);
+                      block_empty; loop_empty;
+                        local_get(j); local_get(result_len); i32_ge_u; br_if(1);
+                        local_get(result); i32_const(4); i32_add;
+                        local_get(j); i32_const(entry as i32); i32_mul; i32_add;
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_load(&key_ty, pk_i32, pk_i64);
+                self.emit_key_eq(&key_ty);
+                wasm!(self.func, {
+                        if_empty; local_get(j); local_set(found_idx); end;
+                        local_get(j); i32_const(1); i32_add; local_set(j);
+                        br(0);
+                      end; end;
+                      // Insert position: found_idx if >=0 else result_len (append)
+                      local_get(found_idx); i32_const(0); i32_lt_s;
+                      if_empty;
+                        local_get(result_len); local_set(found_idx);
+                        local_get(result_len); i32_const(1); i32_add; local_set(result_len);
+                      end;
+                      // Copy key: result[found_idx].key = tuple[0]
                       local_get(result); i32_const(4); i32_add;
-                      local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                      local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
                       local_get(tuple_ptr);
                 });
                 self.emit_elem_copy_sized(ks);
                 wasm!(self.func, {
-                      // Copy val: map[4 + i*entry + ks] = tuple[ks]
+                      // Copy val: result[found_idx].val = tuple[ks]
                       local_get(result); i32_const(4); i32_add;
-                      local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                      local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                       local_get(tuple_ptr); i32_const(ks as i32); i32_add;
                 });
@@ -603,10 +723,16 @@ impl FuncCompiler<'_> {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
+                    local_get(result); local_get(result_len); i32_store(0);
                     local_get(result);
                 });
+                self.scratch.free_i64(pk_i64);
+                self.scratch.free_i32(pk_i32);
                 self.scratch.free_i32(tuple_ptr);
+                self.scratch.free_i32(found_idx);
+                self.scratch.free_i32(j);
                 self.scratch.free_i32(i);
+                self.scratch.free_i32(result_len);
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(len);
                 self.scratch.free_i32(pairs);
