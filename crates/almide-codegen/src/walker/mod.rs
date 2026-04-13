@@ -285,6 +285,16 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             generic_types.insert(td.name);
         }
     }
+    let mut ann = ctx.ann.clone();
+    // Compute which user types cannot derive PartialEq (contain Matrix,
+    // Fn, or a field whose type itself blocks equality). Must consider
+    // type decls from every module, not just the top-level program,
+    // because user programs reference types defined in other modules.
+    let all_type_decls: Vec<IrTypeDecl> = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .cloned()
+        .collect();
+    ann.eq_blocked_types = super::walker::declarations::compute_eq_blocked_types(&all_type_decls);
     let mut ctx = RenderContext {
         templates: ctx.templates,
         var_table: ctx.var_table,
@@ -292,7 +302,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         target: ctx.target,
         auto_unwrap: ctx.auto_unwrap,
         is_test: ctx.is_test,
-        ann: ctx.ann.clone(),
+        ann,
         type_aliases,
         generic_types,
         minimal_generic_bounds: false,

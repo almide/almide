@@ -15,4 +15,8 @@ pub struct CodegenAnnotations {
     pub recursive_enums: HashSet<String>,
     pub boxed_fields: HashSet<(String, String)>,
     pub default_fields: HashMap<(String, String), IrExpr>,
+    /// User-defined record/enum names whose generated Rust struct cannot
+    /// derive `PartialEq` (a field transitively blocks equality — e.g.
+    /// contains a Matrix or a function pointer).
+    pub eq_blocked_types: HashSet<String>,
 }
