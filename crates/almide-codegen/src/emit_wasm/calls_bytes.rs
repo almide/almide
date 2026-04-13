@@ -403,6 +403,53 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { i32_const(0); i32_store(0); });
             }
+            "append_f64_le" => {
+                // bytes.append_f64_le(b, val): append 8 bytes (f64 little-endian).
+                // Like `push` but for an f64 — realloc to len+8 and store.
+                // Mutates the variable in-place when arg[0] is a Var.
+                let buf = self.scratch.alloc_i32();
+                let old_len = self.scratch.alloc_i32();
+                let new_buf = self.scratch.alloc_i32();
+                let fval = self.scratch.alloc_f64();
+                self.emit_expr(&args[0]); // buf ptr
+                wasm!(self.func, { local_set(buf); });
+                self.emit_expr(&args[1]); // val: f64 on stack
+                wasm!(self.func, {
+                    local_set(fval);
+                    // old_len = buf[0]
+                    local_get(buf); i32_load(0); local_set(old_len);
+                    // new_buf = alloc(4 + old_len + 8)
+                    local_get(old_len); i32_const(12); i32_add;
+                    call(self.emitter.rt.alloc);
+                    local_set(new_buf);
+                    // new_buf[0] = old_len + 8
+                    local_get(new_buf); local_get(old_len); i32_const(8); i32_add; i32_store(0);
+                    // copy old data: new_buf+4 <- buf+4, old_len bytes
+                    local_get(new_buf); i32_const(4); i32_add;
+                    local_get(buf); i32_const(4); i32_add;
+                    local_get(old_len);
+                    memory_copy;
+                    // *(new_buf + 4 + old_len) = fval (f64 LE)
+                    local_get(new_buf); i32_const(4); i32_add; local_get(old_len); i32_add;
+                    local_get(fval);
+                    f64_store(0);
+                });
+                if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
+                    if let Some(&local_idx) = self.var_map.get(&id.0) {
+                        wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
+                    }
+                }
+                self.scratch.free_f64(fval);
+                self.scratch.free_i32(new_buf);
+                self.scratch.free_i32(old_len);
+                self.scratch.free_i32(buf);
+            }
+            "append_f32_le" => self.emit_bytes_append_f(args, /*size_bytes=*/4, /*as_f32=*/true),
+            "append_u8" => self.emit_bytes_append_i(args, 1),
+            "append_u16_le" => self.emit_bytes_append_i(args, 2),
+            "append_u32_le" => self.emit_bytes_append_i(args, 4),
+            "append_i32_le" => self.emit_bytes_append_i(args, 4),
+            "append_i64_le" => self.emit_bytes_append_i(args, 8),
             "from_string" => {
                 // bytes.from_string(s): String and Bytes have same layout [len:i32][data:u8...]
                 // Just return the string pointer (effectively a cast)
@@ -612,15 +659,21 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(pos);
                 self.scratch.free_i32(buf);
             }
-            "read_i32_le_array" | "read_f32_le_array" | "read_f16_le_array" => {
+            "read_i32_le_array" | "read_u32_le_array" | "read_i64_le_array"
+            | "read_f32_le_array" | "read_f64_le_array" | "read_f16_le_array" => {
                 // bytes.read_XX_le_array(b, pos, count) → List[T]
-                // Each element: 4 bytes (i32/f32) or 2 bytes (f16).
+                // Element width in source bytes; output cell is always 8 bytes
+                // (Almide Int = i64, Float = f64).
                 let buf = self.scratch.alloc_i32();
                 let pos = self.scratch.alloc_i32();
                 let n = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
-                let elem_bytes = if method == "read_f16_le_array" { 2i32 } else { 4 };
+                let elem_bytes: i32 = match method {
+                    "read_f16_le_array" => 2,
+                    "read_i64_le_array" | "read_f64_le_array" => 8,
+                    _ => 4, // i32 / u32 / f32
+                };
                 let out_bytes: i32 = 8;  // list elem size (i64 or f64)
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(buf); });
@@ -647,8 +700,17 @@ impl FuncCompiler<'_> {
                     "read_i32_le_array" => {
                         wasm!(self.func, { i32_load(0); i64_extend_i32_s; i64_store(0); });
                     }
+                    "read_u32_le_array" => {
+                        wasm!(self.func, { i32_load(0); i64_extend_i32_u; i64_store(0); });
+                    }
+                    "read_i64_le_array" => {
+                        wasm!(self.func, { i64_load(0); i64_store(0); });
+                    }
                     "read_f32_le_array" => {
                         wasm!(self.func, { f32_load(0); f64_promote_f32; f64_store(0); });
+                    }
+                    "read_f64_le_array" => {
+                        wasm!(self.func, { f64_load(0); f64_store(0); });
                     }
                     "read_f16_le_array" => {
                         // f16 bits → f64 via runtime
@@ -715,5 +777,94 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { i32_load16_u(0); call(self.emitter.rt.bytes_f16_to_f64); });
             }
         }
+    }
+
+    /// Emit `bytes.append_<int_type>(b, val)` for integer-shaped values.
+    /// `size_bytes`: 1 (u8) / 2 (u16) / 4 (u32, i32) / 8 (i64).
+    /// Args: `b: Bytes`, `val: Int`. Returns Unit.
+    pub(super) fn emit_bytes_append_i(&mut self, args: &[IrExpr], size_bytes: u32) {
+        let buf = self.scratch.alloc_i32();
+        let old_len = self.scratch.alloc_i32();
+        let new_buf = self.scratch.alloc_i32();
+        let val_i64 = self.scratch.alloc_i64();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]);
+        wasm!(self.func, { local_set(val_i64); });
+        // old_len = buf[0]
+        wasm!(self.func, {
+            local_get(buf); i32_load(0); local_set(old_len);
+        });
+        // new_buf = alloc(4 + old_len + size_bytes)
+        wasm!(self.func, {
+            local_get(old_len); i32_const(4 + size_bytes as i32); i32_add;
+            call(self.emitter.rt.alloc); local_set(new_buf);
+            // new_buf[0] = old_len + size_bytes
+            local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(0);
+            // memcpy old data
+            local_get(new_buf); i32_const(4); i32_add;
+            local_get(buf); i32_const(4); i32_add;
+            local_get(old_len);
+            memory_copy;
+            // address = new_buf + 4 + old_len
+            local_get(new_buf); i32_const(4); i32_add; local_get(old_len); i32_add;
+        });
+        // Store with width-specific opcode. Almide Int is i64; narrow first.
+        match size_bytes {
+            1 => { wasm!(self.func, { local_get(val_i64); i32_wrap_i64; i32_store8(0); }); }
+            2 => { wasm!(self.func, { local_get(val_i64); i32_wrap_i64; i32_store16(0); }); }
+            4 => { wasm!(self.func, { local_get(val_i64); i32_wrap_i64; i32_store(0); }); }
+            8 => { wasm!(self.func, { local_get(val_i64); i64_store(0); }); }
+            _ => panic!("emit_bytes_append_i: unsupported size_bytes {size_bytes}"),
+        }
+        // Update the variable in-place when arg[0] is a Var.
+        if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
+            if let Some(&local_idx) = self.var_map.get(&id.0) {
+                wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
+            }
+        }
+        self.scratch.free_i64(val_i64);
+        self.scratch.free_i32(new_buf);
+        self.scratch.free_i32(old_len);
+        self.scratch.free_i32(buf);
+    }
+
+    /// Emit `bytes.append_<float_type>(b, val)`.
+    /// `size_bytes`: 4 (f32, requires demote) or 8 (f64).
+    pub(super) fn emit_bytes_append_f(&mut self, args: &[IrExpr], size_bytes: u32, as_f32: bool) {
+        let buf = self.scratch.alloc_i32();
+        let old_len = self.scratch.alloc_i32();
+        let new_buf = self.scratch.alloc_i32();
+        let fval = self.scratch.alloc_f64();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]);
+        wasm!(self.func, { local_set(fval); });
+        wasm!(self.func, {
+            local_get(buf); i32_load(0); local_set(old_len);
+            local_get(old_len); i32_const(4 + size_bytes as i32); i32_add;
+            call(self.emitter.rt.alloc); local_set(new_buf);
+            local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(0);
+            local_get(new_buf); i32_const(4); i32_add;
+            local_get(buf); i32_const(4); i32_add;
+            local_get(old_len);
+            memory_copy;
+            local_get(new_buf); i32_const(4); i32_add; local_get(old_len); i32_add;
+        });
+        if as_f32 {
+            wasm!(self.func, { local_get(fval); f32_demote_f64; f32_store(0); });
+        } else {
+            wasm!(self.func, { local_get(fval); f64_store(0); });
+        }
+        let _ = as_f32; // satisfy unused-var lint when both branches identical
+        if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
+            if let Some(&local_idx) = self.var_map.get(&id.0) {
+                wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
+            }
+        }
+        self.scratch.free_f64(fval);
+        self.scratch.free_i32(new_buf);
+        self.scratch.free_i32(old_len);
+        self.scratch.free_i32(buf);
     }
 }

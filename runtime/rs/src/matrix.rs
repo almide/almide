@@ -123,6 +123,20 @@ pub fn almide_rt_matrix_sub(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
         .collect()
 }
 
+pub fn almide_rt_matrix_div(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
+    a.iter().zip(b.iter())
+        .map(|(ar, br)| ar.iter().zip(br.iter()).map(|(x, y)| x / y).collect())
+        .collect()
+}
+
+pub fn almide_rt_matrix_neg(m: &AlmideMatrix) -> AlmideMatrix {
+    m.iter().map(|r| r.iter().map(|x| -x).collect()).collect()
+}
+
+pub fn almide_rt_matrix_pow(m: &AlmideMatrix, exp: f64) -> AlmideMatrix {
+    m.iter().map(|r| r.iter().map(|x| x.powf(exp)).collect()).collect()
+}
+
 pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
     let m = a.len();
     let n = if a.is_empty() { 0 } else { a[0].len() };
@@ -396,6 +410,30 @@ pub fn almide_rt_matrix_conv1d(input: &AlmideMatrix, weight: &AlmideMatrix, bias
                 }
             }
             out[t][o] = sum;
+        }
+    }
+    out
+}
+
+pub fn almide_rt_matrix_to_bytes_f64_le(m: &AlmideMatrix) -> Vec<u8> {
+    let rows = m.len();
+    let cols = if rows == 0 { 0 } else { m[0].len() };
+    let mut out: Vec<u8> = Vec::with_capacity(rows * cols * 8);
+    for row in m {
+        for v in row {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    out
+}
+
+pub fn almide_rt_matrix_to_bytes_f32_le(m: &AlmideMatrix) -> Vec<u8> {
+    let rows = m.len();
+    let cols = if rows == 0 { 0 } else { m[0].len() };
+    let mut out: Vec<u8> = Vec::with_capacity(rows * cols * 4);
+    for row in m {
+        for v in row {
+            out.extend_from_slice(&(*v as f32).to_le_bytes());
         }
     }
     out

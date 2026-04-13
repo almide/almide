@@ -162,8 +162,8 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(src);
             }
-            "add" | "sub" => {
-                // element-wise add/sub
+            "add" | "sub" | "div" => {
+                // element-wise add/sub/div
                 let a = self.scratch.alloc_i32();
                 let b = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
@@ -186,10 +186,11 @@ impl FuncCompiler<'_> {
                       local_get(a); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
                       local_get(b); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
                 });
-                if method == "add" {
-                    wasm!(self.func, { f64_add; });
-                } else {
-                    wasm!(self.func, { f64_sub; });
+                match method {
+                    "add" => { wasm!(self.func, { f64_add; }); }
+                    "sub" => { wasm!(self.func, { f64_sub; }); }
+                    "div" => { wasm!(self.func, { f64_div; }); }
+                    _ => unreachable!(),
                 }
                 wasm!(self.func, {
                       f64_store(0);
@@ -658,6 +659,82 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(end_);
                 self.scratch.free_i32(start);
+                self.scratch.free_i32(m);
+            }
+            "neg" => {
+                // matrix.neg(m): element-wise negation.
+                let m = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
+                let total = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(m);
+                    local_get(m); i32_load(0); local_get(m); i32_load(4); i32_mul; local_set(total);
+                    local_get(total); i32_const(8); i32_mul; i32_const(8); i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    local_get(dst); local_get(m); i32_load(0); i32_store(0);
+                    local_get(dst); local_get(m); i32_load(4); i32_store(4);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(total); i32_ge_u; br_if(1);
+                      local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(m); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      f64_load(0); f64_neg;
+                      f64_store(0);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(dst);
+                });
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(total);
+                self.scratch.free_i32(dst);
+                self.scratch.free_i32(m);
+            }
+            "pow" => {
+                // matrix.pow(m, exp): element-wise power via __float_pow runtime.
+                let m = self.scratch.alloc_i32();
+                let exp = self.scratch.alloc_f64();
+                let dst = self.scratch.alloc_i32();
+                let total = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let x = self.scratch.alloc_f64();
+                let result = self.scratch.alloc_f64();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(m); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(exp);
+                    local_get(m); i32_load(0); local_get(m); i32_load(4); i32_mul; local_set(total);
+                    local_get(total); i32_const(8); i32_mul; i32_const(8); i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    local_get(dst); local_get(m); i32_load(0); i32_store(0);
+                    local_get(dst); local_get(m); i32_load(4); i32_store(4);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(total); i32_ge_u; br_if(1);
+                      // Load x into a local so it's stable across the call.
+                      local_get(m); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
+                      local_set(x);
+                      // Compute pow(x, exp) and stash before storing.
+                      local_get(x); local_get(exp); call(self.emitter.rt.float_pow);
+                      local_set(result);
+                      // Store at dst+8+i*8
+                      local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(result);
+                      f64_store(0);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(dst);
+                });
+                self.scratch.free_f64(result);
+                self.scratch.free_f64(x);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(total);
+                self.scratch.free_i32(dst);
+                self.scratch.free_f64(exp);
                 self.scratch.free_i32(m);
             }
             "gelu" => {
@@ -1314,6 +1391,73 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(vv);
                 self.scratch.free_i32(kk);
                 self.scratch.free_i32(q);
+            }
+            "to_bytes_f64_le" => {
+                // Matrix → flat f64 LE bytes (row-major). Symmetric to from_bytes_f64_le.
+                // Layout: matrix [rows:i32][cols:i32][f64...] → bytes [len:i32][f64...]
+                // Just memcpy the data and prepend the length prefix.
+                let m = self.scratch.alloc_i32();
+                let total = self.scratch.alloc_i32();
+                let bytes_len = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(m);
+                    local_get(m); i32_load(0); local_get(m); i32_load(4); i32_mul; local_set(total);
+                    local_get(total); i32_const(8); i32_mul; local_set(bytes_len);
+                    // alloc 4 + bytes_len
+                    local_get(bytes_len); i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    local_get(dst); local_get(bytes_len); i32_store(0);
+                    // memcpy: dst+4 ← m+8, bytes_len bytes
+                    local_get(dst); i32_const(4); i32_add;
+                    local_get(m); i32_const(8); i32_add;
+                    local_get(bytes_len);
+                    memory_copy;
+                    local_get(dst);
+                });
+                self.scratch.free_i32(dst);
+                self.scratch.free_i32(bytes_len);
+                self.scratch.free_i32(total);
+                self.scratch.free_i32(m);
+            }
+            "to_bytes_f32_le" => {
+                // Matrix → flat f32 LE bytes. Each f64 is demoted to f32 element-wise.
+                let m = self.scratch.alloc_i32();
+                let total = self.scratch.alloc_i32();
+                let bytes_len = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let src_addr = self.scratch.alloc_i32();
+                let dst_addr = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(m);
+                    local_get(m); i32_load(0); local_get(m); i32_load(4); i32_mul; local_set(total);
+                    local_get(total); i32_const(4); i32_mul; local_set(bytes_len);
+                    local_get(bytes_len); i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    local_get(dst); local_get(bytes_len); i32_store(0);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(total); i32_ge_u; br_if(1);
+                      local_get(m); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; local_set(src_addr);
+                      local_get(dst); i32_const(4); i32_add; local_get(i); i32_const(4); i32_mul; i32_add; local_set(dst_addr);
+                      local_get(dst_addr);
+                      local_get(src_addr); f64_load(0); f32_demote_f64;
+                      f32_store(0);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(dst);
+                });
+                self.scratch.free_i32(dst_addr);
+                self.scratch.free_i32(src_addr);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(dst);
+                self.scratch.free_i32(bytes_len);
+                self.scratch.free_i32(total);
+                self.scratch.free_i32(m);
             }
             "from_bytes_f64_le" => {
                 // Construct Matrix from raw f64 LE bytes — fast path for JS-supplied data.

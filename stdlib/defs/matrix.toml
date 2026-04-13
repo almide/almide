@@ -94,6 +94,34 @@ return = "Matrix"
 rust = "almide_rt_matrix_scale(&{m}, {s})"
 ts = "__almd_matrix.scale({m}, {s})"
 
+[sub]
+description = "Element-wise subtraction `a - b`. Both matrices must have the same shape."
+example = 'matrix.sub(a, b)'
+params = [{ name = "a", type = "Matrix" }, { name = "b", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_sub(&{a}, &{b})"
+
+[div]
+description = "Element-wise division `a / b`. Both matrices must have the same shape. Division by zero yields ±Inf or NaN per IEEE-754."
+example = 'matrix.div(a, b)'
+params = [{ name = "a", type = "Matrix" }, { name = "b", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_div(&{a}, &{b})"
+
+[neg]
+description = "Element-wise negation."
+example = 'matrix.neg(m)'
+params = [{ name = "m", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_neg(&{m})"
+
+[pow]
+description = "Element-wise power: each element raised to scalar exponent `exp`."
+example = 'matrix.pow(m, 2.0)'
+params = [{ name = "m", type = "Matrix" }, { name = "exp", type = "Float" }]
+return = "Matrix"
+rust = "almide_rt_matrix_pow(&{m}, {exp})"
+
 [map]
 description = "Apply a function to every element."
 example = 'matrix.map(m, (x) => x * x)'
@@ -113,6 +141,20 @@ params = [
 ]
 return = "Matrix"
 rust = "almide_rt_matrix_from_bytes_f32_le(&{data}, {offset}, {rows}, {cols})"
+
+[to_bytes_f64_le]
+description = "Serialize a Matrix to flat f64 little-endian bytes (row-major). Symmetric to `from_bytes_f64_le`. Useful for shipping a Matrix to JS/WASM hosts."
+example = 'let bytes = matrix.to_bytes_f64_le(mel)'
+params = [{ name = "m", type = "Matrix" }]
+return = "Bytes"
+rust = "almide_rt_matrix_to_bytes_f64_le(&{m})"
+
+[to_bytes_f32_le]
+description = "Serialize a Matrix to flat f32 little-endian bytes (row-major). Each f64 value is demoted to f32."
+example = 'let bytes = matrix.to_bytes_f32_le(weight)'
+params = [{ name = "m", type = "Matrix" }]
+return = "Bytes"
+rust = "almide_rt_matrix_to_bytes_f32_le(&{m})"
 
 [from_bytes_f16_le]
 description = "Zero-copy(-ish) construction: read rows*cols IEEE-754 half-precision values (f16 little-endian) from `data` at `offset` and build a Matrix of f64. Used for GGML F16 quantised weights."

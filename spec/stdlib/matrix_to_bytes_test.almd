@@ -1,0 +1,33 @@
+// matrix.to_bytes_*_le — round-trip with from_bytes_*_le.
+
+test "to_bytes_f64_le round-trip preserves all values" {
+  let m = matrix.from_lists([[1.5, -2.5, 3.0], [4.0, 5.5, -6.25]])
+  let b = matrix.to_bytes_f64_le(m)
+  assert_eq(bytes.len(b), 2 * 3 * 8)
+  let m2 = matrix.from_bytes_f64_le(b, 0, 2, 3)
+  assert_eq(matrix.rows(m2), 2)
+  assert_eq(matrix.cols(m2), 3)
+  assert_eq(matrix.get(m2, 0, 0), 1.5)
+  assert_eq(matrix.get(m2, 0, 2), 3.0)
+  assert_eq(matrix.get(m2, 1, 1), 5.5)
+  assert_eq(matrix.get(m2, 1, 2), -6.25)
+}
+
+test "to_bytes_f32_le round-trips with f32 precision loss tolerated" {
+  let m = matrix.from_lists([[1.5, -0.25], [0.5, 2.0]])
+  let b = matrix.to_bytes_f32_le(m)
+  assert_eq(bytes.len(b), 2 * 2 * 4)
+  let m2 = matrix.from_bytes_f32_le(b, 0, 2, 2)
+  // 1.5 / -0.25 / 0.5 / 2.0 are all exactly representable in f32.
+  assert_eq(matrix.get(m2, 0, 0), 1.5)
+  assert_eq(matrix.get(m2, 0, 1), -0.25)
+  assert_eq(matrix.get(m2, 1, 0), 0.5)
+  assert_eq(matrix.get(m2, 1, 1), 2.0)
+}
+
+test "to_bytes_f64_le on a 1x1 matrix" {
+  let m = matrix.from_lists([[42.0]])
+  let b = matrix.to_bytes_f64_le(m)
+  assert_eq(bytes.len(b), 8)
+  assert_eq(bytes.read_f64_le(b, 0), 42.0)
+}
