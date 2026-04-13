@@ -278,8 +278,8 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
 
 /// Resolve a Call's return type. Order:
 /// 1. User-defined functions (top-level or module) — read from SymbolTable
-/// 2. Stdlib `list.*` polymorphic ops — compute from arg types
-/// 3. Known built-in Named calls (len, print, etc.) — minimal coverage
+/// 2. Generated stdlib signatures (from TOML) with TypeVar substitution
+/// 3. Stdlib `list.*` polymorphic ops — compute from lambda return types
 ///
 /// Returning `None` is fine; the emit layer still has its fallbacks.
 fn resolve_call_ret_ty(
@@ -309,11 +309,28 @@ fn resolve_call_ret_ty(
         _ => {}
     }
 
-    // 2. Stdlib polymorphic list operations
     let (module, func) = match target {
         CallTarget::Module { module, func } => (module.as_str(), func.as_str()),
         _ => return None,
     };
+
+    // 2. Generated stdlib signature lookup with TypeVar substitution.
+    //    This covers every stdlib function declared in stdlib/defs/*.toml
+    //    (int/float/string/list/map/set/option/result/bytes/value/... etc.)
+    //    and substitutes type variables (K, V, T, A, B, ...) from the
+    //    declared parameter types against the actual argument types.
+    if let Some(sig) = crate::generated::stdlib_ret_ty::lookup_stdlib_ret(module, func) {
+        let substituted = substitute_type_vars(&sig.ret_ty, sig.param_tys, args);
+        if !substituted.has_unresolved_deep() {
+            return Some(substituted);
+        }
+        // Fall through to list-specific helpers below if sig had TypeVars we
+        // couldn't substitute (e.g. lambda return types for list.map).
+    }
+
+    // 3. Stdlib polymorphic list operations with lambda return types.
+    //    These need the lambda argument's Fn::ret, which isn't expressible
+    //    in the TOML template.
     if module != "list" { return None; }
 
     // Helper: get the element type of List[T] argument at given index.
@@ -398,6 +415,122 @@ fn resolve_call_ret_ty(
         }
         _ => None,
     }
+}
+
+/// Match a declared parameter type template (e.g. "Map[K, V]") against an
+/// actual argument type (e.g. `Applied(Map, [String, Int])`) and record
+/// the type-variable bindings (`K -> String, V -> Int`) into `bindings`.
+fn bind_type_vars(template: &str, actual: &Ty, bindings: &mut std::collections::HashMap<String, Ty>) {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    let t = template.trim();
+
+    // Type variable like K, V, T, A, B — single uppercase letter or short
+    fn is_type_var(s: &str) -> bool {
+        !s.is_empty()
+            && s.chars().next().unwrap().is_uppercase()
+            && s.len() <= 2
+            && s.chars().all(|c| c.is_uppercase() || c.is_ascii_digit())
+    }
+
+    if is_type_var(t) {
+        bindings.entry(t.to_string()).or_insert_with(|| actual.clone());
+        return;
+    }
+
+    // Parse `Head[arg1, arg2, ...]` against Applied(Head, [arg1, arg2, ...])
+    if let Some(idx) = t.find('[') {
+        if t.ends_with(']') {
+            let head = &t[..idx];
+            let inner = &t[idx+1..t.len()-1];
+            let parts = split_top_level_commas(inner);
+            let head_tci = match head {
+                "List"   => Some(TCI::List),
+                "Option" => Some(TCI::Option),
+                "Result" => Some(TCI::Result),
+                "Map"    => Some(TCI::Map),
+                "Set"    => Some(TCI::Set),
+                _ => None,
+            };
+            if let Some(tci) = head_tci {
+                if let Ty::Applied(act_tci, act_args) = actual {
+                    if std::mem::discriminant(act_tci) == std::mem::discriminant(&tci) {
+                        for (sub_template, sub_actual) in parts.iter().zip(act_args.iter()) {
+                            bind_type_vars(sub_template, sub_actual, bindings);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Tuple: `(T1, T2, ...)`
+    if t.starts_with('(') && t.ends_with(')') {
+        let inner = &t[1..t.len()-1];
+        let parts = split_top_level_commas(inner);
+        if let Ty::Tuple(act_elems) = actual {
+            for (sub_template, sub_actual) in parts.iter().zip(act_elems.iter()) {
+                bind_type_vars(sub_template, sub_actual, bindings);
+            }
+        }
+    }
+}
+
+/// Split a comma list respecting nested brackets.
+fn split_top_level_commas(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut cur = String::new();
+    for ch in s.chars() {
+        match ch {
+            '[' | '(' | '<' => { depth += 1; cur.push(ch); }
+            ']' | ')' | '>' => { depth -= 1; cur.push(ch); }
+            ',' if depth == 0 => {
+                out.push(cur.trim().to_string());
+                cur.clear();
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.trim().is_empty() { out.push(cur.trim().to_string()); }
+    out
+}
+
+/// Apply the bindings from `bind_type_vars` to a template `Ty` (as stored
+/// in the generated signature table). Returns the substituted type.
+fn apply_bindings(ty: &Ty, bindings: &std::collections::HashMap<String, Ty>) -> Ty {
+    match ty {
+        Ty::TypeVar(name) => {
+            if let Some(bound) = bindings.get(name.as_str()) {
+                bound.clone()
+            } else {
+                ty.clone()
+            }
+        }
+        Ty::Applied(tci, args) => {
+            let new_args = args.iter().map(|a| apply_bindings(a, bindings)).collect();
+            Ty::Applied(tci.clone(), new_args)
+        }
+        Ty::Tuple(elems) => {
+            Ty::Tuple(elems.iter().map(|e| apply_bindings(e, bindings)).collect())
+        }
+        Ty::Fn { params, ret } => Ty::Fn {
+            params: params.iter().map(|p| apply_bindings(p, bindings)).collect(),
+            ret: Box::new(apply_bindings(ret, bindings)),
+        },
+        _ => ty.clone(),
+    }
+}
+
+/// Substitute TypeVars in `ret_template` using actual arg types matched
+/// against `param_templates`. Covers the common generic case:
+///   `map.get: (Map[K, V], K) -> Option[V]` with arg types
+///   `(Map[String, Int], String)` yields `Option[Int]`.
+fn substitute_type_vars(ret_template: &Ty, param_templates: &[&str], args: &[IrExpr]) -> Ty {
+    let mut bindings = std::collections::HashMap::new();
+    for (template, arg) in param_templates.iter().zip(args.iter()) {
+        bind_type_vars(template, &arg.ty, &mut bindings);
+    }
+    apply_bindings(ret_template, &bindings)
 }
 
 /// Get the effective type of an expression, preferring VarTable for Var/EnvLoad

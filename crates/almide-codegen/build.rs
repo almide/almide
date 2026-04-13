@@ -10,6 +10,9 @@ mod arg_transforms_gen;
 #[path = "buildscript/runtime_registry.rs"]
 mod runtime_registry;
 
+#[path = "buildscript/stdlib_ret_ty_gen.rs"]
+mod stdlib_ret_ty_gen;
+
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let workspace_root = std::path::Path::new(&manifest_dir).join("../..");
@@ -18,4 +21,5 @@ fn main() {
 
     arg_transforms_gen::generate(&workspace_root, out_dir);
     runtime_registry::generate(&workspace_root, out_dir);
+    stdlib_ret_ty_gen::generate(&workspace_root, out_dir);
 }

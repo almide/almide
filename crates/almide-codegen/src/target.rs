@@ -127,6 +127,11 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(ConcretizeTypesPass)
             // Closure conversion: lift lambdas to top-level functions with explicit env
             .add(ClosureConversionPass)
+            // Re-concretize after closure conversion: lifted functions' bodies
+            // carry their original expr.ty, but the SymbolTable now contains
+            // lifted signatures too — running ConcretizeTypes again resolves
+            // Call return types inside closures (e.g. map.get inside a lifted lambda).
+            .add(ConcretizeTypesPass)
             .add(FanLoweringPass)
             // TailCallMark: mark tail-position calls for WASM return_call emission.
             // Must run last — after all passes that may create or transform calls.
