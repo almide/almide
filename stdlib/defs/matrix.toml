@@ -207,8 +207,17 @@ params = [{ name = "m", type = "Matrix" }, { name = "n", type = "Int" }]
 return = "List[Matrix]"
 rust = "almide_rt_matrix_split_cols_even(&{m}, {n})"
 
+[concat_cols]
+description = "Concatenate a List of matrices column-wise. All matrices must share the same number of rows."
+example = 'matrix.concat_cols([heads_0, heads_1, heads_2])'
+params = [{ name = "matrices", type = "List[Matrix]" }]
+return = "Matrix"
+rust = "almide_rt_matrix_concat_cols_many(&{matrices})"
+
+# Deprecated alias of concat_cols. The "_many" suffix was redundant given the
+# List[Matrix] argument; new code should use concat_cols.
 [concat_cols_many]
-description = "Concatenate matrices column-wise. All matrices must share the same number of rows."
+description = "Deprecated: use matrix.concat_cols instead."
 params = [{ name = "matrices", type = "List[Matrix]" }]
 return = "Matrix"
 rust = "almide_rt_matrix_concat_cols_many(&{matrices})"
@@ -289,8 +298,17 @@ params = [{ name = "m", type = "Matrix" }, { name = "indices", type = "List[Int]
 return = "Matrix"
 rust = "almide_rt_matrix_gather_rows(&{m}, &{indices})"
 
-[row_dot]
+[dot_row]
 description = "Compute dot product of `m`'s row `r` with the given `vec`. Avoids materialising the row as a List."
+example = 'matrix.dot_row(weights, 0, hidden)'
+params = [{ name = "m", type = "Matrix" }, { name = "r", type = "Int" }, { name = "vec", type = "List[Float]" }]
+return = "Float"
+rust = "almide_rt_matrix_row_dot(&{m}, {r}, &{vec})"
+
+# Deprecated alias of dot_row. Kept for backward compatibility; new code should
+# use dot_row to follow the row-major naming convention (see CHEATSHEET).
+[row_dot]
+description = "Deprecated: use matrix.dot_row instead."
 params = [{ name = "m", type = "Matrix" }, { name = "r", type = "Int" }, { name = "vec", type = "List[Float]" }]
 return = "Float"
 rust = "almide_rt_matrix_row_dot(&{m}, {r}, &{vec})"

@@ -1755,8 +1755,9 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(n);
                 self.scratch.free_i32(m);
             }
-            "concat_cols_many" => {
-                // matrix.concat_cols_many(matrices: List[Matrix]) → Matrix
+            "concat_cols" | "concat_cols_many" => {
+                // matrix.concat_cols(matrices: List[Matrix]) → Matrix
+                // (concat_cols_many is the deprecated original name.)
                 // All must have same rows; result has sum of cols.
                 let lst = self.scratch.alloc_i32();
                 let n = self.scratch.alloc_i32();
@@ -1908,7 +1909,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(indices);
                 self.scratch.free_i32(m);
             }
-            "row_dot" => {
+            "dot_row" | "row_dot" => {
                 // matrix.row_dot(m, r, vec) → Float
                 let m = self.scratch.alloc_i32();
                 let row = self.scratch.alloc_i32();
