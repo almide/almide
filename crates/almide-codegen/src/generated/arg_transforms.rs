@@ -22,6 +22,10 @@ pub struct StdlibCallInfo {
 
 pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
     match (module, func) {
+            ("base64", "decode") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_base64_decode", required: 1 }),
+            ("base64", "decode_url") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_base64_decode_url", required: 1 }),
+            ("base64", "encode") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_base64_encode", required: 1 }),
+            ("base64", "encode_url") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_base64_encode_url", required: 1 }),
             ("bytes", "append_f32_be") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut, ArgTransform::Direct], effect: false, pure_: false, name: "almide_rt_bytes_append_f32_be", required: 2 }),
             ("bytes", "append_f32_le") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut, ArgTransform::Direct], effect: false, pure_: false, name: "almide_rt_bytes_append_f32_le", required: 2 }),
             ("bytes", "append_f64_be") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut, ArgTransform::Direct], effect: false, pure_: false, name: "almide_rt_bytes_append_f64_be", required: 2 }),
@@ -48,6 +52,7 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("bytes", "get") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct], effect: false, pure_: true, name: "almide_rt_bytes_get", required: 2 }),
             ("bytes", "get_or") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct, ArgTransform::Direct], effect: false, pure_: true, name: "almide_rt_bytes_get_or", required: 3 }),
             ("bytes", "is_empty") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_bytes_is_empty", required: 1 }),
+            ("bytes", "is_valid_utf8") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_bytes_is_valid_utf8", required: 1 }),
             ("bytes", "len") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_bytes_len", required: 1 }),
             ("bytes", "new") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, pure_: true, name: "almide_rt_bytes_new", required: 1 }),
             ("bytes", "push") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut, ArgTransform::Direct], effect: false, pure_: false, name: "almide_rt_bytes_push", required: 2 }),
@@ -103,6 +108,8 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("bytes", "slice") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct, ArgTransform::Direct], effect: false, pure_: true, name: "almide_rt_bytes_slice", required: 3 }),
             ("bytes", "take_at") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::Direct, ArgTransform::Direct], effect: false, pure_: true, name: "almide_rt_bytes_take_at", required: 3 }),
             ("bytes", "to_list") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_bytes_to_list", required: 1 }),
+            ("bytes", "to_string") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_bytes_to_string", required: 1 }),
+            ("bytes", "to_string_lossy") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_bytes_to_string_lossy", required: 1 }),
             ("bytes", "write_bool") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut, ArgTransform::Direct], effect: false, pure_: false, name: "almide_rt_bytes_write_bool", required: 2 }),
             ("bytes", "write_f64_be") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut, ArgTransform::Direct], effect: false, pure_: false, name: "almide_rt_bytes_write_f64_be", required: 2 }),
             ("bytes", "write_i64_be") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowMut, ArgTransform::Direct], effect: false, pure_: false, name: "almide_rt_bytes_write_i64_be", required: 2 }),
@@ -185,6 +192,9 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("fs", "write") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: true, pure_: false, name: "almide_rt_fs_write", required: 2 }),
             ("fs", "write_bytes") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: true, pure_: false, name: "almide_rt_fs_write_bytes", required: 2 }),
             ("fs", "write_bytes_raw") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowStr, ArgTransform::BorrowRef], effect: true, pure_: false, name: "almide_rt_fs_write_bytes_raw", required: 2 }),
+            ("hex", "decode") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_hex_decode", required: 1 }),
+            ("hex", "encode") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_hex_encode", required: 1 }),
+            ("hex", "encode_upper") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_rt_hex_encode_upper", required: 1 }),
             ("http", "body") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, pure_: true, name: "almide_http_get_body", required: 1 }),
             ("http", "delete") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: true, pure_: false, name: "almide_http_delete", required: 1 }),
             ("http", "get") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: true, pure_: false, name: "almide_http_get", required: 1 }),

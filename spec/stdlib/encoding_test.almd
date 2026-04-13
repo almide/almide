@@ -1,0 +1,92 @@
+// base64 + hex stdlib tests
+
+import base64
+import hex
+
+test "base64 encode/decode round-trip" {
+  let b = bytes.from_string("Hello, World!")
+  let s = base64.encode(b)
+  assert_eq(s, "SGVsbG8sIFdvcmxkIQ==")
+  match base64.decode(s) {
+    ok(decoded) => {
+      assert_eq(bytes.len(decoded), bytes.len(b))
+      assert_eq(bytes.read_u8(decoded, 0), bytes.read_u8(b, 0))
+      assert_eq(bytes.read_u8(decoded, 12), bytes.read_u8(b, 12))
+    }
+    err(_) => assert(false)
+  }
+}
+
+test "base64 encode without padding (URL-safe)" {
+  let b = bytes.from_string("hi")
+  assert_eq(base64.encode_url(b), "aGk")
+}
+
+test "base64 decode rejects invalid chars" {
+  match base64.decode("###") {
+    ok(_) => assert(false)
+    err(_) => assert(true)
+  }
+}
+
+test "base64 decode accepts unpadded" {
+  match base64.decode("aGk") {
+    ok(decoded) => assert_eq(bytes.len(decoded), 2)
+    err(_) => assert(false)
+  }
+}
+
+test "base64 empty input" {
+  let b = bytes.new(0)
+  assert_eq(base64.encode(b), "")
+  match base64.decode("") {
+    ok(decoded) => assert_eq(bytes.len(decoded), 0)
+    err(_) => assert(false)
+  }
+}
+
+test "hex encode lowercase" {
+  let b = bytes.from_string("Hi")
+  assert_eq(hex.encode(b), "4869")
+}
+
+test "hex encode uppercase" {
+  let b = bytes.from_string("Hi")
+  assert_eq(hex.encode_upper(b), "4869")
+}
+
+test "hex decode round-trip" {
+  match hex.decode("4869") {
+    ok(b) => {
+      assert_eq(bytes.len(b), 2)
+      assert_eq(bytes.read_u8(b, 0), 0x48)
+      assert_eq(bytes.read_u8(b, 1), 0x69)
+    }
+    err(_) => assert(false)
+  }
+}
+
+test "hex decode case-insensitive" {
+  match hex.decode("DeAdBeEf") {
+    ok(b) => {
+      assert_eq(bytes.len(b), 4)
+      assert_eq(bytes.read_u8(b, 0), 0xDE)
+      assert_eq(bytes.read_u8(b, 3), 0xEF)
+    }
+    err(_) => assert(false)
+  }
+}
+
+test "hex decode rejects odd length" {
+  match hex.decode("4") {
+    ok(_) => assert(false)
+    err(_) => assert(true)
+  }
+}
+
+test "hex decode rejects non-hex chars" {
+  match hex.decode("4Z") {
+    ok(_) => assert(false)
+    err(_) => assert(true)
+  }
+}

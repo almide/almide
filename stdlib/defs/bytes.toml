@@ -107,6 +107,27 @@ params = [{ name = "s", type = "String" }]
 return = "Bytes"
 rust = "almide_rt_bytes_from_string(&*{s})"
 
+[to_string]
+description = "Decode bytes as UTF-8. Returns `err` on invalid sequences. Strict counterpart of `to_string_lossy`."
+example = 'bytes.to_string(b)'
+params = [{ name = "b", type = "Bytes" }]
+return = "Result[String, String]"
+rust = "almide_rt_bytes_to_string(&{b})"
+
+[to_string_lossy]
+description = "Decode bytes as UTF-8, replacing invalid sequences with U+FFFD (REPLACEMENT CHARACTER). Always succeeds."
+example = 'bytes.to_string_lossy(b)'
+params = [{ name = "b", type = "Bytes" }]
+return = "String"
+rust = "almide_rt_bytes_to_string_lossy(&{b})"
+
+[is_valid_utf8]
+description = "Check whether the buffer contains valid UTF-8 (without decoding)."
+example = 'if bytes.is_valid_utf8(b) then ...'
+params = [{ name = "b", type = "Bytes" }]
+return = "Bool"
+rust = "almide_rt_bytes_is_valid_utf8(&{b})"
+
 # ── Bridge protocol: big-endian pack/unpack ──
 
 [write_i64_be]

@@ -17,6 +17,10 @@ pub struct StdlibSig {
 
 pub fn lookup_stdlib_ret(module: &str, func: &str) -> Option<StdlibSig> {
     match (module, func) {
+        ("base64", "decode") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::Result, vec![Ty::Bytes, Ty::String]), param_tys: &["String"] }),
+        ("base64", "decode_url") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::Result, vec![Ty::Bytes, Ty::String]), param_tys: &["String"] }),
+        ("base64", "encode") => Some(StdlibSig { ret_ty: Ty::String, param_tys: &["Bytes"] }),
+        ("base64", "encode_url") => Some(StdlibSig { ret_ty: Ty::String, param_tys: &["Bytes"] }),
         ("bytes", "append_f32_be") => Some(StdlibSig { ret_ty: Ty::Unit, param_tys: &["Bytes", "Float"] }),
         ("bytes", "append_f32_le") => Some(StdlibSig { ret_ty: Ty::Unit, param_tys: &["Bytes", "Float"] }),
         ("bytes", "append_f64_be") => Some(StdlibSig { ret_ty: Ty::Unit, param_tys: &["Bytes", "Float"] }),
@@ -43,6 +47,7 @@ pub fn lookup_stdlib_ret(module: &str, func: &str) -> Option<StdlibSig> {
         ("bytes", "get") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::Option, vec![Ty::Int]), param_tys: &["Bytes", "Int"] }),
         ("bytes", "get_or") => Some(StdlibSig { ret_ty: Ty::Int, param_tys: &["Bytes", "Int", "Int"] }),
         ("bytes", "is_empty") => Some(StdlibSig { ret_ty: Ty::Bool, param_tys: &["Bytes"] }),
+        ("bytes", "is_valid_utf8") => Some(StdlibSig { ret_ty: Ty::Bool, param_tys: &["Bytes"] }),
         ("bytes", "len") => Some(StdlibSig { ret_ty: Ty::Int, param_tys: &["Bytes"] }),
         ("bytes", "new") => Some(StdlibSig { ret_ty: Ty::Bytes, param_tys: &["Int"] }),
         ("bytes", "push") => Some(StdlibSig { ret_ty: Ty::Unit, param_tys: &["Bytes", "Int"] }),
@@ -98,6 +103,8 @@ pub fn lookup_stdlib_ret(module: &str, func: &str) -> Option<StdlibSig> {
         ("bytes", "slice") => Some(StdlibSig { ret_ty: Ty::Bytes, param_tys: &["Bytes", "Int", "Int"] }),
         ("bytes", "take_at") => Some(StdlibSig { ret_ty: Ty::Tuple(vec![Ty::Int, Ty::Applied(TCI::Option, vec![Ty::Bytes])]), param_tys: &["Bytes", "Int", "Int"] }),
         ("bytes", "to_list") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::List, vec![Ty::Int]), param_tys: &["Bytes"] }),
+        ("bytes", "to_string") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::Result, vec![Ty::String, Ty::String]), param_tys: &["Bytes"] }),
+        ("bytes", "to_string_lossy") => Some(StdlibSig { ret_ty: Ty::String, param_tys: &["Bytes"] }),
         ("bytes", "write_bool") => Some(StdlibSig { ret_ty: Ty::Unit, param_tys: &["Bytes", "Bool"] }),
         ("bytes", "write_f64_be") => Some(StdlibSig { ret_ty: Ty::Unit, param_tys: &["Bytes", "Float"] }),
         ("bytes", "write_i64_be") => Some(StdlibSig { ret_ty: Ty::Unit, param_tys: &["Bytes", "Int"] }),
@@ -180,6 +187,9 @@ pub fn lookup_stdlib_ret(module: &str, func: &str) -> Option<StdlibSig> {
         ("fs", "write") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::Result, vec![Ty::Unit, Ty::String]), param_tys: &["String", "String"] }),
         ("fs", "write_bytes") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::Result, vec![Ty::Unit, Ty::String]), param_tys: &["String", "List[Int]"] }),
         ("fs", "write_bytes_raw") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::Result, vec![Ty::Unit, Ty::String]), param_tys: &["String", "Bytes"] }),
+        ("hex", "decode") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::Result, vec![Ty::Bytes, Ty::String]), param_tys: &["String"] }),
+        ("hex", "encode") => Some(StdlibSig { ret_ty: Ty::String, param_tys: &["Bytes"] }),
+        ("hex", "encode_upper") => Some(StdlibSig { ret_ty: Ty::String, param_tys: &["Bytes"] }),
         ("http", "body") => Some(StdlibSig { ret_ty: Ty::String, param_tys: &["Response"] }),
         ("http", "delete") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::Result, vec![Ty::String, Ty::String]), param_tys: &["String"] }),
         ("http", "get") => Some(StdlibSig { ret_ty: Ty::Applied(TCI::Result, vec![Ty::String, Ty::String]), param_tys: &["String"] }),

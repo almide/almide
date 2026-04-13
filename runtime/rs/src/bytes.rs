@@ -20,6 +20,20 @@ pub fn almide_rt_bytes_push(b: &mut Vec<u8>, val: i64) { b.push(val as u8); }
 pub fn almide_rt_bytes_clear(b: &mut Vec<u8>) { b.clear(); }
 pub fn almide_rt_bytes_from_string(s: &str) -> Vec<u8> { s.as_bytes().to_vec() }
 
+pub fn almide_rt_bytes_to_string(b: &Vec<u8>) -> Result<String, String> {
+    std::str::from_utf8(b)
+        .map(|s| s.to_string())
+        .map_err(|e| format!("invalid UTF-8: {}", e))
+}
+
+pub fn almide_rt_bytes_to_string_lossy(b: &Vec<u8>) -> String {
+    String::from_utf8_lossy(b).into_owned()
+}
+
+pub fn almide_rt_bytes_is_valid_utf8(b: &Vec<u8>) -> bool {
+    std::str::from_utf8(b).is_ok()
+}
+
 // ── Bridge protocol: big-endian pack/unpack ──
 
 pub fn almide_rt_bytes_write_i64_be(b: &mut Vec<u8>, val: i64) { b.extend_from_slice(&val.to_be_bytes()); }
