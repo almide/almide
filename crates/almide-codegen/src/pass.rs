@@ -307,38 +307,10 @@ impl Pipeline {
 }
 
 // ── Built-in Passes ──
-// Placeholder implementations. Each will be fleshed out during migration.
-
-#[derive(Debug)]
-pub struct OptionErasurePass;
-
-impl NanoPass for OptionErasurePass {
-    fn name(&self) -> &str { "OptionErasure" }
-    fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::TypeScript, Target::Python])
-    }
-    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
-        // TS/Python: some(x) → x, none → null/None
-        // Walks IR and sets `option_erased = true` on relevant nodes
-        // TODO: implement during Phase 2 migration
-        PassResult { program, changed: false }
-    }
-}
-
-#[derive(Debug)]
-pub struct ResultPropagationPass;
-
-impl NanoPass for ResultPropagationPass {
-    fn name(&self) -> &str { "ResultPropagation" }
-    fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::Rust])
-    }
-    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
-        // Rust: insert `?` on Result-returning calls inside effect fn
-        // TODO: implement during Phase 2 migration
-        PassResult { program, changed: false }
-    }
-}
+//
+// Each concrete pass lives in its own `pass_*.rs` file. This file defines
+// the trait, the pipeline runner, and the thin wrappers for passes whose
+// logic also lives elsewhere (BorrowInsertion, FanLowering, ...).
 
 #[derive(Debug)]
 pub struct BorrowInsertionPass;
@@ -359,21 +331,6 @@ impl NanoPass for BorrowInsertionPass {
 }
 
 #[derive(Debug)]
-pub struct CloneInsertionPass;
-
-impl NanoPass for CloneInsertionPass {
-    fn name(&self) -> &str { "CloneInsertion" }
-    fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::Rust])
-    }
-    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
-        // Rust: use-count analysis, insert .clone() where needed
-        // TODO: implement during Phase 2 migration
-        PassResult { program, changed: false }
-    }
-}
-
-#[derive(Debug)]
 pub struct FanLoweringPass;
 
 impl NanoPass for FanLoweringPass {
@@ -385,46 +342,4 @@ impl NanoPass for FanLoweringPass {
         super::pass_fan_lowering::strip_fan_auto_try(&mut program);
         PassResult { program, changed: true }
     }
-}
-
-#[derive(Debug)]
-pub struct TypeConcretizationPass;
-
-impl NanoPass for TypeConcretizationPass {
-    fn name(&self) -> &str { "TypeConcretization" }
-    fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::Rust])
-    }
-    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
-        // Rust: Box recursive types, generate AnonRecord structs
-        // TODO: implement during Phase 2 migration
-        PassResult { program, changed: false }
-    }
-}
-
-// ── Default Pipeline ──
-
-#[derive(Debug)]
-pub struct StreamFusionPass;
-impl NanoPass for StreamFusionPass {
-    fn name(&self) -> &str { "StreamFusion" }
-    fn targets(&self) -> Option<Vec<Target>> { None }
-    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
-        super::pass_stream_fusion::StreamFusionPass.run(program, _target)
-    }
-}
-
-pub fn default_pipeline() -> Pipeline {
-    Pipeline::new()
-        // Global passes first (need whole-program analysis)
-        .add(TypeConcretizationPass)
-        .add(BorrowInsertionPass)
-        .add(CloneInsertionPass)
-        // Optimization passes (analysis only in Phase 1)
-        .add(StreamFusionPass)
-        // Local passes (scope-dependent)
-        .add(OptionErasurePass)
-        .add(ResultPropagationPass)
-        // Target-specific lowering
-        .add(FanLoweringPass)
 }
