@@ -45,6 +45,11 @@ test "pow with cube" {
   assert_eq(matrix.get(s, 0, 1), 27.0)
 }
 
-// NOTE: matrix.pow with fractional exponent (e.g. 0.5 for sqrt) currently
-// traps in the WASM target because __float_pow's fractional path is buggy.
-// Tracked separately. Use matrix.map(m, math.sqrt) as a workaround.
+test "pow with 0.5 = sqrt" {
+  let a = matrix.from_lists([[4.0, 9.0], [16.0, 25.0]])
+  let s = matrix.pow(a, 0.5)
+  assert(float.abs(matrix.get(s, 0, 0) - 2.0) < 0.001, "got " + float.to_string(matrix.get(s, 0, 0)))
+  assert(float.abs(matrix.get(s, 0, 1) - 3.0) < 0.001, "got " + float.to_string(matrix.get(s, 0, 1)))
+  assert(float.abs(matrix.get(s, 1, 0) - 4.0) < 0.001, "got " + float.to_string(matrix.get(s, 1, 0)))
+  assert(float.abs(matrix.get(s, 1, 1) - 5.0) < 0.001, "got " + float.to_string(matrix.get(s, 1, 1)))
+}

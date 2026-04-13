@@ -717,7 +717,7 @@ impl FuncCompiler<'_> {
                       // Load x into a local so it's stable across the call.
                       local_get(m); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
                       local_set(x);
-                      // Compute pow(x, exp) and stash before storing.
+                      // Compute pow(x, exp) via __float_pow runtime.
                       local_get(x); local_get(exp); call(self.emitter.rt.float_pow);
                       local_set(result);
                       // Store at dst+8+i*8
