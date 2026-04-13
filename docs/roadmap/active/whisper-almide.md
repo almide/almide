@@ -36,8 +36,15 @@ Dependencies:
 
 ## Status (2026-04-13)
 
-- **Phase 1-3**: 実装完了、Rust/WASM 両ターゲットで全テスト通過 (nn/tensor 13, activations 13, attention 5, wav 7, fft 6, mel 7, gguf 9 = 60 tests)
-- **Phase 4+**: 未着手
+- **Phase 1-5 完了**: WASM Whisper エンドツーエンド成功
+  - native: ggml-tiny.bin + hello.wav → 正確な転写 (~16s)
+  - WASM: 同じパイプラインを Almide→WASM コンパイル後 Node.js (WASI) で実行
+    - hello.wav → `" Hello World, this is a test of whisker speech recognition."` (36s, 30 tokens)
+    - jfk.wav → `" And so my fellow Americans ask not what your country can do for you ask what you can do for your country"` (47s, 30 tokens)
+  - 鍵となった修正: gelu の tanh `(e^2x-1)/(e^2x+1)` で `Inf/Inf=NaN` 発生 → inner を [-20,20] にクランプ
+  - matrix WASM 演算追加: `gather_rows`, `row_dot`, `from_bytes_f64_le`, `conv1d`, `multi_head_attention`, `softmax_rows`, `layer_norm_rows`, etc.
+  - bytes WASM 演算追加: `read_u32_le`, `f16→f64`, `append_*_le`, etc.
+- **Phase 6** (最適化): 未着手。WASM SIMD matmul, quantization, ndarray/Burn backend
 
 ## Dependencies
 
