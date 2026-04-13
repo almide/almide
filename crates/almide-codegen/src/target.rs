@@ -10,8 +10,7 @@
 //! - Ownership language (Rust, Go): ~800 LOC (need borrow analysis)
 
 use super::pass::{
-    BorrowInsertionPass, FanLoweringPass,
-    OptionErasurePass, Pipeline, Target, TypeConcretizationPass,
+    BorrowInsertionPass, FanLoweringPass, Pipeline, Target,
 };
 use super::pass_auto_parallel::AutoParallelPass;
 use super::pass_box_deref::BoxDerefPass;
@@ -27,7 +26,10 @@ use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
 use super::pass_rust_lowering::RustLoweringPass;
+use super::pass_lambda_type_resolve::LambdaTypeResolvePass;
+use super::pass_concretize_types::ConcretizeTypesPass;
 use super::pass_closure_conversion::ClosureConversionPass;
+use super::pass_resolve_calls::ResolveCallsPass;
 use super::pass_list_pattern::ListPatternLoweringPass;
 use super::pass_tail_call_mark::TailCallMarkPass;
 use super::template::TemplateSet;
@@ -55,12 +57,12 @@ fn build_pipeline(target: Target) -> Pipeline {
         Target::Rust => Pipeline::new()
             // ListPatternLowering: desugar list patterns to if/else before any other pass
             .add(ListPatternLoweringPass)
+            // Verify all user-module calls resolve to known IrFunctions.
+            .add(ResolveCallsPass)
             // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
             .add(BoxDerefPass)
             // LICM: hoist loop-invariant expressions before loops
             .add(LICMPass)
-            // Global passes
-            .add(TypeConcretizationPass)
             // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
             .add(StreamFusionPass)
             .add(BorrowInsertionPass)
@@ -102,19 +104,27 @@ fn build_pipeline(target: Target) -> Pipeline {
         Target::Python => Pipeline::new()
             .add(TailCallOptPass)
             .add(LICMPass)
-            // Python-specific passes will go here
-            .add(OptionErasurePass)
-            // .add(ResultToExceptionPass)
+            // Python-specific passes will go here when the target is activated:
+            // .add(OptionErasurePass)      // some(x) → x, none → None
+            // .add(ResultToExceptionPass)  // ok/err → try/except
             .add(FanLoweringPass),
 
         Target::Wasm => Pipeline::new()
             .add(ListPatternLoweringPass)
+            // Verify all user-module calls resolve to known IrFunctions.
+            // Runs early so violations surface before deep transformations.
+            .add(ResolveCallsPass)
             .add(LICMPass)
             .add(EffectInferencePass)
             // StreamFusion not included: WASM emitter has its own lowering paths
             .add(ResultPropagationPass)
             // Peephole: swap/reverse/rotate/copy → specialized IR nodes
             .add(PeepholePass)
+            // Lambda type resolution: top-down propagation of lambda param types
+            .add(LambdaTypeResolvePass)
+            // Concretize types: sync every IrExpr.ty with VarTable / parent context,
+            // so downstream emit code can trust expr.ty.
+            .add(ConcretizeTypesPass)
             // Closure conversion: lift lambdas to top-level functions with explicit env
             .add(ClosureConversionPass)
             .add(FanLoweringPass)
