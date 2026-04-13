@@ -114,10 +114,8 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           # Move tests aside that exercise features not yet ported to WASM:
           #   - json.parse doesn't unescape \n
-          #   - bytes.map_each closure invocation
           mkdir -p /tmp/skip-wasm
           mv spec/stdlib/json_stringify_roundtrip_test.almd /tmp/skip-wasm/ 2>/dev/null || true
-          mv spec/stdlib/bytes_map_each_test.almd /tmp/skip-wasm/ 2>/dev/null || true
           $ALMIDE test spec/ --target wasm
           mv /tmp/skip-wasm/*.almd spec/stdlib/ 2>/dev/null || true
 

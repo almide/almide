@@ -121,6 +121,56 @@ pub fn almide_rt_bytes_set_f64_be(b: &mut Vec<u8>, pos: i64, val: f64) {
     if p + 8 <= b.len() { b[p..p+8].copy_from_slice(&bytes); }
 }
 
+// ── XOR / pad / copy ──
+
+pub fn almide_rt_bytes_xor(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> {
+    let n = a.len().min(b.len());
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        out.push(a[i] ^ b[i]);
+    }
+    out
+}
+
+pub fn almide_rt_bytes_pad_left(b: &Vec<u8>, target_len: i64, val: i64) -> Vec<u8> {
+    let target = target_len as usize;
+    if b.len() >= target {
+        return b.clone();
+    }
+    let pad = target - b.len();
+    let mut out = vec![val as u8; pad];
+    out.extend_from_slice(b);
+    out
+}
+
+pub fn almide_rt_bytes_pad_right(b: &Vec<u8>, target_len: i64, val: i64) -> Vec<u8> {
+    let target = target_len as usize;
+    if b.len() >= target {
+        return b.clone();
+    }
+    let pad = target - b.len();
+    let mut out = b.clone();
+    out.extend(std::iter::repeat(val as u8).take(pad));
+    out
+}
+
+pub fn almide_rt_bytes_copy_from(
+    dst: &mut Vec<u8>,
+    src: &Vec<u8>,
+    dst_off: i64,
+    src_off: i64,
+    len: i64,
+) {
+    let dst_off = dst_off as usize;
+    let src_off = src_off as usize;
+    let mut len = len as usize;
+    if dst_off >= dst.len() || src_off >= src.len() {
+        return;
+    }
+    len = len.min(dst.len() - dst_off).min(src.len() - src_off);
+    dst[dst_off..dst_off + len].copy_from_slice(&src[src_off..src_off + len]);
+}
+
 // ── Transform / split ──
 
 pub fn almide_rt_bytes_reverse(b: &Vec<u8>) -> Vec<u8> {

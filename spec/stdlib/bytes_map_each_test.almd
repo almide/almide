@@ -1,6 +1,4 @@
-// bytes.map_each — closure-taking transform. Currently Rust target only;
-// WASM closure emit is tracked separately.
-// @skip-wasm
+// bytes.map_each — closure-taking transform. Works on Rust + WASM.
 
 test "map_each adds 1 to every byte" {
   let b = bytes.from_string("abc")

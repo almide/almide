@@ -100,6 +100,40 @@ params = [{ name = "b", type = "Bytes" }]
 return = "Unit"
 rust = "almide_rt_bytes_clear(&mut {b})"
 
+[xor]
+description = "Pairwise XOR of two buffers. Result length is `min(len(a), len(b))`. Used in stream ciphers, simple checksums, and tag/MAC verification."
+example = 'bytes.xor(key, ciphertext)'
+params = [{ name = "a", type = "Bytes" }, { name = "b", type = "Bytes" }]
+return = "Bytes"
+rust = "almide_rt_bytes_xor(&{a}, &{b})"
+
+[pad_left]
+description = "Return a fresh Bytes of length `target_len` by prepending `val` bytes. If `b` is already at least `target_len`, returns a clone unchanged."
+example = 'bytes.pad_left(b, 16, 0)'
+params = [{ name = "b", type = "Bytes" }, { name = "target_len", type = "Int" }, { name = "val", type = "Int" }]
+return = "Bytes"
+rust = "almide_rt_bytes_pad_left(&{b}, {target_len}, {val})"
+
+[pad_right]
+description = "Return a fresh Bytes of length `target_len` by appending `val` bytes. If `b` is already at least `target_len`, returns a clone unchanged."
+example = 'bytes.pad_right(b, 16, 0)'
+params = [{ name = "b", type = "Bytes" }, { name = "target_len", type = "Int" }, { name = "val", type = "Int" }]
+return = "Bytes"
+rust = "almide_rt_bytes_pad_right(&{b}, {target_len}, {val})"
+
+[copy_from]
+description = "Copy `len` bytes from `src` starting at `src_off` into `dst` starting at `dst_off`. Mutates `dst` in place. Out-of-range writes are silently truncated."
+example = 'bytes.copy_from(dst, src, 4, 0, 16)'
+params = [
+  { name = "dst", type = "Bytes" },
+  { name = "src", type = "Bytes" },
+  { name = "dst_off", type = "Int" },
+  { name = "src_off", type = "Int" },
+  { name = "len", type = "Int" },
+]
+return = "Unit"
+rust = "almide_rt_bytes_copy_from(&mut {dst}, &{src}, {dst_off}, {src_off}, {len})"
+
 [reverse]
 description = "Return a new Bytes with the bytes in reverse order."
 example = 'bytes.reverse(b)'

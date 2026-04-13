@@ -451,6 +451,11 @@ impl FuncCompiler<'_> {
             "append_u32_le" => self.emit_bytes_append_i(args, 4),
             "append_i32_le" => self.emit_bytes_append_i(args, 4),
             "append_i64_le" => self.emit_bytes_append_i(args, 8),
+            "map_each" => self.emit_bytes_map_each(args),
+            "xor" => self.emit_bytes_xor(args),
+            "pad_left" => self.emit_bytes_pad(args, /*left=*/true),
+            "pad_right" => self.emit_bytes_pad(args, /*left=*/false),
+            "copy_from" => self.emit_bytes_copy_from(args),
             "reverse" => self.emit_bytes_reverse(args),
             "fill" => self.emit_bytes_fill(args),
             "insert" => self.emit_bytes_insert(args),
@@ -1407,6 +1412,214 @@ impl FuncCompiler<'_> {
         });
         self.scratch.free_i32(pos);
         self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.map_each(b, f) -> Bytes` — apply Int→Int closure to every byte.
+    /// Closure layout: `[table_idx:i32][env_ptr:i32]`. Calling convention is
+    /// `(env, arg) -> ret` resolved via `call_indirect`. The byte value is
+    /// widened to i64 going in and truncated coming out.
+    pub(super) fn emit_bytes_map_each(&mut self, args: &[IrExpr]) {
+        let buf = self.scratch.alloc_i32();
+        let closure = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let dst = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]); wasm!(self.func, {
+            local_set(closure);
+            local_get(buf); i32_load(0); local_set(len);
+            local_get(len); i32_const(4); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+            local_get(dst); local_get(len); i32_store(0);
+            i32_const(0); local_set(i);
+            block_empty; loop_empty;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                // dst[i] = (i32) f((i64) b[i])
+                local_get(dst); i32_const(4); i32_add; local_get(i); i32_add;
+                // closure call args: env, arg, table_idx
+                local_get(closure); i32_load(4);
+                local_get(buf); i32_const(4); i32_add; local_get(i); i32_add;
+                i32_load8_u(0); i64_extend_i32_u;
+                local_get(closure); i32_load(0);
+        });
+        self.emit_closure_call(&almide_lang::types::Ty::Int, &almide_lang::types::Ty::Int);
+        wasm!(self.func, {
+                i32_wrap_i64; i32_store8(0);
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+            end; end;
+            local_get(dst);
+        });
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(dst);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(closure);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.xor(a, b) -> Bytes`. Result length = `min(len(a), len(b))`.
+    pub(super) fn emit_bytes_xor(&mut self, args: &[IrExpr]) {
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
+        let alen = self.scratch.alloc_i32();
+        let blen = self.scratch.alloc_i32();
+        let n = self.scratch.alloc_i32();
+        let dst = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(a); });
+        self.emit_expr(&args[1]); wasm!(self.func, {
+            local_set(b);
+            local_get(a); i32_load(0); local_set(alen);
+            local_get(b); i32_load(0); local_set(blen);
+            local_get(alen); local_get(blen); i32_lt_u;
+            if_i32; local_get(alen); else_; local_get(blen); end;
+            local_set(n);
+            local_get(n); i32_const(4); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+            local_get(dst); local_get(n); i32_store(0);
+            i32_const(0); local_set(i);
+            block_empty; loop_empty;
+                local_get(i); local_get(n); i32_ge_u; br_if(1);
+                local_get(dst); i32_const(4); i32_add; local_get(i); i32_add;
+                local_get(a); i32_const(4); i32_add; local_get(i); i32_add; i32_load8_u(0);
+                local_get(b); i32_const(4); i32_add; local_get(i); i32_add; i32_load8_u(0);
+                i32_xor;
+                i32_store8(0);
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+            end; end;
+            local_get(dst);
+        });
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(dst);
+        self.scratch.free_i32(n);
+        self.scratch.free_i32(blen);
+        self.scratch.free_i32(alen);
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
+    }
+
+    /// `bytes.pad_left` / `bytes.pad_right` — extend to target_len with val.
+    pub(super) fn emit_bytes_pad(&mut self, args: &[IrExpr], left: bool) {
+        let buf = self.scratch.alloc_i32();
+        let target = self.scratch.alloc_i32();
+        let val = self.scratch.alloc_i32();
+        let blen = self.scratch.alloc_i32();
+        let pad = self.scratch.alloc_i32();
+        let dst = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]); wasm!(self.func, { i32_wrap_i64; local_set(target); });
+        self.emit_expr(&args[2]); wasm!(self.func, {
+            i32_wrap_i64; local_set(val);
+            local_get(buf); i32_load(0); local_set(blen);
+            // If blen >= target → clone unchanged
+            local_get(blen); local_get(target); i32_ge_u;
+            if_i32;
+                local_get(blen); i32_const(4); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+                local_get(dst); local_get(buf); local_get(blen); i32_const(4); i32_add; memory_copy;
+                local_get(dst);
+            else_;
+                local_get(target); local_get(blen); i32_sub; local_set(pad);
+                local_get(target); i32_const(4); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+                local_get(dst); local_get(target); i32_store(0);
+        });
+        if left {
+            wasm!(self.func, {
+                // Fill [0, pad) with val
+                i32_const(0); local_set(i);
+                block_empty; loop_empty;
+                    local_get(i); local_get(pad); i32_ge_u; br_if(1);
+                    local_get(dst); i32_const(4); i32_add; local_get(i); i32_add;
+                    local_get(val); i32_store8(0);
+                    local_get(i); i32_const(1); i32_add; local_set(i);
+                    br(0);
+                end; end;
+                // Copy original into [pad..target)
+                local_get(dst); i32_const(4); i32_add; local_get(pad); i32_add;
+                local_get(buf); i32_const(4); i32_add;
+                local_get(blen);
+                memory_copy;
+            });
+        } else {
+            wasm!(self.func, {
+                // Copy original into [0..blen)
+                local_get(dst); i32_const(4); i32_add;
+                local_get(buf); i32_const(4); i32_add;
+                local_get(blen);
+                memory_copy;
+                // Fill [blen..target) with val
+                i32_const(0); local_set(i);
+                block_empty; loop_empty;
+                    local_get(i); local_get(pad); i32_ge_u; br_if(1);
+                    local_get(dst); i32_const(4); i32_add; local_get(blen); i32_add; local_get(i); i32_add;
+                    local_get(val); i32_store8(0);
+                    local_get(i); i32_const(1); i32_add; local_set(i);
+                    br(0);
+                end; end;
+            });
+        }
+        wasm!(self.func, {
+                local_get(dst);
+            end;
+        });
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(dst);
+        self.scratch.free_i32(pad);
+        self.scratch.free_i32(blen);
+        self.scratch.free_i32(val);
+        self.scratch.free_i32(target);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.copy_from(dst, src, dst_off, src_off, len)` — in-place memcpy.
+    pub(super) fn emit_bytes_copy_from(&mut self, args: &[IrExpr]) {
+        let dst = self.scratch.alloc_i32();
+        let src = self.scratch.alloc_i32();
+        let dst_off = self.scratch.alloc_i32();
+        let src_off = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let dst_len = self.scratch.alloc_i32();
+        let src_len = self.scratch.alloc_i32();
+        let avail_dst = self.scratch.alloc_i32();
+        let avail_src = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(dst); });
+        self.emit_expr(&args[1]); wasm!(self.func, { local_set(src); });
+        self.emit_expr(&args[2]); wasm!(self.func, { i32_wrap_i64; local_set(dst_off); });
+        self.emit_expr(&args[3]); wasm!(self.func, { i32_wrap_i64; local_set(src_off); });
+        self.emit_expr(&args[4]); wasm!(self.func, {
+            i32_wrap_i64; local_set(len);
+            local_get(dst); i32_load(0); local_set(dst_len);
+            local_get(src); i32_load(0); local_set(src_len);
+            // If either offset out of range → no-op
+            local_get(dst_off); local_get(dst_len); i32_ge_u;
+            local_get(src_off); local_get(src_len); i32_ge_u; i32_or;
+            if_empty;
+                // skip
+            else_;
+                // Clamp len to min(len, dst_len - dst_off, src_len - src_off)
+                local_get(dst_len); local_get(dst_off); i32_sub; local_set(avail_dst);
+                local_get(src_len); local_get(src_off); i32_sub; local_set(avail_src);
+                local_get(len); local_get(avail_dst); i32_lt_u;
+                if_i32; local_get(len); else_; local_get(avail_dst); end;
+                local_set(len);
+                local_get(len); local_get(avail_src); i32_lt_u;
+                if_i32; local_get(len); else_; local_get(avail_src); end;
+                local_set(len);
+                // memcpy: dst+4+dst_off ← src+4+src_off, len bytes
+                local_get(dst); i32_const(4); i32_add; local_get(dst_off); i32_add;
+                local_get(src); i32_const(4); i32_add; local_get(src_off); i32_add;
+                local_get(len);
+                memory_copy;
+            end;
+        });
+        self.scratch.free_i32(avail_src);
+        self.scratch.free_i32(avail_dst);
+        self.scratch.free_i32(src_len);
+        self.scratch.free_i32(dst_len);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(src_off);
+        self.scratch.free_i32(dst_off);
+        self.scratch.free_i32(src);
+        self.scratch.free_i32(dst);
     }
 
     /// `bytes.reverse(b) -> Bytes`. Allocates a fresh buffer.
