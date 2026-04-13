@@ -269,7 +269,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(buf);
             }
             _ => {
-                self.emit_stub_call(args);
+                self.emit_stub_call_named("process", func, args);
             }
         }
 }

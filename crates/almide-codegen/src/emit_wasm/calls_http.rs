@@ -99,7 +99,10 @@ impl FuncCompiler<'_> {
             "get_header" => {
                 // http.get_header(resp, key) → Option[String]
                 //
-                // Inline emit: use `br` to exit the search loop, NOT `return_`.
+                // Option[String] layout convention: a pointer to an i32 cell
+                // holding the string pointer (0 = None). We must allocate
+                // and copy to match what `option.unwrap_or` / match arms
+                // expect — a raw string pointer is NOT a valid Option.
                 let resp = self.scratch.alloc_i32();
                 let key = self.scratch.alloc_i32();
                 let hdrs = self.scratch.alloc_i32();
@@ -107,6 +110,7 @@ impl FuncCompiler<'_> {
                 let i = self.scratch.alloc_i32();
                 let pair_ptr = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
+                let some_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(resp); });
                 self.emit_expr(&args[1]);
@@ -125,7 +129,11 @@ impl FuncCompiler<'_> {
                       local_get(key);
                       call(self.emitter.rt.string.eq);
                       if_empty;
-                        local_get(pair_ptr); i32_load(4); local_set(result);
+                        // Found: build Some(string_ptr) by allocating a 4-byte
+                        // cell and storing the value pointer inside.
+                        i32_const(4); call(self.emitter.rt.alloc); local_set(some_ptr);
+                        local_get(some_ptr); local_get(pair_ptr); i32_load(4); i32_store(0);
+                        local_get(some_ptr); local_set(result);
                         br(2);
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -133,6 +141,7 @@ impl FuncCompiler<'_> {
                     end; end;
                     local_get(result);
                 });
+                self.scratch.free_i32(some_ptr);
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(pair_ptr);
                 self.scratch.free_i32(i);
@@ -330,7 +339,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s);
             }
             _ => {
-                self.emit_stub_call(args);
+                self.emit_stub_call_named("http", func, args);
             }
         }
     }

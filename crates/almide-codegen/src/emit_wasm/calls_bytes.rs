@@ -5,6 +5,19 @@
 use super::FuncCompiler;
 use almide_ir::IrExpr;
 
+/// Requested primitive load for the typed byte-read family.
+#[derive(Clone, Copy)]
+enum ByteReadOp {
+    U8,
+    I32Le,
+    U32Le,
+    U16Le,
+    I64Le,
+    F32Le,
+    F64Le,
+    F16Le,
+}
+
 impl FuncCompiler<'_> {
     /// Dispatch a bytes stdlib method call. Returns true if handled.
     pub(super) fn emit_bytes_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
@@ -450,8 +463,257 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { i32_const(4); i32_add; i64_extend_i32_u; });
             }
+            // ── Little-endian reads (native WASM loads) ──
+            "read_u8" => {
+                self.emit_typed_byte_read(&args[0], &args[1], ByteReadOp::U8);
+            }
+            "read_i32_le" => {
+                self.emit_typed_byte_read(&args[0], &args[1], ByteReadOp::I32Le);
+            }
+            "read_u32_le" => {
+                self.emit_typed_byte_read(&args[0], &args[1], ByteReadOp::U32Le);
+            }
+            "read_u16_le" => {
+                self.emit_typed_byte_read(&args[0], &args[1], ByteReadOp::U16Le);
+            }
+            "read_i64_le" => {
+                self.emit_typed_byte_read(&args[0], &args[1], ByteReadOp::I64Le);
+            }
+            "read_f32_le" => {
+                self.emit_typed_byte_read(&args[0], &args[1], ByteReadOp::F32Le);
+            }
+            "read_f64_le" => {
+                self.emit_typed_byte_read(&args[0], &args[1], ByteReadOp::F64Le);
+            }
+            "read_f16_le" => {
+                self.emit_typed_byte_read(&args[0], &args[1], ByteReadOp::F16Le);
+            }
+            "read_string_at" => {
+                // bytes.read_string_at(b, pos, len) → String
+                // Copy `len` bytes from [data + pos] into a newly allocated
+                // String buffer `[len:i32][bytes]`.
+                let buf = self.scratch.alloc_i32();
+                let src = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(buf); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64;
+                    local_get(buf); i32_const(4); i32_add; i32_add; local_set(src);
+                });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(len);
+                    // alloc 4 + len
+                    local_get(len); i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    local_get(dst); local_get(len); i32_store(0);
+                    local_get(dst); i32_const(4); i32_add;
+                    local_get(src);
+                    local_get(len);
+                    memory_copy;
+                    local_get(dst);
+                });
+                self.scratch.free_i32(dst);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(src);
+                self.scratch.free_i32(buf);
+            }
+            "skip_length_prefixed_le" => {
+                // bytes.skip_length_prefixed_le(b, pos, count) → Int
+                // Skip `count` entries of [u32 len][len bytes] starting at pos.
+                let buf = self.scratch.alloc_i32();
+                let pos = self.scratch.alloc_i32();
+                let n = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let lval = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(buf); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i32_wrap_i64; local_set(pos); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(n);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(n); i32_ge_u; br_if(1);
+                      // Load u32 len from buf + 4 + pos
+                      local_get(buf); i32_const(4); i32_add; local_get(pos); i32_add;
+                      i32_load(0); local_set(lval);
+                      // pos += 4 + len
+                      local_get(pos); i32_const(4); i32_add; local_get(lval); i32_add;
+                      local_set(pos);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(pos); i64_extend_i32_u;
+                });
+                self.scratch.free_i32(lval);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(n);
+                self.scratch.free_i32(pos);
+                self.scratch.free_i32(buf);
+            }
+            "read_length_prefixed_strings_le" => {
+                // bytes.read_length_prefixed_strings_le(b, pos, count) → List[String]
+                let buf = self.scratch.alloc_i32();
+                let pos = self.scratch.alloc_i32();
+                let n = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let lval = self.scratch.alloc_i32();
+                let s = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(buf); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i32_wrap_i64; local_set(pos); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(n);
+                    // alloc list: 4 + n*4
+                    local_get(n); i32_const(4); i32_mul; i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(result);
+                    local_get(result); local_get(n); i32_store(0);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(n); i32_ge_u; br_if(1);
+                      // len at [buf+4+pos]
+                      local_get(buf); i32_const(4); i32_add; local_get(pos); i32_add;
+                      i32_load(0); local_set(lval);
+                      // alloc string: [len][bytes]
+                      local_get(lval); i32_const(4); i32_add;
+                      call(self.emitter.rt.alloc); local_set(s);
+                      local_get(s); local_get(lval); i32_store(0);
+                      // memcpy bytes: dst = s+4, src = buf+4+pos+4, n = lval
+                      local_get(s); i32_const(4); i32_add;
+                      local_get(buf); i32_const(4); i32_add;
+                      local_get(pos); i32_add; i32_const(4); i32_add;
+                      local_get(lval);
+                      memory_copy;
+                      // result[i] = s
+                      local_get(result); i32_const(4); i32_add;
+                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(s); i32_store(0);
+                      // pos += 4 + len
+                      local_get(pos); i32_const(4); i32_add; local_get(lval); i32_add;
+                      local_set(pos);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(result);
+                });
+                self.scratch.free_i32(s);
+                self.scratch.free_i32(lval);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(n);
+                self.scratch.free_i32(pos);
+                self.scratch.free_i32(buf);
+            }
+            "read_i32_le_array" | "read_f32_le_array" | "read_f16_le_array" => {
+                // bytes.read_XX_le_array(b, pos, count) → List[T]
+                // Each element: 4 bytes (i32/f32) or 2 bytes (f16).
+                let buf = self.scratch.alloc_i32();
+                let pos = self.scratch.alloc_i32();
+                let n = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let elem_bytes = if method == "read_f16_le_array" { 2i32 } else { 4 };
+                let out_bytes: i32 = 8;  // list elem size (i64 or f64)
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(buf); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i32_wrap_i64; local_set(pos); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(n);
+                    // alloc list: 4 + n * out_bytes
+                    local_get(n); i32_const(out_bytes); i32_mul; i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(result);
+                    local_get(result); local_get(n); i32_store(0);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(n); i32_ge_u; br_if(1);
+                      // dst = result + 4 + i * out_bytes
+                      local_get(result); i32_const(4); i32_add;
+                      local_get(i); i32_const(out_bytes); i32_mul; i32_add;
+                      // src addr = buf + 4 + pos + i * elem_bytes
+                      local_get(buf); i32_const(4); i32_add; local_get(pos); i32_add;
+                      local_get(i); i32_const(elem_bytes); i32_mul; i32_add;
+                });
+                match method {
+                    "read_i32_le_array" => {
+                        wasm!(self.func, { i32_load(0); i64_extend_i32_s; i64_store(0); });
+                    }
+                    "read_f32_le_array" => {
+                        wasm!(self.func, { f32_load(0); f64_promote_f32; f64_store(0); });
+                    }
+                    "read_f16_le_array" => {
+                        // f16 bits → f64 via runtime
+                        wasm!(self.func, {
+                            i32_load16_u(0);
+                            call(self.emitter.rt.bytes_f16_to_f64);
+                            f64_store(0);
+                        });
+                    }
+                    _ => {}
+                }
+                wasm!(self.func, {
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(result);
+                });
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(n);
+                self.scratch.free_i32(pos);
+                self.scratch.free_i32(buf);
+            }
             _ => return false,
         }
         true
+    }
+
+    /// Emit `[data_ptr + pos]` loaded as the requested primitive type.
+    /// `buf` is the bytes pointer (Bytes layout: [len:i32][data...]).
+    /// `pos` is an Int (i64) byte offset into the data region.
+    fn emit_typed_byte_read(&mut self, buf_expr: &IrExpr, pos_expr: &IrExpr, op: ByteReadOp) {
+        // Compute address = buf + 4 + pos.
+        self.emit_expr(buf_expr);
+        wasm!(self.func, { i32_const(4); i32_add; });
+        self.emit_expr(pos_expr);
+        wasm!(self.func, { i32_wrap_i64; i32_add; });
+
+        match op {
+            ByteReadOp::U8 => {
+                wasm!(self.func, { i32_load8_u(0); i64_extend_i32_u; });
+            }
+            ByteReadOp::I32Le => {
+                wasm!(self.func, { i32_load(0); i64_extend_i32_s; });
+            }
+            ByteReadOp::U32Le => {
+                wasm!(self.func, { i32_load(0); i64_extend_i32_u; });
+            }
+            ByteReadOp::U16Le => {
+                wasm!(self.func, { i32_load16_u(0); i64_extend_i32_u; });
+            }
+            ByteReadOp::I64Le => {
+                wasm!(self.func, { i64_load(0); });
+            }
+            ByteReadOp::F32Le => {
+                wasm!(self.func, { f32_load(0); f64_promote_f32; });
+            }
+            ByteReadOp::F64Le => {
+                wasm!(self.func, { f64_load(0); });
+            }
+            ByteReadOp::F16Le => {
+                // F16 → F32 via runtime (no native WASM instruction).
+                // Reserve a dedicated runtime helper.
+                wasm!(self.func, { i32_load16_u(0); call(self.emitter.rt.bytes_f16_to_f64); });
+            }
+        }
     }
 }

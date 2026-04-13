@@ -440,7 +440,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s);
             }
             _ => {
-                self.emit_stub_call(args);
+                self.emit_stub_call_named("datetime", func, args);
             }
         }
     }

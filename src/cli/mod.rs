@@ -115,6 +115,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "logg
 webpki-roots = "0.26"
 burn = { version = "0.16", features = ["ndarray"] }
 ndarray = { version = "0.16", features = ["blas"] }
+rayon = "1.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 blas-src = { version = "0.10", features = ["accelerate"] }

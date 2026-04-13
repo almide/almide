@@ -412,7 +412,7 @@ impl FuncCompiler<'_> {
                 }
             }
             _ => {
-                self.emit_stub_call(args);
+                self.emit_stub_call_named("io", func, args);
             }
         }
     }

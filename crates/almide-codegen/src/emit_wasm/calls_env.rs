@@ -60,7 +60,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { i32_const(s as i32); });
             }
             _ => {
-                self.emit_stub_call(args);
+                self.emit_stub_call_named("env", func, args);
             }
         }
     }

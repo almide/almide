@@ -101,3 +101,154 @@ params = [{ name = "m", type = "Matrix" }, { name = "f", type = "fn(Float) -> Fl
 return = "Matrix"
 rust = "almide_rt_matrix_map(&{m}, {f})"
 ts = "__almd_matrix.map({m}, {f})"
+
+[from_bytes_f32_le]
+description = "Zero-copy(-ish) construction: read rows*cols f32 little-endian values from `data` at `offset` and build a Matrix. Dramatically faster than iterating and calling from_lists when loading ML weights from disk."
+example = 'matrix.from_bytes_f32_le(weight_bytes, 0, 384, 384)'
+params = [
+  { name = "data", type = "Bytes" },
+  { name = "offset", type = "Int" },
+  { name = "rows", type = "Int" },
+  { name = "cols", type = "Int" },
+]
+return = "Matrix"
+rust = "almide_rt_matrix_from_bytes_f32_le(&{data}, {offset}, {rows}, {cols})"
+
+[from_bytes_f16_le]
+description = "Zero-copy(-ish) construction: read rows*cols IEEE-754 half-precision values (f16 little-endian) from `data` at `offset` and build a Matrix of f64. Used for GGML F16 quantised weights."
+example = 'matrix.from_bytes_f16_le(weight_bytes, 0, 384, 384)'
+params = [
+  { name = "data", type = "Bytes" },
+  { name = "offset", type = "Int" },
+  { name = "rows", type = "Int" },
+  { name = "cols", type = "Int" },
+]
+return = "Matrix"
+rust = "almide_rt_matrix_from_bytes_f16_le(&{data}, {offset}, {rows}, {cols})"
+
+# ── Neural-network primitives (row-wise operations) ──
+# These avoid Almide-level Matrix↔List[List] round-trips that dominate
+# transformer forward passes. Inner loops run in native code.
+
+[broadcast_add_row]
+description = "Add a 1-D bias vector to every row of `m`. Shape: m stays (r, c), bias must have length c."
+params = [{ name = "m", type = "Matrix" }, { name = "bias", type = "List[Float]" }]
+return = "Matrix"
+rust = "almide_rt_matrix_broadcast_add_row(&{m}, &{bias})"
+
+[layer_norm_rows]
+description = "Row-wise Layer Normalization: out[i,j] = (m[i,j] - mean_i) / sqrt(var_i + eps) * gamma[j] + beta[j]."
+params = [
+  { name = "m", type = "Matrix" },
+  { name = "gamma", type = "List[Float]" },
+  { name = "beta", type = "List[Float]" },
+  { name = "eps", type = "Float" },
+]
+return = "Matrix"
+rust = "almide_rt_matrix_layer_norm_rows(&{m}, &{gamma}, &{beta}, {eps})"
+
+[softmax_rows]
+description = "Numerically-stable row-wise softmax."
+params = [{ name = "m", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_softmax_rows(&{m})"
+
+[gelu]
+description = "Element-wise GELU (tanh approximation used by GPT-2/Whisper)."
+params = [{ name = "m", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_gelu(&{m})"
+
+[split_cols_even]
+description = "Split `m` column-wise into `n` equal chunks. Each result matrix has cols/n columns."
+params = [{ name = "m", type = "Matrix" }, { name = "n", type = "Int" }]
+return = "List[Matrix]"
+rust = "almide_rt_matrix_split_cols_even(&{m}, {n})"
+
+[concat_cols_many]
+description = "Concatenate matrices column-wise. All matrices must share the same number of rows."
+params = [{ name = "matrices", type = "List[Matrix]" }]
+return = "Matrix"
+rust = "almide_rt_matrix_concat_cols_many(&{matrices})"
+
+[causal_mask_add]
+description = "Add `mask_val` at positions where col > row (upper triangular). Used for decoder self-attention masks."
+params = [{ name = "m", type = "Matrix" }, { name = "mask_val", type = "Float" }]
+return = "Matrix"
+rust = "almide_rt_matrix_causal_mask_add(&{m}, {mask_val})"
+
+[multi_head_attention]
+description = "Batched multi-head scaled dot-product attention. Reshapes (S, D) → (H, S, D/H), does batched Q@K^T/sqrt(D/H), row-wise softmax, @V, reshapes back to (S, D). All heads computed in one 3-D matmul (BLAS-friendly, unlike head-by-head iteration)."
+params = [
+  { name = "q", type = "Matrix" },
+  { name = "k", type = "Matrix" },
+  { name = "v", type = "Matrix" },
+  { name = "n_heads", type = "Int" },
+]
+return = "Matrix"
+rust = "almide_rt_matrix_multi_head_attention(&{q}, &{k}, &{v}, {n_heads})"
+
+[masked_multi_head_attention]
+description = "Multi-head attention with a causal (upper-triangular) mask applied before softmax. Used for decoder self-attention."
+params = [
+  { name = "q", type = "Matrix" },
+  { name = "k", type = "Matrix" },
+  { name = "v", type = "Matrix" },
+  { name = "n_heads", type = "Int" },
+]
+return = "Matrix"
+rust = "almide_rt_matrix_masked_multi_head_attention(&{q}, &{k}, &{v}, {n_heads})"
+
+[linear_row]
+description = "Compute `x @ weight^T + bias` (row-major linear layer). Combines transpose + matmul + broadcast_add into one native call; eliminates two intermediate tensors."
+params = [{ name = "x", type = "Matrix" }, { name = "weight", type = "Matrix" }, { name = "bias", type = "List[Float]" }]
+return = "Matrix"
+rust = "almide_rt_matrix_linear_row(&{x}, &{weight}, &{bias})"
+
+[linear_row_no_bias]
+description = "Same as linear_row without bias: `x @ weight^T`."
+params = [{ name = "x", type = "Matrix" }, { name = "weight", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_linear_row_no_bias(&{x}, &{weight})"
+
+[slice_rows]
+description = "Extract rows [start, end) as a new Matrix."
+params = [{ name = "m", type = "Matrix" }, { name = "start", type = "Int" }, { name = "end", type = "Int" }]
+return = "Matrix"
+rust = "almide_rt_matrix_slice_rows(&{m}, {start}, {end})"
+
+[conv1d]
+description = "1D convolution along the time axis. input: (T, in_ch). weight: (out_ch, in_ch*kernel) flattened (row-major). bias: (out_ch,). Returns (T_out, out_ch) where T_out = floor((T + 2*padding - kernel) / stride) + 1. Used by Whisper's audio frontend (conv1: k=3, s=1, p=1; conv2: k=3, s=2, p=1)."
+params = [
+  { name = "input", type = "Matrix" },
+  { name = "weight", type = "Matrix" },
+  { name = "bias", type = "List[Float]" },
+  { name = "kernel", type = "Int" },
+  { name = "stride", type = "Int" },
+  { name = "padding", type = "Int" },
+]
+return = "Matrix"
+rust = "almide_rt_matrix_conv1d(&{input}, &{weight}, &{bias}, {kernel}, {stride}, {padding})"
+
+[from_bytes_f64_le]
+description = "Construct Matrix from raw f64 LE bytes. Used when external code (JS host) computes a mel spectrogram and passes it as bytes."
+params = [
+  { name = "data", type = "Bytes" },
+  { name = "offset", type = "Int" },
+  { name = "rows", type = "Int" },
+  { name = "cols", type = "Int" },
+]
+return = "Matrix"
+rust = "almide_rt_matrix_from_bytes_f64_le(&{data}, {offset}, {rows}, {cols})"
+
+[gather_rows]
+description = "Build a new matrix from selected row indices: result[i] = m[indices[i]]. Far faster than `to_lists |> map |> from_lists` for large matrices like token embedding tables."
+params = [{ name = "m", type = "Matrix" }, { name = "indices", type = "List[Int]" }]
+return = "Matrix"
+rust = "almide_rt_matrix_gather_rows(&{m}, &{indices})"
+
+[row_dot]
+description = "Compute dot product of `m`'s row `r` with the given `vec`. Avoids materialising the row as a List."
+params = [{ name = "m", type = "Matrix" }, { name = "r", type = "Int" }, { name = "vec", type = "List[Float]" }]
+return = "Float"
+rust = "almide_rt_matrix_row_dot(&{m}, {r}, &{vec})"

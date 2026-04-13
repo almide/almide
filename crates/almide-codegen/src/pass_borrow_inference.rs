@@ -9,45 +9,109 @@
 //! This eliminates unnecessary .clone() at call sites when the callee only reads the value.
 
 use std::collections::HashMap;
+use std::cell::RefCell;
 use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
 use almide_base::intern::sym;
+use crate::generated::arg_transforms::{self, ArgTransform};
 
-/// Phase 1: Infer borrow signatures for all functions.
+/// Returns true if `transform` borrows its input (does NOT consume ownership).
+fn transform_borrows(t: &ArgTransform) -> bool {
+    matches!(t,
+        ArgTransform::BorrowRef
+        | ArgTransform::BorrowStr
+        | ArgTransform::BorrowMut
+    )
+}
+
+// Thread-local snapshot of currently-known borrow signatures, used during
+// inference so that when we check `fn caller(data: Bytes) { other(data) }`
+// we can consult `other`'s borrows and avoid pessimistically marking `data`
+// as owned. Populated before each fixed-point iteration in
+// `infer_borrow_signatures`.
+thread_local! {
+    static SIGS_SNAPSHOT: RefCell<HashMap<String, Vec<ParamBorrow>>> = RefCell::new(HashMap::new());
+    static MOD_SCOPE: RefCell<Option<String>> = RefCell::new(None);
+    // Name of the function currently being analysed. Self-recursive calls to
+    // this function are treated optimistically (we don't scan their args for
+    // ownership needs), which lets a TCO-loop body like `foo(data, next, ...)`
+    // keep `data: &Vec<u8>` instead of collapsing to `Vec<u8>` on the first
+    // pass and never recovering.
+    static CURRENT_FN: RefCell<Option<String>> = RefCell::new(None);
+}
+
+fn lookup_user_borrows(callee: &str) -> Option<Vec<ParamBorrow>> {
+    SIGS_SNAPSHOT.with(|s| {
+        let s = s.borrow();
+        MOD_SCOPE.with(|m| {
+            let m = m.borrow();
+            if let Some(mod_name) = m.as_deref() {
+                if let Some(v) = s.get(&format!("{}::{}", mod_name, callee)) {
+                    return Some(v.clone());
+                }
+            }
+            s.get(callee).cloned()
+        })
+    })
+}
+
+/// Phase 1: Infer borrow signatures for all functions via fixed-point iteration.
+///
+/// One pass is not enough because a caller's ownership needs depend on the
+/// borrow signatures of its callees. Round 1 handles leaf functions; later
+/// rounds propagate those borrows up through their callers. Converges quickly
+/// in practice — typical fix-points reach in 2-3 rounds; we cap at 6 for
+/// safety.
 pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<ParamBorrow>> {
     let mut sigs: HashMap<String, Vec<ParamBorrow>> = HashMap::new();
 
-    for func in &mut program.functions {
-        if func.is_test || is_derive_fn(&func.name) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
-        let borrows = infer_function_borrows(func);
-        if borrows.iter().any(|b| !matches!(b, ParamBorrow::Own)) {
-            sigs.insert(func.name.to_string(), borrows.clone());
-        }
-        for (param, borrow) in func.params.iter_mut().zip(borrows) {
-            param.borrow = borrow;
-        }
-    }
+    for _iter in 0..6 {
+        // Snapshot current sigs into thread-local so check_needs_ownership can see them.
+        SIGS_SNAPSHOT.with(|s| *s.borrow_mut() = sigs.clone());
+        let prev_sigs = sigs.clone();
 
-    for module in &mut program.modules {
-        let mod_name = module.name.to_string();
-        for func in &mut module.functions {
+        MOD_SCOPE.with(|m| *m.borrow_mut() = None);
+        for func in &mut program.functions {
             if func.is_test || is_derive_fn(&func.name) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
             let borrows = infer_function_borrows(func);
-            if borrows.iter().any(|b| !matches!(b, ParamBorrow::Own)) {
-                // Use module-scoped key to avoid collisions between identically-named
-                // functions in different modules (e.g. local fn get_str in 21 binding files)
-                sigs.insert(format!("{}::{}", mod_name, func.name), borrows.clone());
-            }
+            // Always record the signature (including all-Own) so that the
+            // fixed-point iteration can distinguish "known to be Own" from
+            // "not yet analysed". Without this, self-recursive functions
+            // whose first-pass inference produced all-Own would be looked
+            // up as None forever → conservative fallback → Own sticks.
+            sigs.insert(func.name.to_string(), borrows.clone());
             for (param, borrow) in func.params.iter_mut().zip(borrows) {
                 param.borrow = borrow;
             }
         }
+
+        for module in &mut program.modules {
+            let mod_name = module.name.to_string();
+            MOD_SCOPE.with(|m| *m.borrow_mut() = Some(mod_name.clone()));
+            for func in &mut module.functions {
+                if func.is_test || is_derive_fn(&func.name) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
+                let borrows = infer_function_borrows(func);
+                sigs.insert(format!("{}::{}", mod_name, func.name), borrows.clone());
+                for (param, borrow) in func.params.iter_mut().zip(borrows) {
+                    param.borrow = borrow;
+                }
+            }
+        }
+
+        if sigs == prev_sigs {
+            break;
+        }
     }
+
+    // Clean up thread-locals so they don't leak across separate compilations.
+    SIGS_SNAPSHOT.with(|s| s.borrow_mut().clear());
+    MOD_SCOPE.with(|m| *m.borrow_mut() = None);
 
     sigs
 }
 
 fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
+    CURRENT_FN.with(|c| *c.borrow_mut() = Some(func.name.to_string()));
     func.params.iter().map(|param| {
         if !is_heap_type(&param.ty) {
             return ParamBorrow::Own;
@@ -83,10 +147,10 @@ fn is_monomorphized(name: &str) -> bool {
     name.contains("__")
 }
 
-/// Only String and List are eligible for borrow inference.
-/// Records/Variants have field access issues when borrowed (&Record.field → &String, not String).
+/// Eligible types for borrow inference. Bytes is the key addition here —
+/// binary parsers clone the entire buffer on every read without it.
 fn is_heap_type(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::Applied(TypeConstructorId::List, _))
+    matches!(ty, Ty::String | Ty::Bytes | Ty::Applied(TypeConstructorId::List, _))
 }
 
 /// Check if a parameter variable needs ownership.
@@ -117,18 +181,69 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             check_needs_ownership(right, var, needs);
         }
 
-        // ── Function call: conservatively, passing to any function needs own ──
-        // EXCEPT: if the callee is known to borrow that param (future: use sigs map)
+        // ── Function call ──
+        // For stdlib Module calls, consult arg_transforms to learn which args
+        // are borrowed (BorrowRef / BorrowStr / BorrowMut) vs. consumed. Only
+        // consumed args require ownership. This is what lets a hot loop like
+        // `bytes.read_u32_le(data, pos)` pass `data` 50 000× without cloning.
+        // For user-defined Named calls, consult the fixed-point SIGS snapshot
+        // so a caller can transitively keep `data` borrowed when the callee
+        // also borrows it.
         IrExprKind::Call { target, args, .. } => {
-            // Passing as argument to a function → needs own (conservative)
+            // Bytes-only stdlib-aware: only skip ownership for Bytes args in
+            // stdlib Module calls. Lists/Strings keep the old conservative
+            // behaviour to avoid lambda-typing regressions in filter/map.
+            let stdlib_info = match target {
+                CallTarget::Module { module, func } => arg_transforms::lookup(module.as_str(), func.as_str()),
+                _ => None,
+            };
+            if let Some(info) = stdlib_info {
+                let mut all_borrowed = true;
+                for (i, arg) in args.iter().enumerate() {
+                    let borrowed = info.args.get(i).map_or(false, transform_borrows)
+                        && matches!(arg.ty, Ty::Bytes);
+                    if !borrowed && is_var(arg, var) {
+                        all_borrowed = false;
+                        *needs = true;
+                        return;
+                    }
+                }
+                // If we fell through (none was the target var), still recurse.
+                for arg in args { check_needs_ownership(arg, var, needs); }
+                let _ = all_borrowed;
+                return;
+            }
+            // Self-recursive Named call: treat optimistically. For tail-recursive
+            // parsers passing the same `data` through, we don't want the first-pass
+            // pessimism to lock the param to Own and prevent the fixed point from
+            // promoting it to Ref.
+            if let CallTarget::Named { name } = target {
+                let is_self = CURRENT_FN.with(|c| c.borrow().as_deref() == Some(name.as_str()));
+                if is_self {
+                    for arg in args { check_needs_ownership(arg, var, needs); }
+                    return;
+                }
+            }
+            // User-defined Named call: only skip ownership when the arg is Bytes
+            // AND the callee borrows that slot.
+            if let CallTarget::Named { name } = target {
+                if let Some(borrows) = lookup_user_borrows(name.as_str()) {
+                    for (i, arg) in args.iter().enumerate() {
+                        let borrowed = borrows.get(i).map_or(false, |b| !matches!(b, ParamBorrow::Own))
+                            && matches!(arg.ty, Ty::Bytes);
+                        if !borrowed && is_var(arg, var) { *needs = true; return; }
+                    }
+                    for arg in args { check_needs_ownership(arg, var, needs); }
+                    return;
+                }
+            }
+            // Non-stdlib fallback: any arg use needs ownership.
             for arg in args {
                 if is_var(arg, var) { *needs = true; return; }
             }
-            // Method call: object (receiver) is consumed → needs own
             if let CallTarget::Method { object, .. } = target {
                 if is_var(object, var) { *needs = true; return; }
             }
-            // Recurse into non-arg sub-expressions
             match target {
                 CallTarget::Method { object, .. } => check_needs_ownership(object, var, needs),
                 CallTarget::Computed { callee } => check_needs_ownership(callee, var, needs),
@@ -528,6 +643,62 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
         IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
             source: Box::new(rewrite_calls(*source, sigs, mod_scope)),
             consume, steps, collector,
+        },
+        IrExprKind::Record { name, fields } => IrExprKind::Record {
+            name,
+            fields: fields.into_iter()
+                .map(|(k, v)| (k, rewrite_calls(v, sigs, mod_scope))).collect(),
+        },
+        IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
+            base: Box::new(rewrite_calls(*base, sigs, mod_scope)),
+            fields: fields.into_iter()
+                .map(|(k, v)| (k, rewrite_calls(v, sigs, mod_scope))).collect(),
+        },
+        IrExprKind::List { elements } => IrExprKind::List {
+            elements: elements.into_iter()
+                .map(|e| rewrite_calls(e, sigs, mod_scope)).collect(),
+        },
+        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
+            elements: elements.into_iter()
+                .map(|e| rewrite_calls(e, sigs, mod_scope)).collect(),
+        },
+        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
+            entries: entries.into_iter()
+                .map(|(k, v)| (rewrite_calls(k, sigs, mod_scope), rewrite_calls(v, sigs, mod_scope))).collect(),
+        },
+        IrExprKind::Member { object, field } => IrExprKind::Member {
+            object: Box::new(rewrite_calls(*object, sigs, mod_scope)), field,
+        },
+        IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
+            object: Box::new(rewrite_calls(*object, sigs, mod_scope)), index,
+        },
+        IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
+            expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)), field,
+        },
+        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
+            object: Box::new(rewrite_calls(*object, sigs, mod_scope)),
+            index: Box::new(rewrite_calls(*index, sigs, mod_scope)),
+        },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(rewrite_calls(*object, sigs, mod_scope)),
+            key: Box::new(rewrite_calls(*key, sigs, mod_scope)),
+        },
+        IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
+            start: Box::new(rewrite_calls(*start, sigs, mod_scope)),
+            end: Box::new(rewrite_calls(*end, sigs, mod_scope)),
+            inclusive,
+        },
+        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
+        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
+        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow {
+            expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)), as_str, mutable,
+        },
+        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
+        IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
+        IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(rewrite_calls(*expr, sigs, mod_scope)) },
+        IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
+            name, args: args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect(),
         },
         other => other,
     };

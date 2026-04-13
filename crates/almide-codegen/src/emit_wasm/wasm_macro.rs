@@ -160,6 +160,28 @@ macro_rules! wasm {
         wasm!(@emit $f, $($rest)*)
     };
 
+    // ── Memory (f32) ──
+    (@emit $f:expr, f32_load($off:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F32Load(wasm_encoder::MemArg {
+            offset: $off as u64, align: 2, memory_index: 0,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64_promote_f32; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64PromoteF32);
+        wasm!(@emit $f, $($rest)*)
+    };
+
+    // ── Conversions (i32 ↔ f64) ──
+    (@emit $f:expr, f64_convert_i32_u; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64ConvertI32U);
+        wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64_convert_i32_s; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64ConvertI32S);
+        wasm!(@emit $f, $($rest)*)
+    };
+
     // ── Memory (f64) ──
     (@emit $f:expr, f64_load($off:expr, $mem:expr); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64Load(wasm_encoder::MemArg {
@@ -358,6 +380,12 @@ macro_rules! wasm {
     };
     (@emit $f:expr, f64_neg; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64Neg); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64_min; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64Min); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64_max; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64Max); wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, f64_convert_i64_s; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64ConvertI64S); wasm!(@emit $f, $($rest)*)

@@ -144,6 +144,8 @@ pub struct RuntimeFuncs {
     pub math_log10: u32,
     pub math_log2: u32,
     pub math_exp: u32,
+    /// IEEE-754 half-precision → f64 (for bytes.read_f16_le).
+    pub bytes_f16_to_f64: u32,
     pub string: StringRuntime,
     pub value_stringify: u32,
     pub json_escape_string: u32,
@@ -287,6 +289,7 @@ impl WasmEmitter {
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
                 math_sin: 0, math_cos: 0, math_tan: 0,
                 math_log: 0, math_log10: 0, math_log2: 0, math_exp: 0,
+                bytes_f16_to_f64: 0,
                 concat_str: 0,
                 concat_list: 0,
                 list_eq: 0, mem_eq: 0, list_list_str_cmp: 0,
@@ -747,6 +750,29 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }
     }
 
+    // Stdlib runtime types that aren't declared as Almide records but must
+    // resolve for Member access (e.g. `resp.status`). Field offsets must
+    // match the layout chosen by the corresponding stdlib emit (see
+    // calls_http.rs `response`/`json`).
+    use almide_lang::types::Ty as _Ty;
+    emitter.record_fields.insert("Response".to_string(), vec![
+        ("status".to_string(),  _Ty::Int),     // i64 @ 0
+        ("body".to_string(),    _Ty::String),  // i32 ptr @ 8
+        ("headers".to_string(),
+            _Ty::Applied(almide_lang::types::TypeConstructorId::List, vec![
+                _Ty::Tuple(vec![_Ty::String, _Ty::String]),
+            ])),                                // i32 ptr @ 12
+    ]);
+    emitter.record_fields.insert("Request".to_string(), vec![
+        ("method".to_string(),  _Ty::String),
+        ("path".to_string(),    _Ty::String),
+        ("body".to_string(),    _Ty::String),
+        ("headers".to_string(),
+            _Ty::Applied(almide_lang::types::TypeConstructorId::List, vec![
+                _Ty::Tuple(vec![_Ty::String, _Ty::String]),
+            ])),
+    ]);
+
     // Also register all anonymous record shapes found in the IR under synthetic
     // names so `emit_member`'s Unknown-type fallback (which searches
     // `record_fields` by field name) can resolve Member access on Lambda
@@ -1055,8 +1081,8 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // heap (see `calls_string::emit_string_interp`).
     let mut memory = MemorySection::new();
     memory.memory(MemoryType {
-        minimum: 64, // 4MB initial
-        maximum: None,
+        minimum: 64,            // 4MB initial
+        maximum: Some(65536),   // 4GB max (WASM32 hard limit) — explicit so V8 doesn't apply a smaller default
         memory64: false,
         shared: false,
         page_size_log2: None,
@@ -1174,7 +1200,7 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     // ScratchAllocator locals
     let scratch_i32_cap = 32usize;
     let scratch_i64_cap = 16usize;
-    let scratch_f64_cap = 4usize;
+    let scratch_f64_cap = 16usize;
     let scratch_i32_base = local_decls.len() as u32;
     for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
     let scratch_i64_base = local_decls.len() as u32;

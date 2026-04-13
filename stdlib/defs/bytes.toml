@@ -213,6 +213,12 @@ params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name
 return = "Unit"
 rust = "almide_rt_bytes_set_f32_le(&mut {b}, {pos}, {val})"
 
+[append_f64_le]
+description = "Append a Float as f64 little-endian (8 bytes) to the end of the buffer."
+params = [{ name = "b", type = "Bytes" }, { name = "val", type = "Float" }]
+return = "Unit"
+rust = "almide_rt_bytes_append_f64_le(&mut {b}, {val})"
+
 [set_u16_le]
 description = "Write an Int as u16 little-endian at position pos."
 params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "val", type = "Int" }]
@@ -224,3 +230,86 @@ description = "Return the data pointer (after the 4-byte length prefix) as Int."
 params = [{ name = "b", type = "Bytes" }]
 return = "Int"
 rust = "almide_rt_bytes_data_ptr(&{b})"
+
+# ── Little-endian reads ──
+# GGML / GGUF / WAV and most modern binary formats use LE. Adding these
+# explicit readers beats reading 4 u8s and assembling them in user code
+# (4 runtime calls per i32 vs 1 slice+convert).
+
+[read_i32_le]
+description = "Read an Int from 4 bytes little-endian (sign-extended i32) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_read_i32_le(&{b}, {pos})"
+
+[read_u32_le]
+description = "Read an Int from 4 bytes little-endian (u32, zero-extended) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_read_u32_le(&{b}, {pos})"
+
+[read_u16_le]
+description = "Read an Int from 2 bytes little-endian (u16, zero-extended) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_read_u16_le(&{b}, {pos})"
+
+[read_i64_le]
+description = "Read an Int from 8 bytes little-endian (i64) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_read_i64_le(&{b}, {pos})"
+
+[read_f32_le]
+description = "Read a Float from 4 bytes little-endian (IEEE-754 single-precision) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Float"
+rust = "almide_rt_bytes_read_f32_le(&{b}, {pos})"
+
+[read_f64_le]
+description = "Read a Float from 8 bytes little-endian (IEEE-754 double-precision) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Float"
+rust = "almide_rt_bytes_read_f64_le(&{b}, {pos})"
+
+[read_f16_le]
+description = "Read a Float from 2 bytes little-endian IEEE-754 half-precision (f16) at position."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }]
+return = "Float"
+rust = "almide_rt_bytes_read_f16_le(&{b}, {pos})"
+
+[skip_length_prefixed_le]
+description = "Skip `count` length-prefixed entries starting at `pos`. Each entry is [u32 len little-endian][len bytes]. Returns position after the last entry. Useful for skipping GGML vocab-like sections in one native call — avoids O(n) Almide recursion."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "count", type = "Int" }]
+return = "Int"
+rust = "almide_rt_bytes_skip_length_prefixed_le(&{b}, {pos}, {count})"
+
+[read_string_at]
+description = "Read `len` bytes starting at `pos` as a UTF-8 string. Invalid UTF-8 sequences are replaced. For GGML/GGUF-style embedded strings."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "len", type = "Int" }]
+return = "String"
+rust = "almide_rt_bytes_read_string_at(&{b}, {pos}, {len})"
+
+[read_length_prefixed_strings_le]
+description = "Read `count` length-prefixed UTF-8 strings starting at `pos`. Each entry: [u32 len LE][len bytes]. Returns List[String] indexable by position. Avoids O(n²) Almide-side append."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "count", type = "Int" }]
+return = "List[String]"
+rust = "almide_rt_bytes_read_length_prefixed_strings_le(&{b}, {pos}, {count})"
+
+[read_i32_le_array]
+description = "Read `count` consecutive little-endian i32 values starting at `pos` as a List[Int]. One native call vs. `count` Almide-side reads."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "count", type = "Int" }]
+return = "List[Int]"
+rust = "almide_rt_bytes_read_i32_le_array(&{b}, {pos}, {count})"
+
+[read_f32_le_array]
+description = "Read `count` consecutive little-endian f32 values starting at `pos` as a List[Float]. One native call vs. `count` Almide-side reads."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "count", type = "Int" }]
+return = "List[Float]"
+rust = "almide_rt_bytes_read_f32_le_array(&{b}, {pos}, {count})"
+
+[read_f16_le_array]
+description = "Read `count` consecutive IEEE-754 half-precision (f16 little-endian) values starting at `pos`, expanded to f64, as a List[Float]."
+params = [{ name = "b", type = "Bytes" }, { name = "pos", type = "Int" }, { name = "count", type = "Int" }]
+return = "List[Float]"
+rust = "almide_rt_bytes_read_f16_le_array(&{b}, {pos}, {count})"

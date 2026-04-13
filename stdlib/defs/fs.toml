@@ -34,6 +34,13 @@ effect = true
 rust = "almide_rt_fs_write_bytes(&*{path}, {bytes})?"
 ts = "__almd_fs.write_bytes({path}, {bytes})"
 
+[write_bytes_raw]
+description = "Write a Bytes buffer directly to a file (no List intermediate)."
+params = [{ name = "path", type = "String" }, { name = "data", type = "Bytes" }]
+return = "Result[Unit, String]"
+effect = true
+rust = "almide_rt_fs_write_bytes_raw(&*{path}, &{data})?"
+
 [append]
 description = "Append a string to a file, creating it if it doesn't exist"
 example = 'fs.append("log.txt", "new line\n")'
@@ -212,3 +219,11 @@ return = "Result[Int, String]"
 effect = true
 rust = "almide_rt_fs_modified_at(&*{path})?"
 ts = "__almd_fs.modified_at({path})"
+
+[read_bytes_raw]
+description = "Read file contents directly as Bytes (no List[Int] intermediate). Much faster than read_bytes for binary data — no element-by-element conversion."
+example = 'let data = fs.read_bytes_raw("model.gguf")?'
+params = [{ name = "path", type = "String" }]
+return = "Result[Bytes, String]"
+effect = true
+rust = "almide_rt_fs_read_bytes_raw({path})"

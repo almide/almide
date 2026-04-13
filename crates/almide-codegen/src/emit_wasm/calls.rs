@@ -297,52 +297,52 @@ impl FuncCompiler<'_> {
                 match (module.as_str(), func.as_str()) {
                     _ if module == "int" => {
                         if !self.emit_int_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "float" => {
                         if !self.emit_float_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "string" => {
                         if !self.emit_string_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "option" => {
                         if !self.emit_option_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "result" => {
                         if !self.emit_result_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "list" => {
                         if !self.emit_list_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "bytes" => {
                         if !self.emit_bytes_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "matrix" => {
                         if !self.emit_matrix_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "map" => {
                         if !self.emit_map_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "math" => {
                         if !self.emit_math_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     ("error", "message") => {
@@ -429,7 +429,7 @@ impl FuncCompiler<'_> {
                     }
                     _ if module == "set" => {
                         if !self.emit_set_call(func, args) {
-                            self.emit_stub_call(args);
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "fan" => {
@@ -491,7 +491,7 @@ impl FuncCompiler<'_> {
                                     for arg in args { self.emit_expr(arg); }
                                     wasm!(self.func, { call(func_idx); });
                                 } else {
-                                    self.emit_stub_call(args);
+                                    self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                                 }
                             }
                         }
@@ -787,6 +787,11 @@ impl FuncCompiler<'_> {
         }
     }
 
+    pub(super) fn emit_stub_call_named(&mut self, module: &str, func: &str, args: &[IrExpr]) {
+        eprintln!("[WASM STUB] {}::{} — will trap at runtime", module, func);
+        self.emit_stub_call(args);
+    }
+
     pub(super) fn emit_stub_call(&mut self, args: &[IrExpr]) {
         // Unimplemented function: trap immediately rather than returning a default value.
         // After ResolveCalls pass, user-module unresolved calls are a compile error —
@@ -804,6 +809,9 @@ impl FuncCompiler<'_> {
         }
         eprintln!("[WASM STUB] stub_call emitted — will trap at runtime. \
                    Set ALMIDE_WASM_STUB_PANIC=1 to fail compile instead.");
+        if std::env::var("ALMIDE_WASM_STUB_TRACE").is_ok() {
+            eprintln!("  trace: {}", std::backtrace::Backtrace::force_capture());
+        }
         for arg in args {
             self.emit_expr(arg);
             if values::ty_to_valtype(&arg.ty).is_some() {
@@ -1142,3 +1150,4 @@ impl FuncCompiler<'_> {
     }
 
 }
+
