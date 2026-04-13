@@ -34,6 +34,15 @@ Dependencies:
   lumen (existing) ← math constants
 ```
 
+## Status (2026-04-13)
+
+- **Phase 1-3**: 実装完了、Rust/WASM 両ターゲットで全テスト通過 (nn/tensor 13, activations 13, attention 5, wav 7, fft 6, mel 7, gguf 9 = 60 tests)
+- **Phase 4+**: 未着手
+
+## Dependencies
+
+- **Codegen 基盤**: [codegen-ideal-form](./codegen-ideal-form.md) — Phase 4 以降で必要になる深層ネットワーク実装では、今の emit 層の弱さ (関数解決の曖昧さ、stdlib 関数の個別実装) がボトルネックになる見込み。同時並行で進める。
+
 ## Roadmap
 
 ### Phase 1: nn foundations (matrix extensions)
