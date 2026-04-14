@@ -199,7 +199,14 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
                 .collect();
             format!("Ty::Record {{ fields: vec![{}] }}", fields.join(", "))
         }
-        other => format!("Ty::Named(s(\"{}\"), vec![])", other),
+        other => {
+            // Module-qualified names (e.g. `process.ProcessStatus`) in stdlib
+            // TOML declarations: store the bare tail so render_type emits the
+            // matching Rust struct name. Resolution against the env registry
+            // happens at check time via TypeEnv::resolve_named.
+            let bare = other.rsplit_once('.').map(|(_, tail)| tail).unwrap_or(other);
+            format!("Ty::Named(s(\"{}\"), vec![])", bare)
+        }
     }
 }
 
