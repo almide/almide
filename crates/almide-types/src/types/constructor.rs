@@ -20,6 +20,7 @@ pub enum TypeConstructorId {
     // kind: *
     Int,
     Float,
+    F32,
     String,
     Bool,
     Unit,
@@ -299,6 +300,7 @@ impl std::fmt::Display for TypeConstructorId {
         match self {
             TypeConstructorId::Int => write!(f, "Int"),
             TypeConstructorId::Float => write!(f, "Float"),
+            TypeConstructorId::F32 => write!(f, "F32"),
             TypeConstructorId::String => write!(f, "String"),
             TypeConstructorId::Bool => write!(f, "Bool"),
             TypeConstructorId::Unit => write!(f, "Unit"),

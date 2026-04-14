@@ -157,15 +157,23 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
             while j0 < p {
                 let j1 = if j0 + TILE < p { j0 + TILE } else { p };
                 // Multiply tile A[i0..i1, k0..k1] × B[k0..k1, j0..j1]
+                // Slice-based DAXPY: LLVM auto-vectorizes when inputs are
+                // disjoint slices (c_row is a unique borrow, b_row is &).
+                // On WASM this emits f64x2 SIMD when target-feature=+simd128.
                 let mut i = i0;
                 while i < i1 {
+                    let c_base = i * p;
+                    let c_row = &mut c_flat[c_base + j0..c_base + j1];
                     let mut k = k0;
                     while k < k1 {
                         let a_ik = a_flat[i * n + k];
-                        let mut j = j0;
-                        while j < j1 {
-                            c_flat[i * p + j] += a_ik * b_flat[k * p + j];
-                            j += 1;
+                        let b_base = k * p;
+                        let b_row = &b_flat[b_base + j0..b_base + j1];
+                        // Plain mul+add (not mul_add) — WASM SIMD128 has no
+                        // hardware FMA; mul_add falls back to a software
+                        // polynomial that is 15-20x slower than mul+add.
+                        for (c, &b) in c_row.iter_mut().zip(b_row.iter()) {
+                            *c += a_ik * b;
                         }
                         k += 1;
                     }
@@ -480,4 +488,29 @@ pub fn almide_rt_matrix_row_dot(m: &AlmideMatrix, r: i64, vec: &Vec<f64>) -> f64
     let mut s = 0.0;
     for k in 0..n { s += row[k] * vec[k]; }
     s
+}
+
+// matrix: f32 path stubs for WASM target. matrix.rs has no distinct f32
+// matrix: storage (all Vec<Vec<f64>>), so these delegate to f64 ops.
+// matrix: burn/matrix_burn.rs provides the real f32 path via cblas_sgemm.
+pub fn almide_rt_matrix_zeros_f32(rows: i64, cols: i64) -> AlmideMatrix {
+    almide_rt_matrix_zeros(rows, cols)
+}
+pub fn almide_rt_matrix_ones_f32(rows: i64, cols: i64) -> AlmideMatrix {
+    almide_rt_matrix_ones(rows, cols)
+}
+pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
+    almide_rt_matrix_mul(a, b)
+}
+pub fn almide_rt_matrix_mul_f32_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
+    almide_rt_matrix_scale(&almide_rt_matrix_mul(a, b), alpha)
+}
+pub fn almide_rt_matrix_mul_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
+    almide_rt_matrix_scale(&almide_rt_matrix_mul(a, b), alpha)
+}
+pub fn almide_rt_matrix_mul_f32_t(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
+    almide_rt_matrix_mul(a, &almide_rt_matrix_transpose(b))
+}
+pub fn almide_rt_matrix_mul_f32_t_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
+    almide_rt_matrix_scale(&almide_rt_matrix_mul_f32_t(a, b), alpha)
 }

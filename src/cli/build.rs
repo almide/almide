@@ -120,8 +120,11 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
         .arg("-C").arg("overflow-checks=no")
         .arg("--edition").arg("2021")
         .arg("--target").arg("wasm32-wasip1")
-        .arg("-C").arg("opt-level=s")
+        .arg("-C").arg("opt-level=3")
         .arg("-C").arg("lto=yes")
+        // Enable WASM SIMD128 — all modern runtimes support it (wasmtime,
+        // browsers since ~2022). Unlocks LLVM auto-vectorization for matmul.
+        .arg("-C").arg("target-feature=+simd128")
         .output()
         .unwrap_or_else(|e| { eprintln!("Failed to run rustc: {}", e); std::process::exit(1); });
 
