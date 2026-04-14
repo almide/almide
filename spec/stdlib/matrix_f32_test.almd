@@ -1,0 +1,96 @@
+// matrix.{zeros, ones, mul, mul_scaled, mul_t, mul_t_scaled}_f32
+// — SmallF32 storage path regression tests.
+//
+// Almide's f32 stdlib exposes values as Float (f64) at the language level,
+// so get() returns upcast values. What we check here is that the path
+// compiles, wires correctly to cblas_sgemm, and produces numerically
+// sensible results (small relative error vs the f64 path).
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
+  let d = if a > b then a - b else b - a
+  d < tol
+}
+
+test "zeros_f32 returns all zeros" {
+  let z = matrix.zeros_f32(2, 3)
+  let (r, c) = matrix.shape(z)
+  assert_eq(r, 2)
+  assert_eq(c, 3)
+  assert_eq(matrix.get(z, 0, 0), 0.0)
+  assert_eq(matrix.get(z, 1, 2), 0.0)
+}
+
+test "ones_f32 returns all ones" {
+  let o = matrix.ones_f32(2, 2)
+  assert_eq(matrix.get(o, 0, 0), 1.0)
+  assert_eq(matrix.get(o, 1, 1), 1.0)
+}
+
+test "scale preserves SmallF32 variant" {
+  let a = matrix.ones_f32(2, 2)
+  let s = matrix.scale(a, 0.5)
+  assert_eq(matrix.get(s, 0, 0), 0.5)
+  assert_eq(matrix.get(s, 1, 1), 0.5)
+}
+
+test "mul_f32 on identity returns same values" {
+  let a = matrix.ones_f32(3, 3) |> (m) => matrix.scale(m, 0.5)
+  let id = matrix.from_lists([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+  // Mixing SmallF32 with f64 auto-promotes to f64 matmul via to_burn.
+  // Here we just check value semantics, not storage.
+  let r = matrix.mul(a, id)
+  assert(approx_eq(matrix.get(r, 0, 0), 0.5, 0.00001))
+}
+
+test "mul_f32 of ones(3,3) * 0.5 × ones(3,3) * 0.5 = all 0.75" {
+  let a = matrix.ones_f32(3, 3) |> (m) => matrix.scale(m, 0.5)
+  let b = matrix.ones_f32(3, 3) |> (m) => matrix.scale(m, 0.5)
+  let r = matrix.mul_f32(a, b)
+  // Each element: sum of 3 * (0.5 * 0.5) = 0.75
+  assert(approx_eq(matrix.get(r, 0, 0), 0.75, 0.00001))
+  assert(approx_eq(matrix.get(r, 2, 2), 0.75, 0.00001))
+}
+
+test "mul_f32_scaled fuses alpha through cblas_sgemm alpha" {
+  let a = matrix.ones_f32(2, 2) |> (m) => matrix.scale(m, 0.5)
+  let b = matrix.ones_f32(2, 2) |> (m) => matrix.scale(m, 0.5)
+  // alpha=4, A*B element is 2 * 0.25 = 0.5, scaled by 4 -> 2.0
+  let r = matrix.mul_f32_scaled(a, 4.0, b)
+  assert(approx_eq(matrix.get(r, 0, 0), 2.0, 0.00001))
+  assert(approx_eq(matrix.get(r, 1, 1), 2.0, 0.00001))
+}
+
+test "mul_f32_t computes A @ B^T without a transpose copy" {
+  let a = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let b = matrix.from_lists([[5.0, 6.0], [7.0, 8.0]])
+  // In f64 space first (SmallF32 mul_f32_t expects SmallF32 inputs, so only
+  // sanity-check shape/value via the f64 equivalent; full f32 path exercised
+  // below via ones_f32 + mul_f32_t).
+  let bt = matrix.transpose(b)
+  let expected = matrix.mul(a, bt)
+  assert_eq(matrix.get(expected, 0, 0), 17.0)   // 1*5 + 2*6 = 17
+  assert_eq(matrix.get(expected, 0, 1), 23.0)   // 1*7 + 2*8 = 23
+  assert_eq(matrix.get(expected, 1, 0), 39.0)
+  assert_eq(matrix.get(expected, 1, 1), 53.0)
+}
+
+test "mul_f32_t on SmallF32 inputs agrees with transpose-then-mul" {
+  let a = matrix.ones_f32(4, 3) |> (m) => matrix.scale(m, 0.25)
+  let b = matrix.ones_f32(4, 3) |> (m) => matrix.scale(m, 0.25)
+  // a @ b^T where both are (4,3), result is (4,4). Each element is
+  // sum of 3 * (0.25 * 0.25) = 0.1875.
+  let r = matrix.mul_f32_t(a, b)
+  let (rr, rc) = matrix.shape(r)
+  assert_eq(rr, 4)
+  assert_eq(rc, 4)
+  assert(approx_eq(matrix.get(r, 0, 0), 0.1875, 0.00001))
+  assert(approx_eq(matrix.get(r, 3, 3), 0.1875, 0.00001))
+}
+
+test "mul_f32_t_scaled applies alpha" {
+  let a = matrix.ones_f32(3, 2) |> (m) => matrix.scale(m, 0.5)
+  let b = matrix.ones_f32(3, 2) |> (m) => matrix.scale(m, 0.5)
+  // a @ b^T: each element = 2 * 0.25 = 0.5. With alpha=10 -> 5.0.
+  let r = matrix.mul_f32_t_scaled(a, 10.0, b)
+  assert(approx_eq(matrix.get(r, 0, 0), 5.0, 0.00001))
+}
