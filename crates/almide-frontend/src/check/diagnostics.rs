@@ -13,9 +13,14 @@ impl Checker {
             (Ty::String, Ty::Float) => Some("use `float.parse(s)` to convert String to Float (returns Result[Float, String])".to_string()),
             (Ty::Float, Ty::Int) => Some("use `to_int(x)` to convert Float to Int (truncates)".to_string()),
             (Ty::Int, Ty::Float) => Some("use `to_float(x)` to convert Int to Float".to_string()),
-            // list.push/pop/clear return Unit; suggest `+` for immutable list building
+            // Unit where a List was expected: three common causes.
+            // - `list.push/pop/clear` mutate and return Unit
+            // - `for x in xs { ... }` is a side-effect loop returning Unit
+            // - `println(...)` / other effect calls returning Unit
             (Ty::Unit, Ty::Applied(crate::types::TypeConstructorId::List, _)) =>
-                Some("`list.push` mutates a var and returns Unit. For immutable lists, use `+` to build: `xs + [item]`".to_string()),
+                Some("Got Unit where a List was expected. \
+                      `list.push`/`pop`/`clear` mutate and return Unit — use `xs + [item]` for an immutable append. \
+                      `for x in xs { ... }` is a side-effect loop (Unit); for element transforms, use `list.map(xs, (x) => ...)`.".to_string()),
             // Option[Unit] vs Option[List[T]] — same pattern wrapped in Option
             (Ty::Applied(crate::types::TypeConstructorId::Option, a_args),
              Ty::Applied(crate::types::TypeConstructorId::Option, e_args))

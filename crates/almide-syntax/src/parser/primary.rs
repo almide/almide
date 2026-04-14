@@ -159,6 +159,20 @@ impl Parser {
             return Err(format!("{} at line {}:{}", msg, tok.line, tok.col));
         }
 
+        // Bare `=` in expression position usually means the user tried to
+        // chain assignment (`let r = x = 5`) or start an assignment where
+        // an expression is required. Almide assignments are statements that
+        // return Unit, so they can't appear on the right of `let`.
+        if tok.token_type == TokenType::Eq {
+            let msg = "Assignments return Unit and can't appear here";
+            let hint = "Almide assignment `x = 5` is a statement, not an expression. \
+                        Use separate statements: `x = 5; let r = x` — or pick the value \
+                        directly: `let r = 5`.";
+            let diag = self.diag_error(msg, hint, "assignment-in-expr");
+            self.errors.push(diag);
+            return Err(format!("{} at line {}:{}", msg, tok.line, tok.col));
+        }
+
         Err(format!(
             "Expected expression at line {}:{} (got {:?} '{}')",
             tok.line, tok.col, tok.token_type, tok.value
