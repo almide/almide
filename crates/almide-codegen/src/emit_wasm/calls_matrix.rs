@@ -4,11 +4,62 @@
 //! Total size: 8 + rows*cols*8
 
 use super::FuncCompiler;
-use almide_ir::IrExpr;
+use almide_ir::{IrExpr, IrExprKind, CallTarget};
+use almide_lang::types::Ty;
+use almide_base::intern::sym;
 
 impl FuncCompiler<'_> {
     /// Dispatch a matrix stdlib method call. Returns true if handled.
     pub(super) fn emit_matrix_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
+        // WASM matrix runtime is f64-only. The _f32 variants of primitive ops
+        // are preview API surfaces for the native path; on WASM they dispatch
+        // to their f64 equivalents (storage & arithmetic identical at this
+        // layer).
+        let method = match method {
+            "zeros_f32" => "zeros",
+            "ones_f32" => "ones",
+            "mul_f32" => "mul",
+            _ => method,
+        };
+        // mul_scaled / mul_f32_scaled: alpha * A * B — emit as scale(mul(a, b), alpha).
+        if method == "mul_scaled" || method == "mul_f32_scaled" {
+            let mul_call = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module { module: sym("matrix"), func: sym("mul") },
+                    args: vec![args[0].clone(), args[2].clone()],
+                    type_args: vec![],
+                },
+                ty: Ty::Matrix,
+                span: None,
+            };
+            let scale_args = vec![mul_call, args[1].clone()];
+            return self.emit_matrix_call("scale", &scale_args);
+        }
+        // mul_f32_t / mul_f32_t_scaled: A @ B^T — emit transpose(B) then mul.
+        if method == "mul_f32_t" {
+            let transpose_call = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module { module: sym("matrix"), func: sym("transpose") },
+                    args: vec![args[1].clone()],
+                    type_args: vec![],
+                },
+                ty: Ty::Matrix,
+                span: None,
+            };
+            return self.emit_matrix_call("mul", &[args[0].clone(), transpose_call]);
+        }
+        if method == "mul_f32_t_scaled" {
+            let transpose_call = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module { module: sym("matrix"), func: sym("transpose") },
+                    args: vec![args[2].clone()],
+                    type_args: vec![],
+                },
+                ty: Ty::Matrix,
+                span: None,
+            };
+            return self.emit_matrix_call("mul_scaled", &[args[0].clone(), args[1].clone(), transpose_call]);
+        }
         match method {
             "zeros" | "ones" => {
                 // matrix.zeros(rows, cols) / matrix.ones(rows, cols) → Matrix
