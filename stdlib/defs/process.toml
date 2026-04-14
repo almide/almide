@@ -1,3 +1,18 @@
+# ── Named types (preview) ─────────────────────────────────────────────
+# Declared stdlib types accessible as `process.ProcessStatus`. Currently
+# just parsed — codegen/type-system wiring lands in a follow-up PR. The
+# shape here defines the future ergonomic API: callers will write
+# `r.code / r.stdout / r.stderr` instead of tuple destructuring.
+
+[[types]]
+name = "ProcessStatus"
+kind = "record"
+fields = [
+  { name = "code",   type = "Int" },
+  { name = "stdout", type = "String" },
+  { name = "stderr", type = "String" },
+]
+
 [exec]
 description = "Execute a command and return its stdout as a string"
 example = 'let output = process.exec("ls", ["-la"])'

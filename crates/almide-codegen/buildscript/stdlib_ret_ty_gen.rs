@@ -53,9 +53,17 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) {
             let module = stem.to_string();
 
             let Ok(raw) = fs::read_to_string(&path) else { continue };
-            let Ok(parsed) = toml::from_str::<BTreeMap<String, FnDef>>(&raw) else { continue };
+            #[derive(serde::Deserialize)]
+            struct ModuleFile {
+                #[serde(default)]
+                #[allow(dead_code)]
+                types: Vec<toml::Value>,
+                #[serde(flatten)]
+                functions: BTreeMap<String, FnDef>,
+            }
+            let Ok(mf) = toml::from_str::<ModuleFile>(&raw) else { continue };
 
-            for (func, def) in parsed {
+            for (func, def) in mf.functions {
                 if def.ret.is_empty() { continue }
                 let param_tys: Vec<String> = def.params.iter().map(|p| p.ty.clone()).collect();
                 entries.push((module.clone(), func, def.ret, param_tys));
