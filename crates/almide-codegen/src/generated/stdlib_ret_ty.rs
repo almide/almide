@@ -432,6 +432,8 @@ pub fn lookup_stdlib_ret(module: &str, func: &str) -> Option<StdlibSig> {
         ("matrix", "mul") => Some(StdlibSig { ret_ty: Ty::Matrix, param_tys: &["Matrix", "Matrix"] }),
         ("matrix", "mul_f32") => Some(StdlibSig { ret_ty: Ty::Matrix, param_tys: &["Matrix", "Matrix"] }),
         ("matrix", "mul_f32_scaled") => Some(StdlibSig { ret_ty: Ty::Matrix, param_tys: &["Matrix", "Float", "Matrix"] }),
+        ("matrix", "mul_f32_t") => Some(StdlibSig { ret_ty: Ty::Matrix, param_tys: &["Matrix", "Matrix"] }),
+        ("matrix", "mul_f32_t_scaled") => Some(StdlibSig { ret_ty: Ty::Matrix, param_tys: &["Matrix", "Float", "Matrix"] }),
         ("matrix", "mul_scaled") => Some(StdlibSig { ret_ty: Ty::Matrix, param_tys: &["Matrix", "Float", "Matrix"] }),
         ("matrix", "multi_head_attention") => Some(StdlibSig { ret_ty: Ty::Matrix, param_tys: &["Matrix", "Matrix", "Matrix", "Int"] }),
         ("matrix", "neg") => Some(StdlibSig { ret_ty: Ty::Matrix, param_tys: &["Matrix"] }),

@@ -346,6 +346,20 @@ params = [{ name = "a", type = "Matrix" }, { name = "alpha", type = "Float" }, {
 return = "Matrix"
 rust = "almide_rt_matrix_mul_f32_scaled(&{a}, {alpha}, &{b})"
 
+[mul_f32_t]
+description = "f32 A @ B^T (implicit transpose via cblas transB) — no intermediate copy."
+example = 'matrix.mul_f32_t(q, k)  // q @ k^T for attention scores'
+params = [{ name = "a", type = "Matrix" }, { name = "b", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_mul_f32_t(&{a}, &{b})"
+
+[mul_f32_t_scaled]
+description = "f32 alpha*A*B^T (fused scale + implicit transpose)."
+example = 'matrix.mul_f32_t_scaled(q, inv_sqrt_d, k)  // scaled attention scores'
+params = [{ name = "a", type = "Matrix" }, { name = "alpha", type = "Float" }, { name = "b", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_mul_f32_t_scaled(&{a}, {alpha}, &{b})"
+
 [mul_scaled]
 description = "Fused alpha*A*B for f64 — single cblas_dgemm call, no intermediate alloc."
 example = 'matrix.mul_scaled(a, 2.0, b)'
