@@ -542,25 +542,18 @@ pub fn almide_rt_matrix_softmax_rows(m: &AlmideMatrix) -> AlmideMatrix {
             let (r, c) = (*rows, *cols);
             let mut out: Vec<f32> = vec![0.0f32; r * c];
             let c_i32 = c as i32;
-            unsafe {
-                let src = data.as_ptr();
-                let dst = out.as_mut_ptr();
-                for i in 0..r {
-                    let base = i * c;
-                    let mut max = f32::NEG_INFINITY;
-                    for j in 0..c {
-                        let v = *src.add(base + j);
-                        if v > max { max = v; }
-                    }
-                    // Batch (x - max) into dst, then vvexpf in place —
-                    // 10-30× faster than scalar .exp() per element.
-                    for j in 0..c { *dst.add(base + j) = *src.add(base + j) - max; }
-                    vvexpf(dst.add(base), dst.add(base), &c_i32);
-                    let mut sum = 0.0f32;
-                    for j in 0..c { sum += *dst.add(base + j); }
-                    let inv = 1.0 / sum;
-                    for j in 0..c { *dst.add(base + j) *= inv; }
+            for i in 0..r {
+                let src_row = &data[i * c..(i + 1) * c];
+                let dst_row = &mut out[i * c..(i + 1) * c];
+                // Slice iter => LLVM vectorizes max/sum to f32x4 reductions.
+                let max = src_row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                for (d, &s) in dst_row.iter_mut().zip(src_row.iter()) {
+                    *d = s - max;
                 }
+                unsafe { vvexpf(dst_row.as_mut_ptr(), dst_row.as_ptr(), &c_i32); }
+                let sum: f32 = dst_row.iter().sum();
+                let inv = 1.0 / sum;
+                for d in dst_row.iter_mut() { *d *= inv; }
             }
             AlmideMatrix::SmallF32 { rows: r, cols: c, data: out }
         }
