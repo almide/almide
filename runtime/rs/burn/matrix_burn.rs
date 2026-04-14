@@ -460,7 +460,42 @@ pub fn almide_rt_matrix_softmax_rows(m: &AlmideMatrix) -> AlmideMatrix {
 }
 
 pub fn almide_rt_matrix_gelu(m: &AlmideMatrix) -> AlmideMatrix {
-    wrap(burn::tensor::activation::gelu(m.to_burn()))
+    match m {
+        AlmideMatrix::Small { rows, cols, data } => {
+            // Tanh-based GELU approximation: 0.5·x·(1 + tanh(√(2/π)·(x + 0.044715·x³)))
+            const K: f64 = 0.7978845608028654;
+            let n = data.len();
+            let mut out: Vec<f64> = Vec::with_capacity(n);
+            unsafe {
+                let src = data.as_ptr();
+                let dst = out.as_mut_ptr();
+                for i in 0..n {
+                    let x = *src.add(i);
+                    let inner = K * (x + 0.044715 * x * x * x);
+                    *dst.add(i) = 0.5 * x * (1.0 + inner.tanh());
+                }
+                out.set_len(n);
+            }
+            AlmideMatrix::Small { rows: *rows, cols: *cols, data: out }
+        }
+        AlmideMatrix::SmallF32 { rows, cols, data } => {
+            const K: f32 = 0.7978845608028654;
+            let n = data.len();
+            let mut out: Vec<f32> = Vec::with_capacity(n);
+            unsafe {
+                let src = data.as_ptr();
+                let dst = out.as_mut_ptr();
+                for i in 0..n {
+                    let x = *src.add(i);
+                    let inner = K * (x + 0.044715 * x * x * x);
+                    *dst.add(i) = 0.5 * x * (1.0 + inner.tanh());
+                }
+                out.set_len(n);
+            }
+            AlmideMatrix::SmallF32 { rows: *rows, cols: *cols, data: out }
+        }
+        AlmideMatrix::Burn(_) => wrap(burn::tensor::activation::gelu(m.to_burn())),
+    }
 }
 
 pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideMatrix> {
