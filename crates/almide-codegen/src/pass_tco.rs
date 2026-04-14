@@ -21,7 +21,7 @@
 //! WASM where the stack is limited and there is no native tail call support.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use almide_ir::*;
 use almide_lang::types::Ty;
 use almide_lang::types::constructor::TypeConstructorId;
@@ -46,18 +46,80 @@ impl NanoPass for TailCallOptPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        run_tco(&mut program.functions, &mut program.var_table);
+        // Collect: TCO'd function name → param positions whose borrow annotation
+        // was forced back to Own by the loop rewrite (i.e. NOT in the
+        // Bytes-borrow-preserved set). External call sites targeting these
+        // functions need their Borrow wrappers stripped to match the new
+        // signature — otherwise a &str arg is passed where String is expected.
+        let mut reverted: HashMap<almide_base::intern::Sym, HashSet<usize>> = HashMap::new();
+        run_tco(&mut program.functions, &mut program.var_table, &mut reverted);
         for module in &mut program.modules {
-            run_tco(&mut module.functions, &mut module.var_table);
+            run_tco(&mut module.functions, &mut module.var_table, &mut reverted);
+        }
+        if !reverted.is_empty() {
+            strip_borrows_at_tco_calls(&mut program, &reverted);
         }
         PassResult { program, changed: true }
     }
 }
 
-fn run_tco(functions: &mut [IrFunction], var_table: &mut VarTable) {
+fn run_tco(
+    functions: &mut [IrFunction],
+    var_table: &mut VarTable,
+    reverted: &mut HashMap<almide_base::intern::Sym, HashSet<usize>>,
+) {
     for func in functions.iter_mut() {
         if is_tco_candidate(func) {
-            rewrite_to_loop(func, var_table);
+            let fn_name = func.name.clone();
+            let reverted_here = rewrite_to_loop(func, var_table);
+            if !reverted_here.is_empty() {
+                reverted.insert(fn_name, reverted_here);
+            }
+        }
+    }
+}
+
+/// Visit every Call/TailCall in the program; for any target that was TCO'd and
+/// had borrows reverted, strip the Borrow wrapper at the affected arg positions.
+struct TcoCallStripper<'a> {
+    reverted: &'a HashMap<almide_base::intern::Sym, HashSet<usize>>,
+}
+
+impl<'a> IrMutVisitor for TcoCallStripper<'a> {
+    fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+            | IrExprKind::TailCall { target: CallTarget::Named { name }, args } = &mut expr.kind
+        {
+            if let Some(positions) = self.reverted.get(name) {
+                for (i, arg) in args.iter_mut().enumerate() {
+                    if positions.contains(&i) {
+                        if let IrExprKind::Borrow { expr: inner, .. } = &mut arg.kind {
+                            let taken = std::mem::replace(inner.as_mut(), IrExpr {
+                                kind: IrExprKind::Unit,
+                                ty: Ty::Unit,
+                                span: None,
+                            });
+                            *arg = taken;
+                        }
+                    }
+                }
+            }
+        }
+        walk_expr_mut(self, expr);
+    }
+}
+
+fn strip_borrows_at_tco_calls(
+    program: &mut IrProgram,
+    reverted: &HashMap<almide_base::intern::Sym, HashSet<usize>>,
+) {
+    let mut stripper = TcoCallStripper { reverted };
+    for func in &mut program.functions {
+        stripper.visit_expr_mut(&mut func.body);
+    }
+    for module in &mut program.modules {
+        for func in &mut module.functions {
+            stripper.visit_expr_mut(&mut func.body);
         }
     }
 }
@@ -321,7 +383,7 @@ fn scan_non_tail_stmt(stmt: &IrStmt, fn_name: &str) -> (bool, bool) {
 }
 
 /// Rewrite a TCO-eligible function body from recursive form to a loop.
-fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
+fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<usize> {
     let fn_name = func.name.clone();
     // For effect fns returning Result[T, E], the TCO result variable should hold T
     // because the Rust codegen auto-unwraps Result via `?` operator.
@@ -347,6 +409,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
     // is a no-op lifetime-wise. Keep the borrow there; force ownership
     // everywhere else.
     let mut bytes_borrowed_params: HashSet<usize> = HashSet::new();
+    let mut reverted_to_own: HashSet<usize> = HashSet::new();
     for (i, param) in func.params.iter_mut().enumerate() {
         var_table.entries[param.var.0 as usize].mutability = Mutability::Var;
         let keep_borrow = matches!(param.ty, Ty::Bytes)
@@ -354,6 +417,12 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
         if keep_borrow {
             bytes_borrowed_params.insert(i);
         } else {
+            // If BorrowInsertion had previously marked this param as Borrow,
+            // external call sites are now emitting &str / &Vec where we now
+            // expect owned. Record so the call-site walker can strip wrappers.
+            if !matches!(param.borrow, almide_ir::ParamBorrow::Own) {
+                reverted_to_own.insert(i);
+            }
             param.borrow = almide_ir::ParamBorrow::Own;
         }
     }
@@ -459,6 +528,8 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
         ty: func.ret_ty.clone(),
         span: func.body.span,
     };
+
+    reverted_to_own
 }
 
 /// Rewrite an expression in tail position:

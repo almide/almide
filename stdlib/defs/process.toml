@@ -1,3 +1,18 @@
+# ── Named types (preview) ─────────────────────────────────────────────
+# Declared stdlib types accessible as `process.ProcessStatus`. Currently
+# just parsed — codegen/type-system wiring lands in a follow-up PR. The
+# shape here defines the future ergonomic API: callers will write
+# `r.code / r.stdout / r.stderr` instead of tuple destructuring.
+
+[[types]]
+name = "ProcessStatus"
+kind = "record"
+fields = [
+  { name = "code",   type = "Int" },
+  { name = "stdout", type = "String" },
+  { name = "stderr", type = "String" },
+]
+
 [exec]
 description = "Execute a command and return its stdout as a string"
 example = 'let output = process.exec("ls", ["-la"])'
@@ -53,10 +68,10 @@ rust = "almide_rt_process_exec_with_stdin(&*{cmd}, &{ let __a: Vec<String> = {ar
 ts = "__almd_process.exec_with_stdin({cmd}, {args}, {input})"
 
 [exec_status]
-description = "Execute a command and return (code, stdout, stderr) as a tuple. Use destructuring at the call site."
-example = 'let (code, stdout, stderr) = process.exec_status("ls", [])!'
+description = "Execute a command and return its ProcessStatus (code/stdout/stderr)."
+example = 'let s = process.exec_status("ls", [])!; println(s.stdout)'
 params = [{ name = "cmd", type = "String" }, { name = "args", type = "List[String]" }]
-return = "Result[(Int, String, String), String]"
+return = "Result[process.ProcessStatus, String]"
 effect = true
 rust = "almide_rt_process_exec_status(&*{cmd}, &{ let __a: Vec<String> = {args}; __a })?"
 ts = "__almd_process.exec_status({cmd}, {args})"

@@ -1,27 +1,25 @@
 // wasm:skip — process.exec_status is native-only
 import process
 
-test "process.exec_status returns tuple on success" {
-  let r = process.exec_status("echo", ["hi"])!
-  let (code, stdout, _stderr) = r
-  assert_eq(code, 0)
-  assert(string.contains(stdout, "hi"))
+test "process.exec_status returns a ProcessStatus on success" {
+  let s = process.exec_status("echo", ["hi"])!
+  assert_eq(s.code, 0)
+  assert(string.contains(s.stdout, "hi"))
 }
 
 test "process.exec_status on failing command returns non-zero code" {
   // `false` is a POSIX command that always exits 1
   let is_win = (process.env("OS") ?? "") == "Windows_NT"
   if not is_win then {
-    let r = process.exec_status("false", [])!
-    let (code, _out, _err) = r
-    assert(code != 0)
+    let s = process.exec_status("false", [])!
+    assert(s.code != 0)
   } else {}
 }
 
 test "process.exec_status on nonexistent command returns err" {
   let r = process.exec_status("nonexistent_command_xyz_12345", [])
   match r {
-    ok(_) => assert(false)
-    err(msg) => assert(string.len(msg) > 0)
+    ok(_) => assert(false),
+    err(msg) => assert(string.len(msg) > 0),
   }
 }

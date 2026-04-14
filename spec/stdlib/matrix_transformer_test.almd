@@ -1,0 +1,133 @@
+// matrix.{broadcast_add_row, layer_norm_rows, softmax_rows, gelu,
+//         linear_row, linear_row_no_bias, multi_head_attention,
+//         masked_multi_head_attention, causal_mask_add}
+// — transformer-building-block regression tests.
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
+  let d = if a > b then a - b else b - a
+  d < tol
+}
+
+test "broadcast_add_row adds bias to every row" {
+  let m = matrix.from_lists([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+  let bias = [10.0, 20.0, 30.0]
+  let r = matrix.broadcast_add_row(m, bias)
+  assert_eq(matrix.get(r, 0, 0), 11.0)
+  assert_eq(matrix.get(r, 0, 2), 33.0)
+  assert_eq(matrix.get(r, 1, 0), 14.0)
+  assert_eq(matrix.get(r, 1, 2), 36.0)
+}
+
+test "softmax_rows: uniform input → uniform output sum=1" {
+  let m = matrix.from_lists([[1.0, 1.0, 1.0, 1.0]])
+  let s = matrix.softmax_rows(m)
+  assert(approx_eq(matrix.get(s, 0, 0), 0.25, 0.00001))
+  assert(approx_eq(matrix.get(s, 0, 3), 0.25, 0.00001))
+}
+
+test "softmax_rows: large-max shouldn't overflow (stable form)" {
+  let m = matrix.from_lists([[1000.0, 1000.0, 1000.0]])
+  let s = matrix.softmax_rows(m)
+  assert(approx_eq(matrix.get(s, 0, 0), 0.333333, 0.001))
+}
+
+test "softmax_rows: peaked input concentrates on max" {
+  // Row with one big element: softmax output dominated by that position.
+  let m = matrix.from_lists([[10.0, 0.0, 0.0, 0.0]])
+  let s = matrix.softmax_rows(m)
+  assert(matrix.get(s, 0, 0) > 0.99)
+  assert(matrix.get(s, 0, 1) < 0.01)
+}
+
+test "layer_norm_rows: all-equal row → zeros (then gamma scaled + beta)" {
+  let m = matrix.from_lists([[5.0, 5.0, 5.0]])
+  let gamma = [2.0, 2.0, 2.0]
+  let beta = [1.0, 1.0, 1.0]
+  let r = matrix.layer_norm_rows(m, gamma, beta, 0.00001)
+  // After LN the centred value is 0, scaled by gamma=2, plus beta=1, → 1.0.
+  assert(approx_eq(matrix.get(r, 0, 0), 1.0, 0.01))
+  assert(approx_eq(matrix.get(r, 0, 2), 1.0, 0.01))
+}
+
+test "layer_norm_rows: normalised row has mean≈0, var≈1 (pre gamma/beta)" {
+  let m = matrix.from_lists([[1.0, 2.0, 3.0, 4.0]])
+  let gamma = [1.0, 1.0, 1.0, 1.0]
+  let beta = [0.0, 0.0, 0.0, 0.0]
+  let r = matrix.layer_norm_rows(m, gamma, beta, 0.00001)
+  // Mean of result: 0, variance: 1. Check extremes symmetric.
+  let v0 = matrix.get(r, 0, 0)
+  let v3 = matrix.get(r, 0, 3)
+  assert(approx_eq(v0, 0.0 - v3, 0.001))
+}
+
+test "gelu is identity-ish at 0 and positive-growing" {
+  let m = matrix.from_lists([[0.0, 1.0, -1.0, 2.0]])
+  let g = matrix.gelu(m)
+  assert(approx_eq(matrix.get(g, 0, 0), 0.0, 0.001))    // gelu(0)=0
+  assert(matrix.get(g, 0, 1) > 0.8)                     // gelu(1)≈0.841
+  assert(matrix.get(g, 0, 1) < 0.85)
+  assert(matrix.get(g, 0, 2) < 0.0)                     // gelu(-1) is negative but small
+  assert(matrix.get(g, 0, 2) > -0.2)
+  assert(matrix.get(g, 0, 3) > 1.95)                    // gelu(2)≈1.954
+}
+
+test "linear_row: y = x @ W^T + b" {
+  // x: (1, 2), W: (3, 2), b: [3]
+  // y[j] = sum_k x[k] * W[j,k] + b[j]
+  let x = matrix.from_lists([[1.0, 2.0]])
+  let w = matrix.from_lists([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+  let b = [10.0, 20.0, 30.0]
+  let y = matrix.linear_row(x, w, b)
+  let (r, c) = matrix.shape(y)
+  assert_eq(r, 1)
+  assert_eq(c, 3)
+  assert_eq(matrix.get(y, 0, 0), 11.0)   // 1*1 + 2*0 + 10
+  assert_eq(matrix.get(y, 0, 1), 22.0)   // 1*0 + 2*1 + 20
+  assert_eq(matrix.get(y, 0, 2), 33.0)   // 1*1 + 2*1 + 30
+}
+
+test "linear_row_no_bias: y = x @ W^T" {
+  let x = matrix.from_lists([[1.0, 2.0, 3.0]])
+  let w = matrix.from_lists([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+  let y = matrix.linear_row_no_bias(x, w)
+  assert_eq(matrix.get(y, 0, 0), 1.0)
+  assert_eq(matrix.get(y, 0, 1), 2.0)
+}
+
+test "causal_mask_add: upper triangular gets mask_val" {
+  let m = matrix.zeros(3, 3)
+  let masked = matrix.causal_mask_add(m, -1000.0)
+  // Diagonal and lower: 0. Strict upper: -1000.
+  assert_eq(matrix.get(masked, 0, 0), 0.0)
+  assert_eq(matrix.get(masked, 1, 0), 0.0)
+  assert_eq(matrix.get(masked, 2, 1), 0.0)
+  assert_eq(matrix.get(masked, 0, 1), -1000.0)
+  assert_eq(matrix.get(masked, 0, 2), -1000.0)
+  assert_eq(matrix.get(masked, 1, 2), -1000.0)
+}
+
+test "multi_head_attention: identity weights, 1 head, output shape" {
+  // Q, K, V: (2, 4). 1 head. Softmax(Q K^T / 2) V.
+  let q = matrix.ones(2, 4)
+  let k = matrix.ones(2, 4)
+  let v = matrix.from_lists([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])
+  let out = matrix.multi_head_attention(q, k, v, 1)
+  let (r, c) = matrix.shape(out)
+  assert_eq(r, 2)
+  assert_eq(c, 4)
+  // Uniform Q,K → uniform attention weights 0.5/0.5, so out = row-mean of V.
+  assert(approx_eq(matrix.get(out, 0, 0), 3.0, 0.01))
+  assert(approx_eq(matrix.get(out, 0, 3), 6.0, 0.01))
+}
+
+test "masked_multi_head_attention: causal mask, first row sees only self" {
+  let q = matrix.ones(2, 4)
+  let k = matrix.ones(2, 4)
+  let v = matrix.from_lists([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])
+  let out = matrix.masked_multi_head_attention(q, k, v, 1)
+  // Row 0 attends only to row 0 of V (causal mask hides row 1).
+  assert(approx_eq(matrix.get(out, 0, 0), 1.0, 0.01))
+  assert(approx_eq(matrix.get(out, 0, 3), 4.0, 0.01))
+  // Row 1 attends uniformly to rows 0 and 1.
+  assert(approx_eq(matrix.get(out, 1, 0), 3.0, 0.01))
+}

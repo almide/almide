@@ -256,6 +256,36 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         }
     }
 
+    // Inject synthetic IrTypeDecl entries for stdlib [[types]] declarations
+    // so the walker emits a matching `pub struct` per stdlib named type.
+    // Without this, user code written against `process.ProcessStatus` would
+    // type-check but fail to link against a Rust struct.
+    for t in crate::generated::stdlib_types::STDLIB_TYPES {
+        let fields: Vec<IrFieldDecl> = t.fields.iter().map(|f| IrFieldDecl {
+            name: almide_base::intern::sym(f.name),
+            ty: match f.ty {
+                "Int" => almide_lang::types::Ty::Int,
+                "Float" => almide_lang::types::Ty::Float,
+                "String" => almide_lang::types::Ty::String,
+                "Bool" => almide_lang::types::Ty::Bool,
+                "Unit" => almide_lang::types::Ty::Unit,
+                "Bytes" => almide_lang::types::Ty::Bytes,
+                _ => almide_lang::types::Ty::Unknown,
+            },
+            default: None,
+            alias: None,
+        }).collect();
+        type_decls.push(IrTypeDecl {
+            name: almide_base::intern::sym(t.name),
+            kind: IrTypeDeclKind::Record { fields },
+            deriving: None,
+            generics: None,
+            visibility: IrVisibility::Public,
+            doc: Some(format!("Stdlib named type: {}.{}", t.module, t.name)),
+            blank_lines_before: 0,
+        });
+    }
+
     // Auto-derive: generate convention functions for types that declare deriving but lack custom impl
     let auto_derived = generate_auto_derives(&mut ctx, &type_decls, &functions);
     functions.extend(auto_derived);

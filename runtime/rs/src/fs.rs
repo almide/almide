@@ -79,7 +79,7 @@ pub fn almide_rt_fs_modified_at(path: String) -> Result<i64, String> {
     let modified = meta.modified().map_err(io_err)?;
     Ok(modified.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
 }
-pub fn almide_rt_fs_stat(path: String) -> Result<(i64, bool, bool, i64), String> {
+pub fn almide_rt_fs_stat(path: String) -> Result<FileStat, String> {
     let meta = std::fs::metadata(&path).map_err(io_err)?;
     let size = meta.len() as i64;
     let is_dir = meta.is_dir();
@@ -87,7 +87,7 @@ pub fn almide_rt_fs_stat(path: String) -> Result<(i64, bool, bool, i64), String>
     let modified = meta.modified().ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as i64).unwrap_or(0);
-    Ok((size, is_dir, is_file, modified))
+    Ok(FileStat { size, is_dir, is_file, modified })
 }
 
 // Temp
