@@ -1,0 +1,21 @@
+// Stdlib [[types]] declarations emit matching Rust/WASM structs. A
+// program referencing process.ProcessStatus now compiles end-to-end.
+import process
+
+fn mk(c: Int, o: String, e: String) -> process.ProcessStatus =
+  { code: c, stdout: o, stderr: e }
+
+fn code_of(r: process.ProcessStatus) -> Int = r.code
+fn out_of(r: process.ProcessStatus) -> String = r.stdout
+
+test "construct and read fields" {
+  let s = mk(42, "hello", "err")
+  assert_eq(code_of(s), 42)
+  assert_eq(out_of(s), "hello")
+  assert_eq(s.stderr, "err")
+}
+
+test "annotated literal shape matches" {
+  let s: process.ProcessStatus = { code: 7, stdout: "a", stderr: "b" }
+  assert_eq(s.code + 1, 8)
+}
