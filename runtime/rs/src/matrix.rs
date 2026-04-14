@@ -481,3 +481,16 @@ pub fn almide_rt_matrix_row_dot(m: &AlmideMatrix, r: i64, vec: &Vec<f64>) -> f64
     for k in 0..n { s += row[k] * vec[k]; }
     s
 }
+
+// matrix: f32 path stubs for WASM target. matrix.rs has no distinct f32
+// matrix: storage (all Vec<Vec<f64>>), so these delegate to f64 ops.
+// matrix: burn/matrix_burn.rs provides the real f32 path via cblas_sgemm.
+pub fn almide_rt_matrix_zeros_f32(rows: i64, cols: i64) -> AlmideMatrix {
+    almide_rt_matrix_zeros(rows, cols)
+}
+pub fn almide_rt_matrix_ones_f32(rows: i64, cols: i64) -> AlmideMatrix {
+    almide_rt_matrix_ones(rows, cols)
+}
+pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
+    almide_rt_matrix_mul(a, b)
+}

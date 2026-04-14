@@ -312,3 +312,29 @@ description = "Deprecated: use matrix.dot_row instead."
 params = [{ name = "m", type = "Matrix" }, { name = "r", type = "Int" }, { name = "vec", type = "List[Float]" }]
 return = "Float"
 rust = "almide_rt_matrix_row_dot(&{m}, {r}, &{vec})"
+
+# ── f32 path (preview) ────────────────────────────────────────────────────
+# Same Matrix type, internal storage is f32. Use for matmul that can tolerate
+# f32 precision to hit NumPy-f32-class throughput (1000+ GFLOPS). Values read
+# via matrix.get upcast to Float (f64).
+
+[zeros_f32]
+description = "Create a zero-filled f32 matrix (preview)."
+example = 'matrix.zeros_f32(1024, 1024)'
+params = [{ name = "rows", type = "Int" }, { name = "cols", type = "Int" }]
+return = "Matrix"
+rust = "almide_rt_matrix_zeros_f32({rows}, {cols})"
+
+[ones_f32]
+description = "Create an f32 matrix filled with ones (preview)."
+example = 'matrix.ones_f32(1024, 1024)'
+params = [{ name = "rows", type = "Int" }, { name = "cols", type = "Int" }]
+return = "Matrix"
+rust = "almide_rt_matrix_ones_f32({rows}, {cols})"
+
+[mul_f32]
+description = "f32-backed matrix multiplication via cblas_sgemm (preview)."
+example = 'matrix.mul_f32(a, b)'
+params = [{ name = "a", type = "Matrix" }, { name = "b", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_mul_f32(&{a}, &{b})"

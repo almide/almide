@@ -31,11 +31,21 @@ extern "C" {
         beta: f64,
         c: *mut f64, ldc: i32,
     );
+    fn cblas_sgemm(
+        layout: i32, transa: i32, transb: i32,
+        m: i32, n: i32, k: i32,
+        alpha: f32,
+        a: *const f32, lda: i32,
+        b: *const f32, ldb: i32,
+        beta: f32,
+        c: *mut f32, ldc: i32,
+    );
 }
 
 #[derive(Clone)]
 pub enum AlmideMatrix {
     Small { rows: usize, cols: usize, data: Vec<f64> },
+    SmallF32 { rows: usize, cols: usize, data: Vec<f32> },
     Burn(Tensor<B, 2>),
 }
 
@@ -59,6 +69,7 @@ impl AlmideMatrix {
     fn dims2(&self) -> [usize; 2] {
         match self {
             AlmideMatrix::Small { rows, cols, .. } => [*rows, *cols],
+            AlmideMatrix::SmallF32 { rows, cols, .. } => [*rows, *cols],
             AlmideMatrix::Burn(t) => t.dims(),
         }
     }
@@ -66,12 +77,17 @@ impl AlmideMatrix {
         match self {
             AlmideMatrix::Small { rows, cols, data } =>
                 Tensor::from_data(TensorData::new(data.clone(), [*rows, *cols]), &dev()),
+            AlmideMatrix::SmallF32 { rows, cols, data } => {
+                let d64: Vec<f64> = data.iter().map(|&x| x as f64).collect();
+                Tensor::from_data(TensorData::new(d64, [*rows, *cols]), &dev())
+            }
             AlmideMatrix::Burn(t) => t.clone(),
         }
     }
     fn to_vec_f64(&self) -> Vec<f64> {
         match self {
             AlmideMatrix::Small { data, .. } => data.clone(),
+            AlmideMatrix::SmallF32 { data, .. } => data.iter().map(|&x| x as f64).collect(),
             AlmideMatrix::Burn(t) => t.clone().to_data().to_vec().unwrap(),
         }
     }
@@ -110,6 +126,7 @@ pub fn almide_rt_matrix_get(m: &AlmideMatrix, row: i64, col: i64) -> f64 {
     let c = col as usize;
     match m {
         AlmideMatrix::Small { cols, data, .. } => data[r * cols + c],
+        AlmideMatrix::SmallF32 { cols, data, .. } => data[r * cols + c] as f64,
         AlmideMatrix::Burn(t) => {
             let s = t.clone().slice([r..r + 1, c..c + 1]);
             s.into_scalar() as f64
@@ -128,6 +145,16 @@ pub fn almide_rt_matrix_transpose(m: &AlmideMatrix) -> AlmideMatrix {
                 }
             }
             AlmideMatrix::Small { rows: c, cols: r, data: out }
+        }
+        AlmideMatrix::SmallF32 { rows, cols, data } => {
+            let (r, c) = (*rows, *cols);
+            let mut out = vec![0.0f32; r * c];
+            for i in 0..r {
+                for j in 0..c {
+                    out[j * r + i] = data[i * c + j];
+                }
+            }
+            AlmideMatrix::SmallF32 { rows: c, cols: r, data: out }
         }
         AlmideMatrix::Burn(t) => wrap(t.clone().transpose()),
     }
@@ -282,6 +309,23 @@ pub fn almide_rt_matrix_scale(m: &AlmideMatrix, s: f64) -> AlmideMatrix {
             let out: Vec<f64> = data.iter().map(|x| x * s).collect();
             AlmideMatrix::Small { rows: *rows, cols: *cols, data: out }
         }
+        AlmideMatrix::SmallF32 { rows, cols, data } => {
+            let sf = s as f32;
+            let n = data.len();
+            let mut out = vec![0.0f32; n];
+            // 4-wide unroll for NEON/AVX auto-vectorization
+            let chunks = n - n % 4;
+            let mut j = 0;
+            while j < chunks {
+                out[j] = data[j] * sf;
+                out[j + 1] = data[j + 1] * sf;
+                out[j + 2] = data[j + 2] * sf;
+                out[j + 3] = data[j + 3] * sf;
+                j += 4;
+            }
+            while j < n { out[j] = data[j] * sf; j += 1; }
+            AlmideMatrix::SmallF32 { rows: *rows, cols: *cols, data: out }
+        }
         AlmideMatrix::Burn(t) => wrap(t.clone().mul_scalar(s)),
     }
 }
@@ -291,6 +335,10 @@ pub fn almide_rt_matrix_map(m: &AlmideMatrix, f: impl Fn(f64) -> f64) -> AlmideM
         AlmideMatrix::Small { rows, cols, data } => {
             let out: Vec<f64> = data.iter().map(|&x| f(x)).collect();
             AlmideMatrix::Small { rows: *rows, cols: *cols, data: out }
+        }
+        AlmideMatrix::SmallF32 { rows, cols, data } => {
+            let out: Vec<f32> = data.iter().map(|&x| f(x as f64) as f32).collect();
+            AlmideMatrix::SmallF32 { rows: *rows, cols: *cols, data: out }
         }
         AlmideMatrix::Burn(t) => {
             let [r, c] = t.dims();
@@ -505,4 +553,60 @@ pub fn almide_rt_matrix_row_dot(m: &AlmideMatrix, r: i64, vec: &Vec<f64>) -> f64
     let n = c.min(vec.len());
     for k in 0..n { s += mflat[r * c + k] * vec[k]; }
     s
+}
+
+// ── f32 path ────────────────────────────────────────────────────────────────
+// Same design as the f64 Small path, but backed by Vec<f32> and cblas_sgemm.
+// Dispatched via explicit `matrix.*_f32` stdlib functions — values returned
+// to Almide code are f64 (upcast) since the language has no f32 literal yet.
+
+pub fn almide_rt_matrix_zeros_f32(rows: i64, cols: i64) -> AlmideMatrix {
+    let r = rows as usize;
+    let c = cols as usize;
+    AlmideMatrix::SmallF32 { rows: r, cols: c, data: vec![0.0f32; r * c] }
+}
+
+pub fn almide_rt_matrix_ones_f32(rows: i64, cols: i64) -> AlmideMatrix {
+    let r = rows as usize;
+    let c = cols as usize;
+    AlmideMatrix::SmallF32 { rows: r, cols: c, data: vec![1.0f32; r * c] }
+}
+
+pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
+    match (a, b) {
+        (AlmideMatrix::SmallF32 { rows: m, cols: k, data: ad },
+         AlmideMatrix::SmallF32 { rows: _, cols: n, data: bd }) => {
+            let (m, k, n) = (*m, *k, *n);
+            let mut out = vec![0.0f32; m * n];
+            if m.max(k).max(n) <= RAW_LOOP_MAX {
+                for i in 0..m {
+                    let a_row = &ad[i * k..(i + 1) * k];
+                    let out_row = &mut out[i * n..(i + 1) * n];
+                    for p in 0..k {
+                        let aip = a_row[p];
+                        let b_row = &bd[p * n..(p + 1) * n];
+                        for (o, &b) in out_row.iter_mut().zip(b_row.iter()) {
+                            *o = aip.mul_add(b, *o);
+                        }
+                    }
+                }
+            } else {
+                unsafe {
+                    cblas_sgemm(
+                        101, 111, 111,
+                        m as i32, n as i32, k as i32,
+                        1.0,
+                        ad.as_ptr(), k as i32,
+                        bd.as_ptr(), n as i32,
+                        0.0,
+                        out.as_mut_ptr(), n as i32,
+                    );
+                }
+            }
+            AlmideMatrix::SmallF32 { rows: m, cols: n, data: out }
+        }
+        // Mixed: promote the non-f32 side (rare — only happens when user
+        // mixes f64 and f32 matrices. Fall back to f64 path).
+        _ => almide_rt_matrix_mul(a, b),
+    }
 }
