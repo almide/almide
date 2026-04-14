@@ -143,11 +143,22 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) {
 
     let mut arg_transform_arms = String::new();
 
+    #[derive(serde::Deserialize)]
+    struct ModuleFile {
+        #[serde(default)]
+        #[allow(dead_code)]
+        types: Vec<toml::Value>,
+        #[serde(flatten)]
+        functions: BTreeMap<String, FnDef>,
+    }
+
     for entry in entries {
         let path = entry.path();
         let module_name = path.file_stem().unwrap().to_str().unwrap().to_string();
         let content = fs::read_to_string(&path).unwrap();
-        let defs: BTreeMap<String, FnDef> = toml::from_str(&content).unwrap();
+        let module_file: ModuleFile = toml::from_str(&content)
+            .unwrap_or_else(|e| panic!("failed to parse {}: {}", path.display(), e));
+        let defs = module_file.functions;
 
         for (fn_name, def) in &defs {
             let rust_tmpl = &def.rust;
