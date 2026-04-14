@@ -494,3 +494,9 @@ pub fn almide_rt_matrix_ones_f32(rows: i64, cols: i64) -> AlmideMatrix {
 pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
     almide_rt_matrix_mul(a, b)
 }
+pub fn almide_rt_matrix_mul_f32_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
+    almide_rt_matrix_scale(&almide_rt_matrix_mul(a, b), alpha)
+}
+pub fn almide_rt_matrix_mul_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
+    almide_rt_matrix_scale(&almide_rt_matrix_mul(a, b), alpha)
+}

@@ -338,3 +338,17 @@ example = 'matrix.mul_f32(a, b)'
 params = [{ name = "a", type = "Matrix" }, { name = "b", type = "Matrix" }]
 return = "Matrix"
 rust = "almide_rt_matrix_mul_f32(&{a}, &{b})"
+
+[mul_f32_scaled]
+description = "Fused alpha*A*B for f32 — single cblas_sgemm call, no intermediate alloc (preview)."
+example = 'matrix.mul_f32_scaled(a, 1.001, b)'
+params = [{ name = "a", type = "Matrix" }, { name = "alpha", type = "Float" }, { name = "b", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_mul_f32_scaled(&{a}, {alpha}, &{b})"
+
+[mul_scaled]
+description = "Fused alpha*A*B for f64 — single cblas_dgemm call, no intermediate alloc."
+example = 'matrix.mul_scaled(a, 2.0, b)'
+params = [{ name = "a", type = "Matrix" }, { name = "alpha", type = "Float" }, { name = "b", type = "Matrix" }]
+return = "Matrix"
+rust = "almide_rt_matrix_mul_scaled(&{a}, {alpha}, &{b})"

@@ -20,6 +20,12 @@ const SMALL_THRESHOLD: usize = 2048;
 //   else → direct cblas_dgemm (skip burn wrapper, match NumPy BLAS throughput)
 const RAW_LOOP_MAX: usize = 16;
 
+// For mul_scaled (fused alpha*A*B): at small/medium sizes the cblas alpha
+// param saves an intermediate scale allocation. At large sizes alpha!=1.0
+// hits a slight BLAS perf penalty, so do scale-then-mul (NumPy-style) instead.
+// 512 chosen because fused wins at ≤512 and loses at ≥768 for f64.
+const FUSED_ALPHA_MAX: usize = 512;
+
 #[cfg_attr(target_os = "macos", link(name = "Accelerate", kind = "framework"))]
 extern "C" {
     fn cblas_dgemm(
@@ -281,10 +287,9 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
                 }
                 mk(m, n, out)
             } else {
-                // Medium path: direct cblas_dgemm — skips burn's wrapper overhead
-                // (measured 4x speedup over burn.matmul at 64²) while keeping
-                // data as Vec<f64> so surrounding scale/add/get stay dispatch-free.
-                let mut out = vec![0.0f64; m * n];
+                // Uninit buffer: cblas_dgemm with beta=0 writes every element.
+                // At 1024² this saves ~1ms of zero-init (8MB write).
+                let mut out: Vec<f64> = Vec::with_capacity(m * n);
                 unsafe {
                     cblas_dgemm(
                         101, 111, 111,
@@ -295,6 +300,7 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
                         0.0,
                         out.as_mut_ptr(), n as i32,
                     );
+                    out.set_len(m * n);
                 }
                 mk(m, n, out)
             }
@@ -306,7 +312,24 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
 pub fn almide_rt_matrix_scale(m: &AlmideMatrix, s: f64) -> AlmideMatrix {
     match m {
         AlmideMatrix::Small { rows, cols, data } => {
-            let out: Vec<f64> = data.iter().map(|x| x * s).collect();
+            let n = data.len();
+            // Uninit + unrolled writes: saves an 8MB zero-init on large sizes.
+            let mut out: Vec<f64> = Vec::with_capacity(n);
+            let chunks = n - n % 4;
+            unsafe {
+                let src = data.as_ptr();
+                let dst = out.as_mut_ptr();
+                let mut j = 0;
+                while j < chunks {
+                    *dst.add(j)     = *src.add(j)     * s;
+                    *dst.add(j + 1) = *src.add(j + 1) * s;
+                    *dst.add(j + 2) = *src.add(j + 2) * s;
+                    *dst.add(j + 3) = *src.add(j + 3) * s;
+                    j += 4;
+                }
+                while j < n { *dst.add(j) = *src.add(j) * s; j += 1; }
+                out.set_len(n);
+            }
             AlmideMatrix::Small { rows: *rows, cols: *cols, data: out }
         }
         AlmideMatrix::SmallF32 { rows, cols, data } => {
@@ -572,6 +595,100 @@ pub fn almide_rt_matrix_ones_f32(rows: i64, cols: i64) -> AlmideMatrix {
     AlmideMatrix::SmallF32 { rows: r, cols: c, data: vec![1.0f32; r * c] }
 }
 
+/// Fused scale+mul: out = alpha * A @ B, via cblas_sgemm's alpha parameter.
+/// Skips the intermediate Vec<f32> that `matrix.scale(a, alpha) |> matrix.mul_f32(_, b)`
+/// would allocate — matters at 256-512² where alloc+scale cost dominates.
+pub fn almide_rt_matrix_mul_f32_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
+    match (a, b) {
+        (AlmideMatrix::SmallF32 { rows: m, cols: k, data: ad },
+         AlmideMatrix::SmallF32 { rows: _, cols: n, data: bd }) => {
+            let (m, k, n) = (*m, *k, *n);
+            // f32 sgemm does NOT show an alpha!=1 penalty at large sizes
+            // (Accelerate's sgemm is tuned differently than dgemm); fuse all.
+            if m.max(k).max(n) <= RAW_LOOP_MAX {
+                let mut out = vec![0.0f32; m * n];
+                let alpha = alpha as f32;
+                for i in 0..m {
+                    let a_row = &ad[i * k..(i + 1) * k];
+                    let out_row = &mut out[i * n..(i + 1) * n];
+                    for p in 0..k {
+                        let aip = a_row[p] * alpha;
+                        let b_row = &bd[p * n..(p + 1) * n];
+                        for (o, &b) in out_row.iter_mut().zip(b_row.iter()) {
+                            *o = aip.mul_add(b, *o);
+                        }
+                    }
+                }
+                AlmideMatrix::SmallF32 { rows: m, cols: n, data: out }
+            } else {
+                // Uninit buffer: cblas_sgemm with beta=0 writes every element.
+                let mut out: Vec<f32> = Vec::with_capacity(m * n);
+                unsafe {
+                    cblas_sgemm(
+                        101, 111, 111,
+                        m as i32, n as i32, k as i32,
+                        alpha as f32,
+                        ad.as_ptr(), k as i32,
+                        bd.as_ptr(), n as i32,
+                        0.0,
+                        out.as_mut_ptr(), n as i32,
+                    );
+                    out.set_len(m * n);
+                }
+                AlmideMatrix::SmallF32 { rows: m, cols: n, data: out }
+            }
+        }
+        _ => almide_rt_matrix_scale(&almide_rt_matrix_mul_f32(a, b), alpha),
+    }
+}
+
+/// Fused scale+mul for f64 path (dgemm alpha).
+pub fn almide_rt_matrix_mul_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
+    match (a, b) {
+        (AlmideMatrix::Small { rows: m, cols: k, data: ad },
+         AlmideMatrix::Small { rows: _, cols: n, data: bd }) => {
+            let (m, k, n) = (*m, *k, *n);
+            if m.max(k).max(n) > FUSED_ALPHA_MAX {
+                // Large dgemm: alpha!=1 penalty > alloc savings. Do scale+mul.
+                return almide_rt_matrix_mul(&almide_rt_matrix_scale(a, alpha), b);
+            }
+            if m.max(k).max(n) <= RAW_LOOP_MAX {
+                let mut out = vec![0.0f64; m * n];
+                for i in 0..m {
+                    let a_row = &ad[i * k..(i + 1) * k];
+                    let out_row = &mut out[i * n..(i + 1) * n];
+                    for p in 0..k {
+                        let aip = a_row[p] * alpha;
+                        let b_row = &bd[p * n..(p + 1) * n];
+                        for (o, &b) in out_row.iter_mut().zip(b_row.iter()) {
+                            *o = aip.mul_add(b, *o);
+                        }
+                    }
+                }
+                mk(m, n, out)
+            } else {
+                // Skip the 0.0 init: cblas_dgemm with beta=0 writes every element.
+                // At 1024² this saves ~1ms of zero-init (8MB write).
+                let mut out: Vec<f64> = Vec::with_capacity(m * n);
+                unsafe {
+                    cblas_dgemm(
+                        101, 111, 111,
+                        m as i32, n as i32, k as i32,
+                        alpha,
+                        ad.as_ptr(), k as i32,
+                        bd.as_ptr(), n as i32,
+                        0.0,
+                        out.as_mut_ptr(), n as i32,
+                    );
+                    out.set_len(m * n);
+                }
+                mk(m, n, out)
+            }
+        }
+        _ => almide_rt_matrix_scale(&almide_rt_matrix_mul(a, b), alpha),
+    }
+}
+
 pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
     match (a, b) {
         (AlmideMatrix::SmallF32 { rows: m, cols: k, data: ad },
@@ -591,6 +708,7 @@ pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMat
                     }
                 }
             } else {
+                let mut out_buf: Vec<f32> = Vec::with_capacity(m * n);
                 unsafe {
                     cblas_sgemm(
                         101, 111, 111,
@@ -599,9 +717,11 @@ pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMat
                         ad.as_ptr(), k as i32,
                         bd.as_ptr(), n as i32,
                         0.0,
-                        out.as_mut_ptr(), n as i32,
+                        out_buf.as_mut_ptr(), n as i32,
                     );
+                    out_buf.set_len(m * n);
                 }
+                return AlmideMatrix::SmallF32 { rows: m, cols: n, data: out_buf };
             }
             AlmideMatrix::SmallF32 { rows: m, cols: n, data: out }
         }
