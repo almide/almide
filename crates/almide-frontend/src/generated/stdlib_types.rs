@@ -17,6 +17,16 @@ pub struct StdlibTypeDef {
 
 pub const STDLIB_TYPES: &[StdlibTypeDef] = &[
     StdlibTypeDef {
+        module: "fs",
+        name: "FileStat",
+        fields: &[
+            StdlibTypeField { name: "size", ty: "Int" },
+            StdlibTypeField { name: "is_dir", ty: "Bool" },
+            StdlibTypeField { name: "is_file", ty: "Bool" },
+            StdlibTypeField { name: "modified", ty: "Int" },
+        ],
+    },
+    StdlibTypeDef {
         module: "process",
         name: "ProcessStatus",
         fields: &[
