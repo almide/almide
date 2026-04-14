@@ -72,6 +72,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let then_content = render_body_content(ctx, then);
             let else_content = render_body_content(ctx, else_);
 
+            // Coerce bare Var branches to `String` when the If's type is
+            // String. Function params of type String are emitted as `&str`
+            // in Rust, so `if ... { "lit".to_string() } else { param }` would
+            // mix `String` and `&str`. `.to_string()` unifies both.
+            let (then_content, else_content) = if matches!(ctx.target, super::super::pass::Target::Rust)
+                && matches!(expr.ty, Ty::String) {
+                (
+                    coerce_to_owned_string(&then_content, then),
+                    coerce_to_owned_string(&else_content, else_),
+                )
+            } else {
+                (then_content, else_content)
+            };
+
             if then_content.contains('\n') || else_content.contains('\n') {
                 // Multi-line: indent branch bodies
                 let indented_then = indent_lines(&then_content, 4);
@@ -338,10 +352,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             for part in parts {
                 match part {
                     IrStringPart::Lit { value } => {
-                        // Escape special chars for format!-style templates
+                        // Escape special chars for format!-style templates.
+                        // Include control chars so they don't land as real
+                        // source newlines in the format string — otherwise
+                        // rustfmt continuation indent leaks into runtime
+                        // output. Bug seen with "foo\n" + "${var}" chains.
                         fmt_parts.push(value
                             .replace('\\', "\\\\")
                             .replace('"', "\\\"")
+                            .replace('\n', "\\n")
+                            .replace('\t', "\\t")
+                            .replace('\r', "\\r")
                             .replace('{', "{{")
                             .replace('}', "}}"));
                     }
@@ -552,11 +573,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             }
         }
         IrExprKind::RustMacro { name, args } => {
-            // Render macro args — LitStr rendered as bare &str (no .to_string())
+            // Render macro args — LitStr rendered as bare &str (no .to_string()).
+            // Control chars must be escaped here too, otherwise they land as
+            // real source newlines and the Rust source formatter's continuation
+            // indent leaks into the string literal at runtime (same failure
+            // mode as StringInterp's Lit parts).
             let args_str = args.iter().map(|a| {
                 match &a.kind {
                     IrExprKind::LitStr { value } => {
-                        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+                        let escaped = value
+                            .replace('\\', "\\\\")
+                            .replace('"', "\\\"")
+                            .replace('\n', "\\n")
+                            .replace('\t', "\\t")
+                            .replace('\r', "\\r");
                         format!("\"{}\"", escaped)
                     }
                     _ => render_expr(ctx, a),
@@ -870,5 +900,37 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
     } else {
         ctx.templates.render_with("ctor_call", None, &[], &[("enum_name", enum_name), ("ctor_name", ctor_name), ("args", args_str.as_str())])
             .unwrap_or_else(|| format!("{}::{}({})", enum_name, ctor_name, args_str))
+    }
+}
+
+/// Wrap a rendered branch with `.to_string()` when it likely evaluates to
+/// `&str` at the Rust level but the surrounding context needs an owned
+/// `String`. Used by the If walker to avoid type mismatches between a
+/// literal branch (already `String` via `"...".to_string()`) and a bare
+/// `Var` branch whose param was emitted as `&str`.
+///
+/// Applied only when:
+///   - the expression is a bare `Var` of `Ty::String`, or
+///   - the expression is a block whose tail is such a Var.
+///
+/// Rust's `.to_string()` is idempotent on owned `String` (it clones), so
+/// even when the branch is already owned the result is correct, just with
+/// one redundant allocation.
+fn coerce_to_owned_string(rendered: &str, expr: &IrExpr) -> String {
+    let is_bare_string_var = match &expr.kind {
+        IrExprKind::Var { .. } => matches!(expr.ty, Ty::String),
+        IrExprKind::Block { stmts, expr: tail } if stmts.is_empty() => {
+            if let Some(t) = tail {
+                matches!(t.kind, IrExprKind::Var { .. }) && matches!(t.ty, Ty::String)
+            } else {
+                false
+            }
+        }
+        _ => false,
+    };
+    if is_bare_string_var {
+        format!("{}.to_string()", rendered)
+    } else {
+        rendered.to_string()
     }
 }

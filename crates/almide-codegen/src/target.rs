@@ -25,6 +25,8 @@ use super::pass_stream_fusion::StreamFusionPass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
+use super::pass_matrix_fusion::MatrixFusionPass;
+use super::pass_const_fold::ConstFoldPass;
 use super::pass_rust_lowering::RustLoweringPass;
 use super::pass_lambda_type_resolve::LambdaTypeResolvePass;
 use super::pass_concretize_types::ConcretizeTypesPass;
@@ -63,6 +65,10 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(BoxDerefPass)
             // LICM: hoist loop-invariant expressions before loops
             .add(LICMPass)
+            // MatrixFusion BEFORE borrow/clone (matches raw Module-call IR shape)
+            .add(MatrixFusionPass)
+            // Clean up arithmetic on numeric literals (e.g. (kb * -1.0) → -kb)
+            .add(ConstFoldPass)
             // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
             .add(StreamFusionPass)
             .add(BorrowInsertionPass)
@@ -115,6 +121,11 @@ fn build_pipeline(target: Target) -> Pipeline {
             // Runs early so violations surface before deep transformations.
             .add(ResolveCallsPass)
             .add(LICMPass)
+            // MatrixFusion: collapse matrix.add(matrix.scale(a, ka), matrix.scale(b, kb))
+            // → matrix.fma(a, ka, b, kb). Eliminates 2 alloc + 2 passes per chain.
+            .add(MatrixFusionPass)
+            // Clean up arithmetic on numeric literals (e.g. (kb * -1.0) → -kb)
+            .add(ConstFoldPass)
             .add(EffectInferencePass)
             // StreamFusion not included: WASM emitter has its own lowering paths
             .add(ResultPropagationPass)

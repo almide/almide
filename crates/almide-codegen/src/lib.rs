@@ -45,6 +45,8 @@ pub mod pass_tco;
 pub mod pass_tail_call_mark;
 pub mod pass_licm;
 pub mod pass_peephole;
+pub mod pass_matrix_fusion;
+pub mod pass_const_fold;
 pub mod pass_rust_lowering;
 pub mod pass_lambda_type_resolve;
 pub mod pass_concretize_types;

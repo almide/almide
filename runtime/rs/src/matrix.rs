@@ -193,6 +193,31 @@ pub fn almide_rt_matrix_scale(m: &AlmideMatrix, s: f64) -> AlmideMatrix {
     m.iter().map(|row| row.iter().map(|x| x * s).collect()).collect()
 }
 
+/// Fused multiply-add: a*ka + b*kb in one pass, single allocation.
+/// Equivalent to `add(scale(a, ka), scale(b, kb))` but reads each input
+/// once and allocates once. Caller must ensure shapes match.
+pub fn almide_rt_matrix_fma(a: &AlmideMatrix, ka: f64, b: &AlmideMatrix, kb: f64) -> AlmideMatrix {
+    a.iter().zip(b.iter())
+        .map(|(ar, br)| ar.iter().zip(br.iter()).map(|(x, y)| x * ka + y * kb).collect())
+        .collect()
+}
+
+/// Three-term fused multiply-add: `a*ka + b*kb + c*kc` in one pass.
+/// Target of the MatrixFusionPass tree-fuse rule for nested fma collapse.
+pub fn almide_rt_matrix_fma3(
+    a: &AlmideMatrix, ka: f64,
+    b: &AlmideMatrix, kb: f64,
+    c: &AlmideMatrix, kc: f64,
+) -> AlmideMatrix {
+    a.iter().zip(b.iter()).zip(c.iter())
+        .map(|((ar, br), cr)| {
+            ar.iter().zip(br.iter()).zip(cr.iter())
+                .map(|((x, y), z)| x * ka + y * kb + z * kc)
+                .collect()
+        })
+        .collect()
+}
+
 pub fn almide_rt_matrix_map(m: &AlmideMatrix, f: impl Fn(f64) -> f64) -> AlmideMatrix {
     m.iter().map(|row| row.iter().map(|x| f(*x)).collect()).collect()
 }

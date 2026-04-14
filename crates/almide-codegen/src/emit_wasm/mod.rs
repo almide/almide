@@ -121,6 +121,8 @@ pub struct StringRuntime {
 pub struct RuntimeFuncs {
     pub fd_write: u32,
     pub alloc: u32,
+    pub heap_save: u32,
+    pub heap_restore: u32,
     pub println_str: u32,
     pub int_to_string: u32,
     pub println_int: u32,
@@ -293,6 +295,7 @@ impl WasmEmitter {
             data_bytes: vec![0x0A],
             rt: RuntimeFuncs {
                 fd_write: 0, alloc: 0,
+                heap_save: 0, heap_restore: 0,
                 println_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
@@ -1159,6 +1162,15 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // Export __alloc for FFI callers to allocate WASM linear memory
     if let Some(&alloc_idx) = emitter.func_map.get("__alloc") {
         exports.export("__alloc", wasm_encoder::ExportKind::Func, alloc_idx);
+    }
+    // Export __heap_save / __heap_restore so JS-side wrappers can implement
+    // scoped (arena-style) cleanup after each foreign call. Without these
+    // the bump allocator never frees and long-running benchmarks OOM.
+    if let Some(&idx) = emitter.func_map.get("__heap_save") {
+        exports.export("__heap_save", wasm_encoder::ExportKind::Func, idx);
+    }
+    if let Some(&idx) = emitter.func_map.get("__heap_restore") {
+        exports.export("__heap_restore", wasm_encoder::ExportKind::Func, idx);
     }
     // Export public user functions (collected during emit)
     for name in &emitter.user_exports {

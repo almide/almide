@@ -272,6 +272,81 @@ pub fn almide_rt_matrix_add(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
     }
 }
 
+// Fused multiply-add: a*ka + b*kb in one pass with one allocation.
+// Falls back to scale+add via burn for non-Small cases.
+pub fn almide_rt_matrix_fma(a: &AlmideMatrix, ka: f64, b: &AlmideMatrix, kb: f64) -> AlmideMatrix {
+    match (a, b) {
+        (AlmideMatrix::Small { rows, cols, data: ad },
+         AlmideMatrix::Small { data: bd, .. }) => {
+            let n = ad.len();
+            let mut out: Vec<f64> = Vec::with_capacity(n);
+            unsafe {
+                let (s1, s2, d) = (ad.as_ptr(), bd.as_ptr(), out.as_mut_ptr());
+                for i in 0..n { *d.add(i) = *s1.add(i) * ka + *s2.add(i) * kb; }
+                out.set_len(n);
+            }
+            AlmideMatrix::Small { rows: *rows, cols: *cols, data: out }
+        }
+        (AlmideMatrix::SmallF32 { rows, cols, data: ad },
+         AlmideMatrix::SmallF32 { data: bd, .. }) => {
+            let n = ad.len();
+            let ka32 = ka as f32;
+            let kb32 = kb as f32;
+            let mut out: Vec<f32> = Vec::with_capacity(n);
+            unsafe {
+                let (s1, s2, d) = (ad.as_ptr(), bd.as_ptr(), out.as_mut_ptr());
+                for i in 0..n { *d.add(i) = *s1.add(i) * ka32 + *s2.add(i) * kb32; }
+                out.set_len(n);
+            }
+            AlmideMatrix::SmallF32 { rows: *rows, cols: *cols, data: out }
+        }
+        _ => almide_rt_matrix_add(
+            &almide_rt_matrix_scale(a, ka),
+            &almide_rt_matrix_scale(b, kb),
+        ),
+    }
+}
+
+// Three-term fused multiply-add: a*ka + b*kb + c*kc in one pass.
+// Target of the MatrixFusionPass tree-fuse rule.
+pub fn almide_rt_matrix_fma3(
+    a: &AlmideMatrix, ka: f64,
+    b: &AlmideMatrix, kb: f64,
+    c: &AlmideMatrix, kc: f64,
+) -> AlmideMatrix {
+    match (a, b, c) {
+        (AlmideMatrix::Small { rows, cols, data: ad },
+         AlmideMatrix::Small { data: bd, .. },
+         AlmideMatrix::Small { data: cd, .. }) => {
+            let n = ad.len();
+            let mut out: Vec<f64> = Vec::with_capacity(n);
+            unsafe {
+                let (s1, s2, s3, d) = (ad.as_ptr(), bd.as_ptr(), cd.as_ptr(), out.as_mut_ptr());
+                for i in 0..n { *d.add(i) = *s1.add(i) * ka + *s2.add(i) * kb + *s3.add(i) * kc; }
+                out.set_len(n);
+            }
+            AlmideMatrix::Small { rows: *rows, cols: *cols, data: out }
+        }
+        (AlmideMatrix::SmallF32 { rows, cols, data: ad },
+         AlmideMatrix::SmallF32 { data: bd, .. },
+         AlmideMatrix::SmallF32 { data: cd, .. }) => {
+            let n = ad.len();
+            let (ka32, kb32, kc32) = (ka as f32, kb as f32, kc as f32);
+            let mut out: Vec<f32> = Vec::with_capacity(n);
+            unsafe {
+                let (s1, s2, s3, d) = (ad.as_ptr(), bd.as_ptr(), cd.as_ptr(), out.as_mut_ptr());
+                for i in 0..n { *d.add(i) = *s1.add(i) * ka32 + *s2.add(i) * kb32 + *s3.add(i) * kc32; }
+                out.set_len(n);
+            }
+            AlmideMatrix::SmallF32 { rows: *rows, cols: *cols, data: out }
+        }
+        _ => almide_rt_matrix_add(
+            &almide_rt_matrix_fma(a, ka, b, kb),
+            &almide_rt_matrix_scale(c, kc),
+        ),
+    }
+}
+
 pub fn almide_rt_matrix_sub(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
     match (a, b) {
         (AlmideMatrix::Small { rows, cols, data: ad },

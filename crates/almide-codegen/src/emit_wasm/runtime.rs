@@ -135,6 +135,14 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     let alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.alloc = emitter.register_func("__alloc", alloc_ty);
 
+    // __heap_save() -> i32   — return current heap pointer
+    let heap_save_ty = emitter.register_type(vec![], vec![ValType::I32]);
+    emitter.rt.heap_save = emitter.register_func("__heap_save", heap_save_ty);
+
+    // __heap_restore(ptr: i32) -> () — reset heap pointer (frees alloc above ptr)
+    let heap_restore_ty = emitter.register_type(vec![ValType::I32], vec![]);
+    emitter.rt.heap_restore = emitter.register_func("__heap_restore", heap_restore_ty);
+
     // __println_str(ptr: i32) -> ()
     let println_ty = emitter.register_type(vec![ValType::I32], vec![]);
     emitter.rt.println_str = emitter.register_func("__println_str", println_ty);
@@ -271,6 +279,8 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 /// Compile all runtime function bodies.
 pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_alloc(emitter);
+    compile_heap_save(emitter);
+    compile_heap_restore(emitter);
     compile_println_str(emitter);
     compile_int_to_string(emitter);
     compile_float_to_string(emitter);
@@ -351,6 +361,31 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
         end;
     });
 
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+// __heap_save() -> i32
+// Returns the current heap_ptr. Pair with __heap_restore for arena-style
+// scoped allocation: save before a sequence of __alloc calls, restore after
+// to free everything allocated since the save.
+fn compile_heap_save(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.heap_save];
+    let mut f = Function::new([]);
+    f.instruction(&wasm_encoder::Instruction::GlobalGet(emitter.heap_ptr_global));
+    f.instruction(&wasm_encoder::Instruction::End);
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+// __heap_restore(ptr: i32) -> ()
+// Resets heap_ptr to the given checkpoint. Pointers allocated above this
+// checkpoint become invalid; any view over them must be discarded by the
+// caller before invoking restore.
+fn compile_heap_restore(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.heap_restore];
+    let mut f = Function::new([]);
+    f.instruction(&wasm_encoder::Instruction::LocalGet(0));
+    f.instruction(&wasm_encoder::Instruction::GlobalSet(emitter.heap_ptr_global));
+    f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 

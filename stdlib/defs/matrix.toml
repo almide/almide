@@ -94,6 +94,22 @@ return = "Matrix"
 rust = "almide_rt_matrix_scale(&{m}, {s})"
 ts = "__almd_matrix.scale({m}, {s})"
 
+[fma]
+description = "Fused multiply-add: `a*ka + b*kb` in a single pass with one allocation. Equivalent to `matrix.add(matrix.scale(a, ka), matrix.scale(b, kb))` but avoids two intermediate matrices and reads each input only once. Significantly faster for elementwise chains."
+example = 'matrix.fma(a, 1.5, b, -0.5)'
+params = [{ name = "a", type = "Matrix" }, { name = "ka", type = "Float" }, { name = "b", type = "Matrix" }, { name = "kb", type = "Float" }]
+return = "Matrix"
+rust = "almide_rt_matrix_fma(&{a}, {ka}, &{b}, {kb})"
+ts = "__almd_matrix.fma({a}, {ka}, {b}, {kb})"
+
+[fma3]
+description = "Three-term fused multiply-add: `a*ka + b*kb + c*kc` in a single pass with one allocation. Used by fusion pass to collapse nested `fma(fma(...))` expressions into one sweep."
+example = 'matrix.fma3(a, 2.0, b, -1.0, c, 0.5)'
+params = [{ name = "a", type = "Matrix" }, { name = "ka", type = "Float" }, { name = "b", type = "Matrix" }, { name = "kb", type = "Float" }, { name = "c", type = "Matrix" }, { name = "kc", type = "Float" }]
+return = "Matrix"
+rust = "almide_rt_matrix_fma3(&{a}, {ka}, &{b}, {kb}, &{c}, {kc})"
+ts = "__almd_matrix.fma3({a}, {ka}, {b}, {kb}, {c}, {kc})"
+
 [sub]
 description = "Element-wise subtraction `a - b`. Both matrices must have the same shape."
 example = 'matrix.sub(a, b)'

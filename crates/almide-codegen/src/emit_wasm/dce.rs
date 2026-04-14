@@ -32,6 +32,10 @@ pub fn eliminate_dead_code(emitter: &mut WasmEmitter) -> usize {
 
     // Also include __alloc as always-needed (called by many stubs indirectly)
     entry_points.insert(emitter.rt.alloc);
+    // __heap_save / __heap_restore are JS-callable arena-cleanup helpers;
+    // they have no callers inside the wasm but the JS side relies on them.
+    entry_points.insert(emitter.rt.heap_save);
+    entry_points.insert(emitter.rt.heap_restore);
     // __init_preopen_dirs and __resolve_path are called from main at startup
     entry_points.insert(emitter.rt.init_preopen_dirs);
     entry_points.insert(emitter.rt.resolve_path);

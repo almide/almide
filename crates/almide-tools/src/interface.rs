@@ -105,6 +105,17 @@ pub struct FunctionExport {
     pub examples: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deprecated: Option<String>,
+    /// Set when the fn is declared as a WASM import (`@extern(wasm, "mod", "name")`).
+    /// almide-wasm-bindgen consumes this to emit a JS→WASM shim that the host
+    /// must supply in the `imports` object passed to `WebAssembly.instantiate`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import: Option<ImportRef>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ImportRef {
+    pub module: String,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -243,7 +254,10 @@ pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Opti
     // Functions
     for func in &program.functions {
         if func.is_test { continue; }
-        if !matches!(func.visibility, IrVisibility::Public) { continue; }
+        // Imports (@extern(wasm, ...)) are always part of the contract —
+        // the host must supply them — so include them even if they're not `pub`.
+        let is_wasm_import = func.extern_attrs.iter().any(|a| a.target.as_str() == "wasm");
+        if !is_wasm_import && !matches!(func.visibility, IrVisibility::Public) { continue; }
         let generics = func.generics.as_ref()
             .filter(|g| !g.is_empty())
             .map(|g| g.iter().map(|p| p.name.to_string()).collect());
@@ -261,6 +275,12 @@ pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Opti
         };
 
         let info = doc_info.get(&func.name.to_string());
+        let import = func.extern_attrs.iter()
+            .find(|a| a.target.as_str() == "wasm")
+            .map(|a| ImportRef {
+                module: a.module.to_string(),
+                name: a.function.to_string(),
+            });
         functions.push(FunctionExport {
             name: func.name.to_string(),
             params: func.params.iter().map(|p| ParamExport {
@@ -274,6 +294,7 @@ pub fn extract_with_version(program: &IrProgram, module_name: &str, source: Opti
             doc: info.and_then(|i| i.doc.clone()),
             examples: info.map(|i| i.examples.clone()).unwrap_or_default(),
             deprecated: info.and_then(|i| i.deprecated.clone()),
+            import,
         });
     }
 

@@ -364,6 +364,13 @@ fn cargo_build_test_with_native(
 }
 
 /// Replace the Vec<Vec<f64>> matrix runtime with burn-backed implementation.
+///
+/// Strategy: once we enter the matrix block (marked by `pub type AlmideMatrix
+/// = Vec<Vec<f64>>`), skip every line until we find a `pub fn` whose name is
+/// NOT prefixed with `almide_rt_matrix_`. That marks the end of the matrix
+/// block. This is robust against doc comments (`///`), section dividers,
+/// helper functions, etc. — it only cares about whether we're between matrix
+/// `pub fn`s.
 fn replace_matrix_runtime(rs_code: &str) -> String {
     let mut result = String::with_capacity(rs_code.len() + BURN_MATRIX_RUNTIME.len());
     let mut in_matrix_block = false;
@@ -381,14 +388,17 @@ fn replace_matrix_runtime(rs_code: &str) -> String {
             continue;
         }
         if in_matrix_block {
-            if line.starts_with("pub fn almide_rt_matrix_")
-                || line.starts_with("    ")
-                || line.starts_with("        ")
-                || line.starts_with("// matrix")
-                || line == "}" || line.is_empty() {
+            // End of matrix block = first `pub fn` whose name is NOT
+            // `almide_rt_matrix_`. Anything else (doc comment, blank line,
+            // indented body, `// section` divider, inline helper fn) stays
+            // skipped.
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("pub fn ") && !trimmed.starts_with("pub fn almide_rt_matrix_") {
+                in_matrix_block = false;
+                // Fall through to emit this non-matrix line.
+            } else {
                 continue;
             }
-            in_matrix_block = false;
         }
         result.push_str(line);
         result.push('\n');

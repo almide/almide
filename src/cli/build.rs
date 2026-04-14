@@ -228,12 +228,49 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         almide::codegen::CodegenOutput::Source(_) => unreachable!(),
     };
 
+    let pre_size = bytes.len();
     if let Err(e) = std::fs::write(output, &bytes) {
         eprintln!("Failed to write {}: {}", output, e);
         std::process::exit(1);
     }
 
-    eprintln!("Built {} ({} bytes)", output, bytes.len());
+    // Optional post-process: wasm-opt -O3 (binaryen) shrinks size + sometimes
+    // helps perf via constant prop / dead-store elim across stdlib calls.
+    // Skip if wasm-opt is not on PATH, if ALMIDE_NO_WASM_OPT=1, or if --no-opt.
+    // Disabled by default for now (opt-in via ALMIDE_WASM_OPT=1) until the
+    // runtime is verified to round-trip cleanly through binaryen.
+    let want_opt = std::env::var("ALMIDE_WASM_OPT").map(|v| v == "1" || v == "true").unwrap_or(false);
+    if want_opt {
+        match run_wasm_opt(output) {
+            Ok(post_size) => {
+                let pct = if pre_size > 0 { 100.0 * (pre_size - post_size) as f64 / pre_size as f64 } else { 0.0 };
+                eprintln!("Built {} ({} bytes → {} bytes, -{:.1}%)", output, pre_size, post_size, pct);
+            }
+            Err(e) => {
+                eprintln!("wasm-opt skipped: {}", e);
+                eprintln!("Built {} ({} bytes)", output, pre_size);
+            }
+        }
+    } else {
+        eprintln!("Built {} ({} bytes)", output, pre_size);
+    }
+}
+
+/// Run `wasm-opt -O3 --enable-simd` on the output file, in-place.
+/// Returns the new file size on success.
+fn run_wasm_opt(path: &str) -> Result<usize, String> {
+    // --enable-bulk-memory required: matrix runtime emits memory.fill for
+    // result buffer zero-init. --enable-simd preserves f64x2 instructions
+    // from matrix.scale / add / sub / div / fma / fma3.
+    let status = std::process::Command::new("wasm-opt")
+        .args(["-O3", "--enable-simd", "--enable-bulk-memory", path, "-o", path])
+        .status()
+        .map_err(|e| format!("wasm-opt not available ({})", e))?;
+    if !status.success() {
+        return Err(format!("wasm-opt failed (exit {:?})", status.code()));
+    }
+    let meta = std::fs::metadata(path).map_err(|e| format!("stat {}: {}", path, e))?;
+    Ok(meta.len() as usize)
 }
 
 fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
