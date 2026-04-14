@@ -245,9 +245,24 @@ pub fn almide_rt_matrix_add(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
         (AlmideMatrix::Small { rows, cols, data: ad },
          AlmideMatrix::Small { data: bd, .. }) => {
             let n = ad.len();
-            let mut out = Vec::with_capacity(n);
-            for i in 0..n { out.push(ad[i] + bd[i]); }
+            let mut out: Vec<f64> = Vec::with_capacity(n);
+            unsafe {
+                let (s1, s2, d) = (ad.as_ptr(), bd.as_ptr(), out.as_mut_ptr());
+                for i in 0..n { *d.add(i) = *s1.add(i) + *s2.add(i); }
+                out.set_len(n);
+            }
             AlmideMatrix::Small { rows: *rows, cols: *cols, data: out }
+        }
+        (AlmideMatrix::SmallF32 { rows, cols, data: ad },
+         AlmideMatrix::SmallF32 { data: bd, .. }) => {
+            let n = ad.len();
+            let mut out: Vec<f32> = Vec::with_capacity(n);
+            unsafe {
+                let (s1, s2, d) = (ad.as_ptr(), bd.as_ptr(), out.as_mut_ptr());
+                for i in 0..n { *d.add(i) = *s1.add(i) + *s2.add(i); }
+                out.set_len(n);
+            }
+            AlmideMatrix::SmallF32 { rows: *rows, cols: *cols, data: out }
         }
         _ => wrap(a.to_burn().add(b.to_burn())),
     }
@@ -258,9 +273,24 @@ pub fn almide_rt_matrix_sub(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
         (AlmideMatrix::Small { rows, cols, data: ad },
          AlmideMatrix::Small { data: bd, .. }) => {
             let n = ad.len();
-            let mut out = Vec::with_capacity(n);
-            for i in 0..n { out.push(ad[i] - bd[i]); }
+            let mut out: Vec<f64> = Vec::with_capacity(n);
+            unsafe {
+                let (s1, s2, d) = (ad.as_ptr(), bd.as_ptr(), out.as_mut_ptr());
+                for i in 0..n { *d.add(i) = *s1.add(i) - *s2.add(i); }
+                out.set_len(n);
+            }
             AlmideMatrix::Small { rows: *rows, cols: *cols, data: out }
+        }
+        (AlmideMatrix::SmallF32 { rows, cols, data: ad },
+         AlmideMatrix::SmallF32 { data: bd, .. }) => {
+            let n = ad.len();
+            let mut out: Vec<f32> = Vec::with_capacity(n);
+            unsafe {
+                let (s1, s2, d) = (ad.as_ptr(), bd.as_ptr(), out.as_mut_ptr());
+                for i in 0..n { *d.add(i) = *s1.add(i) - *s2.add(i); }
+                out.set_len(n);
+            }
+            AlmideMatrix::SmallF32 { rows: *rows, cols: *cols, data: out }
         }
         _ => wrap(a.to_burn().sub(b.to_burn())),
     }
@@ -373,9 +403,43 @@ pub fn almide_rt_matrix_map(m: &AlmideMatrix, f: impl Fn(f64) -> f64) -> AlmideM
 }
 
 pub fn almide_rt_matrix_broadcast_add_row(m: &AlmideMatrix, bias: &Vec<f64>) -> AlmideMatrix {
-    let bias_t: Tensor<B, 2> = Tensor::from_data(
-        TensorData::new(bias.clone(), [1, bias.len()]), &dev());
-    wrap(m.to_burn().add(bias_t))
+    match m {
+        AlmideMatrix::Small { rows, cols, data } => {
+            let (r, c) = (*rows, *cols);
+            let mut out: Vec<f64> = Vec::with_capacity(r * c);
+            unsafe {
+                let (src, dst, bp) = (data.as_ptr(), out.as_mut_ptr(), bias.as_ptr());
+                for i in 0..r {
+                    let base = i * c;
+                    for j in 0..c {
+                        *dst.add(base + j) = *src.add(base + j) + *bp.add(j);
+                    }
+                }
+                out.set_len(r * c);
+            }
+            AlmideMatrix::Small { rows: r, cols: c, data: out }
+        }
+        AlmideMatrix::SmallF32 { rows, cols, data } => {
+            let (r, c) = (*rows, *cols);
+            let mut out: Vec<f32> = Vec::with_capacity(r * c);
+            unsafe {
+                let (src, dst, bp) = (data.as_ptr(), out.as_mut_ptr(), bias.as_ptr());
+                for i in 0..r {
+                    let base = i * c;
+                    for j in 0..c {
+                        *dst.add(base + j) = *src.add(base + j) + (*bp.add(j) as f32);
+                    }
+                }
+                out.set_len(r * c);
+            }
+            AlmideMatrix::SmallF32 { rows: r, cols: c, data: out }
+        }
+        AlmideMatrix::Burn(_) => {
+            let bias_t: Tensor<B, 2> = Tensor::from_data(
+                TensorData::new(bias.clone(), [1, bias.len()]), &dev());
+            wrap(m.to_burn().add(bias_t))
+        }
+    }
 }
 
 pub fn almide_rt_matrix_layer_norm_rows(m: &AlmideMatrix, gamma: &Vec<f64>, beta: &Vec<f64>, eps: f64) -> AlmideMatrix {
