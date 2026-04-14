@@ -667,8 +667,14 @@ pub fn almide_rt_matrix_mul_f32_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideM
         (AlmideMatrix::SmallF32 { rows: m, cols: k, data: ad },
          AlmideMatrix::SmallF32 { rows: _, cols: n, data: bd }) => {
             let (m, k, n) = (*m, *k, *n);
-            // f32 sgemm does NOT show an alpha!=1 penalty at large sizes
-            // (Accelerate's sgemm is tuned differently than dgemm); fuse all.
+            // In chained matmul pipelines, separate scale + mul beats
+            // sgemm-with-alpha for square-ish shapes where Accelerate's
+            // alpha=1 path is better tuned. Keep fusion for single-matmul
+            // cases (skinny / non-square) where the alloc savings dominate.
+            let square_ish = m == k && k == n;
+            if square_ish && m > RAW_LOOP_MAX {
+                return almide_rt_matrix_mul_f32(&almide_rt_matrix_scale(a, alpha), b);
+            }
             if m.max(k).max(n) <= RAW_LOOP_MAX {
                 let mut out = vec![0.0f32; m * n];
                 let alpha = alpha as f32;
@@ -758,8 +764,8 @@ pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMat
         (AlmideMatrix::SmallF32 { rows: m, cols: k, data: ad },
          AlmideMatrix::SmallF32 { rows: _, cols: n, data: bd }) => {
             let (m, k, n) = (*m, *k, *n);
-            let mut out = vec![0.0f32; m * n];
             if m.max(k).max(n) <= RAW_LOOP_MAX {
+                let mut out = vec![0.0f32; m * n];
                 for i in 0..m {
                     let a_row = &ad[i * k..(i + 1) * k];
                     let out_row = &mut out[i * n..(i + 1) * n];
@@ -771,8 +777,9 @@ pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMat
                         }
                     }
                 }
+                AlmideMatrix::SmallF32 { rows: m, cols: n, data: out }
             } else {
-                let mut out_buf: Vec<f32> = Vec::with_capacity(m * n);
+                let mut out: Vec<f32> = Vec::with_capacity(m * n);
                 unsafe {
                     cblas_sgemm(
                         101, 111, 111,
@@ -781,13 +788,12 @@ pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMat
                         ad.as_ptr(), k as i32,
                         bd.as_ptr(), n as i32,
                         0.0,
-                        out_buf.as_mut_ptr(), n as i32,
+                        out.as_mut_ptr(), n as i32,
                     );
-                    out_buf.set_len(m * n);
+                    out.set_len(m * n);
                 }
-                return AlmideMatrix::SmallF32 { rows: m, cols: n, data: out_buf };
+                AlmideMatrix::SmallF32 { rows: m, cols: n, data: out }
             }
-            AlmideMatrix::SmallF32 { rows: m, cols: n, data: out }
         }
         // Mixed: promote the non-f32 side (rare — only happens when user
         // mixes f64 and f32 matrices. Fall back to f64 path).
