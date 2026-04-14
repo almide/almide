@@ -13,6 +13,7 @@ use crate::intern::Sym;
 pub enum Ty {
     Int,
     Float,
+    F32,
     String,
     Bool,
     Unit,
@@ -118,6 +119,7 @@ impl Ty {
         match self {
             Ty::Int => "Int".into(),
             Ty::Float => "Float".into(),
+            Ty::F32 => "F32".into(),
             Ty::String => "String".into(),
             Ty::Bool => "Bool".into(),
             Ty::Unit => "Unit".into(),
@@ -366,7 +368,7 @@ impl Ty {
     pub fn children(&self) -> Vec<&Ty> {
         match self {
             // Leaf types — no children
-            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
+            Ty::Int | Ty::Float | Ty::F32 | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
             | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => vec![],
 
             // Parameterized types (List, Option, Result, Map, user-defined)
@@ -413,7 +415,7 @@ impl Ty {
         F: Fn(&Ty) -> Ty,
     {
         match self {
-            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
+            Ty::Int | Ty::Float | Ty::F32 | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
             | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => self.clone(),
 
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
@@ -459,7 +461,7 @@ impl Ty {
         F: FnMut(&Ty) -> Ty,
     {
         match self {
-            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
+            Ty::Int | Ty::Float | Ty::F32 | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
             | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => self.clone(),
 
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
@@ -537,6 +539,7 @@ impl Ty {
         match self {
             Ty::Int => Some("Int"),
             Ty::Float => Some("Float"),
+            Ty::F32 => Some("F32"),
             Ty::String => Some("String"),
             Ty::Bool => Some("Bool"),
             Ty::Unit => Some("Unit"),
@@ -552,6 +555,7 @@ impl Ty {
                 TypeConstructorId::Tuple => "Tuple",
                 TypeConstructorId::Int => "Int",
                 TypeConstructorId::Float => "Float",
+                TypeConstructorId::F32 => "F32",
                 TypeConstructorId::String => "String",
                 TypeConstructorId::Bool => "Bool",
                 TypeConstructorId::Unit => "Unit",
