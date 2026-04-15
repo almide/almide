@@ -575,6 +575,12 @@ macro_rules! wasm {
     (@emit $f:expr, f64x2_add; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64x2Add); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, f64x2_sub; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64x2Sub); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64x2_div; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64x2Div); wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, f64x2_splat; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64x2Splat); wasm!(@emit $f, $($rest)*)
     };

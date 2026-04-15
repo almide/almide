@@ -1,6 +1,5 @@
 // json.stringify → json.parse round-trip with special characters.
-// Rust target only (WASM json.parse does not yet unescape \\n etc.)
-// @skip-wasm
+// Works on both Rust and WASM targets.
 
 import json
 

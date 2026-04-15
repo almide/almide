@@ -28,6 +28,13 @@ pub struct ImportTable {
 
     /// Modules actually referenced in code. Written by checker for unused-import detection.
     pub used: HashSet<Sym>,
+
+    /// Selective imports: bare name → canonical module name.
+    /// `import json.{from_string, stringify}` produces:
+    ///   "from_string" → "json", "stringify" → "json"
+    /// Consumers (checker, lowering) rewrite a bare call `from_string(x)` to
+    /// the qualified form `json.from_string(x)`.
+    pub direct: HashMap<Sym, Sym>,
 }
 
 impl ImportTable {
@@ -42,7 +49,14 @@ impl ImportTable {
             accessible: HashSet::new(),
             stdlib,
             used: HashSet::new(),
+            direct: HashMap::new(),
         }
+    }
+
+    /// Resolve a bare name (e.g. `from_string`) to its qualified form (`json.from_string`)
+    /// if it was selectively imported. Returns `None` otherwise.
+    pub fn resolve_direct(&self, name: &str) -> Option<String> {
+        self.direct.get(&sym(name)).map(|m| format!("{}.{}", m.as_str(), name))
     }
 
     /// Check if a name resolves to a known module (stdlib, accessible, or aliased).
@@ -129,8 +143,8 @@ pub fn build_import_table(
     let mut canonical_to_alias: HashMap<String, String> = HashMap::new();
 
     for imp in &prog.imports {
-        let (path, alias, span) = match imp {
-            ast::Decl::Import { path, alias, span, .. } => (path, alias, span),
+        let (path, alias, names, span) = match imp {
+            ast::Decl::Import { path, alias, names, span } => (path, alias, names, span),
             _ => continue,
         };
 
@@ -208,6 +222,14 @@ pub fn build_import_table(
         let first_segment = path.first().map(|s| s.as_str()).unwrap_or("");
         if crate::stdlib::is_any_stdlib(first_segment) && !is_self {
             table.stdlib.insert(sym(first_segment));
+        }
+
+        // 8. Selective import: register each name → canonical module mapping.
+        // Lets bare calls `from_string(x)` resolve to `json.from_string(x)`.
+        if let Some(name_list) = names {
+            for n in name_list {
+                table.direct.insert(*n, sym(&canonical));
+            }
         }
     }
 

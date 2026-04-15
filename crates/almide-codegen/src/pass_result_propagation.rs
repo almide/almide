@@ -240,13 +240,40 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
             then: Box::new(update_call_types(*then, lifted)),
             else_: Box::new(update_call_types(*else_, lifted)),
         },
-        IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(update_call_types(*subject, lifted)),
-            arms: arms.into_iter().map(|arm| IrMatchArm {
+        IrExprKind::Match { subject, arms } => {
+            let arms: Vec<_> = arms.into_iter().map(|arm| IrMatchArm {
                 pattern: arm.pattern,
                 guard: arm.guard.map(|g| update_call_types(g, lifted)),
                 body: update_call_types(arm.body, lifted),
-            }).collect(),
+            }).collect();
+            // Auto-Try for match arm type unification: when the match's expected
+            // type is T but an arm body is a Result<T> from a lifted effect fn,
+            // wrap the body in Try so all arms unify on T. Without this, mixing
+            // user effect fn calls with built-in effects (println etc.) in
+            // different arms produces a rustc type-mismatch.
+            let arms = arms.into_iter().map(|arm| {
+                if !ty.is_result() && arm.body.ty.is_result()
+                    && matches!(&arm.body.kind, IrExprKind::Call { .. })
+                {
+                    let inner_ty = match &arm.body.ty {
+                        Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => args[0].clone(),
+                        _ => ty.clone(),
+                    };
+                    let body_span = arm.body.span;
+                    IrMatchArm {
+                        pattern: arm.pattern,
+                        guard: arm.guard,
+                        body: IrExpr {
+                            kind: IrExprKind::Try { expr: Box::new(arm.body) },
+                            ty: inner_ty,
+                            span: body_span,
+                        },
+                    }
+                } else {
+                    arm
+                }
+            }).collect();
+            IrExprKind::Match { subject: Box::new(update_call_types(*subject, lifted)), arms }
         },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple,

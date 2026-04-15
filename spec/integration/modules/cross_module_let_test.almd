@@ -1,0 +1,13 @@
+import letlib
+
+test "cross-module let value access" {
+  assert_eq(letlib.GREETING, "hello")
+}
+
+test "cross-module let composes with stdlib pipes" {
+  assert_eq(letlib.NUMBERS |> list.len, 3)
+}
+
+test "cross-module let alongside cross-module fn" {
+  assert_eq(letlib.welcome(), "hello world")
+}

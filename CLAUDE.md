@@ -24,6 +24,25 @@
 - Focus on what changed, not why
 - Commit messages must be in **English only** (enforced by `english-only` commit-msg hook)
 
+## Release Procedure
+
+The release workflow (`.github/workflows/release.yml`, triggered by `v*` tag pushes) **owns release creation**. Do NOT manually `gh release create` after pushing a tag — you will race the workflow and the workflow step will fail with "a release with the same tag name already exists".
+
+Correct flow:
+
+1. Bump `Cargo.toml` version on `develop`, commit, push
+2. Wait for `develop` CI to be green
+3. PR `develop → main`, merge (requires green CI — do not force-merge releases)
+4. `git tag vX.Y.Z <merge-commit>` and `git push origin vX.Y.Z`
+5. **Let the workflow create the release.** It auto-generates notes from commits.
+6. If you want custom notes, edit after the workflow completes: `gh release edit vX.Y.Z --notes "..."`
+
+If you already shipped a broken release:
+
+- `gh release delete vX.Y.Z --yes`
+- `git push --delete origin vX.Y.Z && git tag -d vX.Y.Z`
+- Fix on `develop`, bump to `vX.Y.(Z+1)`, repeat
+
 ## Development Setup
 
 After cloning, install the git hooks:

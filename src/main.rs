@@ -96,6 +96,11 @@ enum Commands {
         #[arg(long)]
         effects: bool,
     },
+    /// Explain a diagnostic code (e.g., almide explain E001)
+    Explain {
+        /// Diagnostic code such as E001
+        code: String,
+    },
     /// Format source files
     Fmt {
         /// Files to format (default: src/**/*.almd)
@@ -382,6 +387,32 @@ fn resolve_file(file: Option<String>) -> String {
 }
 
 fn print_error_explanation(code: &str) {
+    // Prefer richer markdown reference under docs/diagnostics/<CODE>.md when
+    // running from a checkout (or when ALMIDE_DIAGNOSTICS_DIR is set).
+    let candidates: Vec<std::path::PathBuf> = {
+        let mut paths = Vec::new();
+        if let Ok(dir) = std::env::var("ALMIDE_DIAGNOSTICS_DIR") {
+            paths.push(std::path::PathBuf::from(dir).join(format!("{}.md", code)));
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            // Walk up parent dirs, looking for docs/diagnostics/CODE.md.
+            // Handles target/release/almide and ~/.local/bin/almide layouts.
+            let mut cur = exe.as_path();
+            for _ in 0..6 {
+                paths.push(cur.join("docs/diagnostics").join(format!("{}.md", code)));
+                if let Some(p) = cur.parent() { cur = p; } else { break; }
+            }
+        }
+        paths.push(std::path::PathBuf::from(format!("docs/diagnostics/{}.md", code)));
+        paths
+    };
+    for path in &candidates {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            println!("{}", content);
+            return;
+        }
+    }
+
     let explanation = match code {
         "E001" => "E001: Type mismatch\n\n  The expression's type does not match what was expected.\n\n  Example:\n    fn f() -> Int = \"hello\"  // error: expected Int but got String\n\n  Fix: Change the expression to match the expected type, or use a\n  conversion function like int.to_string() or int.parse().",
         "E002" => "E002: Undefined function\n\n  The function name was not found in the current scope, stdlib, or imports.\n\n  Example:\n    fn f() -> Int = nonexistent()  // error: undefined function\n\n  Fix: Check the function name for typos, or import the module that defines it.",
@@ -456,6 +487,9 @@ fn dispatch(cli: Cli) {
             } else {
                 cli::cmd_check(&file, deny_warnings);
             }
+        }
+        Commands::Explain { code } => {
+            print_error_explanation(&code);
         }
         Commands::Fmt { files, check, dry_run } => {
             let write_back = !check && !dry_run;

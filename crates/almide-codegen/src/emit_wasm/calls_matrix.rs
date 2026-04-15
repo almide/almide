@@ -214,7 +214,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(src);
             }
             "add" | "sub" | "div" => {
-                // element-wise add/sub/div
+                // element-wise add/sub/div with f64x2 SIMD inner loop + scalar tail
                 let a = self.scratch.alloc_i32();
                 let b = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
@@ -231,8 +231,27 @@ impl FuncCompiler<'_> {
                     local_get(dst); local_get(a); i32_load(0); i32_store(0);
                     local_get(dst); local_get(a); i32_load(4); i32_store(4);
                     i32_const(0); local_set(i);
+                    // SIMD loop: 2 elements per iter
                     block_empty; loop_empty;
-                      local_get(i); local_get(total); i32_ge_u; br_if(1);
+                      local_get(i); i32_const(1); i32_add; local_get(total); i32_ge_u; br_if(1);
+                      local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(a); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; v128_load(0);
+                      local_get(b); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; v128_load(0);
+                });
+                match method {
+                    "add" => { wasm!(self.func, { f64x2_add; }); }
+                    "sub" => { wasm!(self.func, { f64x2_sub; }); }
+                    "div" => { wasm!(self.func, { f64x2_div; }); }
+                    _ => unreachable!(),
+                }
+                wasm!(self.func, {
+                      v128_store(0);
+                      local_get(i); i32_const(2); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    // Scalar tail (1 element if total is odd)
+                    local_get(i); local_get(total); i32_lt_u;
+                    if_empty;
                       local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
                       local_get(a); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
                       local_get(b); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
@@ -245,9 +264,7 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                       f64_store(0);
-                      local_get(i); i32_const(1); i32_add; local_set(i);
-                      br(0);
-                    end; end;
+                    end;
                     local_get(dst);
                 });
                 self.scratch.free_i32(i);
@@ -434,15 +451,24 @@ impl FuncCompiler<'_> {
                     local_get(dst); local_get(m); i32_load(0); i32_store(0);
                     local_get(dst); local_get(m); i32_load(4); i32_store(4);
                     i32_const(0); local_set(i);
+                    // SIMD f64x2 inner loop
                     block_empty; loop_empty;
-                      local_get(i); local_get(total); i32_ge_u; br_if(1);
+                      local_get(i); i32_const(1); i32_add; local_get(total); i32_ge_u; br_if(1);
+                      local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(m); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      v128_load(0); local_get(s); f64x2_splat; f64x2_mul;
+                      v128_store(0);
+                      local_get(i); i32_const(2); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    // Scalar tail (1 element if total is odd)
+                    local_get(i); local_get(total); i32_lt_u;
+                    if_empty;
                       local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
                       local_get(m); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
                       f64_load(0); local_get(s); f64_mul;
                       f64_store(0);
-                      local_get(i); i32_const(1); i32_add; local_set(i);
-                      br(0);
-                    end; end;
+                    end;
                     local_get(dst);
                 });
                 self.scratch.free_f64(s);
@@ -450,6 +476,181 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(total);
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(m);
+            }
+            "fma" => {
+                // matrix.fma(a, ka, b, kb) → a*ka + b*kb in one pass.
+                // Layout: [rows:i32][cols:i32][f64 × rows*cols], same as
+                // scale/add. Total i = rows*cols, single allocation, two
+                // f64 loads + 2 muls + 1 add per element. Equivalent to
+                // add(scale(a, ka), scale(b, kb)) but skips two intermediate
+                // matrices and an extra pass.
+                let a = self.scratch.alloc_i32();
+                let b = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
+                let total = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let ka = self.scratch.alloc_f64();
+                let kb = self.scratch.alloc_f64();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(a); });
+                self.emit_expr(&args[1]);
+                if matches!(&args[1].ty, almide_lang::types::Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { local_set(ka); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, { local_set(b); });
+                self.emit_expr(&args[3]);
+                if matches!(&args[3].ty, almide_lang::types::Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, {
+                    local_set(kb);
+                    // total = rows * cols
+                    local_get(a); i32_load(0); local_get(a); i32_load(4); i32_mul; local_set(total);
+                    // alloc 8 + total*8
+                    local_get(total); i32_const(8); i32_mul; i32_const(8); i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    // copy header
+                    local_get(dst); local_get(a); i32_load(0); i32_store(0);
+                    local_get(dst); local_get(a); i32_load(4); i32_store(4);
+                    i32_const(0); local_set(i);
+
+                    // SIMD f64x2 inner loop: process 2 f64 elements per iteration.
+                    // Loop invariant: i + 1 < total (room for 2 lanes).
+                    block_empty; loop_empty;
+                      // exit when i+1 >= total (no room for full lane)
+                      local_get(i); i32_const(1); i32_add; local_get(total); i32_ge_u; br_if(1);
+                      // dst addr = dst + 8 + i*8
+                      local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      // v_a = load a[i..i+2]
+                      local_get(a); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      v128_load(0);
+                      // v_a *= splat(ka)
+                      local_get(ka); f64x2_splat;
+                      f64x2_mul;
+                      // v_b = load b[i..i+2]
+                      local_get(b); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      v128_load(0);
+                      // v_b *= splat(kb)
+                      local_get(kb); f64x2_splat;
+                      f64x2_mul;
+                      // v_a + v_b
+                      f64x2_add;
+                      // store dst[i..i+2]
+                      v128_store(0);
+                      // i += 2
+                      local_get(i); i32_const(2); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+
+                    // Scalar tail: process one trailing element if total is odd.
+                    local_get(i); local_get(total); i32_lt_u;
+                    if_empty;
+                      local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(a); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
+                      local_get(ka); f64_mul;
+                      local_get(b); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
+                      local_get(kb); f64_mul;
+                      f64_add;
+                      f64_store(0);
+                    end;
+
+                    local_get(dst);
+                });
+                self.scratch.free_f64(kb);
+                self.scratch.free_f64(ka);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(total);
+                self.scratch.free_i32(dst);
+                self.scratch.free_i32(b);
+                self.scratch.free_i32(a);
+            }
+            "fma3" => {
+                // matrix.fma3(a, ka, b, kb, c, kc) → a*ka + b*kb + c*kc in one pass.
+                // Target of MatrixFusionPass tree-fuse rule (nested fma collapse).
+                // SIMD f64x2 inner loop + scalar tail, same shape as fma but with
+                // a third input/coefficient pair.
+                let a = self.scratch.alloc_i32();
+                let b = self.scratch.alloc_i32();
+                let c = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
+                let total = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let ka = self.scratch.alloc_f64();
+                let kb = self.scratch.alloc_f64();
+                let kc = self.scratch.alloc_f64();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(a); });
+                self.emit_expr(&args[1]);
+                if matches!(&args[1].ty, almide_lang::types::Ty::Int) { wasm!(self.func, { f64_convert_i64_s; }); }
+                wasm!(self.func, { local_set(ka); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, { local_set(b); });
+                self.emit_expr(&args[3]);
+                if matches!(&args[3].ty, almide_lang::types::Ty::Int) { wasm!(self.func, { f64_convert_i64_s; }); }
+                wasm!(self.func, { local_set(kb); });
+                self.emit_expr(&args[4]);
+                wasm!(self.func, { local_set(c); });
+                self.emit_expr(&args[5]);
+                if matches!(&args[5].ty, almide_lang::types::Ty::Int) { wasm!(self.func, { f64_convert_i64_s; }); }
+                wasm!(self.func, {
+                    local_set(kc);
+                    local_get(a); i32_load(0); local_get(a); i32_load(4); i32_mul; local_set(total);
+                    local_get(total); i32_const(8); i32_mul; i32_const(8); i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    local_get(dst); local_get(a); i32_load(0); i32_store(0);
+                    local_get(dst); local_get(a); i32_load(4); i32_store(4);
+                    i32_const(0); local_set(i);
+
+                    block_empty; loop_empty;
+                      local_get(i); i32_const(1); i32_add; local_get(total); i32_ge_u; br_if(1);
+                      local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(a); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      v128_load(0);
+                      local_get(ka); f64x2_splat;
+                      f64x2_mul;
+                      local_get(b); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      v128_load(0);
+                      local_get(kb); f64x2_splat;
+                      f64x2_mul;
+                      f64x2_add;
+                      local_get(c); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      v128_load(0);
+                      local_get(kc); f64x2_splat;
+                      f64x2_mul;
+                      f64x2_add;
+                      v128_store(0);
+                      local_get(i); i32_const(2); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+
+                    // Scalar tail
+                    local_get(i); local_get(total); i32_lt_u;
+                    if_empty;
+                      local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(a); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
+                      local_get(ka); f64_mul;
+                      local_get(b); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
+                      local_get(kb); f64_mul;
+                      f64_add;
+                      local_get(c); i32_const(8); i32_add; local_get(i); i32_const(8); i32_mul; i32_add; f64_load(0);
+                      local_get(kc); f64_mul;
+                      f64_add;
+                      f64_store(0);
+                    end;
+
+                    local_get(dst);
+                });
+                self.scratch.free_f64(kc);
+                self.scratch.free_f64(kb);
+                self.scratch.free_f64(ka);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(total);
+                self.scratch.free_i32(dst);
+                self.scratch.free_i32(c);
+                self.scratch.free_i32(b);
+                self.scratch.free_i32(a);
             }
             "from_lists" => {
                 // matrix.from_lists(rows: List[List[Float]]) → Matrix

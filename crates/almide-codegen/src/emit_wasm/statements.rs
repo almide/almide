@@ -101,7 +101,15 @@ impl FuncCompiler<'_> {
                         return;
                     }
                 };
-                if is_cell {
+                // Defensive: if the RHS has no WASM value (Unit / Never), skip
+                // the local_set. This protects against type-checker gaps where
+                // `m = unit_returning_call(...)` leaks through — the call still
+                // runs for its side effects, we just don't update the local.
+                // A real type error should ideally be caught in the checker;
+                // this prevents WASM validation crashes in the meantime.
+                if values::ty_to_valtype(&value.ty).is_none() {
+                    self.emit_expr(value);
+                } else if is_cell {
                     // Cell: local holds ptr, store new value into cell
                     wasm!(self.func, { local_get(local_idx); });
                     self.emit_expr(value);

@@ -345,7 +345,37 @@ fn cargo_build_test_with_native(
 
     let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        // --quiet suppresses cargo's own error display, but rustc messages
+        // come through stdout as JSON (--message-format=json). Extract the
+        // "rendered" field from each compiler-message so the user sees the
+        // real error spans, not just "1 previous error; N warnings emitted".
+        let mut rendered: Vec<String> = Vec::new();
+        let verbose = std::env::var("ALMIDE_TEST_VERBOSE")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                if json.get("reason").and_then(|r| r.as_str()) == Some("compiler-message") {
+                    let level = json.get("message")
+                        .and_then(|m| m.get("level"))
+                        .and_then(|l| l.as_str())
+                        .unwrap_or("");
+                    if level == "error" || verbose {
+                        if let Some(msg) = json.get("message")
+                            .and_then(|m| m.get("rendered"))
+                            .and_then(|r| r.as_str())
+                        {
+                            rendered.push(msg.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if rendered.is_empty() {
+            return Err(stderr);
+        }
+        return Err(format!("{}\n{}", rendered.join("\n"), stderr));
     }
 
     // Parse the JSON output to find the test binary path
@@ -364,6 +394,13 @@ fn cargo_build_test_with_native(
 }
 
 /// Replace the Vec<Vec<f64>> matrix runtime with burn-backed implementation.
+///
+/// Strategy: once we enter the matrix block (marked by `pub type AlmideMatrix
+/// = Vec<Vec<f64>>`), skip every line until we find a `pub fn` whose name is
+/// NOT prefixed with `almide_rt_matrix_`. That marks the end of the matrix
+/// block. This is robust against doc comments (`///`), section dividers,
+/// helper functions, etc. — it only cares about whether we're between matrix
+/// `pub fn`s.
 fn replace_matrix_runtime(rs_code: &str) -> String {
     let mut result = String::with_capacity(rs_code.len() + BURN_MATRIX_RUNTIME.len());
     let mut in_matrix_block = false;
@@ -381,14 +418,17 @@ fn replace_matrix_runtime(rs_code: &str) -> String {
             continue;
         }
         if in_matrix_block {
-            if line.starts_with("pub fn almide_rt_matrix_")
-                || line.starts_with("    ")
-                || line.starts_with("        ")
-                || line.starts_with("// matrix")
-                || line == "}" || line.is_empty() {
+            // End of matrix block = first `pub fn` whose name is NOT
+            // `almide_rt_matrix_`. Anything else (doc comment, blank line,
+            // indented body, `// section` divider, inline helper fn) stays
+            // skipped.
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("pub fn ") && !trimmed.starts_with("pub fn almide_rt_matrix_") {
+                in_matrix_block = false;
+                // Fall through to emit this non-matrix line.
+            } else {
                 continue;
             }
-            in_matrix_block = false;
         }
         result.push_str(line);
         result.push('\n');

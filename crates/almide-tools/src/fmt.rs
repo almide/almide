@@ -283,7 +283,7 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
         Decl::Module { path, .. } => { w!(out, "{i}module {}", join_syms(path, ".")); }
         Decl::Import { path, names, alias, .. } => {
             w!(out, "{i}import {}", join_syms(path, "."));
-            if let Some(n) = names { w!(out, " ({})", join_syms(n, ", ")); }
+            if let Some(n) = names { w!(out, ".{{{}}}", join_syms(n, ", ")); }
             if let Some(a) = alias { w!(out, " as {a}"); }
         }
         Decl::Strict { mode, .. } => w!(out, "{i}strict \"{mode}\""),
