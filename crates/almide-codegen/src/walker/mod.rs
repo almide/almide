@@ -592,7 +592,7 @@ fn wrap_return(mode: &str, c_func: &str, call_args: &str) -> String {
 
 /// Render @export(c, "symbol") — emits normal Almide fn + thin extern "C" wrapper.
 ///
-/// ```rust
+/// ```text
 /// pub fn my_add(a: i64, b: i64) -> i64 { (a + b) }
 ///
 /// #[export_name = "my_add"]
