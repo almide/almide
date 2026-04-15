@@ -105,10 +105,11 @@ effect fn main() -> Unit = {
 }
 
 #[test]
-fn e001_fn_body_unit_leak_emits_try_snippet() {
-    // Top dojo E001 pattern: fn body ends with a `let` binding (Unit),
-    // so the fn returns Unit instead of the declared return type.
-    let p = write_tmp("try_e001_fn_unit.almd", r#"
+fn e001_fn_body_trailing_let_emits_specialized_snippet() {
+    // Top dojo E001 pattern, specialized: when the fn body's last stmt is
+    // `let <name> = ...`, the try: snippet should name the binding so the
+    // model has copy-pasteable code, not a `<placeholder>` template.
+    let p = write_tmp("try_e001_fn_trailing_let.almd", r#"
 fn sum_digits(n: Int) -> Int = {
     let abs_n = int.abs(n)
 }
@@ -118,8 +119,31 @@ fn sum_digits(n: Int) -> Int = {
     assert!(out.contains("error[E001]"), "out:\n{}", out);
     assert!(out.contains("type mismatch in fn 'sum_digits'"), "out:\n{}", out);
     assert!(out.contains("try:"), "missing try:\n{}", out);
-    assert!(out.contains("fn body ends with a statement"), "body missing\n{}", out);
-    assert!(out.contains("evaluates to Int"), "type-specific guidance missing\n{}", out);
+    // Key payoff: the binding name appears in the snippet, as a standalone
+    // trailing expression the model can copy.
+    assert!(out.contains("let abs_n = ..."), "not specialized:\n{}", out);
+    assert!(out.contains("abs_n                         // <-- add this line"),
+        "missing concrete tail:\n{}", out);
+    assert!(out.contains("returns Int"), "type missing:\n{}", out);
+}
+
+#[test]
+fn e001_fn_body_non_let_uses_generic_fallback() {
+    // When the body tail is NOT a `let` (e.g. an effectful call), we fall
+    // back to the generic template since there's no single binding name
+    // to splice in.
+    let p = write_tmp("try_e001_fn_generic.almd", r#"
+fn returns_int() -> Int = {
+    println("side effect")
+}
+"#);
+    let (ok, out) = check(&p);
+    assert!(!ok);
+    assert!(out.contains("error[E001]"), "out:\n{}", out);
+    assert!(out.contains("try:"), "missing try:\n{}", out);
+    // Generic template (no specific binding name available)
+    assert!(out.contains("fn body ends with a statement"), "generic body missing:\n{}", out);
+    assert!(out.contains("evaluates to Int"), "type missing:\n{}", out);
 }
 
 #[test]

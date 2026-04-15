@@ -3,7 +3,7 @@
 use crate::types::Ty;
 use super::Checker;
 use super::err;
-use super::types::{is_inference_var, resolve_ty};
+use super::types::{is_inference_var, resolve_ty, FixHint};
 
 impl Checker {
     pub(super) fn solve_constraints(&mut self) {
@@ -29,7 +29,7 @@ impl Checker {
                     // mode — a statement (assignment / lone `let`) slips into a
                     // position expected to produce a value. dojo data shows this
                     // is the top E001 pattern for both 70b and 8b.
-                    let try_snippet = unit_leak_snippet(&c.context, &exp, &act);
+                    let try_snippet = unit_leak_snippet(&c.context, &exp, &act, c.fix_hint.as_ref());
                     // Temporarily swap in the constraint's own span so the
                     // error is reported at the call site where the constraint
                     // was introduced, not at wherever checking happened to
@@ -127,12 +127,27 @@ impl Checker {
 /// or an assignment inside an if/match arm) ends up where a value was
 /// expected. Only fires when `act == Unit` and `exp != Unit`, and the
 /// context pins the leak to a specific syntactic hole.
-fn unit_leak_snippet(context: &str, exp: &Ty, act: &Ty) -> Option<String> {
+fn unit_leak_snippet(context: &str, exp: &Ty, act: &Ty, fix_hint: Option<&FixHint>) -> Option<String> {
     if *act != Ty::Unit || *exp == Ty::Unit {
         return None;
     }
     let exp_str = exp.display();
     if context.starts_with("fn '") {
+        // Try to specialize using the real binding name from the fn body
+        // AST — turns a generic "add a final expression" template into
+        // copy-pasteable code like `result` on its own line.
+        if let Some(FixHint::LastLetName(name)) = fix_hint {
+            return Some(format!(
+                "// fn body ends with `let {n} = ...` (a statement, returns Unit).\n\
+                // Add `{n}` as the trailing expression so the fn returns {t}:\n\
+                //\n\
+                //   let {n} = <computation>\n\
+                //   {n}                         // <-- add this line\n\
+                //\n\
+                // Or inline the computation as the tail expression directly.",
+                n = name, t = exp_str
+            ));
+        }
         Some(format!(
             "// fn body ends with a statement (returns Unit); \
             add a final expression that evaluates to {t}:\n\

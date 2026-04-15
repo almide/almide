@@ -33,7 +33,7 @@ use almide_base::diagnostic::Diagnostic;
 use crate::import_table::{ImportTable, build_import_table};
 use almide_base::intern::sym;
 use crate::types::{Ty, TypeEnv};
-use types::{TyVarId, Constraint, UnionFind, resolve_ty};
+use types::{TyVarId, Constraint, FixHint, UnionFind, resolve_ty};
 
 pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
     Diagnostic::error(msg, hint, ctx)
@@ -102,12 +102,22 @@ impl Checker {
     }
 
     pub(crate) fn constrain(&mut self, expected: Ty, actual: Ty, context: impl Into<String>) {
+        self.constrain_with_hint(expected, actual, context, None);
+    }
+
+    pub(crate) fn constrain_with_hint(
+        &mut self,
+        expected: Ty,
+        actual: Ty,
+        context: impl Into<String>,
+        fix_hint: Option<FixHint>,
+    ) {
         let ctx = context.into();
-        // Eagerly unify to propagate type info into lambda bodies
         self.unify_infer(&expected, &actual);
         self.constraints.push(Constraint {
             expected, actual, context: ctx,
             span: self.current_span,
+            fix_hint,
         });
     }
 
@@ -266,7 +276,10 @@ impl Checker {
         if effect.unwrap_or(false) {
             self.constrain_effect_body(name, &ret_ty, body_ity);
         } else {
-            self.constrain(ret_ty, body_ity, format!("fn '{}'", name));
+            // Capture the trailing `let` binding name (if any) to specialize
+            // the Unit-leak E001 try: snippet downstream.
+            let hint = trailing_let_name(body).map(FixHint::LastLetName);
+            self.constrain_with_hint(ret_ty, body_ity, format!("fn '{}'", name), hint);
         }
         self.env.current_ret = prev.0; self.env.can_call_effect = prev.1; self.env.auto_unwrap = prev.2; self.env.lambda_depth = prev.3;
         self.exit_generics(generics);
@@ -404,5 +417,19 @@ impl Checker {
 fn resolve_type_map(type_map: &mut crate::types::TypeMap, uf: &UnionFind) {
     for ty in type_map.values_mut() {
         *ty = resolve_ty(ty, uf);
+    }
+}
+
+/// If `expr` is a block whose value comes from a trailing `let` binding
+/// (i.e. no tail expression, last statement is `Stmt::Let { name, .. }`),
+/// return that binding name. This is the top dojo E001 anti-pattern:
+/// `fn f() -> Int = { let x = ...  }` — the fn returns Unit because a
+/// bare `let` evaluates to Unit, not to the bound value.
+fn trailing_let_name(expr: &ast::Expr) -> Option<String> {
+    let ast::ExprKind::Block { stmts, expr: tail } = &expr.kind else { return None };
+    if tail.is_some() { return None; }
+    match stmts.last()? {
+        ast::Stmt::Let { name, .. } | ast::Stmt::Var { name, .. } => Some(name.to_string()),
+        _ => None,
     }
 }

@@ -17,6 +17,21 @@ pub struct Constraint {
     /// attach to whichever expression the checker happened to visit last,
     /// which produces wildly misleading error locations.
     pub span: Option<crate::ast::Span>,
+    /// Optional syntactic hint captured at constraint creation time to
+    /// specialize `try:` snippets — e.g. the name of the trailing `let`
+    /// binding in a fn body that caused a Unit-leak E001.
+    pub fix_hint: Option<FixHint>,
+}
+
+/// Context-specific info captured at constraint emission time, surfaced
+/// back at diagnostic emission time to turn generic snippets into
+/// concrete copy-pasteable code.
+#[derive(Debug, Clone)]
+pub enum FixHint {
+    /// Name of the last `let` binding in a block whose type is the actual
+    /// (usually Unit). The fix is typically to add the binding's name as a
+    /// trailing expression.
+    LastLetName(String),
 }
 
 /// Check if a Ty is an inference variable (?N).
