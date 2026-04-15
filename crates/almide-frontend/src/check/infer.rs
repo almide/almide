@@ -183,7 +183,51 @@ impl Checker {
                 }
                 let obj_ty = self.infer_expr(object);
                 let concrete = resolve_ty(&obj_ty, &self.uf);
-                self.resolve_field_type(&concrete, field)
+                let field_ty = self.resolve_field_type(&concrete, field);
+                // Almide-friendly diagnostic for list / string field access:
+                // LLMs trained on Haskell / Python / Ruby write `xs.head`,
+                // `xs.tail`, `xs.length`, `s.length`. In Almide these are
+                // stdlib calls — intercept here so rustc never leaks
+                // `error[E0609]: no field 'head' on type 'Vec<i64>'`.
+                if matches!(field_ty, Ty::Unknown) {
+                    let module_and_subs: Option<(&str, Vec<(&str, String)>)> = match &concrete {
+                        Ty::Applied(TypeConstructorId::List, _) => Some(("list", vec![
+                            ("head", "list.first(xs)  // returns Option[T]".into()),
+                            ("tail", "list.drop(xs, 1)".into()),
+                            ("length", "list.len(xs)".into()),
+                            ("len", "list.len(xs)".into()),
+                            ("first", "list.first(xs)".into()),
+                            ("last", "list.last(xs)".into()),
+                            ("size", "list.len(xs)".into()),
+                        ])),
+                        Ty::String => Some(("string", vec![
+                            ("length", "string.len(s)".into()),
+                            ("len", "string.len(s)".into()),
+                            ("size", "string.len(s)".into()),
+                            ("chars", "string.to_chars(s)".into()),
+                        ])),
+                        _ => None,
+                    };
+                    if let Some((module, subs)) = module_and_subs {
+                        let hint = if let Some((_, snippet)) = subs.iter().find(|(n, _)| n == field) {
+                            format!(
+                                "Almide values have no fields — use the `{m}` stdlib module. Replace `x.{f}` with `{snippet}`. No method-call or field-access syntax is supported.",
+                                m = module, f = field, snippet = snippet
+                            )
+                        } else {
+                            format!(
+                                "Almide values have no fields. Use `{m}.<fn>(x)` (or `x |> {m}.<fn>`) — see docs/stdlib/{m}.md for available functions.",
+                                m = module
+                            )
+                        };
+                        self.emit(super::err(
+                            format!("no field '{}' on {}", field, module),
+                            hint,
+                            format!("field access .{}", field),
+                        ).with_code("E013"));
+                    }
+                }
+                field_ty
             }
 
             ExprKind::TupleIndex { object, index, .. } => {

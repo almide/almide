@@ -79,6 +79,7 @@ impl Parser {
         let mut stmts = initial_comments;
         let mut final_expr: Option<Box<Expr>> = None;
         while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+            let pre_err_len = self.errors.len();
             match self.parse_stmt() {
                 Ok(stmt) => {
                     let mut trailing = Vec::new();
@@ -101,7 +102,9 @@ impl Parser {
                 }
                 Err(msg) => {
                     let err_span = Some(self.current_span());
-                    self.errors.push(self.string_to_diagnostic(&msg));
+                    if self.errors.len() == pre_err_len {
+                        self.errors.push(self.string_to_diagnostic(&msg));
+                    }
                     self.recover_to_sync_point(true);
                     stmts.push(Stmt::Error { span: err_span });
                 }
@@ -119,6 +122,7 @@ impl Parser {
         let mut final_expr: Option<Box<Expr>> = None;
 
         loop {
+            let pre_err_len = self.errors.len();
             match self.parse_stmt() {
                 Ok(stmt) => {
                     self.skip_newlines();
@@ -139,7 +143,9 @@ impl Parser {
                 }
                 Err(msg) => {
                     let err_span = Some(self.current_span());
-                    self.errors.push(self.string_to_diagnostic(&msg));
+                    if self.errors.len() == pre_err_len {
+                        self.errors.push(self.string_to_diagnostic(&msg));
+                    }
                     self.recover_to_sync_point(false);
                     stmts.push(Stmt::Error { span: err_span });
                     if self.is_at_braceless_block_end() {
