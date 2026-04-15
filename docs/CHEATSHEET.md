@@ -8,6 +8,25 @@ import <module>
 // declarations...
 ```
 
+## Project layout (multi-file)
+For projects > 1 file, create a package:
+```
+mypkg/
+  almide.toml          # [package] name = "mypkg"
+  src/
+    main.almd          # entry: imports siblings via `import self.<name>`
+    classifier.almd    # sibling module: bare fn / let / type
+    bindings/
+      python.almd      # nested namespace → mypkg.bindings.python
+```
+Sibling import:
+```
+import self.classifier                          // → classifier.fn(), classifier.LET
+import self.classifier.{classify, NUMBERS}      // selective: bare names
+import self.classifier as cls                   // alias
+```
+**Do NOT** write `import x from "./x.almd"` — file paths aren't supported. Always use `import self.<sibling>`.
+
 ## Types
 ```
 type Name = { field: Type, ... }                     // record

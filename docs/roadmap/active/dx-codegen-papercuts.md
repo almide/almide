@@ -86,13 +86,11 @@ memory `reference_codegen_ideal_roadmap.md` の **#1 関数解決を独立パス
 
 **dojo 側 利益**: 自動分類精度が上がる、LLM が hint を辿りやすくなる。
 
-#### B-3. project-local import (`./classify.almd`)
+#### B-3. project-local import (`./classify.almd`) — **resolved (docs)**
 
-**現状**: `import classify from "./classify.almd"` はおそらくサポートされていない (要確認)。結果として `src/main.almd` が 700 行に肥大化。
+**結論**: 機能的には既に解決済み。`almide.toml` + `src/` package layout で `import self.<sibling>` を使えば 700 行 main.almd を分割できる。`import x from "./x.almd"` は spec 外 (TS-style)、Almide は always `self.<sub>` 経由。
 
-**対症**: `almide.toml` に `[modules]` セクション、または file-path import を直接サポート。
-
-**根治**: package system の同 crate 内 module 解決を強化。`docs/specs/module-system.md` に追記。
+**対応**: CHEATSHEET に「Project layout (multi-file)」 section 追加 (docs/CHEATSHEET.md)。dojo は package 化 + `import self.classifier.{classify, NUMBERS}` (C-1 + C-2) で書き直し可。
 
 ## ロードマップ
 
@@ -115,9 +113,7 @@ memory `reference_codegen_ideal_roadmap.md` の **#1 関数解決を独立パス
 - [ ] CLI subcommand 実装
 - [ ] generate script で diagnostic 一覧 README
 
-### Phase 5: B-3 (project-local import)
-- [ ] 現状サポート確認 (resolve.rs / module-system.md)
-- [ ] 未サポートなら syntax 設計 → 実装
+### Phase 5: B-3 — **完了** (CHEATSHEET 追記、機能はもともと存在)
 
 ## 出元
 
