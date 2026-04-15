@@ -53,6 +53,41 @@ struct OutlineParam {
     ty: String,
 }
 
+/// Default stdlib modules bundled into `stdlib-snapshot` when `--modules`
+/// is omitted. Covers the core ~95% of dojo task surface. Less-used modules
+/// (`bytes`, `float`, etc.) are intentionally excluded — callers that want
+/// them can pass `--modules` explicitly.
+const DEFAULT_SNAPSHOT_MODULES: &[&str] = &[
+    "string", "list", "int", "option", "result", "map", "set",
+];
+
+/// Dump concatenated stdlib outlines in one call — designed for SYSTEM_PROMPT
+/// injection by LLM harnesses (e.g. almide-dojo) that need a single authoritative
+/// API inventory without spawning N subprocesses.
+pub fn cmd_ide_stdlib_snapshot(modules: Option<&str>, json: bool) {
+    let modules: Vec<&str> = match modules {
+        Some(csv) => csv.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect(),
+        None => DEFAULT_SNAPSHOT_MODULES.to_vec(),
+    };
+
+    let outlines: Vec<Outline> = modules.iter()
+        .map(|m| collect_stdlib_outline(m).unwrap_or_else(|e| {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }))
+        .collect();
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&outlines).unwrap());
+    } else {
+        for outline in &outlines {
+            println!("# @stdlib/{}", outline.module);
+            print_outline_text(outline);
+            println!();
+        }
+    }
+}
+
 /// Print a one-line summary of every public decl.
 /// `target` is either `@stdlib/<module>` or a file path.
 pub fn cmd_ide_outline(target: &str, filter: Option<&str>, json: bool) {

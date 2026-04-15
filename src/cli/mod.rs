@@ -16,7 +16,7 @@ pub use emit::cmd_emit;
 pub use check::{cmd_check, cmd_check_json, cmd_check_effects};
 pub use commands::{cmd_init, cmd_test, cmd_test_json, cmd_test_wasm, cmd_test_ts, cmd_fmt, cmd_clean};
 pub use selfupdate::cmd_self_update;
-pub use ide::{cmd_ide_outline, cmd_ide_doc};
+pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};
 
 use std::hash::{Hash, Hasher};
 

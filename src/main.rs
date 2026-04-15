@@ -204,6 +204,17 @@ enum IdeCommand {
         #[arg(long)]
         file: Option<String>,
     },
+    /// Dump concatenated stdlib outlines in one call.
+    /// Intended for LLM harnesses that embed a stdlib API inventory in SYSTEM_PROMPT.
+    /// Default modules: string, list, int, option, result, map, set.
+    StdlibSnapshot {
+        /// Comma-separated module list (e.g. `string,list,int`). Defaults to the core set.
+        #[arg(long)]
+        modules: Option<String>,
+        /// Emit JSON array instead of concatenated text sections
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn find_rustc() -> String {
@@ -534,6 +545,9 @@ fn dispatch(cli: Cli) {
                 IdeCommand::Doc { symbol, file } => {
                     let file = resolve_file(file);
                     cli::cmd_ide_doc(&symbol, &file);
+                }
+                IdeCommand::StdlibSnapshot { modules, json } => {
+                    cli::cmd_ide_stdlib_snapshot(modules.as_deref(), json);
                 }
             }
         }

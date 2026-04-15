@@ -79,6 +79,47 @@ fn stdlib_json_schema_shape() {
 }
 
 #[test]
+fn stdlib_snapshot_default_modules() {
+    let output = Command::new(almide())
+        .args(["ide", "stdlib-snapshot"])
+        .output()
+        .expect("run");
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    for m in ["string", "list", "int", "option", "result", "map", "set"] {
+        assert!(text.contains(&format!("# @stdlib/{}", m)), "missing section: {}", m);
+    }
+    insta::assert_snapshot!("stdlib_snapshot_default", text);
+}
+
+#[test]
+fn stdlib_snapshot_modules_filter() {
+    let output = Command::new(almide())
+        .args(["ide", "stdlib-snapshot", "--modules", "option,result"])
+        .output()
+        .expect("run");
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("# @stdlib/option"));
+    assert!(text.contains("# @stdlib/result"));
+    assert!(!text.contains("# @stdlib/string"));
+    assert!(!text.contains("# @stdlib/list"));
+}
+
+#[test]
+fn stdlib_snapshot_json_is_array() {
+    let output = Command::new(almide())
+        .args(["ide", "stdlib-snapshot", "--modules", "option", "--json"])
+        .output()
+        .expect("run");
+    assert!(output.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert!(v.is_array());
+    assert_eq!(v[0]["module"], "option");
+    assert_eq!(v[0]["source"], "stdlib");
+}
+
+#[test]
 fn unknown_stdlib_module_errors_with_hint() {
     let output = Command::new(almide())
         .args(["ide", "outline", "@stdlib/nope"])
