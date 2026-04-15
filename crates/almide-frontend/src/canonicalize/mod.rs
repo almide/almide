@@ -71,6 +71,9 @@ pub fn canonicalize_program<'a>(
     // 4. Register main program declarations
     registration::register_decls(&mut env, &mut diagnostics, &program.decls, None);
 
+    // 5. Carry parse-failure fn names so checker can suppress cascades.
+    env.failed_fn_names.extend(program.failed_fn_names.iter().cloned());
+
     CanonicalizationResult { env, diagnostics }
 }
 

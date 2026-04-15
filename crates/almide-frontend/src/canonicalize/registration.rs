@@ -388,10 +388,65 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
 
 /// Walk all declarations and register them into the type environment.
 pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decls: &[ast::Decl], prefix: Option<&str>) {
+    // Catch duplicate `fn <name>` / `test "<name>"` at the Almide stage so that
+    // rustc's E0428 "defined multiple times" never leaks to the user with a
+    // src/main.rs span. Tracked per (kind, name), remembering the first span.
+    let mut seen_fn: HashMap<String, Option<ast::Span>> = HashMap::new();
+    let mut seen_test: HashMap<String, Option<ast::Span>> = HashMap::new();
+
     for decl in decls {
         match decl {
-            ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, visibility, .. } => {
+            ast::Decl::Fn { name, params, return_type, effect, r#async, generics, span, visibility, extern_attrs, .. } => {
+                // Skip duplicates that come from @extern re-export (name may appear twice by design).
+                if extern_attrs.is_empty() {
+                    let key = prefixed_key(prefix, name);
+                    if let Some(first_span) = seen_fn.get(&key) {
+                        let mut diag = err(
+                            format!("duplicate function '{}'", name),
+                            format!("Rename one of the definitions, or remove the earlier one. Almide requires each function name to be unique within a module."),
+                            format!("fn {}", name),
+                        ).with_code("E012");
+                        if let Some(s) = span {
+                            diag.line = Some(s.line);
+                            diag.col = Some(s.col);
+                        }
+                        if let Some(first) = first_span {
+                            diag.secondary.push(almide_base::diagnostic::SecondarySpan {
+                                line: first.line,
+                                col: Some(first.col),
+                                label: format!("first definition of '{}' here", name),
+                            });
+                        }
+                        diagnostics.push(diag);
+                        continue;
+                    }
+                    seen_fn.insert(key, span.clone());
+                }
                 register_fn_sig(env, name, params, return_type, effect, r#async, generics, prefix, span.as_ref(), *visibility);
+            }
+            ast::Decl::Test { name, span, .. } => {
+                let test_key = name.to_string();
+                if let Some(first_span) = seen_test.get(&test_key) {
+                    let mut diag = err(
+                        format!("duplicate test '{}'", name),
+                        format!("Rename one of the tests, or merge them. Each test name must be unique within a file."),
+                        format!("test \"{}\"", name),
+                    ).with_code("E012");
+                    if let Some(s) = span {
+                        diag.line = Some(s.line);
+                        diag.col = Some(s.col);
+                    }
+                    if let Some(first) = first_span {
+                        diag.secondary.push(almide_base::diagnostic::SecondarySpan {
+                            line: first.line,
+                            col: Some(first.col),
+                            label: format!("first test '{}' here", name),
+                        });
+                    }
+                    diagnostics.push(diag);
+                    continue;
+                }
+                seen_test.insert(test_key, span.clone());
             }
             ast::Decl::Type { name, ty, deriving, generics, .. } => {
                 register_type_decl(env, diagnostics, name, ty, deriving, generics, prefix);

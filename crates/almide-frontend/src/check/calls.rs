@@ -132,6 +132,30 @@ impl Checker {
                     all_args.extend(arg_tys.iter().cloned());
                     return self.check_named_call(&field, &all_args);
                 }
+                // Almide-specific hint: method-call syntax isn't supported.
+                // If obj_ty maps to a stdlib module, suggest the module-call
+                // form (plus the closest existing name if there's a typo).
+                if let Some(module) = builtin_module {
+                    let module_funcs = crate::stdlib::module_functions(module);
+                    let suggestion = almide_base::diagnostic::suggest(&field, module_funcs.iter().copied());
+                    let hint = if let Some(close) = suggestion {
+                        format!(
+                            "Almide doesn't use method-call syntax. Write `{m}.{close}(x)` (or `x |> {m}.{close}`). Method syntax `x.{field}()` is not supported.",
+                            m = module, close = close, field = field
+                        )
+                    } else {
+                        format!(
+                            "Almide doesn't use method-call syntax. Write `{m}.<fn>(x)` (or `x |> {m}.<fn>`) — there is no method `{field}` on `{m}`. Run `almide explain E002` for examples.",
+                            m = module, field = field
+                        )
+                    };
+                    self.emit(super::err(
+                        format!("undefined method '{}' on {}", field, module),
+                        hint,
+                        format!("method call .{}()", field)
+                    ).with_code("E002"));
+                    return Ty::Unknown;
+                }
                 let ret = self.fresh_var();
                 self.constrain(obj_ty, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
                 ret
@@ -254,6 +278,12 @@ impl Checker {
                     }
                 }
             };
+            // Cascade suppression: if `name` belongs to a fn whose body failed
+            // to parse, the real error is already on top. Skip emitting E002
+            // so the LLM focuses on the parse error, not N identical cascades.
+            if self.env.failed_fn_names.contains(name) {
+                return Ty::Unknown;
+            }
             self.emit(super::err(format!("undefined function '{}'", name), hint, format!("call to {}()", name)).with_code("E002"));
             return Ty::Unknown;
         };
@@ -361,9 +391,18 @@ impl Checker {
             for (i, (aty, ety)) in arg_tys.iter().zip(expected_tys.iter()).enumerate() {
                 let concrete_arg = resolve_ty(aty, &self.uf);
                 if concrete_arg != Ty::Unknown && !ety.compatible(&concrete_arg) {
+                    // Richer hint: show the constructor signature + a conversion
+                    // suggestion when the argument type is numeric / string-like.
+                    let sig_shape = expected_tys.iter()
+                        .map(|t| t.display()).collect::<Vec<_>>().join(", ");
+                    let base = format!(
+                        "{}({}) expects argument #{} to be {}, got {}",
+                        name, sig_shape, i + 1, ety.display(), concrete_arg.display()
+                    );
+                    let hint = Self::hint_with_conversion(&base, ety, &concrete_arg);
                     self.emit(super::err(
                         format!("{}() argument {} expects {} but got {}", name, i + 1, ety.display(), concrete_arg.display()),
-                        "Fix the argument type", format!("constructor {}()", name)).with_code("E005"));
+                        hint, format!("constructor {}()", name)).with_code("E005"));
                 }
             }
         }

@@ -314,6 +314,10 @@ pub struct Program {
     /// Number of blank lines before each decl (parallel to `decls`).
     #[serde(skip)]
     pub blank_lines_map: Vec<u32>,
+    /// Names of fn declarations whose body parse failed. Lets the checker
+    /// suppress cascading "undefined function" diagnostics from call sites.
+    #[serde(skip)]
+    pub failed_fn_names: std::collections::HashSet<String>,
 }
 
 // ── Generic AST visitor ──

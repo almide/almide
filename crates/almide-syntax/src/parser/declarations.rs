@@ -310,55 +310,67 @@ impl Parser {
         if self.check(TokenType::Effect) { self.advance(); effect = true; }
         self.expect(TokenType::Fn)?;
         let name = self.expect_any_fn_name()?;
-        let generics = self.try_parse_generic_params()?;
-        let open_fn = self.current().clone();
-        self.expect(TokenType::LParen)?;
-        let params = self.parse_param_list()?;
-        self.expect_closing(TokenType::RParen, open_fn.line, open_fn.col, "function parameters")?;
-        self.expect(TokenType::Arrow)?;
-        let return_type = self.parse_type_expr()?;
+        // Once the fn name is known, any later parse error in this decl is a
+        // cascading source — record the name so the checker can suppress
+        // downstream "undefined function 'name'" noise from call sites.
+        let recorded_name = name.clone();
+        let mut failed = true;
+        let result = (|| -> Result<Decl, String> {
+            let generics = self.try_parse_generic_params()?;
+            let open_fn = self.current().clone();
+            self.expect(TokenType::LParen)?;
+            let params = self.parse_param_list()?;
+            self.expect_closing(TokenType::RParen, open_fn.line, open_fn.col, "function parameters")?;
+            self.expect(TokenType::Arrow)?;
+            let return_type = self.parse_type_expr()?;
 
-        if self.check(TokenType::LBrace) {
-            let tok = self.current();
-            return Err(format!(
-                "Missing '=' before function body at line {}:{}\n  Hint: Almide requires '=' before the body. Write: fn {}(...) -> Type = {{ ... }}",
-                tok.line, tok.col, name
-            ));
-        }
-
-        let body = if self.check(TokenType::Eq) {
-            self.advance();
-            self.skip_newlines();
-            let mut body = if self.check(TokenType::Let) || self.check(TokenType::Var)
-                || self.check(TokenType::Guard)
-            {
-                self.parse_braceless_block()?
-            } else {
-                self.parse_expr()?
-            };
-
-            let returns_result = matches!(&return_type,
-                TypeExpr::Generic { name, .. } if name == "Result"
-            );
-            if effect && returns_result {
-                body = self.wrap_effect_result_body(body);
+            if self.check(TokenType::LBrace) {
+                let tok = self.current();
+                return Err(format!(
+                    "Missing '=' before function body at line {}:{}\n  Hint: Almide requires '=' before the body. Write: fn {}(...) -> Type = {{ ... }}",
+                    tok.line, tok.col, name
+                ));
             }
 
-            Some(body)
-        } else {
-            None
-        };
+            let body = if self.check(TokenType::Eq) {
+                self.advance();
+                self.skip_newlines();
+                let mut body = if self.check(TokenType::Let) || self.check(TokenType::Var)
+                    || self.check(TokenType::Guard)
+                {
+                    self.parse_braceless_block()?
+                } else {
+                    self.parse_expr()?
+                };
 
-        Ok(Decl::Fn {
-            name,
-            r#async: if async_ { Some(true) } else { None },
-            effect: if effect { Some(true) } else { None },
-            visibility,
-            extern_attrs: Vec::new(),
-            export_attrs: Vec::new(),
-            generics, params, return_type, body,
-            span: Some(span),
-        })
+                let returns_result = matches!(&return_type,
+                    TypeExpr::Generic { name, .. } if name == "Result"
+                );
+                if effect && returns_result {
+                    body = self.wrap_effect_result_body(body);
+                }
+
+                Some(body)
+            } else {
+                None
+            };
+
+            Ok(Decl::Fn {
+                name: name.clone(),
+                r#async: if async_ { Some(true) } else { None },
+                effect: if effect { Some(true) } else { None },
+                visibility,
+                extern_attrs: Vec::new(),
+                export_attrs: Vec::new(),
+                generics, params, return_type, body,
+                span: Some(span),
+            })
+        })();
+        if result.is_ok() { failed = false; }
+        if failed {
+            self.failed_fn_names.insert(recorded_name.to_string());
+        }
+        result
     }
 
     fn wrap_effect_result_body(&mut self, body: Expr) -> Expr {

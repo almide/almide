@@ -33,6 +33,7 @@ impl Parser {
             comment_map: Vec::new(),
             doc_map: Vec::new(),
             blank_lines_map: Vec::new(),
+            failed_fn_names: std::collections::HashSet::new(),
         };
 
         let (mut pending, mut gap_blanks) = self.skip_newlines_collect_comments();
@@ -78,10 +79,15 @@ impl Parser {
             program.comment_map.push(std::mem::take(&mut pending));
             gap_blanks = 0;
 
+            let pre_err_len = self.errors.len();
             match self.parse_top_decl() {
                 Ok(decl) => program.decls.push(decl),
                 Err(msg) => {
-                    self.errors.push(self.string_to_diagnostic(&msg));
+                    // If parse_top_decl (or anything it called) already pushed
+                    // a rich diagnostic, skip the string-form duplicate.
+                    if self.errors.len() == pre_err_len {
+                        self.errors.push(self.string_to_diagnostic(&msg));
+                    }
                     self.skip_to_next_decl();
                 }
             }
@@ -99,6 +105,7 @@ impl Parser {
             return Err(messages.join("\n"));
         }
 
+        program.failed_fn_names = std::mem::take(&mut self.failed_fn_names);
         Ok(program)
     }
 }

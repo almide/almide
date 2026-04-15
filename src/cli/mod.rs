@@ -372,10 +372,31 @@ fn cargo_build_test_with_native(
             }
         }
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        if rendered.is_empty() {
-            return Err(stderr);
-        }
-        return Err(format!("{}\n{}", rendered.join("\n"), stderr));
+        let combined = if rendered.is_empty() {
+            stderr
+        } else {
+            format!("{}\n{}", rendered.join("\n"), stderr)
+        };
+        // Wrap: rustc errors that leaked through the Almide checker mean our
+        // codegen produced invalid Rust. Surfacing `src/main.rs` paths to users
+        // is useless (it's not their source). Replace with a bug-report banner.
+        let mentions_main_rs = combined.contains("src/main.rs");
+        let final_err = if mentions_main_rs {
+            let scrubbed = combined
+                .replace("src/main.rs", "<generated.rs>")
+                .replace("almide-out", "almide-generated");
+            format!(
+                "codegen produced invalid Rust — this is an Almide bug.\n\
+                 Please file a minimal repro at https://github.com/almide/almide/issues\n\
+                 \n\
+                 --- rustc output (edited to hide generated paths) ---\n\
+                 {}",
+                scrubbed
+            )
+        } else {
+            combined
+        };
+        return Err(final_err);
     }
 
     // Parse the JSON output to find the test binary path

@@ -75,6 +75,10 @@ pub struct TypeEnv {
     pub fn_decl_spans: std::collections::HashMap<Sym, (usize, usize)>,
     /// Whether we're inside a test block (effect fn calls return Result[T, String])
     pub in_test_block: bool,
+    /// Fn names whose parse failed mid-body. Checker suppresses cascading
+    /// "undefined function 'name'" diagnostics for calls to these — the real
+    /// cause is the parse error already surfaced.
+    pub failed_fn_names: std::collections::HashSet<String>,
 }
 
 impl TypeEnv {
@@ -111,6 +115,7 @@ impl TypeEnv {
             impl_validated: std::collections::HashSet::new(),
             fn_decl_spans: std::collections::HashMap::new(),
             in_test_block: false,
+            failed_fn_names: std::collections::HashSet::new(),
         }
     }
 

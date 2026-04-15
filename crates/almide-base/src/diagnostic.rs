@@ -21,9 +21,11 @@ fn levenshtein(a: &str, b: &str) -> usize {
 }
 
 /// Find the best "did you mean?" suggestion from a list of candidates.
-/// Returns None if no candidate is close enough (threshold: distance < name.len()/3 + 1).
+/// Returns None if no candidate is close enough.
+/// Threshold grows with name length: `max(3, name.len() / 2)` so that
+/// longer names like `to_code_points` → `codepoint` (dist 5) still match.
 pub fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<String> {
-    let threshold = name.len() / 3 + 1;
+    let threshold = (name.len() / 2).max(3);
     let mut best: Option<(&str, usize)> = None;
     for c in candidates {
         let dist = levenshtein(name, c);
