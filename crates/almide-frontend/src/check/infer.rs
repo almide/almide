@@ -156,6 +156,12 @@ impl Checker {
                             ret: Box::new(sig.ret.clone()),
                         };
                     }
+                    // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
+                    // Spec Visibility section applies to fn, type, AND let.
+                    if let Some(let_ty) = self.env.top_lets.get(&sym(&key)).cloned() {
+                        self.type_map.insert(object.id, Ty::Unit);
+                        return let_ty;
+                    }
                     // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
                     if let Some((type_name, case)) = self.env.constructors.get(&sym(field)).cloned() {
                         let resolved_mod = self.env.import_table.resolve(mod_name)

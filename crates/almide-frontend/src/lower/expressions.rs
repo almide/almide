@@ -367,6 +367,22 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                         return eta_expand_module_fn(ctx, *mod_name, *field, params.clone(), (**ret).clone(), span);
                     }
                 }
+                // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
+                // Spec Visibility section applies to fn, type, AND let.
+                // Module top_lets are emitted as `static ALMIDE_RT_<MOD>_<NAME>: LazyLock<T>`
+                // (see lower::mod::lower_module:437). Pre-deref via `(*…)` so that
+                // operators like `==` and `Display` work without auto-deref.
+                let qual_let_key = format!("{}.{}", mod_name, field);
+                if ctx.env.top_lets.contains_key(&sym(&qual_let_key)) {
+                    let symbol = format!(
+                        "(*ALMIDE_RT_{}_{})",
+                        mod_name.as_str().to_uppercase(),
+                        field.as_str().to_uppercase(),
+                    );
+                    let var_id = ctx.var_table.alloc(sym(&symbol), ty.clone(), Mutability::Let, None);
+                    return ctx.mk(IrExprKind::Var { id: var_id }, ty, span);
+                }
+
                 // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
                 if let Some((type_name, case)) = ctx.env.constructors.get(field).cloned() {
                     let resolved = ctx.env.import_table.aliases.get(mod_name).copied()

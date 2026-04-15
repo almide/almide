@@ -1,0 +1,4 @@
+let GREETING: String = "hello"
+let NUMBERS: List[Int] = [1, 2, 3]
+
+fn welcome() -> String = GREETING + " world"
