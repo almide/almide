@@ -124,3 +124,29 @@ These are intentional trade-offs — things we gave up to make LLM generation re
 | DSL capabilities | No operator definition, no custom syntax. Almide code always looks like Almide. |
 
 These are not missing features — they are **intentional constraints that keep the generation space focused**. The goal is not minimalism for its own sake, but ensuring each abstraction has one clear path.
+
+## The MSR rule (how features are added / rejected)
+
+> **Design rule**: syntax that is beautiful to humans but a trap for LLMs is not adopted.
+
+Every language change is evaluated against its **MSR delta** — the change in retry-success rate on [almide-dojo](https://github.com/almide/almide-dojo) across `llama-3.3-70b`, `llama-3.1-8b`, and (when available) `Claude Sonnet 4.6`, measured at `T=0` over 3 runs.
+
+A change is **rejected** if:
+- It drops median MSR by ≥ 3 percentage points on any model, OR
+- It introduces a second canonical form for something that already has one (fragments LLM training data), OR
+- It improves human aesthetics at the cost of generation predictability.
+
+A change is **accepted** if:
+- It measurably raises MSR, **or**
+- It eliminates a class of errors that retry-with-diagnostic cannot repair (the ceiling effect).
+
+Release notes from `v0.14.5` onward include an **MSR delta table** so every release owns its impact. New feature proposals in `docs/roadmap/active/` must cite the failure pattern they address and the expected MSR shift.
+
+## Beauty axis vs MSR axis
+
+Almide does not compete on:
+- Pure-FP aesthetics (Elm, Haskell are stronger here — and they sacrifice LLM writability for that beauty).
+- Dependent types / linear types / first-class effects-as-types (research languages win here — at the cost of a writability cliff).
+- DSL expressiveness, macros, metaprogramming.
+
+Almide competes on exactly one thing: **an LLM sits down and writes correct code on the first try**. Every trade-off above, and every future one, is chosen with that axis as the arbiter.
