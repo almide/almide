@@ -345,7 +345,37 @@ fn cargo_build_test_with_native(
 
     let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        // --quiet suppresses cargo's own error display, but rustc messages
+        // come through stdout as JSON (--message-format=json). Extract the
+        // "rendered" field from each compiler-message so the user sees the
+        // real error spans, not just "1 previous error; N warnings emitted".
+        let mut rendered: Vec<String> = Vec::new();
+        let verbose = std::env::var("ALMIDE_TEST_VERBOSE")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                if json.get("reason").and_then(|r| r.as_str()) == Some("compiler-message") {
+                    let level = json.get("message")
+                        .and_then(|m| m.get("level"))
+                        .and_then(|l| l.as_str())
+                        .unwrap_or("");
+                    if level == "error" || verbose {
+                        if let Some(msg) = json.get("message")
+                            .and_then(|m| m.get("rendered"))
+                            .and_then(|r| r.as_str())
+                        {
+                            rendered.push(msg.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if rendered.is_empty() {
+            return Err(stderr);
+        }
+        return Err(format!("{}\n{}", rendered.join("\n"), stderr));
     }
 
     // Parse the JSON output to find the test binary path
