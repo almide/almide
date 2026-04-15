@@ -36,24 +36,37 @@ Almide の **mission**: "The language LLMs can write most accurately." この ro
 - **Release notes に MSR スコア**: 各リリースが retry-success に責任を持つ。
 - **新機能の意思決定軸**: 「綺麗だが MSR -3pt」な機能は採用しない。
 
-## 実装 Phase 順 (staged plan)
+## 実装 Phase 順 (staged plan, tooling-first per MoonBit findings)
 
-### Phase 1 (即効、本 roadmap で着手)
-1. **`try:` snippet + Diagnostic 拡張** — Axis 3 の本命。E005 / E013 / idiom 系に展開。
-2. **Release notes に MSR delta** — Axis 5 の出発点。v0.14.5 retro から始める。
-3. **DESIGN rule 明文化** — `docs/DESIGN.md` に「LLM trap な構文は不採用」と MSR 判定軸を書く。
+MoonBit の経験則: **「LLM-friendly な言語」だけでは不十分。「LLM-friendly な開発環境」** が同等以上に効く。Almide も tooling を言語拡張より先に積む。
 
-### Phase 2 (1-2 リリース後、Phase 1 計測済)
-4. **`almide fix` CLI** — `try:` snippet を機械適用。構文系のエラー (let-in / let rec / while-do / return) から。
-5. **`llms.txt` + `AGENTS.md` テンプレ同梱** — `almide new` で自動生成、dojo と本体で共有。
+### Phase 1 (完了)
+- ✅ `try:` snippet + Diagnostic 拡張 (f87b7d0b)
+- ✅ DESIGN rule 明文化 (9a583e72)
+- ✅ roadmap 整備
 
-### Phase 3 (中期)
-6. **UFCS 採用判断**: Phase 1-2 の MSR 改善を踏まえて検討。dojo で 20% 以上 残ってるなら GO、解消してるなら不要。proposal: `docs/roadmap/active/ufcs-proposal.md`。
-7. **Error-recovering parser 強化**: カスケード抑制を型エラー方向に拡張。Tree-sitter 式 panic-mode。
+### Phase 2 — Tooling (MoonBit-inspired, 着手中)
+2-1. **`almide ide outline <file>`** — package の pub fn / type / let を 1 行ずつ列挙。grep 撲滅、E002/E003 の hallucination 消す。
+2-2. **`almide ide doc <symbol>`** — stdlib / user fn の signature + docstring を返す。`string.to_upper` を探す時に `grep` 不要。
+2-3. **`almide ide peek-def <symbol>`** — 定義の snippet のみ返す (body あり)。
+2-4. **`almide ide find-refs <symbol>`** — 参照一覧。
+2-5. **AGENTS.md を `almide new` に同梱** — dojo SYSTEM_PROMPT を全 project に配布。MoonBit 同様「最初に読む 1 ファイル」。
+2-6. **runnable `*.almd.md` cheat-sheet** — `almide check *.almd.md` 通過保証。仕様書が drift しない。
 
-### Phase 4 (長期)
-8. **dojo を CI 内蔵**: PR レベルで MSR delta を自動計算、`gh pr comment` で可視化。
-9. **`///|` block boundary**: MoonBit に習い、局所 refactor が他関数を巻き添えにしない仕組み。
+### Phase 3 — Fix tooling + stdlib expansion
+3-1. **`almide fix`** — Phase 1 の `try:` snippet を機械適用。構文系 (let-in / let rec / while-do / return) から。
+3-2. **stdlib pattern expansion** — dojo 11 fail タスクのうち「stdlib が足りないだけ」を解消: `list.binary_search`, `string.run_length_encode`, `list.window`, `list.partition`, etc.
+3-3. **llms.txt** — SPEC.md から自動生成、1 URL で全情報。外部 LLM tool が参照。
+
+### Phase 4 — Language-level changes (tooling で不足分を見てから)
+4-1. **UFCS 採用判断**: Phase 2-3 の MSR 改善を踏まえて。dojo 8b が依然 parse-err 多いなら GO。70b の改善は tooling で取れてる想定。
+4-2. **Error-recovering parser 強化**: カスケード抑制を型エラー方向に拡張。
+4-3. **`?` operator / Option chain 強化** — 70b の type-err 9 件対策。
+
+### Phase 5 (長期)
+5-1. **dojo を CI 内蔵**: PR レベルで MSR delta を自動計算。
+5-2. **`///|` block boundary** (MoonBit 風): 局所 refactor を構文で保証。
+5-3. **Skill marketplace / playbook**: refactor / bug-fix / new-feature の mode 別 playbook を plugin 化。
 
 ## UFCS 別 proposal (保留理由)
 
