@@ -51,19 +51,27 @@ impl Checker {
                     // and whose names won't be confused with common variable names.
                     // e.g. `value`, `error`, `string`, `list` are too common as
                     // variable names — suggesting `import value` is misleading.
-                    let hint = if crate::stdlib::is_import_suggestable(name) {
+                    let (hint, fix): (String, Option<String>) = if crate::stdlib::is_import_suggestable(name) {
                         let desc = crate::stdlib::module_description(name);
-                        format!("Add `import {}` (stdlib: {})\nOr run `almide fmt` to auto-add missing imports", name, desc)
+                        (format!("Add `import {}` (stdlib: {})\nOr run `almide fmt` to auto-add missing imports", name, desc),
+                         Some(format!("import {}", name)))
                     } else {
-                        // "Did you mean?" suggestion from variables, top_lets, and functions in scope
                         let candidates = self.env.all_visible_names();
                         if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
-                            format!("Did you mean `{}`?", suggestion)
+                            (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()))
                         } else {
-                            "Check the variable name".to_string()
+                            ("Check the variable name".to_string(), None)
                         }
                     };
-                    self.emit(super::err(format!("undefined variable '{}'", name), hint, format!("variable {}", name)).with_code("E003"));
+                    let mut diag = super::err(format!("undefined variable '{}'", name), hint, format!("variable {}", name)).with_code("E003");
+                    if let Some(fix) = fix {
+                        diag = if fix.starts_with("import ") {
+                            diag.with_try(fix)
+                        } else {
+                            diag.with_try(format!("// {}  →  {}\n{}", name, fix, fix))
+                        };
+                    }
+                    self.emit(diag);
                     Ty::Unknown
                 }
             }
@@ -822,14 +830,20 @@ impl Checker {
             ast::Stmt::Assign { name, value, .. } => {
                 self.infer_expr(value);
                 if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
-                    let hint = if self.env.param_vars.contains(&sym(name)) {
+                    let is_param = self.env.param_vars.contains(&sym(name));
+                    let hint = if is_param {
                         format!("'{}' is a function parameter (immutable). Use a local copy: var {0}_ = {0}", name)
                     } else {
                         format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
                     };
+                    let snippet = if is_param {
+                        format!("// '{n}' is a parameter — make a mutable copy:\nvar {n}_ = {n}\n// ...then reassign {n}_ instead of {n}", n = name)
+                    } else {
+                        format!("// let {n} = ...  →  var {n} = ...\nvar {n} = <initial value>", n = name)
+                    };
                     let mut diag = super::err(
                         format!("cannot reassign immutable binding '{}'", name),
-                        hint, format!("{} = ...", name)).with_code("E009");
+                        hint, format!("{} = ...", name)).with_code("E009").with_try(snippet);
                     if let Some(&(line, col)) = self.env.var_decl_locs.get(&sym(name)) {
                         diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", name));
                     }
