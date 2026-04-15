@@ -46,6 +46,26 @@ match cond {
 
 memory `reference_codegen_ideal_roadmap.md` の **#1 関数解決を独立パスに** と並走する文脈、`pass_resolve_calls` の前後で effect lift を入れるのが筋。
 
+### C. Spec 未実装 (どちらも spec 準拠なら直すべき)
+
+#### C-1. 選択 import `import x.{A, B}` 未実装
+
+**spec**: サポートあり。
+**現状**: パーサーで認識されない or codegen 未対応 (要調査)。
+**回避策**: `import x` 後に `x.A` / `x.B` を毎回書く (prefix が冗長)。
+**実利益 (dojo)**: `import self.classifier` → `import self.classifier.{classify, category_order}` に書き換えて `classifier.` prefix が全消しできる。
+
+#### C-2. モジュール越しの `let` 値アクセス不可
+
+**spec**: Visibility 節「applies to fn, type, and **let**」と明記。
+**現状**: cross-module で `let CATEGORY_ORDER = [...]` を `module.CATEGORY_ORDER` で参照できない。
+**回避策**: `fn category_order() -> List[String] = [...]` で wrap (毎回 fn call、書き味も悪い)。
+**真因**: import / module resolution が `let` を public symbol として export してない可能性が高い。
+
+#### C-3. 根治設計
+
+両方 module-system spec の missing piece。`docs/specs/module-system.md` を spec の source of truth として、parser + resolution + codegen を 1 PR で揃える。
+
 ### B. DX papercuts
 
 #### B-1. `almide test` がコンパイル失敗時に詳細握り潰し
@@ -81,23 +101,29 @@ memory `reference_codegen_ideal_roadmap.md` の **#1 関数解決を独立パス
 - [ ] `pass_effect_inference` を読んで built-in と user の lift 経路を統一
 - [ ] A-1 / A-2 が repro → fix → green
 
-### Phase 2: B-1 (test の stderr passthrough)
+### Phase 2: C 系 (spec 準拠、dojo の module 分割を解放)
+- [ ] C-1: `import x.{A, B}` パーサー + resolution + codegen
+- [ ] C-2: cross-module `let` を public symbol として export
+- [ ] dojo `classifier` を選択 import + `let CATEGORY_ORDER` で書き直し、prefix 全消しを demo
+
+### Phase 3: B-1 (test の stderr passthrough)
 - [ ] `cargo_build_test` に `--verbose` か env var で passthrough mode
 - [ ] CI で出力肥大化しないよう default は要約のまま
 
-### Phase 3: B-2 (`almide explain`)
+### Phase 4: B-2 (`almide explain`)
 - [ ] `docs/diagnostics/E001.md` 等の skeleton を 5-10 code 分書く
 - [ ] CLI subcommand 実装
 - [ ] generate script で diagnostic 一覧 README
 
-### Phase 4: B-3 (project-local import)
+### Phase 5: B-3 (project-local import)
 - [ ] 現状サポート確認 (resolve.rs / module-system.md)
 - [ ] 未サポートなら syntax 設計 → 実装
 
 ## 出元
 
-dojo loop で実 user 視点で踏んだもの:
+dojo / nn loop で実 user 視点で踏んだもの:
 - A-1, A-2: nn / dojo タスク両方で繰り返し
 - B-1: nn の test 失敗で何度も「再現できないバグ」になりかけた
 - B-2: dojo の auto classify でコード数値推測に依存している
 - B-3: nn/src 7 ファイル化を諦めた根本理由
+- C-1, C-2: dojo classifier の module 分割で spec 通り書けない、fn wrap workaround を強いられた
