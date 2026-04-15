@@ -46,8 +46,8 @@ MoonBit の経験則: **「LLM-friendly な言語」だけでは不十分。「L
 - ✅ roadmap 整備
 
 ### Phase 2 — Tooling (MoonBit-inspired, 着手中)
-2-1. **`almide ide outline <file>`** — package の pub fn / type / let を 1 行ずつ列挙。grep 撲滅、E002/E003 の hallucination 消す。
-2-2. **`almide ide doc <symbol>`** — stdlib / user fn の signature + docstring を返す。`string.to_upper` を探す時に `grep` 不要。
+2-1. ✅ **`almide ide outline <file>`** — package の pub fn / type / let を 1 行ずつ列挙。grep 撲滅、E002/E003 の hallucination 消す。
+2-2. ✅ **`almide ide doc <symbol> [--file <f>]`** — stdlib / user fn の signature + docstring を返す。`string.to_upper` を探す時に `grep` 不要。
 2-3. **`almide ide peek-def <symbol>`** — 定義の snippet のみ返す (body あり)。
 2-4. **`almide ide find-refs <symbol>`** — 参照一覧。
 2-5. **AGENTS.md を `almide new` に同梱** — dojo SYSTEM_PROMPT を全 project に配布。MoonBit 同様「最初に読む 1 ファイル」。

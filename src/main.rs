@@ -152,6 +152,11 @@ enum Commands {
         /// Target version (e.g., v0.13.0); defaults to latest
         version: Option<String>,
     },
+    /// Agent/LLM semantic queries (outline, doc, peek-def, find-refs)
+    Ide {
+        #[command(subcommand)]
+        cmd: IdeCommand,
+    },
     /// Emit source code or AST
     #[command(hide = true)]
     Emit {
@@ -172,6 +177,28 @@ enum Commands {
         /// Add #[repr(C)] to structs/enums for stable C ABI
         #[arg(long)]
         repr_c: bool,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum IdeCommand {
+    /// Print one-line summary of each public decl (fn / type / let) in the file.
+    /// Use this instead of `grep` to discover a package's API.
+    Outline {
+        /// Source file (default: src/main.almd)
+        file: Option<String>,
+        /// Filter to a prefix (e.g. `list.` or a fn name)
+        #[arg(long)]
+        filter: Option<String>,
+    },
+    /// Show signature + doc for a symbol. Accepts `string.to_upper`, `list.fold`,
+    /// or a bare user-defined name.
+    Doc {
+        /// Symbol name (e.g. `string.to_upper`)
+        symbol: String,
+        /// File context (default: src/main.almd — used for user-defined lookup)
+        #[arg(long)]
+        file: Option<String>,
     },
 }
 
@@ -490,6 +517,18 @@ fn dispatch(cli: Cli) {
         }
         Commands::Explain { code } => {
             print_error_explanation(&code);
+        }
+        Commands::Ide { cmd } => {
+            match cmd {
+                IdeCommand::Outline { file, filter } => {
+                    let file = resolve_file(file);
+                    cli::cmd_ide_outline(&file, filter.as_deref());
+                }
+                IdeCommand::Doc { symbol, file } => {
+                    let file = resolve_file(file);
+                    cli::cmd_ide_doc(&symbol, &file);
+                }
+            }
         }
         Commands::Fmt { files, check, dry_run } => {
             let write_back = !check && !dry_run;
