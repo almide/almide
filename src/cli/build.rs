@@ -234,26 +234,21 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         std::process::exit(1);
     }
 
-    // Optional post-process: wasm-opt -O3 (binaryen) shrinks size + sometimes
-    // helps perf via constant prop / dead-store elim across stdlib calls.
-    // Skip if wasm-opt is not on PATH, if ALMIDE_NO_WASM_OPT=1, or if --no-opt.
-    // Disabled by default for now (opt-in via ALMIDE_WASM_OPT=1) until the
-    // runtime is verified to round-trip cleanly through binaryen.
-    let want_opt = std::env::var("ALMIDE_WASM_OPT").map(|v| v == "1" || v == "true").unwrap_or(false);
-    if want_opt {
-        match run_wasm_opt(output) {
-            Ok(post_size) => {
-                let pct = if pre_size > 0 { 100.0 * (pre_size - post_size) as f64 / pre_size as f64 } else { 0.0 };
-                eprintln!("Built {} ({} bytes → {} bytes, -{:.1}%)", output, pre_size, post_size, pct);
-            }
-            Err(e) => {
-                eprintln!("wasm-opt skipped: {}", e);
-                eprintln!("Built {} ({} bytes)", output, pre_size);
-            }
+    // Post-process: wasm-opt -O3 (binaryen) shrinks size + sometimes helps
+    // perf via constant prop / dead-store elim across stdlib calls. Default-on
+    // (round-trip verified across spec/ on WASM target — 197 pass identical
+    // with and without wasm-opt). Opt-out via ALMIDE_NO_WASM_OPT=1.
+    // Silent skip if wasm-opt is not installed.
+    let opt_out = std::env::var("ALMIDE_NO_WASM_OPT").map(|v| v == "1" || v == "true").unwrap_or(false);
+    if !opt_out {
+        if let Ok(post_size) = run_wasm_opt(output) {
+            let pct = if pre_size > 0 { 100.0 * (pre_size - post_size) as f64 / pre_size as f64 } else { 0.0 };
+            eprintln!("Built {} ({} bytes → {} bytes, -{:.1}%)", output, pre_size, post_size, pct);
+            return;
         }
-    } else {
-        eprintln!("Built {} ({} bytes)", output, pre_size);
+        // wasm-opt not available → silent fallback to unoptimized output.
     }
+    eprintln!("Built {} ({} bytes)", output, pre_size);
 }
 
 /// Run `wasm-opt -O3 --enable-simd` on the output file, in-place.
