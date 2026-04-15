@@ -53,7 +53,7 @@ impl Parser {
                 "`let rec` is OCaml/SML syntax; Almide functions are recursive by default",
                 "Define recursive functions at top level: `fn name(args) -> ReturnType = body`. Almide has no `let rec` — call the fn directly, including from its own body.",
                 "let rec",
-            );
+            ).with_try("fn fact(n: Int) -> Int =\n    if n == 0 then 1 else n * fact(n - 1)");
             self.errors.push(diag);
             return Err(format!("'let rec' is not valid in Almide at line {}:{}", tok.line, tok.col));
         }
@@ -118,9 +118,9 @@ impl Parser {
             let tok = self.current().clone();
             let diag = self.diag_error(
                 "`let ... in <expr>` is OCaml/Haskell syntax",
-                "In Almide, multiple lets chain by newlines inside a block. Write:\n    let x = 1\n    let y = 2\n    x + y\n  — no `in` keyword.",
+                "In Almide, multiple lets chain by newlines inside a block — no `in` keyword.",
                 "let ... in",
-            );
+            ).with_try("let x = 1\nlet y = 2\nx + y");
             self.errors.push(diag);
             return Err(format!("`let ... in` is not valid in Almide at line {}:{}", tok.line, tok.col));
         }

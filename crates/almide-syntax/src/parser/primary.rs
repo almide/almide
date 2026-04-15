@@ -299,9 +299,9 @@ impl Parser {
             let tok = self.current().clone();
             let diag = self.diag_error(
                 "`while ... do ... done` is Pascal/Ruby syntax",
-                "Almide uses `while cond { ... }` (curly braces, no `do`/`done`). Pure code: prefer recursion or `list.fold`. Effect code: `while cond { ... }`.",
+                "Almide uses `while cond { ... }` (curly braces, no `do`/`done`). Pure code: prefer recursion or `list.fold`.",
                 "while body",
-            );
+            ).with_try("while cond {\n    // body\n}");
             self.errors.push(diag);
             return Err(format!("`while ... do` is not valid in Almide at line {}:{}", tok.line, tok.col));
         }

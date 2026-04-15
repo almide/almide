@@ -70,6 +70,42 @@ Almide の **mission**: "The language LLMs can write most accurately." この ro
   | Release | 70b | 8b | Notes |
   |---|---|---|---|
   | v0.14.5 | 17/30 | 13/30 | retro — baseline for llm-first roadmap |
+- **retry budget**: dojo data で `pass-3 = 0 across all runs` を確認。`max_retries=3` は無駄、**2 で十分**。余った budget はタスクを 2 周して variance 除去に回す。
+
+## dojo data から学んだ構造 (2026-04-15)
+
+### "両モデル必ず通る" 12 タスク = sweet spot
+`clamp`, `fizzbuzz`, `factorial`, `flatten-nested`, `repeat-string` 等 — 単一関数 / プリミティブ I/O / 浅い再帰。100% pass。**MSR-first 言語のベースライン保証ライン**。
+
+### "両モデル必ず落ちる" 11 タスク = 設計の中心課題
+3 つの機能群に集中:
+- **ADT / sum types**: `anagram-check`, `custom-linked-list`, `mini-json-query`
+- **Stateful loops** (low/high ポインタ等): `binary-search`, `matrix-ops`
+- **String algorithm pipelines**: `balanced-parens`, `caesar-cipher`, `roman-numeral`, `run-length-encoding`, `string-reverse`, `result-pipeline`
+
+→ **機能を捨てるな**。stdlib で "common pattern as a function" を増やして LLM が algorithm を書かずに合成できるようにする:
+- `list.binary_search`, `string.run_length_encode`, `list.window`, `list.partition`, etc.
+- 新 Phase として **Phase 1.5: stdlib pattern expansion** を追加する判断。
+
+### 8b > 70b 逆転 = one canonical form の証拠
+`max-of-list`, `sum-digits` で 8b が通り 70b が落ちる。70b は賢いがゆえに `xs.head` method chain / `let rec` を過剰に書く。**小モデルでも書ける = 大モデルでも勝手に過剰に書かない**。Elm の "only one way" と MSR-first が整合。
+
+### parse-error vs type-error の model-size 依存
+| | parse | type |
+|---|---|---|
+| 8b | 9 | 3 |
+| 70b | 0 | 9 |
+
+→ **小モデル向け**: 構文 forgive (UFCS、auto-import、optional 括弧?) が効く
+→ **大モデル向け**: 型推論強化、Option/Result chain (`?` operator) が効く
+→ 両方を別々の Phase で積む。
+
+## UFCS 再考 (data を見た後)
+
+- 8b の parse-error 9 件 vs 70b の 0 件 = **UFCS が効くのは 8b に強い、70b にはほぼ無関係**。
+- 70b の type-error 9 件 = 型推論 / Option chain の改善が効く。
+- 結論: UFCS は「8b の底上げ」目的なら採用価値大。70b の天井を破るには別方針 (型推論強化、`?` chain) が必要。
+- **決定**: Phase 1-2 終了後、8b MSR が +5pt 未満なら UFCS 検討。70b の改善は type-inference Phase として別立て。
 
 ## 非目標 (明示)
 

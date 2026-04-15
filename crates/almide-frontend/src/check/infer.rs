@@ -209,10 +209,11 @@ impl Checker {
                         _ => None,
                     };
                     if let Some((module, subs)) = module_and_subs {
-                        let hint = if let Some((_, snippet)) = subs.iter().find(|(n, _)| n == field) {
+                        let matched = subs.iter().find(|(n, _)| n == field).map(|(_, s)| s.clone());
+                        let hint = if matched.is_some() {
                             format!(
-                                "Almide values have no fields — use the `{m}` stdlib module. Replace `x.{f}` with `{snippet}`. No method-call or field-access syntax is supported.",
-                                m = module, f = field, snippet = snippet
+                                "Almide values have no fields — use the `{m}` stdlib module. No method-call or field-access syntax is supported.",
+                                m = module
                             )
                         } else {
                             format!(
@@ -220,11 +221,15 @@ impl Checker {
                                 m = module
                             )
                         };
-                        self.emit(super::err(
+                        let mut diag = super::err(
                             format!("no field '{}' on {}", field, module),
                             hint,
                             format!("field access .{}", field),
-                        ).with_code("E013"));
+                        ).with_code("E013");
+                        if let Some(snippet) = matched {
+                            diag = diag.with_try(snippet);
+                        }
+                        self.emit(diag);
                     }
                 }
                 field_ty
