@@ -369,13 +369,15 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 }
                 // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
                 // Spec Visibility section applies to fn, type, AND let.
-                // Module top_lets are emitted as `static ALMIDE_RT_<MOD>_<NAME>: LazyLock<T>`
-                // (see lower::mod::lower_module:437). Pre-deref via `(*…)` so that
-                // operators like `==` and `Display` work without auto-deref.
+                // Module top_lets are emitted as `static ALMIDE_RT_<MOD>_<NAME>` —
+                // a lazy global on both Rust (LazyLock<T>) and WASM. We synthesize
+                // a Var carrying that exact name; codegen recognises the
+                // ALMIDE_RT_ prefix to auto-deref (Rust) and falls back to a
+                // name-based global lookup (WASM).
                 let qual_let_key = format!("{}.{}", mod_name, field);
                 if ctx.env.top_lets.contains_key(&sym(&qual_let_key)) {
                     let symbol = format!(
-                        "(*ALMIDE_RT_{}_{})",
+                        "ALMIDE_RT_{}_{}",
                         mod_name.as_str().to_uppercase(),
                         field.as_str().to_uppercase(),
                     );

@@ -42,8 +42,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Variables ──
         IrExprKind::Var { id } => {
             let name = ctx.var_name(*id).to_string();
-            // Lazy vars need deref via template
-            if ctx.ann.lazy_vars.contains(id) {
+            // Lazy vars need deref via template. Cross-module top_let synthetic
+            // vars carry an `ALMIDE_RT_<MOD>_<NAME>` name and reference a static
+            // LazyLock — auto-deref them too.
+            let is_synthetic_lazy = name.starts_with("ALMIDE_RT_");
+            if ctx.ann.lazy_vars.contains(id) || is_synthetic_lazy {
                 let upper = name.to_uppercase();
                 ctx.templates.render_with("deref_lazy", None, &[], &[("name", upper.as_str())])
                     .unwrap_or_else(|| name.to_uppercase())

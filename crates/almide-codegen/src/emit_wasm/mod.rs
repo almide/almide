@@ -231,6 +231,11 @@ pub struct WasmEmitter {
     pub preopen_count_global: u32,
     // Top-level let globals: VarId → (global index, ValType)
     pub top_let_globals: HashMap<u32, (u32, ValType)>,
+    /// Name-keyed mirror of `top_let_globals`, plus entries for cross-module
+    /// `static ALMIDE_RT_<MOD>_<NAME>` so that synthetic Vars in the main
+    /// var_table can resolve via name even when their VarId belongs to a
+    /// different table.
+    pub top_let_globals_by_name: HashMap<String, (u32, ValType)>,
     pub top_let_init: Vec<(u32, ValType, i64)>, // (global_idx, type, const_init_bits) in order
     pub next_global: u32,
 
@@ -357,6 +362,7 @@ impl WasmEmitter {
             preopen_table_global: 1,
             preopen_count_global: 2,
             top_let_globals: HashMap::new(),
+            top_let_globals_by_name: HashMap::new(),
             top_let_init: Vec::new(),
             next_global: 3, // 0 = heap_ptr, 1 = preopen_table, 2 = preopen_count
             func_table: Vec::new(),
@@ -836,7 +842,29 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             _ => 0, // computed values default to 0
         };
         emitter.top_let_globals.insert(tl.var.0, (global_idx, vt));
+        let name = program.var_table.get(tl.var).name.to_string();
+        emitter.top_let_globals_by_name.insert(name, (global_idx, vt));
         emitter.top_let_init.push((global_idx, vt, const_bits));
+    }
+    // Also register module top_lets as globals so cross-module access (synthetic
+    // Var with `ALMIDE_RT_<MOD>_<NAME>` name) can resolve at WASM emit time.
+    for module in &program.modules {
+        for tl in &module.top_lets {
+            let global_idx = emitter.next_global;
+            emitter.next_global += 1;
+            let vt = values::ty_to_valtype(&tl.ty).unwrap_or(ValType::I64);
+            let const_bits: i64 = match &tl.value.kind {
+                almide_ir::IrExprKind::LitInt { value } => *value,
+                almide_ir::IrExprKind::LitFloat { value } => value.to_bits() as i64,
+                almide_ir::IrExprKind::LitBool { value } => *value as i64,
+                _ => 0,
+            };
+            // Module-local VarId may collide with main's; use name as the
+            // primary key. Skip the id-based map to avoid hijacking main vars.
+            let name = module.var_table.get(tl.var).name.to_string();
+            emitter.top_let_globals_by_name.insert(name, (global_idx, vt));
+            emitter.top_let_init.push((global_idx, vt, const_bits));
+        }
     }
 
     // Register ALL function signatures (including test functions)
@@ -952,10 +980,12 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Check if any top-level let needs dynamic initialization (non-constant values).
     // LitStr needs init because string pointers are resolved at runtime via data section.
-    let needs_init = program.top_lets.iter().any(|tl| !matches!(&tl.value.kind,
+    let is_dyn = |tl: &almide_ir::IrTopLet| !matches!(&tl.value.kind,
         almide_ir::IrExprKind::LitInt { .. } | almide_ir::IrExprKind::LitFloat { .. } |
         almide_ir::IrExprKind::LitBool { .. }
-    ));
+    );
+    let needs_init = program.top_lets.iter().any(is_dyn)
+        || program.modules.iter().any(|m| m.top_lets.iter().any(is_dyn));
     let init_globals_idx: Option<u32> = if needs_init {
         let void_ty = emitter.register_type(vec![], vec![]);
         let idx = emitter.register_func("__init_globals", void_ty);
@@ -1257,8 +1287,45 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
                 compiler.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
             }
         }
-        compiler.func.instruction(&wasm_encoder::Instruction::End);
+        // Also initialize cross-module top_lets via name lookup (their VarIds
+        // belong to per-module var_tables, so id-keyed top_let_globals can't
+        // resolve them; we use the prefixed name set up at registration time).
         compiler.func
+    };
+    // Append module top_let initializers to the same function body. Each
+    // module needs its own var_table for the FuncCompiler ctx, so we re-build
+    // a compiler per module and append instructions.
+    let mut compiled_func = compiled_func;
+    for module in &program.modules {
+        if module.top_lets.is_empty() { continue; }
+        let mut scratch_alloc = scratch::ScratchAllocator::new();
+        scratch_alloc.set_bases_with_capacity(scratch_i32_base, scratch_i32_cap, scratch_i64_base, scratch_i64_cap, scratch_f64_base, scratch_f64_cap);
+        scratch_alloc.set_v128_base(scratch_v128_base);
+        let mut mc = FuncCompiler {
+            emitter: &mut *emitter,
+            func: compiled_func,
+            var_map: HashMap::new(),
+            depth: 0,
+            loop_stack: Vec::new(),
+            scratch: scratch_alloc,
+            var_table: &module.var_table,
+            stub_ret_ty: Ty::Unit,
+        };
+        for tl in &module.top_lets {
+            mc.emit_expr(&tl.value);
+            let name = module.var_table.get(tl.var).name.as_str();
+            if let Some(&(global_idx, _)) = mc.emitter.top_let_globals_by_name.get(name) {
+                mc.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
+            } else {
+                mc.func.instruction(&wasm_encoder::Instruction::Drop);
+            }
+        }
+        compiled_func = mc.func;
+    }
+    let compiled_func = {
+        let mut f = compiled_func;
+        f.instruction(&wasm_encoder::Instruction::End);
+        f
     };
 
     emitter.add_compiled(CompiledFunc { type_idx: void_type, func: compiled_func });

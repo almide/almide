@@ -112,12 +112,7 @@ jobs:
       - name: Almide spec tests (WASM target)
         run: |
           ALMIDE=/tmp/almide-bin/almide
-          # Move tests that exercise features not yet ported to WASM:
-          #   - cross-module let access (Rust uses ALMIDE_RT_<MOD>_<NAME> static; WASM unimplemented)
-          mkdir -p /tmp/skip-wasm
-          mv spec/integration/modules/cross_module_let_test.almd /tmp/skip-wasm/ 2>/dev/null || true
           $ALMIDE test spec/ --target wasm
-          mv /tmp/skip-wasm/*.almd spec/integration/modules/ 2>/dev/null || true
 
   # ═══════════════════════════════════════════════
   # Checks
