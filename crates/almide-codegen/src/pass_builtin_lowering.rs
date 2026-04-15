@@ -293,6 +293,14 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             exprs: exprs.into_iter().map(rewrite_expr).collect(),
         },
+        // Recurse into iterator chains so lambdas inside fold / map / filter
+        // get builtin-lowered (e.g. println → RustMacro).
+        IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
+            source: Box::new(rewrite_expr(*source)),
+            consume,
+            steps: steps.into_iter().map(|s| s.map_exprs(&mut rewrite_expr)).collect(),
+            collector: collector.map_exprs(&mut rewrite_expr),
+        },
         other => other,
     };
 

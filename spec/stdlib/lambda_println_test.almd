@@ -1,0 +1,13 @@
+// lambda_println_test — println inside list.fold/map lambda emits as macro.
+// Was a codegen bug: BuiltinLowering didn't recurse into IterChain, so the
+// builtin → RustMacro transform missed lambdas inside fold/map.
+
+test "println inside fold lambda compiles and runs" {
+  let r = [1, 2, 3] |> list.fold(0, (acc, x) => { println("x"); acc + x })
+  assert_eq(r, 6)
+}
+
+test "println inside map lambda compiles and runs" {
+  let r = [1, 2, 3] |> list.map((x) => { println("y"); x * 2 })
+  assert_eq(r, [2, 4, 6])
+}
