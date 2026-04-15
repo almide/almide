@@ -476,20 +476,49 @@ fn emit_parse_string(f: &mut Function, alloc: u32) {
           local_get(6); local_get(7); i32_store(0);
           i32_const(0); local_set(9);
     });
-    // Copy bytes loop
+    // Copy bytes loop with JSON escape decoding.
+    // Locals: 8 = read offset, 9 = write offset, 4 = current byte (reused).
+    // Handles \n \t \r \" \\ \/ \b \f. \uXXXX is not yet supported (passes through).
     wasm!(f, {
+          i32_const(0); local_set(8);
+          i32_const(0); local_set(9);
           block_empty; loop_empty;
-            local_get(9); local_get(7); i32_ge_u; br_if(1);
+            local_get(8); local_get(7); i32_ge_u; br_if(1);
+            // byte = in[in_base + read_off]
+            local_get(0); i32_const(4); i32_add; local_get(5); i32_add; local_get(8); i32_add;
+            i32_load8_u(0); local_set(4);
+            // if byte == 0x5C (backslash): decode next byte
+            local_get(4); i32_const(92); i32_eq;
+            if_empty;
+              // advance read past backslash
+              local_get(8); i32_const(1); i32_add; local_set(8);
+              local_get(8); local_get(7); i32_ge_u; br_if(2);
+              // load next byte
+              local_get(0); i32_const(4); i32_add; local_get(5); i32_add; local_get(8); i32_add;
+              i32_load8_u(0); local_set(4);
+              // Decode escape: overwrite local 4 in-place via if/else chain.
+              // Decoded values (8,9,10,12,13) and idempotent ones (34,47,92) don't
+              // collide with the source codes for other escapes (110,116,114,98,102),
+              // so a sequential pass is safe.
+              local_get(4); i32_const(110); i32_eq; if_empty; i32_const(10); local_set(4); end;  // n
+              local_get(4); i32_const(116); i32_eq; if_empty; i32_const(9);  local_set(4); end;  // t
+              local_get(4); i32_const(114); i32_eq; if_empty; i32_const(13); local_set(4); end;  // r
+              local_get(4); i32_const(98);  i32_eq; if_empty; i32_const(8);  local_set(4); end;  // b
+              local_get(4); i32_const(102); i32_eq; if_empty; i32_const(12); local_set(4); end;  // f
+              // ", \, /  decode to themselves — no rewrite needed.
+            end;
+            // out[out_base + write_off] = byte
             local_get(6); i32_const(4); i32_add; local_get(9); i32_add;
-            local_get(0); i32_const(4); i32_add; local_get(5); i32_add; local_get(9); i32_add;
-            i32_load8_u(0);
+            local_get(4);
             i32_store8(0);
             local_get(9); i32_const(1); i32_add; local_set(9);
+            local_get(8); i32_const(1); i32_add; local_set(8);
             br(0);
           end; end;
     });
-    // Build Value and return
+    // Build Value and return — write actual decoded length (write_off)
     wasm!(f, {
+          local_get(6); local_get(9); i32_store(0);
           local_get(1); i32_const(1); i32_add; local_set(1);
           i32_const(8); call(alloc); local_set(7);
           local_get(7); i32_const(4); i32_store(0);
