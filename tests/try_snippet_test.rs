@@ -105,6 +105,42 @@ effect fn main() -> Unit = {
 }
 
 #[test]
+fn e001_fn_body_unit_leak_emits_try_snippet() {
+    // Top dojo E001 pattern: fn body ends with a `let` binding (Unit),
+    // so the fn returns Unit instead of the declared return type.
+    let p = write_tmp("try_e001_fn_unit.almd", r#"
+fn sum_digits(n: Int) -> Int = {
+    let abs_n = int.abs(n)
+}
+"#);
+    let (ok, out) = check(&p);
+    assert!(!ok);
+    assert!(out.contains("error[E001]"), "out:\n{}", out);
+    assert!(out.contains("type mismatch in fn 'sum_digits'"), "out:\n{}", out);
+    assert!(out.contains("try:"), "missing try:\n{}", out);
+    assert!(out.contains("fn body ends with a statement"), "body missing\n{}", out);
+    assert!(out.contains("evaluates to Int"), "type-specific guidance missing\n{}", out);
+}
+
+#[test]
+fn e004_arg_count_emits_sig_placeholder() {
+    // dojo data: `string.join(xs)` forgets the separator. The try: snippet
+    // should show the full signature with named placeholders.
+    let p = write_tmp("try_e004.almd", r#"
+fn greet(xs: List[String]) -> String = {
+    string.join(xs)
+}
+"#);
+    let (ok, out) = check(&p);
+    assert!(!ok);
+    assert!(out.contains("error[E004]"), "out:\n{}", out);
+    assert!(out.contains("try:"), "missing try:\n{}", out);
+    // placeholder must name both params with types
+    assert!(out.contains("<list: List[String]>"), "first placeholder missing\n{}", out);
+    assert!(out.contains("<sep: String>"), "second placeholder missing\n{}", out);
+}
+
+#[test]
 fn e002_freetext_alias_suppresses_try_snippet() {
     // `string.all` aliases to "string.chars + list.all" — a free-text
     // composition, not a bare fn name. try: must be suppressed rather

@@ -321,9 +321,22 @@ impl Checker {
             None => self.env.fn_min_params.get(&sym(name)).copied().unwrap_or(sig.params.len()),
         };
         if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
+            // Build a placeholder call showing the full signature so LLMs
+            // can see exactly which args are missing / extraneous.
+            let placeholder = sig.params.iter()
+                .map(|(pname, pty)| format!("<{}: {}>", pname.as_str(), pty.display()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let snippet = format!(
+                "// {name}() takes {n} arg(s) — you passed {got}\n\
+                {name}({placeholder})",
+                name = name, n = sig.params.len(), got = arg_tys.len(),
+                placeholder = placeholder,
+            );
             self.emit(super::err(
                 format!("{}() expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
-                "Check the number of arguments", format!("call to {}()", name)).with_code("E004"));
+                "Check the number of arguments", format!("call to {}()", name)
+            ).with_code("E004").with_try(snippet));
         }
         // Validate argument types and infer generics
         let mut bindings: HashMap<Sym, Ty> = HashMap::new();
