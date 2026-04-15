@@ -1,0 +1,19 @@
+// match_arm_effect_unify_test — match arm bodies that mix user effect fn
+// (returns Result<T, String> after lifting) with built-in effects (return ())
+// should auto-unify via Try insertion.
+
+effect fn user_effect() -> () = {
+  println("user")
+}
+
+effect fn use_match() -> () = {
+  let cond: Result[Int, String] = ok(1)
+  match cond {
+    ok(_) => user_effect(),       // returns lifted Result<(), String>
+    err(_) => println("nope"),    // returns ()
+  }
+}
+
+test "match arm mixing user effect fn and built-in compiles" {
+  use_match()!
+}
