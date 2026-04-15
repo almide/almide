@@ -45,6 +45,19 @@ impl Parser {
         let span = self.current_span();
         self.expect(TokenType::Let)?;
 
+        // Detect `let rec name(args) = ...` (OCaml / SML / F#). Almide
+        // doesn't need `rec` — top-level fns are recursive by default.
+        if self.check(TokenType::Ident) && self.current().value == "rec" {
+            let tok = self.current().clone();
+            let diag = self.diag_error(
+                "`let rec` is OCaml/SML syntax; Almide functions are recursive by default",
+                "Define recursive functions at top level: `fn name(args) -> ReturnType = body`. Almide has no `let rec` — call the fn directly, including from its own body.",
+                "let rec",
+            );
+            self.errors.push(diag);
+            return Err(format!("'let rec' is not valid in Almide at line {}:{}", tok.line, tok.col));
+        }
+
         // Record destructuring: let { a, b } = expr
         if self.check(TokenType::LBrace) {
             self.advance();
@@ -99,6 +112,18 @@ impl Parser {
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
         let value = self.parse_expr()?;
+        // Detect `let x = expr in <body>` (OCaml/Haskell). Almide lets chain
+        // by newline/semicolon inside a block — no `in` keyword.
+        if self.check(TokenType::In) {
+            let tok = self.current().clone();
+            let diag = self.diag_error(
+                "`let ... in <expr>` is OCaml/Haskell syntax",
+                "In Almide, multiple lets chain by newlines inside a block. Write:\n    let x = 1\n    let y = 2\n    x + y\n  — no `in` keyword.",
+                "let ... in",
+            );
+            self.errors.push(diag);
+            return Err(format!("`let ... in` is not valid in Almide at line {}:{}", tok.line, tok.col));
+        }
         Ok(Stmt::Let { name, ty, value, span: Some(span) })
     }
 

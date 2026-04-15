@@ -294,6 +294,17 @@ impl Parser {
         self.skip_newlines();
         let cond = self.parse_expr()?;
         self.skip_newlines();
+        // Detect `while cond do ... done` (Pascal/Ruby). Almide uses `{ ... }`.
+        if self.check(TokenType::Ident) && self.current().value == "do" {
+            let tok = self.current().clone();
+            let diag = self.diag_error(
+                "`while ... do ... done` is Pascal/Ruby syntax",
+                "Almide uses `while cond { ... }` (curly braces, no `do`/`done`). Pure code: prefer recursion or `list.fold`. Effect code: `while cond { ... }`.",
+                "while body",
+            );
+            self.errors.push(diag);
+            return Err(format!("`while ... do` is not valid in Almide at line {}:{}", tok.line, tok.col));
+        }
         let open = self.current().clone();
         self.expect(TokenType::LBrace)?;
         let mut stmts = Vec::new();
