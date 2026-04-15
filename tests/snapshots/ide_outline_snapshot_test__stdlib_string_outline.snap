@@ -1,0 +1,48 @@
+---
+source: tests/ide_outline_snapshot_test.rs
+expression: "run_outline(&[\"@stdlib/string\"])"
+---
+fn string.capitalize(s: String) -> String
+fn string.chars(s: String) -> List[String]
+fn string.codepoint(s: String) -> Option[Int]
+fn string.contains(s: String, sub: String) -> Bool
+fn string.count(s: String, sub: String) -> Int
+fn string.drop(s: String, n: Int) -> String
+fn string.drop_end(s: String, n: Int) -> String
+fn string.ends_with(s: String, suffix: String) -> Bool
+fn string.first(s: String) -> Option[String]
+fn string.from_bytes(bytes: List[Int]) -> String
+fn string.from_codepoint(n: Int) -> String
+fn string.get(s: String, i: Int) -> Option[String]
+fn string.index_of(s: String, needle: String) -> Option[Int]
+fn string.is_alpha(s: String) -> Bool
+fn string.is_alphanumeric(s: String) -> Bool
+fn string.is_digit(s: String) -> Bool
+fn string.is_empty(s: String) -> Bool
+fn string.is_lower(s: String) -> Bool
+fn string.is_upper(s: String) -> Bool
+fn string.is_whitespace(s: String) -> Bool
+fn string.join(list: List[String], sep: String) -> String
+fn string.last(s: String) -> Option[String]
+fn string.last_index_of(s: String, needle: String) -> Option[Int]
+fn string.len(s: String) -> Int
+fn string.lines(s: String) -> List[String]
+fn string.pad_end(s: String, n: Int, ch: String) -> String
+fn string.pad_start(s: String, n: Int, ch: String) -> String
+fn string.repeat(s: String, n: Int) -> String
+fn string.replace(s: String, from: String, to: String) -> String
+fn string.replace_first(s: String, from: String, to: String) -> String
+fn string.reverse(s: String) -> String
+fn string.slice(s: String, start: Int, end: Int) -> String
+fn string.split(s: String, sep: String) -> List[String]
+fn string.starts_with(s: String, prefix: String) -> Bool
+fn string.strip_prefix(s: String, prefix: String) -> Option[String]
+fn string.strip_suffix(s: String, suffix: String) -> Option[String]
+fn string.take(s: String, n: Int) -> String
+fn string.take_end(s: String, n: Int) -> String
+fn string.to_bytes(s: String) -> List[Int]
+fn string.to_lower(s: String) -> String
+fn string.to_upper(s: String) -> String
+fn string.trim(s: String) -> String
+fn string.trim_end(s: String) -> String
+fn string.trim_start(s: String) -> String

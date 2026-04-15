@@ -1,0 +1,26 @@
+---
+source: tests/ide_outline_snapshot_test.rs
+expression: "run_outline(&[\"@stdlib/int\"])"
+---
+fn int.abs(n: Int) -> Int
+fn int.band(a: Int, b: Int) -> Int
+fn int.bits_to_float(bits: Int) -> Float
+fn int.bnot(a: Int) -> Int
+fn int.bor(a: Int, b: Int) -> Int
+fn int.bshl(a: Int, n: Int) -> Int
+fn int.bshr(a: Int, n: Int) -> Int
+fn int.bxor(a: Int, b: Int) -> Int
+fn int.clamp(n: Int, lo: Int, hi: Int) -> Int
+fn int.from_hex(s: String) -> Result[Int, String]
+fn int.max(a: Int, b: Int) -> Int
+fn int.min(a: Int, b: Int) -> Int
+fn int.parse(s: String) -> Result[Int, String]
+fn int.rotate_left(a: Int, n: Int, bits: Int) -> Int
+fn int.rotate_right(a: Int, n: Int, bits: Int) -> Int
+fn int.to_float(n: Int) -> Float
+fn int.to_hex(n: Int) -> String
+fn int.to_string(n: Int) -> String
+fn int.to_u32(a: Int) -> Int
+fn int.to_u8(a: Int) -> Int
+fn int.wrap_add(a: Int, b: Int, bits: Int) -> Int
+fn int.wrap_mul(a: Int, b: Int, bits: Int) -> Int

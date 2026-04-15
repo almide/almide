@@ -1,0 +1,23 @@
+---
+source: tests/ide_outline_snapshot_test.rs
+expression: "run_outline(&[\"@stdlib/set\"])"
+---
+fn set.all[A](s: Set[A], f: fn(A) -> Bool) -> Bool
+fn set.any[A](s: Set[A], f: fn(A) -> Bool) -> Bool
+fn set.contains[A](s: Set[A], value: A) -> Bool
+fn set.difference[A](a: Set[A], b: Set[A]) -> Set[A]
+fn set.filter[A](s: Set[A], f: fn(A) -> Bool) -> Set[A]
+fn set.fold[A, B](s: Set[A], init: B, f: fn(B, A) -> B) -> B
+fn set.from_list[A](xs: List[A]) -> Set[A]
+fn set.insert[A](s: Set[A], value: A) -> Set[A]
+fn set.intersection[A](a: Set[A], b: Set[A]) -> Set[A]
+fn set.is_disjoint[A](a: Set[A], b: Set[A]) -> Bool
+fn set.is_empty[A](s: Set[A]) -> Bool
+fn set.is_subset[A](a: Set[A], b: Set[A]) -> Bool
+fn set.len[A](s: Set[A]) -> Int
+fn set.map[A, B](s: Set[A], f: fn(A) -> B) -> Set[B]
+fn set.new[A]() -> Set[A]
+fn set.remove[A](s: Set[A], value: A) -> Set[A]
+fn set.symmetric_difference[A](a: Set[A], b: Set[A]) -> Set[A]
+fn set.to_list[A](s: Set[A]) -> List[A]
+fn set.union[A](a: Set[A], b: Set[A]) -> Set[A]
