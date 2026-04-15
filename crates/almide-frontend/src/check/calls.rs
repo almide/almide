@@ -185,11 +185,26 @@ impl Checker {
             return ty;
         }
 
-        // Try stdlib lookup for module-qualified calls (e.g. "string.trim")
+        // Try stdlib lookup for module-qualified calls (e.g. "string.trim").
+        // Selective import (`import json.{from_string}`) lets bare `from_string`
+        // resolve via direct map → "json.from_string".
+        let qualified_via_direct = self.env.import_table.resolve_direct(name);
         let sig = self.env.functions.get(&sym(name)).cloned().or_else(|| {
             let (module, func) = name.split_once('.')?;
             crate::stdlib::lookup_sig(module, func)
+        }).or_else(|| {
+            let q = qualified_via_direct.as_ref()?;
+            let (module, func) = q.split_once('.')?;
+            crate::stdlib::lookup_sig(module, func)
+                .or_else(|| self.env.functions.get(&sym(q)).cloned())
         });
+
+        // Mark the source module as used (for unused-import diagnostic).
+        if qualified_via_direct.is_some() {
+            if let Some(module) = self.env.import_table.direct.get(&sym(name)).copied() {
+                self.env.import_table.used.insert(module);
+            }
+        }
 
         let Some(sig) = sig else {
             // No function signature found — try constructor, variable, or report error

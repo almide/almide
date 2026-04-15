@@ -1,0 +1,13 @@
+// selective_import_test — `import x.{A, B}` resolves bare names to module-qualified calls.
+
+import json.{from_string, stringify}
+
+test "selective import resolves bare call to module function" {
+  let v = from_string("hello")
+  assert_eq(stringify(v), "\"hello\"")
+}
+
+test "selective import + module-qualified still works" {
+  let v = json.from_string("world")
+  assert_eq(stringify(v), "\"world\"")
+}

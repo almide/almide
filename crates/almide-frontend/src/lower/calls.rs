@@ -95,6 +95,11 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                     callee: Box::new(ctx.mk(IrExprKind::Var { id: var_id }, ty, callee.span)),
                 };
             }
+            // Selective import: bare `from_string` → Module { json, from_string }.
+            // (used-mark happens in checker pass; lowering only rewrites.)
+            if let Some(module) = ctx.env.import_table.direct.get(name).copied() {
+                return CallTarget::Module { module, func: *name };
+            }
             CallTarget::Named { name: *name }
         }
         ast::ExprKind::Member { object, field, .. } => {
