@@ -182,14 +182,18 @@ enum Commands {
 
 #[derive(clap::Subcommand, Debug)]
 enum IdeCommand {
-    /// Print one-line summary of each public decl (fn / type / let) in the file.
+    /// Print one-line summary of each public decl (fn / type / let).
     /// Use this instead of `grep` to discover a package's API.
+    /// Accepts a file path or `@stdlib/<module>` (e.g. `@stdlib/string`).
     Outline {
-        /// Source file (default: src/main.almd)
-        file: Option<String>,
-        /// Filter to a prefix (e.g. `list.` or a fn name)
+        /// Source file or `@stdlib/<module>` (default: src/main.almd)
+        target: Option<String>,
+        /// Filter to a substring (e.g. `upper` or `to_`)
         #[arg(long)]
         filter: Option<String>,
+        /// Emit JSON instead of one-line text
+        #[arg(long)]
+        json: bool,
     },
     /// Show signature + doc for a symbol. Accepts `string.to_upper`, `list.fold`,
     /// or a bare user-defined name.
@@ -520,9 +524,12 @@ fn dispatch(cli: Cli) {
         }
         Commands::Ide { cmd } => {
             match cmd {
-                IdeCommand::Outline { file, filter } => {
-                    let file = resolve_file(file);
-                    cli::cmd_ide_outline(&file, filter.as_deref());
+                IdeCommand::Outline { target, filter, json } => {
+                    let target = match target {
+                        Some(t) if t.starts_with("@stdlib/") => t,
+                        other => resolve_file(other),
+                    };
+                    cli::cmd_ide_outline(&target, filter.as_deref(), json);
                 }
                 IdeCommand::Doc { symbol, file } => {
                     let file = resolve_file(file);
