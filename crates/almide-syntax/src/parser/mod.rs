@@ -33,11 +33,15 @@ pub struct Parser {
     pub(crate) file: Option<String>,
     pub(crate) next_expr_id: u32,
     pub(crate) depth: usize,
+    /// Names of fn declarations whose body failed to parse. Downstream checker
+    /// consults this set to suppress cascading "undefined function" diagnostics
+    /// so LLMs see the real parse error on top instead of 3× E002 repeats.
+    pub failed_fn_names: std::collections::HashSet<String>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0 }
+        Parser { tokens, pos: 0, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new() }
     }
 
     pub(crate) fn next_id(&mut self) -> ExprId {

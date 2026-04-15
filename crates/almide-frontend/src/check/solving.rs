@@ -19,10 +19,12 @@ impl Checker {
                 let exp = resolve_ty(&c.expected, &self.uf);
                 let act = resolve_ty(&c.actual, &self.uf);
                 if exp != Ty::Unknown && act != Ty::Unknown {
-                    let hint = Self::hint_with_conversion(
-                        "Fix the expression type or change the expected type",
-                        &exp, &act,
-                    );
+                    let base = match c.context.as_str() {
+                        "match arm" => "All match arms must share the same type. Change the mismatched arm to return the same type as the others, or change the first arm",
+                        "if branches" | "if arm" => "Both branches of `if/then/else` must have the same type",
+                        _ => "Fix the expression type or change the expected type",
+                    };
+                    let hint = Self::hint_with_conversion(base, &exp, &act);
                     // Temporarily swap in the constraint's own span so the
                     // error is reported at the call site where the constraint
                     // was introduced, not at wherever checking happened to
