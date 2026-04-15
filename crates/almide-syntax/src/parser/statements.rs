@@ -114,15 +114,27 @@ impl Parser {
         let value = self.parse_expr()?;
         // Detect `let x = expr in <body>` (OCaml/Haskell). Almide lets chain
         // by newline/semicolon inside a block — no `in` keyword.
+        // Look across an intervening newline so dojo-observed forms like
+        //     let abs_n = int.abs(n)
+        //       in if abs_n == 0 ...
+        // also trigger the let-in diagnostic instead of falling through to
+        // a generic "Expected expression (got In 'in')" parse error.
+        self.skip_newlines_if_followed_by(TokenType::In);
         if self.check(TokenType::In) {
-            let tok = self.current().clone();
             let diag = self.diag_error(
                 "`let ... in <expr>` is OCaml/Haskell syntax",
                 "In Almide, multiple lets chain by newlines inside a block — no `in` keyword.",
                 "let ... in",
             ).with_try("let x = 1\nlet y = 2\nx + y");
             self.errors.push(diag);
-            return Err(format!("`let ... in` is not valid in Almide at line {}:{}", tok.line, tok.col));
+            // Recover: consume `in` and the trailing expression so the partial
+            // `Stmt::Let { name, value }` survives in the AST. This lets
+            // downstream diagnostics (E001 fn-body Unit-leak) cite the actual
+            // binding name in their try: snippet, instead of falling back to
+            // a generic <computation> placeholder.
+            self.advance(); // consume `in`
+            self.skip_newlines();
+            let _orphan = self.parse_expr();
         }
         Ok(Stmt::Let { name, ty, value, span: Some(span) })
     }

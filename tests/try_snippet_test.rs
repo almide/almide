@@ -89,6 +89,30 @@ fn main() -> String = {
 }
 
 #[test]
+fn let_in_across_newline_triggers_letin_diagnostic() {
+    // dojo data: 70b writes OCaml-style `let x = expr\n  in <body>` and
+    // pre-fix the parser fell through to a generic "Expected expression
+    // (got In 'in')" parse error. Ensure the let-in detection fires across
+    // an intervening newline AND emits the chain-by-newline try: snippet.
+    let p = write_tmp("try_letin_newline.almd", r#"
+fn sum_digits(n: Int) -> Int =
+  let abs_n = int.abs(n)
+  in if abs_n == 0 then 0
+     else (abs_n % 10) + sum_digits(abs_n / 10)
+"#);
+    let (ok, out) = check(&p);
+    assert!(!ok);
+    assert!(out.contains("`let ... in <expr>` is OCaml/Haskell syntax"),
+        "let-in detection didn't fire across newline:\n{}", out);
+    assert!(out.contains("let x = 1\n      let y = 2"),
+        "missing chain-by-newline try: snippet:\n{}", out);
+    // After parser recovery, the partial Stmt::Let should survive so the
+    // E001 fn-body Unit-leak snippet can name the actual binding.
+    assert!(out.contains("let abs_n = ...") || out.contains("let abs_n ="),
+        "specialized E001 snippet didn't pick up `abs_n`:\n{}", out);
+}
+
+#[test]
 fn e009_let_reassign_emits_var_snippet() {
     let p = write_tmp("try_e009.almd", r#"
 effect fn main() -> Unit = {

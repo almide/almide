@@ -382,8 +382,12 @@ fn cargo_build_test_with_native(
         // Wrap: rustc errors that leaked through the Almide checker mean our
         // codegen produced invalid Rust. Surfacing `src/main.rs` paths to users
         // is useless (it's not their source). Replace with a bug-report banner.
+        // Trigger on EITHER a generated-source path OR a 4-digit rustc error
+        // code (E0001..E9999) — Almide codes top out at 3 digits, so any
+        // `error[E\d{4}]` is unambiguously rustc and indicates a codegen bug.
         let mentions_main_rs = combined.contains("src/main.rs");
-        let final_err = if mentions_main_rs {
+        let leaks_rustc_code = contains_rustc_error_code(&combined);
+        let final_err = if mentions_main_rs || leaks_rustc_code {
             let scrubbed = combined
                 .replace("src/main.rs", "<generated.rs>")
                 .replace("almide-out", "almide-generated");
@@ -483,4 +487,56 @@ fn collect_test_files(dir: &std::path::Path) -> Vec<String> {
         }
     }
     files
+}
+
+/// Detect rustc-style `error[E\d{4}]` codes leaking through our checker.
+/// Almide's diagnostic codes are 3 digits (E001..E099); rustc uses 4 digits
+/// (E0001..E9999). A 4-digit code in the output unambiguously means our
+/// codegen produced invalid Rust — flag it for the bug-report wrapper so
+/// dojo classifiers don't mistake it for a user-facing language error.
+fn contains_rustc_error_code(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let needle = b"error[E";
+    let mut i = 0;
+    while i + needle.len() < bytes.len() {
+        if &bytes[i..i + needle.len()] == needle {
+            // Count consecutive digits after `error[E`
+            let mut j = i + needle.len();
+            let mut digits = 0;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                digits += 1;
+                j += 1;
+            }
+            if digits >= 4 && j < bytes.len() && bytes[j] == b']' {
+                return true;
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::contains_rustc_error_code;
+
+    #[test]
+    fn detects_4_digit_rustc_code() {
+        assert!(contains_rustc_error_code("error[E0599]: no method named 'foo' found"));
+        assert!(contains_rustc_error_code("blah\nerror[E0382]: use of moved value\nblah"));
+    }
+
+    #[test]
+    fn ignores_3_digit_almide_code() {
+        assert!(!contains_rustc_error_code("error[E001]: type mismatch"));
+        assert!(!contains_rustc_error_code("error[E013]: ..."));
+    }
+
+    #[test]
+    fn ignores_no_brackets() {
+        assert!(!contains_rustc_error_code("error: something went wrong"));
+        assert!(!contains_rustc_error_code(""));
+    }
 }
