@@ -112,6 +112,60 @@ effect fn main() -> Unit = {
 }
 
 #[test]
+fn fix_rewrites_comparison_calls_to_operators() {
+    // dojo result-pipeline pattern: LLM writes `int.gt(n, 0)` expecting a
+    // function-style comparison. Auto-rewrite to `n > 0` — same for lt /
+    // gte / lte / eq / neq on int, float, string, bool.
+    let src = r#"
+fn is_positive(n: Int) -> Bool = int.gt(n, 0)
+fn close_enough(a: Float, b: Float) -> Bool = float.lt(a, b)
+fn is_even(n: Int) -> Bool = int.eq(n % 2, 0)
+fn not_equal(a: Int, b: Int) -> Bool = int.neq(a, b)
+
+effect fn main() -> Unit = {
+    println(if is_positive(5) then "pos" else "neg")
+    println(if is_even(4) then "even" else "odd")
+}
+"#;
+    let path = write_tmp("fix_operator.almd", src);
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(),
+        "fix failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Rewrote 4 comparison"),
+        "expected 4 rewrites:\n{}", stderr);
+
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(after.contains("n > 0"), "gt not rewritten:\n{}", after);
+    assert!(after.contains("a < b"), "lt not rewritten:\n{}", after);
+    assert!(after.contains("n % 2 == 0"), "eq not rewritten:\n{}", after);
+    assert!(after.contains("a != b"), "neq not rewritten:\n{}", after);
+    assert!(!after.contains("int.gt"), "int.gt residue:\n{}", after);
+
+    // File must now run.
+    let run = Command::new(almide()).args(["run", &path]).output().unwrap();
+    assert!(run.status.success());
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("pos") && stdout.contains("even"),
+        "run output unexpected:\n{}", stdout);
+}
+
+#[test]
+fn fix_leaves_real_2arg_calls_alone() {
+    // Sanity: don't rewrite calls that look like 2-arg fns but are NOT on
+    // a known comparison-fn / module pair. A 2-arg list fn should be
+    // untouched.
+    let src = r#"
+fn head_or_default(xs: List[Int], d: Int) -> Int = list.get_or(xs, 0, d)
+"#;
+    let path = write_tmp("fix_no_rewrite.almd", src);
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success());
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(after.contains("list.get_or"), "unrelated fn clipped:\n{}", after);
+}
+
+#[test]
 fn fix_does_not_touch_into_keyword_lookalike() {
     // Sanity: the `in` word-boundary check must not clip `into`, `in_foo`,
     // etc. This file has no let-in error but does have `into` as part of

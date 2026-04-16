@@ -12,7 +12,9 @@
 //! cover them too.
 
 use crate::{parse_file, project, project_fetch};
+use almide::ast::{self, Expr, ExprKind};
 use almide::fmt::{auto_imports, format_program};
+use almide_base::intern::sym;
 
 pub fn cmd_fix(file: &str, dry_run: bool) {
     let (mut program, source_text, parse_errors) = parse_file(file);
@@ -34,10 +36,18 @@ pub fn cmd_fix(file: &str, dry_run: bool) {
     let import_messages = auto_imports(&mut program, &dep_names, &dep_submodules);
     let has_import_changes = !import_messages.is_empty();
 
-    // Start from the formatter output if we touched imports, else keep the
-    // original text verbatim so other textual fixes don't reformat things
-    // they shouldn't.
-    let mut working = if has_import_changes {
+    // AST-level rewrite: `int.gt(a, b)` / `.lt` / `.eq` / `.neq` / `.le` /
+    // `.ge` etc. (on int/float/string/bool) → the corresponding operator.
+    // Almide never defined these comparison functions; LLMs reach for them
+    // from Go-ish / Java-ish training data. Mechanically substituting to
+    // `a > b` etc. turns the error case into working code.
+    let operator_count = rewrite_comparison_calls(&mut program);
+    let has_ast_changes = has_import_changes || operator_count > 0;
+
+    // Start from the formatter output if any AST-level change happened,
+    // else keep the original text verbatim so other textual fixes don't
+    // reformat things they shouldn't.
+    let mut working = if has_ast_changes {
         format_program(&program)
     } else {
         source_text.clone()
@@ -45,9 +55,9 @@ pub fn cmd_fix(file: &str, dry_run: bool) {
 
     // Textual rewrite: let-in → drop `in`. The parse_errors collected above
     // correspond to the ORIGINAL source (line/col match pre-edit). If we've
-    // already reformatted via auto_imports, re-parse to get positions that
-    // match the working text.
-    let letin_errors: Vec<(usize, usize)> = if has_import_changes {
+    // already reformatted via AST-level fixes, re-parse to get positions
+    // that match the working text.
+    let letin_errors: Vec<(usize, usize)> = if has_ast_changes {
         collect_letin_positions(&working)
     } else {
         parse_errors.iter()
@@ -61,7 +71,11 @@ pub fn cmd_fix(file: &str, dry_run: bool) {
         working = delete_in_tokens(&working, &letin_errors);
     }
 
-    let any_change = has_import_changes || letin_count > 0;
+    let any_change = has_import_changes || operator_count > 0 || letin_count > 0;
+
+    let op_msg = |n: usize| format!(
+        "Rewrote {} comparison function call(s) to operator form (int.gt/lt/eq/... → > < == ...)", n
+    );
 
     if dry_run {
         if !any_change {
@@ -71,6 +85,7 @@ pub fn cmd_fix(file: &str, dry_run: bool) {
             for m in &import_messages {
                 println!("  {}", m);
             }
+            if operator_count > 0 { println!("  {}", op_msg(operator_count)); }
             if letin_count > 0 {
                 println!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
             }
@@ -86,6 +101,7 @@ pub fn cmd_fix(file: &str, dry_run: bool) {
         for m in &import_messages {
             eprintln!("  {}", m);
         }
+        if operator_count > 0 { eprintln!("  {}", op_msg(operator_count)); }
         if letin_count > 0 {
             eprintln!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
         }
@@ -94,6 +110,60 @@ pub fn cmd_fix(file: &str, dry_run: bool) {
     // After auto-fixes, report any remaining `try:` snippets so callers
     // know what's left to do by hand.
     report_manual_fixes(file, &working);
+}
+
+/// Map `<module>.<func>` → operator symbol for comparison-style calls LLMs
+/// commonly write but which Almide doesn't define (Go / Java idioms).
+fn comparison_fn_to_operator(module: &str, func: &str) -> Option<&'static str> {
+    match (module, func) {
+        ("int" | "float", "gt") => Some(">"),
+        ("int" | "float", "lt") => Some("<"),
+        ("int" | "float", "gte" | "ge") => Some(">="),
+        ("int" | "float", "lte" | "le") => Some("<="),
+        ("int" | "float" | "string" | "bool", "eq") => Some("=="),
+        ("int" | "float" | "string" | "bool", "neq" | "ne") => Some("!="),
+        _ => None,
+    }
+}
+
+/// Walk the program and rewrite every `<m>.<op>(a, b)` call whose
+/// `(module, func)` resolves via `comparison_fn_to_operator` into a
+/// `Binary` expression. Returns the number of rewrites performed.
+fn rewrite_comparison_calls(program: &mut ast::Program) -> usize {
+    let mut count = 0;
+    ast::visit_exprs_mut(program, &mut |expr: &mut Expr| {
+        let (op_sym, left_box, right_box) = match &mut expr.kind {
+            ExprKind::Call { callee, args, named_args, type_args } => {
+                if !named_args.is_empty() || type_args.is_some() || args.len() != 2 {
+                    return;
+                }
+                let Some((module, func)) = extract_module_call(callee) else { return };
+                let Some(op) = comparison_fn_to_operator(&module, &func) else { return };
+                // Take the args out of the Call without mutating yet —
+                // we'll rebuild the whole expr.kind below.
+                let mut drained = std::mem::take(args);
+                let right = drained.pop().unwrap();
+                let left = drained.pop().unwrap();
+                (op, Box::new(left), Box::new(right))
+            }
+            _ => return,
+        };
+        expr.kind = ExprKind::Binary {
+            op: sym(op_sym),
+            left: left_box,
+            right: right_box,
+        };
+        count += 1;
+    });
+    count
+}
+
+/// If `callee` is the expression `<module>.<func>` (a Member access on a
+/// bare module ident), return (module, func). Otherwise None.
+fn extract_module_call(callee: &Expr) -> Option<(String, String)> {
+    let ExprKind::Member { object, field } = &callee.kind else { return None };
+    let ExprKind::Ident { name } = &object.kind else { return None };
+    Some((name.to_string(), field.to_string()))
 }
 
 fn collect_letin_positions(source: &str) -> Vec<(usize, usize)> {
