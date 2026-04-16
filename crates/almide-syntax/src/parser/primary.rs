@@ -306,20 +306,13 @@ impl Parser {
                 "Almide uses `while cond { ... }` (curly braces). But `while` requires a `var` accumulator — pure/effect fns usually want recursion instead.",
                 "while body",
             ).with_try(
-                "// Option A — recursion (preferred in pure fn):\n\
-                 fn loop(i: Int, acc: T) -> T =\n\
-                   if !cond(i) then acc\n\
-                   else loop(i + 1, update(acc, i))\n\
-                 loop(0, initial)\n\
-                 \n\
-                 // Option B — Almide `while` (requires `var` mutation):\n\
+                "// Almide `while` needs braces (not `do ... done`):\n\
                  var i = 0\n\
-                 var acc = initial\n\
-                 while cond(i) {\n\
-                   acc = update(acc, i)\n\
-                   i = i + 1\n\
-                 }\n\
-                 acc"
+                 while cond(i) { i = i + 1 }\n\
+                 \n\
+                 // For pure fn, prefer recursion over `var` + while:\n\
+                 fn loop(i: Int, acc: T) -> T =\n\
+                   if !cond(i) then acc else loop(i + 1, next(acc, i))"
             );
             self.errors.push(diag);
             return Err(format!("`while ... do` is not valid in Almide at line {}:{}", tok.line, tok.col));

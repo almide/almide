@@ -314,10 +314,9 @@ fn run(n: Int) -> Int =
     assert!(out.contains("Pascal/Ruby syntax"),
         "while-do detection missing:\n{}", out);
     // Must mention BOTH paths so LLM retry can pick.
-    assert!(out.contains("Option A") && out.contains("recursion"),
-        "recursion option missing:\n{}", out);
-    assert!(out.contains("Option B") && out.contains("var i = 0"),
-        "while-var option missing:\n{}", out);
+    assert!(out.contains("var i = 0"), "while-var form missing:\n{}", out);
+    assert!(out.contains("recursion"), "recursion form missing:\n{}", out);
+    assert!(out.contains("fn loop"), "recursion scaffold missing:\n{}", out);
 }
 
 #[test]

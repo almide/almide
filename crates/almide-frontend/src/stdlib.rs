@@ -142,35 +142,61 @@ pub fn suggest_alias(module: &str, func: &str) -> Option<&'static str> {
         // sqrt: Almide only has float.sqrt, not int.sqrt. Most LLMs reach
         // for int.sqrt(n) in is-prime / perfect-square style tasks.
         ("int", "sqrt") => Some("float.sqrt(int.to_float(n))"),
-        // comparison functions: Almide uses operators, not methods.
-        ("int", "gt") | ("float", "gt") => Some("a > b (operator)"),
-        ("int", "lt") | ("float", "lt") => Some("a < b (operator)"),
-        ("int", "gte") | ("int", "ge") | ("float", "gte") | ("float", "ge") => Some("a >= b (operator)"),
-        ("int", "lte") | ("int", "le") | ("float", "lte") | ("float", "le") => Some("a <= b (operator)"),
-        ("int", "eq") | ("float", "eq") | ("string", "eq") | ("bool", "eq") => Some("a == b (operator)"),
-        ("int", "neq") | ("int", "ne") | ("float", "neq") | ("float", "ne") => Some("a != b (operator)"),
+        // comparison functions delegate to the single canonical table
+        // below so `suggest_alias`, `try_snippet_for_alias`, and
+        // downstream `almide fix` rules all agree on the shape.
+        _ if comparison_operator_of(module, func).is_some() => {
+            match comparison_operator_of(module, func)? {
+                ">" => Some("a > b (operator)"),
+                "<" => Some("a < b (operator)"),
+                ">=" => Some("a >= b (operator)"),
+                "<=" => Some("a <= b (operator)"),
+                "==" => Some("a == b (operator)"),
+                "!=" => Some("a != b (operator)"),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Canonical mapping: `<module>.<func>` → operator string, for LLM
+/// hallucinations like `int.gt(a, b)` that should be `a > b`. This is the
+/// single source of truth — `suggest_alias`, `try_snippet_for_alias`, and
+/// `almide fix`'s Call-to-Binary rewrite all derive from here.
+///
+/// `==` and `!=` apply to any type in Almide (structural equality), so
+/// we cover int/float/string/bool for those; ordering ops are numeric
+/// only (int/float).
+pub fn comparison_operator_of(module: &str, func: &str) -> Option<&'static str> {
+    match (module, func) {
+        ("int" | "float", "gt") => Some(">"),
+        ("int" | "float", "lt") => Some("<"),
+        ("int" | "float", "gte" | "ge") => Some(">="),
+        ("int" | "float", "lte" | "le") => Some("<="),
+        ("int" | "float" | "string" | "bool", "eq") => Some("=="),
+        ("int" | "float" | "string" | "bool", "neq" | "ne") => Some("!="),
         _ => None,
     }
 }
 
 /// Rich multi-line `try:` snippet for well-known LLM hallucinations that
-/// don't map to a single clean function name — conversion-wrappers,
-/// operator forms, etc. `suggest_alias` returns free-text for these cases
+/// don't map to a single clean function name (conversion-wrappers,
+/// operator forms). `suggest_alias` returns free-text for these cases
 /// (suppressing the default "fn(...)" try: snippet); this table provides
 /// a concrete fix template instead.
 pub fn try_snippet_for_alias(module: &str, func: &str) -> Option<&'static str> {
-    match (module, func) {
-        ("int", "sqrt") => Some(
+    if (module, func) == ("int", "sqrt") {
+        return Some(
             "// Almide has float.sqrt; int.sqrt doesn't exist.\n\
              // Convert → sqrt → (optionally) convert back:\n\
              let root_f = float.sqrt(int.to_float(n))       // Float\n\
              let root_i = float.to_int(root_f)              // Int (truncates)\n\
              // — or inline: float.to_int(float.sqrt(int.to_float(n)))"
-        ),
-        ("int", "gt") | ("int", "lt") | ("int", "gte") | ("int", "ge")
-        | ("int", "lte") | ("int", "le") | ("int", "eq") | ("int", "neq") | ("int", "ne")
-        | ("float", "gt") | ("float", "lt") | ("float", "gte") | ("float", "ge")
-        | ("float", "lte") | ("float", "le") | ("float", "eq") | ("float", "neq") | ("float", "ne") => Some(
+        );
+    }
+    if comparison_operator_of(module, func).is_some() {
+        return Some(
             "// Almide uses operators, not comparison functions:\n\
              //   int.gt(a, b)   →  a > b\n\
              //   int.lt(a, b)   →  a < b\n\
@@ -179,9 +205,9 @@ pub fn try_snippet_for_alias(module: &str, func: &str) -> Option<&'static str> {
              //   int.eq(a, b)   →  a == b\n\
              //   int.neq(a, b)  →  a != b\n\
              // (same for float, string, bool — == and != work on any type)"
-        ),
-        _ => None,
+        );
     }
+    None
 }
 
 /// Names of built-in effect functions (not module-scoped).

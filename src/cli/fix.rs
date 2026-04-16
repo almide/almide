@@ -49,7 +49,9 @@ struct ManualDiag {
 }
 
 pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
-    let (mut program, source_text, parse_errors) = parse_file(file);
+    // `parse_errors` is consumed inside the rule engine (per-rule
+    // re-parse) so we discard it here.
+    let (mut program, source_text, _parse_errors) = parse_file(file);
 
     let (dep_names, dep_submodules): (Vec<String>, std::collections::HashMap<String, String>) =
         if std::path::Path::new("almide.toml").exists() {
@@ -85,37 +87,14 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
         source_text.clone()
     };
 
-    // Textual rewrite: let-in → drop `in`. The parse_errors collected above
-    // correspond to the ORIGINAL source (line/col match pre-edit). If we've
-    // already reformatted via AST-level fixes, re-parse to get positions
-    // that match the working text.
-    let letin_errors: Vec<(usize, usize)> = if has_ast_changes {
-        collect_letin_positions(&working)
-    } else {
-        parse_errors.iter()
-            .filter(|d| d.message.contains("`let ... in <expr>`"))
-            .filter_map(|d| Some((d.line?, d.col?)))
-            .collect()
-    };
-
-    let letin_count = letin_errors.len();
-    if letin_count > 0 {
-        working = delete_in_tokens(&working, &letin_errors);
-    }
-
-    // `return` keyword removal. Almide has no `return`; the trailing expr of
-    // a block/fn is the value. LLMs habitually write `return expr` from
-    // Go/Rust/JS — same mechanical fix shape as let-in (delete the keyword,
-    // keep the following expression). Parser recovery surfaces only the
-    // FIRST `return` per file, so iterate to fixpoint (capped) to sweep
-    // multiple returns in one pass.
-    let mut return_count = 0;
-    for _ in 0..8 {
-        let positions = collect_return_positions(&working);
-        if positions.is_empty() { break; }
-        return_count += positions.len();
-        working = delete_return_tokens(&working, &positions);
-    }
+    // Source-level keyword removals. Both `let-in` and `return` share the
+    // same shape: find the keyword at positions reported by parser
+    // diagnostics, delete it plus one trailing space, word-boundary-check
+    // so `into` / `return_value` etc. don't get clipped. Iterate to
+    // fixpoint because parser recovery surfaces only the first occurrence
+    // per pass.
+    let letin_count = LETIN_REMOVAL.apply(&mut working);
+    let return_count = RETURN_REMOVAL.apply(&mut working);
 
     let any_change = has_import_changes || operator_count > 0 || letin_count > 0 || return_count > 0;
 
@@ -206,18 +185,12 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
     }
 }
 
-/// Map `<module>.<func>` → operator symbol for comparison-style calls LLMs
-/// commonly write but which Almide doesn't define (Go / Java idioms).
+/// Delegate to the canonical comparison-operator table in
+/// `almide::stdlib::comparison_operator_of` so `almide fix`'s AST rewrite,
+/// the E002 try: snippet, and `suggest_alias`'s "Did you mean?" hint
+/// stay in perfect sync.
 fn comparison_fn_to_operator(module: &str, func: &str) -> Option<&'static str> {
-    match (module, func) {
-        ("int" | "float", "gt") => Some(">"),
-        ("int" | "float", "lt") => Some("<"),
-        ("int" | "float", "gte" | "ge") => Some(">="),
-        ("int" | "float", "lte" | "le") => Some("<="),
-        ("int" | "float" | "string" | "bool", "eq") => Some("=="),
-        ("int" | "float" | "string" | "bool", "neq" | "ne") => Some("!="),
-        _ => None,
-    }
+    almide::stdlib::comparison_operator_of(module, func)
 }
 
 /// Walk the program and rewrite every `<m>.<op>(a, b)` call whose
@@ -260,104 +233,96 @@ fn extract_module_call(callee: &Expr) -> Option<(String, String)> {
     Some((name.to_string(), field.to_string()))
 }
 
-fn collect_return_positions(source: &str) -> Vec<(usize, usize)> {
-    let tokens = almide::lexer::Lexer::tokenize(source);
-    let mut parser = almide::parser::Parser::new(tokens);
-    let _ = parser.parse();
-    parser.errors.iter()
-        .filter(|d| d.message.starts_with("'return' is not needed in Almide"))
-        .filter_map(|d| Some((d.line?, d.col?)))
-        .collect()
+/// Source-level fix: delete occurrences of a single keyword at positions
+/// reported by parser diagnostics. Shared engine for `let-in` (`in`
+/// keyword) and `return` keyword removal — the two rules differ only in
+/// `keyword` and `diag_matches`, every other detail is the same.
+///
+/// Iterates to fixpoint because parser recovery surfaces only the first
+/// occurrence per pass. `max_iter` caps runaway in case a rule becomes
+/// pathological (e.g. the same position keeps being detected post-edit).
+struct KeywordRemoval {
+    keyword: &'static str,
+    /// Predicate over diagnostic messages identifying the rule's trigger.
+    diag_matches: fn(&str) -> bool,
+    max_iter: usize,
 }
 
-fn delete_return_tokens(source: &str, positions: &[(usize, usize)]) -> String {
-    let mut lines: Vec<String> = source.split('\n').map(String::from).collect();
-    let mut sorted: Vec<_> = positions.iter().copied().collect();
-    sorted.sort_by(|a, b| b.cmp(a));
-    for (line, col) in sorted {
-        let li = line.saturating_sub(1);
-        let Some(l) = lines.get_mut(li) else { continue };
-        let ci = col.saturating_sub(1);
-        if l.get(ci..ci + 6) != Some("return") { continue; }
-        // word boundaries
-        let before_ok = ci == 0
-            || !l.as_bytes()[ci - 1].is_ascii_alphanumeric()
-                && l.as_bytes()[ci - 1] != b'_';
-        let after_byte = l.as_bytes().get(ci + 6).copied();
-        let after_ok = match after_byte {
-            None => true,
-            Some(b) => !b.is_ascii_alphanumeric() && b != b'_',
-        };
-        if !(before_ok && after_ok) { continue; }
-        // Delete `return` plus a single trailing space if present, so
-        // `return 42` becomes `42` and the trailing expression slides into
-        // tail position naturally.
-        let mut end = ci + 6;
-        if l.as_bytes().get(end) == Some(&b' ') { end += 1; }
-        let new_line = format!("{}{}", &l[..ci], &l[end..]);
-        if new_line.trim().is_empty() {
-            *l = String::new();
-        } else {
-            *l = new_line;
+const LETIN_REMOVAL: KeywordRemoval = KeywordRemoval {
+    keyword: "in",
+    diag_matches: |m| m.contains("`let ... in <expr>`"),
+    max_iter: 8,
+};
+
+const RETURN_REMOVAL: KeywordRemoval = KeywordRemoval {
+    keyword: "return",
+    diag_matches: |m| m.starts_with("'return' is not needed in Almide"),
+    max_iter: 8,
+};
+
+impl KeywordRemoval {
+    /// Apply the rule to `source` until no more matches, in place. Returns
+    /// total occurrences removed across all iterations.
+    fn apply(&self, source: &mut String) -> usize {
+        let mut total = 0;
+        for _ in 0..self.max_iter {
+            let positions = self.collect_positions(source);
+            if positions.is_empty() { break; }
+            total += positions.len();
+            *source = self.delete_at(source, &positions);
         }
+        total
     }
-    lines.join("\n")
-}
 
-fn collect_letin_positions(source: &str) -> Vec<(usize, usize)> {
-    // Re-parse to find let-in diagnostic positions in the possibly-modified
-    // `source`. Share the diagnostic-detection code with the parser by
-    // invoking it and filtering on the message string.
-    let tokens = almide::lexer::Lexer::tokenize(source);
-    let mut parser = almide::parser::Parser::new(tokens);
-    let _ = parser.parse();
-    parser.errors.iter()
-        .filter(|d| d.message.contains("`let ... in <expr>`"))
-        .filter_map(|d| Some((d.line?, d.col?)))
-        .collect()
-}
-
-/// Delete `in` keyword tokens at the given (line, col) positions.
-/// Positions are 1-indexed as reported by the parser.
-fn delete_in_tokens(source: &str, positions: &[(usize, usize)]) -> String {
-    let mut lines: Vec<String> = source.split('\n').map(String::from).collect();
-    // Apply edits in reverse so earlier positions aren't invalidated by
-    // later ones on the same line.
-    let mut sorted: Vec<_> = positions.iter().copied().collect();
-    sorted.sort_by(|a, b| b.cmp(a));
-    for (line, col) in sorted {
-        let li = line.saturating_sub(1);
-        let Some(l) = lines.get_mut(li) else { continue };
-        let ci = col.saturating_sub(1);
-        // Sanity: we expect `in` as a word at byte column `ci`.
-        if l.get(ci..ci + 2) != Some("in") {
-            continue;
-        }
-        // Check word boundaries so we don't clip things like `into`.
-        let before_ok = ci == 0
-            || !l.as_bytes()[ci - 1].is_ascii_alphanumeric()
-                && l.as_bytes()[ci - 1] != b'_';
-        let after_byte = l.as_bytes().get(ci + 2).copied();
-        let after_ok = match after_byte {
-            None => true,
-            Some(b) => !b.is_ascii_alphanumeric() && b != b'_',
-        };
-        if !(before_ok && after_ok) { continue; }
-        // Delete `in` plus a single trailing space (if present) so the
-        // result reads cleanly. If `in` sits alone on an indented line
-        // (e.g. `  in <body>`), also trim the now-trailing whitespace so
-        // we don't leave a blank indented line behind.
-        let mut end = ci + 2;
-        if l.as_bytes().get(end) == Some(&b' ') { end += 1; }
-        let new_line = format!("{}{}", &l[..ci], &l[end..]);
-        // If removing `in` leaves only whitespace, collapse the line.
-        if new_line.trim().is_empty() {
-            *l = String::new();
-        } else {
-            *l = new_line;
-        }
+    fn collect_positions(&self, source: &str) -> Vec<(usize, usize)> {
+        let tokens = almide::lexer::Lexer::tokenize(source);
+        let mut parser = almide::parser::Parser::new(tokens);
+        let _ = parser.parse();
+        parser.errors.iter()
+            .filter(|d| (self.diag_matches)(&d.message))
+            .filter_map(|d| Some((d.line?, d.col?)))
+            .collect()
     }
-    lines.join("\n")
+
+    fn delete_at(&self, source: &str, positions: &[(usize, usize)]) -> String {
+        let klen = self.keyword.len();
+        let mut lines: Vec<String> = source.split('\n').map(String::from).collect();
+        // Apply edits in reverse so earlier positions aren't invalidated by
+        // later ones on the same line.
+        let mut sorted: Vec<_> = positions.iter().copied().collect();
+        sorted.sort_by(|a, b| b.cmp(a));
+        for (line, col) in sorted {
+            let li = line.saturating_sub(1);
+            let Some(l) = lines.get_mut(li) else { continue };
+            let ci = col.saturating_sub(1);
+            if l.get(ci..ci + klen) != Some(self.keyword) { continue; }
+            if !word_boundary_ok(l.as_bytes(), ci, ci + klen) { continue; }
+            // Delete the keyword plus one trailing space if present. For a
+            // lone-on-indent line (e.g. `  in <body>`), collapse to empty.
+            let mut end = ci + klen;
+            if l.as_bytes().get(end) == Some(&b' ') { end += 1; }
+            let new_line = format!("{}{}", &l[..ci], &l[end..]);
+            *l = if new_line.trim().is_empty() {
+                String::new()
+            } else {
+                new_line
+            };
+        }
+        lines.join("\n")
+    }
+}
+
+/// Standard identifier-boundary check: the chars at `start-1` and `end` must
+/// not be identifier continuations, or be at the source edges. Used to
+/// avoid clipping `into` / `return_value` / `in_flight` etc.
+fn word_boundary_ok(bytes: &[u8], start: usize, end: usize) -> bool {
+    let before_ok = start == 0
+        || (!bytes[start - 1].is_ascii_alphanumeric() && bytes[start - 1] != b'_');
+    let after_ok = match bytes.get(end).copied() {
+        None => true,
+        Some(b) => !b.is_ascii_alphanumeric() && b != b'_',
+    };
+    before_ok && after_ok
 }
 
 /// Re-parse + type-check `source` and extract every diagnostic that has a

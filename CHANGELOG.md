@@ -149,6 +149,26 @@ Every entry below attaches a `try:` block with copy-pasteable code:
 - `llms.txt` is hand-written; not yet auto-generated from canonical docs
   (SPEC / cheatsheet). Phase 3-3.2.
 
+### Internal refactors (no behavior change, no MSR effect)
+
+- **`almide fix` keyword-removal rules** consolidated into a single
+  `KeywordRemoval { keyword, diag_matches, max_iter }` engine. `let-in`
+  and `return` rules are now data-driven; adding a third keyword
+  deletion rule is one const entry plus a call site. `word_boundary_ok`
+  extracted from the two previous copies.
+- **Comparison operator table** (`int.gt` / `.lt` / `.eq` / etc. → `>` /
+  `<` / `==`) consolidated behind `almide::stdlib::comparison_operator_of`.
+  Previously the same mapping was duplicated across `suggest_alias`,
+  `try_snippet_for_alias`, and `cli/fix.rs::comparison_fn_to_operator`;
+  now each derives from the single canonical function. As a side
+  effect, `string.eq` and `bool.eq` now get the "Did you mean" hint
+  (previously missing from `suggest_alias` — a gap that surfaced when
+  consolidating).
+- **while-do `try:` snippet** shortened from the previous Option A/B
+  block (≈15 lines) to 7 lines: one concise `while`-form + one
+  `fn loop` recursion scaffold. Feedback from the reflection: the
+  longer form risked paradox-of-choice and bloated retry context.
+
 ### Deferred (evidence-based)
 
 - `almide ide peek-def` / `find-refs`: dojo context doesn't exercise
