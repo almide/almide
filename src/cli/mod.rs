@@ -298,7 +298,8 @@ fn cargo_build_generated_with_native(
 
     let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(wrap_codegen_leak(stderr));
     }
 
     let profile = if release { "release" } else { "debug" };
@@ -307,6 +308,29 @@ fn cargo_build_generated_with_native(
         return Err(format!("expected binary not found at {}", bin_path.display()));
     }
     Ok(bin_path)
+}
+
+/// Scrub rustc output when our codegen produces invalid Rust — replaces
+/// generated paths with placeholders and prepends a bug-report banner so
+/// users (and harness classifiers) don't mistake a compiler bug for a
+/// user-facing language error. No-op when the output is clean.
+fn wrap_codegen_leak(stderr: String) -> String {
+    let mentions_main_rs = stderr.contains("src/main.rs");
+    let leaks_rustc_code = contains_rustc_error_code(&stderr);
+    if !(mentions_main_rs || leaks_rustc_code) {
+        return stderr;
+    }
+    let scrubbed = stderr
+        .replace("src/main.rs", "<generated.rs>")
+        .replace("almide-out", "almide-generated");
+    format!(
+        "codegen produced invalid Rust — this is an Almide bug.\n\
+         Please file a minimal repro at https://github.com/almide/almide/issues\n\
+         \n\
+         --- rustc output (edited to hide generated paths) ---\n\
+         {}",
+        scrubbed
+    )
 }
 
 /// Build generated Rust code using cargo for test mode (--test harness).
@@ -379,30 +403,7 @@ fn cargo_build_test_with_native(
         } else {
             format!("{}\n{}", rendered.join("\n"), stderr)
         };
-        // Wrap: rustc errors that leaked through the Almide checker mean our
-        // codegen produced invalid Rust. Surfacing `src/main.rs` paths to users
-        // is useless (it's not their source). Replace with a bug-report banner.
-        // Trigger on EITHER a generated-source path OR a 4-digit rustc error
-        // code (E0001..E9999) — Almide codes top out at 3 digits, so any
-        // `error[E\d{4}]` is unambiguously rustc and indicates a codegen bug.
-        let mentions_main_rs = combined.contains("src/main.rs");
-        let leaks_rustc_code = contains_rustc_error_code(&combined);
-        let final_err = if mentions_main_rs || leaks_rustc_code {
-            let scrubbed = combined
-                .replace("src/main.rs", "<generated.rs>")
-                .replace("almide-out", "almide-generated");
-            format!(
-                "codegen produced invalid Rust — this is an Almide bug.\n\
-                 Please file a minimal repro at https://github.com/almide/almide/issues\n\
-                 \n\
-                 --- rustc output (edited to hide generated paths) ---\n\
-                 {}",
-                scrubbed
-            )
-        } else {
-            combined
-        };
-        return Err(final_err);
+        return Err(wrap_codegen_leak(combined));
     }
 
     // Parse the JSON output to find the test binary path

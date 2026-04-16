@@ -1,0 +1,150 @@
+// Dogfood demo: `almide ide outline` in Almide itself.
+//
+// Reads a `.almdi` JSON (produced by `almide compile --json`) and emits
+// a one-line-per-decl summary — the same shape the Rust-side
+// `almide ide outline <file>` produces, but written in Almide. The goal
+// is to validate that the language expresses this class of work (parse
+// structured input, walk it, format strings) without friction.
+
+import json
+import env
+import fs
+
+// ── Type rendering ─────────────────────────────────────────────────
+
+// Walk a `type` JSON node and produce a readable string like `List[Int]`
+// or `Result[String, Error]`. Mirrors the Rust-side `format_tref` logic.
+fn render_type(t: Value) -> String = {
+    let kind = json.get_string(t, "kind") ?? "?"
+    match kind {
+        "int"     => "Int",
+        "float"   => "Float",
+        "string"  => "String",
+        "bool"    => "Bool",
+        "unit"    => "Unit",
+        "bytes"   => "Bytes",
+        "matrix"  => "Matrix",
+        "unknown" => "?",
+        "list"    => "List[${render_inner(t, "inner")}]",
+        "option"  => "Option[${render_inner(t, "inner")}]",
+        "set"     => "Set[${render_inner(t, "inner")}]",
+        "result"  => "Result[${render_inner(t, "ok")}, ${render_inner(t, "err")}]",
+        "map"     => "Map[${render_inner(t, "key")}, ${render_inner(t, "value")}]",
+        "tuple"   => "(${render_elems(t, "elements")})",
+        "fn"      => "fn(${render_elems(t, "params")}) -> ${render_inner(t, "return")}",
+        "named"   => render_named(t),
+        "typevar" => json.get_string(t, "name") ?? "?",
+        _         => "<${kind}>",
+    }
+}
+
+fn render_inner(t: Value, key: String) -> String =
+    match json.get(t, key) {
+        some(inner) => render_type(inner),
+        none        => "?",
+    }
+
+fn render_elems(t: Value, key: String) -> String =
+    match json.get_array(t, key) {
+        some(arr) => arr |> list.map(render_type) |> list.join(", "),
+        none      => "",
+    }
+
+fn render_named(t: Value) -> String = {
+    let name = json.get_string(t, "name") ?? "?"
+    match json.get_array(t, "args") {
+        some(args) =>
+            if list.is_empty(args) then name
+            else "${name}[${args |> list.map(render_type) |> list.join(", ")}]",
+        none => name,
+    }
+}
+
+// ── Decl rendering ─────────────────────────────────────────────────
+
+fn render_param(p: Value) -> String = {
+    let name = json.get_string(p, "name") ?? "?"
+    let ty = json.get(p, "type") ?? json.null()
+    "${name}: ${render_type(ty)}"
+}
+
+fn render_generics(node: Value) -> String =
+    match json.get_array(node, "generics") {
+        some(gs) =>
+            if list.is_empty(gs) then ""
+            else "[${gs |> list.map((g) => json.as_string(g) ?? "?") |> list.join(", ")}]",
+        none => "",
+    }
+
+fn render_function(f: Value) -> String = {
+    let name = json.get_string(f, "name") ?? "?"
+    let is_effect = json.get_bool(f, "effect") ?? false
+    let params = json.get_array(f, "params") ?? []
+    let ret = json.get(f, "return") ?? json.null()
+    let generics = render_generics(f)
+    let param_str = params |> list.map(render_param) |> list.join(", ")
+    let kw = if is_effect then "effect fn " else "fn "
+    "${kw}${name}${generics}(${param_str}) -> ${render_type(ret)}"
+}
+
+fn render_constant(c: Value) -> String = {
+    let name = json.get_string(c, "name") ?? "?"
+    let ty = json.get(c, "type") ?? json.null()
+    "let ${name}: ${render_type(ty)}"
+}
+
+fn render_record_fields(node: Value) -> String = {
+    let fields = json.get_array(node, "fields") ?? []
+    let rendered = fields |> list.map((f) => {
+        let fname = json.get_string(f, "name") ?? "?"
+        let fty = json.get(f, "type") ?? json.null()
+        "${fname}: ${render_type(fty)}"
+    }) |> list.join(", ")
+    "{ ${rendered} }"
+}
+
+fn render_variant_cases(node: Value) -> String = {
+    let cases = json.get_array(node, "cases") ?? []
+    cases
+        |> list.map((c) => json.get_string(c, "name") ?? "?")
+        |> list.join(" | ")
+}
+
+fn render_type_decl(t: Value) -> String = {
+    let name = json.get_string(t, "name") ?? "?"
+    let kind_node = json.get(t, "kind") ?? json.null()
+    let kind = json.get_string(kind_node, "kind") ?? "?"
+    let shape = match kind {
+        "record"  => render_record_fields(kind_node),
+        "variant" => render_variant_cases(kind_node),
+        "alias"   => render_inner(kind_node, "target"),
+        _         => "<${kind}>",
+    }
+    "type ${name} = ${shape}"
+}
+
+// ── Main ───────────────────────────────────────────────────────────
+
+effect fn print_outline(iface: Value) -> Unit = {
+    let types = json.get_array(iface, "types") ?? []
+    for t in types {
+        println(render_type_decl(t))
+    }
+    let constants = json.get_array(iface, "constants") ?? []
+    for c in constants {
+        println(render_constant(c))
+    }
+    let functions = json.get_array(iface, "functions") ?? []
+    for f in functions {
+        println(render_function(f))
+    }
+}
+
+effect fn main() -> Unit = {
+    let args = env.args()
+    guard list.len(args) >= 1 else err("usage: almd-outline <interface.json>")
+    let path = list.first(args)!
+    let text = fs.read_text(path)!
+    let iface = json.parse(text)!
+    print_outline(iface)
+}
