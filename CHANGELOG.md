@@ -151,26 +151,34 @@ Every entry below attaches a `try:` block with copy-pasteable code:
 
 ### Added — `almide docs-gen --check` (doc-drift guard)
 
-A consistency check that verifies `llms.txt` tracks its canonical
-sources. MVP covers three axes:
+A consistency check that verifies `llms.txt` and `docs/diagnostics/`
+track their canonical sources. MVP covers four axes:
 
 - **Version**: `Cargo.toml` version string must appear in `llms.txt`.
-- **Diagnostic codes**: every `EXXX` file under `docs/diagnostics/`
-  must be referenced by name in `llms.txt`.
+- **Diagnostic codes referenced in llms.txt**: every `EXXX` file
+  under `docs/diagnostics/` must be named in `llms.txt`.
 - **Auto-imported stdlib**: every module in
   `almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED` must be mentioned
   in `llms.txt`'s "Fast facts".
+- **Diagnostic registry bijection**: every `with_code("EXXX")` in the
+  compiler source must have a matching `docs/diagnostics/EXXX.md`, and
+  every doc must correspond to a code that's actually emitted.
 
 Exits 1 with a bulleted drift report on failure. `cargo test`
 integration test `docs_gen_check_passes_on_clean_checkout` makes
-every PR that changes a source-of-truth but forgets `llms.txt` fail CI.
+every PR that changes a source-of-truth but forgets the docs fail CI.
 
 Full generation (not just drift-check) is scoped in
-`docs/roadmap/active/llms-txt-autogen.md`.
+`docs/roadmap/active/llms-txt-autogen.md`; registry-vs-emit
+unification strategy in `docs/roadmap/active/diagnostic-emit-doc-unification.md`.
 
-Found a real drift on first run: the previous `E010-E013` range row
-in `llms.txt` didn't actually contain `E011` / `E012` as substrings.
-Now fully expanded.
+Real drifts found & fixed on first run:
+- `E010-E013` range row in `llms.txt` didn't contain `E011` / `E012`
+  as substrings (range-compression masquerading as content). Expanded.
+- `E420` (function visibility violation) was emitted by the compiler
+  but had no doc. Added `docs/diagnostics/E420.md`, noted that the
+  code number is out-of-sequence and a renumber candidate for a
+  future release.
 
 ### Internal refactors (no behavior change, no MSR effect)
 
