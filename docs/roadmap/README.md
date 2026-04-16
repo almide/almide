@@ -6,7 +6,7 @@
 
 ## Active
 
-26 items
+25 items
 
 | Item | Description |
 |------|-------------|
@@ -28,7 +28,6 @@
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [`almide docs-gen` — llms.txt Auto-Generation](active/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | [lumen — Pure Graphics Math](active/lumen-graphics-math.md) | lumen — pure graphics math library (vec3, mat4, color), used by webgl/canvas/obsid |
-| [Option/Result Bundled `.almd` — Not Cosmetic After All](active/option-result-bundled-cleanup.md) | Bundled option/result are signature-override layer; pick a path to consolidate |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](active/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
@@ -72,13 +71,14 @@
 
 ## Done
 
-207 items
+208 items
 
 <details>
-<summary>Show all 207 completed items</summary>
+<summary>Show all 208 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-04-17 | [Option/Result Bundled `.almd` — Not Cosmetic After All](done/option-result-bundled-cleanup.md) | Bundled option/result are signature-override layer; pick a path to consolidate |
 | 2026-04-16 | [Cut v0.14.6 Release](done/release-0.14.6.md) | Cut v0.14.6 release from llm-first-phase2 branch |
 | 2026-04-16 | [Bundled-Almide Dispatch for Stdlib Modules](done/bundled-almide-dispatch.md) | Let stdlib/<module>.almd extend TOML modules (codegen dispatch fix) |
 | 2026-04-09 | [Distribution UX](done/distribution-ux.md) | GitHub Release binaries, one-line installer, and almide self-update |
