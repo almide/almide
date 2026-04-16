@@ -60,17 +60,17 @@ impl NanoPass for ConcretizeTypesPass {
     }
 
     fn postconditions(&self) -> Vec<Postcondition> {
-        // NOTE: Audit is informational. Enable with ALMIDE_AUDIT_TYPES=1.
-        // Not used as a hard assertion yet because some `list.zip` call
-        // return types remain unresolved in the IR (their TupleIndex users
-        // work because emit_tuple_index falls back to VarTable). Turning
-        // these into hard errors requires either (a) resolving Call return
-        // types in ConcretizeTypes, or (b) accepting them as known-OK.
-        if std::env::var("ALMIDE_AUDIT_TYPES").is_ok() {
-            vec![Postcondition::Custom(audit_remaining_unresolved)]
-        } else {
-            vec![]
-        }
+        // S2 (v0.14.7-phase3.1): audit runs on every build; violations are
+        // printed by the harness as `[POSTCONDITION VIOLATION] ...` and
+        // escalate to a panic under `ALMIDE_CHECK_IR=1`. spec/ runs clean
+        // on Rust at default + ALMIDE_CHECK_IR=1. WASM target on
+        // ALMIDE_CHECK_IR=1 still trips on lifted-lambda TypeVar residue
+        // produced by ClosureConversion (the second `ConcretizeTypes`
+        // pass cannot fully recover the lambda param type from VarTable
+        // when the source generic was already specialized away). Closing
+        // that gap is part of S3 (pass_resolve_calls Phase 1b-c) — see
+        // codegen-ideal-form.md §Phase 3 Arc.
+        vec![Postcondition::Custom(audit_remaining_unresolved)]
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {

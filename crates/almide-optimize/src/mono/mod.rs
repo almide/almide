@@ -351,13 +351,15 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         }
     }
 
-    // Remove generic source fns that have at least one specialization.
-    let specialized_origins: std::collections::HashSet<(String, String)> = rename.keys()
-        .map(|(m, f, _)| (m.clone(), f.clone())).collect();
+    // Remove all generic source fns from bundled stdlib modules. Specialized
+    // instances are already in `module.functions`; the generic source itself
+    // would otherwise reach codegen with TypeVar params and fail the
+    // post-ConcretizeTypes audit (especially in WASM, which doesn't drop
+    // unused module fns the way the Rust target does).
+    use almide_lang::stdlib_info::is_bundled_module;
     for module in &mut program.modules {
-        let mname = module.name.to_string();
-        module.functions.retain(|f| !specialized_origins.contains(&(mname.clone(), f.name.to_string()))
-            || !f.generics.as_ref().map_or(false, |g| !g.is_empty()));
+        if !is_bundled_module(module.name.as_str()) { continue; }
+        module.functions.retain(|f| !f.generics.as_ref().map_or(false, |g| !g.is_empty()));
     }
 }
 

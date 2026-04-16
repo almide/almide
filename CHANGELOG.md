@@ -17,6 +17,27 @@ for the 4-step plan. This `-phase3.1` milestone scope: steps S1
 (option/result signature normalization) and S2 (ConcretizeTypes hard
 postcondition).
 
+### S2 — ConcretizeTypes audit always-on; bundled-stdlib generic cleanup
+
+`ConcretizeTypesPass::postconditions` no longer gates the audit on
+`ALMIDE_AUDIT_TYPES=1`; the `Custom(audit_remaining_unresolved)` check
+runs on every build. Violations print as
+`[POSTCONDITION VIOLATION] [ConcretizeTypes] N expressions remain ...`
+and escalate to `panic!` under `ALMIDE_CHECK_IR=1`.
+
+`spec/` is clean on the Rust target with `ALMIDE_CHECK_IR=1`. WASM
+target on `ALMIDE_CHECK_IR=1` still trips on lifted-lambda TypeVar
+residue produced by `ClosureConversion`; closing that gap is S3 work.
+Default behavior (no `ALMIDE_CHECK_IR`) is unchanged — both targets
+pass spec/ as before.
+
+Bundled-stdlib mono cleanup: `monomorphize_module_fns` previously kept
+unused generic source fns inside `program.modules`, which reached the
+WASM emitter with TypeVars intact. Now drops every generic fn in
+`is_bundled_module(name)` after the specialization round — specialized
+instances live alongside in `module.functions`, the generic source is
+no longer needed.
+
 ### S1 — Option/Result signature normalization
 
 Removed the bundled `stdlib/option.almd` / `stdlib/result.almd` that
