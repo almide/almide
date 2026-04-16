@@ -105,9 +105,15 @@ Every entry below attaches a `try:` block with copy-pasteable code:
   auto-fixes, 1 when `manual_pending` is non-empty. Harnesses can gate
   retry on the exit code without parsing output.
 - **Diagnostic explain docs enriched** (`docs/diagnostics/E001.md`
-  through `E005.md`, `E009.md`): each now includes the actual `try:`
+  through `E013.md` — full set): each now includes the actual `try:`
   snippet shape the compiler emits, conversion tables for common type
   mismatches, and cross-references to `llms.txt` / `CHEATSHEET.md`.
+  Several docs had mismatched content (E010 described "scope error"
+  but the code means **non-exhaustive match**; E011 described
+  "init issue" but means **mutable var in closure in pure fn**);
+  those are now corrected. E012 (duplicate definition) and E013
+  (field access on non-record) added — both were emitted by the
+  checker but undocumented.
 - **`almide fix <file> [--dry-run] [--json]`** — applies `auto_imports`
   (adds missing `import json` / `import fs` / etc), removes OCaml-style
   `let x = expr in <body>` keywords (the body stays), rewrites
