@@ -1,7 +1,7 @@
 // Regression guard: bundled-Almide stdlib dispatch.
-// list.bundled_probe / split_at / iterate are defined in stdlib/list.almd
-// with no TOML/Rust runtime. If any of these fail, the codegen rt_ bypass
-// is broken — see docs/roadmap/done/bundled-almide-dispatch.md.
+// list.bundled_probe / split_at are defined in stdlib/list.almd with no
+// TOML/Rust runtime. If any of these fail, the codegen rt_ bypass is
+// broken on Rust or WASM — see docs/roadmap/done/bundled-almide-dispatch.md.
 
 test "list.bundled_probe (bundled-Almide dispatch smoke)" {
   assert_eq(list.bundled_probe(41), 42)

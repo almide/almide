@@ -216,7 +216,7 @@ unify these.
 ### Added — bundled `list.*` fns (real users of the dispatch path)
 
 `stdlib/list.almd` ships three fns covered by
-`spec/stdlib/list_bundled_test.almd`:
+`spec/stdlib/list_bundled_test.almd` on both Rust and WASM targets:
 
 - `list.bundled_probe(n)` — smoke regression guard.
 - `list.split_at(xs, n) -> (List[T], List[T])` — splits a list at index
@@ -225,6 +225,24 @@ unify these.
 - `list.iterate(seed, f, n) -> List[T]` — builds
   `[seed, f(seed), f(f(seed)), ...]` of length `n`. Pure-Almide
   recursion through the bundled-dispatch path end-to-end.
+
+### Changed — `monomorphize` extended to module-defined generics
+
+Generic fns declared inside IR modules (e.g. `list.split_at[T]` in
+`stdlib/list.almd`) are now specialized by the monomorphization pass,
+not only top-level `program.functions`. The call target stays
+`CallTarget::Module { module, func }`, so codegen continues to route
+through the same stdlib dispatch on every backend. This closes the
+WASM gap where `list.split_at([1, 2], 2)` was reaching the emitter
+with a `TypeVar` and falling back to i32 element sizing. Self-recursive
+`Named` calls inside specialized bodies are rewritten by
+`specialize_function` itself; top-level rewrite_calls remains the
+source of truth for top-level fns.
+
+Roadmap: see `active/bundled-almide-ideal-form.md` for the remaining
+debt (unified dispatch entry, retire `stub_call → unreachable`,
+`ConcretizeTypes` hard postcondition, option/result signature
+normalization).
 
 No MSR delta expected (infrastructure only); downstream work
 (`diagnostic-snippet-externalization`, auto-rewrite rules in Almide) is

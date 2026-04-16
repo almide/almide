@@ -233,9 +233,9 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         }
 
         let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-        // Lower user modules to IR
+        // Lower user modules to IR (bundled stdlib included; TOML duplicates pruned)
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-            if almide::stdlib::is_stdlib_module(name) { continue; }
+            if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
             let saved_self = checker.env.self_module_name;
             if let Some(pid) = pkg_id.as_ref() {
                 checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
@@ -249,7 +249,12 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            let mut mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            if almide::stdlib::is_bundled_module(name) {
+                let toml_funcs: std::collections::HashSet<&'static str> =
+                    almide::stdlib::module_functions(name).into_iter().collect();
+                mod_ir_module.functions.retain(|f| !toml_funcs.contains(f.name.as_str()));
+            }
             checker.env.import_table = saved_table;
             checker.env.self_module_name = saved_self;
             ir_program.modules.push(mod_ir_module);
@@ -449,9 +454,9 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
 
         let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
 
-        // Lower user modules to IR
+        // Lower user modules to IR (bundled stdlib included; TOML duplicates pruned)
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-            if almide::stdlib::is_stdlib_module(name) { continue; }
+            if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
             let saved_self = checker.env.self_module_name;
             if let Some(pid) = pkg_id.as_ref() {
                 checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
@@ -462,7 +467,12 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            let mut mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            if almide::stdlib::is_bundled_module(name) {
+                let toml_funcs: std::collections::HashSet<&'static str> =
+                    almide::stdlib::module_functions(name).into_iter().collect();
+                mod_ir_module.functions.retain(|f| !toml_funcs.contains(f.name.as_str()));
+            }
             checker.env.import_table = saved_table;
             checker.env.self_module_name = saved_self;
             ir_program.modules.push(mod_ir_module);

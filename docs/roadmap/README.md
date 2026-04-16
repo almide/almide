@@ -6,12 +6,13 @@
 
 ## Active
 
-25 items
+26 items
 
 | Item | Description |
 |------|-------------|
 | [almai — Multi-Provider LLM Client](active/almai-llm-client.md) | almai — multi-provider LLM client library, 8 providers shipped |
 | [Almide Dojo — Continuous MSR Measurement](active/almide-dojo.md) | Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration |
+| [Bundled-Almide Stdlib — Ideal Form](active/bundled-almide-ideal-form.md) | Ideal form for bundled-Almide stdlib: one dispatch path, no patch-layer special cases |
 | [bytes: unify bounds-check semantics](active/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
 | [`cargo test --all` Cache Race](active/cargo-test-cache-race.md) | Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures |
 | [Codegen Ideal Form](active/codegen-ideal-form.md) | WASM codegen redesign toward declarative dispatch and explicit symbol resolution |
