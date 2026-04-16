@@ -9,6 +9,28 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
+## [0.14.7-phase3.3] — Unreleased (develop branch)
+
+Continuation of the Phase 3 "Ideal Form Migration" arc. This `-phase3.3`
+milestone scope: step S4 (mono coverage extension to user packages).
+
+### S4 — Mono drops generic source fns from every module, not just bundled
+
+`monomorphize_module_fns` already discovered and specialized generic
+fns across every module in `program.modules` (the bundled-only filter
+introduced in v0.14.6 was applied only at the post-specialize prune
+step). The prune is now uniform across all modules: every generic
+source fn is dropped after the specialization round, not only those
+inside `is_bundled_module(...)`.
+
+In practice this means user package modules carrying generic fns
+(e.g. `pkg.helper[T](x: T) -> List[T]`) are now subject to the same
+post-mono invariant as bundled stdlib modules: no module fn carries
+TypeVars after this pass. spec/ has no user-package generic test today,
+so the change is no-op for the existing suite, but it removes the
+remaining "bundled vs not" branch in the prune step — one fewer
+patch-layer special case to maintain.
+
 ## [0.14.7-phase3.2] — Unreleased (develop branch)
 
 Continuation of the Phase 3 "Ideal Form Migration" arc. This `-phase3.2`

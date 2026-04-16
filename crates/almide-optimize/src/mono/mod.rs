@@ -351,14 +351,14 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         }
     }
 
-    // Remove all generic source fns from bundled stdlib modules. Specialized
-    // instances are already in `module.functions`; the generic source itself
-    // would otherwise reach codegen with TypeVar params and fail the
-    // post-ConcretizeTypes audit (especially in WASM, which doesn't drop
-    // unused module fns the way the Rust target does).
-    use almide_lang::stdlib_info::is_bundled_module;
+    // Remove all generic source fns from every IR module — bundled stdlib
+    // and user packages alike. Specialized instances are already in
+    // `module.functions`; unspecialized generics with no call sites are
+    // dead code (the source still has TypeVar params and would fail the
+    // post-ConcretizeTypes audit). The Rust target's later optimizer would
+    // remove them anyway; the WASM emitter does not, so we prune here as
+    // the canonical invariant: post-mono, no module fn carries TypeVars.
     for module in &mut program.modules {
-        if !is_bundled_module(module.name.as_str()) { continue; }
         module.functions.retain(|f| !f.generics.as_ref().map_or(false, |g| !g.is_empty()));
     }
 }
