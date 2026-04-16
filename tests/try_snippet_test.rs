@@ -262,6 +262,42 @@ fn main() -> Bool = {
 }
 
 #[test]
+fn list_rest_pattern_hints_at_idiomatic_recursion() {
+    // Sonnet / other strong LLMs reach for rest patterns from Rust/JS
+    // (`[head, ...tail]`) or Haskell/OCaml (`head :: tail`). Neither is
+    // supported in Almide list patterns; the diagnostic must point to
+    // `list.first` / `list.drop` explicitly so the retry knows what to
+    // write instead.
+    let p = write_tmp("try_rest_pattern_dotdotdot.almd", r#"
+fn sum(xs: List[Int]) -> Int =
+    match xs {
+        [] => 0,
+        [head, ...tail] => head + sum(tail),
+    }
+"#);
+    let (_, out) = check(&p);
+    assert!(out.contains("rest/spread patterns"), "dot-dot-dot hint missing:\n{}", out);
+    assert!(out.contains("list.first") && out.contains("list.drop"),
+        "idiomatic fix hint missing:\n{}", out);
+}
+
+#[test]
+fn cons_pattern_hints_at_idiomatic_recursion() {
+    let p = write_tmp("try_cons_pattern.almd", r#"
+fn sum(xs: List[Int]) -> Int =
+    match xs {
+        [] => 0,
+        head :: tail => head + sum(tail),
+    }
+"#);
+    let (_, out) = check(&p);
+    assert!(out.contains("cons pattern") && out.contains("Haskell/OCaml/Elm"),
+        "cons-pattern attribution missing:\n{}", out);
+    assert!(out.contains("list.first") && out.contains("list.drop"),
+        "idiomatic fix hint missing:\n{}", out);
+}
+
+#[test]
 fn misplaced_test_keyword_emits_harness_hint() {
     // dojo custom-linked-list fail mode: LLM writes its own `test "..." {}`
     // block, and either (a) it's in a context that doesn't accept one, or

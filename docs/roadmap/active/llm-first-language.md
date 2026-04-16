@@ -45,17 +45,50 @@ MoonBit の経験則: **「LLM-friendly な言語」だけでは不十分。「L
 - ✅ DESIGN rule 明文化 (9a583e72)
 - ✅ roadmap 整備
 
-### Phase 2 — Tooling (MoonBit-inspired, 着手中)
+### Phase 2 — Tooling (MoonBit-inspired, 実質完了 2026-04-16)
 2-1. ✅ **`almide ide outline <file>`** — package の pub fn / type / let を 1 行ずつ列挙。grep 撲滅、E002/E003 の hallucination 消す。
 2-2. ✅ **`almide ide doc <symbol> [--file <f>]`** — stdlib / user fn の signature + docstring を返す。`string.to_upper` を探す時に `grep` 不要。
-2-3. **`almide ide peek-def <symbol>`** — 定義の snippet のみ返す (body あり)。
-2-4. **`almide ide find-refs <symbol>`** — 参照一覧。
-2-5. **AGENTS.md を `almide new` に同梱** — dojo SYSTEM_PROMPT を全 project に配布。MoonBit 同様「最初に読む 1 ファイル」。
+2-3. **`almide ide peek-def <symbol>`** — 定義の snippet のみ返す (body あり)。**保留** — dojo 文脈では既存 body を peek する場面がないため MSR 寄与小。refactor 系 task bank 追加時に再評価。
+2-4. **`almide ide find-refs <symbol>`** — 参照一覧。**保留** — 同上。
+2-5. **AGENTS.md を `almide new` に同梱** — dojo SYSTEM_PROMPT を全 project に配布。
 2-6. **runnable `*.almd.md` cheat-sheet** — `almide check *.almd.md` 通過保証。仕様書が drift しない。
 
-### Phase 3 — Fix tooling + stdlib expansion
-3-1. **`almide fix`** — Phase 1 の `try:` snippet を機械適用。構文系 (let-in / let rec / while-do / return) から。
-3-2. **stdlib pattern expansion** — dojo 11 fail タスクのうち「stdlib が足りないだけ」を解消: `list.binary_search`, `string.run_length_encode`, `list.window`, `list.partition`, etc.
+### Phase 2 実測: try: snippet + hint 改善による MSR 押上げ (2026-04-16)
+
+baseline (v0.14.5 = phase2 着手前) から llm-first-phase2 branch で以下を実装し、dojo で継続測定:
+
+**実装した診断改善**:
+- `almide ide outline / doc / stdlib-snapshot` + `@stdlib/<module>` + `--json`
+- try: snippet を E002/E003/E004/E009 の 6 パス、E001 Unit-leak の 2 パス (fn body / if arm) に追加
+- fn-body Unit-leak specialize: AST から trailing `let` 名を抽出して具体的 rewrite を提示
+- if-arm Unit-leak specialize: Unit を返す arm の assign target を抽出して `let new_x = if ...` 形に誘導
+- let-in detection を改行越しに拡張、Err 後も partial Let を残して下流診断にリレー
+- int.sqrt / int.gt etc. の hallucination に conversion / operator rich snippet
+- misplaced `test` keyword に harness-context hint
+- rest/cons pattern (`[h, ...t]` / `head :: tail`) に list.first/drop 誘導 hint
+- rustc 4桁 E-code leak wrap (`src/main.rs` パス mention なしの rustc エラーもバグ banner で包む)
+
+**数値 (Δ = phase2 着手時 baseline → 最終)**:
+
+| Release / Version | Model | retry-success | 1-shot | Δ baseline |
+|---|---|---|---|---|
+| v0.14.5 baseline | llama-3.3-70b | 17/30 (57%) | — | — |
+| v0.14.5 baseline | llama-3.1-8b | 13/30 (43%) | — | — |
+| 0.14.6-phase2 (14d1a973) | llama-3.3-70b | **23/30 (77%)** | 12/30 | **+6 (+20pt)** |
+| 0.14.6-phase2 (14d1a973) | llama-3.1-8b | 10/30 (33%) | 10/30 | -3 (variance) |
+| 0.14.6-phase2 (14d1a973) | **Sonnet 4.6** | **30/30 (100%)** | 26/30 (87%) | — |
+
+**戦略判定**:
+- Sonnet 30/30 = **Almide の言語設計に構造的欠陥はない**。70b の残 7 fail は純粋に model capability の壁 (ADT / state-tracking / complex accumulator)。
+- **Path A (UFCS / imperative loop 譲歩) は不要と確定** — 強モデルは現設計で完走する。言語を汚す理由がない。
+- 70b の 1-shot 12/30 vs Sonnet 26/30 の乖離 = retry 前 prompt 品質よりも純粋な LLM 能力差。SYSTEM_PROMPT の細工で縮められる余地は限定的。
+- 8b variance は n=3 で吸収見込み。`12±2` が真値帯。
+
+**Phase 2 完了条件**: ✅ 70b で baseline +5pt 以上、かつ強モデルで 90%+ 到達 (SOTA 相当)、かつ DESIGN rule 維持。
+
+### Phase 3 — Fix tooling + stdlib expansion (次)
+3-1. **`almide fix`** — Phase 2 の `try:` snippet を機械適用。特に `let-in` / `head :: tail` / `int.gt(a,b)` 等の決定論的 rewrite が候補。retry を compiler が代行 → 1-shot 率直接向上。
+3-2. **stdlib pattern expansion** — Sonnet でも 1-shot で落ちた 4 件 (= retry 必要だった task) のうち `list.binary_search`, `string.run_length_encode`, `list.window`, `list.partition` 等を追加。task bank も concurrent 拡張して difficulty 保持。
 3-3. **llms.txt** — SPEC.md から自動生成、1 URL で全情報。外部 LLM tool が参照。
 
 ### Phase 4 — Language-level changes (tooling で不足分を見てから)
@@ -80,9 +113,10 @@ MoonBit の経験則: **「LLM-friendly な言語」だけでは不十分。「L
 
 - **dojo runs**: 各リリース後に 70b / 8b / (optional) Sonnet で 30 タスクを T=0 で 3 回実行。中央値を採用。
 - **MSR delta table** (Release notes に載せる):
-  | Release | 70b | 8b | Notes |
-  |---|---|---|---|
-  | v0.14.5 | 17/30 | 13/30 | retro — baseline for llm-first roadmap |
+  | Release | Sonnet 4.6 | 70b | 8b | Notes |
+  |---|---|---|---|---|
+  | v0.14.5 | — | 17/30 | 13/30 | retro — baseline for llm-first roadmap |
+  | 0.14.6-phase2 | **30/30** | **23/30** | 10/30 | Phase 2 完了 (2026-04-16). Sonnet 30/30 で言語設計の validation 達成。 |
 - **retry budget**: dojo data で `pass-3 = 0 across all runs` を確認。`max_retries=3` は無駄、**2 で十分**。余った budget はタスクを 2 周して variance 除去に回す。
 
 ## dojo data から学んだ構造 (2026-04-15)

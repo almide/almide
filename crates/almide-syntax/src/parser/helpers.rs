@@ -162,6 +162,16 @@ impl Parser {
         if got.token_type == TokenType::Test {
             return "`test \"...\"` is a top-level form. Got here mid-declaration — either the previous fn/type/impl is missing a closing `}`, or the test block is in a context (e.g. harness-submitted code) that doesn't accept one. Remove the test block or close the prior declaration.".to_string();
         }
+        // Haskell/OCaml/Elm cons pattern `head :: tail` → user typed an
+        // Ident followed by `::` in a match arm. The parser saw `:` where
+        // a `=>` was expected; if the token after is another `:`, that's
+        // almost certainly a cons pattern.
+        if *expected == TokenType::FatArrow
+            && got.token_type == TokenType::Colon
+            && self.peek_at(1).map(|t| t.token_type == TokenType::Colon).unwrap_or(false)
+        {
+            return "`head :: tail` (cons pattern) is Haskell/OCaml/Elm syntax. Almide list patterns use [] / [a, b] literals only. For head/tail recursion, use `list.first(xs)` and `list.drop(xs, 1)` on the non-empty arm.".to_string();
+        }
         if let Some(result) = self.check_hint(Some(expected.clone()), super::hints::HintScope::Expression) {
             result.hint
         } else {
