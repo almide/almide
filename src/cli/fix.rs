@@ -19,12 +19,19 @@ use serde::Serialize;
 
 /// JSON output shape (stable contract for harnesses) so the dojo retry loop
 /// can decide "re-check vs pass-through to LLM" without parsing human text.
+/// Bump on any breaking change (field removal, semantic shift). Additive
+/// changes (new fields) don't require a bump — harnesses should ignore
+/// unknown fields.
+const FIX_REPORT_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Serialize)]
 struct FixReport<'a> {
+    schema_version: u32,
     file: &'a str,
     imports_added: Vec<String>,
     letin_removed: usize,
     operator_rewrites: usize,
+    return_removed: usize,
     manual_pending: Vec<ManualDiag>,
     /// True if the file was written (or would be, in --dry-run). Harness can
     /// use this to gate a follow-up `almide check`: if false, nothing changed
@@ -96,7 +103,21 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
         working = delete_in_tokens(&working, &letin_errors);
     }
 
-    let any_change = has_import_changes || operator_count > 0 || letin_count > 0;
+    // `return` keyword removal. Almide has no `return`; the trailing expr of
+    // a block/fn is the value. LLMs habitually write `return expr` from
+    // Go/Rust/JS — same mechanical fix shape as let-in (delete the keyword,
+    // keep the following expression). Parser recovery surfaces only the
+    // FIRST `return` per file, so iterate to fixpoint (capped) to sweep
+    // multiple returns in one pass.
+    let mut return_count = 0;
+    for _ in 0..8 {
+        let positions = collect_return_positions(&working);
+        if positions.is_empty() { break; }
+        return_count += positions.len();
+        working = delete_return_tokens(&working, &positions);
+    }
+
+    let any_change = has_import_changes || operator_count > 0 || letin_count > 0 || return_count > 0;
 
     // Extract "Added `import X`" → bare module names for JSON.
     let imports_added: Vec<String> = import_messages.iter()
@@ -115,10 +136,12 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
 
     if json {
         let report = FixReport {
+            schema_version: FIX_REPORT_SCHEMA_VERSION,
             file,
             imports_added,
             letin_removed: letin_count,
             operator_rewrites: operator_count,
+            return_removed: return_count,
             manual_pending: manual,
             changed: any_change,
             dry_run,
@@ -141,6 +164,9 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
             if letin_count > 0 {
                 println!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
             }
+            if return_count > 0 {
+                println!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", return_count);
+            }
             println!("\n--- new file contents ---");
             println!("{}", working);
         }
@@ -150,6 +176,9 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
         if operator_count > 0 { eprintln!("  {}", op_msg(operator_count)); }
         if letin_count > 0 {
             eprintln!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
+        }
+        if return_count > 0 {
+            eprintln!("  Removed {} `return` keyword(s) (Almide uses trailing expression)", return_count);
         }
     }
 
@@ -219,6 +248,50 @@ fn extract_module_call(callee: &Expr) -> Option<(String, String)> {
     let ExprKind::Member { object, field } = &callee.kind else { return None };
     let ExprKind::Ident { name } = &object.kind else { return None };
     Some((name.to_string(), field.to_string()))
+}
+
+fn collect_return_positions(source: &str) -> Vec<(usize, usize)> {
+    let tokens = almide::lexer::Lexer::tokenize(source);
+    let mut parser = almide::parser::Parser::new(tokens);
+    let _ = parser.parse();
+    parser.errors.iter()
+        .filter(|d| d.message.starts_with("'return' is not needed in Almide"))
+        .filter_map(|d| Some((d.line?, d.col?)))
+        .collect()
+}
+
+fn delete_return_tokens(source: &str, positions: &[(usize, usize)]) -> String {
+    let mut lines: Vec<String> = source.split('\n').map(String::from).collect();
+    let mut sorted: Vec<_> = positions.iter().copied().collect();
+    sorted.sort_by(|a, b| b.cmp(a));
+    for (line, col) in sorted {
+        let li = line.saturating_sub(1);
+        let Some(l) = lines.get_mut(li) else { continue };
+        let ci = col.saturating_sub(1);
+        if l.get(ci..ci + 6) != Some("return") { continue; }
+        // word boundaries
+        let before_ok = ci == 0
+            || !l.as_bytes()[ci - 1].is_ascii_alphanumeric()
+                && l.as_bytes()[ci - 1] != b'_';
+        let after_byte = l.as_bytes().get(ci + 6).copied();
+        let after_ok = match after_byte {
+            None => true,
+            Some(b) => !b.is_ascii_alphanumeric() && b != b'_',
+        };
+        if !(before_ok && after_ok) { continue; }
+        // Delete `return` plus a single trailing space if present, so
+        // `return 42` becomes `42` and the trailing expression slides into
+        // tail position naturally.
+        let mut end = ci + 6;
+        if l.as_bytes().get(end) == Some(&b' ') { end += 1; }
+        let new_line = format!("{}{}", &l[..ci], &l[end..]);
+        if new_line.trim().is_empty() {
+            *l = String::new();
+        } else {
+            *l = new_line;
+        }
+    }
+    lines.join("\n")
 }
 
 fn collect_letin_positions(source: &str) -> Vec<(usize, usize)> {

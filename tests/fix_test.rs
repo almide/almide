@@ -66,7 +66,7 @@ fn clamp(x: Int) -> Int = {
 fn fix_json_output_shape_is_stable() {
     // dojo harness contract: --json emits a fixed-schema object that the
     // retry loop can parse. Changing field names / types here is a
-    // breaking change — bump the schema version + notify downstream.
+    // breaking change — bump `schema_version` and notify downstream.
     let src = r#"
 effect fn main() -> Unit = {
     let v = json.from_int(42)
@@ -81,10 +81,12 @@ effect fn main() -> Unit = {
         .unwrap();
     assert!(out.status.success());
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    assert_eq!(v["schema_version"], 1);
     assert!(v["file"].is_string());
     assert!(v["imports_added"].is_array());
     assert!(v["letin_removed"].is_number());
     assert!(v["operator_rewrites"].is_number());
+    assert!(v["return_removed"].is_number());
     assert!(v["manual_pending"].is_array());
     assert!(v["changed"].is_boolean());
     assert!(v["dry_run"].is_boolean());
@@ -92,6 +94,37 @@ effect fn main() -> Unit = {
     assert_eq!(v["operator_rewrites"], 1);
     assert_eq!(v["changed"], true);
     assert_eq!(v["dry_run"], true);
+}
+
+#[test]
+fn fix_removes_return_keyword_iteratively() {
+    // dojo / LLM habit: writes `return expr` from Go/Rust/JS. Parser only
+    // surfaces the first `return` per file, so fix must iterate to sweep
+    // multiple occurrences in one invocation.
+    let src = r#"
+fn is_positive(n: Int) -> Bool =
+    if n > 0 then
+        return true
+    else
+        return false
+
+effect fn main() -> Unit = {
+    println(if is_positive(5) then "yes" else "no")
+}
+"#;
+    let path = write_tmp("fix_return.almd", src);
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Removed 2 `return`"),
+        "expected 2 returns removed:\n{}", stderr);
+
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(!after.contains("return "), "`return` not fully removed:\n{}", after);
+
+    let run = Command::new(almide()).args(["run", &path]).output().unwrap();
+    assert!(run.status.success());
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("yes"), "expected 'yes', got:\n{}", stdout);
 }
 
 #[test]
