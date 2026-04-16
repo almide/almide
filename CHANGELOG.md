@@ -9,6 +9,37 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
+## [0.14.7-phase3.1] — Unreleased (develop branch)
+
+Phase 3 "Ideal Form Migration" arc begins. See
+[docs/roadmap/active/codegen-ideal-form.md §Phase 3 Arc](docs/roadmap/active/codegen-ideal-form.md)
+for the 4-step plan. This `-phase3.1` milestone scope: steps S1
+(option/result signature normalization) and S2 (ConcretizeTypes hard
+postcondition).
+
+### S1 — Option/Result signature normalization
+
+Removed the bundled `stdlib/option.almd` / `stdlib/result.almd` that
+silently overrode TOML signatures for `option.unwrap_or_else` and
+`option.or_else`. The root cause — TOML declared `Fn[Unit] -> X` while
+callers write `() => x` — is fixed at the source: TOML now uses
+`Fn[] -> X`, and the `stdlib_codegen.rs` TOML parser handles the empty
+params case.
+
+Surface changes:
+
+- `stdlib/defs/option.toml` `unwrap_or_else.f` / `or_else.f`: `Fn[Unit] -> X` → `Fn[] -> X`
+- `stdlib/option.almd` / `stdlib/result.almd`: deleted (no longer needed
+  for signature override; runtime dispatch was always TOML-backed)
+- `BUNDLED_MODULES` / `AUTO_IMPORT_BUNDLED` / `get_bundled_source`:
+  `option` / `result` entries removed. Tier-1 auto-import continues via
+  `import_table.rs`'s hardcoded list.
+
+No caller-visible breakage: `option.or_else(o, () => ...)` now type-checks
+directly against the TOML signature instead of going through the bundled
+override. `spec/stdlib/coverage_misc_test.almd` (the gatekeeper for this
+co-dependence) passes unchanged.
+
 ## [0.14.6] — 2026-04-16
 
 Phase 2 of the "LLM-first language" roadmap. **Focus**: make the compiler

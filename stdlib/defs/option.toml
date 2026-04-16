@@ -46,7 +46,7 @@ example = "option.unwrap_or_else(none, () => 42) // => 42"
 type_params = ["A"]
 params = [
     { name = "o", type = "Option[A]" },
-    { name = "f", type = "Fn[Unit] -> A" },
+    { name = "f", type = "Fn[] -> A" },
 ]
 return = "A"
 rust = "almide_rt_option_unwrap_or_else({o}, || {{ {f.body} }})"
@@ -106,7 +106,7 @@ example = "option.or_else(none, () => some(42)) // => some(42)"
 type_params = ["A"]
 params = [
     { name = "o", type = "Option[A]" },
-    { name = "f", type = "Fn[Unit] -> Option[A]" },
+    { name = "f", type = "Fn[] -> Option[A]" },
 ]
 return = "Option[A]"
 rust = "almide_rt_option_or_else({o}, || {{ {f.body} }})"

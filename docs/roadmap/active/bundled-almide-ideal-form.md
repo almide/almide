@@ -1,6 +1,11 @@
 <!-- description: Ideal form for bundled-Almide stdlib: one dispatch path, no patch-layer special cases -->
 # Bundled-Almide Stdlib — Ideal Form
 
+> **Merged into**: `active/codegen-ideal-form.md` §Phase 3 Arc (2026-04-17).
+> The 5 debt items here are reframed as steps S1-S4 of the
+> `0.14.7-phase3.N` arc. Keep this file as the narrow-scope rationale; the
+> arc-level plan and cadence live in codegen-ideal-form.md.
+
 The `bundled-almide-dispatch` work (shipped in v0.14.6) made
 `stdlib/<m>.almd` usable, but the implementation grew several
 patch-layer special cases because the first pass treated bundled fns
