@@ -202,5 +202,5 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
 - Current branch for Phase 2 tooling work: `llm-first-phase2`.
-- Baseline → 0.14.6-phase2 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
+- Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.

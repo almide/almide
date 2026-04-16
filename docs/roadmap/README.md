@@ -6,7 +6,7 @@
 
 ## Active
 
-26 items
+25 items
 
 | Item | Description |
 |------|-------------|
@@ -27,11 +27,10 @@
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [`almide docs-gen` — llms.txt Auto-Generation](active/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | [lumen — Pure Graphics Math](active/lumen-graphics-math.md) | lumen — pure graphics math library (vec3, mat4, color), used by webgl/canvas/obsid |
-| [Option/Result Bundled `.almd` Cleanup](active/option-result-bundled-cleanup.md) | Decide whether option/result bundled .almd should be deleted or made authoritative |
+| [Option/Result Bundled `.almd` — Not Cosmetic After All](active/option-result-bundled-cleanup.md) | Bundled option/result are signature-override layer; pick a path to consolidate |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](active/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
-| [Cut v0.14.6 Release](active/release-0.14.6.md) | Cut v0.14.6 release from llm-first-phase2 branch |
 | [Stdlib Defs / Runtime Consistency Check](active/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | [Stdlib Symmetry Audit](active/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
 | [Variant Exhaustiveness Refinement](active/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
@@ -72,13 +71,14 @@
 
 ## Done
 
-206 items
+207 items
 
 <details>
-<summary>Show all 206 completed items</summary>
+<summary>Show all 207 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-04-16 | [Cut v0.14.6 Release](done/release-0.14.6.md) | Cut v0.14.6 release from llm-first-phase2 branch |
 | 2026-04-16 | [Bundled-Almide Dispatch for Stdlib Modules](done/bundled-almide-dispatch.md) | Let stdlib/<module>.almd extend TOML modules (codegen dispatch fix) |
 | 2026-04-09 | [Distribution UX](done/distribution-ux.md) | GitHub Release binaries, one-line installer, and almide self-update |
 | 2026-04-09 | [Custom WASM Host Imports](done/wasm-host-imports.md) | Allow WASM target to import functions from custom host modules |

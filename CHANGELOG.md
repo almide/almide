@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to this project are documented here. This file was
-started at `0.14.6-phase2`; earlier versions are summarized retrospectively
+started at `0.14.6`; earlier versions are summarized retrospectively
 under "Before this file existed" at the bottom.
 
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
@@ -9,7 +9,7 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
-## [0.14.6-phase2] — Unreleased (develop/llm-first-phase2 branch)
+## [0.14.6] — 2026-04-16
 
 Phase 2 of the "LLM-first language" roadmap. **Focus**: make the compiler
 produce copy-pasteable fix snippets in diagnostics, so LLM retries converge
@@ -17,7 +17,7 @@ faster. Measured against [almide-dojo] 30-task benchmark.
 
 ### LLM writability (dojo MSR, 2026-04-16)
 
-| Model | v0.14.5 baseline | 0.14.6-phase2 | Δ |
+| Model | v0.14.5 baseline | 0.14.6 | Δ |
 |---|---|---|---|
 | Sonnet 4.6 | — | **30/30 (100%)** | — |
 | llama-3.3-70b | 17/30 (57%) | **23/30 (77%)** | **+6 (+20pt)** |

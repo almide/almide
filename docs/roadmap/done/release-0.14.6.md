@@ -1,4 +1,5 @@
 <!-- description: Cut v0.14.6 release from llm-first-phase2 branch -->
+<!-- done: 2026-04-16 -->
 # Cut v0.14.6 Release
 
 Trigger: implement next (Phase 3 MVP is stable; dojo has been running
@@ -6,17 +7,17 @@ against the branch for ~1 week).
 
 ## Why now
 
-- **`0.14.6-phase2` branch dependency is painful**: external users who
+- **`0.14.6` branch dependency is painful**: external users who
   want the Phase 2/3 improvements must `cargo install --git --branch
   llm-first-phase2`. Released 0.14.6 would let them `cargo install almide`.
 - **Dojo measurement stability**: releasing the branch as 0.14.6 freezes
   a known-good reference point. Follow-up work continues on `develop`
   toward 0.14.7-phase3.N.
-- **CHANGELOG.md is ready**: every `0.14.6-phase2` entry is a release note.
+- **CHANGELOG.md is ready**: every `0.14.6` entry is a release note.
 
 ## Procedure (per CLAUDE.md release rules)
 
-1. Bump `Cargo.toml` version: `0.14.6-phase2` → `0.14.6`.
+1. Bump `Cargo.toml` version: `0.14.6` → `0.14.6`.
 2. Commit on `develop`, push.
 3. Wait for `develop` CI green.
 4. Open PR: `develop → main`. Do not force-merge.
