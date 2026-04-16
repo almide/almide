@@ -139,6 +139,47 @@ pub fn suggest_alias(module: &str, func: &str) -> Option<&'static str> {
         ("list", "tail") => Some("list.drop(xs, 1)"),
         ("map", "new") | ("map", "empty") => Some("[:] (empty map literal)"),
         ("map", "has_key") | ("map", "has") | ("map", "includes") => Some("map.contains"),
+        // sqrt: Almide only has float.sqrt, not int.sqrt. Most LLMs reach
+        // for int.sqrt(n) in is-prime / perfect-square style tasks.
+        ("int", "sqrt") => Some("float.sqrt(int.to_float(n))"),
+        // comparison functions: Almide uses operators, not methods.
+        ("int", "gt") | ("float", "gt") => Some("a > b (operator)"),
+        ("int", "lt") | ("float", "lt") => Some("a < b (operator)"),
+        ("int", "gte") | ("int", "ge") | ("float", "gte") | ("float", "ge") => Some("a >= b (operator)"),
+        ("int", "lte") | ("int", "le") | ("float", "lte") | ("float", "le") => Some("a <= b (operator)"),
+        ("int", "eq") | ("float", "eq") | ("string", "eq") | ("bool", "eq") => Some("a == b (operator)"),
+        ("int", "neq") | ("int", "ne") | ("float", "neq") | ("float", "ne") => Some("a != b (operator)"),
+        _ => None,
+    }
+}
+
+/// Rich multi-line `try:` snippet for well-known LLM hallucinations that
+/// don't map to a single clean function name — conversion-wrappers,
+/// operator forms, etc. `suggest_alias` returns free-text for these cases
+/// (suppressing the default "fn(...)" try: snippet); this table provides
+/// a concrete fix template instead.
+pub fn try_snippet_for_alias(module: &str, func: &str) -> Option<&'static str> {
+    match (module, func) {
+        ("int", "sqrt") => Some(
+            "// Almide has float.sqrt; int.sqrt doesn't exist.\n\
+             // Convert → sqrt → (optionally) convert back:\n\
+             let root_f = float.sqrt(int.to_float(n))       // Float\n\
+             let root_i = float.to_int(root_f)              // Int (truncates)\n\
+             // — or inline: float.to_int(float.sqrt(int.to_float(n)))"
+        ),
+        ("int", "gt") | ("int", "lt") | ("int", "gte") | ("int", "ge")
+        | ("int", "lte") | ("int", "le") | ("int", "eq") | ("int", "neq") | ("int", "ne")
+        | ("float", "gt") | ("float", "lt") | ("float", "gte") | ("float", "ge")
+        | ("float", "lte") | ("float", "le") | ("float", "eq") | ("float", "neq") | ("float", "ne") => Some(
+            "// Almide uses operators, not comparison functions:\n\
+             //   int.gt(a, b)   →  a > b\n\
+             //   int.lt(a, b)   →  a < b\n\
+             //   int.gte(a, b)  →  a >= b\n\
+             //   int.lte(a, b)  →  a <= b\n\
+             //   int.eq(a, b)   →  a == b\n\
+             //   int.neq(a, b)  →  a != b\n\
+             // (same for float, string, bool — == and != work on any type)"
+        ),
         _ => None,
     }
 }

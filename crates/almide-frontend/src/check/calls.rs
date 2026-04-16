@@ -253,7 +253,10 @@ impl Checker {
                 }
                 return ty;
             }
-            let (hint, fix_name): (String, Option<String>) = {
+            // Triple: (hint, clean fn-name fix for simple try:, rich multi-line snippet).
+            // `rich_snippet` overrides `fix_name` when present — used for hallucinations
+            // that need a conversion wrapper or operator rewrite rather than a rename.
+            let (hint, fix_name, rich_snippet): (String, Option<String>, Option<&'static str>) = {
                 // For module-qualified calls (e.g. "string.uppercase"), narrow candidates
                 // to the same module and compare only the function part for better suggestions.
                 if let Some((module, func)) = name.split_once('.') {
@@ -264,28 +267,29 @@ impl Checker {
                             // Aliases can be free text like "xs + [x]"; only treat as a
                             // copy-pasteable fn name if it matches `module.func` form.
                             let fix = is_clean_fn_name(alias).then(|| alias.to_string());
-                            (format!("Did you mean `{}`?", alias), fix)
+                            let rich = crate::stdlib::try_snippet_for_alias(module, func);
+                            (format!("Did you mean `{}`?", alias), fix, rich)
                         } else if let Some(suggestion) = almide_base::diagnostic::suggest(func, module_funcs.iter().copied()) {
                             let full = format!("{}.{}", module, suggestion);
-                            (format!("Did you mean `{}`?", full), Some(full))
+                            (format!("Did you mean `{}`?", full), Some(full), None)
                         } else {
-                            (format!("No function '{}' in module '{}'. See docs/CHEATSHEET.md for available functions", func, module), None)
+                            (format!("No function '{}' in module '{}'. See docs/CHEATSHEET.md for available functions", func, module), None, None)
                         }
                     } else {
                         // Unknown module — suggest across all candidates
                         let candidates = self.env.all_visible_names();
                         if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
-                            (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()))
+                            (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
                         } else {
-                            ("Check the function name".to_string(), None)
+                            ("Check the function name".to_string(), None, None)
                         }
                     }
                 } else {
                     let candidates = self.env.all_visible_names();
                     if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
-                        (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()))
+                        (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
                     } else {
-                        ("Check the function name".to_string(), None)
+                        ("Check the function name".to_string(), None, None)
                     }
                 }
             };
@@ -296,7 +300,9 @@ impl Checker {
                 return Ty::Unknown;
             }
             let mut diag = super::err(format!("undefined function '{}'", name), hint, format!("call to {}()", name)).with_code("E002");
-            if let Some(fix) = fix_name {
+            if let Some(rich) = rich_snippet {
+                diag = diag.with_try(rich.to_string());
+            } else if let Some(fix) = fix_name {
                 diag = diag.with_try(format!("// {wrong}(...)  →  {right}(...)\n{right}(...)", wrong = name, right = fix));
             }
             self.emit(diag);

@@ -213,6 +213,38 @@ fn greet(xs: List[String]) -> String = {
 }
 
 #[test]
+fn int_sqrt_hallucination_emits_conversion_snippet() {
+    // dojo is-prime fail mode: LLM writes int.sqrt(n). Almide only has
+    // float.sqrt, so we need to show the convert→sqrt→convert-back form.
+    let p = write_tmp("try_int_sqrt.almd", r#"
+fn is_prime(n: Int) -> Bool = {
+    let limit = int.sqrt(n)
+    true
+}
+"#);
+    let (ok, out) = check(&p);
+    assert!(!ok);
+    assert!(out.contains("error[E002]"), "out:\n{}", out);
+    assert!(out.contains("float.sqrt(int.to_float(n))"), "conversion snippet missing:\n{}", out);
+    assert!(out.contains("float.to_int(root_f)"), "convert-back snippet missing:\n{}", out);
+}
+
+#[test]
+fn int_comparison_fn_hallucination_emits_operator_snippet() {
+    // dojo result-pipeline fail mode: LLM writes int.gt(n, 0) expecting
+    // a function-style comparison. Show the operator form.
+    let p = write_tmp("try_int_gt.almd", r#"
+fn positive(n: Int) -> Bool =
+    int.gt(n, 0)
+"#);
+    let (ok, out) = check(&p);
+    assert!(!ok);
+    assert!(out.contains("error[E002]"), "out:\n{}", out);
+    assert!(out.contains("a > b"), "operator hint missing:\n{}", out);
+    assert!(out.contains("int.gt(a, b)   →  a > b"), "mapping table missing:\n{}", out);
+}
+
+#[test]
 fn e002_freetext_alias_suppresses_try_snippet() {
     // `string.all` aliases to "string.chars + list.all" — a free-text
     // composition, not a bare fn name. try: must be suppressed rather
