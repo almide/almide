@@ -1,9 +1,10 @@
-# reimpl-lint: Detect User Functions That Reimplement Stdlib
+<!-- description: Detect user fns whose signature matches a stdlib fn, suggest delegation -->
+# Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations
 
-Status: **Spec (not implemented)**. Trigger: implement when dojo measurement
-shows `list.binary_search` / `string.run_length_encode` / other stdlib
-primitives are being reimplemented from scratch (after SYSTEM_PROMPT
-"Prefer stdlib" section is applied and still doesn't move the needle).
+Trigger: implement when dojo measurement shows `list.binary_search` /
+`string.run_length_encode` / other stdlib primitives are being
+reimplemented from scratch (after SYSTEM_PROMPT "Prefer stdlib" section
+is applied and still doesn't move the needle).
 
 ## Goal
 
