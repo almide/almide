@@ -307,7 +307,8 @@ fn cargo_build_generated_with_native(
     }
 
     let profile = if release { "release" } else { "debug" };
-    let bin_path = project_dir.join("target").join(profile).join("almide-out");
+    let exe = if cfg!(windows) { "almide-out.exe" } else { "almide-out" };
+    let bin_path = project_dir.join("target").join(profile).join(exe);
     if !bin_path.exists() {
         return Err(format!("expected binary not found at {}", bin_path.display()));
     }
