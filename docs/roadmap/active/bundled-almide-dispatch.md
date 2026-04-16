@@ -13,19 +13,36 @@ ends up trying to call a non-existent Rust runtime function.
 ## Current behavior (the bug)
 
 ```
-stdlib/list.almd: fn binary_search(xs, target) = ...   # Almide source
-↓ parser/checker: resolves list.binary_search → IrFunction
-↓ pass_stdlib_lowering (codegen):
-  if is_stdlib_module("list"):
-    rt_name = "almide_rt_list_binary_search"    # ← always
-↓ rustc: error[E0425]: cannot find function `almide_rt_list_binary_search`
+stdlib/list.almd: fn bundled_probe() = 42     # Almide source
+↓ parser loads file (BUNDLED_MODULES opt-in)
+↓ canonicalize: bundled fn is NOT merged into the `list` namespace
+↓ lowering: no IrFunction named `bundled_probe` exists in the program
+↓ codegen: user code calls `list.bundled_probe()` → rt_list_bundled_probe
+↓ rustc: error[E0425]: cannot find function `almide_rt_list_bundled_probe`
 ```
 
-The frontend correctly loads the bundled Almide source and produces a
-valid IR function for `binary_search`. But `pass_stdlib_lowering.rs:95-110`
-hardcodes the `is_stdlib_module(module)` branch to emit runtime-function
-names — it has no signal that an individual `func` comes from bundled
-Almide instead of TOML.
+**Investigation 2026-04-16** (during the "ideal form" pass): adding
+`list` to `BUNDLED_MODULES` + `AUTO_IMPORT_BUNDLED` and shipping
+`stdlib/list.almd` with a probe fn revealed the problem is not *just*
+codegen — bundled fns don't land in the IR's `functions` list at all
+when the module name overlaps with a TOML-backed module. The `option`
+/ `result` bundled sources work today because the frontend resolution
+for Tier-1 modules follows a different path than Tier-2 / TOML
+stdlib, and `list` sits on the TOML side.
+
+So the fix is two-layer:
+
+1. **Frontend side**: when a bundled `.almd` file shares a module name
+   with a TOML-registered stdlib module, merge its functions into the
+   module's public surface (env.fn registrations) so call sites
+   resolve to real `IrFunction`s.
+2. **Codegen side**: when a `list.<func>` call resolves to a user
+   IrFunction (i.e. the function is defined in IR), bypass
+   `almide_rt_<module>_<func>` emission and use the normal user-fn
+   call path.
+
+Either step alone is insufficient. The roadmap entry was originally
+scoped to codegen only; it's now both layers.
 
 ## Proposed fix
 
@@ -121,12 +138,27 @@ After the fix:
 4. Existing TOML-backed `list.binary_search` continues to work
    unchanged (regression guard).
 
-## Estimated scope
+## Estimated scope (revised post-investigation)
 
-- Option 3 implementation: 2-3 hours including IR change, frontend
-  tagging pass, codegen check, tests across all three targets.
-- No dojo measurement delta expected (this is infrastructure, not a
-  diagnostic).
+- **Frontend merge**: 1-2 hours. Identify where bundled .almd fns
+  currently fail to merge into TOML-module namespaces. Likely in
+  `canonicalize::registration` or `import_table`. The existing
+  `option` / `result` bundled pattern is the reference — tracing why
+  that works gives the merge point.
+- **Codegen bypass**: 1 hour. Once IR has the bundled fn, check
+  `program.functions` at `pass_stdlib_lowering` entry for
+  `<module>.<func>`-style names; skip rt_ emission when present.
+- **Tests**: 1 hour. Regression guard: add a new bundled fn to
+  `stdlib/list.almd`, verify it type-checks, runs (Rust target),
+  compiles (WASM target), and doesn't break existing TOML-backed
+  `list.*` callers.
+
+Total: 3-4 hours in a dedicated session. This is one of the
+architectural blockers for `diagnostic-snippet-externalization` and
+the general "stdlib-in-Almide" dogfooding story.
+
+No dojo measurement delta expected on landing (infrastructure, not a
+diagnostic); downstream work that depends on it will move the needle.
 
 ## When to implement
 
