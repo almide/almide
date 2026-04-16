@@ -217,3 +217,9 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone>(xs: &Vec<A>, f: impl Fn(A)
 pub fn almide_rt_list_push<A>(xs: &mut Vec<A>, x: A) { xs.push(x); }
 pub fn almide_rt_list_pop<A>(xs: &mut Vec<A>) -> Option<A> { xs.pop() }
 pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }
+
+// ── Algorithmic primitives (Phase 3 stdlib expansion) ──
+
+pub fn almide_rt_list_binary_search(xs: &Vec<i64>, target: i64) -> Option<i64> {
+    xs.binary_search(&target).ok().map(|i| i as i64)
+}

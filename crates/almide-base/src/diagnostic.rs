@@ -66,6 +66,10 @@ pub struct Diagnostic {
     pub col: Option<usize>,
     pub end_col: Option<usize>,
     pub secondary: Vec<SecondarySpan>,
+    /// Optional copy-pasteable fix snippet (Elm-style `try:`). Shown after the
+    /// hint so LLMs and humans can apply the fix without re-reading the docs.
+    /// Multi-line; renderer prints each line with a `    ` indent under `try:`.
+    pub try_snippet: Option<String>,
 }
 
 impl Diagnostic {
@@ -74,6 +78,7 @@ impl Diagnostic {
             level: Level::Error, code: None,
             message: message.into(), hint: hint.into(), context: context.into(),
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
+            try_snippet: None,
         }
     }
 
@@ -82,11 +87,18 @@ impl Diagnostic {
             level: Level::Warning, code: None,
             message: message.into(), hint: hint.into(), context: context.into(),
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
+            try_snippet: None,
         }
     }
 
     pub fn with_code(mut self, code: &'static str) -> Self {
         self.code = Some(code);
+        self
+    }
+
+    /// Attach a copy-pasteable fix snippet.
+    pub fn with_try(mut self, snippet: impl Into<String>) -> Self {
+        self.try_snippet = Some(snippet.into());
         self
     }
 
@@ -138,6 +150,12 @@ impl Diagnostic {
         }
         if !self.hint.is_empty() {
             out.push_str(&format!("\n  hint: {}", self.hint));
+        }
+        if let Some(snippet) = &self.try_snippet {
+            out.push_str("\n  try:");
+            for line in snippet.lines() {
+                out.push_str(&format!("\n      {}", line));
+            }
         }
         out
     }

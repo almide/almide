@@ -152,6 +152,32 @@ enum Commands {
         /// Target version (e.g., v0.13.0); defaults to latest
         version: Option<String>,
     },
+    /// Agent/LLM semantic queries (outline, doc, peek-def, find-refs)
+    Ide {
+        #[command(subcommand)]
+        cmd: IdeCommand,
+    },
+    /// Apply mechanically-safe fixes to a file (auto-import; reports remaining
+    /// try: snippets for manual application).
+    Fix {
+        /// Source file (default: src/main.almd)
+        file: Option<String>,
+        /// Show what would change without modifying the file
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit a machine-readable JSON report (for harness integration)
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check canonical docs (llms.txt, etc.) against source-of-truth inputs
+    /// (Cargo version, diagnostic code inventory, stdlib auto-import list).
+    /// Fails CI when drift is detected.
+    #[command(name = "docs-gen")]
+    DocsGen {
+        /// Verify mode: exit 1 if any drift is found, 0 otherwise.
+        #[arg(long)]
+        check: bool,
+    },
     /// Emit source code or AST
     #[command(hide = true)]
     Emit {
@@ -172,6 +198,43 @@ enum Commands {
         /// Add #[repr(C)] to structs/enums for stable C ABI
         #[arg(long)]
         repr_c: bool,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum IdeCommand {
+    /// Print one-line summary of each public decl (fn / type / let).
+    /// Use this instead of `grep` to discover a package's API.
+    /// Accepts a file path or `@stdlib/<module>` (e.g. `@stdlib/string`).
+    Outline {
+        /// Source file or `@stdlib/<module>` (default: src/main.almd)
+        target: Option<String>,
+        /// Filter to a substring (e.g. `upper` or `to_`)
+        #[arg(long)]
+        filter: Option<String>,
+        /// Emit JSON instead of one-line text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show signature + doc for a symbol. Accepts `string.to_upper`, `list.fold`,
+    /// or a bare user-defined name.
+    Doc {
+        /// Symbol name (e.g. `string.to_upper`)
+        symbol: String,
+        /// File context (default: src/main.almd — used for user-defined lookup)
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Dump concatenated stdlib outlines in one call.
+    /// Intended for LLM harnesses that embed a stdlib API inventory in SYSTEM_PROMPT.
+    /// Default modules: string, list, int, option, result, map, set.
+    StdlibSnapshot {
+        /// Comma-separated module list (e.g. `string,list,int`). Defaults to the core set.
+        #[arg(long)]
+        modules: Option<String>,
+        /// Emit JSON array instead of concatenated text sections
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -270,9 +333,12 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             }
             ir_program = Some(ir);
         }
-        // Lower user modules to IR (skip TOML-defined stdlib — they use generated codegen)
+        // Lower user modules to IR (skip TOML-only stdlib — they use generated
+        // codegen). Bundled .almd stdlib modules MUST be lowered: their fns
+        // need to land in IR so callers resolve to a real function instead of
+        // a non-existent almide_rt_<m>_<f>.
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-            if almide::stdlib::is_stdlib_module(name) { continue; }
+            if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
             // For dependency modules, temporarily set self_module_name to the package root
             // so `import self` in sub-modules resolves to the dependency, not the main project
             let saved_self = checker.env.self_module_name;
@@ -293,7 +359,17 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            let mut mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            // For bundled stdlib modules, drop fns whose name overlaps with the
+            // TOML-backed runtime: those callers go through the generated
+            // almide_rt_<m>_<f> dispatch, and emitting the bundled body would
+            // produce a duplicate definition. Bundled-only fns survive — those
+            // are what extend the module.
+            if almide::stdlib::is_bundled_module(name) {
+                let toml_funcs: std::collections::HashSet<&'static str> =
+                    almide::stdlib::module_functions(name).into_iter().collect();
+                mod_ir_module.functions.retain(|f| !toml_funcs.contains(f.name.as_str()));
+            }
             let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
             checker.env.import_table = saved_table;
             checker.env.self_module_name = saved_self;
@@ -488,8 +564,33 @@ fn dispatch(cli: Cli) {
                 cli::cmd_check(&file, deny_warnings);
             }
         }
+        Commands::Fix { file, dry_run, json } => {
+            let file = resolve_file(file);
+            cli::cmd_fix(&file, dry_run, json);
+        }
+        Commands::DocsGen { check } => {
+            cli::cmd_docs_gen(check);
+        }
         Commands::Explain { code } => {
             print_error_explanation(&code);
+        }
+        Commands::Ide { cmd } => {
+            match cmd {
+                IdeCommand::Outline { target, filter, json } => {
+                    let target = match target {
+                        Some(t) if t.starts_with("@stdlib/") => t,
+                        other => resolve_file(other),
+                    };
+                    cli::cmd_ide_outline(&target, filter.as_deref(), json);
+                }
+                IdeCommand::Doc { symbol, file } => {
+                    let file = resolve_file(file);
+                    cli::cmd_ide_doc(&symbol, &file);
+                }
+                IdeCommand::StdlibSnapshot { modules, json } => {
+                    cli::cmd_ide_stdlib_snapshot(modules.as_deref(), json);
+                }
+            }
         }
         Commands::Fmt { files, check, dry_run } => {
             let write_back = !check && !dry_run;

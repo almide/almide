@@ -65,6 +65,13 @@ pub fn display(d: &Diagnostic) -> String {
         let line = if color { format!("{}hint:{} {}", CYAN, RESET, d.hint) } else { format!("hint: {}", d.hint) };
         out.push_str(&format!("\n  {}", line));
     }
+    if let Some(snippet) = &d.try_snippet {
+        let label = if color { format!("{}try:{}", CYAN, RESET) } else { "try:".to_string() };
+        out.push_str(&format!("\n  {}", label));
+        for sline in snippet.lines() {
+            out.push_str(&format!("\n      {}", sline));
+        }
+    }
     out
 }
 

@@ -595,3 +595,13 @@ params = [{ name = "xs", type = "List[A]" }]
 return = "Unit"
 rust = "almide_rt_list_clear(&mut {xs})"
 ts = "{xs}.length = 0"
+
+# ── Algorithmic primitives (Phase 3 stdlib expansion) ──
+
+[binary_search]
+description = "Binary-search for `target` in a sorted list of integers. Returns the index or none."
+example = 'list.binary_search([1, 3, 5, 7], 5) // => some(2)'
+params = [{ name = "xs", type = "List[Int]" }, { name = "target", type = "Int" }]
+return = "Option[Int]"
+rust = "almide_rt_list_binary_search(&{xs}, {target})"
+ts = "__almd_list.binary_search({xs}, {target})"

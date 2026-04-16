@@ -94,3 +94,17 @@ pub fn almide_rt_string_drop_end(s: &str, n: i64) -> String {
     let end = if n as usize >= chars.len() { 0 } else { chars.len() - n as usize };
     chars[..end].iter().collect()
 }
+
+// ── Algorithmic primitives (Phase 3 stdlib expansion) ──
+
+pub fn almide_rt_string_run_length_encode(s: &str) -> Vec<(String, i64)> {
+    let mut result: Vec<(String, i64)> = Vec::new();
+    for c in s.chars() {
+        let cs: String = c.to_string();
+        match result.last_mut() {
+            Some((prev, count)) if *prev == cs => { *count += 1; }
+            _ => { result.push((cs, 1)); }
+        }
+    }
+    result
+}

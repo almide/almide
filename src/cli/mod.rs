@@ -7,6 +7,9 @@ mod emit;
 mod check;
 mod commands;
 mod selfupdate;
+mod ide;
+mod fix;
+mod docs_gen;
 
 pub use run::{cmd_run, cmd_run_inner};
 pub use build::cmd_build;
@@ -15,6 +18,9 @@ pub use emit::cmd_emit;
 pub use check::{cmd_check, cmd_check_json, cmd_check_effects};
 pub use commands::{cmd_init, cmd_test, cmd_test_json, cmd_test_wasm, cmd_test_ts, cmd_fmt, cmd_clean};
 pub use selfupdate::cmd_self_update;
+pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};
+pub use fix::cmd_fix;
+pub use docs_gen::cmd_docs_gen;
 
 use std::hash::{Hash, Hasher};
 
@@ -296,15 +302,40 @@ fn cargo_build_generated_with_native(
 
     let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(wrap_codegen_leak(stderr));
     }
 
     let profile = if release { "release" } else { "debug" };
-    let bin_path = project_dir.join("target").join(profile).join("almide-out");
+    let exe = if cfg!(windows) { "almide-out.exe" } else { "almide-out" };
+    let bin_path = project_dir.join("target").join(profile).join(exe);
     if !bin_path.exists() {
         return Err(format!("expected binary not found at {}", bin_path.display()));
     }
     Ok(bin_path)
+}
+
+/// Scrub rustc output when our codegen produces invalid Rust — replaces
+/// generated paths with placeholders and prepends a bug-report banner so
+/// users (and harness classifiers) don't mistake a compiler bug for a
+/// user-facing language error. No-op when the output is clean.
+fn wrap_codegen_leak(stderr: String) -> String {
+    let mentions_main_rs = stderr.contains("src/main.rs");
+    let leaks_rustc_code = contains_rustc_error_code(&stderr);
+    if !(mentions_main_rs || leaks_rustc_code) {
+        return stderr;
+    }
+    let scrubbed = stderr
+        .replace("src/main.rs", "<generated.rs>")
+        .replace("almide-out", "almide-generated");
+    format!(
+        "codegen produced invalid Rust — this is an Almide bug.\n\
+         Please file a minimal repro at https://github.com/almide/almide/issues\n\
+         \n\
+         --- rustc output (edited to hide generated paths) ---\n\
+         {}",
+        scrubbed
+    )
 }
 
 /// Build generated Rust code using cargo for test mode (--test harness).
@@ -377,26 +408,7 @@ fn cargo_build_test_with_native(
         } else {
             format!("{}\n{}", rendered.join("\n"), stderr)
         };
-        // Wrap: rustc errors that leaked through the Almide checker mean our
-        // codegen produced invalid Rust. Surfacing `src/main.rs` paths to users
-        // is useless (it's not their source). Replace with a bug-report banner.
-        let mentions_main_rs = combined.contains("src/main.rs");
-        let final_err = if mentions_main_rs {
-            let scrubbed = combined
-                .replace("src/main.rs", "<generated.rs>")
-                .replace("almide-out", "almide-generated");
-            format!(
-                "codegen produced invalid Rust — this is an Almide bug.\n\
-                 Please file a minimal repro at https://github.com/almide/almide/issues\n\
-                 \n\
-                 --- rustc output (edited to hide generated paths) ---\n\
-                 {}",
-                scrubbed
-            )
-        } else {
-            combined
-        };
-        return Err(final_err);
+        return Err(wrap_codegen_leak(combined));
     }
 
     // Parse the JSON output to find the test binary path
@@ -481,4 +493,56 @@ fn collect_test_files(dir: &std::path::Path) -> Vec<String> {
         }
     }
     files
+}
+
+/// Detect rustc-style `error[E\d{4}]` codes leaking through our checker.
+/// Almide's diagnostic codes are 3 digits (E001..E099); rustc uses 4 digits
+/// (E0001..E9999). A 4-digit code in the output unambiguously means our
+/// codegen produced invalid Rust — flag it for the bug-report wrapper so
+/// dojo classifiers don't mistake it for a user-facing language error.
+fn contains_rustc_error_code(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let needle = b"error[E";
+    let mut i = 0;
+    while i + needle.len() < bytes.len() {
+        if &bytes[i..i + needle.len()] == needle {
+            // Count consecutive digits after `error[E`
+            let mut j = i + needle.len();
+            let mut digits = 0;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                digits += 1;
+                j += 1;
+            }
+            if digits >= 4 && j < bytes.len() && bytes[j] == b']' {
+                return true;
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::contains_rustc_error_code;
+
+    #[test]
+    fn detects_4_digit_rustc_code() {
+        assert!(contains_rustc_error_code("error[E0599]: no method named 'foo' found"));
+        assert!(contains_rustc_error_code("blah\nerror[E0382]: use of moved value\nblah"));
+    }
+
+    #[test]
+    fn ignores_3_digit_almide_code() {
+        assert!(!contains_rustc_error_code("error[E001]: type mismatch"));
+        assert!(!contains_rustc_error_code("error[E013]: ..."));
+    }
+
+    #[test]
+    fn ignores_no_brackets() {
+        assert!(!contains_rustc_error_code("error: something went wrong"));
+        assert!(!contains_rustc_error_code(""));
+    }
 }

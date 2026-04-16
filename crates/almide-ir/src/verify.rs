@@ -249,6 +249,13 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
 
     let mut known_module_functions: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
     for m in &program.modules {
+        // Skip bundled stdlib modules: their `module.func` calls intermix
+        // bundled fns with TOML-backed runtime fns, and the latter are not in
+        // `m.functions`. Codegen handles dispatch — verify must not gate on
+        // an incomplete view of the module surface.
+        if almide_lang::stdlib_info::is_bundled_module(m.name.as_str()) {
+            continue;
+        }
         let funcs: std::collections::HashSet<String> = m.functions.iter().map(|f| f.name.to_string()).collect();
         known_module_functions.insert(m.name.to_string(), funcs);
     }
@@ -490,6 +497,7 @@ mod tests {
             is_test: false,
             generics: None,
             extern_attrs: vec![],
+            export_attrs: vec![],
             visibility: IrVisibility::Public,
             doc: None,
             blank_lines_before: 0,
@@ -792,6 +800,7 @@ mod tests {
             is_test: false,
             generics: None,
             extern_attrs: vec![],
+            export_attrs: vec![],
             visibility: IrVisibility::Public,
             doc: None,
             blank_lines_before: 0,

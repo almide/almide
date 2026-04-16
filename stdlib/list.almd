@@ -1,0 +1,19 @@
+// list — bundled-Almide extensions
+// Bundled stdlib module (written in Almide). TOML-backed list.* fns continue
+// to use the Rust runtime; new fns added here are dispatched through the
+// normal user-fn call path.
+
+// Smoke fn: covered by spec/stdlib/list_bundled_test.almd as a regression
+// guard for the bundled-dispatch pipeline. Do not remove.
+fn bundled_probe(n: Int) -> Int = n + 1
+
+// Split a list at index `n`. Equivalent to `(list.take(xs, n), list.drop(xs, n))`.
+// Demonstrates bundled-Almide calling existing TOML stdlib fns.
+fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) =
+  (list.take(xs, n), list.drop(xs, n))
+
+// Build [seed, f(seed), f(f(seed)), ...] of length `n`.
+// Pure-Almide recursion using the bundled-dispatch path end-to-end.
+fn iterate[T](seed: T, f: fn(T) -> T, n: Int) -> List[T] =
+  if n <= 0 then []
+  else [seed] + iterate(f(seed), f, n - 1)

@@ -50,8 +50,17 @@ pub(super) fn specialize_function(
     substitute_expr_types(&mut body, bindings);
     remap_expr_varids(&mut body, &remap);
 
+    // Phase 5: rename self-recursive `Named { orig.name }` calls in the
+    // specialized body so they refer to the specialized fn. Top-level mono's
+    // `rewrite_calls` will later normalize the same thing for top-level fns
+    // (idempotent no-op here); module-scoped mono relies on this step
+    // because its rewriter walks module bodies but does not re-discover
+    // intra-fn recursive edges.
+    let spec_name = format!("{}__{}", orig.name, suffix);
+    rename_named_calls(&mut body, orig.name.as_str(), &spec_name);
+
     IrFunction {
-        name: format!("{}__{}", orig.name, suffix).into(),
+        name: spec_name.into(),
         params,
         ret_ty: substitute_ty(&orig.ret_ty, bindings),
         body,
@@ -65,6 +74,27 @@ pub(super) fn specialize_function(
         doc: None,
         blank_lines_before: 0,
     }
+}
+
+// ── Self-recursive Named rename ────────────────────────────────
+
+fn rename_named_calls(expr: &mut IrExpr, from: &str, to: &str) {
+    use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
+    use almide_base::intern::sym;
+
+    struct Renamer<'a> { from: &'a str, to: &'a str }
+    impl<'a> IrMutVisitor for Renamer<'a> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &mut expr.kind {
+                if name.as_str() == self.from {
+                    *name = sym(self.to);
+                }
+            }
+        }
+    }
+
+    Renamer { from, to }.visit_expr_mut(expr);
 }
 
 // ── VarId collection ────────────────────────────────────────────

@@ -322,7 +322,16 @@ impl FuncCompiler<'_> {
                     }
                     _ if module == "list" => {
                         if !self.emit_list_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            // Try bundled-Almide fn (e.g. stdlib/list.almd) before
+                            // giving up. The IR module's fn is registered under
+                            // `almide_rt_<module>_<func>` by mod.rs::register_user_funcs.
+                            let fn_name = format!("almide_rt_list_{}", func.replace('.', "_"));
+                            if let Some(&idx) = self.emitter.func_map.get(fn_name.as_str()) {
+                                for arg in args { self.emit_expr(arg); }
+                                wasm!(self.func, { call(idx); });
+                            } else {
+                                self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            }
                         }
                     }
                     _ if module == "bytes" => {

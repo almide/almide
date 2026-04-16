@@ -3,7 +3,7 @@
 use crate::types::Ty;
 use super::Checker;
 use super::err;
-use super::types::{is_inference_var, resolve_ty};
+use super::types::{is_inference_var, resolve_ty, FixHint, IfArm};
 
 impl Checker {
     pub(super) fn solve_constraints(&mut self) {
@@ -25,6 +25,11 @@ impl Checker {
                         _ => "Fix the expression type or change the expected type",
                     };
                     let hint = Self::hint_with_conversion(base, &exp, &act);
+                    // Context-specific try: snippet for the "Unit leak" failure
+                    // mode — a statement (assignment / lone `let`) slips into a
+                    // position expected to produce a value. dojo data shows this
+                    // is the top E001 pattern for both 70b and 8b.
+                    let try_snippet = unit_leak_snippet(&c.context, &exp, &act, c.fix_hint.as_ref());
                     // Temporarily swap in the constraint's own span so the
                     // error is reported at the call site where the constraint
                     // was introduced, not at wherever checking happened to
@@ -33,9 +38,13 @@ impl Checker {
                     if c.span.is_some() {
                         self.current_span = c.span;
                     }
-                    self.emit(err(
+                    let mut diag = err(
                         format!("type mismatch in {}: expected {} but got {}", c.context, exp.display(), act.display()),
-                        hint, c.context.clone()).with_code("E001"));
+                        hint, c.context.clone()).with_code("E001");
+                    if let Some(snippet) = try_snippet {
+                        diag = diag.with_try(snippet);
+                    }
+                    self.emit(diag);
                     self.current_span = saved_span;
                 }
             }
@@ -110,5 +119,100 @@ impl Checker {
             }
             _ => a.compatible(b),
         }
+    }
+}
+
+/// Produce a `try:` snippet for the "Unit leak" E001 pattern — the top
+/// failure mode in dojo data: a statement (`let` binding without a tail,
+/// or an assignment inside an if/match arm) ends up where a value was
+/// expected. Only fires when `act == Unit` and `exp != Unit`, and the
+/// context pins the leak to a specific syntactic hole.
+fn unit_leak_snippet(context: &str, exp: &Ty, act: &Ty, fix_hint: Option<&FixHint>) -> Option<String> {
+    // For fn-body context the constraint direction is fixed: expected is the
+    // declared ret type, actual is the body type. But for if/match arm
+    // contexts the sides are arbitrary (arm[i] vs arm[j]), so accept either
+    // direction — the "real" type is whichever isn't Unit.
+    let is_arm_ctx = context == "if branches" || context == "if arm" || context == "match arm";
+    let real_ty = match (*exp == Ty::Unit, *act == Ty::Unit) {
+        (false, true) => exp,
+        (true, false) if is_arm_ctx => act,
+        _ => return None,
+    };
+    let exp_str = real_ty.display();
+    if context.starts_with("fn '") {
+        // Try to specialize using the real binding name from the fn body
+        // AST — turns a generic "add a final expression" template into
+        // copy-pasteable code like `result` on its own line.
+        if let Some(FixHint::LastLetName(name)) = fix_hint {
+            return Some(format!(
+                "// fn body ends with `let {n} = ...` (a statement, returns Unit).\n\
+                // Add `{n}` as the trailing expression so the fn returns {t}:\n\
+                //\n\
+                //   let {n} = <computation>\n\
+                //   {n}                         // <-- add this line\n\
+                //\n\
+                // Or inline the computation as the tail expression directly.",
+                n = name, t = exp_str
+            ));
+        }
+        Some(format!(
+            "// fn body ends with a statement (returns Unit); \
+            add a final expression that evaluates to {t}:\n\
+            //   let tmp = <computation>\n\
+            //   tmp                            // <-- the returned value\n\
+            // Or inline:\n\
+            //   <expression>                   // must have type {t}",
+            t = exp_str
+        ))
+    } else if context == "if branches" || context == "if arm" {
+        // Specialize when we captured the actual variable being assigned in
+        // the Unit arm — turns the generic template into a rewrite that
+        // names the real variable so the LLM can copy-paste the structure.
+        if let Some(FixHint::IfArmAssign { arm, var_name }) = fix_hint {
+            let (unit_arm, good_arm) = match arm {
+                IfArm::Then => ("then", "else"),
+                IfArm::Else => ("else", "then"),
+            };
+            return Some(format!(
+                "// the {unit_arm}-arm is `{v} = ...` (assignment, returns Unit).\n\
+                // if/else is an *expression*: both arms must produce {t}.\n\
+                // Rewrite as a rebinding of `{v}`:\n\
+                //\n\
+                //   let new_{v} = if cond then <new-value-for-{v}> else {v}\n\
+                //\n\
+                // Or, if {v} is a loop-like accumulator, use recursion instead of mutation.",
+                unit_arm = unit_arm, v = var_name, t = exp_str
+            ));
+        }
+        if let Some(FixHint::IfArmsAssign { then_var, else_var }) = fix_hint {
+            let primary = then_var.as_deref().or(else_var.as_deref()).unwrap_or("x");
+            return Some(format!(
+                "// both arms are assignments (each returns Unit).\n\
+                // if/else is an *expression*: rebind `{v}` instead of mutating it:\n\
+                //\n\
+                //   let new_{v} = if cond then <value-when-true> else <value-when-false>",
+                v = primary
+            ));
+        }
+        Some(format!(
+            "// an if-arm is a statement (e.g. `x = y` or a bare `let`) — returns Unit.\n\
+            // if/else is an *expression*: both arms must produce {t}. Rebind via let instead:\n\
+            //   let new_x = if cond then <then-value> else <else-value>\n\
+            // Or for loop-like state, use recursion:\n\
+            //   fn step(x: {t}) -> {t} = if cond then step(<update>) else x",
+            t = exp_str
+        ))
+    } else if context == "match arm" {
+        Some(format!(
+            "// a match arm is a statement (returns Unit). \
+            Each arm must produce {t}.\n\
+            //   match expr {{\n\
+            //     PatA => value_a,   // <-- must be {t}\n\
+            //     PatB => value_b,\n\
+            //   }}",
+            t = exp_str
+        ))
+    } else {
+        None
     }
 }

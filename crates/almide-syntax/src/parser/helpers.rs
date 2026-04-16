@@ -153,7 +153,25 @@ impl Parser {
         Ok(self.advance())
     }
 
-    fn hint_for_expected(&self, expected: &TokenType, _got: &Token) -> String {
+    fn hint_for_expected(&self, expected: &TokenType, got: &Token) -> String {
+        // Targeted cascade hint: when parser expected something else and
+        // ran into a `test` token, the prior decl is likely unclosed (or
+        // the code shouldn't contain a test block at all in harness
+        // contexts). Surface a specific nudge so LLM retries know to
+        // either close the prior decl or remove the test block.
+        if got.token_type == TokenType::Test {
+            return "`test \"...\"` is a top-level form. Got here mid-declaration — either the previous fn/type/impl is missing a closing `}`, or the test block is in a context (e.g. harness-submitted code) that doesn't accept one. Remove the test block or close the prior declaration.".to_string();
+        }
+        // Haskell/OCaml/Elm cons pattern `head :: tail` → user typed an
+        // Ident followed by `::` in a match arm. The parser saw `:` where
+        // a `=>` was expected; if the token after is another `:`, that's
+        // almost certainly a cons pattern.
+        if *expected == TokenType::FatArrow
+            && got.token_type == TokenType::Colon
+            && self.peek_at(1).map(|t| t.token_type == TokenType::Colon).unwrap_or(false)
+        {
+            return "`head :: tail` (cons pattern) is Haskell/OCaml/Elm syntax. Almide list patterns use [] / [a, b] literals only. For head/tail recursion, use `list.first(xs)` and `list.drop(xs, 1)` on the non-empty arm.".to_string();
+        }
         if let Some(result) = self.check_hint(Some(expected.clone()), super::hints::HintScope::Expression) {
             result.hint
         } else {
@@ -168,7 +186,7 @@ impl Parser {
         let tok = self.current();
         let hint = match (&tok.token_type, tok.value.as_str()) {
             (TokenType::Underscore, _) => "\n  Hint: '_' can only be used in match patterns, not as a variable name.",
-            (TokenType::Test, _) => "\n  Hint: 'test' is a reserved keyword.",
+            (TokenType::Test, _) => "\n  Hint: `test \"...\"` is a top-level form. Got here mid-declaration — either the previous fn/type/impl is missing a closing `}`, or the test block shouldn't be in this file at all (harness-submitted code).",
             _ => "",
         };
         Err(format!(
@@ -209,14 +227,17 @@ impl Parser {
             return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
-        let hint = match &tok.token_type {
+        let hint: String = match &tok.token_type {
             TokenType::Int | TokenType::Float | TokenType::String => {
-                "\n  Hint: Expected a name (identifier), not a literal value"
+                "\n  Hint: Expected a name (identifier), not a literal value".into()
+            }
+            TokenType::Test => {
+                "\n  Hint: `test \"...\"` is a top-level form. Got here mid-declaration — either a previous fn/type/impl is missing a closing `}`, or the test block shouldn't be in this file (harness-submitted code).".into()
             }
             _ if tok.value == "=" || tok.value == ":" => {
-                "\n  Hint: A name is required before '='. Example: fn my_func() -> Int = ..."
+                "\n  Hint: A name is required before '='. Example: fn my_func() -> Int = ...".into()
             }
-            _ => "",
+            _ => String::new(),
         };
         Err(format!(
             "Expected name at line {}:{} (got {:?} '{}'){}",

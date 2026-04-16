@@ -6,23 +6,32 @@
 
 ## Active
 
-17 items
+26 items
 
 | Item | Description |
 |------|-------------|
 | [almai — Multi-Provider LLM Client](active/almai-llm-client.md) | almai — multi-provider LLM client library, 8 providers shipped |
 | [Almide Dojo — Continuous MSR Measurement](active/almide-dojo.md) | Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration |
+| [Bundled-Almide Stdlib — Ideal Form](active/bundled-almide-ideal-form.md) | Ideal form for bundled-Almide stdlib: one dispatch path, no patch-layer special cases |
 | [bytes: unify bounds-check semantics](active/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
+| [`cargo test --all` Cache Race](active/cargo-test-cache-race.md) | Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures |
 | [Codegen Ideal Form](active/codegen-ideal-form.md) | WASM codegen redesign toward declarative dispatch and explicit symbol resolution |
 | [Compiler Version Pin](active/compiler-version-pin.md) | minimum compiler version pinning in almide.toml (Cargo rust-version style) |
+| [Unify Diagnostic Emission with Docs](active/diagnostic-emit-doc-unification.md) | Unify diagnostic emission sites with their docs/diagnostics/*.md files |
+| [Externalize `try:` Snippets from Rust Literals](active/diagnostic-snippet-externalization.md) | Move try: snippet text out of Rust literals into stdlib/diagnostics/*.almd |
 | [Diagnostics: Here / Try / Hint Format](active/diagnostics-here-try-hint.md) | Standardize diagnostics to Here/Try/Hint three-part format with CI-verified hint correctness |
+| [DX & Codegen Papercuts](active/dx-codegen-papercuts.md) | Codegen bugs (effect fn unification) + DX papercuts (test stderr, explain, local imports) |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with rush/spawn/link/cancel |
 | [Flow[T] — Lazy Streaming Sequences](active/flow-design.md) | Flow[T] lazy streaming sequences with flow.* namespace aligned with list.* verbs |
 | [Flow[T] — User Specification (Draft)](active/flow-spec-draft.md) | Draft user-facing spec for Flow[T] — to be promoted to docs/specs/flow.md after Phase 1 |
+| [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
+| [`almide docs-gen` — llms.txt Auto-Generation](active/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | [lumen — Pure Graphics Math](active/lumen-graphics-math.md) | lumen — pure graphics math library (vec3, mat4, color), used by webgl/canvas/obsid |
+| [Option/Result Bundled `.almd` — Not Cosmetic After All](active/option-result-bundled-cleanup.md) | Bundled option/result are signature-override layer; pick a path to consolidate |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
+| [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](active/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
 | [Stdlib Defs / Runtime Consistency Check](active/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | [Stdlib Symmetry Audit](active/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
 | [Variant Exhaustiveness Refinement](active/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
@@ -63,13 +72,15 @@
 
 ## Done
 
-205 items
+207 items
 
 <details>
-<summary>Show all 205 completed items</summary>
+<summary>Show all 207 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-04-16 | [Cut v0.14.6 Release](done/release-0.14.6.md) | Cut v0.14.6 release from llm-first-phase2 branch |
+| 2026-04-16 | [Bundled-Almide Dispatch for Stdlib Modules](done/bundled-almide-dispatch.md) | Let stdlib/<module>.almd extend TOML modules (codegen dispatch fix) |
 | 2026-04-09 | [Distribution UX](done/distribution-ux.md) | GitHub Release binaries, one-line installer, and almide self-update |
 | 2026-04-09 | [Custom WASM Host Imports](done/wasm-host-imports.md) | Allow WASM target to import functions from custom host modules |
 | 2026-04-08 | [WASM Closure Mutable Capture](done/wasm-closure-mutable-capture.md) | WASM closure mutable capture via heap cell for var mutation in lambdas |

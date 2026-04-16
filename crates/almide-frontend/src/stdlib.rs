@@ -53,6 +53,7 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
         "path" => Some(include_str!("../../../stdlib/path.almd")),
         "option" => Some(include_str!("../../../stdlib/option.almd")),
         "result" => Some(include_str!("../../../stdlib/result.almd")),
+        "list" => Some(include_str!("../../../stdlib/list.almd")),
         _ => None,
     }
 }
@@ -139,8 +140,75 @@ pub fn suggest_alias(module: &str, func: &str) -> Option<&'static str> {
         ("list", "tail") => Some("list.drop(xs, 1)"),
         ("map", "new") | ("map", "empty") => Some("[:] (empty map literal)"),
         ("map", "has_key") | ("map", "has") | ("map", "includes") => Some("map.contains"),
+        // sqrt: Almide only has float.sqrt, not int.sqrt. Most LLMs reach
+        // for int.sqrt(n) in is-prime / perfect-square style tasks.
+        ("int", "sqrt") => Some("float.sqrt(int.to_float(n))"),
+        // comparison functions delegate to the single canonical table
+        // below so `suggest_alias`, `try_snippet_for_alias`, and
+        // downstream `almide fix` rules all agree on the shape.
+        _ if comparison_operator_of(module, func).is_some() => {
+            match comparison_operator_of(module, func)? {
+                ">" => Some("a > b (operator)"),
+                "<" => Some("a < b (operator)"),
+                ">=" => Some("a >= b (operator)"),
+                "<=" => Some("a <= b (operator)"),
+                "==" => Some("a == b (operator)"),
+                "!=" => Some("a != b (operator)"),
+                _ => None,
+            }
+        }
         _ => None,
     }
+}
+
+/// Canonical mapping: `<module>.<func>` → operator string, for LLM
+/// hallucinations like `int.gt(a, b)` that should be `a > b`. This is the
+/// single source of truth — `suggest_alias`, `try_snippet_for_alias`, and
+/// `almide fix`'s Call-to-Binary rewrite all derive from here.
+///
+/// `==` and `!=` apply to any type in Almide (structural equality), so
+/// we cover int/float/string/bool for those; ordering ops are numeric
+/// only (int/float).
+pub fn comparison_operator_of(module: &str, func: &str) -> Option<&'static str> {
+    match (module, func) {
+        ("int" | "float", "gt") => Some(">"),
+        ("int" | "float", "lt") => Some("<"),
+        ("int" | "float", "gte" | "ge") => Some(">="),
+        ("int" | "float", "lte" | "le") => Some("<="),
+        ("int" | "float" | "string" | "bool", "eq") => Some("=="),
+        ("int" | "float" | "string" | "bool", "neq" | "ne") => Some("!="),
+        _ => None,
+    }
+}
+
+/// Rich multi-line `try:` snippet for well-known LLM hallucinations that
+/// don't map to a single clean function name (conversion-wrappers,
+/// operator forms). `suggest_alias` returns free-text for these cases
+/// (suppressing the default "fn(...)" try: snippet); this table provides
+/// a concrete fix template instead.
+pub fn try_snippet_for_alias(module: &str, func: &str) -> Option<&'static str> {
+    if (module, func) == ("int", "sqrt") {
+        return Some(
+            "// Almide has float.sqrt; int.sqrt doesn't exist.\n\
+             // Convert → sqrt → (optionally) convert back:\n\
+             let root_f = float.sqrt(int.to_float(n))       // Float\n\
+             let root_i = float.to_int(root_f)              // Int (truncates)\n\
+             // — or inline: float.to_int(float.sqrt(int.to_float(n)))"
+        );
+    }
+    if comparison_operator_of(module, func).is_some() {
+        return Some(
+            "// Almide uses operators, not comparison functions:\n\
+             //   int.gt(a, b)   →  a > b\n\
+             //   int.lt(a, b)   →  a < b\n\
+             //   int.gte(a, b)  →  a >= b\n\
+             //   int.lte(a, b)  →  a <= b\n\
+             //   int.eq(a, b)   →  a == b\n\
+             //   int.neq(a, b)  →  a != b\n\
+             // (same for float, string, bool — == and != work on any type)"
+        );
+    }
+    None
 }
 
 /// Names of built-in effect functions (not module-scoped).

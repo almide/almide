@@ -1,0 +1,148 @@
+//! Golden snapshot for `almide ide outline @stdlib/<module>`.
+//!
+//! dojo (and any SYSTEM_PROMPT that embeds a stdlib snapshot) depends on
+//! this output format being stable. A change here — whether adding a
+//! function, renaming a parameter, or altering the rendered type format —
+//! is a contract break that MUST be reviewed explicitly.
+//!
+//! Update with: `cargo insta review`.
+
+use std::process::Command;
+
+fn almide() -> &'static str {
+    env!("CARGO_BIN_EXE_almide")
+}
+
+fn run_outline(args: &[&str]) -> String {
+    let output = Command::new(almide())
+        .arg("ide")
+        .arg("outline")
+        .args(args)
+        .output()
+        .expect("failed to run almide");
+    assert!(
+        output.status.success(),
+        "almide ide outline {:?} failed:\n{}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("non-utf8 output")
+}
+
+#[test]
+fn stdlib_string_outline() {
+    insta::assert_snapshot!(run_outline(&["@stdlib/string"]));
+}
+
+#[test]
+fn stdlib_list_outline() {
+    insta::assert_snapshot!(run_outline(&["@stdlib/list"]));
+}
+
+#[test]
+fn stdlib_int_outline() {
+    insta::assert_snapshot!(run_outline(&["@stdlib/int"]));
+}
+
+#[test]
+fn stdlib_option_outline() {
+    insta::assert_snapshot!(run_outline(&["@stdlib/option"]));
+}
+
+#[test]
+fn stdlib_result_outline() {
+    insta::assert_snapshot!(run_outline(&["@stdlib/result"]));
+}
+
+#[test]
+fn stdlib_map_outline() {
+    insta::assert_snapshot!(run_outline(&["@stdlib/map"]));
+}
+
+#[test]
+fn stdlib_set_outline() {
+    insta::assert_snapshot!(run_outline(&["@stdlib/set"]));
+}
+
+#[test]
+fn stdlib_json_schema_shape() {
+    let out = run_outline(&["@stdlib/option", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
+    assert_eq!(v["source"], "stdlib");
+    assert_eq!(v["module"], "option");
+    assert!(v["functions"].is_array());
+    let f0 = &v["functions"][0];
+    assert!(f0["name"].is_string());
+    assert!(f0["params"].is_array());
+    assert!(f0["ret"].is_string());
+    assert!(f0["effect"].is_boolean());
+}
+
+#[test]
+fn ide_doc_accepts_stdlib_prefix() {
+    // ergonomic symmetry with `outline @stdlib/<m>`: `doc @stdlib/<m>.<fn>`
+    // works exactly like `doc <m>.<fn>`.
+    let bare = Command::new(almide())
+        .args(["ide", "doc", "string.to_upper", "--file", "spec/lang/default_args_test.almd"])
+        .output()
+        .unwrap();
+    let prefixed = Command::new(almide())
+        .args(["ide", "doc", "@stdlib/string.to_upper", "--file", "spec/lang/default_args_test.almd"])
+        .output()
+        .unwrap();
+    assert_eq!(bare.stdout, prefixed.stdout, "prefix should be transparent");
+    assert!(String::from_utf8_lossy(&bare.stdout).contains("string.to_upper"));
+}
+
+#[test]
+fn stdlib_snapshot_default_modules() {
+    let output = Command::new(almide())
+        .args(["ide", "stdlib-snapshot"])
+        .output()
+        .expect("run");
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    for m in ["string", "list", "int", "option", "result", "map", "set"] {
+        assert!(text.contains(&format!("# @stdlib/{}", m)), "missing section: {}", m);
+    }
+    insta::assert_snapshot!("stdlib_snapshot_default", text);
+}
+
+#[test]
+fn stdlib_snapshot_modules_filter() {
+    let output = Command::new(almide())
+        .args(["ide", "stdlib-snapshot", "--modules", "option,result"])
+        .output()
+        .expect("run");
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("# @stdlib/option"));
+    assert!(text.contains("# @stdlib/result"));
+    assert!(!text.contains("# @stdlib/string"));
+    assert!(!text.contains("# @stdlib/list"));
+}
+
+#[test]
+fn stdlib_snapshot_json_is_array() {
+    let output = Command::new(almide())
+        .args(["ide", "stdlib-snapshot", "--modules", "option", "--json"])
+        .output()
+        .expect("run");
+    assert!(output.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
+    assert!(v.is_array());
+    assert_eq!(v[0]["module"], "option");
+    assert_eq!(v[0]["source"], "stdlib");
+}
+
+#[test]
+fn unknown_stdlib_module_errors_with_hint() {
+    let output = Command::new(almide())
+        .args(["ide", "outline", "@stdlib/nope"])
+        .output()
+        .expect("run");
+    assert!(!output.status.success());
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("not a stdlib module"), "stderr: {}", err);
+    assert!(err.contains("hint:"), "stderr: {}", err);
+}

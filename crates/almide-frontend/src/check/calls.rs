@@ -138,7 +138,7 @@ impl Checker {
                 if let Some(module) = builtin_module {
                     let module_funcs = crate::stdlib::module_functions(module);
                     let suggestion = almide_base::diagnostic::suggest(&field, module_funcs.iter().copied());
-                    let hint = if let Some(close) = suggestion {
+                    let hint = if let Some(close) = &suggestion {
                         format!(
                             "Almide doesn't use method-call syntax. Write `{m}.{close}(x)` (or `x |> {m}.{close}`). Method syntax `x.{field}()` is not supported.",
                             m = module, close = close, field = field
@@ -149,11 +149,18 @@ impl Checker {
                             m = module, field = field
                         )
                     };
-                    self.emit(super::err(
+                    let mut diag = super::err(
                         format!("undefined method '{}' on {}", field, module),
                         hint,
                         format!("method call .{}()", field)
-                    ).with_code("E002"));
+                    ).with_code("E002");
+                    if let Some(close) = suggestion {
+                        diag = diag.with_try(format!(
+                            "// x.{field}()  →  {m}.{close}(x)\n{m}.{close}(x)",
+                            m = module, close = close, field = field
+                        ));
+                    }
+                    self.emit(diag);
                     return Ty::Unknown;
                 }
                 let ret = self.fresh_var();
@@ -246,7 +253,10 @@ impl Checker {
                 }
                 return ty;
             }
-            let hint = {
+            // Triple: (hint, clean fn-name fix for simple try:, rich multi-line snippet).
+            // `rich_snippet` overrides `fix_name` when present — used for hallucinations
+            // that need a conversion wrapper or operator rewrite rather than a rename.
+            let (hint, fix_name, rich_snippet): (String, Option<String>, Option<&'static str>) = {
                 // For module-qualified calls (e.g. "string.uppercase"), narrow candidates
                 // to the same module and compare only the function part for better suggestions.
                 if let Some((module, func)) = name.split_once('.') {
@@ -254,27 +264,32 @@ impl Checker {
                     if !module_funcs.is_empty() {
                         // Check known alias map first (catches common hallucinations)
                         if let Some(alias) = crate::stdlib::suggest_alias(module, func) {
-                            format!("Did you mean `{}`?", alias)
+                            // Aliases can be free text like "xs + [x]"; only treat as a
+                            // copy-pasteable fn name if it matches `module.func` form.
+                            let fix = is_clean_fn_name(alias).then(|| alias.to_string());
+                            let rich = crate::stdlib::try_snippet_for_alias(module, func);
+                            (format!("Did you mean `{}`?", alias), fix, rich)
                         } else if let Some(suggestion) = almide_base::diagnostic::suggest(func, module_funcs.iter().copied()) {
-                            format!("Did you mean `{}.{}`?", module, suggestion)
+                            let full = format!("{}.{}", module, suggestion);
+                            (format!("Did you mean `{}`?", full), Some(full), None)
                         } else {
-                            format!("No function '{}' in module '{}'. See docs/CHEATSHEET.md for available functions", func, module)
+                            (format!("No function '{}' in module '{}'. See docs/CHEATSHEET.md for available functions", func, module), None, None)
                         }
                     } else {
                         // Unknown module — suggest across all candidates
                         let candidates = self.env.all_visible_names();
                         if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
-                            format!("Did you mean `{}`?", suggestion)
+                            (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
                         } else {
-                            "Check the function name".to_string()
+                            ("Check the function name".to_string(), None, None)
                         }
                     }
                 } else {
                     let candidates = self.env.all_visible_names();
                     if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
-                        format!("Did you mean `{}`?", suggestion)
+                        (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
                     } else {
-                        "Check the function name".to_string()
+                        ("Check the function name".to_string(), None, None)
                     }
                 }
             };
@@ -284,7 +299,13 @@ impl Checker {
             if self.env.failed_fn_names.contains(name) {
                 return Ty::Unknown;
             }
-            self.emit(super::err(format!("undefined function '{}'", name), hint, format!("call to {}()", name)).with_code("E002"));
+            let mut diag = super::err(format!("undefined function '{}'", name), hint, format!("call to {}()", name)).with_code("E002");
+            if let Some(rich) = rich_snippet {
+                diag = diag.with_try(rich.to_string());
+            } else if let Some(fix) = fix_name {
+                diag = diag.with_try(format!("// {wrong}(...)  →  {right}(...)\n{right}(...)", wrong = name, right = fix));
+            }
+            self.emit(diag);
             return Ty::Unknown;
         };
 
@@ -306,9 +327,22 @@ impl Checker {
             None => self.env.fn_min_params.get(&sym(name)).copied().unwrap_or(sig.params.len()),
         };
         if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
+            // Build a placeholder call showing the full signature so LLMs
+            // can see exactly which args are missing / extraneous.
+            let placeholder = sig.params.iter()
+                .map(|(pname, pty)| format!("<{}: {}>", pname.as_str(), pty.display()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let snippet = format!(
+                "// {name}() takes {n} arg(s) — you passed {got}\n\
+                {name}({placeholder})",
+                name = name, n = sig.params.len(), got = arg_tys.len(),
+                placeholder = placeholder,
+            );
             self.emit(super::err(
                 format!("{}() expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
-                "Check the number of arguments", format!("call to {}()", name)).with_code("E004"));
+                "Check the number of arguments", format!("call to {}()", name)
+            ).with_code("E004").with_try(snippet));
         }
         // Validate argument types and infer generics
         let mut bindings: HashMap<Sym, Ty> = HashMap::new();
@@ -470,4 +504,14 @@ impl Checker {
             _ => ty.map_children(&|child| self.substitute_self_in_ty(child, replacement)),
         }
     }
+}
+
+/// Whether a string is a plain dotted identifier (e.g. `list.len`) safe to
+/// drop into a copy-pasteable `try:` snippet as `fn(...)`. Rejects aliases
+/// that are free-text hints (e.g. `"xs + [x]"`, `"string.chars + list.all"`).
+fn is_clean_fn_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        && !s.starts_with('.')
+        && !s.ends_with('.')
 }

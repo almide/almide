@@ -1,0 +1,64 @@
+---
+source: tests/ide_outline_snapshot_test.rs
+expression: "run_outline(&[\"@stdlib/list\"])"
+---
+fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
+fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
+fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]
+fn list.chunk[A](xs: List[A], n: Int) -> List[List[A]]
+fn list.clear[A](xs: List[A]) -> Unit
+fn list.contains[A](xs: List[A], x: A) -> Bool
+fn list.count[A](xs: List[A], f: fn(A) -> Bool) -> Int
+fn list.dedup[A](xs: List[A]) -> List[A]
+fn list.drop[A](xs: List[A], n: Int) -> List[A]
+fn list.drop_end[A](xs: List[A], n: Int) -> List[A]
+fn list.drop_while[A](xs: List[A], f: fn(A) -> Bool) -> List[A]
+fn list.enumerate[A](xs: List[A]) -> List[(Int, A)]
+fn list.filter[A](xs: List[A], f: fn(A) -> Bool) -> List[A]
+fn list.filter_map[A, B](xs: List[A], f: fn(A) -> Option[B]) -> List[B]
+fn list.find[A](xs: List[A], f: fn(A) -> Bool) -> Option[A]
+fn list.find_index[A](xs: List[A], f: fn(A) -> Bool) -> Option[Int]
+fn list.first[A](xs: List[A]) -> Option[A]
+fn list.flat_map[A, B](xs: List[A], f: fn(A) -> List[B]) -> List[B]
+fn list.flatten[T](xss: List[List[T]]) -> List[T]
+fn list.fold[A, B](xs: List[A], init: B, f: fn(B, A) -> B) -> B
+fn list.get[A](xs: List[A], i: Int) -> Option[A]
+fn list.get_or[A](xs: List[A], i: Int, default: A) -> A
+fn list.group_by[A, B](xs: List[A], f: fn(A) -> B) -> Map[B, List[A]]
+fn list.index_of[A](xs: List[A], x: A) -> Option[Int]
+fn list.insert[A](xs: List[A], i: Int, val: A) -> List[A]
+fn list.intersperse[A](xs: List[A], sep: A) -> List[A]
+fn list.is_empty[A](xs: List[A]) -> Bool
+fn list.join(xs: List[String], sep: String) -> String
+fn list.last[A](xs: List[A]) -> Option[A]
+fn list.len[A](xs: List[A]) -> Int
+fn list.map[A, B](xs: List[A], f: fn(A) -> B) -> List[B]
+fn list.max[A](xs: List[A]) -> Option[A]
+fn list.min[A](xs: List[A]) -> Option[A]
+fn list.partition[A](xs: List[A], f: fn(A) -> Bool) -> (List[A], List[A])
+fn list.pop[A](xs: List[A]) -> Option[A]
+fn list.product(xs: List[Int]) -> Int
+fn list.push[A](xs: List[A], x: A) -> Unit
+fn list.range(start: Int, end: Int) -> List[Int]
+fn list.reduce[A](xs: List[A], f: fn(A, A) -> A) -> Option[A]
+fn list.remove_at[A](xs: List[A], i: Int) -> List[A]
+fn list.repeat[A](val: A, n: Int) -> List[A]
+fn list.reverse[A](xs: List[A]) -> List[A]
+fn list.scan[A, B](xs: List[A], init: B, f: fn(B, A) -> B) -> List[B]
+fn list.set[A](xs: List[A], i: Int, val: A) -> List[A]
+fn list.shuffle[A](xs: List[A]) -> List[A]
+fn list.slice[A](xs: List[A], start: Int, end: Int) -> List[A]
+fn list.sort[A](xs: List[A]) -> List[A]
+fn list.sort_by[A, B](xs: List[A], f: fn(A) -> B) -> List[A]
+fn list.sum(xs: List[Int]) -> Int
+fn list.swap[A](xs: List[A], i: Int, j: Int) -> List[A]
+fn list.take[A](xs: List[A], n: Int) -> List[A]
+fn list.take_end[A](xs: List[A], n: Int) -> List[A]
+fn list.take_while[A](xs: List[A], f: fn(A) -> Bool) -> List[A]
+fn list.unique[A](xs: List[A]) -> List[A]
+fn list.unique_by[A, K](xs: List[A], f: fn(A) -> K) -> List[A]
+fn list.update[A](xs: List[A], i: Int, f: fn(A) -> A) -> List[A]
+fn list.window[A](xs: List[A], n: Int) -> List[List[A]]
+fn list.windows[A](xs: List[A], n: Int) -> List[List[A]]
+fn list.zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)]
+fn list.zip_with[A, B, C](xs: List[A], ys: List[B], f: fn(A, B) -> C) -> List[C]

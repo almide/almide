@@ -17,7 +17,33 @@ pub struct Constraint {
     /// attach to whichever expression the checker happened to visit last,
     /// which produces wildly misleading error locations.
     pub span: Option<crate::ast::Span>,
+    /// Optional syntactic hint captured at constraint creation time to
+    /// specialize `try:` snippets — e.g. the name of the trailing `let`
+    /// binding in a fn body that caused a Unit-leak E001.
+    pub fix_hint: Option<FixHint>,
 }
+
+/// Context-specific info captured at constraint emission time, surfaced
+/// back at diagnostic emission time to turn generic snippets into
+/// concrete copy-pasteable code.
+#[derive(Debug, Clone)]
+pub enum FixHint {
+    /// Name of the last `let` binding in a block whose type is the actual
+    /// (usually Unit). The fix is typically to add the binding's name as a
+    /// trailing expression.
+    LastLetName(String),
+    /// One arm of an `if/else` is a bare assignment `x = ...` (returns Unit),
+    /// producing an if-branch type mismatch. Carries the name being assigned
+    /// and which arm (then/else) is the offender, so the `try:` snippet can
+    /// show `let new_x = if cond then <v> else x` with the real variable.
+    IfArmAssign { arm: IfArm, var_name: String },
+    /// Both if-arms are statement-only (assignments or bare `let`). Report
+    /// the names so the snippet can show a rebinding on the combined result.
+    IfArmsAssign { then_var: Option<String>, else_var: Option<String> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IfArm { Then, Else }
 
 /// Check if a Ty is an inference variable (?N).
 pub fn is_inference_var(ty: &Ty) -> Option<TyVarId> {

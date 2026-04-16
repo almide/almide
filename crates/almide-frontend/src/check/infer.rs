@@ -5,7 +5,7 @@ use almide_lang::ast;
 use almide_lang::ast::ExprKind;
 use almide_base::intern::{Sym, sym};
 use crate::types::{Ty, TypeConstructorId, VariantPayload};
-use super::types::resolve_ty;
+use super::types::{resolve_ty, FixHint, IfArm};
 use super::Checker;
 
 impl Checker {
@@ -51,19 +51,27 @@ impl Checker {
                     // and whose names won't be confused with common variable names.
                     // e.g. `value`, `error`, `string`, `list` are too common as
                     // variable names — suggesting `import value` is misleading.
-                    let hint = if crate::stdlib::is_import_suggestable(name) {
+                    let (hint, fix): (String, Option<String>) = if crate::stdlib::is_import_suggestable(name) {
                         let desc = crate::stdlib::module_description(name);
-                        format!("Add `import {}` (stdlib: {})\nOr run `almide fmt` to auto-add missing imports", name, desc)
+                        (format!("Add `import {}` (stdlib: {})\nOr run `almide fmt` to auto-add missing imports", name, desc),
+                         Some(format!("import {}", name)))
                     } else {
-                        // "Did you mean?" suggestion from variables, top_lets, and functions in scope
                         let candidates = self.env.all_visible_names();
                         if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
-                            format!("Did you mean `{}`?", suggestion)
+                            (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()))
                         } else {
-                            "Check the variable name".to_string()
+                            ("Check the variable name".to_string(), None)
                         }
                     };
-                    self.emit(super::err(format!("undefined variable '{}'", name), hint, format!("variable {}", name)).with_code("E003"));
+                    let mut diag = super::err(format!("undefined variable '{}'", name), hint, format!("variable {}", name)).with_code("E003");
+                    if let Some(fix) = fix {
+                        diag = if fix.starts_with("import ") {
+                            diag.with_try(fix)
+                        } else {
+                            diag.with_try(format!("// {}  →  {}\n{}", name, fix, fix))
+                        };
+                    }
+                    self.emit(diag);
                     Ty::Unknown
                 }
             }
@@ -209,10 +217,11 @@ impl Checker {
                         _ => None,
                     };
                     if let Some((module, subs)) = module_and_subs {
-                        let hint = if let Some((_, snippet)) = subs.iter().find(|(n, _)| n == field) {
+                        let matched = subs.iter().find(|(n, _)| n == field).map(|(_, s)| s.clone());
+                        let hint = if matched.is_some() {
                             format!(
-                                "Almide values have no fields — use the `{m}` stdlib module. Replace `x.{f}` with `{snippet}`. No method-call or field-access syntax is supported.",
-                                m = module, f = field, snippet = snippet
+                                "Almide values have no fields — use the `{m}` stdlib module. No method-call or field-access syntax is supported.",
+                                m = module
                             )
                         } else {
                             format!(
@@ -220,11 +229,15 @@ impl Checker {
                                 m = module
                             )
                         };
-                        self.emit(super::err(
+                        let mut diag = super::err(
                             format!("no field '{}' on {}", field, module),
                             hint,
                             format!("field access .{}", field),
-                        ).with_code("E013"));
+                        ).with_code("E013");
+                        if let Some(snippet) = matched {
+                            diag = diag.with_try(snippet);
+                        }
+                        self.emit(diag);
                     }
                 }
                 field_ty
@@ -336,7 +349,11 @@ impl Checker {
                 self.infer_expr(cond);
                 let then_ty = self.infer_expr(then);
                 let else_ty = self.infer_expr(else_);
-                self.constrain(then_ty.clone(), else_ty, "if branches");
+                // Specialize the Unit-leak `try:` snippet: if an arm is a
+                // bare assignment `x = ...` (returns Unit), we want to cite
+                // the actual variable name in the suggested rewrite.
+                let hint = if_arm_fix_hint(then, else_);
+                self.constrain_with_hint(then_ty.clone(), else_ty, "if branches", hint);
                 then_ty
             }
 
@@ -817,14 +834,20 @@ impl Checker {
             ast::Stmt::Assign { name, value, .. } => {
                 self.infer_expr(value);
                 if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
-                    let hint = if self.env.param_vars.contains(&sym(name)) {
+                    let is_param = self.env.param_vars.contains(&sym(name));
+                    let hint = if is_param {
                         format!("'{}' is a function parameter (immutable). Use a local copy: var {0}_ = {0}", name)
                     } else {
                         format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
                     };
+                    let snippet = if is_param {
+                        format!("// '{n}' is a parameter — make a mutable copy:\nvar {n}_ = {n}\n// ...then reassign {n}_ instead of {n}", n = name)
+                    } else {
+                        format!("// let {n} = ...  →  var {n} = ...\nvar {n} = <initial value>", n = name)
+                    };
                     let mut diag = super::err(
                         format!("cannot reassign immutable binding '{}'", name),
-                        hint, format!("{} = ...", name)).with_code("E009");
+                        hint, format!("{} = ...", name)).with_code("E009").with_try(snippet);
                     if let Some(&(line, col)) = self.env.var_decl_locs.get(&sym(name)) {
                         diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", name));
                     }
@@ -1075,5 +1098,40 @@ fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
         }
         ExprKind::Record { fields, .. } => { for f in fields { collect_idents(&f.value, out); } }
         _ => {} // literals, none, unit, etc.
+    }
+}
+
+/// If an `if/else` arm is a statement-only block that assigns to a variable
+/// (e.g. `{ high = mid - 1 }`), return its target name. This is the dojo
+/// binary-search / matrix-ops pattern: an arm does a side-effect instead of
+/// producing a value, so the whole if-expr types as Unit.
+fn arm_assign_target(expr: &ast::Expr) -> Option<String> {
+    let ExprKind::Block { stmts, expr: tail } = &expr.kind else { return None };
+    if tail.is_some() { return None; }
+    // Only single-statement blocks are unambiguous: `{ x = v }`. Multi-stmt
+    // blocks might legitimately produce a value via a trailing stmt we
+    // don't pattern-match, so skip to avoid false claims.
+    if stmts.len() != 1 { return None; }
+    match &stmts[0] {
+        ast::Stmt::Assign { name, .. } => Some(name.to_string()),
+        ast::Stmt::Let { name, .. } | ast::Stmt::Var { name, .. } => Some(name.to_string()),
+        _ => None,
+    }
+}
+
+fn if_arm_fix_hint(then: &ast::Expr, else_: &ast::Expr) -> Option<FixHint> {
+    let then_tgt = arm_assign_target(then);
+    let else_tgt = arm_assign_target(else_);
+    match (then_tgt, else_tgt) {
+        (Some(t), Some(e)) => Some(FixHint::IfArmsAssign {
+            then_var: Some(t), else_var: Some(e),
+        }),
+        (Some(t), None) => Some(FixHint::IfArmAssign {
+            arm: IfArm::Then, var_name: t,
+        }),
+        (None, Some(e)) => Some(FixHint::IfArmAssign {
+            arm: IfArm::Else, var_name: e,
+        }),
+        (None, None) => None,
     }
 }

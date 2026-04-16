@@ -1,0 +1,28 @@
+---
+source: tests/ide_outline_snapshot_test.rs
+expression: "run_outline(&[\"@stdlib/map\"])"
+---
+fn map.all[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
+fn map.any[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
+fn map.clear[K, V](m: Map[K, V]) -> Unit
+fn map.contains[K, V](m: Map[K, V], key: K) -> Bool
+fn map.count[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Int
+fn map.delete[K, V](m: Map[K, V], key: K) -> Unit
+fn map.entries[K, V](m: Map[K, V]) -> List[(K, V)]
+fn map.filter[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Map[K, V]
+fn map.find[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Option[(K, V)]
+fn map.fold[K, V, A](m: Map[K, V], init: A, f: fn(A, K, V) -> A) -> A
+fn map.from_list[K, V](pairs: List[(K, V)]) -> Map[K, V]
+fn map.get[K, V](m: Map[K, V], key: K) -> Option[V]
+fn map.get_or[K, V](m: Map[K, V], key: K, default: V) -> V
+fn map.insert[K, V](m: Map[K, V], key: K, value: V) -> Unit
+fn map.is_empty[K, V](m: Map[K, V]) -> Bool
+fn map.keys[K, V](m: Map[K, V]) -> List[K]
+fn map.len[K, V](m: Map[K, V]) -> Int
+fn map.map[K, V, B](m: Map[K, V], f: fn(V) -> B) -> Map[K, B]
+fn map.merge[K, V](a: Map[K, V], b: Map[K, V]) -> Map[K, V]
+fn map.new[K, V]() -> Map[K, V]
+fn map.remove[K, V](m: Map[K, V], key: K) -> Map[K, V]
+fn map.set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V]
+fn map.update[K, V](m: Map[K, V], key: K, f: fn(V) -> V) -> Map[K, V]
+fn map.values[K, V](m: Map[K, V]) -> List[V]

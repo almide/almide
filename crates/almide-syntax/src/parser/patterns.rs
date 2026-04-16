@@ -115,9 +115,23 @@ impl Parser {
         }
 
         let tok = self.current();
-        let hint = match tok.value.as_str() {
-            "=>" => "\n  Hint: Missing pattern before '=>'. Use '_' for wildcard, or a variable name",
-            _ => "\n  Hint: Valid patterns: _, variable, Type(args), (a, b), [], [a, b], some(x), ok(x), err(x), none, true, false, 42, \"text\"",
+        // Targeted hints for common LLM-imported patterns from other languages.
+        // DotDotDot / DotDot in list-pattern position = rest spread (Rust / JS).
+        // Colon-Colon = cons pattern (Haskell / OCaml / Elm). Both don't exist
+        // in Almide list patterns; point to the idiomatic recursion form
+        // using list.first / list.drop.
+        let hint: String = match (&tok.token_type, tok.value.as_str()) {
+            (_, "=>") => "\n  Hint: Missing pattern before '=>'. Use '_' for wildcard, or a variable name".into(),
+            (TokenType::DotDotDot, _) | (TokenType::DotDot, _) => {
+                "\n  Hint: rest/spread patterns `[h, ...t]` / `[h, ..t]` are not supported in Almide list patterns.\n\
+                  Use recursion with list.first / list.drop:\n\
+                    match xs {\n\
+                      [] => base,\n\
+                      _  => { let h = list.first(xs)!; let t = list.drop(xs, 1); /* ... */ },\n\
+                    }\n\
+                  Note: `{ x, .. }` IS valid inside record patterns.".into()
+            }
+            _ => "\n  Hint: Valid patterns: _, variable, Type(args), (a, b), [], [a, b], some(x), ok(x), err(x), none, true, false, 42, \"text\"".into(),
         };
         Err(format!(
             "Expected pattern at line {}:{} (got {:?} '{}'){}",

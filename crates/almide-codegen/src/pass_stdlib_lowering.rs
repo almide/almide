@@ -5,7 +5,9 @@
 //!
 //! NO string rendering. All decisions are structural IR transformations.
 
+use std::cell::RefCell;
 use std::collections::{HashSet, HashMap};
+use almide_base::intern::Sym;
 use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
 use crate::generated::arg_transforms::{self, ArgTransform};
@@ -14,11 +16,42 @@ use super::pass::{NanoPass, PassResult, Target};
 #[derive(Debug)]
 pub struct StdlibLoweringPass;
 
+thread_local! {
+    /// (module, func) pairs that come from bundled .almd stdlib sources and
+    /// have NO matching TOML/Rust runtime fn. Populated at the start of
+    /// `StdlibLoweringPass::run`. For these, the rt_ rewrite is suppressed
+    /// and the call stays as a `CallTarget::Module` so the walker emits a
+    /// normal user-fn call.
+    static BUNDLED_FNS: RefCell<HashSet<(Sym, Sym)>> = RefCell::new(HashSet::new());
+}
+
+fn is_bundled_only(module: Sym, func: Sym) -> bool {
+    BUNDLED_FNS.with(|s| s.borrow().contains(&(module, func)))
+}
+
 impl NanoPass for StdlibLoweringPass {
     fn name(&self) -> &str { "StdlibLowering" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
     fn depends_on(&self) -> Vec<&'static str> { vec!["EffectInference"] }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // Build the bundled-only fn registry: any fn defined in an IR module
+        // whose name matches a known bundled stdlib module AND has no TOML
+        // runtime entry. These need to bypass the rt_ rewrite below.
+        let bundled_fns: HashSet<(Sym, Sym)> = program.modules.iter()
+            .filter(|m| almide_lang::stdlib_info::is_bundled_module(m.name.as_str()))
+            .flat_map(|m| {
+                let mname = m.name;
+                m.functions.iter().filter_map(move |f| {
+                    if arg_transforms::lookup(mname.as_str(), f.name.as_str()).is_some() {
+                        None
+                    } else {
+                        Some((mname, f.name))
+                    }
+                })
+            })
+            .collect();
+        BUNDLED_FNS.with(|s| *s.borrow_mut() = bundled_fns);
+
         for func in &mut program.functions {
             func.body = rewrite_expr(std::mem::take(&mut func.body));
         }
@@ -95,8 +128,11 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
             // Non-stdlib modules (bundled .almd + user packages): leave as Module calls.
             // They are rendered by the walker directly, not converted to Named calls.
+            // Bundled-only stdlib fns (defined in stdlib/<module>.almd with no TOML
+            // runtime template) take the same path — there is no almide_rt_*
+            // function to call, so the walker renders them as a normal user-fn call.
             let is_stdlib = almide_lang::stdlib_info::is_stdlib_module(&module);
-            if !is_stdlib {
+            if !is_stdlib || is_bundled_only(module, func) {
                 let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
                 return IrExpr {
                     kind: IrExprKind::Call {
