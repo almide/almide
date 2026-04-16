@@ -185,12 +185,16 @@ investigation:
    investigation said option/result bundled fns "work today because the
    frontend resolution for Tier-1 modules follows a different path than
    Tier-2 / TOML stdlib." Re-checking with this fix in place:
-   option/result `.almd` sources were **never used**. The TOML runtime
-   has a same-named fn for every entry, and `src/main.rs:338` skipped
-   bundled lowering entirely when `is_stdlib_module(name) == true`. So
-   the bundled `.almd` parsed (via the AUTO_IMPORT_BUNDLED loader) but
-   was discarded before lowering. The TOML+`almide_rt_*` path always
-   won. See `roadmap/active/option-result-bundled-cleanup.md`.
+   option/result `.almd` sources never produce **codegen output**
+   (every fn collides with a TOML entry and gets pruned), but they ARE
+   consumed by the type checker and **override the TOML signatures**.
+   Specifically, the TOML uses `Fn[Unit] -> X` while the bundled
+   `.almd` uses `fn() -> X`, and every real-world caller writes the
+   latter. Deleting the bundled `.almd` breaks `coverage_misc_test`
+   immediately. The two halves are accidentally co-dependent —
+   bundled = signatures, TOML = runtime dispatch. See
+   `roadmap/active/option-result-bundled-cleanup.md` for the path to
+   un-tangle this.
 
 ### Surfaced gaps not in the original spec
 

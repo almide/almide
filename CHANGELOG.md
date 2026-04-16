@@ -204,14 +204,27 @@ The fix is four-layer:
    `Module → almide_rt_*` rewrite is suppressed and the call stays as a
    `Module` call so the walker emits a normal user-fn invocation.
 
-The pre-existing bundled `option`/`result` `.almd` sources turned out to
-be cosmetic — the TOML runtime always wins for fns of the same name.
-That is preserved (see `roadmap/active/option-result-bundled-cleanup.md`
-for the cleanup plan).
+The pre-existing bundled `option`/`result` `.almd` sources turn out to
+serve a hidden role: codegen prunes them (TOML wins for runtime
+dispatch), but the type checker reads them and **uses their signatures
+in preference to the TOML's** — so `option.or_else(o, () => ...)`
+type-checks against the bundled `fn() -> X` rather than the TOML's
+`Fn[Unit] -> X`. Removing them breaks the test suite. See
+`roadmap/active/option-result-bundled-cleanup.md` for the path to
+unify these.
 
-`stdlib/list.almd` ships with one smoke fn (`bundled_probe`) covered by
-`spec/stdlib/list_bundled_test.almd` as a regression guard. Real
-bundled-Almide stdlib fns will be added in follow-up commits.
+### Added — bundled `list.*` fns (real users of the dispatch path)
+
+`stdlib/list.almd` ships three fns covered by
+`spec/stdlib/list_bundled_test.almd`:
+
+- `list.bundled_probe(n)` — smoke regression guard.
+- `list.split_at(xs, n) -> (List[T], List[T])` — splits a list at index
+  `n`. Demonstrates a bundled fn calling existing TOML fns
+  (`list.take`, `list.drop`).
+- `list.iterate(seed, f, n) -> List[T]` — builds
+  `[seed, f(seed), f(f(seed)), ...]` of length `n`. Pure-Almide
+  recursion through the bundled-dispatch path end-to-end.
 
 No MSR delta expected (infrastructure only); downstream work
 (`diagnostic-snippet-externalization`, auto-rewrite rules in Almide) is
