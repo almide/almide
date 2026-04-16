@@ -1,5 +1,11 @@
 <!-- description: Ideal form for bundled-Almide stdlib: one dispatch path, no patch-layer special cases -->
+<!-- done: 2026-04-17 -->
 # Bundled-Almide Stdlib — Ideal Form
+
+> **Status**: All 5 debt items closed by the v0.14.7-phase3.N arc
+> (S1 → A in `codegen-ideal-form.md §Phase 3 Arc`). See
+> `CHANGELOG.md §0.14.7-phase3.5` for the patch-layer audit at close.
+> Original narrow-scope rationale preserved below.
 
 The `bundled-almide-dispatch` work (shipped in v0.14.6) made
 `stdlib/<m>.almd` usable, but the implementation grew several

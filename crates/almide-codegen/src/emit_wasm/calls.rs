@@ -322,16 +322,14 @@ impl FuncCompiler<'_> {
                     }
                     _ if module == "list" => {
                         if !self.emit_list_call(func, args) {
-                            // Try bundled-Almide fn (e.g. stdlib/list.almd) before
-                            // giving up. The IR module's fn is registered under
-                            // `almide_rt_<module>_<func>` by mod.rs::register_user_funcs.
-                            let fn_name = format!("almide_rt_list_{}", func.replace('.', "_"));
-                            if let Some(&idx) = self.emitter.func_map.get(fn_name.as_str()) {
-                                for arg in args { self.emit_expr(arg); }
-                                wasm!(self.func, { call(idx); });
-                            } else {
-                                self.emit_stub_call_named(module.as_str(), func.as_str(), args);
-                            }
+                            // Bundled-Almide fns inside list (e.g. list.split_at,
+                            // list.iterate from stdlib/list.almd) are rewritten to
+                            // CallTarget::Named { almide_rt_list_<f> } by
+                            // pass_resolve_calls — they never reach this Module arm.
+                            // Anything that gets here is a TOML stdlib fn whose
+                            // dispatch is missing in emit_list_call. Hard ICE so the
+                            // gap is fixed at the source, not papered over.
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "bytes" => {
@@ -825,38 +823,30 @@ impl FuncCompiler<'_> {
         }
     }
 
-    pub(super) fn emit_stub_call_named(&mut self, module: &str, func: &str, args: &[IrExpr]) {
-        if std::env::var("ALMIDE_WASM_STUB_VERBOSE").is_ok() {
-            eprintln!("[WASM STUB] {}::{} — will trap at runtime", module, func);
-        }
-        self.emit_stub_call(args);
+    /// S3 (v0.14.7-phase3.2): the WASM dispatcher used to route unknown
+    /// stdlib calls to `emit_stub_call`, which deferred the failure to a
+    /// runtime `unreachable` trap. spec/ + nn (v0.14.6 stub-panic sweep)
+    /// proved every reachable code path resolves before reaching here, so
+    /// reaching the stub now is a compile-time ICE — there is no runtime
+    /// trap to debug. If you hit this panic, it means a `module.func` call
+    /// survived `pass_resolve_calls` without a TOML or bundled IR target;
+    /// add the missing dispatch arm or fix the resolver, do not relax this
+    /// panic.
+    pub(super) fn emit_stub_call_named(&mut self, module: &str, func: &str, _args: &[IrExpr]) -> ! {
+        panic!(
+            "[ICE] WASM emit reached emit_stub_call_named for `{}.{}`. \
+             No runtime stub remains; resolve the call (TOML / bundled IR) \
+             or add a dispatch arm in emit_wasm/calls_*.rs.",
+            module, func
+        );
     }
 
-    pub(super) fn emit_stub_call(&mut self, args: &[IrExpr]) {
-        // Unimplemented function: trap immediately rather than returning a default value.
-        // After ResolveCalls pass, user-module unresolved calls are a compile error —
-        // so any stub_call reaching here must be an unimplemented stdlib method.
-        //
-        // DEFAULT: silent + continue. Most stub_call sites end up dead-code
-        // eliminated by the post-emit DCE pass, so the warning was pure noise.
-        // ALMIDE_WASM_STUB_PANIC=1: panic at compile time (hard assertion for CI).
-        // ALMIDE_WASM_STUB_VERBOSE=1: print the warning anyway (for debugging).
-        if std::env::var("ALMIDE_WASM_STUB_PANIC").is_ok() {
-            panic!("[WASM STUB] stub_call reached — compile-time hard failure (ALMIDE_WASM_STUB_PANIC=1)");
-        }
-        if std::env::var("ALMIDE_WASM_STUB_VERBOSE").is_ok() {
-            eprintln!("[WASM STUB] stub_call emitted — will trap at runtime if reached.");
-        }
-        if std::env::var("ALMIDE_WASM_STUB_TRACE").is_ok() {
-            eprintln!("  trace: {}", std::backtrace::Backtrace::force_capture());
-        }
-        for arg in args {
-            self.emit_expr(arg);
-            if values::ty_to_valtype(&arg.ty).is_some() {
-                wasm!(self.func, { drop; });
-            }
-        }
-        wasm!(self.func, { unreachable; });
+    pub(super) fn emit_stub_call(&mut self, _args: &[IrExpr]) -> ! {
+        panic!(
+            "[ICE] WASM emit reached emit_stub_call (no module/func context). \
+             A stdlib dispatcher returned false without going through \
+             emit_stub_call_named — fix the caller."
+        );
     }
 
     /// Emit a safe default value for a given type.

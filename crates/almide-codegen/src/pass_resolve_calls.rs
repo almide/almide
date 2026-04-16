@@ -1,30 +1,45 @@
-//! Call Resolution pass: verify that every user-module call target resolves
-//! to a known IrFunction at compile time, eliminating runtime traps from
-//! unresolved symbols.
+//! Call Resolution pass: verify-and-rewrite for every `CallTarget::Module`.
 //!
-//! This is Phase 1 of the codegen-ideal-form roadmap. Future phases:
-//! - Phase 1b: Normalize module names in CallTarget::Module (alias → canonical)
-//! - Phase 1c: Remove emit_stub_call entirely
+//! Phase 1a (v0.14.5): user-module call verification.
+//! Phase 1b (v0.14.7-phase3.5, this revision): IR rewrite + stdlib coverage.
+//! Phase 1c (v0.14.7-phase3.2): `emit_stub_call*` panic on reach.
 //!
 //! ## What this pass does
 //!
-//! Walks every `CallTarget::Module { module, func }` in the program.
-//! - If `module` is a stdlib/bundled module → skip (emit layer handles these).
-//! - If `module` is a user module → verify `func` exists in that module's
-//!   function list.
-//! - If resolution fails → record an error.
+//! Walks every `CallTarget::Module { module, func }` and either:
+//! - **Verifies**: a TOML-backed stdlib fn or a user-module fn exists; if
+//!   neither matches, emits a postcondition violation (compile-time ICE
+//!   under `ALMIDE_CHECK_IR=1`).
+//! - **Rewrites**: a bundled-Almide stdlib fn (`(m, f)` not in TOML, but
+//!   present as `IrFunction` inside `program.modules[m]`) → rewrite the
+//!   call target to `CallTarget::Named { name: "almide_rt_<m>_<f>" }`,
+//!   matching the codegen registration name. After this, every backend's
+//!   stdlib dispatcher (Rust `pass_stdlib_lowering`, WASM `emit_call`) only
+//!   has to handle TOML-backed modules; bundled fns flow through the same
+//!   user-fn call path as any other top-level Named target.
 //!
-//! The pass does NOT modify the IR (yet). It only verifies.
+//! ## Why this rewrite, not `CallTarget::Resolved`
+//!
+//! A new `Resolved` variant would carry strictly more info but would
+//! ripple through every IR walker, the WASM emitter's pattern matches,
+//! and the optimizer. Reusing `Named` keeps the IR shape stable; the only
+//! cost is that `Named` now carries two flavors (top-level user fn + the
+//! `almide_rt_<m>_<f>` mangled name for bundled fns), which the
+//! generator already handles since v0.14.6 (see the WASM `func_map`
+//! registration in `emit_wasm/mod.rs`).
 //!
 //! ## Postcondition
 //!
-//! Every `CallTarget::Module { module, func }` where `module` is a user
-//! module (not stdlib) has a matching `IrFunction` in `program.modules`.
+//! After this pass, every `CallTarget::Module { m, f }` is either
+//! TOML-resolvable or it's a violation. Bundled-Almide fns no longer
+//! appear as `Module` targets — they're `Named`.
 
 use std::collections::HashSet;
 use almide_ir::*;
-use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut};
+use almide_base::intern::sym;
 use super::pass::{NanoPass, PassResult, Postcondition, Target};
+use super::generated::arg_transforms;
 
 #[derive(Debug)]
 pub struct ResolveCallsPass;
@@ -34,7 +49,8 @@ impl NanoPass for ResolveCallsPass {
 
     fn targets(&self) -> Option<Vec<Target>> {
         // Applies to all targets. Both Rust and WASM benefit from
-        // catching unresolved symbols at compile time.
+        // catching unresolved symbols at compile time AND from the
+        // bundled → Named rewrite (eliminates per-target fallback patches).
         None
     }
 
@@ -42,18 +58,118 @@ impl NanoPass for ResolveCallsPass {
         vec![Postcondition::Custom(verify_all_calls_resolved)]
     }
 
-    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
-        // This pass is currently verification-only — no IR changes.
-        // Future: rewrite CallTarget::Module with canonical module names.
-        PassResult { program, changed: false }
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        let symbols = SymbolTable::build(&program);
+
+        struct Rewriter<'a> { symbols: &'a SymbolTable }
+        impl<'a> IrMutVisitor for Rewriter<'a> {
+            fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+                walk_expr_mut(self, expr);
+                if let IrExprKind::Call { target, .. } = &mut expr.kind {
+                    if let CallTarget::Module { module, func } = target {
+                        let m = module.as_str();
+                        let f = func.as_str();
+                        // bundled-Almide fn (in IR module, no TOML entry)
+                        // → rewrite to Named with the codegen-registered
+                        // mangled name. Leaves TOML-backed stdlib calls as
+                        // Module so the per-target dispatcher can apply
+                        // arg decoration / inline emit.
+                        let toml_has = arg_transforms::lookup(m, f).is_some();
+                        let bundled_has = self.symbols.module_has_fn(m, f);
+                        if !toml_has && bundled_has {
+                            let mangled = format!(
+                                "almide_rt_{}_{}",
+                                m.replace('.', "_"),
+                                f.replace('.', "_"),
+                            );
+                            *target = CallTarget::Named { name: sym(&mangled) };
+                        }
+                    }
+                }
+            }
+            fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
+                walk_stmt_mut(self, stmt);
+            }
+        }
+        let mut rw = Rewriter { symbols: &symbols };
+        for func in &mut program.functions {
+            rw.visit_expr_mut(&mut func.body);
+        }
+        for tl in &mut program.top_lets {
+            rw.visit_expr_mut(&mut tl.value);
+        }
+        for mi in 0..program.modules.len() {
+            for fi in 0..program.modules[mi].functions.len() {
+                let mut body = std::mem::replace(
+                    &mut program.modules[mi].functions[fi].body,
+                    IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None },
+                );
+                rw.visit_expr_mut(&mut body);
+                program.modules[mi].functions[fi].body = body;
+            }
+            for ti in 0..program.modules[mi].top_lets.len() {
+                let mut val = std::mem::replace(
+                    &mut program.modules[mi].top_lets[ti].value,
+                    IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None },
+                );
+                rw.visit_expr_mut(&mut val);
+                program.modules[mi].top_lets[ti].value = val;
+            }
+        }
+        PassResult { program, changed: true }
     }
 }
 
 // ── Verification ────────────────────────────────────────────────────
 
-/// Check that every user-module CallTarget resolves to a known IrFunction.
-/// Returns list of unresolved references as diagnostic strings.
+/// Check that every CallTarget::Module resolves to either a TOML stdlib fn,
+/// a bundled-Almide fn (= IR module fn), or a user-module fn. Returns the
+/// list of unresolved references as diagnostic strings.
 fn verify_all_calls_resolved(program: &IrProgram) -> Vec<String> {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+
+    struct CallChecker<'a> {
+        symbols: &'a SymbolTable,
+        in_fn: Option<String>,
+        violations: Vec<String>,
+    }
+    impl<'a> IrVisitor for CallChecker<'a> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Call { target, .. } = &expr.kind {
+                if let CallTarget::Module { module, func } = target {
+                    let m = module.as_str();
+                    let f = func.as_str();
+                    let is_stdlib = almide_lang::stdlib_info::is_any_stdlib(m);
+                    let resolved = if is_stdlib {
+                        // stdlib (TOML or bundled IR fn). The rewriter above
+                        // moved bundled fns to Named, so by the time this
+                        // postcondition runs, any Module {stdlib, f} should
+                        // be TOML-backed.
+                        arg_transforms::lookup(m, f).is_some()
+                            || self.symbols.module_has_fn(m, f)
+                    } else if self.symbols.has_user_module(m) {
+                        self.symbols.module_has_fn(m, f)
+                    } else {
+                        // Unknown module — likely an alias not normalized yet.
+                        // Don't complain (matches v0.14.5 Phase 1a behavior).
+                        true
+                    };
+                    if !resolved {
+                        self.violations.push(format!(
+                            "[ResolveCalls] Unresolved call: {}.{} (in {})",
+                            m, f,
+                            self.in_fn.as_deref().unwrap_or("<unknown>"),
+                        ));
+                    }
+                }
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &IrStmt) {
+            walk_stmt(self, stmt);
+        }
+    }
+
     let symbols = SymbolTable::build(program);
     let mut checker = CallChecker {
         symbols: &symbols,
@@ -105,56 +221,13 @@ impl SymbolTable {
         Self { user_modules }
     }
 
-    /// Is this a known user module (i.e. we have its IR)?
     fn has_user_module(&self, name: &str) -> bool {
         self.user_modules.contains_key(name)
     }
 
-    /// Does this user module declare this function?
-    fn has_func(&self, module: &str, func: &str) -> bool {
+    fn module_has_fn(&self, module: &str, func: &str) -> bool {
         self.user_modules.get(module)
             .map(|fs| fs.contains(func))
             .unwrap_or(false)
-    }
-}
-
-// ── Walker ──────────────────────────────────────────────────────────
-
-struct CallChecker<'a> {
-    symbols: &'a SymbolTable,
-    in_fn: Option<String>,
-    violations: Vec<String>,
-}
-
-impl<'a> IrVisitor for CallChecker<'a> {
-    fn visit_expr(&mut self, expr: &IrExpr) {
-        if let IrExprKind::Call { target, .. } = &expr.kind {
-            if let CallTarget::Module { module, func } = target {
-                let m = module.as_str();
-                let f = func.as_str();
-                // Stdlib / bundled modules are handled by the emit layer —
-                // skip them. We only verify calls into user code.
-                let is_stdlib_or_bundled =
-                    almide_lang::stdlib_info::is_any_stdlib(m);
-                if !is_stdlib_or_bundled && self.symbols.has_user_module(m) {
-                    if !self.symbols.has_func(m, f) {
-                        self.violations.push(format!(
-                            "[ResolveCalls] Unresolved call: {}.{} (in {})",
-                            m, f,
-                            self.in_fn.as_deref().unwrap_or("<unknown>"),
-                        ));
-                    }
-                }
-                // If the module isn't in user_modules AND isn't stdlib, it's
-                // likely an alias we haven't normalized yet (Phase 1b territory)
-                // — don't complain for now, the emit layer will trap at runtime
-                // and we'll address in Phase 1b.
-            }
-        }
-        walk_expr(self, expr);
-    }
-
-    fn visit_stmt(&mut self, stmt: &IrStmt) {
-        walk_stmt(self, stmt);
     }
 }

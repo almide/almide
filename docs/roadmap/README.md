@@ -6,13 +6,12 @@
 
 ## Active
 
-26 items
+25 items
 
 | Item | Description |
 |------|-------------|
 | [almai — Multi-Provider LLM Client](active/almai-llm-client.md) | almai — multi-provider LLM client library, 8 providers shipped |
 | [Almide Dojo — Continuous MSR Measurement](active/almide-dojo.md) | Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration |
-| [Bundled-Almide Stdlib — Ideal Form](active/bundled-almide-ideal-form.md) | Ideal form for bundled-Almide stdlib: one dispatch path, no patch-layer special cases |
 | [bytes: unify bounds-check semantics](active/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
 | [`cargo test --all` Cache Race](active/cargo-test-cache-race.md) | Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures |
 | [Codegen Ideal Form](active/codegen-ideal-form.md) | WASM codegen redesign toward declarative dispatch and explicit symbol resolution |
@@ -28,10 +27,10 @@
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [`almide docs-gen` — llms.txt Auto-Generation](active/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | [lumen — Pure Graphics Math](active/lumen-graphics-math.md) | lumen — pure graphics math library (vec3, mat4, color), used by webgl/canvas/obsid |
-| [Option/Result Bundled `.almd` — Not Cosmetic After All](active/option-result-bundled-cleanup.md) | Bundled option/result are signature-override layer; pick a path to consolidate |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](active/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
+| [Stdlib Declarative Unification — Toward a Single Source of Truth](active/stdlib-declarative-unification.md) | Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes |
 | [Stdlib Defs / Runtime Consistency Check](active/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | [Stdlib Symmetry Audit](active/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
 | [Variant Exhaustiveness Refinement](active/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
@@ -72,13 +71,15 @@
 
 ## Done
 
-207 items
+209 items
 
 <details>
-<summary>Show all 207 completed items</summary>
+<summary>Show all 209 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-04-17 | [Option/Result Bundled `.almd` — Not Cosmetic After All](done/option-result-bundled-cleanup.md) | Bundled option/result are signature-override layer; pick a path to consolidate |
+| 2026-04-17 | [Bundled-Almide Stdlib — Ideal Form](done/bundled-almide-ideal-form.md) | Ideal form for bundled-Almide stdlib: one dispatch path, no patch-layer special cases |
 | 2026-04-16 | [Cut v0.14.6 Release](done/release-0.14.6.md) | Cut v0.14.6 release from llm-first-phase2 branch |
 | 2026-04-16 | [Bundled-Almide Dispatch for Stdlib Modules](done/bundled-almide-dispatch.md) | Let stdlib/<module>.almd extend TOML modules (codegen dispatch fix) |
 | 2026-04-09 | [Distribution UX](done/distribution-ux.md) | GitHub Release binaries, one-line installer, and almide self-update |

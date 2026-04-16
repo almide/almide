@@ -1,4 +1,5 @@
 <!-- description: Bundled option/result are signature-override layer; pick a path to consolidate -->
+<!-- done: 2026-04-17 -->
 # Option/Result Bundled `.almd` — Not Cosmetic After All
 
 ## Background
@@ -100,3 +101,24 @@ C is a workaround if A turns out to have hidden cost.
 User confirms which path to take before starting. A is the
 least-likely-to-regress path that still ends with a clean source-of-
 truth.
+
+## Resolution (2026-04-17, v0.14.7-phase3.1 — step S1)
+
+Option **A** taken. `stdlib/defs/option.toml` `unwrap_or_else.f` /
+`or_else.f` now declare `Fn[] -> X` (was `Fn[Unit] -> X`); the TOML
+parser in `stdlib_codegen.rs` was extended to handle empty params for
+the `Fn[...]` form. With the signatures normalized, the bundled
+`stdlib/option.almd` and `stdlib/result.almd` files were no longer
+needed for type-checker override and were deleted, along with their
+entries in `BUNDLED_MODULES` / `AUTO_IMPORT_BUNDLED` / `get_bundled_source`.
+
+`spec/stdlib/coverage_misc_test.almd` (the gatekeeper that broke when we
+attempted this without the TOML normalization in v0.14.6) passes
+unchanged — caller code `option.or_else(o, () => some(42))` now
+type-checks directly against the normalized TOML signature.
+
+Tier-1 auto-import for `option` / `result` continues unchanged via the
+hardcoded list in `almide-frontend::import_table::ImportTable::new`.
+
+See `CHANGELOG.md §0.14.7-phase3.1 §S1` and
+`active/codegen-ideal-form.md §Phase 3 Arc §Step S1`.

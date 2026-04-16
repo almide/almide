@@ -11,10 +11,14 @@ pub const STDLIB_MODULES: &[&str] = &[
 ];
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
-pub const BUNDLED_MODULES: &[&str] = &["args", "path", "option", "result", "list"];
+pub const BUNDLED_MODULES: &[&str] = &["args", "path", "list"];
 
 /// Bundled modules that should be auto-imported (Tier 1 behavior).
-pub const AUTO_IMPORT_BUNDLED: &[&str] = &["option", "result", "list"];
+/// Tier-1 stdlib modules with no bundled-Almide content (option, result, etc.)
+/// are auto-imported via the hardcoded list in
+/// `almide-frontend::import_table::ImportTable::new`; this list is for
+/// bundled `.almd` modules that need resolve-time loading.
+pub const AUTO_IMPORT_BUNDLED: &[&str] = &["list"];
 
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {

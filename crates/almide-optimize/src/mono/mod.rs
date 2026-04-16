@@ -271,8 +271,14 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         if !any_new { break; }
     }
 
-    if rename.is_empty() { return; }
-
+    // Skip the rewrite loop when there are no specializations — there is
+    // nothing to redirect — but DON'T early-return: the post-loop prune
+    // below must always run so unused generic source fns (no call sites
+    // → no specializations → empty rename) are still dropped from
+    // program.modules. Without this, ConcretizeTypes audit on the WASM
+    // pipeline trips on bundled list.iterate's body in any program that
+    // imports list but never calls iterate.
+    if !rename.is_empty() {
     // Rewrite call sites: Module { m, f } + suffix context → Module { m, f_suffix }
     // The suffix for each call site is determined by the bindings we computed above;
     // we re-discover to apply. Simpler: re-walk the program and for each Module call
@@ -350,14 +356,17 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
             program.modules[mi].top_lets[ti].value = val;
         }
     }
+    } // end of `if !rename.is_empty()`
 
-    // Remove generic source fns that have at least one specialization.
-    let specialized_origins: std::collections::HashSet<(String, String)> = rename.keys()
-        .map(|(m, f, _)| (m.clone(), f.clone())).collect();
+    // Remove all generic source fns from every IR module — bundled stdlib
+    // and user packages alike. Specialized instances are already in
+    // `module.functions`; unspecialized generics with no call sites are
+    // dead code (the source still has TypeVar params and would fail the
+    // post-ConcretizeTypes audit). The Rust target's later optimizer would
+    // remove them anyway; the WASM emitter does not, so we prune here as
+    // the canonical invariant: post-mono, no module fn carries TypeVars.
     for module in &mut program.modules {
-        let mname = module.name.to_string();
-        module.functions.retain(|f| !specialized_origins.contains(&(mname.clone(), f.name.to_string()))
-            || !f.generics.as_ref().map_or(false, |g| !g.is_empty()));
+        module.functions.retain(|f| !f.generics.as_ref().map_or(false, |g| !g.is_empty()));
     }
 }
 

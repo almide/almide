@@ -141,10 +141,14 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
             let arrow_pos = other.rfind("] -> ").unwrap();
             let params_str = &other[3..arrow_pos];
             let ret_str = &other[arrow_pos + 5..];
-            let param_types: Vec<String> = params_str
-                .split(", ")
-                .map(|t| parse_type(t.trim(), type_params))
-                .collect();
+            let param_types: Vec<String> = if params_str.is_empty() {
+                vec![]
+            } else {
+                params_str
+                    .split(", ")
+                    .map(|t| parse_type(t.trim(), type_params))
+                    .collect()
+            };
             format!(
                 "Ty::Fn {{ params: vec![{}], ret: Box::new({}) }}",
                 param_types.join(", "),

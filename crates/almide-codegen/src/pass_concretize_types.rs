@@ -60,17 +60,17 @@ impl NanoPass for ConcretizeTypesPass {
     }
 
     fn postconditions(&self) -> Vec<Postcondition> {
-        // NOTE: Audit is informational. Enable with ALMIDE_AUDIT_TYPES=1.
-        // Not used as a hard assertion yet because some `list.zip` call
-        // return types remain unresolved in the IR (their TupleIndex users
-        // work because emit_tuple_index falls back to VarTable). Turning
-        // these into hard errors requires either (a) resolving Call return
-        // types in ConcretizeTypes, or (b) accepting them as known-OK.
-        if std::env::var("ALMIDE_AUDIT_TYPES").is_ok() {
-            vec![Postcondition::Custom(audit_remaining_unresolved)]
-        } else {
-            vec![]
-        }
+        // S2 (v0.14.7-phase3.1): audit runs on every build; violations are
+        // printed by the harness as `[POSTCONDITION VIOLATION] ...` and
+        // escalate to a panic under `ALMIDE_CHECK_IR=1`. spec/ runs clean
+        // on Rust at default + ALMIDE_CHECK_IR=1. WASM target on
+        // ALMIDE_CHECK_IR=1 still trips on lifted-lambda TypeVar residue
+        // produced by ClosureConversion (the second `ConcretizeTypes`
+        // pass cannot fully recover the lambda param type from VarTable
+        // when the source generic was already specialized away). Closing
+        // that gap is part of S3 (pass_resolve_calls Phase 1b-c) — see
+        // codegen-ideal-form.md §Phase 3 Arc.
+        vec![Postcondition::Custom(audit_remaining_unresolved)]
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
@@ -595,6 +595,7 @@ fn reconcile_binop(op: BinOp, lt: &Ty, rt: &Ty) -> Option<BinOp> {
 /// legitimately have unresolved types.
 fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
     struct Auditor {
+        location: String,
         remaining: usize,
         samples: Vec<String>,
     }
@@ -610,9 +611,10 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
                 );
                 if !skip {
                     self.remaining += 1;
-                    if self.samples.len() < 3 {
-                        self.samples.push(format!("{:?} ty={:?}",
-                            std::mem::discriminant(&expr.kind), expr.ty));
+                    if self.samples.len() < 5 {
+                        self.samples.push(format!("[{}] {:?} ty={:?}",
+                            self.location,
+                            kind_name(&expr.kind), expr.ty));
                     }
                 }
             }
@@ -622,14 +624,56 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
             walk_stmt(self, stmt);
         }
     }
-    let mut a = Auditor { remaining: 0, samples: Vec::new() };
-    for f in &program.functions { a.visit_expr(&f.body); }
+    fn kind_name(k: &IrExprKind) -> &'static str {
+        match k {
+            IrExprKind::LitInt { .. } => "LitInt",
+            IrExprKind::LitFloat { .. } => "LitFloat",
+            IrExprKind::LitStr { .. } => "LitStr",
+            IrExprKind::LitBool { .. } => "LitBool",
+            IrExprKind::Unit => "Unit",
+            IrExprKind::Var { .. } => "Var",
+            IrExprKind::FnRef { .. } => "FnRef",
+            IrExprKind::BinOp { .. } => "BinOp",
+            IrExprKind::UnOp { .. } => "UnOp",
+            IrExprKind::If { .. } => "If",
+            IrExprKind::Match { .. } => "Match",
+            IrExprKind::Block { .. } => "Block",
+            IrExprKind::Fan { .. } => "Fan",
+            IrExprKind::ForIn { .. } => "ForIn",
+            IrExprKind::While { .. } => "While",
+            IrExprKind::Call { .. } => "Call",
+            IrExprKind::TailCall { .. } => "TailCall",
+            IrExprKind::List { .. } => "List",
+            IrExprKind::MapLiteral { .. } => "MapLiteral",
+            IrExprKind::Record { .. } => "Record",
+            IrExprKind::SpreadRecord { .. } => "SpreadRecord",
+            IrExprKind::Tuple { .. } => "Tuple",
+            IrExprKind::Range { .. } => "Range",
+            IrExprKind::Member { .. } => "Member",
+            IrExprKind::TupleIndex { .. } => "TupleIndex",
+            IrExprKind::IndexAccess { .. } => "IndexAccess",
+            IrExprKind::MapAccess { .. } => "MapAccess",
+            IrExprKind::Lambda { .. } => "Lambda",
+            IrExprKind::ClosureCreate { .. } => "ClosureCreate",
+            IrExprKind::EnvLoad { .. } => "EnvLoad",
+            _ => "(other)",
+        }
+    }
+    let mut a = Auditor { location: String::new(), remaining: 0, samples: Vec::new() };
+    for f in &program.functions {
+        a.location = format!("fn {}", f.name);
+        a.visit_expr(&f.body);
+    }
     for m in &program.modules {
-        for f in &m.functions { a.visit_expr(&f.body); }
+        let mname = m.name.to_string();
+        for f in &m.functions {
+            a.location = format!("{}::{}", mname, f.name);
+            a.visit_expr(&f.body);
+        }
     }
     if a.remaining > 0 {
-        vec![format!("[ConcretizeTypes] {} expressions remain with unresolved types. Samples: {:?}",
-            a.remaining, a.samples)]
+        vec![format!("[ConcretizeTypes] {} expressions remain with unresolved types. Samples: {}",
+            a.remaining, a.samples.join(" | "))]
     } else {
         Vec::new()
     }

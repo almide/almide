@@ -9,6 +9,146 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
+## [0.14.7] — 2026-04-17
+
+Phase 3 "Ideal Form Migration" arc. Six ship points (`-phase3.1`
+through `-phase3.5` plus the interim B fix-up) are merged into this
+release. Combined goal: drive every patch-layer special case in the
+bundled-Almide / codegen dispatch to zero. After this release, every
+`CallTarget::Module` either resolves to a TOML stdlib fn (per-target
+inline emit) or is rewritten to `Named` (bundled-Almide path);
+unresolved stdlib calls are compile-time ICE; monomorphization drops
+every generic source post-pass; the audit catches residue with a
+fn-locator. See `docs/roadmap/done/bundled-almide-ideal-form.md` and
+`docs/roadmap/active/codegen-ideal-form.md §Phase 3 Arc` for the
+plan/closure narrative.
+
+### Patch layer status at release
+
+- bundled `option.almd` / `result.almd` (signature override): **gone** (S1)
+- WASM `func_map` per-module fallback for bundled fns: **gone** (A)
+- mono `is_bundled_module` filter at prune step: **gone** (S4)
+- `monomorphize_module_fns` early-return that skipped the prune: **gone** (B)
+- `emit_stub_call*` runtime traps: **gone** (S3, now compile-time ICE)
+
+### S1 — Option/Result signature normalization
+
+Removed the bundled `stdlib/option.almd` / `stdlib/result.almd` that
+silently overrode TOML signatures for `option.unwrap_or_else` and
+`option.or_else`. The root cause — TOML declared `Fn[Unit] -> X` while
+callers write `() => x` — is fixed at the source: TOML now uses
+`Fn[] -> X`, and the `stdlib_codegen.rs` TOML parser handles the empty
+params case.
+
+Surface changes:
+
+- `stdlib/defs/option.toml` `unwrap_or_else.f` / `or_else.f`: `Fn[Unit] -> X` → `Fn[] -> X`
+- `stdlib/option.almd` / `stdlib/result.almd`: deleted (no longer needed
+  for signature override; runtime dispatch was always TOML-backed)
+- `BUNDLED_MODULES` / `AUTO_IMPORT_BUNDLED` / `get_bundled_source`:
+  `option` / `result` entries removed. Tier-1 auto-import continues via
+  `import_table.rs`'s hardcoded list.
+
+No caller-visible breakage: `option.or_else(o, () => ...)` now type-checks
+directly against the TOML signature instead of going through the bundled
+override. `spec/stdlib/coverage_misc_test.almd` (the gatekeeper for this
+co-dependence) passes unchanged.
+
+### S2 — ConcretizeTypes audit always-on; bundled-stdlib generic cleanup
+
+`ConcretizeTypesPass::postconditions` no longer gates the audit on
+`ALMIDE_AUDIT_TYPES=1`; the `Custom(audit_remaining_unresolved)` check
+runs on every build. Violations print as
+`[POSTCONDITION VIOLATION] [ConcretizeTypes] N expressions remain ...`
+and escalate to `panic!` under `ALMIDE_CHECK_IR=1`.
+
+`spec/` is clean on the Rust target with `ALMIDE_CHECK_IR=1`. WASM
+target on `ALMIDE_CHECK_IR=1` still trips on lifted-lambda TypeVar
+residue produced by `ClosureConversion`; closing that gap is S3 work.
+Default behavior (no `ALMIDE_CHECK_IR`) is unchanged — both targets
+pass spec/ as before.
+
+Bundled-stdlib mono cleanup: `monomorphize_module_fns` previously kept
+unused generic source fns inside `program.modules`, which reached the
+WASM emitter with TypeVars intact. Now drops every generic fn in
+`is_bundled_module(name)` after the specialization round — specialized
+instances live alongside in `module.functions`, the generic source is
+no longer needed.
+
+### S3 — WASM `emit_stub_call*` panics at compile time
+
+`emit_stub_call_named` and `emit_stub_call` no longer drop arguments and
+emit a runtime `unreachable` instruction. They now `panic!()` with a
+`[ICE]` prefix — reaching either at WASM emission time means a
+`module.func` call survived `pass_resolve_calls` without a TOML or
+bundled IR target, which is a compiler bug to fix at the resolver, not a
+runtime trap to debug.
+
+The `ALMIDE_WASM_STUB_PANIC` / `ALMIDE_WASM_STUB_VERBOSE` /
+`ALMIDE_WASM_STUB_TRACE` env vars are removed; v0.14.6's stub-panic
+sweep already proved spec/ + nn never reach the stub. Phase 1c of the
+codegen-ideal-form roadmap is closed by this step.
+
+### S4 — Mono drops generic source fns from every module, not just bundled
+
+`monomorphize_module_fns` already discovered and specialized generic
+fns across every module in `program.modules` (the bundled-only filter
+introduced in v0.14.6 was applied only at the post-specialize prune
+step). The prune is now uniform across all modules: every generic
+source fn is dropped after the specialization round, not only those
+inside `is_bundled_module(...)`. User package modules carrying generic
+fns (e.g. `pkg.helper[T](x: T) -> List[T]`) get the same post-mono
+invariant as bundled stdlib modules.
+
+### B — Mono prune always runs; ConcretizeTypes audit is more locatable
+
+`monomorphize_module_fns` previously early-returned when no generic
+specialization was discovered. The post-loop prune was therefore
+skipped in the very case where it matters most: a program that imports
+a bundled stdlib module but never calls any of its generic fns. The
+unused generic source survived to codegen, carried `TypeVar(T)` in its
+body, and tripped the `ConcretizeTypes` audit on WASM. Fix: the prune
+always runs; only the rewrite loop (no-op when `rename` is empty) is
+conditionally skipped.
+
+`audit_remaining_unresolved` (the `Custom` postcondition) now reports
+each violating expression's enclosing fn name + a short `kind` label
+("[list::iterate] List ty=...") instead of opaque
+`Discriminant(NN)` numbers.
+
+After this fix, spec/ on WASM with `ALMIDE_CHECK_IR=1` is **191/206
+passing, 15 skipped**. The remaining 15 are independent type-inference
+gaps (empty-list `Applied(List, [Unknown])`, OpenRecord propagation,
+codec-derived list fields, generic chain-b argument, etc.) tracked in
+`codegen-ideal-form.md §#4`. Default behavior (no `ALMIDE_CHECK_IR`)
+is unchanged — both targets pass spec/ as before.
+
+### A — Phase 1b: ResolveCalls rewrites bundled stdlib calls to `Named`
+
+`pass_resolve_calls.rs` is no longer verification-only. For every
+`CallTarget::Module { module, func }` it now does:
+
+- TOML stdlib (e.g. `list.map`, `option.unwrap_or_else`): leave as
+  `Module { module, func }` so per-target dispatchers can apply arg
+  decoration / inline emit (`pass_stdlib_lowering` on Rust, `emit_call`
+  on WASM).
+- bundled-Almide stdlib (e.g. `list.split_at`, `list.iterate` defined
+  in `stdlib/list.almd` and specialized by mono): rewrite to
+  `CallTarget::Named { name: "almide_rt_<m>_<f>" }`, the codegen-
+  registered mangled symbol. Both backends already register bundled fns
+  under that name, so no further dispatch logic is needed.
+- neither TOML nor bundled IR fn: postcondition violation — the
+  unresolved-stdlib gap that previously deferred to a runtime trap is
+  now a compile-time ICE under `ALMIDE_CHECK_IR=1`.
+
+Removed: the WASM `_ if module == "list"` arm's bundled-fn fallback
+(`func_map.get("almide_rt_list_*")`) added in v0.14.6 as a patch. With
+the rewrite above, bundled fns never reach the Module dispatch arm in
+the first place, so the fallback was dead.
+
+`bundled-almide-ideal-form.md` is moved to `done/` — all 5 catalogued
+items are closed.
+
 ## [0.14.6] — 2026-04-16
 
 Phase 2 of the "LLM-first language" roadmap. **Focus**: make the compiler
