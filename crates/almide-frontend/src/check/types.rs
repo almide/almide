@@ -32,7 +32,18 @@ pub enum FixHint {
     /// (usually Unit). The fix is typically to add the binding's name as a
     /// trailing expression.
     LastLetName(String),
+    /// One arm of an `if/else` is a bare assignment `x = ...` (returns Unit),
+    /// producing an if-branch type mismatch. Carries the name being assigned
+    /// and which arm (then/else) is the offender, so the `try:` snippet can
+    /// show `let new_x = if cond then <v> else x` with the real variable.
+    IfArmAssign { arm: IfArm, var_name: String },
+    /// Both if-arms are statement-only (assignments or bare `let`). Report
+    /// the names so the snippet can show a rebinding on the combined result.
+    IfArmsAssign { then_var: Option<String>, else_var: Option<String> },
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IfArm { Then, Else }
 
 /// Check if a Ty is an inference variable (?N).
 pub fn is_inference_var(ty: &Ty) -> Option<TyVarId> {

@@ -152,6 +152,30 @@ fn sum_digits(n: Int) -> Int = {
 }
 
 #[test]
+fn e001_if_arm_assign_specializes_with_var_name() {
+    // dojo binary-search / matrix-ops pattern: an `if` arm is a bare
+    // assignment `x = ...` → Unit, causing an if-branch mismatch. The
+    // specialized snippet should cite the real variable and show the
+    // rebinding rewrite.
+    let p = write_tmp("try_e001_if_arm.almd", r#"
+fn clamp(x: Int, lo: Int, hi: Int) -> Int = {
+    var val = x
+    if val < lo then { val = lo } else val
+}
+"#);
+    let (ok, out) = check(&p);
+    assert!(!ok);
+    assert!(out.contains("error[E001]"), "out:\n{}", out);
+    assert!(out.contains("in if branches"), "if-branches context missing:\n{}", out);
+    // Specialized snippet must name the real variable (`val`) and show the
+    // rebinding rewrite, not a generic `<new-x>` placeholder.
+    assert!(out.contains("the then-arm is `val = ...`"),
+        "then-arm attribution missing:\n{}", out);
+    assert!(out.contains("let new_val = if cond then <new-value-for-val> else val"),
+        "specialized rebinding snippet missing:\n{}", out);
+}
+
+#[test]
 fn e001_fn_body_non_let_uses_generic_fallback() {
     // When the body tail is NOT a `let` (e.g. an effectful call), we fall
     // back to the generic template since there's no single binding name
