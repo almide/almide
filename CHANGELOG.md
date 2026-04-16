@@ -9,6 +9,47 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
+## [0.14.7-phase3.5] — Unreleased (develop branch)
+
+Step A of the Phase 3 arc: `pass_resolve_calls` Phase 1b. The bundled-fn
+fallback patch in WASM emit is dropped — bundled-Almide stdlib calls now
+flow through the same `Named` dispatch path as any other top-level user
+fn, on every backend.
+
+### A — Phase 1b: ResolveCalls rewrites bundled stdlib calls to `Named`
+
+`pass_resolve_calls.rs` is no longer verification-only. For every
+`CallTarget::Module { module, func }` it now does:
+
+- TOML stdlib (e.g. `list.map`, `option.unwrap_or_else`): leave as
+  `Module { module, func }` so per-target dispatchers can apply arg
+  decoration / inline emit (`pass_stdlib_lowering` on Rust, `emit_call`
+  on WASM).
+- bundled-Almide stdlib (e.g. `list.split_at`, `list.iterate` defined
+  in `stdlib/list.almd` and specialized by mono): rewrite to
+  `CallTarget::Named { name: "almide_rt_<m>_<f>" }`, the codegen-
+  registered mangled symbol. Both backends already register bundled fns
+  under that name, so no further dispatch logic is needed.
+- neither TOML nor bundled IR fn: postcondition violation — the
+  unresolved-stdlib gap that previously deferred to a runtime trap is
+  now a compile-time ICE under `ALMIDE_CHECK_IR=1`.
+
+Removed: the WASM `_ if module == "list"` arm's bundled-fn fallback
+(`func_map.get("almide_rt_list_*")`) added in v0.14.6 as a patch. With
+the rewrite above, bundled fns never reach the Module dispatch arm in
+the first place, so the fallback was dead.
+
+### Patch layer status after S1-A
+
+- bundled `option.almd` / `result.almd` (signature override): **gone** (S1)
+- WASM `func_map` per-module fallback: **gone** (this commit)
+- mono `is_bundled_module` filter at prune step: **gone** (S4)
+- `monomorphize_module_fns` early-return that skipped the prune: **gone** (B)
+- `emit_stub_call*` runtime traps: **gone** (S3, now compile-time ICE)
+
+`bundled-almide-ideal-form.md` is moved to `done/` — all 5 catalogued
+items are closed.
+
 ## [0.14.7-phase3.4] — Unreleased (develop branch)
 
 Step B of the Phase 3 arc (lifted-lambda / unused-generic TypeVar

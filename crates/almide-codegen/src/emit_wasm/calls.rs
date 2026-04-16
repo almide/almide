@@ -322,16 +322,14 @@ impl FuncCompiler<'_> {
                     }
                     _ if module == "list" => {
                         if !self.emit_list_call(func, args) {
-                            // Try bundled-Almide fn (e.g. stdlib/list.almd) before
-                            // giving up. The IR module's fn is registered under
-                            // `almide_rt_<module>_<func>` by mod.rs::register_user_funcs.
-                            let fn_name = format!("almide_rt_list_{}", func.replace('.', "_"));
-                            if let Some(&idx) = self.emitter.func_map.get(fn_name.as_str()) {
-                                for arg in args { self.emit_expr(arg); }
-                                wasm!(self.func, { call(idx); });
-                            } else {
-                                self.emit_stub_call_named(module.as_str(), func.as_str(), args);
-                            }
+                            // Bundled-Almide fns inside list (e.g. list.split_at,
+                            // list.iterate from stdlib/list.almd) are rewritten to
+                            // CallTarget::Named { almide_rt_list_<f> } by
+                            // pass_resolve_calls — they never reach this Module arm.
+                            // Anything that gets here is a TOML stdlib fn whose
+                            // dispatch is missing in emit_list_call. Hard ICE so the
+                            // gap is fixed at the source, not papered over.
+                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
                         }
                     }
                     _ if module == "bytes" => {
