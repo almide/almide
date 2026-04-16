@@ -63,6 +63,58 @@ fn clamp(x: Int) -> Int = {
 }
 
 #[test]
+fn fix_json_output_shape_is_stable() {
+    // dojo harness contract: --json emits a fixed-schema object that the
+    // retry loop can parse. Changing field names / types here is a
+    // breaking change — bump the schema version + notify downstream.
+    let src = r#"
+effect fn main() -> Unit = {
+    let v = json.from_int(42)
+    let pos = int.gt(5, 0)
+    println(json.stringify(v))
+}
+"#;
+    let path = write_tmp("fix_json_shape.almd", src);
+    let out = Command::new(almide())
+        .args(["fix", &path, "--json", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    assert!(v["file"].is_string());
+    assert!(v["imports_added"].is_array());
+    assert!(v["letin_removed"].is_number());
+    assert!(v["operator_rewrites"].is_number());
+    assert!(v["manual_pending"].is_array());
+    assert!(v["changed"].is_boolean());
+    assert!(v["dry_run"].is_boolean());
+    assert_eq!(v["imports_added"][0], "json");
+    assert_eq!(v["operator_rewrites"], 1);
+    assert_eq!(v["changed"], true);
+    assert_eq!(v["dry_run"], true);
+}
+
+#[test]
+fn fix_json_reports_manual_pending_with_diag_details() {
+    let src = r#"
+fn clamp(x: Int) -> Int = {
+    let abs_x = int.abs(x)
+}
+"#;
+    let path = write_tmp("fix_json_manual.almd", src);
+    let out = Command::new(almide()).args(["fix", &path, "--json"]).output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let manual = &v["manual_pending"];
+    assert!(manual.is_array() && !manual.as_array().unwrap().is_empty());
+    let d = &manual[0];
+    assert_eq!(d["code"], "E001");
+    assert!(d["line"].is_number());
+    assert!(d["message"].as_str().unwrap().contains("type mismatch"));
+    // `changed` is false because nothing was auto-applied.
+    assert_eq!(v["changed"], false);
+}
+
+#[test]
 fn fix_no_op_on_clean_file() {
     let path = write_tmp("fix_noop.almd", r#"
 fn add(a: Int, b: Int) -> Int = a + b

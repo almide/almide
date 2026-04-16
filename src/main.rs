@@ -165,6 +165,9 @@ enum Commands {
         /// Show what would change without modifying the file
         #[arg(long)]
         dry_run: bool,
+        /// Emit a machine-readable JSON report (for harness integration)
+        #[arg(long)]
+        json: bool,
     },
     /// Emit source code or AST
     #[command(hide = true)]
@@ -539,9 +542,9 @@ fn dispatch(cli: Cli) {
                 cli::cmd_check(&file, deny_warnings);
             }
         }
-        Commands::Fix { file, dry_run } => {
+        Commands::Fix { file, dry_run, json } => {
             let file = resolve_file(file);
-            cli::cmd_fix(&file, dry_run);
+            cli::cmd_fix(&file, dry_run, json);
         }
         Commands::Explain { code } => {
             print_error_explanation(&code);

@@ -15,8 +15,33 @@ use crate::{parse_file, project, project_fetch};
 use almide::ast::{self, Expr, ExprKind};
 use almide::fmt::{auto_imports, format_program};
 use almide_base::intern::sym;
+use serde::Serialize;
 
-pub fn cmd_fix(file: &str, dry_run: bool) {
+/// JSON output shape (stable contract for harnesses) so the dojo retry loop
+/// can decide "re-check vs pass-through to LLM" without parsing human text.
+#[derive(Serialize)]
+struct FixReport<'a> {
+    file: &'a str,
+    imports_added: Vec<String>,
+    letin_removed: usize,
+    operator_rewrites: usize,
+    manual_pending: Vec<ManualDiag>,
+    /// True if the file was written (or would be, in --dry-run). Harness can
+    /// use this to gate a follow-up `almide check`: if false, nothing changed
+    /// and retry proceeds with the original diagnostics.
+    changed: bool,
+    dry_run: bool,
+}
+
+#[derive(Serialize)]
+struct ManualDiag {
+    code: String,
+    line: Option<usize>,
+    col: Option<usize>,
+    message: String,
+}
+
+pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
     let (mut program, source_text, parse_errors) = parse_file(file);
 
     let (dep_names, dep_submodules): (Vec<String>, std::collections::HashMap<String, String>) =
@@ -73,18 +98,45 @@ pub fn cmd_fix(file: &str, dry_run: bool) {
 
     let any_change = has_import_changes || operator_count > 0 || letin_count > 0;
 
+    // Extract "Added `import X`" → bare module names for JSON.
+    let imports_added: Vec<String> = import_messages.iter()
+        .filter_map(|m| m.strip_prefix("Added `import ").and_then(|s| s.strip_suffix('`')))
+        .map(String::from)
+        .collect();
+
+    let manual = collect_manual_fixes(file, &working);
+
+    if !dry_run && any_change {
+        if let Err(e) = std::fs::write(file, &working) {
+            eprintln!("error: failed to write {}: {}", file, e);
+            std::process::exit(1);
+        }
+    }
+
+    if json {
+        let report = FixReport {
+            file,
+            imports_added,
+            letin_removed: letin_count,
+            operator_rewrites: operator_count,
+            manual_pending: manual,
+            changed: any_change,
+            dry_run,
+        };
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        return;
+    }
+
+    // Human output (default).
     let op_msg = |n: usize| format!(
         "Rewrote {} comparison function call(s) to operator form (int.gt/lt/eq/... → > < == ...)", n
     );
-
     if dry_run {
         if !any_change {
             println!("no auto-applicable fixes");
         } else {
             println!("--- would apply ---");
-            for m in &import_messages {
-                println!("  {}", m);
-            }
+            for m in &import_messages { println!("  {}", m); }
             if operator_count > 0 { println!("  {}", op_msg(operator_count)); }
             if letin_count > 0 {
                 println!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
@@ -93,23 +145,26 @@ pub fn cmd_fix(file: &str, dry_run: bool) {
             println!("{}", working);
         }
     } else if any_change {
-        if let Err(e) = std::fs::write(file, &working) {
-            eprintln!("error: failed to write {}: {}", file, e);
-            std::process::exit(1);
-        }
         eprintln!("{}:", file);
-        for m in &import_messages {
-            eprintln!("  {}", m);
-        }
+        for m in &import_messages { eprintln!("  {}", m); }
         if operator_count > 0 { eprintln!("  {}", op_msg(operator_count)); }
         if letin_count > 0 {
             eprintln!("  Removed {} OCaml-style `in` keyword(s) (let-in → newline chain)", letin_count);
         }
     }
 
-    // After auto-fixes, report any remaining `try:` snippets so callers
-    // know what's left to do by hand.
-    report_manual_fixes(file, &working);
+    if !manual.is_empty() {
+        eprintln!("\n{} diagnostic(s) have `try:` snippets that need manual application:", manual.len());
+        for d in &manual {
+            let loc = match (d.line, d.col) {
+                (Some(l), Some(c)) => format!("{}:{}", l, c),
+                (Some(l), None) => format!("{}", l),
+                _ => "?".into(),
+            };
+            eprintln!("  [{code}] {file}:{loc}  {}", d.message, code = d.code);
+        }
+        eprintln!("\nRun `almide check {}` for the full text of each `try:` snippet.", file);
+    }
 }
 
 /// Map `<module>.<func>` → operator symbol for comparison-style calls LLMs
@@ -222,17 +277,20 @@ fn delete_in_tokens(source: &str, positions: &[(usize, usize)]) -> String {
     lines.join("\n")
 }
 
-fn report_manual_fixes(file: &str, source: &str) {
+/// Re-parse + type-check `source` and extract every diagnostic that has a
+/// `try:` snippet. These are the "manual fix needed" items returned to the
+/// caller (human reporter or JSON serializer). We don't print from here so
+/// the JSON path can emit a clean object.
+fn collect_manual_fixes(file: &str, source: &str) -> Vec<ManualDiag> {
     use almide::check::Checker;
     use almide::canonicalize;
     use almide::diagnostic;
 
-    // Re-parse the (possibly modified) source and type-check.
     let tokens = almide::lexer::Lexer::tokenize(source);
     let mut parser = almide::parser::Parser::new(tokens);
     let mut prog = match parser.parse() {
         Ok(p) => p,
-        Err(_) => return,
+        Err(_) => return Vec::new(),
     };
     let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
     let mut checker = Checker::from_env(canon.env);
@@ -240,24 +298,14 @@ fn report_manual_fixes(file: &str, source: &str) {
     checker.diagnostics = canon.diagnostics;
     let diagnostics = checker.infer_program(&mut prog);
 
-    let manual: Vec<&diagnostic::Diagnostic> = diagnostics.iter()
+    diagnostics.iter()
         .chain(parser.errors.iter())
         .filter(|d| d.level == diagnostic::Level::Error && d.try_snippet.is_some())
-        .collect();
-
-    if manual.is_empty() {
-        return;
-    }
-    eprintln!("\n{} diagnostic(s) have `try:` snippets that need manual application:",
-        manual.len());
-    for d in &manual {
-        let loc = match (d.line, d.col) {
-            (Some(l), Some(c)) => format!("{}:{}", l, c),
-            (Some(l), None) => format!("{}", l),
-            _ => "?".into(),
-        };
-        let code = d.code.as_deref().unwrap_or("E???");
-        eprintln!("  [{code}] {file}:{loc}  {}", d.message);
-    }
-    eprintln!("\nRun `almide check {}` for the full text of each `try:` snippet.", file);
+        .map(|d| ManualDiag {
+            code: d.code.unwrap_or("E???").to_string(),
+            line: d.line,
+            col: d.col,
+            message: d.message.clone(),
+        })
+        .collect()
 }

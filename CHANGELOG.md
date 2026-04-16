@@ -93,14 +93,16 @@ Every entry below attaches a `try:` block with copy-pasteable code:
 
 ### Added — Phase 3 MVP
 
-- **`almide fix <file> [--dry-run]`** — applies `auto_imports` (adds missing
-  `import json` / `import fs` / etc), removes OCaml-style `let x = expr in
-  <body>` keywords (the body stays), rewrites comparison-function calls
-  (`int.gt(n, 0)` → `n > 0`, same for lt / gte / lte / eq / neq on int /
-  float / string / bool), and reports any remaining diagnostics that carry
-  `try:` snippets as manual-fix pointers. Cons-pattern rewrite is still
-  manual (needs AST-level pattern transformation + parser recovery of the
-  dropped body).
+- **`almide fix <file> [--dry-run] [--json]`** — applies `auto_imports`
+  (adds missing `import json` / `import fs` / etc), removes OCaml-style
+  `let x = expr in <body>` keywords (the body stays), rewrites
+  comparison-function calls (`int.gt(n, 0)` → `n > 0`, same for lt /
+  gte / lte / eq / neq on int / float / string / bool), and reports any
+  remaining diagnostics that carry `try:` snippets as manual-fix pointers.
+  `--json` emits a stable-schema report (imports_added, letin_removed,
+  operator_rewrites, manual_pending, changed, dry_run) for LLM harness
+  retry-loop integration. Cons-pattern rewrite is still manual (needs
+  AST-level pattern transformation + parser recovery of the dropped body).
 - **`list.binary_search(List[Int], Int) -> Option[Int]`** — sorted-list
   binary search. Dojo binary-search task was previously a 70b fail; this
   reduces it to an API call.
