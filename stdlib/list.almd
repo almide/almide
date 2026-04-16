@@ -1,0 +1,6 @@
+// list — bundled-Almide extensions
+// Bundled stdlib module (written in Almide). TOML-backed list.* fns continue
+// to use the Rust runtime; new fns added here are dispatched through the
+// normal user-fn call path.
+
+fn bundled_probe(n: Int) -> Int = n + 1

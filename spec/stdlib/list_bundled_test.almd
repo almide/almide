@@ -1,0 +1,13 @@
+// Regression guard: bundled-Almide stdlib dispatch.
+// list.bundled_probe is defined in stdlib/list.almd (no TOML/Rust runtime).
+// If this test fails, the codegen rt_ bypass is broken — see
+// docs/roadmap/active/bundled-almide-dispatch.md.
+
+test "list.bundled_probe (bundled-Almide dispatch)" {
+  assert_eq(list.bundled_probe(41), 42)
+}
+
+test "list.* TOML fns coexist with bundled fns" {
+  assert_eq(list.sum([1, 2, 3]), 6)
+  assert_eq(list.len([1, 2, 3]), 3)
+}

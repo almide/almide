@@ -333,9 +333,12 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             }
             ir_program = Some(ir);
         }
-        // Lower user modules to IR (skip TOML-defined stdlib — they use generated codegen)
+        // Lower user modules to IR (skip TOML-only stdlib — they use generated
+        // codegen). Bundled .almd stdlib modules MUST be lowered: their fns
+        // need to land in IR so callers resolve to a real function instead of
+        // a non-existent almide_rt_<m>_<f>.
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-            if almide::stdlib::is_stdlib_module(name) { continue; }
+            if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
             // For dependency modules, temporarily set self_module_name to the package root
             // so `import self` in sub-modules resolves to the dependency, not the main project
             let saved_self = checker.env.self_module_name;
@@ -356,7 +359,17 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            let mut mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            // For bundled stdlib modules, drop fns whose name overlaps with the
+            // TOML-backed runtime: those callers go through the generated
+            // almide_rt_<m>_<f> dispatch, and emitting the bundled body would
+            // produce a duplicate definition. Bundled-only fns survive — those
+            // are what extend the module.
+            if almide::stdlib::is_bundled_module(name) {
+                let toml_funcs: std::collections::HashSet<&'static str> =
+                    almide::stdlib::module_functions(name).into_iter().collect();
+                mod_ir_module.functions.retain(|f| !toml_funcs.contains(f.name.as_str()));
+            }
             let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
             checker.env.import_table = saved_table;
             checker.env.self_module_name = saved_self;
