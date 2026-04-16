@@ -9,6 +9,31 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
+## [0.14.8] — 2026-04-17
+
+Hotfix for a v0.14.7 regression: external package dispatch (e.g. `almai`
+loaded from `[dependencies]` in `almide.toml`) failed to link because the
+Phase 1b `ResolveCallsPass` rewrote every `CallTarget::Module` — including
+user-package modules — to a non-versioned mangled name. The walker then
+emitted those functions under their versioned identifier
+(`almide_rt_<pkg>_v<major>_<fn>`) while the call sites referenced the
+unversioned form (`almide_rt_<pkg>_<fn>`), producing Rust E0425 at
+compile time.
+
+### Fix
+
+`ResolveCallsPass` now gates its Module → Named rewrite on
+`stdlib_info::is_any_stdlib(m)`. Only bundled-Almide stdlib modules
+(`args`, `path`, `list`, …) — which never carry a `versioned_name` — are
+rewritten. User-package calls stay as `CallTarget::Module` and continue
+to flow through `StdlibLoweringPass::rewrite_module_names` (Rust) or the
+WASM `func_map` bare-name fallback, both of which know how to look up
+the versioned symbol.
+
+No surface changes. `almide test` (206 files) and `cargo test` pass;
+downstream `almide-dojo` (13 tests using `almai.defaults` /
+`almai.with_system` / `almai.call_with`) compiles and runs again.
+
 ## [0.14.7] — 2026-04-17
 
 Phase 3 "Ideal Form Migration" arc. Six ship points (`-phase3.1`

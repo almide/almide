@@ -69,14 +69,24 @@ impl NanoPass for ResolveCallsPass {
                     if let CallTarget::Module { module, func } = target {
                         let m = module.as_str();
                         let f = func.as_str();
-                        // bundled-Almide fn (in IR module, no TOML entry)
+                        // bundled-Almide stdlib fn (in IR module, no TOML entry)
                         // → rewrite to Named with the codegen-registered
                         // mangled name. Leaves TOML-backed stdlib calls as
                         // Module so the per-target dispatcher can apply
                         // arg decoration / inline emit.
+                        //
+                        // User-package modules (external deps loaded from
+                        // almide.toml) are NOT rewritten here: they carry a
+                        // `versioned_name` that the walker uses as the emit
+                        // prefix (`almide_rt_<pkg>_v<major>_<fn>`), and the
+                        // later `StdlibLoweringPass::rewrite_module_names`
+                        // (Rust) / direct Module dispatch (WASM) handle the
+                        // versioned lookup. Rewriting to a non-versioned
+                        // `almide_rt_<pkg>_<fn>` here would break the link.
+                        let is_stdlib = almide_lang::stdlib_info::is_any_stdlib(m);
                         let toml_has = arg_transforms::lookup(m, f).is_some();
                         let bundled_has = self.symbols.module_has_fn(m, f);
-                        if !toml_has && bundled_has {
+                        if is_stdlib && !toml_has && bundled_has {
                             let mangled = format!(
                                 "almide_rt_{}_{}",
                                 m.replace('.', "_"),
