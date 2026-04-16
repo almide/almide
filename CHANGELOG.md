@@ -91,6 +91,33 @@ Every entry below attaches a `try:` block with copy-pasteable code:
   as "prefix", but the implementation was always substring — documentation
   now matches behavior).
 
+### Added — Phase 3 MVP
+
+- **`almide fix <file> [--dry-run]`** — applies `auto_imports` (adds missing
+  `import json` / `import fs` / etc) and reports any remaining diagnostics
+  that carry `try:` snippets as manual-fix pointers. Foundation for future
+  mechanical rewrites (`let-in`, cons pattern, etc).
+- **`list.binary_search(List[Int], Int) -> Option[Int]`** — sorted-list
+  binary search. Dojo binary-search task was previously a 70b fail; this
+  reduces it to an API call.
+- **`string.run_length_encode(String) -> List[(String, Int)]`** — RLE pairs.
+  Same motivation.
+- **`llms.txt`** at repo root — mission, CLI reference, core idioms, stdlib
+  pointer, diagnostic codes, anti-patterns. 1-URL fetch point for LLM tools.
+
+### Known gaps (documented, not blockers)
+
+- Extending existing `list.*` / `string.*` modules via `stdlib/<m>.almd`
+  bundled source doesn't work today: `list.*` lowering is hardcoded to emit
+  `almide_rt_list_<fn>` regardless of whether the fn came from TOML or Almide
+  source. Workaround: add new fns as TOML + runtime (`stdlib/defs/<m>.toml`
+  + `runtime/rs/src/<m>.rs`). Full Almide-source dispatch is Phase 3-2.2.
+- `almide fix` does not yet mechanically apply `let-in` / `head :: tail` /
+  operator-style rewrites — the try: snippets are shown but require manual
+  edits. Phase 3-1.2.
+- `llms.txt` is hand-written; not yet auto-generated from canonical docs
+  (SPEC / cheatsheet). Phase 3-3.2.
+
 ### Deferred (evidence-based)
 
 - `almide ide peek-def` / `find-refs`: dojo context doesn't exercise

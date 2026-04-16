@@ -157,6 +157,15 @@ enum Commands {
         #[command(subcommand)]
         cmd: IdeCommand,
     },
+    /// Apply mechanically-safe fixes to a file (auto-import; reports remaining
+    /// try: snippets for manual application).
+    Fix {
+        /// Source file (default: src/main.almd)
+        file: Option<String>,
+        /// Show what would change without modifying the file
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Emit source code or AST
     #[command(hide = true)]
     Emit {
@@ -529,6 +538,10 @@ fn dispatch(cli: Cli) {
             } else {
                 cli::cmd_check(&file, deny_warnings);
             }
+        }
+        Commands::Fix { file, dry_run } => {
+            let file = resolve_file(file);
+            cli::cmd_fix(&file, dry_run);
         }
         Commands::Explain { code } => {
             print_error_explanation(&code);
