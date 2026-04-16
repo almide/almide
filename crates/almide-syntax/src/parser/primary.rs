@@ -295,13 +295,32 @@ impl Parser {
         let cond = self.parse_expr()?;
         self.skip_newlines();
         // Detect `while cond do ... done` (Pascal/Ruby). Almide uses `{ ... }`.
+        // Match `do` whether on the same line as `cond` or the next line —
+        // LLMs write both forms. Dojo data on binary-search / matrix-ops
+        // fails frequently on this pattern, and the right fix is usually
+        // recursion, not a mutable `while` loop (pure fn).
         if self.check(TokenType::Ident) && self.current().value == "do" {
             let tok = self.current().clone();
             let diag = self.diag_error(
                 "`while ... do ... done` is Pascal/Ruby syntax",
-                "Almide uses `while cond { ... }` (curly braces, no `do`/`done`). Pure code: prefer recursion or `list.fold`.",
+                "Almide uses `while cond { ... }` (curly braces). But `while` requires a `var` accumulator — pure/effect fns usually want recursion instead.",
                 "while body",
-            ).with_try("while cond {\n    // body\n}");
+            ).with_try(
+                "// Option A — recursion (preferred in pure fn):\n\
+                 fn loop(i: Int, acc: T) -> T =\n\
+                   if !cond(i) then acc\n\
+                   else loop(i + 1, update(acc, i))\n\
+                 loop(0, initial)\n\
+                 \n\
+                 // Option B — Almide `while` (requires `var` mutation):\n\
+                 var i = 0\n\
+                 var acc = initial\n\
+                 while cond(i) {\n\
+                   acc = update(acc, i)\n\
+                   i = i + 1\n\
+                 }\n\
+                 acc"
+            );
             self.errors.push(diag);
             return Err(format!("`while ... do` is not valid in Almide at line {}:{}", tok.line, tok.col));
         }

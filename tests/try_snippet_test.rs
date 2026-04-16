@@ -298,6 +298,29 @@ fn sum(xs: List[Int]) -> Int =
 }
 
 #[test]
+fn while_do_done_emits_recursion_and_while_alternatives() {
+    // dojo binary-search / matrix-ops fail pattern: LLM writes
+    // `while cond do ... done` (Pascal / Ruby / OCaml loop form).
+    // The hint should offer BOTH recursion (pure-fn preferred) AND
+    // Almide's `while cond { }` (for `var` accumulators). Dojo data
+    // suggests recursion is the better default for these tasks.
+    let p = write_tmp("try_whiledo.almd", r#"
+fn run(n: Int) -> Int =
+  while n > 0 do
+    n = n - 1
+  done
+"#);
+    let (_, out) = check(&p);
+    assert!(out.contains("Pascal/Ruby syntax"),
+        "while-do detection missing:\n{}", out);
+    // Must mention BOTH paths so LLM retry can pick.
+    assert!(out.contains("Option A") && out.contains("recursion"),
+        "recursion option missing:\n{}", out);
+    assert!(out.contains("Option B") && out.contains("var i = 0"),
+        "while-var option missing:\n{}", out);
+}
+
+#[test]
 fn misplaced_test_keyword_emits_harness_hint() {
     // dojo custom-linked-list fail mode: LLM writes its own `test "..." {}`
     // block, and either (a) it's in a context that doesn't accept one, or

@@ -56,6 +56,12 @@ Every entry below attaches a `try:` block with copy-pasteable code:
 - **Rest/cons patterns**: `[head, ...tail]` / `[h, ..t]` / `head :: tail`
   emit a targeted hint pointing to `list.first` / `list.drop` recursion —
   the only idiomatic shape in Almide.
+- **`while cond do ... done`** (Pascal/Ruby/OCaml loop form) detection
+  now emits a richer `try:` snippet offering BOTH the recursion form
+  (preferred for pure/effect fn) AND the Almide `while cond { ... }`
+  form (for `var` accumulators). Motivated by dojo binary-search /
+  matrix-ops fails where `do ... done` was consistently the first
+  attempt, and the recursion form wins on retry.
 
 ### Added — tooling
 
