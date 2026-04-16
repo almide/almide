@@ -94,9 +94,10 @@ Every entry below attaches a `try:` block with copy-pasteable code:
 ### Added — Phase 3 MVP
 
 - **`almide fix <file> [--dry-run]`** — applies `auto_imports` (adds missing
-  `import json` / `import fs` / etc) and reports any remaining diagnostics
-  that carry `try:` snippets as manual-fix pointers. Foundation for future
-  mechanical rewrites (`let-in`, cons pattern, etc).
+  `import json` / `import fs` / etc), removes OCaml-style `let x = expr in
+  <body>` keywords (the body stays), and reports any remaining diagnostics
+  that carry `try:` snippets as manual-fix pointers. Cons-pattern and
+  operator-form rewrites are still manual.
 - **`list.binary_search(List[Int], Int) -> Option[Int]`** — sorted-list
   binary search. Dojo binary-search task was previously a 70b fail; this
   reduces it to an API call.
