@@ -180,6 +180,43 @@ Real drifts found & fixed on first run:
   code number is out-of-sequence and a renumber candidate for a
   future release.
 
+### Added — bundled-Almide stdlib dispatch (infrastructure)
+
+`stdlib/<module>.almd` files can now extend TOML-backed stdlib modules with
+new fns written in Almide. Previously this silently failed: the codegen
+emitted `almide_rt_<m>_<f>` for every `module.func` call, so a bundled
+`fn binary_search_v2` ended up calling a non-existent runtime function.
+
+The fix is four-layer:
+
+1. **Frontend resolve** (`src/main.rs`) lowers bundled stdlib modules to
+   IR even when `is_stdlib_module(name) == true`. TOML-only stdlib still
+   short-circuits.
+2. **TOML duplicate prune** (`src/main.rs`) drops bundled fns whose name
+   collides with the TOML runtime — those go through the rt_ path,
+   bundled-only fns survive.
+3. **IR verify** (`almide-ir`) skips bundled stdlib modules in
+   `known_module_functions`, so calls to TOML fns from bundled bodies
+   (e.g. `result.collect` calling `list.is_empty`) don't error as
+   "unknown function".
+4. **Codegen dispatch** (`pass_stdlib_lowering`) builds a per-pass
+   registry of bundled-only `(module, func)` pairs; for those, the
+   `Module → almide_rt_*` rewrite is suppressed and the call stays as a
+   `Module` call so the walker emits a normal user-fn invocation.
+
+The pre-existing bundled `option`/`result` `.almd` sources turned out to
+be cosmetic — the TOML runtime always wins for fns of the same name.
+That is preserved (see `roadmap/active/option-result-bundled-cleanup.md`
+for the cleanup plan).
+
+`stdlib/list.almd` ships with one smoke fn (`bundled_probe`) covered by
+`spec/stdlib/list_bundled_test.almd` as a regression guard. Real
+bundled-Almide stdlib fns will be added in follow-up commits.
+
+No MSR delta expected (infrastructure only); downstream work
+(`diagnostic-snippet-externalization`, auto-rewrite rules in Almide) is
+unblocked.
+
 ### Internal refactors (no behavior change, no MSR effect)
 
 - **`almide fix` keyword-removal rules** consolidated into a single

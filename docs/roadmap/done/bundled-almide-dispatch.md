@@ -1,4 +1,5 @@
 <!-- description: Let stdlib/<module>.almd extend TOML modules (codegen dispatch fix) -->
+<!-- done: 2026-04-16 -->
 # Bundled-Almide Dispatch for Stdlib Modules
 
 Motivation: dojo run #10 proved `almide fix` retry-loop integration is a
@@ -165,3 +166,53 @@ diagnostic); downstream work that depends on it will move the needle.
 Now (elevated priority per dojo run #10 recommendation: "`almide fix`
 が劇的に効いたので、auto-rewrite rules を Almide で書けるようにする
 価値が確定"). Block on: user approval of option 3 vs alternative.
+
+## Resolution (2026-04-16)
+
+Implemented in `llm-first-phase2`. The realised design diverged from the
+spec in two material ways — both came out of the implementation
+investigation:
+
+1. **option 3 (IR `FunctionSource` tag) was NOT taken.** Pre-scanning
+   `program.modules` for `is_bundled_module(m.name)` at
+   `pass_stdlib_lowering` entry achieves the same self-describing
+   property with a smaller diff (no IR struct change, no per-fn lowering
+   tag plumbing). Stored in a `thread_local!` cell scoped to the pass
+   run. Revisit option 3 if a second consumer (other passes, other
+   targets) needs the same lookup.
+
+2. **The spec mis-characterised the option/result baseline.** The
+   investigation said option/result bundled fns "work today because the
+   frontend resolution for Tier-1 modules follows a different path than
+   Tier-2 / TOML stdlib." Re-checking with this fix in place:
+   option/result `.almd` sources were **never used**. The TOML runtime
+   has a same-named fn for every entry, and `src/main.rs:338` skipped
+   bundled lowering entirely when `is_stdlib_module(name) == true`. So
+   the bundled `.almd` parsed (via the AUTO_IMPORT_BUNDLED loader) but
+   was discarded before lowering. The TOML+`almide_rt_*` path always
+   won. See `roadmap/active/option-result-bundled-cleanup.md`.
+
+### Surfaced gaps not in the original spec
+
+- **Verifier** (`almide-ir::verify`) treats `known_module_functions` as
+  authoritative. Lowering bundled list to IR caused
+  `result.collect`'s call to `list.is_empty` to fail verify (TOML fn
+  invisible to verifier). Fix: skip bundled stdlib modules entirely in
+  the registry.
+- **TOML duplicate prune required.** Bundled `.almd` and TOML defs both
+  declare e.g. `option.map`. Lowering both produces two
+  `almide_rt_option_map` definitions. The `src/main.rs` lowering loop
+  prunes IR fns whose name overlaps `module_functions(name)` from the
+  generated stdlib_sigs.
+
+### Files touched
+
+- `crates/almide-types/src/stdlib_info.rs` — `list` ∈ BUNDLED + AUTO_IMPORT
+- `crates/almide-frontend/src/stdlib.rs` — `get_bundled_source("list")`
+- `stdlib/list.almd` — smoke fn
+- `src/main.rs` — bundled lowering pass-through + TOML prune
+- `crates/almide-ir/src/verify.rs` — bundled module skip
+- `crates/almide-codegen/src/pass_stdlib_lowering.rs` — `BUNDLED_FNS`
+- `spec/stdlib/list_bundled_test.almd` — regression guard
+
+### Estimated 3-4h, actual ~3h.
