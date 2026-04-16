@@ -9,6 +9,28 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
+## [0.14.7-phase3.2] — Unreleased (develop branch)
+
+Continuation of the Phase 3 "Ideal Form Migration" arc. This `-phase3.2`
+milestone scope: step S3 (`emit_stub_call → ICE`).
+
+### S3 — WASM `emit_stub_call*` panics at compile time
+
+`emit_stub_call_named` and `emit_stub_call` no longer drop arguments and
+emit a runtime `unreachable` instruction. They now `panic!()` with a
+`[ICE]` prefix — reaching either at WASM emission time means a
+`module.func` call survived `pass_resolve_calls` without a TOML or
+bundled IR target, which is a compiler bug to fix at the resolver, not a
+runtime trap to debug.
+
+The `ALMIDE_WASM_STUB_PANIC` / `ALMIDE_WASM_STUB_VERBOSE` /
+`ALMIDE_WASM_STUB_TRACE` env vars are removed; v0.14.6's
+stub-panic sweep already proved spec/ + nn never reach the stub.
+
+This completes Phase 1c of the codegen-ideal-form roadmap. Phase 1b
+(rewriting `CallTarget::Module` to canonical resolved symbols in
+`pass_resolve_calls`) remains open.
+
 ## [0.14.7-phase3.1] — Unreleased (develop branch)
 
 Phase 3 "Ideal Form Migration" arc begins. See
