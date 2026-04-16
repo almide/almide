@@ -169,6 +169,15 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Check canonical docs (llms.txt, etc.) against source-of-truth inputs
+    /// (Cargo version, diagnostic code inventory, stdlib auto-import list).
+    /// Fails CI when drift is detected.
+    #[command(name = "docs-gen")]
+    DocsGen {
+        /// Verify mode: exit 1 if any drift is found, 0 otherwise.
+        #[arg(long)]
+        check: bool,
+    },
     /// Emit source code or AST
     #[command(hide = true)]
     Emit {
@@ -545,6 +554,9 @@ fn dispatch(cli: Cli) {
         Commands::Fix { file, dry_run, json } => {
             let file = resolve_file(file);
             cli::cmd_fix(&file, dry_run, json);
+        }
+        Commands::DocsGen { check } => {
+            cli::cmd_docs_gen(check);
         }
         Commands::Explain { code } => {
             print_error_explanation(&code);

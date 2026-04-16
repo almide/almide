@@ -9,6 +9,7 @@ mod commands;
 mod selfupdate;
 mod ide;
 mod fix;
+mod docs_gen;
 
 pub use run::{cmd_run, cmd_run_inner};
 pub use build::cmd_build;
@@ -19,6 +20,7 @@ pub use commands::{cmd_init, cmd_test, cmd_test_json, cmd_test_wasm, cmd_test_ts
 pub use selfupdate::cmd_self_update;
 pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};
 pub use fix::cmd_fix;
+pub use docs_gen::cmd_docs_gen;
 
 use std::hash::{Hash, Hasher};
 

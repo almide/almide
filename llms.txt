@@ -153,7 +153,10 @@ let root_i = float.to_int(root_f)    // truncating
 | E006 | Pure fn calls effect fn | Mark the caller `effect fn` |
 | E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
 | E009 | Reassign immutable | `let` → `var` |
-| E010-E013 | Less common | Run `almide explain E0XX` |
+| E010 | Non-exhaustive match | Add the missing arm(s) or `_ => ...` |
+| E011 | Mutable var mutated inside closure in pure fn | Refactor with `list.fold` / `list.count` / etc, or mark fn `effect fn` |
+| E012 | Duplicate definition (fn / test) | Rename one side |
+| E013 | Field access on non-record / missing field | Check spelling; non-records don't have method syntax (see E002) |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates
 an Almide codegen bug, not a user error — report at the issues URL.

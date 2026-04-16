@@ -149,6 +149,29 @@ Every entry below attaches a `try:` block with copy-pasteable code:
 - `llms.txt` is hand-written; not yet auto-generated from canonical docs
   (SPEC / cheatsheet). Phase 3-3.2.
 
+### Added — `almide docs-gen --check` (doc-drift guard)
+
+A consistency check that verifies `llms.txt` tracks its canonical
+sources. MVP covers three axes:
+
+- **Version**: `Cargo.toml` version string must appear in `llms.txt`.
+- **Diagnostic codes**: every `EXXX` file under `docs/diagnostics/`
+  must be referenced by name in `llms.txt`.
+- **Auto-imported stdlib**: every module in
+  `almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED` must be mentioned
+  in `llms.txt`'s "Fast facts".
+
+Exits 1 with a bulleted drift report on failure. `cargo test`
+integration test `docs_gen_check_passes_on_clean_checkout` makes
+every PR that changes a source-of-truth but forgets `llms.txt` fail CI.
+
+Full generation (not just drift-check) is scoped in
+`docs/roadmap/active/llms-txt-autogen.md`.
+
+Found a real drift on first run: the previous `E010-E013` range row
+in `llms.txt` didn't actually contain `E011` / `E012` as substrings.
+Now fully expanded.
+
 ### Internal refactors (no behavior change, no MSR effect)
 
 - **`almide fix` keyword-removal rules** consolidated into a single
