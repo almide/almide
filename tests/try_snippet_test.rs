@@ -260,3 +260,29 @@ fn main() -> Bool = {
     assert!(out.contains("Did you mean `string.chars + list.all`"), "hint missing\n{}", out);
     assert!(!out.contains("try:"), "try: must be suppressed for free-text alias\n{}", out);
 }
+
+#[test]
+fn misplaced_test_keyword_emits_harness_hint() {
+    // dojo custom-linked-list fail mode: LLM writes its own `test "..." {}`
+    // block, and either (a) it's in a context that doesn't accept one, or
+    // (b) a prior decl is unclosed, so the parser hits `test` mid-parse.
+    // The hint must mention both causes so the LLM retry can diagnose.
+    let p = write_tmp("try_test_cascade.almd", r#"
+type MyList = {
+    head: Int,
+    tail: Int
+}
+
+fn make() -> MyList = MyList { head: 1, tail: 2
+
+test "mine" {
+    make()
+}
+"#);
+    let (ok, out) = check(&p);
+    assert!(!ok);
+    assert!(out.contains("top-level form"),
+        "test-cascade hint missing:\n{}", out);
+    assert!(out.contains("harness-submitted code"),
+        "harness hint missing:\n{}", out);
+}
