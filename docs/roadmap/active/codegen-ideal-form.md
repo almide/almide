@@ -107,6 +107,45 @@ Postcondition: `CallTarget::Module` / bare `CallTarget::Named` は全て `Resolv
 
 これが達成できれば、今回の `is_unresolved_structural()` vs `has_deep_unresolved()` vs `is_unresolved()` の地獄が解消する。
 
+**残 gap (v0.14.7 時点、21 件 on WASM `ALMIDE_CHECK_IR=1` audit)**:
+
+`ALMIDE_CHECK_IR=1` で spec/ を WASM 走らせると 15-21 件が audit 違反で panic。内訳:
+
+| pattern | 例 | 件数 |
+|---|---|---|
+| empty list/collection literal の element 型逆推論失敗 | `fn fan.map empty list: List[Unknown]` / `fn empty for: List[Unknown]` | 10+ |
+| Codec auto-derive の empty field | `fn decode_container: List[Unknown]` / `fn derive Codec: empty list field` | 3-4 |
+| Result/Option ok/some() で inner 型未決 | `fn safe_div: Result[Unknown, String]` / `fn validate_age` | 2-3 |
+| OpenRecord → concrete record 解決未 | `fn chain_b__Unknown: OpenRecord { name: String }` | 1 |
+| 深い generic context | `fn is_balanced: Option[List[Unknown]]` | 1 |
+| Event/Tuple empty payload | `fn extract_click_positions: List[Tuple[Unknown, Unknown]]` | 1 |
+
+default (no env var) では WASM emit 側の defensive fallback
+(`resolve_list_elem` の 4 段 fallback、`Unknown` → i32 assumption) が
+吸収するので 203/206 pass。潜在 risk: empty list が i32 element
+alloc されて後から i64 要素 push で layout 不整合、等。spec test に
+該当 pattern が無いだけで user code で踏み得る。
+
+**Fix の分解 (0.14.8 以降の sub-phase 候補)**:
+
+- (a) Empty literal の consumer 逆推論: `fn f(xs: List[Int]) = f([])`
+  で `[]: List[Int]` を引き当てる。checker 拡張、半日〜1日
+- (b) `ok(x)` / `some(x)` wrapper の inner 型推論: wrapper の引数型
+  を wrapper の expected ret_ty から逆引き。半日
+- (c) Codec auto-derive の empty field: `derive.rs` で empty list
+  field の element type を default に固定。1-2時間
+- (d) OpenRecord → concrete resolve: checker の open → closed 解決
+  path 整理。数日
+- (e) Event/Tuple empty payload: variant constructor の payload
+  types を variant sig から伝播。半日
+
+(a) + (b) + (c) で 17/21 、(d) + (e) で残 4。total 1 週間 scope。
+
+**当面のスタンス**: default では無害なので release blocker ではない。
+dojo measurement で user code に顕在化するパターンが出たら priority
+上げて潰す。stdlib-declarative-unification arc の合間に進めるのが
+自然 (両者とも WASM emit の精度向上という共通方向)。
+
 ### 5. VarTable の責務明確化
 
 **現状**:
