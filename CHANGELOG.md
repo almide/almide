@@ -99,6 +99,15 @@ Every entry below attaches a `try:` block with copy-pasteable code:
 
 ### Added — Phase 3 MVP
 
+- **`almide ide doc`** accepts `@stdlib/<module>.<fn>` prefix as an alias for
+  `<module>.<fn>`, for ergonomic symmetry with `almide ide outline @stdlib/<module>`.
+- **`almide fix` exit code**: returns 0 when the file is clean after
+  auto-fixes, 1 when `manual_pending` is non-empty. Harnesses can gate
+  retry on the exit code without parsing output.
+- **Diagnostic explain docs enriched** (`docs/diagnostics/E001.md`
+  through `E005.md`, `E009.md`): each now includes the actual `try:`
+  snippet shape the compiler emits, conversion tables for common type
+  mismatches, and cross-references to `llms.txt` / `CHEATSHEET.md`.
 - **`almide fix <file> [--dry-run] [--json]`** — applies `auto_imports`
   (adds missing `import json` / `import fs` / etc), removes OCaml-style
   `let x = expr in <body>` keywords (the body stays), rewrites

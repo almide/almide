@@ -79,6 +79,22 @@ fn stdlib_json_schema_shape() {
 }
 
 #[test]
+fn ide_doc_accepts_stdlib_prefix() {
+    // ergonomic symmetry with `outline @stdlib/<m>`: `doc @stdlib/<m>.<fn>`
+    // works exactly like `doc <m>.<fn>`.
+    let bare = Command::new(almide())
+        .args(["ide", "doc", "string.to_upper", "--file", "spec/lang/default_args_test.almd"])
+        .output()
+        .unwrap();
+    let prefixed = Command::new(almide())
+        .args(["ide", "doc", "@stdlib/string.to_upper", "--file", "spec/lang/default_args_test.almd"])
+        .output()
+        .unwrap();
+    assert_eq!(bare.stdout, prefixed.stdout, "prefix should be transparent");
+    assert!(String::from_utf8_lossy(&bare.stdout).contains("string.to_upper"));
+}
+
+#[test]
 fn stdlib_snapshot_default_modules() {
     let output = Command::new(almide())
         .args(["ide", "stdlib-snapshot"])

@@ -194,6 +194,16 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
         }
         eprintln!("\nRun `almide check {}` for the full text of each `try:` snippet.", file);
     }
+
+    // Exit code contract for harness integration:
+    //   0 — file is clean (or was made clean by auto-fixes; no manual work left)
+    //   1 — manual fixes still pending (harness should forward diagnostics to LLM retry)
+    // Write errors elsewhere already exit(1); here we only signal the
+    // "post-fix clean / dirty" bit. --dry-run never exits dirty so preview
+    // invocations don't surprise callers that pipe them.
+    if !dry_run && !manual.is_empty() {
+        std::process::exit(1);
+    }
 }
 
 /// Map `<module>.<func>` → operator symbol for comparison-style calls LLMs

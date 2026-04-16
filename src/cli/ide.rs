@@ -115,10 +115,16 @@ pub fn cmd_ide_outline(target: &str, filter: Option<&str>, json: bool) {
 
 /// Show signature + doc for one symbol.
 /// Handles:
-///   `module.fn`  — stdlib lookup
-///   `bare_name`  — user fn/type in the supplied `file`
+///   `module.fn`              — stdlib lookup (e.g. `string.to_upper`)
+///   `@stdlib/module.fn`      — same, with explicit prefix for symmetry
+///                              with `almide ide outline @stdlib/<module>`
+///   `bare_name`              — user fn/type in the supplied `file`
 pub fn cmd_ide_doc(symbol: &str, file: &str) {
-    if let Some((module, fname)) = symbol.split_once('.') {
+    // Strip the `@stdlib/` prefix for ergonomic symmetry with `outline`.
+    // `almide ide doc @stdlib/string.to_upper` and `almide ide doc
+    // string.to_upper` now behave identically.
+    let resolved = symbol.strip_prefix(STDLIB_PREFIX).unwrap_or(symbol);
+    if let Some((module, fname)) = resolved.split_once('.') {
         if let Some(sig) = almide::stdlib::lookup_sig(module, fname) {
             let params = sig.params.iter()
                 .map(|(n, t)| format!("{}: {}", n.as_str(), t.display()))

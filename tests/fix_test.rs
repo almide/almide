@@ -161,6 +161,24 @@ fn add(a: Int, b: Int) -> Int = a + b
 }
 
 #[test]
+fn fix_exit_code_signals_manual_pending() {
+    // Harness contract: exit 0 when the file is clean after auto-fixes,
+    // exit 1 when manual work remains. Dry-run never exits dirty.
+    let clean = write_tmp("fix_exit_clean.almd", "fn add(a: Int, b: Int) -> Int = a + b\n");
+    let out = Command::new(almide()).args(["fix", &clean]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "clean file should exit 0");
+
+    // This file has an E001 Unit-leak that `almide fix` doesn't auto-apply.
+    let dirty = write_tmp("fix_exit_dirty.almd", "fn f() -> Int = { let x = 1 }\n");
+    let out = Command::new(almide()).args(["fix", &dirty]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "manual-pending file should exit 1");
+
+    // Dry-run on dirty stays at 0.
+    let out = Command::new(almide()).args(["fix", &dirty, "--dry-run"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "--dry-run never exits dirty");
+}
+
+#[test]
 fn fix_rewrites_let_in_to_newline_chain() {
     // dojo 70b sum-digits pattern: OCaml-style `let x = expr\n  in <body>`.
     // After `almide fix`, the `in` keyword is gone and the body parses
