@@ -595,6 +595,7 @@ fn reconcile_binop(op: BinOp, lt: &Ty, rt: &Ty) -> Option<BinOp> {
 /// legitimately have unresolved types.
 fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
     struct Auditor {
+        location: String,
         remaining: usize,
         samples: Vec<String>,
     }
@@ -610,9 +611,10 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
                 );
                 if !skip {
                     self.remaining += 1;
-                    if self.samples.len() < 3 {
-                        self.samples.push(format!("{:?} ty={:?}",
-                            std::mem::discriminant(&expr.kind), expr.ty));
+                    if self.samples.len() < 5 {
+                        self.samples.push(format!("[{}] {:?} ty={:?}",
+                            self.location,
+                            kind_name(&expr.kind), expr.ty));
                     }
                 }
             }
@@ -622,14 +624,56 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
             walk_stmt(self, stmt);
         }
     }
-    let mut a = Auditor { remaining: 0, samples: Vec::new() };
-    for f in &program.functions { a.visit_expr(&f.body); }
+    fn kind_name(k: &IrExprKind) -> &'static str {
+        match k {
+            IrExprKind::LitInt { .. } => "LitInt",
+            IrExprKind::LitFloat { .. } => "LitFloat",
+            IrExprKind::LitStr { .. } => "LitStr",
+            IrExprKind::LitBool { .. } => "LitBool",
+            IrExprKind::Unit => "Unit",
+            IrExprKind::Var { .. } => "Var",
+            IrExprKind::FnRef { .. } => "FnRef",
+            IrExprKind::BinOp { .. } => "BinOp",
+            IrExprKind::UnOp { .. } => "UnOp",
+            IrExprKind::If { .. } => "If",
+            IrExprKind::Match { .. } => "Match",
+            IrExprKind::Block { .. } => "Block",
+            IrExprKind::Fan { .. } => "Fan",
+            IrExprKind::ForIn { .. } => "ForIn",
+            IrExprKind::While { .. } => "While",
+            IrExprKind::Call { .. } => "Call",
+            IrExprKind::TailCall { .. } => "TailCall",
+            IrExprKind::List { .. } => "List",
+            IrExprKind::MapLiteral { .. } => "MapLiteral",
+            IrExprKind::Record { .. } => "Record",
+            IrExprKind::SpreadRecord { .. } => "SpreadRecord",
+            IrExprKind::Tuple { .. } => "Tuple",
+            IrExprKind::Range { .. } => "Range",
+            IrExprKind::Member { .. } => "Member",
+            IrExprKind::TupleIndex { .. } => "TupleIndex",
+            IrExprKind::IndexAccess { .. } => "IndexAccess",
+            IrExprKind::MapAccess { .. } => "MapAccess",
+            IrExprKind::Lambda { .. } => "Lambda",
+            IrExprKind::ClosureCreate { .. } => "ClosureCreate",
+            IrExprKind::EnvLoad { .. } => "EnvLoad",
+            _ => "(other)",
+        }
+    }
+    let mut a = Auditor { location: String::new(), remaining: 0, samples: Vec::new() };
+    for f in &program.functions {
+        a.location = format!("fn {}", f.name);
+        a.visit_expr(&f.body);
+    }
     for m in &program.modules {
-        for f in &m.functions { a.visit_expr(&f.body); }
+        let mname = m.name.to_string();
+        for f in &m.functions {
+            a.location = format!("{}::{}", mname, f.name);
+            a.visit_expr(&f.body);
+        }
     }
     if a.remaining > 0 {
-        vec![format!("[ConcretizeTypes] {} expressions remain with unresolved types. Samples: {:?}",
-            a.remaining, a.samples)]
+        vec![format!("[ConcretizeTypes] {} expressions remain with unresolved types. Samples: {}",
+            a.remaining, a.samples.join(" | "))]
     } else {
         Vec::new()
     }

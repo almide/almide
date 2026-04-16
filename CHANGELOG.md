@@ -9,6 +9,39 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
+## [0.14.7-phase3.4] — Unreleased (develop branch)
+
+Step B of the Phase 3 arc (lifted-lambda / unused-generic TypeVar
+residue close).
+
+### B — Mono prune always runs; ConcretizeTypes audit is more locatable
+
+`monomorphize_module_fns` previously early-returned when no generic
+specialization was discovered. The post-loop prune (drop generic
+source fns from every IR module) was therefore skipped in the very
+case where it matters most: a program that imports a bundled stdlib
+module but never calls any of its generic fns. The unused generic
+source survived to codegen, carried `TypeVar(T)` in its body, and
+tripped the new `ConcretizeTypes` audit on the WASM target. Fix: the
+prune now always runs; only the rewrite loop (which has nothing to
+do when `rename` is empty) is conditionally skipped.
+
+`audit_remaining_unresolved` (the `Custom` postcondition) now reports
+each violating expression's enclosing fn name + a short `kind` label
+instead of opaque `Discriminant(NN)` numbers, so the source of the
+remaining residue is immediately visible in the
+`[POSTCONDITION VIOLATION]` line.
+
+### Status of `ALMIDE_CHECK_IR=1` on WASM target
+
+After B: spec/ on WASM with `ALMIDE_CHECK_IR=1` is **191/206 passing,
+15 skipped**. The remaining 15 are independent type-inference gaps
+(empty-list `Applied(List, [Unknown])`, OpenRecord propagation,
+codec-derived list fields, generic chain-b argument, etc.) that
+predate this arc and are tracked in `codegen-ideal-form.md §#4`.
+Default behavior (no `ALMIDE_CHECK_IR`) is unchanged — both targets
+pass spec/ as before.
+
 ## [0.14.7-phase3.3] — Unreleased (develop branch)
 
 Continuation of the Phase 3 "Ideal Form Migration" arc. This `-phase3.3`
