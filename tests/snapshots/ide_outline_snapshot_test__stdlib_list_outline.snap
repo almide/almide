@@ -4,6 +4,7 @@ expression: "run_outline(&[\"@stdlib/list\"])"
 ---
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
+fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]
 fn list.chunk[A](xs: List[A], n: Int) -> List[List[A]]
 fn list.clear[A](xs: List[A]) -> Unit
 fn list.contains[A](xs: List[A], x: A) -> Bool

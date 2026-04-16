@@ -34,6 +34,7 @@ fn string.repeat(s: String, n: Int) -> String
 fn string.replace(s: String, from: String, to: String) -> String
 fn string.replace_first(s: String, from: String, to: String) -> String
 fn string.reverse(s: String) -> String
+fn string.run_length_encode(s: String) -> List[(String, Int)]
 fn string.slice(s: String, start: Int, end: Int) -> String
 fn string.split(s: String, sep: String) -> List[String]
 fn string.starts_with(s: String, prefix: String) -> Bool
@@ -51,6 +52,7 @@ fn string.trim_start(s: String) -> String
 # @stdlib/list
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
+fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]
 fn list.chunk[A](xs: List[A], n: Int) -> List[List[A]]
 fn list.clear[A](xs: List[A]) -> Unit
 fn list.contains[A](xs: List[A], x: A) -> Bool

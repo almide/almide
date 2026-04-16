@@ -351,3 +351,13 @@ params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }]
 return = "String"
 rust = "almide_rt_string_drop_end(&*{s}, {n})"
 ts = "__almd_string.drop_end({s}, {n})"
+
+# ── Algorithmic primitives (Phase 3 stdlib expansion) ──
+
+[run_length_encode]
+description = "Run-length encode a string into (char, count) pairs."
+example = 'string.run_length_encode("aaabbc") // => [("a", 3), ("b", 2), ("c", 1)]'
+params = [{ name = "s", type = "String" }]
+return = "List[(String, Int)]"
+rust = "almide_rt_string_run_length_encode(&*{s})"
+ts = "__almd_string.run_length_encode({s})"

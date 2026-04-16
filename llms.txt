@@ -1,0 +1,202 @@
+# Almide
+
+> The programming language LLMs can write most accurately. Pure-Rust
+> compiler, `.almd` source files, dual-target codegen (Rust, WASM).
+> Every design decision serves one metric: **modification survival rate**
+> on the [almide-dojo](https://github.com/almide/almide-dojo) MSR benchmark.
+
+If you are an LLM writing Almide code, read this file first. It is
+concise on purpose. Follow the link map for depth.
+
+## Fast facts
+
+- Extension: `.almd`. Stdlib modules `string`, `int`, `float`, `list`,
+  `map`, `set`, `option`, `result`, `value`, `env` are auto-imported.
+  `json`, `fs`, `http`, `regex`, `datetime`, `bytes`, `matrix`, `process`,
+  `testing`, `random`, `io` need explicit `import`.
+- Null is spelled `Option[T]`. Errors are spelled `Result[T, E]`. No
+  `null`, no `throw`, no exceptions.
+- Effectful functions are written `effect fn f() -> T`. Pure functions
+  cannot call effect functions (checked, emits E006).
+- Generics use `[T]` (not `<T>`). Variants use leading `|`.
+- `match` is exhaustive; missing arms emit a warning.
+- Multiple lets chain by newline (no `in`). No `let rec`, no `head :: tail`
+  cons, no `[a, ...rest]` spread in list patterns.
+
+## Link map
+
+| Topic | File |
+|---|---|
+| Syntax + stdlib idioms cheatsheet | [docs/CHEATSHEET.md](docs/CHEATSHEET.md) |
+| Design philosophy (ambiguity removal) | [docs/DESIGN.md](docs/DESIGN.md) |
+| Full language spec | [docs/SPEC.md](docs/SPEC.md) |
+| Grammar | [docs/GRAMMAR.md](docs/GRAMMAR.md) |
+| Stdlib spec per module | [docs/specs/](docs/specs/) |
+| Module system (import, sub-modules, diamonds) | [docs/specs/module-system.md](docs/specs/module-system.md) |
+| Package system (deps, MVS, versions) | [docs/specs/package-system.md](docs/specs/package-system.md) |
+| Error-code reference | [docs/diagnostics/](docs/diagnostics/) (run `almide explain E001`) |
+| Patterns that are rejected on purpose | [docs/REJECTED_PATTERNS.md](docs/REJECTED_PATTERNS.md) |
+| Recent changes | [CHANGELOG.md](CHANGELOG.md) |
+
+## CLI
+
+```
+almide check <file>          # type-check only
+almide run <file>            # compile + execute
+almide build <file> -o app   # build binary (default: Rust target)
+almide build <file> --target wasm
+almide test [pattern]        # run tests (*.almd with `test { }` blocks)
+almide fmt <file>            # format
+almide compile [module]      # emit .almdi module interface
+almide explain E001          # expand a diagnostic code
+almide ide outline <file>                 # one-line-per-decl summary
+almide ide outline @stdlib/string         # stdlib API listing
+almide ide doc string.to_upper            # signature + doc for a symbol
+almide ide stdlib-snapshot [--json]       # concatenated stdlib outlines for
+                                          # SYSTEM_PROMPT injection (~3.5K tokens)
+```
+
+## Core idioms
+
+### Prefer match over if-chains
+
+```almide
+// ✗
+if kind == "int" then "i64"
+else if kind == "float" then "f64"
+else "unknown"
+
+// ✓
+match kind {
+  "int"   => "i64",
+  "float" => "f64",
+  _       => "unknown",
+}
+```
+
+### Prefer list combinators over `var + for`
+
+```almide
+// ✗
+var result: List[String] = []
+for item in items { result = result + [transform(item)] }
+result
+
+// ✓
+items |> list.map(transform)
+```
+
+### Recursion for stateful loops (no head :: tail)
+
+```almide
+fn skip_ws(s: String, p: Int) -> Int =
+  if p < string.len(s) and is_ws(peek(s, p)) then skip_ws(s, p + 1)
+  else p
+```
+
+For head/tail on lists, use `list.first` / `list.drop(xs, 1)`:
+
+```almide
+match xs {
+  [] => base,
+  _  => {
+    let h = list.first(xs)!
+    let t = list.drop(xs, 1)
+    // ...
+  },
+}
+```
+
+### Effect fn with `guard else err(...)`
+
+```almide
+effect fn open_file(path: String) -> Result[String, String] = {
+  guard fs.is_file(path) else err("not a file: ${path}")
+  fs.read_text(path)!
+}
+```
+
+### `??` / `?` / `!`
+
+```almide
+option.get(v, key) ?? default        // Option fallback
+result.get(v, key)?                  // Result → Option (inside a fn returning Option)
+parse_int(s)!                        // unwrap a Result, propagate err (effect fn only)
+```
+
+### Operators, not comparison functions
+
+Almide uses operators for comparison and equality. There is no
+`int.gt`, `int.lt`, `int.eq`, etc. Use `>`, `<`, `==`, `!=`, `>=`, `<=`.
+Equality (`==` / `!=`) works on any type.
+
+### sqrt, abs, etc.
+
+`int.sqrt` does not exist. Convert, sqrt, optionally convert back:
+
+```almide
+let root_f = float.sqrt(int.to_float(n))
+let root_i = float.to_int(root_f)    // truncating
+```
+
+`int.abs`, `float.abs` do exist.
+
+## Diagnostic codes LLMs hit most (retry anchors)
+
+| Code | Meaning | Usual fix (from `try:` snippet) |
+|---|---|---|
+| E001 | Type mismatch | Often Unit-leak: add a trailing expression, or rebind via `let new_x = if cond then … else …` |
+| E002 | Undefined function | Often a cross-language idiom (`length` → `len`, `push` → `+ [x]`). Check `almide ide outline @stdlib/<m>` |
+| E003 | Undefined variable | Missing explicit `import json` / `import fs` / etc |
+| E004 | Arg count mismatch | Signature placeholder in try: shows `<name: Type>` |
+| E005 | Arg type mismatch | Often needs explicit conversion (`int.to_string(n)` etc) |
+| E006 | Pure fn calls effect fn | Mark the caller `effect fn` |
+| E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
+| E009 | Reassign immutable | `let` → `var` |
+| E010-E013 | Less common | Run `almide explain E0XX` |
+
+A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates
+an Almide codegen bug, not a user error — report at the issues URL.
+
+## Project layout
+
+```
+mypkg/
+  almide.toml          # [package] name = "mypkg"
+  src/
+    main.almd          # entry: `import self.<sibling>`
+    classifier.almd    # sibling module
+```
+
+Sibling import is `import self.classifier` — no file paths.
+
+## What Almide is NOT
+
+- Not Haskell/ML — no `let rec`, no `let … in`, no type classes (protocols exist but have explicit `impl`), no HKTs.
+- Not Rust — no lifetimes, no borrow checker surface syntax, no `unsafe`, no traits-as-data-attributes.
+- Not JS/Python — no dynamic typing, no `null`, no exceptions, no method-call syntax (`x.foo()` on non-UDTs).
+
+Cross-language idioms that compile in other languages and break here:
+`let x = … in body` (OCaml), `head :: tail` (Haskell), `[a, ...rest]`
+(JS/Rust), `int.gt(a, b)` (Go-ish), `x.toUpperCase()` (JS method chain).
+Diagnostics for each carry a `try:` snippet that shows the Almide form.
+
+## For agents and harnesses
+
+- Start by calling `almide ide stdlib-snapshot` once and embedding the
+  result in your SYSTEM_PROMPT. It is the authoritative inventory
+  (~3.5K tokens text, ~14K JSON).
+- On compile error, read the `hint:` and `try:` sections of the
+  diagnostic — they are designed to be copy-pasteable.
+- Do not write `test "…" { }` blocks in harness-submitted code unless
+  the harness explicitly asks for them; this is the top parser cascade
+  cause.
+
+## Meta
+
+- License: MIT or Apache-2.0 (see LICENSE files).
+- Repo: <https://github.com/almide/almide>
+- Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
+- Current branch for Phase 2 tooling work: `llm-first-phase2`.
+- Baseline → 0.14.6-phase2 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
+  Sonnet 4.6 30/30 (100%) validates design.
