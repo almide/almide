@@ -53,6 +53,32 @@ fn inline_rust_spec(module: Sym, func: Sym) -> Option<InlineRustSpec> {
     INLINE_RUST.with(|s| s.borrow().get(&(module, func)).cloned())
 }
 
+/// Strip owning / borrowing / cloning decorations from an
+/// `@inline_rust` arg before it lands in an `InlineRust` node.
+///
+/// Upstream passes (`CloneInsertionPass`, `BorrowInsertionPass`, ...)
+/// wrap args in `Clone` / `Borrow` / `ToVec` / `RcWrap` / `BoxNew`
+/// based on the callee signature. But the `@inline_rust` template is
+/// authoritative for Rust-level reference semantics — when the user
+/// writes `&mut {b}`, they mean the VARIABLE `b`, not a clone.
+/// Passing `b.clone()` into the template produces `&mut b.clone()`
+/// which operates on a disposable temp and silently loses the
+/// mutation.
+///
+/// Stripping one layer of these wrappers aligns the rendered arg with
+/// the template's stated intent. Users who actually want a clone
+/// should spell it out (`.clone()`) inside the template string.
+fn strip_arg_decorations(expr: IrExpr) -> IrExpr {
+    match expr.kind {
+        IrExprKind::Clone { expr: inner } => *inner,
+        IrExprKind::Borrow { expr: inner, .. } => *inner,
+        IrExprKind::ToVec { expr: inner } => *inner,
+        IrExprKind::RcWrap { expr: inner, .. } => *inner,
+        IrExprKind::BoxNew { expr: inner } => *inner,
+        _ => expr,
+    }
+}
+
 /// Extract the `@inline_rust("...")` template from an IrFunction's
 /// attrs, if present. Returns None if the attribute is missing or
 /// malformed (no string first-arg).
@@ -255,7 +281,10 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             // InlineRust IR node with the template + param-keyed args.
             // Bundled wins over the legacy TOML/arg_transforms path.
             if let Some(spec) = inline_rust_spec(module, func) {
-                let rewritten_args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
+                let rewritten_args: Vec<IrExpr> = args.into_iter()
+                    .map(|a| rewrite_expr(a))
+                    .map(strip_arg_decorations)
+                    .collect();
                 // Pair each rewritten arg with the matching param name.
                 // Extra positional args (shouldn't happen post-checker)
                 // fall off silently; missing trailing args leave their

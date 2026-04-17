@@ -19,7 +19,7 @@ pub const STDLIB_MODULES: &[&str] = &[
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
 pub const BUNDLED_MODULES: &[&str] = &[
-    "args", "path", "list", "int", "base64", "hex", "float",
+    "args", "path", "list", "int", "base64", "hex", "float", "bytes",
     "int8", "int16", "int32",
     "uint8", "uint16", "uint32", "uint64",
     "float32",
@@ -77,6 +77,7 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "base64" => Some(include_str!("../../../stdlib/base64.almd")),
         "hex" => Some(include_str!("../../../stdlib/hex.almd")),
         "float" => Some(include_str!("../../../stdlib/float.almd")),
+        "bytes" => Some(include_str!("../../../stdlib/bytes.almd")),
         "int8" => Some(include_str!("../../../stdlib/int8.almd")),
         "int16" => Some(include_str!("../../../stdlib/int16.almd")),
         "int32" => Some(include_str!("../../../stdlib/int32.almd")),
