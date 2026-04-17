@@ -142,6 +142,9 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
         IrExprKind::RustMacro { args, .. } => {
             for a in args { v.visit_expr(a); }
         }
+        IrExprKind::InlineRust { args, .. } => {
+            for (_, a) in args { v.visit_expr(a); }
+        }
         IrExprKind::IterChain { source, steps, collector, .. } => {
             v.visit_expr(source);
             for step in steps {

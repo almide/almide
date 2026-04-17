@@ -1,0 +1,18 @@
+// int — bundled-Almide stdlib module (Stage 1 of stdlib declarative unification).
+//
+// Each fn here declares its signature in pure Almide and routes the Rust
+// codegen to the existing runtime via `@inline_rust(template)`. The template
+// is substituted at every call site by `StdlibLoweringPass`; `{param_name}`
+// placeholders are replaced with the rendered Rust expression for that arg.
+//
+// What this buys today: one place (this file) to see int.to_string's
+// signature + Rust dispatch. The corresponding `stdlib/defs/int.toml`
+// entry is still present but dormant — bundled wins at dispatch time.
+//
+// What this does NOT buy yet: WASM dispatch (still goes through
+// `calls_int.rs`), pure-Almide fallback bodies for targets without a
+// matching intrinsic, and auto-migration of the remaining int fns. Those
+// land in sub-phases 2–4 of the arc.
+
+@inline_rust("almide_rt_int_to_string({n})")
+fn to_string(n: Int) -> String = _

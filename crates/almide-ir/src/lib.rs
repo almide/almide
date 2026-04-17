@@ -315,6 +315,25 @@ pub enum IrExprKind {
     /// Walker outputs this verbatim — no further processing.
     RenderedCall { code: String },
 
+    /// Rust-target inline template dispatch, produced by
+    /// `StdlibLoweringPass` when a call target's IrFunction carries
+    /// an `@inline_rust("...")` attribute. The walker renders each
+    /// `args` element to its Rust source form, substitutes `{name}`
+    /// placeholders in `template` with the rendered string, and emits
+    /// the result verbatim.
+    ///
+    /// Unlike `RenderedCall`, the args are NOT pre-rendered at pass
+    /// time: they ride the IR through later passes (clone insertion,
+    /// borrow insertion, ...) and get rendered at the final walker
+    /// step.
+    InlineRust {
+        template: String,
+        /// Pairs of `(param_name, arg_expr)`. The order matches the
+        /// original call's positional argument order; `param_name` is
+        /// used for placeholder substitution in `template`.
+        args: Vec<(Sym, IrExpr)>,
+    },
+
     // ── Closure Conversion (inserted by ClosureConversionPass, WASM target) ──
     /// Create a closure object: lifted function + captured environment.
     ClosureCreate {
@@ -504,6 +523,9 @@ impl IrExpr {
             },
             IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
                 name, args: args.into_iter().map(|a| f(a)).collect(),
+            },
+            IrExprKind::InlineRust { template, args } => IrExprKind::InlineRust {
+                template, args: args.into_iter().map(|(n, a)| (n, f(a))).collect(),
             },
 
             // ── Strings ──
@@ -733,6 +755,13 @@ pub struct IrFunction {
     pub extern_attrs: Vec<almide_lang::ast::ExternAttr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub export_attrs: Vec<almide_lang::ast::ExportAttr>,
+    /// Generic `@name(args)` attributes on the source fn. Preserved
+    /// verbatim from AST for downstream passes (Stdlib Unification:
+    /// `@inline_rust`, `@wasm_intrinsic`, `@pure`, `@schedule`,
+    /// `@rewrite`). `@extern` / `@export` still live in their typed
+    /// vecs above and are NOT duplicated here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attrs: Vec<almide_lang::ast::Attribute>,
     #[serde(default = "default_ir_visibility")]
     pub visibility: IrVisibility,
     /// Doc comment from source (`///` lines).

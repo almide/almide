@@ -52,6 +52,7 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
         "args" => Some(include_str!("../../../stdlib/args.almd")),
         "path" => Some(include_str!("../../../stdlib/path.almd")),
         "list" => Some(include_str!("../../../stdlib/list.almd")),
+        "int" => Some(include_str!("../../../stdlib/int.almd")),
         _ => None,
     }
 }

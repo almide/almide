@@ -104,6 +104,18 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         repr_c: ctx.repr_c,
     };
 
+    // Stdlib Unification Stage 1: fns declared with `@inline_rust(...)`
+    // are dispatch-only. Their body is never emitted as a Rust fn;
+    // the template is inlined at each call site by
+    // `pass_stdlib_lowering`. Skipping emission here also avoids
+    // duplicate-definition clashes with the TOML-backed runtime fn
+    // (`almide_rt_<m>_<f>`) that the template refers to.
+    if matches!(ctx.target, Target::Rust)
+        && func.attrs.iter().any(|a| a.name.as_str() == "inline_rust")
+    {
+        return String::new();
+    }
+
     // Extern fn: emit import/use via template (rs) or extern "C" block (c)
     if !func.extern_attrs.is_empty() {
         let target_str = match ctx.target {

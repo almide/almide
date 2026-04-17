@@ -248,20 +248,28 @@ Grammar:
 - Argument values: `"string"`, `42`, `0xff`, `-1`, `true`, `false`, or
   a bare identifier (treated as a symbolic tag, not a value reference)
 
-Two attribute names have semantic meaning today:
+Attribute names with semantic meaning today:
 
 - `@extern(target, "module", "function")` — FFI binding for the target
   runtime. See [§11 of module-system.md](./module-system.md#11-extern).
 - `@export(c, "symbol")` — export with C ABI. Paired with
   `--repr-c` output (see module-system §10).
+- `@inline_rust("template")` — **bundled stdlib only**. Routes the
+  Rust target's codegen for the annotated fn to an inline template,
+  overriding the TOML-backed `arg_transforms` dispatch. `{param_name}`
+  placeholders are replaced with the rendered Rust expression for the
+  matching call argument. The fn's body is not emitted as a Rust
+  function; the template is inlined at every call site. Used by
+  `stdlib/<module>.almd` files during the Stdlib Declarative
+  Unification arc. テスト: `spec/stdlib/int_bundled_inline_rust_test.almd`.
 
-All other attribute names parse without error and are preserved in the
-AST, but carry no semantic behavior yet. They are reserved for the
-Stdlib Declarative Unification and MLIR Backend arcs (see
-`docs/roadmap/active/stdlib-declarative-unification.md` and
-`docs/roadmap/active/mlir-backend-adoption.md`). Writing
-`@inline_rust(...)` or `@schedule(...)` in user code today is legal
-syntax but the compiler ignores it.
+Other attribute names (`@pure`, `@schedule`, `@rewrite`,
+`@wasm_intrinsic`) parse without error and are preserved in the AST,
+but carry no semantic behavior yet. They are reserved for later
+sub-phases of the Stdlib Declarative Unification and MLIR Backend
+arcs (see `docs/roadmap/active/stdlib-declarative-unification.md` and
+`docs/roadmap/active/mlir-backend-adoption.md`). Writing them in user
+code today is legal syntax but the compiler ignores them.
 
 テスト: `crates/almide-syntax/src/parser/test_attributes.rs` (13
 parse tests), `crates/almide-tools/src/fmt.rs::attr_tests` (6 format

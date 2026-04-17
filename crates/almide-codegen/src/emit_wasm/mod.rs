@@ -945,6 +945,17 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             if func.is_test {
                 continue;
             }
+            // Stdlib Unification Stage 1: `@inline_rust` / `@wasm_intrinsic`
+            // bundled fns are dispatch-only declarations. On the WASM
+            // target, the call dispatch still goes through
+            // `calls_<module>.rs` (TOML-backed intrinsics); the bundled
+            // fn's body (typically `_` / Hole) is never needed and would
+            // fail to compile. Skip registration + emission.
+            if func.attrs.iter().any(|a|
+                matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"))
+            {
+                continue;
+            }
             let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");
             // Test functions use __test_ prefix so they don't collide with
             // identically-named user functions (e.g. fn broadcast_add + test "broadcast_add").

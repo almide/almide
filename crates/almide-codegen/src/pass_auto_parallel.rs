@@ -261,7 +261,7 @@ fn is_pure_expr(
         IrExprKind::FnRef { .. } => true,
 
         // Macro invocations and rendered calls: assume impure (conservative)
-        IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
+        IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. } => false,
 
         // Loops in a lambda body: could mutate, be conservative
         IrExprKind::ForIn { .. } | IrExprKind::While { .. } => false,
@@ -516,6 +516,10 @@ fn rewrite_expr(
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name,
             args: args.into_iter().map(|a| rewrite_expr(a, effect_fns, mutable_vars)).collect(),
+        },
+        IrExprKind::InlineRust { template, args } => IrExprKind::InlineRust {
+            template,
+            args: args.into_iter().map(|(n, a)| (n, rewrite_expr(a, effect_fns, mutable_vars))).collect(),
         },
         other => other,
     };

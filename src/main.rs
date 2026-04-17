@@ -360,15 +360,35 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
             let mut mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-            // For bundled stdlib modules, drop fns whose name overlaps with the
-            // TOML-backed runtime: those callers go through the generated
-            // almide_rt_<m>_<f> dispatch, and emitting the bundled body would
-            // produce a duplicate definition. Bundled-only fns survive — those
-            // are what extend the module.
+            // For bundled stdlib modules, the default behavior is: drop fns
+            // whose name overlaps with the TOML-backed runtime. Those callers
+            // go through the generated almide_rt_<m>_<f> dispatch and
+            // emitting the bundled body would produce a duplicate definition.
+            //
+            // Exception (Stdlib Declarative Unification Stage 1): bundled fns
+            // carrying `@inline_rust(...)` or `@wasm_intrinsic(...)` override
+            // the TOML dispatch. Their bodies are never emitted (the Rust
+            // walker / WASM emitter both skip them), but their *attributes*
+            // are consumed by `StdlibLoweringPass` to rewrite call sites into
+            // an `IrExprKind::InlineRust` template. So we must retain the
+            // IrFunction in the bundled module or the attribute lookup has
+            // nothing to find.
             if almide::stdlib::is_bundled_module(name) {
                 let toml_funcs: std::collections::HashSet<&'static str> =
                     almide::stdlib::module_functions(name).into_iter().collect();
-                mod_ir_module.functions.retain(|f| !toml_funcs.contains(f.name.as_str()));
+                mod_ir_module.functions.retain(|f| {
+                    if !toml_funcs.contains(f.name.as_str()) {
+                        // Bundled-only: keep (extends the module).
+                        return true;
+                    }
+                    // TOML has the same name: keep iff bundled declares a
+                    // codegen-override attribute that supersedes the TOML
+                    // path.
+                    f.attrs.iter().any(|a| matches!(
+                        a.name.as_str(),
+                        "inline_rust" | "wasm_intrinsic"
+                    ))
+                });
             }
             let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
             checker.env.import_table = saved_table;

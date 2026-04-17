@@ -209,7 +209,7 @@ fn convert_expr(
                 name: func_name, params: func_params, ret_ty,
                 body: final_body,
                 is_effect: false, is_async: false, is_test: false,
-                generics: None, extern_attrs: vec![], export_attrs: vec![],
+                generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
                 visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             });
 
