@@ -68,3 +68,34 @@ fn is_nan(n: Float) -> Bool = _
 
 @inline_rust("({n}).is_infinite()")
 fn is_infinite(n: Float) -> Bool = _
+
+// ── Sized type conversions (Stage 3) ──
+@inline_rust("({n}) as i8")
+fn to_int8(n: Float) -> Int8 = _
+
+@inline_rust("({n}) as i16")
+fn to_int16(n: Float) -> Int16 = _
+
+@inline_rust("({n}) as i32")
+fn to_int32(n: Float) -> Int32 = _
+
+@inline_rust("({n}) as u8")
+fn to_uint8(n: Float) -> UInt8 = _
+
+@inline_rust("({n}) as u16")
+fn to_uint16(n: Float) -> UInt16 = _
+
+@inline_rust("({n}) as u32")
+fn to_uint32(n: Float) -> UInt32 = _
+
+@inline_rust("({n}) as u64")
+fn to_uint64(n: Float) -> UInt64 = _
+
+@inline_rust("({n}) as f32")
+fn to_float32(n: Float) -> Float32 = _
+
+@inline_rust("({n}) as i64")
+fn to_int64(n: Float) -> Int64 = _
+
+@inline_rust("({n}) as f64")
+fn to_float64(n: Float) -> Float64 = _

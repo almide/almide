@@ -132,10 +132,20 @@ fn int.parse(s: String) -> Result[Int, String]
 fn int.rotate_left(a: Int, n: Int, bits: Int) -> Int
 fn int.rotate_right(a: Int, n: Int, bits: Int) -> Int
 fn int.to_float(n: Int) -> Float
+fn int.to_float32(n: Int) -> Float32
+fn int.to_float64(n: Int) -> Float
 fn int.to_hex(n: Int) -> String
+fn int.to_int16(n: Int) -> Int16
+fn int.to_int32(n: Int) -> Int32
+fn int.to_int64(n: Int) -> Int
+fn int.to_int8(n: Int) -> Int8
 fn int.to_string(n: Int) -> String
 fn int.to_u32(a: Int) -> Int
 fn int.to_u8(a: Int) -> Int
+fn int.to_uint16(n: Int) -> UInt16
+fn int.to_uint32(n: Int) -> UInt32
+fn int.to_uint64(n: Int) -> UInt64
+fn int.to_uint8(n: Int) -> UInt8
 fn int.wrap_add(a: Int, b: Int, bits: Int) -> Int
 fn int.wrap_mul(a: Int, b: Int, bits: Int) -> Int
 

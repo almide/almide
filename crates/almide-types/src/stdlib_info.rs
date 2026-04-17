@@ -8,17 +8,34 @@ pub const STDLIB_MODULES: &[&str] = &[
     "json", "http", "process", "math", "random", "regex", "io", "result",
     "option", "error", "datetime", "testing", "value", "set",
     "base64", "hex",
+    // Sized numeric types (Stage 3 of the sized-numeric-types arc).
+    // Each hosts UFCS conversion methods (`.to_int64()`,
+    // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
+    // so users never need `import int32`.
+    "int8", "int16", "int32",
+    "uint8", "uint16", "uint32", "uint64",
+    "float32",
 ];
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
-pub const BUNDLED_MODULES: &[&str] = &["args", "path", "list", "int", "base64", "hex", "float"];
+pub const BUNDLED_MODULES: &[&str] = &[
+    "args", "path", "list", "int", "base64", "hex", "float",
+    "int8", "int16", "int32",
+    "uint8", "uint16", "uint32", "uint64",
+    "float32",
+];
 
 /// Bundled modules that should be auto-imported (Tier 1 behavior).
 /// Tier-1 stdlib modules with no bundled-Almide content (option, result, etc.)
 /// are auto-imported via the hardcoded list in
 /// `almide-frontend::import_table::ImportTable::new`; this list is for
 /// bundled `.almd` modules that need resolve-time loading.
-pub const AUTO_IMPORT_BUNDLED: &[&str] = &["list", "int", "float"];
+pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
+    "list", "int", "float",
+    "int8", "int16", "int32",
+    "uint8", "uint16", "uint32", "uint64",
+    "float32",
+];
 
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -60,6 +77,14 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "base64" => Some(include_str!("../../../stdlib/base64.almd")),
         "hex" => Some(include_str!("../../../stdlib/hex.almd")),
         "float" => Some(include_str!("../../../stdlib/float.almd")),
+        "int8" => Some(include_str!("../../../stdlib/int8.almd")),
+        "int16" => Some(include_str!("../../../stdlib/int16.almd")),
+        "int32" => Some(include_str!("../../../stdlib/int32.almd")),
+        "uint8" => Some(include_str!("../../../stdlib/uint8.almd")),
+        "uint16" => Some(include_str!("../../../stdlib/uint16.almd")),
+        "uint32" => Some(include_str!("../../../stdlib/uint32.almd")),
+        "uint64" => Some(include_str!("../../../stdlib/uint64.almd")),
+        "float32" => Some(include_str!("../../../stdlib/float32.almd")),
         _ => None,
     }
 }
@@ -180,6 +205,19 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── ambiguous: math + float ──
         "sign" => vec!["math", "float"],
+
+        // ── sized numeric conversion methods (Stage 3) ──
+        // Every sized int / float provides these UFCS methods. The
+        // concrete module (int32, uint8, float32, ...) is picked by
+        // the receiver's type at codegen (`resolve_module_from_ty`).
+        "to_int8" | "to_int16" | "to_int32" | "to_int64"
+        | "to_uint8" | "to_uint16" | "to_uint32" | "to_uint64"
+        | "to_float32" | "to_float64" => vec![
+            "int", "float",
+            "int8", "int16", "int32",
+            "uint8", "uint16", "uint32", "uint64",
+            "float32",
+        ],
 
         _ => vec![],
     }

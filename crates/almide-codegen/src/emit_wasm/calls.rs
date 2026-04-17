@@ -6,6 +6,51 @@ use wasm_encoder::ValType;
 
 use super::FuncCompiler;
 use super::values;
+
+/// Signed / unsigned / float kind for sized numeric WASM conversion
+/// dispatch. See `emit_sized_conv_call`.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum SizedKind { Int, UInt, Float }
+
+/// Map a sized numeric `Ty` to its module name (`int32`, `uint8`, ...).
+/// Mirrors `resolve_module_from_ty` / `builtin_module_for_type` so the
+/// WASM dispatcher can route a `CallTarget::Method` on a sized
+/// receiver into the same module dispatch path as `CallTarget::Module`.
+fn sized_ty_module(ty: &Ty) -> Option<&'static str> {
+    Some(match ty {
+        Ty::Int => "int",
+        Ty::Float => "float",
+        Ty::Int8 => "int8",
+        Ty::Int16 => "int16",
+        Ty::Int32 => "int32",
+        Ty::UInt8 => "uint8",
+        Ty::UInt16 => "uint16",
+        Ty::UInt32 => "uint32",
+        Ty::UInt64 => "uint64",
+        Ty::Float32 => "float32",
+        _ => return None,
+    })
+}
+
+/// Parse a sized-type module name into (kind, bit-width). Accepts the
+/// canonical `int` / `float` (treated as 64-bit) plus every sized
+/// variant. Returns `None` for anything else so the dispatcher falls
+/// through to legacy TOML / bundled routing.
+fn sized_type_info(name: &str) -> Option<(SizedKind, u32)> {
+    Some(match name {
+        "int" | "int64" => (SizedKind::Int, 64),
+        "int32" => (SizedKind::Int, 32),
+        "int16" => (SizedKind::Int, 16),
+        "int8" => (SizedKind::Int, 8),
+        "uint64" => (SizedKind::UInt, 64),
+        "uint32" => (SizedKind::UInt, 32),
+        "uint16" => (SizedKind::UInt, 16),
+        "uint8" => (SizedKind::UInt, 8),
+        "float" | "float64" => (SizedKind::Float, 64),
+        "float32" => (SizedKind::Float, 32),
+        _ => return None,
+    })
+}
 use super::wasm_macro::wasm;
 
 impl FuncCompiler<'_> {
@@ -294,6 +339,24 @@ impl FuncCompiler<'_> {
             }
 
             CallTarget::Module { module, func } => {
+                // Sized numeric conversion modules (`int8`, ..., `uint64`,
+                // `float32`) live in bundled `.almd` + `@inline_rust` only.
+                // On WASM they surface as `CallTarget::Module` here and get
+                // lowered to the matching WASM conversion instruction
+                // (`i64.extend_i32_s`, `f32.convert_i64_u`, ...) by
+                // `emit_sized_conv_call`. The canonical `int` / `float`
+                // modules also host `.to_intN()` / `.to_floatN()` methods
+                // via the same path, so we consult this dispatcher before
+                // their TOML-driven `emit_int_call` / `emit_float_call`.
+                if matches!(
+                    module.as_str(),
+                    "int" | "float" | "int8" | "int16" | "int32"
+                        | "uint8" | "uint16" | "uint32" | "uint64" | "float32"
+                ) {
+                    if self.emit_sized_conv_call(module.as_str(), func.as_str(), args) {
+                        return;
+                    }
+                }
                 match (module.as_str(), func.as_str()) {
                     _ if module == "int" => {
                         if !self.emit_int_call(func, args) {
@@ -632,6 +695,27 @@ impl FuncCompiler<'_> {
                             self.emit_ufcs_fallback(object, method, args);
                         }
                     }
+                    // Sized numeric UFCS conversion on `Ty::Int` / `Ty::Float`
+                    // (e.g. `n.to_int32()` where `n: Int`). Must precede the
+                    // generic `Ty::Int` / `Ty::Float` dispatch below because
+                    // those arms route through `emit_int_call` /
+                    // `emit_float_call` which don't know about sized
+                    // conversion templates.
+                    _ if matches!(&object.ty, Ty::Int | Ty::Float)
+                        && {
+                            let m = method.split('.').last().unwrap_or(method);
+                            m.starts_with("to_int") || m.starts_with("to_uint") || m.starts_with("to_float")
+                        }
+                        => {
+                        let src_module = sized_ty_module(&object.ty).unwrap();
+                        let bare_method = method.split('.').last().unwrap_or(method);
+                        let fake_args = vec![(**object).clone()];
+                        let target = CallTarget::Module {
+                            module: almide_base::intern::sym(src_module),
+                            func: almide_base::intern::sym(bare_method),
+                        };
+                        self.emit_call(&target, &fake_args, _ret_ty);
+                    }
                     _ if matches!(&object.ty, Ty::Int) => {
                         let mut fake_args = vec![(**object).clone()];
                         fake_args.extend(args.iter().cloned());
@@ -663,6 +747,25 @@ impl FuncCompiler<'_> {
                         if !self.emit_map_call(m, &fake_args) {
                             self.emit_ufcs_fallback(object, method, args);
                         }
+                    }
+                    _ if sized_ty_module(&object.ty).is_some()
+                        && {
+                            let m = method.split('.').last().unwrap_or(method);
+                            m.starts_with("to_int") || m.starts_with("to_uint") || m.starts_with("to_float")
+                        }
+                        => {
+                        // Sized numeric UFCS conversion (Stage 3 of the
+                        // sized-numeric-types arc). Route through the
+                        // Module dispatcher so `emit_sized_conv_call`
+                        // picks the right WASM conversion instruction.
+                        let src_module = sized_ty_module(&object.ty).unwrap();
+                        let bare_method = method.split('.').last().unwrap_or(method);
+                        let fake_args = vec![(**object).clone()];
+                        let target = CallTarget::Module {
+                            module: almide_base::intern::sym(src_module),
+                            func: almide_base::intern::sym(bare_method),
+                        };
+                        self.emit_call(&target, &fake_args, _ret_ty);
                     }
                     _ => {
                         // Try to resolve as TypeName.method convention call
@@ -939,6 +1042,128 @@ impl FuncCompiler<'_> {
             wasm!(self.func, { drop; });
         }
         self.emit_stub_call(args);
+    }
+
+    /// Stage 3 of the sized-numeric-types arc: emit WASM conversion
+    /// instructions for the `to_intN` / `to_uintN` / `to_floatN`
+    /// UFCS methods on sized numeric modules. Returns `true` if the
+    /// (module, func) pair was handled.
+    ///
+    /// The scheme mirrors Rust's `as` semantics (wrapping on narrow
+    /// int downcasts, saturating trunc on float→int). WASM-native
+    /// opcodes cover every combination: `i32.wrap_i64`,
+    /// `i64.extend_i32_s/_u`, `f32.convert_i64_s/_u`,
+    /// `i32.trunc_sat_f64_s`, `f32.demote_f64`, `f64.promote_f32`,
+    /// and no-ops for same-width / same-kind conversions.
+    fn emit_sized_conv_call(&mut self, module: &str, func: &str, args: &[IrExpr]) -> bool {
+        use wasm_encoder::Instruction;
+        // All conversion fns take one positional arg (the source value).
+        if args.len() != 1 { return false; }
+        // Determine source / destination kind+width purely from names so
+        // this dispatcher is closed over the entire sized-type matrix
+        // regardless of which .almd module hosts the fn.
+        let src = sized_type_info(module);
+        let dst = func.strip_prefix("to_").and_then(sized_type_info);
+        let (Some((src_kind, src_bits)), Some((dst_kind, dst_bits))) = (src, dst) else {
+            return false;
+        };
+        // to_string is NOT handled here; its @inline_rust uses format!()
+        // which is Rust-only. On WASM we already have string dispatch via
+        // the respective int/float module, so fall through.
+        if func == "to_string" { return false; }
+
+        self.emit_expr(&args[0]);
+
+        let src_u = matches!(src_kind, SizedKind::UInt);
+        match (src_kind, dst_kind) {
+            (SizedKind::Int | SizedKind::UInt, SizedKind::Int | SizedKind::UInt) => {
+                // Integer → integer. WASM valtype buckets: narrow
+                // (<=32 bits) → i32; 64-bit → i64. Sign behavior at
+                // extend vs wrap:
+                //   src i32 bucket → dst i64 bucket: i64.extend_i32_s/_u
+                //   src i64 bucket → dst i32 bucket: i32.wrap_i64
+                //   same bucket: no-op for width ≥ dst; mask-to-width
+                //     for narrow dst so `256 as u8 == 0` matches Rust.
+                //
+                // Masking is applied on narrowing INTO any sized int
+                // less than 32 bits so the representation in the i32
+                // bucket is canonical (zero-extended for UInt, sign-
+                // extended for Int via extend_8_s / extend_16_s).
+                // This keeps subsequent `i64.extend_i32_{s,u}` correct.
+                let src_64 = src_bits == 64;
+                let dst_64 = dst_bits == 64;
+                if src_64 && !dst_64 {
+                    self.func.instruction(&Instruction::I32WrapI64);
+                } else if !src_64 && dst_64 {
+                    if src_u {
+                        self.func.instruction(&Instruction::I64ExtendI32U);
+                    } else {
+                        self.func.instruction(&Instruction::I64ExtendI32S);
+                    }
+                    // narrowing happens below when dst is <= 32 bits;
+                    // extend is only for reaching the i64 bucket.
+                }
+                // Normalize the narrow representation: UInt* zero-pads,
+                // Int* sign-extends from the stored width.
+                if dst_bits < 32 {
+                    let dst_u = matches!(dst_kind, SizedKind::UInt);
+                    if dst_u {
+                        let mask = ((1u64 << dst_bits) - 1) as i32;
+                        self.func.instruction(&Instruction::I32Const(mask));
+                        self.func.instruction(&Instruction::I32And);
+                    } else {
+                        let instr = if dst_bits == 8 { Instruction::I32Extend8S }
+                                    else { Instruction::I32Extend16S };
+                        self.func.instruction(&instr);
+                    }
+                }
+            }
+            (SizedKind::Int | SizedKind::UInt, SizedKind::Float) => {
+                let dst_f32 = dst_bits == 32;
+                let src_64 = src_bits == 64;
+                let instr = match (dst_f32, src_64, src_u) {
+                    (true, true, true) => Instruction::F32ConvertI64U,
+                    (true, true, false) => Instruction::F32ConvertI64S,
+                    (true, false, true) => Instruction::F32ConvertI32U,
+                    (true, false, false) => Instruction::F32ConvertI32S,
+                    (false, true, true) => Instruction::F64ConvertI64U,
+                    (false, true, false) => Instruction::F64ConvertI64S,
+                    (false, false, true) => Instruction::F64ConvertI32U,
+                    (false, false, false) => Instruction::F64ConvertI32S,
+                };
+                self.func.instruction(&instr);
+            }
+            (SizedKind::Float, SizedKind::Int | SizedKind::UInt) => {
+                // Float → int. `_sat_` variants mirror Rust's `as`
+                // semantics: NaN → 0, overflow saturates to the
+                // target's min/max. The signed/unsigned variant is
+                // picked from the DESTINATION kind because that's what
+                // determines the integer encoding.
+                let src_f32 = src_bits == 32;
+                let dst_64 = dst_bits == 64;
+                let dst_u = matches!(dst_kind, SizedKind::UInt);
+                let instr = match (dst_64, src_f32, dst_u) {
+                    (true, true, true) => Instruction::I64TruncSatF32U,
+                    (true, true, false) => Instruction::I64TruncSatF32S,
+                    (true, false, true) => Instruction::I64TruncSatF64U,
+                    (true, false, false) => Instruction::I64TruncSatF64S,
+                    (false, true, true) => Instruction::I32TruncSatF32U,
+                    (false, true, false) => Instruction::I32TruncSatF32S,
+                    (false, false, true) => Instruction::I32TruncSatF64U,
+                    (false, false, false) => Instruction::I32TruncSatF64S,
+                };
+                self.func.instruction(&instr);
+            }
+            (SizedKind::Float, SizedKind::Float) => {
+                if src_bits == 64 && dst_bits == 32 {
+                    self.func.instruction(&Instruction::F32DemoteF64);
+                } else if src_bits == 32 && dst_bits == 64 {
+                    self.func.instruction(&Instruction::F64PromoteF32);
+                }
+                // Same-width float: no-op.
+            }
+        }
+        true
     }
 
     pub(super) fn emit_assert_eq(&mut self, left: &IrExpr, right: &IrExpr) {

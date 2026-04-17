@@ -528,6 +528,16 @@ fn resolve_module_from_ty(ty: &Ty, method: &str) -> Option<&'static str> {
         Ty::String => Some("string"),
         Ty::Int => Some("int"),
         Ty::Float => Some("float"),
+        // Sized numeric types (Stage 3 of the sized-numeric-types arc).
+        // Each hosts its own UFCS conversion / `.to_string()` module.
+        Ty::Int8 => Some("int8"),
+        Ty::Int16 => Some("int16"),
+        Ty::Int32 => Some("int32"),
+        Ty::UInt8 => Some("uint8"),
+        Ty::UInt16 => Some("uint16"),
+        Ty::UInt32 => Some("uint32"),
+        Ty::UInt64 => Some("uint64"),
+        Ty::Float32 => Some("float32"),
         Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
         Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
         _ => None,

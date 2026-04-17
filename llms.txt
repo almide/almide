@@ -12,6 +12,9 @@ concise on purpose. Follow the link map for depth.
 
 - Extension: `.almd`. Stdlib modules `string`, `int`, `float`, `list`,
   `map`, `set`, `option`, `result`, `value`, `env` are auto-imported.
+  Sized-numeric conversion modules (`int8`, `int16`, `int32`, `uint8`,
+  `uint16`, `uint32`, `uint64`, `float32`) are also auto-imported for
+  UFCS — e.g. `x.to_int64()` on `x: Int32` resolves to `int32.to_int64(x)`.
   `json`, `fs`, `http`, `regex`, `datetime`, `bytes`, `matrix`, `process`,
   `testing`, `random`, `io` need explicit `import`.
 - Null is spelled `Option[T]`. Errors are spelled `Result[T, E]`. No
