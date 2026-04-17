@@ -26,6 +26,12 @@ struct InlineRustSpec {
     /// Parameter names in order. Used to pair positional call args
     /// with their `{name}` placeholders in `template`.
     param_names: Vec<Sym>,
+    /// Per-param default value, if declared in the bundled source
+    /// (`fn slice(s: String, start: Int, end: Int = 9223372036854775807)`).
+    /// Used to fill positional args that the caller omitted — e.g.
+    /// `string.slice(s, 3)` binds `{end}` to the stored default so
+    /// the emitted template renders as a 3-arg runtime call.
+    defaults: Vec<Option<IrExpr>>,
 }
 
 thread_local! {
@@ -148,9 +154,56 @@ fn parse_bundled_inline_rust(module: &str) -> Vec<(Sym, InlineRustSpec)> {
             _ => continue,
         };
         let param_names = params.iter().map(|p| p.name).collect();
-        out.push((*name, InlineRustSpec { template, param_names }));
+        let defaults = params.iter()
+            .map(|p| p.default.as_deref().and_then(ast_expr_to_ir_literal))
+            .collect();
+        out.push((*name, InlineRustSpec { template, param_names, defaults }));
     }
     out
+}
+
+/// Convert an AST literal default-value expression to an `IrExpr`.
+///
+/// Scope: simple literals only (int / float / string / bool / `none`)
+/// — the cases that show up as bundled-stdlib default parameters.
+/// Anything else returns `None` and the default effectively doesn't
+/// exist from this fallback path's point of view; the IR-population
+/// path (which runs through the full lowering pipeline) still carries
+/// the complete `IrExpr`, so the fallback only matters for tooling
+/// that bypasses resolve/lower (codegen snapshot tests, ...).
+fn ast_expr_to_ir_literal(expr: &almide_lang::ast::Expr) -> Option<IrExpr> {
+    use almide_lang::ast::ExprKind;
+    match &expr.kind {
+        ExprKind::Int { value, .. } => {
+            let n = value.as_i64()?;
+            Some(IrExpr {
+                kind: IrExprKind::LitInt { value: n },
+                ty: Ty::Int,
+                span: None,
+            })
+        }
+        ExprKind::Float { value } => Some(IrExpr {
+            kind: IrExprKind::LitFloat { value: *value },
+            ty: Ty::Float,
+            span: None,
+        }),
+        ExprKind::String { value } => Some(IrExpr {
+            kind: IrExprKind::LitStr { value: value.clone() },
+            ty: Ty::String,
+            span: None,
+        }),
+        ExprKind::Bool { value } => Some(IrExpr {
+            kind: IrExprKind::LitBool { value: *value },
+            ty: Ty::Bool,
+            span: None,
+        }),
+        ExprKind::Ident { name } if name.as_str() == "none" => Some(IrExpr {
+            kind: IrExprKind::OptionNone,
+            ty: Ty::option(Ty::Unknown),
+            span: None,
+        }),
+        _ => None,
+    }
 }
 
 impl NanoPass for StdlibLoweringPass {
@@ -205,7 +258,10 @@ impl NanoPass for StdlibLoweringPass {
                 m.functions.iter().filter_map(move |f| {
                     find_inline_rust_template(f).map(|template| {
                         let param_names = f.params.iter().map(|p| p.name).collect();
-                        ((mname, f.name), InlineRustSpec { template, param_names })
+                        let defaults = f.params.iter()
+                            .map(|p| p.default.as_ref().map(|d| (**d).clone()))
+                            .collect();
+                        ((mname, f.name), InlineRustSpec { template, param_names, defaults })
                     })
                 })
             })
@@ -323,9 +379,27 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             // InlineRust IR node with the template + param-keyed args.
             // Bundled wins over the legacy TOML/arg_transforms path.
             if let Some(spec) = inline_rust_spec(module, func) {
-                let rewritten_args: Vec<IrExpr> = args.into_iter()
+                let mut rewritten_args: Vec<IrExpr> = args.into_iter()
                     .map(|a| rewrite_expr(a))
                     .collect();
+                // Fill trailing positional args from declared defaults.
+                // Bundled fns like `string.slice(s, start, end = <sentinel>)`
+                // let the caller omit `end`; without this the template
+                // would render with an unreplaced `{end}` placeholder.
+                // The IR-population path carries full `IrExpr` defaults
+                // from the lowered bundled module; the source-parse
+                // fallback only supports simple literals — anything
+                // else is `None` and leaves the arg unfilled (the same
+                // failure mode as before this carve-out).
+                if rewritten_args.len() < spec.param_names.len() {
+                    for default in spec.defaults.iter().skip(rewritten_args.len()) {
+                        if let Some(d) = default {
+                            rewritten_args.push(d.clone());
+                        } else {
+                            break;
+                        }
+                    }
+                }
                 // Pair each rewritten arg with the matching param name.
                 // Strip pre-inserted Clone / Borrow / ToVec / BoxNew /
                 // RcWrap wrappers ONLY when the template references
