@@ -326,6 +326,15 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         } else {
                             a
                         };
+                        // Stage 3: a literal Lambda arg to a bundled
+                        // stdlib fn needs the same clone-binding
+                        // treatment as the TOML path's `ArgTransform::
+                        // LambdaClone` — otherwise a captured var used
+                        // twice inside the lambda body produces a
+                        // move-after-move in the generated closure.
+                        // `prepare_lambda` is a no-op on non-Lambda
+                        // args, so this is safe for non-closure params.
+                        let a = prepare_lambda(a);
                         (*n, a)
                     })
                     .collect();
