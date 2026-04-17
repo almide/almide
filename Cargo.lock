@@ -67,6 +67,9 @@ dependencies = [
 name = "almide-egg-lab"
 version = "0.1.0"
 dependencies = [
+ "almide-base",
+ "almide-ir",
+ "almide-lang",
  "egg",
 ]
 
