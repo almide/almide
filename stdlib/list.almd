@@ -1,14 +1,216 @@
-// list — bundled-Almide extensions
-// Bundled stdlib module (written in Almide). TOML-backed list.* fns continue
-// to use the Rust runtime; new fns added here are dispatched through the
-// normal user-fn call path.
+// list — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 3c).
+//
+// Migrated mechanically from `stdlib/defs/list.toml` (60 fns). Closure-
+// bearing ops that `pass_stdlib_lowering::try_lower_to_iter_chain`
+// recognises (`map`, `filter`, `flat_map`, `filter_map`, `fold`, `find`,
+// `any`, `all`, `count`) are intercepted before the `@inline_rust`
+// dispatch fires — the Rust emitter produces a fused
+// `into_iter().<step>().<collect>()` chain, preserving zero-copy on
+// isolated calls. All other ops (non-closure, mutable, and the closure
+// ops not in the IterChain list) go through the declarative bundled
+// path.
+
+// ── basic accessors ──
+
+@inline_rust("almide_rt_list_len(&{xs})")
+fn len[A](xs: List[A]) -> Int = _
+
+@inline_rust("almide_rt_list_get(&{xs}, {i})")
+fn get[A](xs: List[A], i: Int) -> Option[A] = _
+
+@inline_rust("almide_rt_list_get_or(&{xs}, {i}, {default})")
+fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
+
+@inline_rust("almide_rt_list_set(&{xs}, {i}, {val})")
+fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
+
+@inline_rust("almide_rt_list_swap(&{xs}, {i}, {j})")
+fn swap[A](xs: List[A], i: Int, j: Int) -> List[A] = _
+
+@inline_rust("almide_rt_list_sort(&{xs})")
+fn sort[A](xs: List[A]) -> List[A] = _
+
+@inline_rust("almide_rt_list_reverse(&{xs})")
+fn reverse[A](xs: List[A]) -> List[A] = _
+
+@inline_rust("almide_rt_list_contains(&{xs}, &{x})")
+fn contains[A](xs: List[A], x: A) -> Bool = _
+
+@inline_rust("almide_rt_list_enumerate(({xs}).to_vec())")
+fn enumerate[A](xs: List[A]) -> List[(Int, A)] = _
+
+@inline_rust("almide_rt_list_zip(({xs}).to_vec(), ({ys}).to_vec())")
+fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
+
+@inline_rust("almide_rt_list_flatten(({xss}).to_vec())")
+fn flatten[T](xss: List[List[T]]) -> List[T] = _
+
+@inline_rust("almide_rt_list_take(({xs}).to_vec(), {n})")
+fn take[A](xs: List[A], n: Int) -> List[A] = _
+
+@inline_rust("almide_rt_list_drop(({xs}).to_vec(), {n})")
+fn drop[A](xs: List[A], n: Int) -> List[A] = _
+
+@inline_rust("almide_rt_list_unique(&{xs})")
+fn unique[A](xs: List[A]) -> List[A] = _
+
+@inline_rust("almide_rt_list_index_of(&{xs}, &{x})")
+fn index_of[A](xs: List[A], x: A) -> Option[Int] = _
+
+@inline_rust("almide_rt_list_last(&{xs})")
+fn last[A](xs: List[A]) -> Option[A] = _
+
+@inline_rust("almide_rt_list_chunk(&{xs}, {n})")
+fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
+
+@inline_rust("almide_rt_list_sum(&{xs})")
+fn sum(xs: List[Int]) -> Int = _
+
+@inline_rust("almide_rt_list_product(&{xs})")
+fn product(xs: List[Int]) -> Int = _
+
+@inline_rust("almide_rt_list_first(&{xs})")
+fn first[A](xs: List[A]) -> Option[A] = _
+
+@inline_rust("almide_rt_list_is_empty(&{xs})")
+fn is_empty[A](xs: List[A]) -> Bool = _
+
+@inline_rust("almide_rt_list_min(&{xs})")
+fn min[A](xs: List[A]) -> Option[A] = _
+
+@inline_rust("almide_rt_list_max(&{xs})")
+fn max[A](xs: List[A]) -> Option[A] = _
+
+@inline_rust("almide_rt_list_join(&{xs}, &*{sep})")
+fn join(xs: List[String], sep: String) -> String = _
+
+// ── closure-bearing (IterChain-handled: map, filter, find, any, all,
+//    count, flat_map, filter_map, fold — the `try_lower_to_iter_chain`
+//    intercept in `pass_stdlib_lowering` fires before the `@inline_rust`
+//    dispatch below and produces a fused iterator chain) ──
+
+@inline_rust("almide_rt_list_map(({xs}).to_vec(), {f})")
+fn map[A, B](xs: List[A], f: (A) -> B) -> List[B] = _
+
+@inline_rust("almide_rt_list_filter(({xs}).to_vec(), {f})")
+fn filter[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
+
+@inline_rust("almide_rt_list_find(({xs}).to_vec(), {f})")
+fn find[A](xs: List[A], f: (A) -> Bool) -> Option[A] = _
+
+@inline_rust("almide_rt_list_any(&{xs}, {f})")
+fn any[A](xs: List[A], f: (A) -> Bool) -> Bool = _
+
+@inline_rust("almide_rt_list_all(&{xs}, {f})")
+fn all[A](xs: List[A], f: (A) -> Bool) -> Bool = _
+
+@inline_rust("almide_rt_list_count(&{xs}, {f})")
+fn count[A](xs: List[A], f: (A) -> Bool) -> Int = _
+
+@inline_rust("almide_rt_list_flat_map(({xs}).to_vec(), {f})")
+fn flat_map[A, B](xs: List[A], f: (A) -> List[B]) -> List[B] = _
+
+@inline_rust("almide_rt_list_filter_map(({xs}).to_vec(), {f})")
+fn filter_map[A, B](xs: List[A], f: (A) -> Option[B]) -> List[B] = _
+
+@inline_rust("almide_rt_list_fold(({xs}).to_vec(), {init}, {f})")
+fn fold[A, B](xs: List[A], init: B, f: (B, A) -> B) -> B = _
+
+// ── closure-bearing (not IterChain-handled — direct runtime dispatch) ──
+
+@inline_rust("almide_rt_list_sort_by(({xs}).to_vec(), {f})")
+fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
+
+@inline_rust("almide_rt_list_take_while(({xs}).to_vec(), {f})")
+fn take_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
+
+@inline_rust("almide_rt_list_drop_while(({xs}).to_vec(), {f})")
+fn drop_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
+
+@inline_rust("almide_rt_list_partition(({xs}).to_vec(), {f})")
+fn partition[A](xs: List[A], f: (A) -> Bool) -> (List[A], List[A]) = _
+
+@inline_rust("almide_rt_list_reduce(({xs}).to_vec(), {f})")
+fn reduce[A](xs: List[A], f: (A, A) -> A) -> Option[A] = _
+
+@inline_rust("almide_rt_list_group_by(({xs}).to_vec(), {f})")
+fn group_by[A, B](xs: List[A], f: (A) -> B) -> Map[B, List[A]] = _
+
+@inline_rust("almide_rt_list_find_index(({xs}).to_vec(), {f})")
+fn find_index[A](xs: List[A], f: (A) -> Bool) -> Option[Int] = _
+
+@inline_rust("almide_rt_list_update(({xs}).to_vec(), {i}, {f})")
+fn update[A](xs: List[A], i: Int, f: (A) -> A) -> List[A] = _
+
+@inline_rust("almide_rt_list_scan(({xs}).to_vec(), {init}, {f})")
+fn scan[A, B](xs: List[A], init: B, f: (B, A) -> B) -> List[B] = _
+
+@inline_rust("almide_rt_list_zip_with(({xs}).to_vec(), ({ys}).to_vec(), {f})")
+fn zip_with[A, B, C](xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C] = _
+
+@inline_rust("almide_rt_list_unique_by(({xs}).to_vec(), {f})")
+fn unique_by[A, K](xs: List[A], f: (A) -> K) -> List[A] = _
+
+// ── non-closure constructors / slicing ──
+
+@inline_rust("almide_rt_list_range({start}, {end})")
+fn range(start: Int, end: Int) -> List[Int] = _
+
+@inline_rust("almide_rt_list_slice(({xs}).to_vec(), {start}, {end})")
+fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
+
+@inline_rust("almide_rt_list_insert(({xs}).to_vec(), {i}, {val})")
+fn insert[A](xs: List[A], i: Int, val: A) -> List[A] = _
+
+@inline_rust("almide_rt_list_remove_at(({xs}).to_vec(), {i})")
+fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
+
+@inline_rust("almide_rt_list_repeat({val}, {n})")
+fn repeat[A](val: A, n: Int) -> List[A] = _
+
+@inline_rust("almide_rt_list_intersperse(({xs}).to_vec(), {sep})")
+fn intersperse[A](xs: List[A], sep: A) -> List[A] = _
+
+@inline_rust("almide_rt_list_windows(&{xs}, {n})")
+fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
+
+@inline_rust("almide_rt_list_dedup(&{xs})")
+fn dedup[A](xs: List[A]) -> List[A] = _
+
+@inline_rust("almide_rt_list_take_end(({xs}).to_vec(), {n})")
+fn take_end[A](xs: List[A], n: Int) -> List[A] = _
+
+@inline_rust("almide_rt_list_drop_end(({xs}).to_vec(), {n})")
+fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
+
+@inline_rust("almide_rt_list_shuffle(({xs}).to_vec())")
+fn shuffle[A](xs: List[A]) -> List[A] = _
+
+@inline_rust("almide_rt_list_window(({xs}).to_vec(), {n})")
+fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
+
+@inline_rust("almide_rt_list_binary_search(&{xs}, {target})")
+fn binary_search(xs: List[Int], target: Int) -> Option[Int] = _
+
+// ── mutable (in-place) ──
+
+@inline_rust("almide_rt_list_push(&mut {xs}, {x})")
+fn push[A](xs: List[A], x: A) -> Unit = _
+
+@inline_rust("almide_rt_list_pop(&mut {xs})")
+fn pop[A](xs: List[A]) -> Option[A] = _
+
+@inline_rust("almide_rt_list_clear(&mut {xs})")
+fn clear[A](xs: List[A]) -> Unit = _
+
+// ── bundled-Almide extensions (non-TOML, pure Almide body) ──
 
 // Smoke fn: covered by spec/stdlib/list_bundled_test.almd as a regression
 // guard for the bundled-dispatch pipeline. Do not remove.
 fn bundled_probe(n: Int) -> Int = n + 1
 
 // Split a list at index `n`. Equivalent to `(list.take(xs, n), list.drop(xs, n))`.
-// Demonstrates bundled-Almide calling existing TOML stdlib fns.
+// Demonstrates bundled-Almide calling existing stdlib fns.
 fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) =
   (list.take(xs, n), list.drop(xs, n))
 
