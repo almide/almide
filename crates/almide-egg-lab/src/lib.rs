@@ -28,7 +28,7 @@
 use egg::*;
 
 pub mod bridge;
-pub use bridge::Bridge;
+pub use bridge::{Bridge, LowerError};
 
 define_language! {
     /// Minimal Almide IR fragment for fusion experiments.
