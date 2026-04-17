@@ -11,8 +11,29 @@ use crate::intern::Sym;
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Ty {
+    /// Canonical 64-bit signed integer. `Int64` in user source resolves to
+    /// this same variant so the two names are indistinguishable at the
+    /// type-checker layer (Sized Numeric Types arc Stage 1a).
     Int,
+    /// Canonical 64-bit IEEE-754 float. `Float64` resolves here.
     Float,
+    /// 8-bit signed integer. Rust `i8`; WASM `i32` with sign-aware ops.
+    Int8,
+    /// 16-bit signed integer. Rust `i16`.
+    Int16,
+    /// 32-bit signed integer. Rust `i32`.
+    Int32,
+    /// 8-bit unsigned integer. Rust `u8`.
+    UInt8,
+    /// 16-bit unsigned integer. Rust `u16`.
+    UInt16,
+    /// 32-bit unsigned integer. Rust `u32`.
+    UInt32,
+    /// 64-bit unsigned integer. Rust `u64`. Distinct from `Int` because
+    /// signedness changes wrapping / comparison semantics.
+    UInt64,
+    /// 32-bit IEEE-754 float. Rust `f32`.
+    Float32,
     String,
     Bool,
     Unit,
@@ -118,6 +139,14 @@ impl Ty {
         match self {
             Ty::Int => "Int".into(),
             Ty::Float => "Float".into(),
+            Ty::Int8 => "Int8".into(),
+            Ty::Int16 => "Int16".into(),
+            Ty::Int32 => "Int32".into(),
+            Ty::UInt8 => "UInt8".into(),
+            Ty::UInt16 => "UInt16".into(),
+            Ty::UInt32 => "UInt32".into(),
+            Ty::UInt64 => "UInt64".into(),
+            Ty::Float32 => "Float32".into(),
             Ty::String => "String".into(),
             Ty::Bool => "Bool".into(),
             Ty::Unit => "Unit".into(),
@@ -273,6 +302,34 @@ impl Ty {
         match (self, other) {
             (Ty::Int, Ty::Int) => true,
             (Ty::Float, Ty::Float) => true,
+            // Sized numeric types: exact-width match. Cross-width ops
+            // require explicit conversion (Stage 1c will enforce in the
+            // arithmetic dispatch).
+            (Ty::Int8, Ty::Int8) => true,
+            (Ty::Int16, Ty::Int16) => true,
+            (Ty::Int32, Ty::Int32) => true,
+            (Ty::UInt8, Ty::UInt8) => true,
+            (Ty::UInt16, Ty::UInt16) => true,
+            (Ty::UInt32, Ty::UInt32) => true,
+            (Ty::UInt64, Ty::UInt64) => true,
+            (Ty::Float32, Ty::Float32) => true,
+            // Literal coercion (Sized Numeric Types Stage 1b): an
+            // integer literal inferred as `Ty::Int` is accepted in a
+            // context that expects any sized integer type. Same for
+            // `Ty::Float` ↔ `Ty::Float32`. The coercion is symmetric
+            // in `compatible` because this pass runs before range
+            // checking; the subsequent arithmetic-dispatch sub-phase
+            // will enforce same-type binary ops, and an explicit
+            // range-check pass (Stage 1b polish) catches `UInt8 = 300`.
+            // Keeping it here (rather than threading an "expected
+            // type" through infer) is a deliberate minimum-viable
+            // choice: it gets `let x: Int32 = 42` working today with
+            // a tight, auditable one-line rule per pairing.
+            (Ty::Int, Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64)
+            | (Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64, Ty::Int) => true,
+            (Ty::Float, Ty::Float32) | (Ty::Float32, Ty::Float) => true,
             (Ty::String, Ty::String) => true,
             (Ty::Bool, Ty::Bool) => true,
             (Ty::Unit, Ty::Unit) => true,
@@ -367,6 +424,7 @@ impl Ty {
         match self {
             // Leaf types — no children
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
+            | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32
             | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => vec![],
 
             // Parameterized types (List, Option, Result, Map, user-defined)
@@ -414,6 +472,7 @@ impl Ty {
     {
         match self {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
+            | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32
             | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => self.clone(),
 
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
@@ -460,6 +519,7 @@ impl Ty {
     {
         match self {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
+            | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32
             | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => self.clone(),
 
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),

@@ -18,6 +18,21 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
         ast::TypeExpr::Simple { name } => match name.as_str() {
             "Int" => Ty::Int,
             "Float" => Ty::Float,
+            // Sized numeric types (Stage 1a of the sized-numeric-types arc).
+            // `Int64` / `Float64` alias to `Ty::Int` / `Ty::Float` — writing
+            // either form is indistinguishable at the type checker layer, so
+            // existing code that uses `Int` keeps compiling while new code
+            // can use the precise width name.
+            "Int64" => Ty::Int,
+            "Float64" => Ty::Float,
+            "Int8" => Ty::Int8,
+            "Int16" => Ty::Int16,
+            "Int32" => Ty::Int32,
+            "UInt8" => Ty::UInt8,
+            "UInt16" => Ty::UInt16,
+            "UInt32" => Ty::UInt32,
+            "UInt64" => Ty::UInt64,
+            "Float32" => Ty::Float32,
             "String" => Ty::String,
             "Bool" => Ty::Bool,
             "Unit" => Ty::Unit,
