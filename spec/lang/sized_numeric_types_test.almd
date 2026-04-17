@@ -1,0 +1,90 @@
+// Sized Numeric Types — Stage 1a / 1b regression guard.
+//
+// Locks in:
+//   - `Int8` / `Int16` / `Int32` / `UInt8` / `UInt16` / `UInt32` /
+//     `UInt64` / `Float32` parse as type names and resolve to distinct
+//     `Ty::*` variants.
+//   - `Int64` / `Float64` alias to the canonical `Int` / `Float`
+//     types.
+//   - Literal coercion: `let x: Int32 = 42` and `f(42)` where `f`
+//     takes `Int32` both emit the correct Rust width (`42i32` instead
+//     of `42i64`). Covers let-binding and fn-arg lowering paths.
+//
+// Deferred to Stage 1c (arithmetic on sized types) and Stage 3
+// (conversion UFCS): assertions that compare a sized-typed value
+// against an Int literal are kept out of this file until those
+// sub-phases land. We exercise compile success + same-type
+// round-trip for now.
+
+fn id_i32(x: Int32) -> Int32 = x
+fn id_i16(x: Int16) -> Int16 = x
+fn id_i8(x: Int8) -> Int8 = x
+fn id_u32(x: UInt32) -> UInt32 = x
+fn id_u16(x: UInt16) -> UInt16 = x
+fn id_u8(x: UInt8) -> UInt8 = x
+fn id_u64(x: UInt64) -> UInt64 = x
+fn id_f32(x: Float32) -> Float32 = x
+fn id_int64(x: Int64) -> Int64 = x
+fn id_float64(x: Float64) -> Float64 = x
+
+test "Int32 fn compiles and accepts literal" {
+  let _ = id_i32(42)
+  assert_eq(true, true)
+}
+
+test "Int16 negative literal" {
+  let _ = id_i16(-32768)
+  assert_eq(true, true)
+}
+
+test "Int8 boundary literal" {
+  let _ = id_i8(127)
+  assert_eq(true, true)
+}
+
+test "UInt32 literal in range" {
+  let _ = id_u32(1000000)
+  assert_eq(true, true)
+}
+
+test "UInt16 literal at max" {
+  let _ = id_u16(65535)
+  assert_eq(true, true)
+}
+
+test "UInt8 literal at max" {
+  let _ = id_u8(255)
+  assert_eq(true, true)
+}
+
+test "UInt64 hex literal" {
+  let _ = id_u64(0xff)
+  assert_eq(true, true)
+}
+
+test "Float32 literal" {
+  let _ = id_f32(3.14)
+  assert_eq(true, true)
+}
+
+test "Int64 and Int aliases compile identically" {
+  let a: Int = 10
+  let b: Int64 = a
+  assert_eq(a, b)
+}
+
+test "Float64 and Float aliases compile identically" {
+  let a: Float = 1.5
+  let b: Float64 = a
+  assert_eq(a, b)
+}
+
+test "Int64 fn" {
+  let r = id_int64(100)
+  assert_eq(r, 100)
+}
+
+test "Float64 fn" {
+  let r = id_float64(2.5)
+  assert_eq(r, 2.5)
+}

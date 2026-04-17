@@ -23,10 +23,28 @@ impl FuncCompiler<'_> {
         match &expr.kind {
             // ── Literals ──
             IrExprKind::LitInt { value } => {
-                wasm!(self.func, { i64_const(*value); });
+                // Pick the WASM numeric instruction from the literal's
+                // ty (Sized Numeric Types Stage 1b). Narrow signed /
+                // unsigned ints ride in `i32_const`; `UInt64` uses
+                // `i64_const` like the canonical `Int`.
+                match &expr.ty {
+                    Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 => {
+                        wasm!(self.func, { i32_const(*value as i32); });
+                    }
+                    _ => {
+                        wasm!(self.func, { i64_const(*value); });
+                    }
+                }
             }
             IrExprKind::LitFloat { value } => {
-                wasm!(self.func, { f64_const(*value); });
+                if matches!(expr.ty, Ty::Float32) {
+                    self.func.instruction(&wasm_encoder::Instruction::F32Const(
+                        (*value as f32).into(),
+                    ));
+                } else {
+                    wasm!(self.func, { f64_const(*value); });
+                }
             }
             IrExprKind::LitBool { value } => {
                 wasm!(self.func, { i32_const(*value as i32); });

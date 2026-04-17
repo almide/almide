@@ -8,6 +8,19 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
     match ty {
         Ty::Int => template_or(ctx, "type_int", &[], "i64"),
         Ty::Float => template_or(ctx, "type_float", &[], "f64"),
+        // Sized numeric types (Stage 1a of the sized-numeric-types arc).
+        // Each has a direct Rust primitive with matching width + signedness;
+        // no templating layer is needed because every backend that uses
+        // this renderer (Rust) has identical mappings. WASM emission has
+        // its own ty_to_valtype flow.
+        Ty::Int8 => "i8".to_string(),
+        Ty::Int16 => "i16".to_string(),
+        Ty::Int32 => "i32".to_string(),
+        Ty::UInt8 => "u8".to_string(),
+        Ty::UInt16 => "u16".to_string(),
+        Ty::UInt32 => "u32".to_string(),
+        Ty::UInt64 => "u64".to_string(),
+        Ty::Float32 => "f32".to_string(),
         Ty::String => template_or(ctx, "type_string", &[], "String"),
         Ty::Bool => template_or(ctx, "type_bool", &[], "bool"),
         Ty::Unit => template_or(ctx, "type_unit", &[], "()"),

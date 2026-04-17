@@ -79,6 +79,37 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
         }
     }
 
+    // Stage 1b: retype Int/Float literal args that flow into sized
+    // numeric params (`Int32`, `UInt8`, `Float32`, ...). Mirrors the
+    // let-binding coercion in `statements.rs::override_record_literal_ty`
+    // so `f(42)` where `f(x: UInt32)` emits `f(42u32)` instead of an
+    // `i64` / `u32` codegen mismatch.
+    if let CallTarget::Named { name } = &target {
+        if let Some(sig) = ctx.env.functions.get(name).cloned() {
+            for (i, (_, param_ty)) in sig.params.iter().enumerate() {
+                if let Some(arg) = ir_args.get_mut(i) {
+                    super::statements::coerce_literal_to_sized(arg, param_ty);
+                }
+            }
+        } else if let Some((module, func)) = name.as_str().split_once('.') {
+            if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
+                for (i, (_, param_ty)) in sig.params.iter().enumerate() {
+                    if let Some(arg) = ir_args.get_mut(i) {
+                        super::statements::coerce_literal_to_sized(arg, param_ty);
+                    }
+                }
+            }
+        }
+    } else if let CallTarget::Module { module, func } = &target {
+        if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
+            for (i, (_, param_ty)) in sig.params.iter().enumerate() {
+                if let Some(arg) = ir_args.get_mut(i) {
+                    super::statements::coerce_literal_to_sized(arg, param_ty);
+                }
+            }
+        }
+    }
+
     ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
 }
 

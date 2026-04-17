@@ -19,13 +19,32 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Literals ──
         IrExprKind::LitInt { value } => {
             let value_s = value.to_string();
-            ctx.templates.render_with("int_literal", None, &[], &[("value", value_s.as_str())])
-                .unwrap_or_else(|| value.to_string())
+            // Pick the Rust literal suffix from `expr.ty` so sized
+            // numeric types (Stage 1a/1b) emit the right width:
+            // `Ty::Int32` → `i32`, `Ty::UInt8` → `u8`, and the
+            // canonical `Ty::Int` keeps the legacy `i64`. Falls
+            // through to the `int_literal` template for backward
+            // compatibility when ty is Int / Unknown.
+            match &expr.ty {
+                Ty::Int8 => format!("{}i8", value_s),
+                Ty::Int16 => format!("{}i16", value_s),
+                Ty::Int32 => format!("{}i32", value_s),
+                Ty::UInt8 => format!("{}u8", value_s),
+                Ty::UInt16 => format!("{}u16", value_s),
+                Ty::UInt32 => format!("{}u32", value_s),
+                Ty::UInt64 => format!("{}u64", value_s),
+                _ => ctx.templates.render_with("int_literal", None, &[], &[("value", value_s.as_str())])
+                    .unwrap_or_else(|| value.to_string()),
+            }
         }
         IrExprKind::LitFloat { value } => {
             let value_s = format!("{}", value);
-            ctx.templates.render_with("float_literal", None, &[], &[("value", value_s.as_str())])
-                .unwrap_or_else(|| format!("{}", value))
+            if matches!(expr.ty, Ty::Float32) {
+                format!("{}f32", value_s)
+            } else {
+                ctx.templates.render_with("float_literal", None, &[], &[("value", value_s.as_str())])
+                    .unwrap_or_else(|| format!("{}", value))
+            }
         }
         IrExprKind::LitStr { value } => {
             let escaped = value.replace('\\', "\\\\").replace('"', "\\\"")
