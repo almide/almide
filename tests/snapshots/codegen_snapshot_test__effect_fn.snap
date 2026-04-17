@@ -51,23 +51,6 @@ pub fn almide_rt_int_to_u32(n: i64) -> i64 { (n as u32) as i64 }
 pub fn almide_rt_int_to_u8(n: i64) -> i64 { (n as u8) as i64 }
 pub fn almide_rt_int_bits_to_float(bits: i64) -> f64 { f64::from_bits(bits as u64) }
 
-/// Stdlib named type: fs.FileStat
-#[derive(Clone, Debug, PartialEq)]
-pub struct FileStat {
-    pub size: i64,
-    pub is_dir: bool,
-    pub is_file: bool,
-    pub modified: i64,
-}
-
-/// Stdlib named type: process.ProcessStatus
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProcessStatus {
-    pub code: i64,
-    pub stdout: String,
-    pub stderr: String,
-}
-
 pub fn parse_int(s: String) -> Result<i64, String> {
     Ok((almide_rt_int_parse(&*s))?)
 }
