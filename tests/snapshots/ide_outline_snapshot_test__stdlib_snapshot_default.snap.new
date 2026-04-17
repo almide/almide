@@ -1,5 +1,6 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
+assertion_line: 108
 expression: text
 ---
 # @stdlib/string

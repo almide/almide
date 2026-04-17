@@ -1,5 +1,6 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
+assertion_line: 49
 expression: "run_outline(&[\"@stdlib/option\"])"
 ---
 fn option.filter[A](o: Option[A], f: fn(A) -> Bool) -> Option[A]
