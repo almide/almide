@@ -267,6 +267,54 @@ pub struct ExportAttr {
     pub symbol: Sym,     // e.g., "bridge_add"
 }
 
+/// Generic `@name(args)` attribute on a declaration.
+///
+/// Hosts the stdlib unification attributes (`@inline_rust`,
+/// `@wasm_intrinsic`, `@pure`, `@schedule`, `@rewrite`) and any
+/// future metadata. The more rigid `@extern` / `@export` shapes are
+/// still parsed into `ExternAttr` / `ExportAttr` for backward
+/// compatibility; new attributes live here.
+///
+/// `args` preserves the source order of positional and named
+/// arguments so that formatter round-trip matches input byte-for-byte.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Attribute {
+    pub name: Sym,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<AttrArg>,
+    #[serde(skip)]
+    pub span: Option<Span>,
+}
+
+/// One argument inside `@name(...)`. `name` is `None` for positional
+/// arguments and `Some(sym)` for `name=value` pairs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttrArg {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<Sym>,
+    pub value: AttrValue,
+}
+
+/// Literal kinds allowed inside attribute argument positions. The
+/// enum is intentionally narrow: attributes describe compile-time
+/// metadata, not arbitrary expressions, so we avoid pulling in the
+/// full `Expr` grammar and its recursive dependencies.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AttrValue {
+    /// `"literal"` — for code templates (`@inline_rust`) and
+    /// arbitrary string payloads.
+    String { value: String },
+    /// `42`, `-1`, `0xff` — for numeric tuning values.
+    Int { value: i64 },
+    /// `true` / `false` — for boolean flags.
+    Bool { value: bool },
+    /// Unquoted identifier, e.g. `gpu` in `@schedule(device=gpu)`.
+    /// Parsers should not interpret this as a reference to a variable;
+    /// it is an attribute-level enum tag.
+    Ident { name: Sym },
+}
+
 impl Default for Visibility {
     fn default() -> Self { Visibility::Public }
 }
@@ -284,6 +332,10 @@ pub enum Decl {
         #[serde(default)] visibility: Visibility,
         #[serde(default)] extern_attrs: Vec<ExternAttr>,
         #[serde(default)] export_attrs: Vec<ExportAttr>,
+        /// Generic `@name(args)` attributes that are not `@extern` or
+        /// `@export`. Stdlib unification attributes live here.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attrs: Vec<Attribute>,
         #[serde(default)] generics: Option<Vec<GenericParam>>,
         params: Vec<Param>,
         #[serde(rename = "returnType")] return_type: TypeExpr,
