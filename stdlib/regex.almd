@@ -1,0 +1,30 @@
+// regex — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4b).
+//
+// Migrated mechanically from `stdlib/defs/regex.toml` (8 fns). All fns
+// are pure. Note the runtime prefix is `almide_regex_*` (not the
+// `almide_rt_*` used by most other modules) — this mirrors the
+// existing TOML templates verbatim.
+
+@inline_rust("almide_regex_is_match(&{pat}, &{s})")
+fn is_match(pat: String, s: String) -> Bool = _
+
+@inline_rust("almide_regex_full_match(&{pat}, &{s})")
+fn full_match(pat: String, s: String) -> Bool = _
+
+@inline_rust("almide_regex_find(&{pat}, &{s})")
+fn find(pat: String, s: String) -> Option[String] = _
+
+@inline_rust("almide_regex_find_all(&{pat}, &{s})")
+fn find_all(pat: String, s: String) -> List[String] = _
+
+@inline_rust("almide_regex_replace(&{pat}, &{s}, &{rep})")
+fn replace(pat: String, s: String, rep: String) -> String = _
+
+@inline_rust("almide_regex_replace_first(&{pat}, &{s}, &{rep})")
+fn replace_first(pat: String, s: String, rep: String) -> String = _
+
+@inline_rust("almide_regex_split(&{pat}, &{s})")
+fn split(pat: String, s: String) -> List[String] = _
+
+@inline_rust("almide_regex_captures(&{pat}, &{s})")
+fn captures(pat: String, s: String) -> Option[List[String]] = _

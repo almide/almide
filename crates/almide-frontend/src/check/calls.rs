@@ -401,8 +401,22 @@ impl Checker {
         // This removes the implicit auto-unwrap and lets users choose: `!` to unwrap, or match on ok/err.
         // Only user-defined fns are wrapped — stdlib effect fns are not lifted by codegen,
         // so their runtime implementations return raw values (not Result).
+        //
+        // `env.functions.contains_key` covered the pre-bundled world where
+        // stdlib sigs lived in a parallel table. Once a stdlib module is
+        // migrated to `stdlib/<m>.almd` and loaded via `lower_module`,
+        // its fns also land in `env.functions` under `<module>.<fn>`
+        // keys — matching the check above and wrongly wrapping their
+        // return type in the test block. Gate the wrap by "not a bundled
+        // stdlib module": bundled stdlib fns generate runtime calls that
+        // return raw values (their `@inline_rust` templates carry their
+        // own `?` when the Rust runtime truly returns `Result`).
+        let is_bundled_stdlib_call = name.split_once('.')
+            .map(|(m, _)| almide_lang::stdlib_info::is_bundled_module(m))
+            .unwrap_or(false);
         if self.env.in_test_block && sig.is_effect && !ret.is_result()
             && self.env.functions.contains_key(&sym(name))
+            && !is_bundled_stdlib_call
         {
             return Ty::result(ret, Ty::String);
         }

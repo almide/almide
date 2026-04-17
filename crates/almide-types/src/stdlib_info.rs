@@ -22,6 +22,7 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "args", "path", "list", "int", "base64", "hex", "float", "bytes",
     "error", "math", "datetime", "value", "option", "result",
     "map", "set", "string",
+    "env", "io", "random", "regex", "testing",
     "int8", "int16", "int32",
     "uint8", "uint16", "uint32", "uint64",
     "float32",
@@ -44,6 +45,11 @@ pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     "int8", "int16", "int32",
     "uint8", "uint16", "uint32", "uint64",
     "float32",
+    // env / io / random / regex / testing are NOT auto-imported —
+    // users still need `import env` / `import io` etc. These bundled
+    // modules exist so `@inline_rust` templates are discoverable when
+    // the call site explicitly imports them; auto-import would bring
+    // effect-surface helpers into every file unsolicited.
 ];
 
 /// Check if a module name is a hardcoded stdlib module.
@@ -94,6 +100,11 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "map" => Some(include_str!("../../../stdlib/map.almd")),
         "set" => Some(include_str!("../../../stdlib/set.almd")),
         "string" => Some(include_str!("../../../stdlib/string.almd")),
+        "env" => Some(include_str!("../../../stdlib/env.almd")),
+        "io" => Some(include_str!("../../../stdlib/io.almd")),
+        "random" => Some(include_str!("../../../stdlib/random.almd")),
+        "regex" => Some(include_str!("../../../stdlib/regex.almd")),
+        "testing" => Some(include_str!("../../../stdlib/testing.almd")),
         "math" => Some(include_str!("../../../stdlib/math.almd")),
         "datetime" => Some(include_str!("../../../stdlib/datetime.almd")),
         "int8" => Some(include_str!("../../../stdlib/int8.almd")),
