@@ -1,4 +1,4 @@
-> Last updated: 2026-03-28
+> Last updated: 2026-04-17
 
 # Almide Language Specification
 
@@ -228,6 +228,44 @@ fn User.greet(self) -> String = "Hi, ${self.name}"
 fn not_yet(x: Int) -> String = _                     // hole: type-checked stub
 fn later(x: Int) -> String = todo("implement later")  // todo with message
 ```
+
+#### Attributes
+
+Function declarations can be prefixed with one or more `@name` or
+`@name(args)` attributes. The parser accepts a generic shape:
+
+```
+@pure
+@inline_rust("almide_rt_int_abs({n})")
+@schedule(device=gpu, tile=32, unroll=true)
+fn decorated(n: Int) -> Int = int.abs(n)
+```
+
+Grammar:
+
+- `@name` — no args
+- `@name(arg, ...)` — positional, named (`key=value`), or mixed
+- Argument values: `"string"`, `42`, `0xff`, `-1`, `true`, `false`, or
+  a bare identifier (treated as a symbolic tag, not a value reference)
+
+Two attribute names have semantic meaning today:
+
+- `@extern(target, "module", "function")` — FFI binding for the target
+  runtime. See [§11 of module-system.md](./module-system.md#11-extern).
+- `@export(c, "symbol")` — export with C ABI. Paired with
+  `--repr-c` output (see module-system §10).
+
+All other attribute names parse without error and are preserved in the
+AST, but carry no semantic behavior yet. They are reserved for the
+Stdlib Declarative Unification and MLIR Backend arcs (see
+`docs/roadmap/active/stdlib-declarative-unification.md` and
+`docs/roadmap/active/mlir-backend-adoption.md`). Writing
+`@inline_rust(...)` or `@schedule(...)` in user code today is legal
+syntax but the compiler ignores it.
+
+テスト: `crates/almide-syntax/src/parser/test_attributes.rs` (13
+parse tests), `crates/almide-tools/src/fmt.rs::attr_tests` (6 format
+round-trip tests).
 
 テスト: `spec/lang/function_test.almd`, `spec/lang/default_args_test.almd`, `spec/lang/named_args_test.almd`, `spec/lang/generics_test.almd`
 

@@ -4,6 +4,65 @@ use crate::ast::ExprKind;
 use crate::intern::{Sym, sym};
 use super::Parser;
 
+/// Parse an integer literal raw spelling (same syntax the lexer
+/// accepts for `TokenType::Int`): decimal, `0x` hex, and `_`
+/// digit separators.
+fn parse_int_literal(raw: &str) -> Result<i64, String> {
+    let clean = raw.replace('_', "");
+    if let Some(hex) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
+        i64::from_str_radix(hex, 16).map_err(|e| e.to_string())
+    } else {
+        clean.parse::<i64>().map_err(|e| e.to_string())
+    }
+}
+
+/// Convert a generic `Attribute` that the user wrote as `@extern(...)`
+/// into the legacy typed `ExternAttr`. Mirrors the old hand-written
+/// parser so diagnostics stay recognizable.
+fn extract_extern_attr(attr: &Attribute) -> Result<ExternAttr, String> {
+    let args = &attr.args;
+    if args.len() != 3 {
+        return Err(format!(
+            "@extern expects 3 positional arguments (target, \"module\", \"function\"); got {}",
+            args.len()
+        ));
+    }
+    let target = match &args[0] {
+        AttrArg { name: None, value: AttrValue::Ident { name } } => *name,
+        _ => return Err("@extern first argument must be a bare identifier target (e.g. `rust`)".into()),
+    };
+    let module = match &args[1] {
+        AttrArg { name: None, value: AttrValue::String { value } } => sym(value),
+        _ => return Err("@extern second argument must be a string literal module".into()),
+    };
+    let function = match &args[2] {
+        AttrArg { name: None, value: AttrValue::String { value } } => sym(value),
+        _ => return Err("@extern third argument must be a string literal function".into()),
+    };
+    Ok(ExternAttr { target, module, function })
+}
+
+/// Convert a generic `Attribute` that the user wrote as `@export(...)`
+/// into the legacy typed `ExportAttr`.
+fn extract_export_attr(attr: &Attribute) -> Result<ExportAttr, String> {
+    let args = &attr.args;
+    if args.len() != 2 {
+        return Err(format!(
+            "@export expects 2 positional arguments (target, \"symbol\"); got {}",
+            args.len()
+        ));
+    }
+    let target = match &args[0] {
+        AttrArg { name: None, value: AttrValue::Ident { name } } => *name,
+        _ => return Err("@export first argument must be a bare identifier target (e.g. `c`)".into()),
+    };
+    let symbol = match &args[1] {
+        AttrArg { name: None, value: AttrValue::String { value } } => sym(value),
+        _ => return Err("@export second argument must be a string literal symbol".into()),
+    };
+    Ok(ExportAttr { target, symbol })
+}
+
 impl Parser {
     // ── Module & Import ───────────────────────────────────────────
 
@@ -72,8 +131,8 @@ impl Parser {
 
     pub(crate) fn parse_top_decl(&mut self) -> Result<Decl, String> {
         if self.check(TokenType::At) {
-            let (extern_attrs, export_attrs) = self.collect_fn_attrs()?;
-            return self.parse_fn_decl_with_attrs(extern_attrs, export_attrs);
+            let (extern_attrs, export_attrs, attrs) = self.collect_fn_attrs()?;
+            return self.parse_fn_decl_with_attrs(extern_attrs, export_attrs, attrs);
         }
         if self.check(TokenType::Type) {
             return self.parse_type_decl();
@@ -141,69 +200,170 @@ impl Parser {
         Ok(Decl::TopLet { name, ty, value, visibility, span: Some(span) })
     }
 
-    fn collect_fn_attrs(&mut self) -> Result<(Vec<ExternAttr>, Vec<ExportAttr>), String> {
+    /// Parse `@name(args)?` declarations that precede a fn decl.
+    ///
+    /// Returns three buckets: `@extern` and `@export` are routed to
+    /// their legacy typed structs so existing consumers keep working;
+    /// any other `@name(...)` lands in a generic `Vec<Attribute>` that
+    /// new tooling (stdlib unification, MLIR schedules, rewrite rules)
+    /// can inspect without pattern-matching over the typed structs.
+    fn collect_fn_attrs(&mut self) -> Result<(Vec<ExternAttr>, Vec<ExportAttr>, Vec<Attribute>), String> {
         let mut extern_attrs = Vec::new();
         let mut export_attrs = Vec::new();
+        let mut attrs = Vec::new();
         while self.check(TokenType::At) {
-            self.advance();
-            if self.check_ident("extern") {
-                self.advance();
-                let open_ext = self.current().clone();
-                self.expect(TokenType::LParen)?;
-                let target = self.expect_ident()?;
-                self.expect(TokenType::Comma)?;
-                let module = {
-                    let tok = self.current();
-                    if tok.token_type != TokenType::String {
-                        return Err(format!("Expected string literal for extern module at line {}:{}", tok.line, tok.col));
-                    }
-                    let val = sym(&tok.value);
-                    self.advance();
-                    val
-                };
-                self.expect(TokenType::Comma)?;
-                let function = {
-                    let tok = self.current();
-                    if tok.token_type != TokenType::String {
-                        return Err(format!("Expected string literal for extern function at line {}:{}", tok.line, tok.col));
-                    }
-                    let val = sym(&tok.value);
-                    self.advance();
-                    val
-                };
-                self.expect_closing(TokenType::RParen, open_ext.line, open_ext.col, "@extern annotation")?;
-                extern_attrs.push(ExternAttr { target, module, function });
-            } else if self.check_ident("export") {
-                self.advance();
-                let open_ext = self.current().clone();
-                self.expect(TokenType::LParen)?;
-                let target = self.expect_ident()?;
-                self.expect(TokenType::Comma)?;
-                let symbol = {
-                    let tok = self.current();
-                    if tok.token_type != TokenType::String {
-                        return Err(format!("Expected string literal for export symbol at line {}:{}", tok.line, tok.col));
-                    }
-                    let val = sym(&tok.value);
-                    self.advance();
-                    val
-                };
-                self.expect_closing(TokenType::RParen, open_ext.line, open_ext.col, "@export annotation")?;
-                export_attrs.push(ExportAttr { target, symbol });
-            } else {
-                let tok = self.current();
-                return Err(format!("Expected 'extern' or 'export' after '@' at line {}:{}", tok.line, tok.col));
+            let attr = self.parse_attribute()?;
+            match attr.name.as_str() {
+                "extern" => extern_attrs.push(extract_extern_attr(&attr)?),
+                "export" => export_attrs.push(extract_export_attr(&attr)?),
+                _ => attrs.push(attr),
             }
             self.skip_newlines();
         }
-        Ok((extern_attrs, export_attrs))
+        Ok((extern_attrs, export_attrs, attrs))
     }
 
-    fn parse_fn_decl_with_attrs(&mut self, extern_attrs: Vec<ExternAttr>, export_attrs: Vec<ExportAttr>) -> Result<Decl, String> {
+    /// Parse a single `@name` or `@name(args...)`. Positioned at the
+    /// leading `@` token.
+    fn parse_attribute(&mut self) -> Result<Attribute, String> {
+        let span = self.current_span();
+        self.expect(TokenType::At)?;
+        let name = self.expect_ident_like_name()?;
+        let args = if self.check(TokenType::LParen) {
+            let open = self.current().clone();
+            self.advance();
+            self.skip_newlines();
+            let mut args = Vec::new();
+            if !self.check(TokenType::RParen) {
+                args.push(self.parse_attr_arg()?);
+                while self.check(TokenType::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                    if self.check(TokenType::RParen) { break; }
+                    args.push(self.parse_attr_arg()?);
+                }
+                self.skip_newlines();
+            }
+            self.expect_closing(TokenType::RParen, open.line, open.col, "attribute argument list")?;
+            args
+        } else {
+            // `@pure` / `@inline` style — no parens, no args.
+            Vec::new()
+        };
+        Ok(Attribute { name, args, span: Some(span) })
+    }
+
+    /// Parse one arg inside `@name(...)`: either `value` (positional)
+    /// or `name=value` (named). The lookahead for `name=` is an ident
+    /// followed by `=` that is NOT `==`.
+    fn parse_attr_arg(&mut self) -> Result<AttrArg, String> {
+        let is_named = self.check(TokenType::Ident)
+            && matches!(self.peek_at(1).map(|t| &t.token_type), Some(&TokenType::Eq));
+        let name = if is_named {
+            let n = self.expect_ident()?;
+            self.advance(); // consume `=`
+            Some(n)
+        } else {
+            None
+        };
+        let value = self.parse_attr_value()?;
+        Ok(AttrArg { name, value })
+    }
+
+    /// Attribute values are a narrow subset of expressions: literals
+    /// and bare identifiers. Negative ints are accepted via a `-`
+    /// prefix so callers can write `@foo(-1)`.
+    fn parse_attr_value(&mut self) -> Result<AttrValue, String> {
+        let tok = self.current().clone();
+        match tok.token_type {
+            TokenType::String => {
+                self.advance();
+                Ok(AttrValue::String { value: tok.value })
+            }
+            TokenType::Int => {
+                self.advance();
+                parse_int_literal(&tok.value).map(|v| AttrValue::Int { value: v })
+                    .map_err(|e| format!("Invalid integer literal in attribute at line {}:{} — {}", tok.line, tok.col, e))
+            }
+            TokenType::Minus => {
+                self.advance();
+                let inner = self.current().clone();
+                if inner.token_type != TokenType::Int {
+                    return Err(format!(
+                        "Expected integer literal after '-' in attribute at line {}:{}",
+                        inner.line, inner.col
+                    ));
+                }
+                self.advance();
+                parse_int_literal(&inner.value).map(|v| AttrValue::Int { value: -v })
+                    .map_err(|e| format!("Invalid integer literal in attribute at line {}:{} — {}", tok.line, tok.col, e))
+            }
+            TokenType::True => {
+                self.advance();
+                Ok(AttrValue::Bool { value: true })
+            }
+            TokenType::False => {
+                self.advance();
+                Ok(AttrValue::Bool { value: false })
+            }
+            TokenType::Ident => {
+                let name = sym(&tok.value);
+                self.advance();
+                Ok(AttrValue::Ident { name })
+            }
+            _ => {
+                Err(format!(
+                    "Expected attribute value (string, int, bool, or identifier) at line {}:{} (got {:?} '{}')",
+                    tok.line, tok.col, tok.token_type, tok.value
+                ))
+            }
+        }
+    }
+
+    /// Accept an identifier or soft-keyword in attribute name position
+    /// (`extern`, `export`, `pure`, `inline_rust`, ...). Uses the same
+    /// acceptance set as `expect_any_name` but without forcing a fn
+    /// name context.
+    fn expect_ident_like_name(&mut self) -> Result<Sym, String> {
+        // `extern` / `export` / `effect` / other soft keywords might
+        // be tokenized as keywords; fall back to their raw spelling.
+        let tok = self.current().clone();
+        match tok.token_type {
+            TokenType::Ident => {
+                let name = sym(&tok.value);
+                self.advance();
+                Ok(name)
+            }
+            _ => {
+                // Accept keyword-ish tokens by raw spelling so that
+                // @extern / @effect etc. still reach the generic path
+                // should a caller need them. Error only if the value
+                // is empty (not a word-like token).
+                if tok.value.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_') {
+                    let name = sym(&tok.value);
+                    self.advance();
+                    Ok(name)
+                } else {
+                    Err(format!(
+                        "Expected attribute name after '@' at line {}:{} (got {:?} '{}')",
+                        tok.line, tok.col, tok.token_type, tok.value
+                    ))
+                }
+            }
+        }
+    }
+
+    fn parse_fn_decl_with_attrs(&mut self, extern_attrs: Vec<ExternAttr>, export_attrs: Vec<ExportAttr>, attrs: Vec<Attribute>) -> Result<Decl, String> {
         let mut decl = self.parse_fn_decl()?;
-        if let Decl::Fn { extern_attrs: ref mut ea, export_attrs: ref mut xa, .. } = decl {
+        if let Decl::Fn {
+            extern_attrs: ref mut ea,
+            export_attrs: ref mut xa,
+            attrs: ref mut aa,
+            ..
+        } = decl {
             *ea = extern_attrs;
             *xa = export_attrs;
+            *aa = attrs;
         }
         Ok(decl)
     }
@@ -362,6 +522,7 @@ impl Parser {
                 visibility,
                 extern_attrs: Vec::new(),
                 export_attrs: Vec::new(),
+                attrs: Vec::new(),
                 generics, params, return_type, body,
                 span: Some(span),
             })
