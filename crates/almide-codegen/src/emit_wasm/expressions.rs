@@ -782,52 +782,108 @@ impl FuncCompiler<'_> {
 
     pub(super) fn emit_binop(&mut self, op: BinOp, left: &IrExpr, right: &IrExpr) {
         // BinOp is already reconciled with operand types by ConcretizeTypes pass.
+        // Pick WASM arithmetic width from the operand's valtype. All
+        // sized integer variants (Int8/Int16/Int32/UInt8/UInt16/UInt32)
+        // lower to `i32`; `UInt64` and canonical `Int` stay `i64`. For
+        // unsigned div/mod the distinction matters (div_u vs div_s),
+        // tracked via `is_unsigned_int`.
+        let is_i32_int = matches!(
+            left.ty,
+            Ty::Int8 | Ty::Int16 | Ty::Int32
+                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32
+        );
+        let is_unsigned_int = matches!(
+            left.ty,
+            Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+        );
+        let is_f32 = matches!(left.ty, Ty::Float32);
+
         match op {
             // ── Arithmetic ──
             BinOp::AddInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { i64_add; });
+                if is_i32_int {
+                    wasm!(self.func, { i32_add; });
+                } else {
+                    wasm!(self.func, { i64_add; });
+                }
             }
             BinOp::SubInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { i64_sub; });
+                if is_i32_int {
+                    wasm!(self.func, { i32_sub; });
+                } else {
+                    wasm!(self.func, { i64_sub; });
+                }
             }
             BinOp::MulInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { i64_mul; });
+                if is_i32_int {
+                    wasm!(self.func, { i32_mul; });
+                } else {
+                    wasm!(self.func, { i64_mul; });
+                }
             }
             BinOp::DivInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { i64_div_s; });
+                let instr = match (is_i32_int, is_unsigned_int) {
+                    (true, true) => wasm_encoder::Instruction::I32DivU,
+                    (true, false) => wasm_encoder::Instruction::I32DivS,
+                    (false, true) => wasm_encoder::Instruction::I64DivU,
+                    (false, false) => wasm_encoder::Instruction::I64DivS,
+                };
+                self.func.instruction(&instr);
             }
             BinOp::ModInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { i64_rem_s; });
+                let instr = match (is_i32_int, is_unsigned_int) {
+                    (true, true) => wasm_encoder::Instruction::I32RemU,
+                    (true, false) => wasm_encoder::Instruction::I32RemS,
+                    (false, true) => wasm_encoder::Instruction::I64RemU,
+                    (false, false) => wasm_encoder::Instruction::I64RemS,
+                };
+                self.func.instruction(&instr);
             }
             BinOp::AddFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { f64_add; });
+                if is_f32 {
+                    self.func.instruction(&wasm_encoder::Instruction::F32Add);
+                } else {
+                    wasm!(self.func, { f64_add; });
+                }
             }
             BinOp::SubFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { f64_sub; });
+                if is_f32 {
+                    self.func.instruction(&wasm_encoder::Instruction::F32Sub);
+                } else {
+                    wasm!(self.func, { f64_sub; });
+                }
             }
             BinOp::MulFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { f64_mul; });
+                if is_f32 {
+                    self.func.instruction(&wasm_encoder::Instruction::F32Mul);
+                } else {
+                    wasm!(self.func, { f64_mul; });
+                }
             }
             BinOp::DivFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { f64_div; });
+                if is_f32 {
+                    self.func.instruction(&wasm_encoder::Instruction::F32Div);
+                } else {
+                    wasm!(self.func, { f64_div; });
+                }
             }
             BinOp::ModFloat => {
                 // WASM has no f64.rem; compute via: a - trunc(a/b) * b

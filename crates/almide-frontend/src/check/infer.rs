@@ -281,13 +281,29 @@ impl Checker {
                         if lc == Ty::Matrix || rc == Ty::Matrix {
                             Ty::Matrix
                         } else {
-                            let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
+                            // Sized Numeric Types (Stage 1c): same-width
+                            // arithmetic accepts every sized numeric variant.
+                            let is_numeric = |t: &Ty| matches!(
+                                t,
+                                Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_)
+                                    | Ty::Int8 | Ty::Int16 | Ty::Int32
+                                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                                    | Ty::Float32
+                            );
+                            let is_sized_scalar = |t: &Ty| matches!(
+                                t,
+                                Ty::Int8 | Ty::Int16 | Ty::Int32
+                                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                                    | Ty::Float32
+                            );
                             if !is_numeric(&lc) || !is_numeric(&rc) {
                                 self.emit(super::err(
                                     format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
                                     "Use numeric types (Int or Float)", format!("operator {}", op)));
                             }
-                            if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
+                            if lc.compatible(&rc) && is_sized_scalar(&lc) {
+                                lc
+                            } else if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
                         }
                     }
                     "++" => {
@@ -980,11 +996,35 @@ impl Checker {
         if *lc == Ty::Matrix || *rc == Ty::Matrix {
             return Ty::Matrix;
         }
-        let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
+        // Sized Numeric Types (Stage 1c): arithmetic accepts canonical
+        // `Int` / `Float` plus every sized variant. Same-type pairing is
+        // enforced below; mixing widths is an explicit conversion.
+        let is_numeric = |t: &Ty| matches!(
+            t,
+            Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_)
+                | Ty::Int8 | Ty::Int16 | Ty::Int32
+                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                | Ty::Float32
+        );
         if !is_numeric(lc) || !is_numeric(rc) {
             self.emit(super::err(
                 format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
                 "Use + with numeric types, String, or List", format!("operator +")));
+        }
+        // Result type resolution:
+        //   - Same sized type on both sides → that sized type.
+        //   - Canonical Float promotes Int mixes to Float (legacy rule).
+        //   - Mixed sized widths are rejected; the diagnostic is
+        //     emitted by `compatible` / `unify_infer` callers, so here
+        //     we just fall through with `lt` to avoid an extra error.
+        let is_sized_scalar = |t: &Ty| matches!(
+            t,
+            Ty::Int8 | Ty::Int16 | Ty::Int32
+                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                | Ty::Float32
+        );
+        if lc.compatible(rc) && is_sized_scalar(lc) {
+            return lc.clone();
         }
         if *lc == Ty::Float || *rc == Ty::Float { Ty::Float } else { lt }
     }

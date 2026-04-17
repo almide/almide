@@ -455,6 +455,23 @@ fn is_unresolved(ty: &Ty) -> bool {
 
 fn ty_matches(actual: &Ty, expected: &Ty) -> bool {
     if is_unresolved(actual) { return true; }
+    // Sized Numeric Types (Stage 1c): every sized integer is accepted
+    // wherever `Ty::Int` is expected, and `Ty::Float32` where `Ty::Float`
+    // is expected. The BinOp variants in IR (`AddInt`, `AddFloat`, ...)
+    // are not width-parameterized; the actual WASM / Rust op is chosen
+    // at emit time from the operand's ty.
+    if expected == &Ty::Int
+        && matches!(
+            actual,
+            Ty::Int8 | Ty::Int16 | Ty::Int32
+                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+        )
+    {
+        return true;
+    }
+    if expected == &Ty::Float && matches!(actual, Ty::Float32) {
+        return true;
+    }
     std::mem::discriminant(actual) == std::mem::discriminant(expected)
 }
 

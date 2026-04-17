@@ -88,3 +88,21 @@ test "Float64 fn" {
   let r = id_float64(2.5)
   assert_eq(r, 2.5)
 }
+
+// ── Stage 1c: same-type arithmetic ───────────────────────────────
+
+fn add_i32(a: Int32, b: Int32) -> Int32 = a + b
+fn sub_i32(a: Int32, b: Int32) -> Int32 = a - b
+fn mul_u8(a: UInt8, b: UInt8) -> UInt8 = a * b
+fn div_u32(a: UInt32, b: UInt32) -> UInt32 = a / b
+fn mod_i16(a: Int16, b: Int16) -> Int16 = a % b
+fn add_f32(a: Float32, b: Float32) -> Float32 = a + b
+fn sub_u64(a: UInt64, b: UInt64) -> UInt64 = a - b
+
+test "Int32 addition" { assert_eq(add_i32(10, 20), 30) }
+test "Int32 subtraction" { assert_eq(sub_i32(50, 20), 30) }
+test "UInt8 multiplication" { assert_eq(mul_u8(10, 5), 50) }
+test "UInt32 division (unsigned)" { assert_eq(div_u32(100, 4), 25) }
+test "Int16 modulo" { assert_eq(mod_i16(23, 5), 3) }
+test "Float32 addition" { assert_eq(add_f32(1.5, 2.5), 4.0) }
+test "UInt64 subtraction" { assert_eq(sub_u64(1000, 200), 800) }
