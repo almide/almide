@@ -1,0 +1,26 @@
+// testing — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4b).
+//
+// Migrated mechanically from `stdlib/defs/testing.toml` (7 fns). All
+// pure assertion helpers. `assert_throws` accepts a thunk; the lambda
+// prep applied to bundled InlineRust args passes it through intact.
+
+@inline_rust("almide_rt_test_assert_throws({f}, &*{expected})")
+fn assert_throws(f: () -> Unit, expected: String) -> Unit = _
+
+@inline_rust("almide_rt_test_assert_contains(&*{haystack}, &*{needle})")
+fn assert_contains(haystack: String, needle: String) -> Unit = _
+
+@inline_rust("almide_rt_test_assert_approx({a}, {b}, {tolerance})")
+fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
+
+@inline_rust("almide_rt_test_assert_gt({a}, {b})")
+fn assert_gt(a: Int, b: Int) -> Unit = _
+
+@inline_rust("almide_rt_test_assert_lt({a}, {b})")
+fn assert_lt(a: Int, b: Int) -> Unit = _
+
+@inline_rust("almide_rt_test_assert_some(&{opt})")
+fn assert_some[A](opt: Option[A]) -> Unit = _
+
+@inline_rust("almide_rt_test_assert_ok(&{result})")
+fn assert_ok[A, B](result: Result[A, B]) -> Unit = _

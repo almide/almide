@@ -1,0 +1,30 @@
+// io — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4b).
+//
+// Migrated mechanically from `stdlib/defs/io.toml` (7 fns). Three fns
+// are declared `effect` (return `Result`, propagate with `?` in the
+// template); four are `impure` — side-effecting but callable from
+// non-effect callers because they return a plain value instead of
+// `Result`. Almide has no surface-level `impure` keyword, so those
+// fns stay as plain `fn` (matching the existing TOML contract where
+// the sole difference was an omitted effect-context check).
+
+@inline_rust("almide_rt_io_read_line()?")
+effect fn read_line() -> String = _
+
+@inline_rust("almide_rt_io_print(&*{s})?")
+effect fn print(s: String) -> Unit = _
+
+@inline_rust("almide_rt_io_read_all()?")
+effect fn read_all() -> String = _
+
+@inline_rust("almide_rt_io_read_byte()")
+fn read_byte() -> Int = _
+
+@inline_rust("almide_rt_io_read_n_bytes({n})")
+fn read_n_bytes(n: Int) -> List[Int] = _
+
+@inline_rust("almide_rt_io_write_bytes(&{data})")
+fn write_bytes(data: List[Int]) -> Unit = _
+
+@inline_rust("almide_rt_io_write(&{data})")
+fn write(data: Bytes) -> Unit = _
