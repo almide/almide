@@ -21,6 +21,7 @@ pub const STDLIB_MODULES: &[&str] = &[
 pub const BUNDLED_MODULES: &[&str] = &[
     "args", "path", "list", "int", "base64", "hex", "float", "bytes",
     "error", "math", "datetime", "value", "option", "result",
+    "map", "set",
     "int8", "int16", "int32",
     "uint8", "uint16", "uint32", "uint64",
     "float32",
@@ -39,6 +40,7 @@ pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     // the auto-import behavior the generated `stdlib_sigs` previously
     // provided.
     "error", "math", "datetime", "value", "option", "result",
+    "map", "set",
     "int8", "int16", "int32",
     "uint8", "uint16", "uint32", "uint64",
     "float32",
@@ -89,6 +91,8 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "value" => Some(include_str!("../../../stdlib/value.almd")),
         "option" => Some(include_str!("../../../stdlib/option.almd")),
         "result" => Some(include_str!("../../../stdlib/result.almd")),
+        "map" => Some(include_str!("../../../stdlib/map.almd")),
+        "set" => Some(include_str!("../../../stdlib/set.almd")),
         "math" => Some(include_str!("../../../stdlib/math.almd")),
         "datetime" => Some(include_str!("../../../stdlib/datetime.almd")),
         "int8" => Some(include_str!("../../../stdlib/int8.almd")),
