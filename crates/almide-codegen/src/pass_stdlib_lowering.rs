@@ -79,6 +79,28 @@ fn strip_arg_decorations(expr: IrExpr) -> IrExpr {
     }
 }
 
+/// Does the template reference `{name}` preceded by an explicit
+/// borrow sigil (`&`, `&*`, `&mut`, `&mut *`)? If so the template is
+/// declaring that the RENDERED arg is a place-expression, not a
+/// value-expression; we strip any Clone wrapper that upstream passes
+/// inserted so the mutation / borrow lands on the caller's variable
+/// instead of a disposable clone.
+fn template_wants_reference(template: &str, name: &str) -> bool {
+    let needle = format!("{{{}}}", name);
+    let Some(idx) = template.find(&needle) else { return false };
+    // Walk back over horizontal whitespace + the last sigil.
+    let prefix = &template[..idx];
+    let trimmed = prefix.trim_end();
+    // Borrow forms: `&`, `&mut`, `&*`, `&mut *`. Keyword `mut` may
+    // carry trailing whitespace (`&mut `), star may come right after
+    // ampersand with no space, and the `&` itself always closes the
+    // immediately-preceding token.
+    trimmed.ends_with('&')
+        || trimmed.ends_with("&mut")
+        || trimmed.ends_with("&*")
+        || trimmed.ends_with("&mut *")
+}
+
 /// Extract the `@inline_rust("...")` template from an IrFunction's
 /// attrs, if present. Returns None if the attribute is missing or
 /// malformed (no string first-arg).
@@ -283,17 +305,29 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             if let Some(spec) = inline_rust_spec(module, func) {
                 let rewritten_args: Vec<IrExpr> = args.into_iter()
                     .map(|a| rewrite_expr(a))
-                    .map(strip_arg_decorations)
                     .collect();
                 // Pair each rewritten arg with the matching param name.
-                // Extra positional args (shouldn't happen post-checker)
-                // fall off silently; missing trailing args leave their
-                // placeholders untouched in the template, which will
-                // surface as a compile error in the generated Rust so
-                // the author fixes the template.
+                // Strip pre-inserted Clone / Borrow / ToVec / BoxNew /
+                // RcWrap wrappers ONLY when the template references
+                // the parameter with an explicit borrow sigil
+                // (`&{b}`, `&mut {b}`, `&*{b}`). In that case the
+                // template owns reference semantics and the wrapper
+                // would produce `&mut b.clone()` — mutation on a
+                // temp, silently dropped. Elsewhere (by-value params
+                // like `value.field(v, key)` that take `Value` owned
+                // and reuse `v` across several `?`-propagating calls
+                // after the codec derive), keep the wrappers so the
+                // clone-insertion pass's ownership plumbing works.
                 let paired: Vec<(Sym, IrExpr)> = spec.param_names.iter()
                     .zip(rewritten_args.into_iter())
-                    .map(|(n, a)| (*n, a))
+                    .map(|(n, a)| {
+                        let a = if template_wants_reference(&spec.template, n.as_str()) {
+                            strip_arg_decorations(a)
+                        } else {
+                            a
+                        };
+                        (*n, a)
+                    })
                     .collect();
                 return IrExpr {
                     kind: IrExprKind::InlineRust { template: spec.template, args: paired },

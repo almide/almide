@@ -20,6 +20,7 @@ pub const STDLIB_MODULES: &[&str] = &[
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
 pub const BUNDLED_MODULES: &[&str] = &[
     "args", "path", "list", "int", "base64", "hex", "float", "bytes",
+    "error", "math", "datetime",
     "int8", "int16", "int32",
     "uint8", "uint16", "uint32", "uint64",
     "float32",
@@ -32,6 +33,12 @@ pub const BUNDLED_MODULES: &[&str] = &[
 /// bundled `.almd` modules that need resolve-time loading.
 pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     "list", "int", "float",
+    // Stdlib modules migrated from TOML to bundled `.almd` need
+    // auto-import so their signatures and dispatch reach every file
+    // without requiring a redundant `import <name>`. The set mirrors
+    // the auto-import behavior the generated `stdlib_sigs` previously
+    // provided.
+    "error", "math", "datetime",
     "int8", "int16", "int32",
     "uint8", "uint16", "uint32", "uint64",
     "float32",
@@ -78,6 +85,9 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "hex" => Some(include_str!("../../../stdlib/hex.almd")),
         "float" => Some(include_str!("../../../stdlib/float.almd")),
         "bytes" => Some(include_str!("../../../stdlib/bytes.almd")),
+        "error" => Some(include_str!("../../../stdlib/error.almd")),
+        "math" => Some(include_str!("../../../stdlib/math.almd")),
+        "datetime" => Some(include_str!("../../../stdlib/datetime.almd")),
         "int8" => Some(include_str!("../../../stdlib/int8.almd")),
         "int16" => Some(include_str!("../../../stdlib/int16.almd")),
         "int32" => Some(include_str!("../../../stdlib/int32.almd")),

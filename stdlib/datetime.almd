@@ -1,0 +1,70 @@
+// datetime — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2d).
+//
+// Migrated mechanically from the matching `stdlib/defs/*.toml`.
+// Signatures (including any generic type params) match the legacy
+// TOML definitions byte-for-byte; the Rust runtime in
+// `runtime/rs/src/datetime.rs` stays as the implementation target.
+// WASM dispatch continues through `emit_wasm/calls_datetime.rs`.
+
+@inline_rust("{ts} + {n} * 86400")
+fn add_days(ts: Int, n: Int) -> Int = _
+
+@inline_rust("{ts} + {n} * 3600")
+fn add_hours(ts: Int, n: Int) -> Int = _
+
+@inline_rust("{ts} + {n} * 60")
+fn add_minutes(ts: Int, n: Int) -> Int = _
+
+@inline_rust("{ts} + {n}")
+fn add_seconds(ts: Int, n: Int) -> Int = _
+
+@inline_rust("almide_rt_datetime_day({ts})")
+fn day(ts: Int) -> Int = _
+
+@inline_rust("{a} - {b}")
+fn diff_seconds(a: Int, b: Int) -> Int = _
+
+@inline_rust("almide_rt_datetime_format({ts}, {pattern})")
+fn format(ts: Int, pattern: String) -> String = _
+
+@inline_rust("almide_rt_datetime_from_parts({y}, {m}, {d}, {h}, {min}, {s})")
+fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
+
+@inline_rust("{seconds}")
+fn from_unix(seconds: Int) -> Int = _
+
+@inline_rust("almide_rt_datetime_hour({ts})")
+fn hour(ts: Int) -> Int = _
+
+@inline_rust("{a} > {b}")
+fn is_after(a: Int, b: Int) -> Bool = _
+
+@inline_rust("{a} < {b}")
+fn is_before(a: Int, b: Int) -> Bool = _
+
+@inline_rust("almide_rt_datetime_minute({ts})")
+fn minute(ts: Int) -> Int = _
+
+@inline_rust("almide_rt_datetime_month({ts})")
+fn month(ts: Int) -> Int = _
+
+@inline_rust("almide_rt_datetime_now()")
+fn now() -> Int = _
+
+@inline_rust("almide_rt_datetime_parse_iso({s})")
+fn parse_iso(s: String) -> Result[Int, String] = _
+
+@inline_rust("almide_rt_datetime_second({ts})")
+fn second(ts: Int) -> Int = _
+
+@inline_rust("almide_rt_datetime_to_iso({ts})")
+fn to_iso(ts: Int) -> String = _
+
+@inline_rust("{ts}")
+fn to_unix(ts: Int) -> Int = _
+
+@inline_rust("almide_rt_datetime_weekday({ts})")
+fn weekday(ts: Int) -> String = _
+
+@inline_rust("almide_rt_datetime_year({ts})")
+fn year(ts: Int) -> Int = _
