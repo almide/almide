@@ -565,8 +565,18 @@ impl FuncCompiler<'_> {
                         self.emit_process_call(func, args);
                     }
                     _ if module == "testing" => {
-                        // Delegate to Named handler: testing.assert_gt → "assert_gt"
-                        let target = CallTarget::Named { name: (*func).into() };
+                        // Delegate to the hardcoded Named handler:
+                        // `testing.assert_gt` → `assert_gt`. After Stage 3a
+                        // the monomorphizer may specialize bundled generic
+                        // fns to `assert_some__String`, `assert_ok__Int_String`,
+                        // ... The hardcoded Named dispatch above keys on the
+                        // *base* name, so strip the mono suffix before
+                        // delegating — otherwise the call falls through to
+                        // the user-fn fallback and emits `unreachable` for
+                        // any typed caller.
+                        let fname = func.as_str();
+                        let base = fname.split_once("__").map(|(b, _)| b).unwrap_or(fname);
+                        let target = CallTarget::Named { name: almide_base::intern::sym(base) };
                         self.emit_call(&target, args, _ret_ty);
                     }
                     _ => {
