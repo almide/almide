@@ -1,0 +1,46 @@
+// result — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 3b).
+//
+// Migrated mechanically from `stdlib/defs/result.toml`. The
+// implementations live as Rust method calls on the built-in
+// `Result<T, E>` or as `almide_rt_result_*` runtime fns
+// (`collect`, `partition`, `collect_map`). Closure-bearing ops
+// (`map`, `map_err`, `flat_map`, `unwrap_or_else`, `collect_map`)
+// ride the generic lambda-prep added by Stage 3a, so captures
+// that are used multiple times get the same clone-binding
+// treatment as the legacy TOML's `ArgTransform::LambdaClone`.
+
+@inline_rust("({r}).map({f})")
+fn map[A, B, E](r: Result[A, E], f: (A) -> B) -> Result[B, E] = _
+
+@inline_rust("({r}).map_err({f})")
+fn map_err[A, E, F](r: Result[A, E], f: (E) -> F) -> Result[A, F] = _
+
+@inline_rust("({r}).and_then({f})")
+fn flat_map[A, B, E](r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E] = _
+
+@inline_rust("({r}).unwrap_or({default})")
+fn unwrap_or[A, E](r: Result[A, E], default: A) -> A = _
+
+@inline_rust("({r}).unwrap_or_else({f})")
+fn unwrap_or_else[A, E](r: Result[A, E], f: (E) -> A) -> A = _
+
+@inline_rust("({r}).is_ok()")
+fn is_ok[A, E](r: Result[A, E]) -> Bool = _
+
+@inline_rust("({r}).is_err()")
+fn is_err[A, E](r: Result[A, E]) -> Bool = _
+
+@inline_rust("({r}).ok()")
+fn to_option[A, E](r: Result[A, E]) -> Option[A] = _
+
+@inline_rust("({r}).err()")
+fn to_err_option[A, E](r: Result[A, E]) -> Option[E] = _
+
+@inline_rust("almide_rt_result_collect(({rs}).to_vec())")
+fn collect[T, E](rs: List[Result[T, E]]) -> Result[List[T], List[E]] = _
+
+@inline_rust("almide_rt_result_partition(({rs}).to_vec())")
+fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = _
+
+@inline_rust("almide_rt_result_collect_map(({xs}).to_vec(), {f})")
+fn collect_map[T, U, E](xs: List[T], f: (T) -> Result[U, E]) -> Result[List[U], List[E]] = _
