@@ -1,0 +1,172 @@
+// matrix — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4e).
+//
+// Migrated mechanically from `stdlib/defs/matrix.toml` (48 fns). All
+// runtime fns take `&AlmideMatrix` / `&Vec<...>` borrows with owned
+// scalars (f64 / i64) — templates use `&{m}` / `&{bias}` / `&{data}`
+// matching each runtime signature. The `map` closure arg rides the
+// standard `prepare_lambda` lambda-prep and renders as an ordinary
+// Rust closure.
+//
+// `MatrixFusionPass` runs *before* `StdlibLoweringPass` (see
+// `crates/almide-codegen/src/target.rs`), so `matrix.add(matrix.scale(
+// a, ka), matrix.scale(b, kb))` already collapses to `matrix.fma(a,
+// ka, b, kb)` by the time the InlineRust dispatch fires. No
+// fusion-preserving reorder is needed — the fused form is still a
+// plain `CallTarget::Module { module: "matrix", func: "fma" }`, which
+// the bundled `@inline_rust` path dispatches directly.
+
+// ── construction + metadata ──
+
+@inline_rust("almide_rt_matrix_zeros({rows}, {cols})")
+fn zeros(rows: Int, cols: Int) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_ones({rows}, {cols})")
+fn ones(rows: Int, cols: Int) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_shape(&{m})")
+fn shape(m: Matrix) -> (Int, Int) = _
+
+@inline_rust("almide_rt_matrix_transpose(&{m})")
+fn transpose(m: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_from_lists(&{rows})")
+fn from_lists(rows: List[List[Float]]) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_to_lists(&{m})")
+fn to_lists(m: Matrix) -> List[List[Float]] = _
+
+@inline_rust("almide_rt_matrix_get(&{m}, {row}, {col})")
+fn get(m: Matrix, row: Int, col: Int) -> Float = _
+
+@inline_rust("almide_rt_matrix_rows(&{m})")
+fn rows(m: Matrix) -> Int = _
+
+@inline_rust("almide_rt_matrix_cols(&{m})")
+fn cols(m: Matrix) -> Int = _
+
+// ── elementwise arithmetic ──
+
+@inline_rust("almide_rt_matrix_add(&{a}, &{b})")
+fn add(a: Matrix, b: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_mul(&{a}, &{b})")
+fn mul(a: Matrix, b: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_scale(&{m}, {s})")
+fn scale(m: Matrix, s: Float) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_fma(&{a}, {ka}, &{b}, {kb})")
+fn fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_fma3(&{a}, {ka}, &{b}, {kb}, &{c}, {kc})")
+fn fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_sub(&{a}, &{b})")
+fn sub(a: Matrix, b: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_div(&{a}, &{b})")
+fn div(a: Matrix, b: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_neg(&{m})")
+fn neg(m: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_pow(&{m}, {exp})")
+fn pow(m: Matrix, exp: Float) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_map(&{m}, {f})")
+fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
+
+// ── bytes serialisation ──
+
+@inline_rust("almide_rt_matrix_from_bytes_f32_le(&{data}, {offset}, {rows}, {cols})")
+fn from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_to_bytes_f64_le(&{m})")
+fn to_bytes_f64_le(m: Matrix) -> Bytes = _
+
+@inline_rust("almide_rt_matrix_to_bytes_f32_le(&{m})")
+fn to_bytes_f32_le(m: Matrix) -> Bytes = _
+
+@inline_rust("almide_rt_matrix_from_bytes_f16_le(&{data}, {offset}, {rows}, {cols})")
+fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_from_bytes_f64_le(&{data}, {offset}, {rows}, {cols})")
+fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+
+// ── neural-network primitives (row-wise) ──
+
+@inline_rust("almide_rt_matrix_broadcast_add_row(&{m}, &{bias})")
+fn broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_layer_norm_rows(&{m}, &{gamma}, &{beta}, {eps})")
+fn layer_norm_rows(m: Matrix, gamma: List[Float], beta: List[Float], eps: Float) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_softmax_rows(&{m})")
+fn softmax_rows(m: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_gelu(&{m})")
+fn gelu(m: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_split_cols_even(&{m}, {n})")
+fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
+
+@inline_rust("almide_rt_matrix_concat_cols_many(&{matrices})")
+fn concat_cols(matrices: List[Matrix]) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_concat_cols_many(&{matrices})")
+fn concat_cols_many(matrices: List[Matrix]) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_causal_mask_add(&{m}, {mask_val})")
+fn causal_mask_add(m: Matrix, mask_val: Float) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_multi_head_attention(&{q}, &{k}, &{v}, {n_heads})")
+fn multi_head_attention(q: Matrix, k: Matrix, v: Matrix, n_heads: Int) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_masked_multi_head_attention(&{q}, &{k}, &{v}, {n_heads})")
+fn masked_multi_head_attention(q: Matrix, k: Matrix, v: Matrix, n_heads: Int) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_linear_row(&{x}, &{weight}, &{bias})")
+fn linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_linear_row_no_bias(&{x}, &{weight})")
+fn linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_slice_rows(&{m}, {start}, {end})")
+fn slice_rows(m: Matrix, start: Int, end: Int) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_conv1d(&{input}, &{weight}, &{bias}, {kernel}, {stride}, {padding})")
+fn conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_gather_rows(&{m}, &{indices})")
+fn gather_rows(m: Matrix, indices: List[Int]) -> Matrix = _
+
+// ── row-vector dot products ──
+
+@inline_rust("almide_rt_matrix_row_dot(&{m}, {r}, &{vec})")
+fn dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float = _
+
+@inline_rust("almide_rt_matrix_row_dot(&{m}, {r}, &{vec})")
+fn row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float = _
+
+// ── f32 preview path ──
+
+@inline_rust("almide_rt_matrix_zeros_f32({rows}, {cols})")
+fn zeros_f32(rows: Int, cols: Int) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_ones_f32({rows}, {cols})")
+fn ones_f32(rows: Int, cols: Int) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_mul_f32(&{a}, &{b})")
+fn mul_f32(a: Matrix, b: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_mul_f32_scaled(&{a}, {alpha}, &{b})")
+fn mul_f32_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_mul_f32_t(&{a}, &{b})")
+fn mul_f32_t(a: Matrix, b: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_mul_f32_t_scaled(&{a}, {alpha}, &{b})")
+fn mul_f32_t_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
+
+@inline_rust("almide_rt_matrix_mul_scaled(&{a}, {alpha}, &{b})")
+fn mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
