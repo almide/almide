@@ -42,6 +42,18 @@ impl FuncCompiler<'_> {
         match ty {
             Ty::Int => { wasm!(self.func, { i64_eq; }); }
             Ty::Float => { wasm!(self.func, { f64_eq; }); }
+            // Sized Numeric Types (Stage 1c): narrow ints ride in i32
+            // at the WASM level, so equality uses `i32.eq`. `UInt64`
+            // stays i64. `Float32` uses `f32.eq` via the Instruction
+            // API (macro lacks an `f32_eq` rule).
+            Ty::Int8 | Ty::Int16 | Ty::Int32
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 => {
+                wasm!(self.func, { i32_eq; });
+            }
+            Ty::UInt64 => { wasm!(self.func, { i64_eq; }); }
+            Ty::Float32 => {
+                self.func.instruction(&wasm_encoder::Instruction::F32Eq);
+            }
             Ty::Bool => { wasm!(self.func, { i32_eq; }); }
             Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
 

@@ -63,6 +63,20 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             let fmt = IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None };
                             return IrExpr { kind: IrExprKind::RustMacro { name: *name, args: vec![cond, fmt, msg] }, ty, span };
                         }
+                        // Sized Numeric Types (Stage 1c): `assert_eq(x,
+                        // 30)` where `x: Int32` needs the `30` literal
+                        // retyped to `Int32` so `rustc`'s `assert_eq!`
+                        // macro sees matching operand widths. The
+                        // assertion itself isn't a typed fn call, so
+                        // the usual arg-coercion in `lower_call` doesn't
+                        // reach here — patch at the macro build site.
+                        let mut args = args;
+                        if args.len() == 2 {
+                            let l_ty = args[0].ty.clone();
+                            let r_ty = args[1].ty.clone();
+                            coerce_macro_arg(&mut args[1], &l_ty);
+                            coerce_macro_arg(&mut args[0], &r_ty);
+                        }
                         return IrExpr { kind: IrExprKind::RustMacro { name: *name, args }, ty, span };
                     }
                     // assert_some → assert!(x.is_some())
@@ -305,6 +319,34 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
     };
 
     IrExpr { kind, ty, span }
+}
+
+/// Retype a bare Int / Float literal whose IR type is `Ty::Int` /
+/// `Ty::Float` so it matches a sized-typed peer in the same macro
+/// call. See the `assert_eq` site above for the motivation.
+fn coerce_macro_arg(arg: &mut IrExpr, peer_ty: &Ty) {
+    let sized = matches!(
+        peer_ty,
+        Ty::Int8 | Ty::Int16 | Ty::Int32
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32
+    );
+    if !sized { return; }
+    match &mut arg.kind {
+        IrExprKind::LitInt { .. } if arg.ty == Ty::Int => {
+            arg.ty = peer_ty.clone();
+        }
+        IrExprKind::LitFloat { .. } if arg.ty == Ty::Float => {
+            arg.ty = peer_ty.clone();
+        }
+        IrExprKind::UnOp { op: UnOp::NegInt, operand } => {
+            if matches!(&operand.kind, IrExprKind::LitInt { .. }) && operand.ty == Ty::Int {
+                operand.ty = peer_ty.clone();
+                arg.ty = peer_ty.clone();
+            }
+        }
+        _ => {}
+    }
 }
 
 fn rewrite_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {

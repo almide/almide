@@ -85,6 +85,17 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
     // so `f(42)` where `f(x: UInt32)` emits `f(42u32)` instead of an
     // `i64` / `u32` codegen mismatch.
     if let CallTarget::Named { name } = &target {
+        // Builtin comparison macros (assert_eq / assert_ne) aren't
+        // registered in env.functions, but their semantics demand
+        // width-matched operands on both targets. Coerce literal-side
+        // args toward their typed peer here, before the target-specific
+        // lowering picks up a Macro / RustMacro / direct-emit path.
+        if matches!(name.as_str(), "assert_eq" | "assert_ne") && ir_args.len() == 2 {
+            let l_ty = ir_args[0].ty.clone();
+            let r_ty = ir_args[1].ty.clone();
+            super::statements::coerce_literal_to_sized(&mut ir_args[1], &l_ty);
+            super::statements::coerce_literal_to_sized(&mut ir_args[0], &r_ty);
+        }
         if let Some(sig) = ctx.env.functions.get(name).cloned() {
             for (i, (_, param_ty)) in sig.params.iter().enumerate() {
                 if let Some(arg) = ir_args.get_mut(i) {

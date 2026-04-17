@@ -135,8 +135,16 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
         // ── Operators ──
         ast::ExprKind::Binary { op, left, right, .. } => {
-            let l = lower_expr(ctx, left);
-            let r = lower_expr(ctx, right);
+            let mut l = lower_expr(ctx, left);
+            let mut r = lower_expr(ctx, right);
+            // Sized Numeric Types (Stage 1c): when one operand is a
+            // sized type and the other is a bare Int/Float literal,
+            // retype the literal so the resulting BinOp has matching
+            // operand widths. Mirrors the fn-arg and let-binding
+            // coercion rules — the same authoritative-context rule
+            // applies to any pairing where one side locks the width.
+            super::statements::coerce_literal_to_sized(&mut r, &l.ty);
+            super::statements::coerce_literal_to_sized(&mut l, &r.ty);
             // Resolve operand types: if expr.ty is Unknown, try VarTable lookup
             let left_ty = if l.ty == Ty::Unknown {
                 if let IrExprKind::Var { id } = &l.kind { ctx.var_table.get(*id).ty.clone() } else { l.ty.clone() }
@@ -168,13 +176,31 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 ("*", Ty::Matrix, Ty::Matrix) => BinOp::MulMatrix,
                 ("*", Ty::Matrix, Ty::Float) | ("*", Ty::Float, Ty::Matrix) => BinOp::ScaleMatrix,
                 ("*", Ty::Matrix, Ty::Int) | ("*", Ty::Int, Ty::Matrix) => BinOp::ScaleMatrix,
-                ("+", Ty::Float, _) | ("+", _, Ty::Float) => BinOp::AddFloat,
+                // Float dispatch covers canonical `Float` plus the sized
+                // `Float32`. Any other numeric type (Int / Int8 ... /
+                // UInt64) takes the Int path. The *width* of the
+                // arithmetic op (i32_add vs i64_add vs f32_add vs
+                // f64_add) is resolved at WASM emit time from the
+                // operand's valtype; Rust codegen emits plain `a + b`
+                // and lets rustc pick.
+                ("+", Ty::Float, _) | ("+", _, Ty::Float)
+                | ("+", Ty::Float32, _) | ("+", _, Ty::Float32) => BinOp::AddFloat,
                 ("+", _, _) => BinOp::AddInt,
-                ("-", Ty::Float, _) | ("-", _, Ty::Float) => BinOp::SubFloat, ("-", _, _) => BinOp::SubInt,
-                ("*", Ty::Float, _) | ("*", _, Ty::Float) => BinOp::MulFloat, ("*", _, _) => BinOp::MulInt,
-                ("/", Ty::Float, _) | ("/", _, Ty::Float) => BinOp::DivFloat, ("/", _, _) => BinOp::DivInt,
-                ("%", Ty::Float, _) | ("%", _, Ty::Float) => BinOp::ModFloat, ("%", _, _) => BinOp::ModInt,
-                ("^", Ty::Float, _) | ("^", _, Ty::Float) => BinOp::PowFloat, ("^", _, _) => BinOp::PowInt,
+                ("-", Ty::Float, _) | ("-", _, Ty::Float)
+                | ("-", Ty::Float32, _) | ("-", _, Ty::Float32) => BinOp::SubFloat,
+                ("-", _, _) => BinOp::SubInt,
+                ("*", Ty::Float, _) | ("*", _, Ty::Float)
+                | ("*", Ty::Float32, _) | ("*", _, Ty::Float32) => BinOp::MulFloat,
+                ("*", _, _) => BinOp::MulInt,
+                ("/", Ty::Float, _) | ("/", _, Ty::Float)
+                | ("/", Ty::Float32, _) | ("/", _, Ty::Float32) => BinOp::DivFloat,
+                ("/", _, _) => BinOp::DivInt,
+                ("%", Ty::Float, _) | ("%", _, Ty::Float)
+                | ("%", Ty::Float32, _) | ("%", _, Ty::Float32) => BinOp::ModFloat,
+                ("%", _, _) => BinOp::ModInt,
+                ("^", Ty::Float, _) | ("^", _, Ty::Float)
+                | ("^", Ty::Float32, _) | ("^", _, Ty::Float32) => BinOp::PowFloat,
+                ("^", _, _) => BinOp::PowInt,
                 ("==", _, _) => BinOp::Eq, ("!=", _, _) => BinOp::Neq,
                 ("<", _, _) => BinOp::Lt, (">", _, _) => BinOp::Gt,
                 ("<=", _, _) => BinOp::Lte, (">=", _, _) => BinOp::Gte,
