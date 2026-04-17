@@ -157,13 +157,20 @@ fn verify_all_calls_resolved(program: &IrProgram) -> Vec<String> {
                     let f = func.as_str();
                     let is_stdlib = almide_lang::stdlib_info::is_any_stdlib(m);
                     let resolved = if is_stdlib {
-                        // Post-unification: every stdlib module lives in
-                        // `stdlib/<m>.almd` as an `@inline_rust`-bundled IR
-                        // module. The rewriter above moves plain-bundled fns
-                        // to Named; any `Module {stdlib, f}` surviving here
-                        // has `@inline_rust` and is resolved by the
-                        // per-target lowering pass.
-                        self.symbols.module_has_fn(m, f)
+                        // Post-unification every stdlib module lives in
+                        // `stdlib/<m>.almd`. When the user code imports it,
+                        // resolve.rs lowers the bundled module into
+                        // `program.modules` and the symbol table sees it.
+                        // When the call-site code uses a stdlib module
+                        // without importing it (e.g. `bytes.push` from a
+                        // file that already pulled in `bytes` via UFCS),
+                        // the per-target dispatcher (`emit_bytes_call` /
+                        // `pass_stdlib_lowering` template) still handles
+                        // the call — fall back to a parse of the bundled
+                        // source so the verify trusts the actual codegen
+                        // surface, not just whichever modules happened to
+                        // get loaded into the IR for this build.
+                        self.symbols.module_has_fn(m, f) || bundled_has_fn(m, f)
                     } else if self.symbols.has_user_module(m) {
                         self.symbols.module_has_fn(m, f)
                     } else {
@@ -271,4 +278,23 @@ impl SymbolTable {
     fn has_codegen_override(&self, module: &str, func: &str) -> bool {
         self.codegen_override.contains(&(module.to_string(), func.to_string()))
     }
+}
+
+/// Does `module.func` exist in the bundled `.almd` source for `module`?
+/// Used by the verify pass when a stdlib call site is reached without
+/// the corresponding bundled IR being loaded into `program.modules`
+/// (call sites that touch a stdlib module the user did not explicitly
+/// `import`). The per-target dispatcher renders these via
+/// `emit_<module>_call` / `pass_stdlib_lowering` template substitution,
+/// so the verify accepts them as long as the bundled source declares
+/// the fn.
+fn bundled_has_fn(module: &str, func: &str) -> bool {
+    use almide_lang::ast::Decl;
+    let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
+        return false;
+    };
+    let Some(program) = almide_lang::parse_cached(source) else { return false; };
+    program.decls.iter().any(|decl| {
+        matches!(decl, Decl::Fn { name, .. } if name.as_str() == func)
+    })
 }

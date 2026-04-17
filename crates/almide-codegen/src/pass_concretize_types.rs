@@ -266,6 +266,18 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
             if elem_tys.iter().any(Ty::has_unresolved_deep) { None }
             else { Some(Ty::Tuple(elem_tys)) }
         }
+        IrExprKind::OptionSome { expr } => {
+            // `some(x)` has type `Option[x.ty]`; recover when the type
+            // checker left an `Option[Unknown]` placeholder (typical for
+            // payloads built from pattern-bound names).
+            if expr.ty.has_unresolved_deep() { None }
+            else {
+                Some(Ty::Applied(
+                    almide_lang::types::constructor::TypeConstructorId::Option,
+                    vec![expr.ty.clone()],
+                ))
+            }
+        }
         IrExprKind::LitInt { .. } => Some(Ty::Int),
         IrExprKind::LitFloat { .. } => Some(Ty::Float),
         IrExprKind::LitBool { .. } => Some(Ty::Bool),
