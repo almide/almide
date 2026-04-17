@@ -36,10 +36,21 @@ fn user_code(full: &str) -> &str {
         let after_macro = &full[pos..];
         if let Some(newline) = after_macro.find('\n') {
             let rest = &full[pos + newline + 1..];
-            // Skip blank lines and runtime code until we hit user code
-            // User functions start with `pub fn` at column 0
-            if let Some(fn_pos) = rest.find("\npub fn ").or_else(|| rest.find("\nfn ")) {
-                return rest[fn_pos + 1..].trim();
+            // Skip blank lines and runtime code until we hit user code.
+            // User functions start with `pub fn` at column 0. Earlier
+            // versions relied on `\npub fn ` matching (leading newline),
+            // which silently dropped the first user fn when the preamble
+            // shrank enough that `rest` starts directly with `pub fn ...`
+            // — notably after Stage 4c migrated the fs / process stdlib
+            // types out of the unconditional preamble. Accept both
+            // forms: "at start of rest" AND "after a newline".
+            let hit = if rest.starts_with("pub fn ") || rest.starts_with("fn ") {
+                Some(0)
+            } else {
+                rest.find("\npub fn ").or_else(|| rest.find("\nfn ")).map(|p| p + 1)
+            };
+            if let Some(fn_pos) = hit {
+                return rest[fn_pos..].trim();
             }
             return rest.trim();
         }

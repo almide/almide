@@ -1,0 +1,89 @@
+// http — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4c).
+//
+// Migrated mechanically from `stdlib/defs/http.toml` (20 fns).
+// `Request` / `Response` are nominal types that live as Rust structs
+// in `runtime/rs/src/http.rs`.
+//
+// Runtime ABI for this module is mixed:
+// - Request / Response accessors take `&`-refs (`&AlmideHttpResponse`,
+//   `&AlmideHttpRequest`) and `&str` for string keys.
+// - Response builders (`response`, `json`, `with_headers`) take
+//   owned `String` for the body.
+// - HTTP client methods (`get`/`post`/…) take `&str` URLs/bodies.
+// Each template carries the sigil required by its runtime fn so no
+// rewrite-layer stripping is needed.
+//
+// `serve` takes a request-handler callback. The underlying runtime
+// expects `Fn(Request) -> Result<Response, String>`, but the Almide
+// API keeps the callback as `(Request) -> Response` — the template
+// wraps the call in `Ok(...)` at the Rust site (`|__req| Ok({f}(__req))`)
+// so `{f}` can still render as a plain `|req| http.response(...)`
+// closure without any codegen plumbing beyond `prepare_lambda`.
+
+@inline_rust("almide_http_serve({port}, |__req| Ok(({f})(__req)))?")
+effect fn serve(port: Int, f: (Request) -> Response) -> Unit = _
+
+// ── Response builders ──
+
+@inline_rust("almide_rt_http_response({status}, {body})")
+fn response(status: Int, body: String) -> Response = _
+
+@inline_rust("almide_rt_http_json({status}, {body})")
+fn json(status: Int, body: String) -> Response = _
+
+@inline_rust("almide_rt_http_with_headers({status}, {body}, &{headers})")
+fn with_headers(status: Int, body: String, headers: Map[String, String]) -> Response = _
+
+@inline_rust("almide_rt_http_redirect(&{url})")
+fn redirect(url: String) -> Response = _
+
+// ── Response accessors/mutators ──
+
+@inline_rust("almide_http_set_status({resp}, {code})")
+fn status(resp: Response, code: Int) -> Response = _
+
+@inline_rust("almide_http_get_body(&{resp})")
+fn body(resp: Response) -> String = _
+
+@inline_rust("almide_http_set_header({resp}, &{key}, &{value})")
+fn set_header(resp: Response, key: String, value: String) -> Response = _
+
+@inline_rust("almide_http_get_header(&{resp}, &{key})")
+fn get_header(resp: Response, key: String) -> Option[String] = _
+
+// ── Request accessors (pure) ──
+
+@inline_rust("almide_http_req_method(&{req})")
+fn req_method(req: Request) -> String = _
+
+@inline_rust("almide_http_req_path(&{req})")
+fn req_path(req: Request) -> String = _
+
+@inline_rust("almide_http_req_body(&{req})")
+fn req_body(req: Request) -> String = _
+
+@inline_rust("almide_http_req_header(&{req}, &{key})")
+fn req_header(req: Request, key: String) -> Option[String] = _
+
+@inline_rust("almide_http_query_params(&{req})")
+fn query_params(req: Request) -> Map[String, String] = _
+
+// ── HTTP client (effect) ──
+
+@inline_rust("almide_http_get(&{url})")
+effect fn get(url: String) -> Result[String, String] = _
+
+@inline_rust("almide_http_post(&{url}, &{body})")
+effect fn post(url: String, body: String) -> Result[String, String] = _
+
+@inline_rust("almide_http_put(&{url}, &{body})")
+effect fn put(url: String, body: String) -> Result[String, String] = _
+
+@inline_rust("almide_http_patch(&{url}, &{body})")
+effect fn patch(url: String, body: String) -> Result[String, String] = _
+
+@inline_rust("almide_http_delete(&{url})")
+effect fn delete(url: String) -> Result[String, String] = _
+
+@inline_rust("almide_http_request(&{method}, &{url}, &{body}, &{headers})")
+effect fn request(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = _
