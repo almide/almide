@@ -11,7 +11,7 @@ pub const STDLIB_MODULES: &[&str] = &[
 ];
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
-pub const BUNDLED_MODULES: &[&str] = &["args", "path", "list"];
+pub const BUNDLED_MODULES: &[&str] = &["args", "path", "list", "int"];
 
 /// Bundled modules that should be auto-imported (Tier 1 behavior).
 /// Tier-1 stdlib modules with no bundled-Almide content (option, result, etc.)

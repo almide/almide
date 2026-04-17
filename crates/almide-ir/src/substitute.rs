@@ -243,6 +243,13 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             },
             ty: expr.ty.clone(), span: expr.span,
         },
+        IrExprKind::InlineRust { template, args } => IrExpr {
+            kind: IrExprKind::InlineRust {
+                template: template.clone(),
+                args: args.iter().map(|(n, a)| (*n, sub(a))).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span,
+        },
 
         IrExprKind::IterChain { source, consume, steps, collector } => IrExpr {
             kind: IrExprKind::IterChain {

@@ -91,7 +91,7 @@ fn auto_derive_repr(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[
         ret_ty: Ty::String,
         body: IrExpr { kind: IrExprKind::StringInterp { parts }, ty: Ty::String, span: None },
         is_effect: false, is_async: false, is_test: false,
-        generics: None, extern_attrs: vec![], export_attrs: vec![], visibility: IrVisibility::Public,
+        generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
     }
 }
@@ -121,7 +121,7 @@ fn auto_derive_variant_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty) -> I
         ret_ty: Ty::Bool,
         body,
         is_effect: false, is_async: false, is_test: false,
-        generics: None, extern_attrs: vec![], export_attrs: vec![], visibility: IrVisibility::Public,
+        generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
     }
 }
@@ -157,7 +157,7 @@ fn auto_derive_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[Ir
         ret_ty: Ty::Bool,
         body: body.unwrap_or(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None }),
         is_effect: false, is_async: false, is_test: false,
-        generics: None, extern_attrs: vec![], export_attrs: vec![], visibility: IrVisibility::Public,
+        generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
     }
 }

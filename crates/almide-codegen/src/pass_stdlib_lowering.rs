@@ -16,6 +16,18 @@ use super::pass::{NanoPass, PassResult, Target};
 #[derive(Debug)]
 pub struct StdlibLoweringPass;
 
+/// Decoded `@inline_rust(...)` metadata for a bundled stdlib fn.
+/// Populated once at the start of `StdlibLoweringPass::run` and
+/// consumed during `rewrite_expr` on every matching call site.
+#[derive(Debug, Clone)]
+struct InlineRustSpec {
+    /// The literal template string from `@inline_rust("...")`.
+    template: String,
+    /// Parameter names in order. Used to pair positional call args
+    /// with their `{name}` placeholders in `template`.
+    param_names: Vec<Sym>,
+}
+
 thread_local! {
     /// (module, func) pairs that come from bundled .almd stdlib sources and
     /// have NO matching TOML/Rust runtime fn. Populated at the start of
@@ -23,10 +35,35 @@ thread_local! {
     /// and the call stays as a `CallTarget::Module` so the walker emits a
     /// normal user-fn call.
     static BUNDLED_FNS: RefCell<HashSet<(Sym, Sym)>> = RefCell::new(HashSet::new());
+
+    /// (module, func) → `@inline_rust` metadata. Populated once at the
+    /// start of `run`; `rewrite_expr` intercepts matching module calls
+    /// and emits `IrExprKind::InlineRust` instead of the legacy
+    /// `arg_transforms`-backed `Named` call. This lets pure-Almide
+    /// stdlib modules override the per-TOML dispatch on a fn-by-fn
+    /// basis (Stage 1 of the Stdlib Declarative Unification arc).
+    static INLINE_RUST: RefCell<HashMap<(Sym, Sym), InlineRustSpec>> = RefCell::new(HashMap::new());
 }
 
 fn is_bundled_only(module: Sym, func: Sym) -> bool {
     BUNDLED_FNS.with(|s| s.borrow().contains(&(module, func)))
+}
+
+fn inline_rust_spec(module: Sym, func: Sym) -> Option<InlineRustSpec> {
+    INLINE_RUST.with(|s| s.borrow().get(&(module, func)).cloned())
+}
+
+/// Extract the `@inline_rust("...")` template from an IrFunction's
+/// attrs, if present. Returns None if the attribute is missing or
+/// malformed (no string first-arg).
+fn find_inline_rust_template(f: &IrFunction) -> Option<String> {
+    use almide_lang::ast::AttrValue;
+    let attr = f.attrs.iter().find(|a| a.name.as_str() == "inline_rust")?;
+    let first = attr.args.first()?;
+    match &first.value {
+        AttrValue::String { value } => Some(value.clone()),
+        _ => None,
+    }
 }
 
 impl NanoPass for StdlibLoweringPass {
@@ -51,6 +88,27 @@ impl NanoPass for StdlibLoweringPass {
             })
             .collect();
         BUNDLED_FNS.with(|s| *s.borrow_mut() = bundled_fns);
+
+        // Build the @inline_rust dispatch table. A bundled stdlib fn with
+        // this attribute takes priority over the TOML-generated
+        // arg_transforms path: any call to `(module, func)` in this table
+        // will be rewritten into an `IrExprKind::InlineRust` node whose
+        // template + args are rendered verbatim at walker time. The
+        // bundled fn itself is NOT emitted as a Rust function body (see
+        // `walker/mod.rs::should_skip_fn_body`).
+        let inline_rust: HashMap<(Sym, Sym), InlineRustSpec> = program.modules.iter()
+            .filter(|m| almide_lang::stdlib_info::is_bundled_module(m.name.as_str()))
+            .flat_map(|m| {
+                let mname = m.name;
+                m.functions.iter().filter_map(move |f| {
+                    find_inline_rust_template(f).map(|template| {
+                        let param_names = f.params.iter().map(|p| p.name).collect();
+                        ((mname, f.name), InlineRustSpec { template, param_names })
+                    })
+                })
+            })
+            .collect();
+        INLINE_RUST.with(|s| *s.borrow_mut() = inline_rust);
 
         for func in &mut program.functions {
             func.body = rewrite_expr(std::mem::take(&mut func.body));
@@ -126,6 +184,29 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
 
     let kind = match expr.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
+            // Stdlib Unification Stage 1: if a bundled stdlib fn
+            // declares `@inline_rust("template")`, produce an
+            // InlineRust IR node with the template + param-keyed args.
+            // Bundled wins over the legacy TOML/arg_transforms path.
+            if let Some(spec) = inline_rust_spec(module, func) {
+                let rewritten_args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
+                // Pair each rewritten arg with the matching param name.
+                // Extra positional args (shouldn't happen post-checker)
+                // fall off silently; missing trailing args leave their
+                // placeholders untouched in the template, which will
+                // surface as a compile error in the generated Rust so
+                // the author fixes the template.
+                let paired: Vec<(Sym, IrExpr)> = spec.param_names.iter()
+                    .zip(rewritten_args.into_iter())
+                    .map(|(n, a)| (*n, a))
+                    .collect();
+                return IrExpr {
+                    kind: IrExprKind::InlineRust { template: spec.template, args: paired },
+                    ty,
+                    span,
+                };
+            }
+
             // Non-stdlib modules (bundled .almd + user packages): leave as Module calls.
             // They are rendered by the walker directly, not converted to Named calls.
             // Bundled-only stdlib fns (defined in stdlib/<module>.almd with no TOML

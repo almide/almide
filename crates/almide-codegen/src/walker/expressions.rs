@@ -182,6 +182,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Codegen pre-rendered call ──
         IrExprKind::RenderedCall { code } => code.clone(),
 
+        // ── @inline_rust template dispatch (Stdlib Unification Stage 1) ──
+        // Produced by `pass_stdlib_lowering` for calls to bundled stdlib
+        // fns whose IrFunction carries an `@inline_rust("...")` attribute.
+        // Render each arg into the param-keyed placeholder.
+        IrExprKind::InlineRust { template, args } => {
+            let mut out = template.clone();
+            for (name, arg) in args {
+                let rendered = render_expr(ctx, arg);
+                let placeholder = format!("{{{}}}", name.as_str());
+                out = out.replace(&placeholder, &rendered);
+            }
+            out
+        }
+
         // ── Calls ──
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
             match target {

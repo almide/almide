@@ -211,16 +211,25 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         let blank_lines = prog.blank_lines_map.get(decl_idx).copied().unwrap_or(0);
 
         match decl {
-            ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, export_attrs, visibility, .. } => {
-                let mut f = lower_fn(&mut ctx, name, params, body, effect, r#async, span, generics, extern_attrs, export_attrs, visibility, module_prefix);
+            ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, .. } => {
+                let mut f = lower_fn(&mut ctx, name, params, body, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, module_prefix);
                 f.doc = doc;
                 f.blank_lines_before = blank_lines;
                 functions.push(f);
             }
-            // Extern fn without body: include in IR with Hole body (codegen emits `use` import)
-            ast::Decl::Fn { name, params, body: None, effect, r#async, span, generics, extern_attrs, export_attrs, visibility, .. } if !extern_attrs.is_empty() => {
+            // Body-less fn: included in IR with a Hole body when it has
+            // an `@extern(...)` binding (codegen emits `use` import) or
+            // a generic `@inline_rust(...)` / `@wasm_intrinsic(...)`
+            // attribute (stdlib unification: body is declarative only,
+            // codegen skips emission and substitutes a template at call
+            // sites). Either case keeps the signature in IR so callers
+            // type-check against a real IrFunction.
+            ast::Decl::Fn { name, params, body: None, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, .. }
+                if !extern_attrs.is_empty()
+                    || attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic")) =>
+            {
                 let hole_body = ast::Expr::new(ast::ExprId(0), span.clone(), ast::ExprKind::Hole);
-                let mut f = lower_fn(&mut ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, export_attrs, visibility, module_prefix);
+                let mut f = lower_fn(&mut ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, module_prefix);
                 f.doc = doc;
                 f.blank_lines_before = blank_lines;
                 functions.push(f);
@@ -244,10 +253,10 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
             }
             ast::Decl::Impl { for_, methods, .. } => {
                 for m in methods {
-                    if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, export_attrs, visibility, .. } = m {
+                    if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, .. } = m {
                         // Prefix method name with type name: "show" → "Dog.show"
                         let convention_name = format!("{}.{}", for_, name);
-                        let f = lower_fn(&mut ctx, &convention_name, params, body, effect, r#async, span, generics, extern_attrs, export_attrs, visibility, None);
+                        let f = lower_fn(&mut ctx, &convention_name, params, body, effect, r#async, span, generics, extern_attrs, export_attrs, attrs, visibility, None);
                         functions.push(f);
                     }
                 }
@@ -455,6 +464,7 @@ fn lower_fn(
     effect: &Option<bool>, r#async: &Option<bool>, span: &Option<ast::Span>,
     generics: &Option<Vec<ast::GenericParam>>, extern_attrs: &[ast::ExternAttr],
     export_attrs: &[ast::ExportAttr],
+    attrs: &[ast::Attribute],
     visibility: &ast::Visibility, module_prefix: Option<&str>,
 ) -> IrFunction {
     ctx.push_scope();
@@ -512,7 +522,9 @@ fn lower_fn(
         name: sym(name), params: ir_params, ret_ty, body: ir_body,
         is_effect, is_async, is_test: false,
         generics: generics.clone(), extern_attrs: extern_attrs.to_vec(),
-        export_attrs: export_attrs.to_vec(), visibility: vis,
+        export_attrs: export_attrs.to_vec(),
+        attrs: attrs.to_vec(),
+        visibility: vis,
         doc: None, blank_lines_before: 0,
     }
 }
@@ -524,7 +536,7 @@ fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
     IrFunction {
         name: sym(name), params: vec![], ret_ty: Ty::Unit, body: ir_body,
         is_effect: true, is_async: false, is_test: true,
-        generics: None, extern_attrs: vec![], export_attrs: vec![],
+        generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
         visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
     }
