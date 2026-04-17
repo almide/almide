@@ -27,6 +27,19 @@ impl NanoPass for ResultPropagationPass {
         // This ensures ! (unwrap) propagates errors consistently across Rust and WASM.
         let wrap_non_result = matches!(target, Target::Rust | Target::Wasm);
 
+        // `@inline_rust` / `@wasm_intrinsic` bundled fns dispatch through a
+        // per-target template whose actual runtime fn (Rust: `runtime/rs`,
+        // WASM: `emit_wasm/calls_*.rs`) returns the unwrapped type.
+        // Lifting their IR signature to `Result[T, String]` would tell the
+        // call-site rewriter to retype call exprs to Result while the
+        // emitter still pushes `T` on the stack (or substitutes the bare
+        // template), which collapses local widths and equality dispatch.
+        // Keep the IR consistent with what actually gets emitted.
+        let is_template_dispatch = |attrs: &[almide_lang::ast::Attribute]| -> bool {
+            attrs.iter().any(|a| matches!(a.name.as_str(),
+                "inline_rust" | "wasm_intrinsic"))
+        };
+
         // Phase 1a: Collect all effect fn names and lift return types.
         // Extern functions are excluded: their signatures are fixed by the host
         // environment and must not be wrapped in Result.
@@ -34,6 +47,7 @@ impl NanoPass for ResultPropagationPass {
         for func in &mut program.functions {
             if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
                 && func.extern_attrs.is_empty()
+                && !is_template_dispatch(&func.attrs)
             {
                 let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                 func.ret_ty = Ty::result(orig, Ty::String);
@@ -63,6 +77,7 @@ impl NanoPass for ResultPropagationPass {
             for func in &mut module.functions {
                 if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
                     && func.extern_attrs.is_empty()
+                    && !is_template_dispatch(&func.attrs)
                 {
                     let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                     func.ret_ty = Ty::result(orig, Ty::String);
