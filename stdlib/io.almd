@@ -8,13 +8,13 @@
 // fns stay as plain `fn` (matching the existing TOML contract where
 // the sole difference was an omitted effect-context check).
 
-@inline_rust("almide_rt_io_read_line()?")
+@inline_rust("almide_rt_io_read_line()")
 effect fn read_line() -> String = _
 
-@inline_rust("almide_rt_io_print(&*{s})?")
+@inline_rust("almide_rt_io_print(&*{s})")
 effect fn print(s: String) -> Unit = _
 
-@inline_rust("almide_rt_io_read_all()?")
+@inline_rust("almide_rt_io_read_all()")
 effect fn read_all() -> String = _
 
 @inline_rust("almide_rt_io_read_byte()")

@@ -40,6 +40,12 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
             "Matrix" => Ty::Matrix,
             "RawPtr" => Ty::RawPtr,
             "Path" => Ty::String,
+            // `Never` is the bottom type — used by `process.exit` and
+            // similar diverging fns. The resolver has to surface it as
+            // `Ty::Never` (not `Ty::Named("Never", [])`); without this,
+            // bundled sigs that spell `-> Never` would be unifiable only
+            // with another nominal `Never` type, which doesn't exist.
+            "Never" => Ty::Never,
             other => {
                 // - Generic type parameters (T, U, Self, ...) resolve via
                 //   known_types as `Ty::TypeVar`.
