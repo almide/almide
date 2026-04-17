@@ -13,15 +13,37 @@ use std::cell::RefCell;
 use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
 use almide_base::intern::sym;
-use crate::generated::arg_transforms::{self, ArgTransform};
 
-/// Returns true if `transform` borrows its input (does NOT consume ownership).
-fn transform_borrows(t: &ArgTransform) -> bool {
-    matches!(t,
-        ArgTransform::BorrowRef
-        | ArgTransform::BorrowStr
-        | ArgTransform::BorrowMut
-    )
+/// `true` if the bundled `module.func`'s `@inline_rust` template
+/// borrows the param at position `pos` (`&{name}`, `&*{name}`,
+/// `&mut {name}`, or `&mut *{name}`). Consumed ("owned") params have
+/// no sigil and render via `{name}` alone.
+fn bundled_borrow_at(module: &str, func: &str, pos: usize) -> bool {
+    use almide_lang::ast::{AttrValue, Decl};
+    use almide_lang::lexer::Lexer;
+    use almide_lang::parser::Parser;
+    let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
+        return false;
+    };
+    let tokens = Lexer::tokenize(source);
+    let mut parser = Parser::new(tokens);
+    let Ok(program) = parser.parse() else { return false; };
+    for decl in &program.decls {
+        let Decl::Fn { name, attrs, params, .. } = decl else { continue };
+        if name.as_str() != func { continue; }
+        let Some(pname) = params.get(pos).map(|p| p.name) else { return false; };
+        let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "inline_rust") else {
+            return false;
+        };
+        let Some(first) = attr.args.first() else { return false; };
+        let AttrValue::String { value } = &first.value else { return false; };
+        let p = pname.as_str();
+        return value.contains(&format!("&{{{}}}", p))
+            || value.contains(&format!("&*{{{}}}", p))
+            || value.contains(&format!("&mut {{{}}}", p))
+            || value.contains(&format!("&mut *{{{}}}", p));
+    }
+    false
 }
 
 // Thread-local snapshot of currently-known borrow signatures, used during
@@ -211,25 +233,19 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             // Bytes-only stdlib-aware: only skip ownership for Bytes args in
             // stdlib Module calls. Lists/Strings keep the old conservative
             // behaviour to avoid lambda-typing regressions in filter/map.
-            let stdlib_info = match target {
-                CallTarget::Module { module, func } => arg_transforms::lookup(module.as_str(), func.as_str()),
-                _ => None,
-            };
-            if let Some(info) = stdlib_info {
-                let mut all_borrowed = true;
-                for (i, arg) in args.iter().enumerate() {
-                    let borrowed = info.args.get(i).map_or(false, transform_borrows)
-                        && matches!(arg.ty, Ty::Bytes);
-                    if !borrowed && is_var(arg, var) {
-                        all_borrowed = false;
-                        *needs = true;
-                        return;
+            if let CallTarget::Module { module, func } = target {
+                if almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
+                    for (i, arg) in args.iter().enumerate() {
+                        let borrowed = bundled_borrow_at(module.as_str(), func.as_str(), i)
+                            && matches!(arg.ty, Ty::Bytes);
+                        if !borrowed && is_var(arg, var) {
+                            *needs = true;
+                            return;
+                        }
                     }
+                    for arg in args { check_needs_ownership(arg, var, needs); }
+                    return;
                 }
-                // If we fell through (none was the target var), still recurse.
-                for arg in args { check_needs_ownership(arg, var, needs); }
-                let _ = all_borrowed;
-                return;
             }
             // Self-recursive Named call: treat optimistically. For tail-recursive
             // parsers passing the same `data` through, we don't want the first-pass

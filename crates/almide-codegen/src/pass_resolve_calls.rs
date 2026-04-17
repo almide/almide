@@ -39,7 +39,6 @@ use almide_ir::*;
 use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut};
 use almide_base::intern::sym;
 use super::pass::{NanoPass, PassResult, Postcondition, Target};
-use super::generated::arg_transforms;
 
 #[derive(Debug)]
 pub struct ResolveCallsPass;
@@ -84,7 +83,6 @@ impl NanoPass for ResolveCallsPass {
                         // versioned lookup. Rewriting to a non-versioned
                         // `almide_rt_<pkg>_<fn>` here would break the link.
                         let is_stdlib = almide_lang::stdlib_info::is_any_stdlib(m);
-                        let toml_has = arg_transforms::lookup(m, f).is_some();
                         let bundled_has = self.symbols.module_has_fn(m, f);
                         // `@inline_rust` / `@wasm_intrinsic` bundled fns stay
                         // as `CallTarget::Module` — the per-target lowering
@@ -94,7 +92,7 @@ impl NanoPass for ResolveCallsPass {
                         // would silently fall back to a Named call referring
                         // to a symbol that nobody emits.
                         let has_override = self.symbols.has_codegen_override(m, f);
-                        if is_stdlib && !toml_has && bundled_has && !has_override {
+                        if is_stdlib && bundled_has && !has_override {
                             let mangled = format!(
                                 "almide_rt_{}_{}",
                                 m.replace('.', "_"),
@@ -159,12 +157,13 @@ fn verify_all_calls_resolved(program: &IrProgram) -> Vec<String> {
                     let f = func.as_str();
                     let is_stdlib = almide_lang::stdlib_info::is_any_stdlib(m);
                     let resolved = if is_stdlib {
-                        // stdlib (TOML or bundled IR fn). The rewriter above
-                        // moved bundled fns to Named, so by the time this
-                        // postcondition runs, any Module {stdlib, f} should
-                        // be TOML-backed.
-                        arg_transforms::lookup(m, f).is_some()
-                            || self.symbols.module_has_fn(m, f)
+                        // Post-unification: every stdlib module lives in
+                        // `stdlib/<m>.almd` as an `@inline_rust`-bundled IR
+                        // module. The rewriter above moves plain-bundled fns
+                        // to Named; any `Module {stdlib, f}` surviving here
+                        // has `@inline_rust` and is resolved by the
+                        // per-target lowering pass.
+                        self.symbols.module_has_fn(m, f)
                     } else if self.symbols.has_user_module(m) {
                         self.symbols.module_has_fn(m, f)
                     } else {

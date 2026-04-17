@@ -1,16 +1,18 @@
-//! StdlibLoweringPass: transform Module calls into Named calls with IR-level arg decoration.
+//! StdlibLoweringPass: dispatch Module calls into per-target IR nodes.
 //!
-//! Uses build.rs-generated `arg_transforms::lookup()` table to know exactly
-//! how each argument should be decorated (BorrowStr, BorrowRef, ToVec, LambdaClone, Direct).
-//!
-//! NO string rendering. All decisions are structural IR transformations.
+//! Post Stdlib Declarative Unification, every stdlib module lives in
+//! `stdlib/<m>.almd` with `@inline_rust` / `@wasm_intrinsic` templates.
+//! This pass parses those attrs (once per run via the `INLINE_RUST`
+//! thread-local) and rewrites `CallTarget::Module { module, func }`
+//! into `IrExprKind::InlineRust { template, args }` for the Rust
+//! target. The WASM emitter keeps its own dispatch in
+//! `emit_wasm/calls_*.rs`; this pass skips WASM emission.
 
 use std::cell::RefCell;
 use std::collections::{HashSet, HashMap};
 use almide_base::intern::Sym;
 use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
-use crate::generated::arg_transforms::{self, ArgTransform};
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -211,20 +213,15 @@ impl NanoPass for StdlibLoweringPass {
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
     fn depends_on(&self) -> Vec<&'static str> { vec!["EffectInference"] }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        // Build the bundled-only fn registry: any fn defined in an IR module
-        // whose name matches a known bundled stdlib module AND has no TOML
-        // runtime entry. These need to bypass the rt_ rewrite below.
+        // Every fn in every bundled stdlib IR module is bundled-only
+        // now: the TOML-backed runtime table was retired with the
+        // Stdlib Declarative Unification arc, so no overlap check
+        // is needed.
         let bundled_fns: HashSet<(Sym, Sym)> = program.modules.iter()
             .filter(|m| almide_lang::stdlib_info::is_bundled_module(m.name.as_str()))
             .flat_map(|m| {
                 let mname = m.name;
-                m.functions.iter().filter_map(move |f| {
-                    if arg_transforms::lookup(mname.as_str(), f.name.as_str()).is_some() {
-                        None
-                    } else {
-                        Some((mname, f.name))
-                    }
-                })
+                m.functions.iter().map(move |f| (mname, f.name))
             })
             .collect();
         BUNDLED_FNS.with(|s| *s.borrow_mut() = bundled_fns);
@@ -473,44 +470,20 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                 return inlined;
             }
 
-            // Look up per-function transform table
-            let info = arg_transforms::lookup(&module, &func);
-            let rt_name = info.as_ref().map(|i| i.name.to_string())
-                .unwrap_or_else(|| format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_")));
-
-            // Fill missing optional args with OptionNone
-            let total_params = info.as_ref().map(|i| i.args.len()).unwrap_or(args.len());
-            let mut args = args;
-            while args.len() < total_params {
-                args.push(IrExpr {
-                    kind: IrExprKind::OptionNone,
-                    ty: Ty::option(Ty::Unknown),
-                    span: None,
-                });
-            }
-
-            // Decorate each arg based on the transform table
-            let decorated_args: Vec<IrExpr> = args.into_iter().enumerate().map(|(i, arg)| {
-                let transform = info.as_ref()
-                    .and_then(|info| info.args.get(i).copied())
-                    .unwrap_or(ArgTransform::Direct);
-
-                decorate_arg(arg, transform)
-            }).collect();
-
-            // Build the Named call
-            let call = IrExpr {
+            // Post Stdlib Declarative Unification every stdlib module
+            // flows through the `@inline_rust` dispatch above. Any
+            // Module call that reaches here is either a user module
+            // (already returned at the `is_bundled_only` branch) or a
+            // stale alias that should remain visible to the walker.
+            return IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Named { name: rt_name.into() },
-                    args: decorated_args,
+                    target: CallTarget::Module { module, func },
+                    args,
                     type_args,
                 },
-                ty: ty.clone(),
+                ty,
                 span,
             };
-
-            // auto-? is handled by ResultPropagationPass (runs after this pass)
-            return call;
         }
 
         // Recurse into all sub-expressions (same as before)
@@ -548,9 +521,8 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         let (mod_name, func_name) = (&method[..dot_pos], &method[dot_pos+1..]);
                         let mod_sym = almide_base::intern::sym(mod_name);
                         let func_sym = almide_base::intern::sym(func_name);
-                        let is_toml_stdlib = arg_transforms::lookup(mod_name, func_name).is_some();
                         let is_bundled_inline_rust = INLINE_RUST.with(|s| s.borrow().contains_key(&(mod_sym, func_sym)));
-                        if !is_toml_stdlib && !is_bundled_inline_rust {
+                        if !is_bundled_inline_rust {
                                 // Not a stdlib function — leave as Method call for BuiltinLoweringPass
                                 return IrExpr { kind: IrExprKind::Call {
                                     target: CallTarget::Method { object, method },
@@ -1151,141 +1123,6 @@ fn prepare_lambda_borrowed(arg: IrExpr) -> IrExpr {
             }
         }
         _ => arg,
-    }
-}
-
-/// Decorate a single argument based on the per-function transform.
-fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
-    let ty = arg.ty.clone();
-    let span = arg.span;
-
-    match transform {
-        ArgTransform::Direct => arg,
-
-        ArgTransform::BorrowStr => {
-            // &*expr — strip Clone wrapper (borrow doesn't consume ownership)
-            let inner = match arg.kind {
-                IrExprKind::Clone { expr } => *expr,
-                _ => arg,
-            };
-            IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: true, mutable: false },
-                ty, span,
-            }
-        }
-
-        ArgTransform::BorrowRef => {
-            // &expr — strip Clone wrapper (borrow doesn't consume ownership)
-            let inner = match arg.kind {
-                IrExprKind::Clone { expr } => *expr,
-                _ => arg,
-            };
-            IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: false, mutable: false },
-                ty, span,
-            }
-        }
-
-        ArgTransform::BorrowMut => {
-            // &mut expr — strip Clone wrapper (mutable borrow doesn't clone)
-            let inner = match arg.kind {
-                IrExprKind::Clone { expr } => *expr,
-                _ => arg,
-            };
-            IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: false, mutable: true },
-                ty, span,
-            }
-        }
-
-        ArgTransform::ToVec => {
-            // (expr).to_vec()
-            IrExpr {
-                kind: IrExprKind::ToVec { expr: Box::new(arg) },
-                ty, span,
-            }
-        }
-
-        ArgTransform::LambdaClone => {
-            // Lambda: add clone bindings only for params used more than once
-            match arg.kind {
-                IrExprKind::Lambda { params, body, lambda_id } => {
-                    let clone_stmts = build_clone_stmts_for_lambda(&params, &body);
-
-                    let wrapped_body = if clone_stmts.is_empty() {
-                        *body
-                    } else {
-                        let body_ty = body.ty.clone();
-                        let body_span = body.span;
-                        IrExpr {
-                            kind: IrExprKind::Block {
-                                stmts: clone_stmts,
-                                expr: Some(body),
-                            },
-                            ty: body_ty,
-                            span: body_span,
-                        }
-                    };
-
-                    IrExpr {
-                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
-                        ty, span,
-                    }
-                }
-                // FnRef: pass as-is (function reference, not a lambda)
-                _ => arg,
-            }
-        }
-
-        ArgTransform::WrapSome => {
-            // Some(expr) — but if arg is already OptionNone, pass as-is (optional param omitted)
-            if matches!(&arg.kind, IrExprKind::OptionNone) {
-                arg
-            } else {
-                IrExpr {
-                    kind: IrExprKind::OptionSome { expr: Box::new(arg) },
-                    ty: Ty::option(ty),
-                    span,
-                }
-            }
-        }
-
-        ArgTransform::LambdaResultWrap => {
-            // Lambda with Ok(body) wrapping: callback body gets wrapped in ResultOk
-            match arg.kind {
-                IrExprKind::Lambda { params, body, lambda_id } => {
-                    // Clone bindings (only for multi-use params)
-                    let clone_stmts = build_clone_stmts_for_lambda(&params, &body);
-
-                    // Wrap body in ResultOk
-                    let body_ty = body.ty.clone();
-                    let ok_body = IrExpr {
-                        kind: IrExprKind::ResultOk { expr: body },
-                        ty: Ty::result(body_ty.clone(), Ty::String),
-                        span: None,
-                    };
-
-                    let wrapped_body = if clone_stmts.is_empty() {
-                        ok_body
-                    } else {
-                        IrExpr {
-                            kind: IrExprKind::Block {
-                                stmts: clone_stmts,
-                                expr: Some(Box::new(ok_body)),
-                            },
-                            ty: Ty::result(body_ty, Ty::String),
-                            span: None,
-                        }
-                    };
-
-                    IrExpr {
-                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
-                        ty, span,
-                    }
-                }
-                _ => arg,
-            }
-        }
     }
 }
 
