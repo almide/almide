@@ -1,0 +1,23 @@
+// base64 — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2b).
+//
+// RFC 4648 Base64 encoding. Standard alphabet + `=` padding for the
+// canonical form; URL-safe variants use `-` / `_` with optional padding.
+// Decoders accept both padded and unpadded inputs and reject invalid
+// characters with `err`.
+//
+// Each fn routes the Rust target to the existing runtime in
+// `runtime/rs/src/base64.rs` via `@inline_rust(template)`. On WASM
+// dispatch continues through `emit_wasm/calls_base64.rs` (pending a
+// separate `@wasm_intrinsic` migration).
+
+@inline_rust("almide_rt_base64_encode(&{b})")
+fn encode(b: Bytes) -> String = _
+
+@inline_rust("almide_rt_base64_decode(&{s})")
+fn decode(s: String) -> Result[Bytes, String] = _
+
+@inline_rust("almide_rt_base64_encode_url(&{b})")
+fn encode_url(b: Bytes) -> String = _
+
+@inline_rust("almide_rt_base64_decode_url(&{s})")
+fn decode_url(s: String) -> Result[Bytes, String] = _
