@@ -6,12 +6,13 @@
 
 ## Active
 
-26 items
+30 items
 
 | Item | Description |
 |------|-------------|
 | [almai — Multi-Provider LLM Client](active/almai-llm-client.md) | almai — multi-provider LLM client library, 8 providers shipped |
 | [Almide Dojo — Continuous MSR Measurement](active/almide-dojo.md) | Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration |
+| [Build Cache (Incremental Compilation)](active/build-cache-incremental.md) | Crate-level incremental build cache keyed by source/compiler/deps hash |
 | [bytes: unify bounds-check semantics](active/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
 | [`cargo test --all` Cache Race](active/cargo-test-cache-race.md) | Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures |
 | [Codegen Ideal Form](active/codegen-ideal-form.md) | WASM codegen redesign toward declarative dispatch and explicit symbol resolution |
@@ -24,13 +25,16 @@
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with rush/spawn/link/cancel |
 | [Flow[T] — Lazy Streaming Sequences](active/flow-design.md) | Flow[T] lazy streaming sequences with flow.* namespace aligned with list.* verbs |
 | [Flow[T] — User Specification (Draft)](active/flow-spec-draft.md) | Draft user-facing spec for Flow[T] — to be promoted to docs/specs/flow.md after Phase 1 |
+| [Host Binding IDL (Schema-first, Codegen-first)](active/host-binding-idl.md) | Schema-first IDL for typed host bindings, codegen replaces hand-written FFI |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [`almide docs-gen` — llms.txt Auto-Generation](active/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | [lumen — Pure Graphics Math](active/lumen-graphics-math.md) | lumen — pure graphics math library (vec3, mat4, color), used by webgl/canvas/obsid |
 | [MLIR Backend + Egg Rewrite Engine](active/mlir-backend-adoption.md) | MLIR backend + egg e-graph rewriter for pure-Almide optimal lowering |
+| [Observability: Effect Trace / Runtime Timeline](active/observability-effect-trace.md) | Effect trace, runtime event timeline, pass inspector for debugging and MSR |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](active/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
+| [Sized Numeric Types](active/sized-numeric-types.md) | Swift-style Int8/Int32/UInt32/Float32 scalar types; unblocks bytes redesign + Matrix[T] dtype |
 | [Stdlib Declarative Unification — Toward a Single Source of Truth](active/stdlib-declarative-unification.md) | Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes |
 | [Stdlib Defs / Runtime Consistency Check](active/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | [Stdlib Symmetry Audit](active/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
@@ -39,15 +43,17 @@
 
 ## On Hold
 
-26 items
+29 items
 
 | Item | Description |
 |------|-------------|
+| [Advanced Type System (HKT / GADT / Type-level)](on-hold/advanced-type-system.md) | HKT / GADT / type-level computation as opt-in advanced features, not LLM-recommended |
 | [Almide-to-Almide FFI via almide-lander](on-hold/almide-to-almide-ffi.md) | Use almide-lander to call compiled Almide libraries from Almide via shared library FFI |
 | [Almide UI — Reactive Web Framework as Almide Library](on-hold/almide-ui.md) | SolidJS-like reactive UI framework built as a pure Almide library |
 | [API Diff & Automatic Versioning](on-hold/api-diff-auto-versioning.md) | Automatic semver bump detection via public API diffing |
 | [LLM Benchmark: Next Phase](on-hold/benchmark-next-phase.md) | LLM benchmark Phase 2-3: cross-language comparison, harder problems, publication |
 | [Compile-Time Contracts](on-hold/compile-time-contracts.md) | Compile-time preconditions and type invariants via where clauses |
+| [Doc Test Framework](on-hold/doctest-framework.md) | Auto-compile and run .almide code blocks in docs to prevent example drift |
 | [Error-Fix Database](on-hold/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
@@ -57,6 +63,7 @@
 | [Tiny ML Inference Runtime](on-hold/ml-inference.md) | Tiny ML inference runtime using compile-time model specialization |
 | [Package Registry](on-hold/package-registry.md) | Lock file, semver resolution, and central package registry |
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
+| [Persistence / Sync Primitives](on-hold/persistence-sync-primitives.md) | Local-first storage, CRDT merge, and sync queue primitives for app runtime |
 | [Porta Embedded — Sub-10KB Almide IoT Agents on WASI Hosts](on-hold/porta-embedded.md) | Porta-style WASI agent runtime for IoT: <10KB Almide guests on tiny hosts |
 | [Rainbow Bridge — Wrap External Code as Almide Packages](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
