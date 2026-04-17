@@ -1,0 +1,70 @@
+// float — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2b).
+//
+// Float arithmetic + conversion. Templates mirror the shape the
+// legacy TOML entries had so Rust output is byte-identical in most
+// cases. Several fns inline as native Rust method calls (`.sqrt()`,
+// `.is_nan()`, ...) rather than runtime fn calls — the template is
+// the authoritative form, so whatever it emits is what rustc sees.
+// This replaces the special cases for `("float", ...)` that used to
+// live in `pass_stdlib_lowering::try_inline_intrinsic`; those entries
+// are now dead code and are deleted in the same commit.
+//
+// WASM dispatch stays on `emit_wasm/calls_float.rs` until a later
+// `@wasm_intrinsic` sub-phase.
+
+// ── Conversions ──
+
+@inline_rust("almide_rt_float_to_string({n})")
+fn to_string(n: Float) -> String = _
+
+@inline_rust("almide_rt_float_to_int({n})")
+fn to_int(n: Float) -> Int = _
+
+@inline_rust("almide_rt_float_from_int({n})")
+fn from_int(n: Int) -> Float = _
+
+@inline_rust("almide_rt_float_parse({s})")
+fn parse(s: String) -> Result[Float, String] = _
+
+@inline_rust("almide_rt_float_to_fixed({n}, {decimals})")
+fn to_fixed(n: Float, decimals: Int) -> String = _
+
+@inline_rust("almide_rt_float_to_bits({f})")
+fn to_bits(f: Float) -> Int = _
+
+// ── Arithmetic (inlined as native Rust method calls) ──
+
+@inline_rust("({n}).sqrt()")
+fn sqrt(n: Float) -> Float = _
+
+@inline_rust("({n}).abs()")
+fn abs(n: Float) -> Float = _
+
+@inline_rust("({n}).floor()")
+fn floor(n: Float) -> Float = _
+
+@inline_rust("({n}).ceil()")
+fn ceil(n: Float) -> Float = _
+
+@inline_rust("({n}).round()")
+fn round(n: Float) -> Float = _
+
+@inline_rust("almide_rt_float_min({a}, {b})")
+fn min(a: Float, b: Float) -> Float = _
+
+@inline_rust("almide_rt_float_max({a}, {b})")
+fn max(a: Float, b: Float) -> Float = _
+
+@inline_rust("almide_rt_float_clamp({n}, {lo}, {hi})")
+fn clamp(n: Float, lo: Float, hi: Float) -> Float = _
+
+@inline_rust("almide_rt_float_sign({n})")
+fn sign(n: Float) -> Float = _
+
+// ── Classification ──
+
+@inline_rust("({n}).is_nan()")
+fn is_nan(n: Float) -> Bool = _
+
+@inline_rust("({n}).is_infinite()")
+fn is_infinite(n: Float) -> Bool = _

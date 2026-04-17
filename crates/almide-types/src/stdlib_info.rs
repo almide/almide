@@ -11,14 +11,14 @@ pub const STDLIB_MODULES: &[&str] = &[
 ];
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
-pub const BUNDLED_MODULES: &[&str] = &["args", "path", "list", "int"];
+pub const BUNDLED_MODULES: &[&str] = &["args", "path", "list", "int", "base64", "hex", "float"];
 
 /// Bundled modules that should be auto-imported (Tier 1 behavior).
 /// Tier-1 stdlib modules with no bundled-Almide content (option, result, etc.)
 /// are auto-imported via the hardcoded list in
 /// `almide-frontend::import_table::ImportTable::new`; this list is for
 /// bundled `.almd` modules that need resolve-time loading.
-pub const AUTO_IMPORT_BUNDLED: &[&str] = &["list", "int"];
+pub const AUTO_IMPORT_BUNDLED: &[&str] = &["list", "int", "float"];
 
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -57,6 +57,9 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "path" => Some(include_str!("../../../stdlib/path.almd")),
         "list" => Some(include_str!("../../../stdlib/list.almd")),
         "int" => Some(include_str!("../../../stdlib/int.almd")),
+        "base64" => Some(include_str!("../../../stdlib/base64.almd")),
+        "hex" => Some(include_str!("../../../stdlib/hex.almd")),
+        "float" => Some(include_str!("../../../stdlib/float.almd")),
         _ => None,
     }
 }

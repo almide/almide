@@ -94,14 +94,19 @@ pub fn resolve_imports_with_deps(
                 }
             } else if path.len() == 1 {
                 let name = &path[0];
-                if stdlib::is_stdlib_module(name) {
-                    continue;
-                }
-                // Check bundled stdlib packages (written in Almide)
+                // Bundled stdlib modules (written in Almide) need the source
+                // loaded so `pass_stdlib_lowering` can see their
+                // `@inline_rust` attributes. This check has to precede the
+                // legacy "stdlib → skip" fallback, otherwise explicitly
+                // imported bundled stdlib (e.g. `import base64`) gets
+                // short-circuited before their source reaches the checker.
                 if let Some(source) = stdlib::get_bundled_source(name) {
                     if !loaded_names.contains(name.as_str()) {
                         load_bundled_module(name, source, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
                     }
+                    continue;
+                }
+                if stdlib::is_stdlib_module(name) {
                     continue;
                 }
                 load_module(name, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;

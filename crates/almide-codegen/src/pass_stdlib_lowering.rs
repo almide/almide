@@ -645,10 +645,17 @@ fn resolve_ufcs_stmts(stmts: Vec<IrStmt>, siblings: &[String]) -> Vec<IrStmt> {
 fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
     let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span };
 
+    // NOTE: `float` entries that used to live here (sqrt/abs/floor/
+    // ceil/round/is_nan/is_infinite) have been deleted. The bundled
+    // `stdlib/float.almd` now owns those dispatches via `@inline_rust`
+    // templates that emit the same Method-call form — the intercept
+    // fires earlier in `rewrite_expr`, so this code would be dead even
+    // if left in place. Kept `math.*` entries because the `math`
+    // module has not been migrated to bundled yet.
     match (module, func) {
         // ── math.sqrt(x) → x.sqrt() via RenderedCall ──
         // These are the highest-impact: called in tight loops (nbody, spectralnorm)
-        ("math", "sqrt") | ("float", "sqrt") if args.len() >= 1 => {
+        ("math", "sqrt") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
@@ -658,7 +665,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
                 type_args: vec![],
             }))
         }
-        ("math", "abs") | ("float", "abs") if args.len() >= 1 => {
+        ("math", "abs") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
@@ -668,7 +675,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
                 type_args: vec![],
             }))
         }
-        ("math", "floor") | ("float", "floor") if args.len() >= 1 => {
+        ("math", "floor") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
@@ -678,7 +685,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
                 type_args: vec![],
             }))
         }
-        ("math", "ceil") | ("float", "ceil") if args.len() >= 1 => {
+        ("math", "ceil") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
@@ -688,7 +695,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
                 type_args: vec![],
             }))
         }
-        ("math", "round") | ("float", "round") if args.len() >= 1 => {
+        ("math", "round") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
@@ -753,14 +760,8 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
         ("math", "pi") => Some(mk(IrExprKind::LitFloat { value: std::f64::consts::PI })),
         ("math", "e") => Some(mk(IrExprKind::LitFloat { value: std::f64::consts::E })),
         ("math", "inf") => Some(mk(IrExprKind::LitFloat { value: f64::INFINITY })),
-        ("float", "is_nan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
-            target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("is_nan") },
-            args: vec![], type_args: vec![],
-        })),
-        ("float", "is_infinite") if args.len() >= 1 => Some(mk(IrExprKind::Call {
-            target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("is_infinite") },
-            args: vec![], type_args: vec![],
-        })),
+        // `float.is_nan` / `float.is_infinite` deleted — owned by
+        // `stdlib/float.almd` via `@inline_rust`.
         ("math", "is_nan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("is_nan") },
             args: vec![], type_args: vec![],
