@@ -216,45 +216,26 @@ pub fn builtin_effect_fns() -> Vec<&'static str> {
 /// `@inline_rust` / `@wasm_intrinsic`).
 ///
 /// Reflection paths (outline, docs-gen) that want the complete
-/// user-visible surface should call `module_functions_all` instead —
-/// this list shrinks as fns migrate to `stdlib/<m>.almd`, but the
-/// reflection surface should not.
+/// user-visible surface should call this fn. Post Stdlib Declarative
+/// Unification, every stdlib module lives in `stdlib/<m>.almd`, so
+/// the TOML-generated table is no longer a source — all names flow
+/// through `bundled_sigs`.
 pub fn module_functions(module: &str) -> Vec<&'static str> {
-    crate::generated::stdlib_sigs::generated_module_functions(module)
+    crate::bundled_sigs::module_fn_names(module)
 }
 
-/// Union of TOML-declared and bundled-declared fn names for a stdlib
-/// module. Stable-ordered so snapshot tests over outlines don't
-/// flutter when TOML ↔ bundled balance shifts during migration.
+/// Kept as an alias so callers that still reach for "the union of
+/// TOML + bundled names" stay compiling. With TOML gone, the union is
+/// just the bundled set.
 pub fn module_functions_all(module: &str) -> Vec<&'static str> {
-    let mut all: std::collections::BTreeSet<&'static str> =
-        crate::generated::stdlib_sigs::generated_module_functions(module)
-            .into_iter()
-            .collect();
-    for n in crate::bundled_sigs::module_fn_names(module) {
-        all.insert(n);
-    }
-    all.into_iter().collect()
+    module_functions(module)
 }
 
-/// Look up a stdlib function's type signature.
-///
-/// Resolution order:
-/// 1. Generated TOML sigs (`stdlib/defs/*.toml` → `stdlib_sigs.rs` at
-///    build time). Fast path, covers every module that still has a
-///    TOML entry.
-/// 2. Bundled `.almd` sigs (Stdlib Declarative Unification Stage 2+).
-///    When a module is migrated to `stdlib/<m>.almd`, its TOML entry
-///    may be deleted; the signatures then live in the bundled source
-///    alone. We parse the bundled source on demand and cache the
-///    resulting sig map per module — parsing is cheap, cache is
-///    shared across the process, and the cache only grows when
-///    `canonicalize` / `lookup_sig` actually asks for a bundled
-///    module.
+/// Look up a stdlib function's type signature. Since the Stdlib
+/// Declarative Unification arc landed, every stdlib module is
+/// `@inline_rust`-bundled `.almd`, so the lookup delegates straight
+/// to `bundled_sigs` — the generated TOML table is no longer in play.
 pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
-    if let Some(sig) = crate::generated::stdlib_sigs::lookup_generated_sig(module, func) {
-        return Some(sig);
-    }
     lookup_bundled_sig(module, func)
 }
 

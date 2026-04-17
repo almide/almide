@@ -5,6 +5,7 @@
 pub use almide_syntax::ast;
 pub use almide_syntax::lexer;
 pub use almide_syntax::parser;
+pub use almide_syntax::parse_cached;
 
 pub use almide_types::types;
 pub use almide_types::stdlib_info;

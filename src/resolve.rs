@@ -143,7 +143,7 @@ pub fn resolve_imports_with_deps(
 /// Load a bundled stdlib module from embedded source.
 fn load_bundled_module(
     name: &str,
-    source: &str,
+    source: &'static str,
     base_dir: &Path,
     dep_paths: &[(project::PkgId, PathBuf)],
     loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
@@ -154,13 +154,16 @@ fn load_bundled_module(
         return Ok(());
     }
 
-    let tokens = lexer::Lexer::tokenize(source);
-    let mut p = parser::Parser::new(tokens);
-    let program = p.parse()
-        .map_err(|e| format!("parse error in bundled stdlib '{}': {}", name, e))?;
-    if !p.errors.is_empty() {
-        return Err(format!("parse error in bundled stdlib '{}': {}", name, p.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
-    }
+    // Bundled stdlib sources are `&'static str` from `include_str!`,
+    // so route through the shared AST cache. Subsequent visits to
+    // the same module (frontend `bundled_sigs`, codegen
+    // `pass_stdlib_lowering`, `pass_licm`, `pass_borrow_inference`)
+    // hit the cached parse instead of re-tokenising every call site.
+    // Bundled sources are validated as part of CI, so a parse failure
+    // here is a compiler bug rather than user input.
+    let program = almide_lang::parse_cached(source)
+        .ok_or_else(|| format!("parse error in bundled stdlib '{}'", name))?
+        .clone();
 
     // Recursively resolve this module's imports
     for import in &program.imports {

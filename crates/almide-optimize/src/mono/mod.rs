@@ -144,6 +144,20 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
             m.functions.iter().enumerate().filter_map(move |(fi, f)| {
                 let gs = f.generics.as_ref()?;
                 if gs.is_empty() { return None; }
+                // `@inline_rust` / `@wasm_intrinsic` bundled fns are dispatch
+                // metadata: their body is `_` and the actual implementation
+                // is the per-target template (Rust runtime fn / hand-written
+                // WASM runtime). Templates are type-erased — `list.len[A]`
+                // expands to `almide_rt_list_len(&{xs})` regardless of `A`.
+                // Specializing them just produces bare-body clones whose
+                // names (`len__Int`) the WASM dispatcher's per-module match
+                // arms cannot recognise, which is exactly the gap the
+                // `emit_stub_call_named` panic plugs after the fact. Skip
+                // them here so the call site stays `Module { list, len }`
+                // and the dispatcher sees the unsuffixed name.
+                let is_template_dispatch = f.attrs.iter().any(|a|
+                    matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"));
+                if is_template_dispatch { return None; }
                 let mut bounded = Vec::new();
                 for g in gs.iter() {
                     for (i, param) in f.params.iter().enumerate() {

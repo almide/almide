@@ -74,16 +74,13 @@ pub fn is_any_stdlib(name: &str) -> bool {
 /// that every consumer — type checker, codegen passes, tooling — can
 /// reach them without gaining a dep on the frontend crate.
 ///
-/// **TODO (Stdlib Declarative Unification follow-up)**: multiple
-/// downstream consumers currently parse the returned source and
-/// maintain their own cached derived views (FnSig in
-/// `almide-frontend::bundled_sigs`, `@inline_rust` templates in
-/// `almide-codegen::pass_stdlib_lowering`). The intended end state is
-/// one shared cache that feeds both — likely realised as "bundled
-/// modules are always lowered to IR during the preamble, even in unit
-/// tests that bypass `resolve.rs`", so the IR becomes the single
-/// source of parsed metadata. Until that refactor lands, treat the
-/// duplicate parses as a knowingly-temporary cost.
+/// Both downstream consumers (`almide-frontend::bundled_sigs` for
+/// FnSig extraction, `almide-codegen::pass_stdlib_lowering` for
+/// `@inline_rust` template extraction) feed the returned source into
+/// `almide_syntax::parse_cached`, a process-wide AST cache. A single
+/// parse per source pointer backs both views, so the FnSig table the
+/// type checker queries and the templates codegen emits cannot drift
+/// out of step as bundled `.almd` modules evolve.
 pub fn bundled_source(name: &str) -> Option<&'static str> {
     match name {
         "args" => Some(include_str!("../../../stdlib/args.almd")),
