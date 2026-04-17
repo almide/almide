@@ -122,26 +122,22 @@ fn find_inline_rust_template(f: &IrFunction) -> Option<String> {
     }
 }
 
-/// Fallback entry point: parse a bundled stdlib source directly and
-/// pull out every `@inline_rust` template. Needed when a consumer
-/// (notably the codegen snapshot tests in `tests/`) invokes codegen
-/// without going through `resolve.rs`, so `program.modules` never
-/// contains the bundled `IrModule`.
+/// Fallback entry point: pull every `@inline_rust` template from a
+/// bundled stdlib source. Needed when a consumer (notably the codegen
+/// snapshot tests in `tests/`) invokes codegen without going through
+/// `resolve.rs`, so `program.modules` never contains the bundled
+/// `IrModule`.
 ///
-/// See the TODO note on `almide_lang::stdlib_info::bundled_source`:
-/// this function and `almide-frontend::bundled_sigs` each parse the
-/// same source string into different views. Consolidating them into
-/// a single cached "bundled modules preamble" is a follow-up.
+/// The parse is delegated to `almide_lang::parse_cached`, the shared
+/// process-wide AST cache used by `almide-frontend::bundled_sigs` to
+/// extract type signatures. Both views derive from a single parse so
+/// they cannot drift as bundled `.almd` sources evolve.
 fn parse_bundled_inline_rust(module: &str) -> Vec<(Sym, InlineRustSpec)> {
     use almide_lang::ast::{AttrValue, Decl};
-    use almide_lang::lexer::Lexer;
-    use almide_lang::parser::Parser;
     let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
         return Vec::new();
     };
-    let tokens = Lexer::tokenize(source);
-    let mut parser = Parser::new(tokens);
-    let Ok(program) = parser.parse() else {
+    let Some(program) = almide_lang::parse_cached(source) else {
         return Vec::new();
     };
     let mut out = Vec::new();

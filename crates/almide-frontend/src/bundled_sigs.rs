@@ -26,14 +26,17 @@
 //! runtime parse, no build-graph churn) is the right one for the
 //! arc's incremental migration cadence. A future build-time extractor
 //! can replace this module without changing any call site.
+//!
+//! The actual parse is delegated to `almide_syntax::parse_cached`, a
+//! shared process-wide AST cache. The codegen `pass_stdlib_lowering`
+//! consumes the same cache to extract `@inline_rust` templates, so
+//! both views of every bundled module derive from a single parse.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use almide_base::intern::{sym, Sym};
 use almide_lang::ast;
-use almide_lang::lexer::Lexer;
-use almide_lang::parser::Parser;
 
 use crate::types::FnSig;
 
@@ -124,10 +127,7 @@ fn build_module_sigs(module: &str) -> Option<HashMap<Sym, FnSig>> {
         return None;
     }
     let source = super::stdlib::get_bundled_source(module)?;
-
-    let tokens = Lexer::tokenize(source);
-    let mut parser = Parser::new(tokens);
-    let program = parser.parse().ok()?;
+    let program = almide_lang::parse_cached(source)?;
 
     let mut out = HashMap::new();
     for decl in &program.decls {

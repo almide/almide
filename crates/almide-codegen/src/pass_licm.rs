@@ -725,14 +725,10 @@ fn refs_are_outside_loop_stmt(stmt: &IrStmt, loop_defined: &HashSet<VarId>) -> b
 /// truth.
 fn is_pure_stdlib_call(module: &str, func: &str) -> bool {
     use almide_lang::ast::{AttrValue, Decl};
-    use almide_lang::lexer::Lexer;
-    use almide_lang::parser::Parser;
     let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
         return false;
     };
-    let tokens = Lexer::tokenize(source);
-    let mut parser = Parser::new(tokens);
-    let Ok(program) = parser.parse() else { return false; };
+    let Some(program) = almide_lang::parse_cached(source) else { return false; };
     for decl in &program.decls {
         let Decl::Fn { name, attrs, effect, r#async, .. } = decl else { continue };
         if name.as_str() != func { continue; }
@@ -753,14 +749,10 @@ fn is_pure_stdlib_call(module: &str, func: &str) -> bool {
 /// modules and for templates that don't match.
 fn bundled_mutates_param_at(module: &str, func: &str, pos: usize) -> bool {
     use almide_lang::ast::{AttrValue, Decl};
-    use almide_lang::lexer::Lexer;
-    use almide_lang::parser::Parser;
     let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
         return false;
     };
-    let tokens = Lexer::tokenize(source);
-    let mut parser = Parser::new(tokens);
-    let Ok(program) = parser.parse() else { return false; };
+    let Some(program) = almide_lang::parse_cached(source) else { return false; };
     for decl in &program.decls {
         let Decl::Fn { name, attrs, params, .. } = decl else { continue };
         if name.as_str() != func { continue; }
