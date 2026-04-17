@@ -1,0 +1,42 @@
+// float32 — bundled-Almide sized-numeric conversion module.
+//
+// Generated alongside the Sized Numeric Types arc (Stage 3).
+// Every fn here is a mechanical `as` cast expressed through
+// `@inline_rust`; Rust chooses the correct truncation / sign-extend /
+// float-round semantics based on source and target Rust primitive
+// types. Overflow on narrow integer downcasts wraps — the checked
+// (`to_<T>_checked`) / saturating variants land in a later sub-phase.
+//
+// All fns are UFCS-dispatched: `x.to_int64()` on `x: Float32`
+// resolves to `float32.to_int64(x)` via the resolver in
+// `almide-codegen::pass_stdlib_lowering::resolve_module_from_ty`.
+
+@inline_rust("({x}) as i8")
+fn to_int8(x: Float32) -> Int8 = _
+
+@inline_rust("({x}) as i16")
+fn to_int16(x: Float32) -> Int16 = _
+
+@inline_rust("({x}) as i32")
+fn to_int32(x: Float32) -> Int32 = _
+
+@inline_rust("({x}) as u8")
+fn to_uint8(x: Float32) -> UInt8 = _
+
+@inline_rust("({x}) as u16")
+fn to_uint16(x: Float32) -> UInt16 = _
+
+@inline_rust("({x}) as u32")
+fn to_uint32(x: Float32) -> UInt32 = _
+
+@inline_rust("({x}) as u64")
+fn to_uint64(x: Float32) -> UInt64 = _
+
+@inline_rust("({x}) as i64")
+fn to_int64(x: Float32) -> Int64 = _
+
+@inline_rust("({x}) as f64")
+fn to_float64(x: Float32) -> Float64 = _
+
+@inline_rust("format!(\"{}\", {x})")
+fn to_string(x: Float32) -> String = _

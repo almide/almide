@@ -91,3 +91,34 @@ fn to_u32(a: Int) -> Int = _
 
 @inline_rust("almide_rt_int_to_u8({a})")
 fn to_u8(a: Int) -> Int = _
+
+// ── Sized type conversions (Stage 3) ──
+@inline_rust("({n}) as i8")
+fn to_int8(n: Int) -> Int8 = _
+
+@inline_rust("({n}) as i16")
+fn to_int16(n: Int) -> Int16 = _
+
+@inline_rust("({n}) as i32")
+fn to_int32(n: Int) -> Int32 = _
+
+@inline_rust("({n}) as u8")
+fn to_uint8(n: Int) -> UInt8 = _
+
+@inline_rust("({n}) as u16")
+fn to_uint16(n: Int) -> UInt16 = _
+
+@inline_rust("({n}) as u32")
+fn to_uint32(n: Int) -> UInt32 = _
+
+@inline_rust("({n}) as u64")
+fn to_uint64(n: Int) -> UInt64 = _
+
+@inline_rust("({n}) as f32")
+fn to_float32(n: Int) -> Float32 = _
+
+@inline_rust("({n}) as f64")
+fn to_float64(n: Int) -> Float64 = _
+
+@inline_rust("{n}")
+fn to_int64(n: Int) -> Int64 = _

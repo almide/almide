@@ -106,3 +106,55 @@ test "UInt32 division (unsigned)" { assert_eq(div_u32(100, 4), 25) }
 test "Int16 modulo" { assert_eq(mod_i16(23, 5), 3) }
 test "Float32 addition" { assert_eq(add_f32(1.5, 2.5), 4.0) }
 test "UInt64 subtraction" { assert_eq(sub_u64(1000, 200), 800) }
+
+// ── Stage 3: UFCS conversion methods ─────────────────────────────
+
+test "Int32 to Int64" {
+  let x: Int32 = 42
+  let y: Int64 = x.to_int64()
+  assert_eq(y, 42)
+}
+
+test "Int to UInt8 with wrap (256 → 0)" {
+  let x: Int = 256
+  let y: UInt8 = x.to_uint8()
+  let z: Int64 = y.to_int64()
+  assert_eq(z, 0)
+}
+
+test "UInt8 max → Int64 preserves 255" {
+  let y = id_u8(255)
+  let z: Int64 = y.to_int64()
+  assert_eq(z, 255)
+}
+
+test "Float to Int32 truncates toward zero" {
+  let x: Float = 3.7
+  let y: Int32 = x.to_int32()
+  let z: Int64 = y.to_int64()
+  assert_eq(z, 3)
+}
+
+test "Int32 to Float32 round-trip" {
+  let x: Int32 = 100
+  let y: Float32 = x.to_float32()
+  let z: Int32 = y.to_int32()
+  assert_eq(z.to_int64(), 100)
+}
+
+test "Float64 to Float32 demotes precision" {
+  let x: Float = 3.14
+  let y: Float32 = x.to_float32()
+  let z: Float64 = y.to_float64()
+  // Rounded to f32 precision then back; approximation
+  assert_eq(z > 3.13, true)
+  assert_eq(z < 3.15, true)
+}
+
+test "Int8 sign extends to Int64" {
+  // -1 as i8 → sign extend → -1 as i64
+  let x: Int = -1
+  let y: Int8 = x.to_int8()
+  let z: Int64 = y.to_int64()
+  assert_eq(z, -1)
+}
