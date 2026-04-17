@@ -66,6 +66,45 @@ fn find_inline_rust_template(f: &IrFunction) -> Option<String> {
     }
 }
 
+/// Fallback entry point: parse a bundled stdlib source directly and
+/// pull out every `@inline_rust` template. Needed when a consumer
+/// (notably the codegen snapshot tests in `tests/`) invokes codegen
+/// without going through `resolve.rs`, so `program.modules` never
+/// contains the bundled `IrModule`.
+///
+/// See the TODO note on `almide_lang::stdlib_info::bundled_source`:
+/// this function and `almide-frontend::bundled_sigs` each parse the
+/// same source string into different views. Consolidating them into
+/// a single cached "bundled modules preamble" is a follow-up.
+fn parse_bundled_inline_rust(module: &str) -> Vec<(Sym, InlineRustSpec)> {
+    use almide_lang::ast::{AttrValue, Decl};
+    use almide_lang::lexer::Lexer;
+    use almide_lang::parser::Parser;
+    let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
+        return Vec::new();
+    };
+    let tokens = Lexer::tokenize(source);
+    let mut parser = Parser::new(tokens);
+    let Ok(program) = parser.parse() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for decl in &program.decls {
+        let Decl::Fn { name, params, attrs, .. } = decl else { continue };
+        let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "inline_rust") else {
+            continue;
+        };
+        let Some(first) = attr.args.first() else { continue };
+        let template = match &first.value {
+            AttrValue::String { value } => value.clone(),
+            _ => continue,
+        };
+        let param_names = params.iter().map(|p| p.name).collect();
+        out.push((*name, InlineRustSpec { template, param_names }));
+    }
+    out
+}
+
 impl NanoPass for StdlibLoweringPass {
     fn name(&self) -> &str { "StdlibLowering" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
@@ -89,14 +128,29 @@ impl NanoPass for StdlibLoweringPass {
             .collect();
         BUNDLED_FNS.with(|s| *s.borrow_mut() = bundled_fns);
 
-        // Build the @inline_rust dispatch table. A bundled stdlib fn with
-        // this attribute takes priority over the TOML-generated
-        // arg_transforms path: any call to `(module, func)` in this table
-        // will be rewritten into an `IrExprKind::InlineRust` node whose
-        // template + args are rendered verbatim at walker time. The
-        // bundled fn itself is NOT emitted as a Rust function body (see
-        // `walker/mod.rs::should_skip_fn_body`).
-        let inline_rust: HashMap<(Sym, Sym), InlineRustSpec> = program.modules.iter()
+        // Build the @inline_rust dispatch table. Two sources feed it:
+        //
+        // 1. `program.modules` — the frontend-loaded bundled stdlib
+        //    modules (the normal compile path routes through
+        //    `resolve.rs` which parses + lowers each bundled `.almd`).
+        //    These land as full `IrModule` entries; we read the
+        //    `@inline_rust` attribute directly off `IrFunction.attrs`.
+        //
+        // 2. Bundled source fallback — code paths that bypass
+        //    `resolve.rs` (unit tests using `canonicalize_program` +
+        //    `lower_program` directly, e.g. the snapshot test suite)
+        //    never get bundled modules into `program.modules`. For
+        //    those, re-parse the embedded `stdlib/<m>.almd` source so
+        //    every @inline_rust fn is reachable. Skipping this would
+        //    make pass_stdlib_lowering silently fall back to the
+        //    legacy `arg_transforms::lookup` path for migrated fns,
+        //    which now returns `None` and emits invalid Rust.
+        //
+        // The merge policy is "IR wins" — if a bundled module is
+        // fully loaded, we take its IR-level signature (param names,
+        // attribute values). Source fallback only fills in modules
+        // that IR didn't provide.
+        let mut inline_rust: HashMap<(Sym, Sym), InlineRustSpec> = program.modules.iter()
             .filter(|m| almide_lang::stdlib_info::is_bundled_module(m.name.as_str()))
             .flat_map(|m| {
                 let mname = m.name;
@@ -108,6 +162,18 @@ impl NanoPass for StdlibLoweringPass {
                 })
             })
             .collect();
+        let loaded_bundled_modules: std::collections::HashSet<Sym> = program.modules.iter()
+            .map(|m| m.name)
+            .collect();
+        for name in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let mname = almide_base::intern::sym(name);
+            if loaded_bundled_modules.contains(&mname) {
+                continue;
+            }
+            for (fname, spec) in parse_bundled_inline_rust(name) {
+                inline_rust.entry((mname, fname)).or_insert(spec);
+            }
+        }
         INLINE_RUST.with(|s| *s.borrow_mut() = inline_rust);
 
         for func in &mut program.functions {
@@ -303,12 +369,22 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         }
                     }
                     // UFCS: "module.func" method → convert to Module call and process
-                    // Only if the module.func exists in stdlib (arg_transforms table)
+                    // Accept stdlib fns from two sources:
+                    //   1. TOML-backed `arg_transforms` table (legacy path)
+                    //   2. Bundled `@inline_rust` stdlib fns (Stdlib Declarative
+                    //      Unification Stage 2+) — the INLINE_RUST registry built
+                    //      at the top of `run`. Without this branch, deleting a
+                    //      fn's TOML entry after migrating it to bundled would
+                    //      drop UFCS dispatch (`42.to_string()`) back into the
+                    //      BuiltinLoweringPass Method fallback.
                     if method.contains('.') && !method.ends_with(".encode") && !method.ends_with(".decode") {
                         let dot_pos = method.find('.').unwrap();
                         let (mod_name, func_name) = (&method[..dot_pos], &method[dot_pos+1..]);
-                        // Check if this is a real stdlib function
-                        if arg_transforms::lookup(mod_name, func_name).is_none() {
+                        let mod_sym = almide_base::intern::sym(mod_name);
+                        let func_sym = almide_base::intern::sym(func_name);
+                        let is_toml_stdlib = arg_transforms::lookup(mod_name, func_name).is_some();
+                        let is_bundled_inline_rust = INLINE_RUST.with(|s| s.borrow().contains_key(&(mod_sym, func_sym)));
+                        if !is_toml_stdlib && !is_bundled_inline_rust {
                                 // Not a stdlib function — leave as Method call for BuiltinLoweringPass
                                 return IrExpr { kind: IrExprKind::Call {
                                     target: CallTarget::Method { object, method },

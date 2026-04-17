@@ -18,7 +18,7 @@ pub const BUNDLED_MODULES: &[&str] = &["args", "path", "list", "int"];
 /// are auto-imported via the hardcoded list in
 /// `almide-frontend::import_table::ImportTable::new`; this list is for
 /// bundled `.almd` modules that need resolve-time loading.
-pub const AUTO_IMPORT_BUNDLED: &[&str] = &["list"];
+pub const AUTO_IMPORT_BUNDLED: &[&str] = &["list", "int"];
 
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -33,6 +33,32 @@ pub fn is_bundled_module(name: &str) -> bool {
 /// Check if a module name is any kind of stdlib (hardcoded or bundled).
 pub fn is_any_stdlib(name: &str) -> bool {
     is_stdlib_module(name) || is_bundled_module(name)
+}
+
+/// Return the embedded source text of a bundled stdlib module.
+///
+/// The source strings live here (not in `almide-frontend::stdlib`) so
+/// that every consumer — type checker, codegen passes, tooling — can
+/// reach them without gaining a dep on the frontend crate.
+///
+/// **TODO (Stdlib Declarative Unification follow-up)**: multiple
+/// downstream consumers currently parse the returned source and
+/// maintain their own cached derived views (FnSig in
+/// `almide-frontend::bundled_sigs`, `@inline_rust` templates in
+/// `almide-codegen::pass_stdlib_lowering`). The intended end state is
+/// one shared cache that feeds both — likely realised as "bundled
+/// modules are always lowered to IR during the preamble, even in unit
+/// tests that bypass `resolve.rs`", so the IR becomes the single
+/// source of parsed metadata. Until that refactor lands, treat the
+/// duplicate parses as a knowingly-temporary cost.
+pub fn bundled_source(name: &str) -> Option<&'static str> {
+    match name {
+        "args" => Some(include_str!("../../../stdlib/args.almd")),
+        "path" => Some(include_str!("../../../stdlib/path.almd")),
+        "list" => Some(include_str!("../../../stdlib/list.almd")),
+        "int" => Some(include_str!("../../../stdlib/int.almd")),
+        _ => None,
+    }
 }
 
 /// Resolve a method name to its stdlib module (for UFCS / dot syntax).

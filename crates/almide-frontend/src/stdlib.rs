@@ -4,6 +4,7 @@ use crate::types::FnSig;
 
 // Re-export from almide-lang for backwards compatibility.
 pub use almide_lang::stdlib_info::{
+    bundled_source as get_bundled_source,
     STDLIB_MODULES, BUNDLED_MODULES, AUTO_IMPORT_BUNDLED,
     is_stdlib_module, is_any_stdlib, is_bundled_module,
     resolve_ufcs_module, resolve_ufcs_candidates,
@@ -46,16 +47,6 @@ pub fn module_description(name: &str) -> &'static str {
     }
 }
 
-/// Bundled stdlib packages written in Almide (.almd files embedded in the compiler binary).
-pub fn get_bundled_source(name: &str) -> Option<&'static str> {
-    match name {
-        "args" => Some(include_str!("../../../stdlib/args.almd")),
-        "path" => Some(include_str!("../../../stdlib/path.almd")),
-        "list" => Some(include_str!("../../../stdlib/list.almd")),
-        "int" => Some(include_str!("../../../stdlib/int.almd")),
-        _ => None,
-    }
-}
 
 /// Resolve UFCS module by receiver type (compile-time resolution).
 pub fn resolve_ufcs_by_type(method: &str, receiver_type: almide_lang::ast::ResolvedType) -> Option<&'static str> {
@@ -215,12 +206,62 @@ pub fn builtin_effect_fns() -> Vec<&'static str> {
     vec!["println", "eprintln", "panic"]
 }
 
-/// Return all function names in a stdlib module.
+/// Return the TOML-declared fn names for a stdlib module.
+///
+/// This is the **dispatch** list: fns that still live in
+/// `stdlib/defs/<m>.toml` and therefore feed `arg_transforms` /
+/// `rt_<m>_<f>` codegen. The main-crate prune logic uses it to
+/// decide which bundled fns to drop (bundled fns whose name
+/// collides with TOML are dropped unless they override with
+/// `@inline_rust` / `@wasm_intrinsic`).
+///
+/// Reflection paths (outline, docs-gen) that want the complete
+/// user-visible surface should call `module_functions_all` instead —
+/// this list shrinks as fns migrate to `stdlib/<m>.almd`, but the
+/// reflection surface should not.
 pub fn module_functions(module: &str) -> Vec<&'static str> {
     crate::generated::stdlib_sigs::generated_module_functions(module)
 }
 
+/// Union of TOML-declared and bundled-declared fn names for a stdlib
+/// module. Stable-ordered so snapshot tests over outlines don't
+/// flutter when TOML ↔ bundled balance shifts during migration.
+pub fn module_functions_all(module: &str) -> Vec<&'static str> {
+    let mut all: std::collections::BTreeSet<&'static str> =
+        crate::generated::stdlib_sigs::generated_module_functions(module)
+            .into_iter()
+            .collect();
+    for n in crate::bundled_sigs::module_fn_names(module) {
+        all.insert(n);
+    }
+    all.into_iter().collect()
+}
+
 /// Look up a stdlib function's type signature.
+///
+/// Resolution order:
+/// 1. Generated TOML sigs (`stdlib/defs/*.toml` → `stdlib_sigs.rs` at
+///    build time). Fast path, covers every module that still has a
+///    TOML entry.
+/// 2. Bundled `.almd` sigs (Stdlib Declarative Unification Stage 2+).
+///    When a module is migrated to `stdlib/<m>.almd`, its TOML entry
+///    may be deleted; the signatures then live in the bundled source
+///    alone. We parse the bundled source on demand and cache the
+///    resulting sig map per module — parsing is cheap, cache is
+///    shared across the process, and the cache only grows when
+///    `canonicalize` / `lookup_sig` actually asks for a bundled
+///    module.
 pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
-    crate::generated::stdlib_sigs::lookup_generated_sig(module, func)
+    if let Some(sig) = crate::generated::stdlib_sigs::lookup_generated_sig(module, func) {
+        return Some(sig);
+    }
+    lookup_bundled_sig(module, func)
+}
+
+/// Bundled-source signature lookup. Delegates to the caching layer in
+/// `bundled_sigs` (per-module parse, process-wide cache) so that
+/// migrating a stdlib fn to `stdlib/<m>.almd` keeps the type checker
+/// informed without any TOML bridge.
+fn lookup_bundled_sig(module: &str, func: &str) -> Option<FnSig> {
+    crate::bundled_sigs::lookup(module, func)
 }

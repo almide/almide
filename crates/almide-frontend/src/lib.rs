@@ -4,6 +4,7 @@ pub mod lower;
 pub mod import_table;
 pub mod stdlib;
 pub mod generated;
+mod bundled_sigs;
 
 /// TypeEnv — the mutable type-checking environment.
 mod type_env;

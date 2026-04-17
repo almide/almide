@@ -1,18 +1,93 @@
-// int — bundled-Almide stdlib module (Stage 1 of stdlib declarative unification).
+// int — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2).
 //
-// Each fn here declares its signature in pure Almide and routes the Rust
-// codegen to the existing runtime via `@inline_rust(template)`. The template
-// is substituted at every call site by `StdlibLoweringPass`; `{param_name}`
-// placeholders are replaced with the rendered Rust expression for that arg.
+// All int fns live here as pure-Almide declarations. Each routes the
+// Rust target to the existing `runtime/rs/src/int.rs` implementations
+// via `@inline_rust(template)`; `StdlibLoweringPass` substitutes
+// `{param_name}` placeholders with the rendered Rust expression for
+// each call argument and emits the template verbatim. The body `= _`
+// is a declarative hole — it is never emitted (see
+// `walker/mod.rs::render_function`'s `@inline_rust` skip) and exists
+// only so the signature type-checks.
 //
-// What this buys today: one place (this file) to see int.to_string's
-// signature + Rust dispatch. The corresponding `stdlib/defs/int.toml`
-// entry is still present but dormant — bundled wins at dispatch time.
+// On WASM the bundled fns are skipped at register time; dispatch
+// continues through `emit_wasm/calls_int.rs` until a later arc adds
+// `@wasm_intrinsic` attributes.
 //
-// What this does NOT buy yet: WASM dispatch (still goes through
-// `calls_int.rs`), pure-Almide fallback bodies for targets without a
-// matching intrinsic, and auto-migration of the remaining int fns. Those
-// land in sub-phases 2–4 of the arc.
+// Deleting `stdlib/defs/int.toml`: the signatures and dispatch for
+// int are now authoritative here. The handwritten `almide_rt_int_*`
+// Rust fns in `runtime/rs/src/int.rs` remain — they are the actual
+// implementations referenced by the templates.
+
+// ── Conversions ──
 
 @inline_rust("almide_rt_int_to_string({n})")
 fn to_string(n: Int) -> String = _
+
+@inline_rust("almide_rt_int_to_hex({n})")
+fn to_hex(n: Int) -> String = _
+
+@inline_rust("almide_rt_int_parse(&*{s})")
+fn parse(s: String) -> Result[Int, String] = _
+
+@inline_rust("almide_rt_int_parse_hex(&*{s})")
+fn from_hex(s: String) -> Result[Int, String] = _
+
+@inline_rust("almide_rt_int_to_float({n})")
+fn to_float(n: Int) -> Float = _
+
+@inline_rust("almide_rt_int_bits_to_float({bits})")
+fn bits_to_float(bits: Int) -> Float = _
+
+// ── Arithmetic ──
+
+@inline_rust("almide_rt_int_abs({n})")
+fn abs(n: Int) -> Int = _
+
+@inline_rust("almide_rt_int_min({a}, {b})")
+fn min(a: Int, b: Int) -> Int = _
+
+@inline_rust("almide_rt_int_max({a}, {b})")
+fn max(a: Int, b: Int) -> Int = _
+
+@inline_rust("almide_rt_int_clamp({n}, {lo}, {hi})")
+fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
+
+// ── Bitwise ──
+
+@inline_rust("almide_rt_int_band({a}, {b})")
+fn band(a: Int, b: Int) -> Int = _
+
+@inline_rust("almide_rt_int_bor({a}, {b})")
+fn bor(a: Int, b: Int) -> Int = _
+
+@inline_rust("almide_rt_int_bxor({a}, {b})")
+fn bxor(a: Int, b: Int) -> Int = _
+
+@inline_rust("almide_rt_int_bnot({a})")
+fn bnot(a: Int) -> Int = _
+
+@inline_rust("almide_rt_int_bshl({a}, {n})")
+fn bshl(a: Int, n: Int) -> Int = _
+
+@inline_rust("almide_rt_int_bshr({a}, {n})")
+fn bshr(a: Int, n: Int) -> Int = _
+
+// ── Wrapping / masking ──
+
+@inline_rust("almide_rt_int_wrap_add({a}, {b}, {bits})")
+fn wrap_add(a: Int, b: Int, bits: Int) -> Int = _
+
+@inline_rust("almide_rt_int_wrap_mul({a}, {b}, {bits})")
+fn wrap_mul(a: Int, b: Int, bits: Int) -> Int = _
+
+@inline_rust("almide_rt_int_rotate_right({a}, {n}, {bits})")
+fn rotate_right(a: Int, n: Int, bits: Int) -> Int = _
+
+@inline_rust("almide_rt_int_rotate_left({a}, {n}, {bits})")
+fn rotate_left(a: Int, n: Int, bits: Int) -> Int = _
+
+@inline_rust("almide_rt_int_to_u32({a})")
+fn to_u32(a: Int) -> Int = _
+
+@inline_rust("almide_rt_int_to_u8({a})")
+fn to_u8(a: Int) -> Int = _

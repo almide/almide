@@ -86,7 +86,15 @@ impl NanoPass for ResolveCallsPass {
                         let is_stdlib = almide_lang::stdlib_info::is_any_stdlib(m);
                         let toml_has = arg_transforms::lookup(m, f).is_some();
                         let bundled_has = self.symbols.module_has_fn(m, f);
-                        if is_stdlib && !toml_has && bundled_has {
+                        // `@inline_rust` / `@wasm_intrinsic` bundled fns stay
+                        // as `CallTarget::Module` — the per-target lowering
+                        // pass intercepts them and emits a template. If we
+                        // rewrote them here, pass_stdlib_lowering would never
+                        // see the Module target and the template dispatch
+                        // would silently fall back to a Named call referring
+                        // to a symbol that nobody emits.
+                        let has_override = self.symbols.has_codegen_override(m, f);
+                        if is_stdlib && !toml_has && bundled_has && !has_override {
                             let mangled = format!(
                                 "almide_rt_{}_{}",
                                 m.replace('.', "_"),
@@ -215,20 +223,40 @@ fn verify_all_calls_resolved(program: &IrProgram) -> Vec<String> {
 struct SymbolTable {
     /// (module_name → set of function names declared in that module)
     user_modules: std::collections::HashMap<String, HashSet<String>>,
+    /// Subset of the above: `(module, fn)` pairs whose IrFunction
+    /// carries an `@inline_rust` or `@wasm_intrinsic` attribute. These
+    /// are dispatch-only declarations (Stdlib Declarative Unification
+    /// Stage 2+): their bodies are never emitted, and call sites must
+    /// stay as `CallTarget::Module` so the per-target lowering
+    /// (`StdlibLoweringPass` on Rust, `emit_int_call` etc. on WASM)
+    /// can intercept them with the right semantics. Rewriting them to
+    /// `CallTarget::Named { almide_rt_<m>_<f> }` would bypass the
+    /// template-substitution path entirely and route calls to a symbol
+    /// that `pass_stdlib_lowering` refuses to generate (because the
+    /// bundled fn's body is skipped at emit time).
+    codegen_override: HashSet<(String, String)>,
 }
 
 impl SymbolTable {
     fn build(program: &IrProgram) -> Self {
         let mut user_modules = std::collections::HashMap::new();
+        let mut codegen_override: HashSet<(String, String)> = HashSet::new();
         for module in &program.modules {
             let name = module.name.to_string();
             let funcs: HashSet<String> = module.functions.iter()
                 .filter(|f| !f.is_test)
                 .map(|f| f.name.to_string())
                 .collect();
+            for f in &module.functions {
+                if f.attrs.iter().any(|a|
+                    matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"))
+                {
+                    codegen_override.insert((name.clone(), f.name.to_string()));
+                }
+            }
             user_modules.insert(name, funcs);
         }
-        Self { user_modules }
+        Self { user_modules, codegen_override }
     }
 
     fn has_user_module(&self, name: &str) -> bool {
@@ -239,5 +267,9 @@ impl SymbolTable {
         self.user_modules.get(module)
             .map(|fs| fs.contains(func))
             .unwrap_or(false)
+    }
+
+    fn has_codegen_override(&self, module: &str, func: &str) -> bool {
+        self.codegen_override.contains(&(module.to_string(), func.to_string()))
     }
 }

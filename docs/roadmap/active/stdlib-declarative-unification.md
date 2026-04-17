@@ -86,11 +86,13 @@ Each module needs:
 
 ## 移行構造 (Stage 1-4)
 
-- **Stage 1**: define attribute syntax + codegen reader. Migrate one
-  trivial module (`int`) as proof-of-concept. Keep TOML / runtime / emit
-  in parallel during migration.
-- **Stage 2**: migrate 5 non-closure modules (int, float, bytes,
-  base64, hex). Delete corresponding TOML + runtime + emit.
+- **Stage 1** (完了): define attribute syntax + codegen reader.
+  `int.to_string` を `stdlib/int.almd` に `@inline_rust` 経由で migrate。
+  TOML / runtime / emit は並列維持。
+- **Stage 2** (進行中): migrate 5 non-closure modules (int, float, bytes,
+  base64, hex). `int` 22 fn 全移行 + `stdlib/defs/int.toml` 削除 完了。
+  残り 4 モジュール。Runtime Rust fns (`runtime/rs/src/<m>.rs`) は維持、
+  WASM は `calls_<m>.rs` 経由の既存 dispatch を使う。
 - **Stage 3**: closure-bearing modules (list, option, result, map, set).
   Requires attribute recipes that encode closure ABI.
 - **Stage 4**: effect modules (fs, http, process, io, env, datetime,
@@ -99,6 +101,38 @@ Each module needs:
 
 Target release cadence: one stage per `0.14.N` / early `0.15.x`. Full
 unification lands in `0.15.0`.
+
+## Technical debt during migration
+
+The migration intentionally leaves a few patch-like seams that need to
+be collapsed before Stage 3:
+
+1. **Duplicate bundled-source parse paths.** Both
+   `almide-frontend::bundled_sigs` (for `FnSig` lookups) and
+   `almide-codegen::pass_stdlib_lowering::parse_bundled_inline_rust`
+   (for `@inline_rust` template lookups) parse every bundled
+   `stdlib/<m>.almd` source independently. The source string itself
+   is shared (`almide_lang::stdlib_info::bundled_source`), but each
+   side maintains its own cache and extraction pass. The ideal end
+   state: bundled modules are always lowered to `IrModule` during a
+   codegen preamble (even for unit tests that bypass `resolve.rs`),
+   so both consumers see the same typed IR.
+
+2. **Two `module_functions` APIs.**
+   `almide-frontend::stdlib::module_functions` returns the TOML-only
+   list (used by the main-crate prune), while `module_functions_all`
+   merges bundled. This split mirrors (1): once all fns flow through
+   IR, the distinction collapses to a single "every registered fn"
+   query.
+
+3. **`@inline_rust` param borrow inference short-circuit.**
+   `pass_borrow_inference::infer_function_borrows` forces all-Own
+   on fns with `@inline_rust` / `@wasm_intrinsic` because their
+   bodies are holes and inferring against the hole would produce
+   spurious `RefStr` / `RefSlice` borrows. The template is the sole
+   authority for borrow semantics. If we later grow `@pure` pure-
+   Almide fallback bodies alongside templates, this rule needs to
+   become "use template when chosen, infer from body otherwise".
 
 ## MLIR Backend + Egg arc との関係
 
