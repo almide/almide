@@ -9,12 +9,16 @@ terminate quickly, and pick the fused form?*
 
 ## Verdict
 
-**Yes.** Both the toy PoC (5 tests) and the real-IR bridge (6 tests)
-pass in ~2s on release build. Fusion fires on three canonical shapes,
-saturation converges inside a small iteration budget, and — most
-importantly — cross-rule composition works without manual phase
-ordering on both string-parsed expressions *and* real `IrExpr`
-fragments.
+**Yes.** The toy PoC (5 tests) plus the real-IR bridge (11 tests,
+including 5 that cover lift → saturate → **lower** round-trips with
+live `VarTable`-backed beta-reduction) pass in ~2.5 s on release
+build. Fusion fires on three canonical shapes, saturation converges
+inside a small iteration budget, cross-rule composition works
+without manual phase ordering, and — most importantly — `compose`
+and `and-pred` markers are beta-reduced into real `IrExprKind::Lambda`
+nodes with fresh `VarId`s at lower time, so the extracted output is
+a well-typed `IrExpr` fragment ready to feed back into the existing
+pipeline.
 
 | Test | What it proves |
 |---|---|
@@ -34,9 +38,14 @@ in the e-graph and the extractor picks the cheapest.
 
 - Models only the IR shapes needed for the three rules: `map`, `filter`,
   `fold`, `lam`, `compose`, `and-pred`, plus numeric / symbolic atoms.
-- Does not substitute lambdas — uses `compose` / `and-pred` pseudo-ops
-  as markers. A later lowering step (Stage 1 of the arc) would
-  beta-reduce them into real lambdas.
+- **Lambda substitution happens at lower time, not inside saturation.**
+  E-graphs cannot represent binders without extra alpha-renaming
+  machinery (see egg's `examples/lambda.rs`). Saturation keeps
+  `compose` / `and-pred` as zero-cost markers; the single extracted
+  best form is then beta-reduced into real `IrExprKind::Lambda`
+  nodes with fresh `VarId`s. One-shot allocation is bounded by the
+  output size, which sidesteps the e-graph alpha-equivalence issue
+  without losing the fresh-id discipline the main IR requires.
 - Not wired into the main compiler pipeline. No codegen impact,
   deletable with zero blast radius.
 
@@ -46,17 +55,17 @@ in the e-graph and the extractor picks the cheapest.
   `AlmideExpr` expressions, three fusion rules, five tests.
 - **IrExpr bridge** (`src/bridge.rs`, `tests/bridge_test.rs`): lifts
   `almide_ir::IrExpr` subtrees (list combinators + identity-lambda
-  detection) into `RecExpr<AlmideExpr>`. Six tests covering identity
-  elimination, map/filter fusion, cross-rule composition, and
-  opaque pass-through on real IR.
+  detection) into `RecExpr<AlmideExpr>` and lowers the extracted
+  form back into a well-typed `IrExpr`. Eleven tests cover identity
+  elimination, map/filter fusion, cross-rule composition, opaque
+  pass-through, and the five round-trip cases that verify fresh
+  `VarId` allocation, body substitution, and structural shape on the
+  lowered output.
 
 ## What this does NOT yet answer
 
 Tracked as open questions in the arc document:
 
-- **Round-trip lower.** The bridge only lifts today; reconstruction
-  from `RecExpr` back to a well-typed `IrExpr` requires beta-reducing
-  the `compose` / `and-pred` markers into real lambdas (Phase C).
 - **Type-aware rules.** Real Almide rules depend on element types
   (`List[Int]` vs `List[String]`). egg supports this via `Analysis`
   but we haven't exercised it.
@@ -66,6 +75,12 @@ Tracked as open questions in the arc document:
 - **Cost-function calibration for targets.** The current `FusionCost`
   just penalizes loops. Real target-aware costs (Rust iter-collect
   vs WASM manual loop vs GPU offload) are a Stage 3 concern.
+- **Lambda substitution inside the e-graph.** `lower`-time
+  beta-reduction is sufficient to prove the round-trip works, but
+  in-graph substitution (custom `Applier` + alpha-renaming, à la
+  `egg/examples/lambda.rs`) would let saturation see through compose
+  markers and potentially discover more fusions. Scope for Stage 1+
+  once we see which rules need it.
 
 ## Running
 
@@ -79,8 +94,8 @@ If this PoC passes review, Stage 1 of the MLIR adoption arc (see
 `docs/roadmap/active/mlir-backend-adoption.md`) will:
 
 1. Expand the language to cover the full `IrExpr` enum
-2. Replace `lam`/`compose`/`and-pred` pseudo-ops with real lambda
-   substitution (custom `Applier`)
+2. Decide whether to keep lower-time beta-reduction or promote
+   substitution into the e-graph via a custom `Applier`
 3. Add type-parametric rules
 4. Port the remaining 4 `pass_stream_fusion` rules
 5. Run equality saturation as an opt-in pass before the existing
