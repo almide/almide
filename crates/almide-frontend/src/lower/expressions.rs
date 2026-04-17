@@ -36,7 +36,25 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Variables ──
         ast::ExprKind::Ident { name, .. } => {
             if let Some(var_id) = ctx.lookup_var(name) {
-                ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
+                // The type checker fills `ty` from `expr_types`. Names bound
+                // by record / variant patterns can land here as `Unknown`
+                // because the checker doesn't propagate the variant case's
+                // field types into the binding occurrence (the pattern
+                // lowering puts the field type into VarTable, but the
+                // checker's `expr_types` for the bare identifier reference
+                // hasn't been re-resolved post-pattern). Promote to the
+                // VarTable type only when the checker truly has nothing
+                // (`Unknown`) and the VarTable has a fully concrete type —
+                // we never want to fold a `TypeVar` from a generic body's
+                // VarTable into a call-site IR expression, since that would
+                // confuse mono's binding discovery.
+                let resolved = if matches!(ty, Ty::Unknown) {
+                    let vt_ty = ctx.var_table.get(var_id).ty.clone();
+                    if !vt_ty.contains_unknown() && !vt_ty.contains_typevar() {
+                        vt_ty
+                    } else { ty }
+                } else { ty };
+                ctx.mk(IrExprKind::Var { id: var_id }, resolved, span)
             } else if let Ty::Fn { params: param_tys, ret } = &ty {
                 // Function/top-let used as a value → eta-expand to lambda
                 // so borrow insertion handles param types correctly (e.g. String → &str).
@@ -118,8 +136,20 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
         ast::ExprKind::EmptyMap => ctx.mk(IrExprKind::EmptyMap, ty, span),
         ast::ExprKind::Tuple { elements, .. } => {
-            let elems = elements.iter().map(|e| lower_expr(ctx, e)).collect();
-            ctx.mk(IrExprKind::Tuple { elements: elems }, ty, span)
+            let elems: Vec<IrExpr> = elements.iter().map(|e| lower_expr(ctx, e)).collect();
+            // Type-checker fills `ty` from `expr_types`; for a tuple whose
+            // element exprs depend on a pattern-bound name, that ty can be
+            // `Tuple([Unknown, ..])` even when the lowered elements now
+            // carry concrete types (see the same fix on `Ident`). Rebuild
+            // the tuple ty from the lowered elements when the checker's ty
+            // is unresolved so downstream `Some(tuple)` / `List[tuple]`
+            // chains get a clean propagation path.
+            let resolved_ty = if ty.has_unresolved_deep()
+                && elems.iter().all(|e| !e.ty.has_unresolved_deep())
+            {
+                Ty::Tuple(elems.iter().map(|e| e.ty.clone()).collect())
+            } else { ty };
+            ctx.mk(IrExprKind::Tuple { elements: elems }, resolved_ty, span)
         }
 
         // ── Records ──
