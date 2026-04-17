@@ -10,7 +10,7 @@ fn option.is_some[A](o: Option[A]) -> Bool
 fn option.map[A, B](o: Option[A], f: fn(A) -> B) -> Option[B]
 fn option.or_else[A](o: Option[A], f: fn() -> Option[A]) -> Option[A]
 fn option.to_list[A](o: Option[A]) -> List[A]
-fn option.to_result[A](o: Option[A], err: String) -> Result[A, String]
+fn option.to_result[A](o: Option[A], msg: String) -> Result[A, String]
 fn option.unwrap_or[A](o: Option[A], default: A) -> A
 fn option.unwrap_or_else[A](o: Option[A], f: fn() -> A) -> A
 fn option.zip[A, B](a: Option[A], b: Option[B]) -> Option[(A, B)]

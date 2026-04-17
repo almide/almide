@@ -365,8 +365,25 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
     // post-ConcretizeTypes audit). The Rust target's later optimizer would
     // remove them anyway; the WASM emitter does not, so we prune here as
     // the canonical invariant: post-mono, no module fn carries TypeVars.
+    //
+    // Exception: bundled stdlib fns carrying `@inline_rust` or
+    // `@wasm_intrinsic` are dispatch *metadata*, not emitted code. Their
+    // generic signatures stay in the IR so `pass_stdlib_lowering` can
+    // locate them by (module, func) and render call sites as
+    // `IrExprKind::InlineRust`. Without this carve-out, every
+    // Stdlib-Unification bundled module (option, result, list, ...)
+    // loses its attribute table the moment mono runs.
     for module in &mut program.modules {
-        module.functions.retain(|f| !f.generics.as_ref().map_or(false, |g| !g.is_empty()));
+        module.functions.retain(|f| {
+            let is_generic = f.generics.as_ref().map_or(false, |g| !g.is_empty());
+            if !is_generic {
+                return true;
+            }
+            f.attrs.iter().any(|a| matches!(
+                a.name.as_str(),
+                "inline_rust" | "wasm_intrinsic"
+            ))
+        });
     }
 }
 
