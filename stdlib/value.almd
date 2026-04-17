@@ -1,0 +1,59 @@
+@inline_rust("almide_rt_value_array({items})")
+fn array(items: List[Value]) -> Value = _
+
+@inline_rust("almide_rt_value_as_array({v})")
+fn as_array(v: Value) -> Result[List[Value], String] = _
+
+@inline_rust("almide_rt_value_as_bool({v})")
+fn as_bool(v: Value) -> Result[Bool, String] = _
+
+@inline_rust("almide_rt_value_as_float({v})")
+fn as_float(v: Value) -> Result[Float, String] = _
+
+@inline_rust("almide_rt_value_as_int({v})")
+fn as_int(v: Value) -> Result[Int, String] = _
+
+@inline_rust("almide_rt_value_as_string({v})")
+fn as_string(v: Value) -> Result[String, String] = _
+
+@inline_rust("almide_rt_value_bool({b})")
+fn bool(b: Bool) -> Value = _
+
+@inline_rust("almide_rt_value_float({f})")
+fn float(f: Float) -> Value = _
+
+@inline_rust("almide_rt_value_field({v}, {key})")
+fn get(v: Value, key: String) -> Result[Value, String] = _
+
+@inline_rust("almide_rt_value_int({n})")
+fn int(n: Int) -> Value = _
+
+@inline_rust("almide_rt_value_merge({a}, {b})")
+fn merge(a: Value, b: Value) -> Value = _
+
+@inline_rust("almide_rt_value_null()")
+fn null() -> Value = _
+
+@inline_rust("almide_rt_value_object({pairs})")
+fn object(pairs: List[(String, Value)]) -> Value = _
+
+@inline_rust("almide_rt_value_omit({v}, {keys})")
+fn omit(v: Value, keys: List[String]) -> Value = _
+
+@inline_rust("almide_rt_value_pick({v}, {keys})")
+fn pick(v: Value, keys: List[String]) -> Value = _
+
+@inline_rust("almide_rt_value_str({s})")
+fn str(s: String) -> Value = _
+
+@inline_rust("almide_rt_value_stringify(&{v})")
+fn stringify(v: Value) -> String = _
+
+@inline_rust("almide_rt_value_to_camel_case({v})")
+fn to_camel_case(v: Value) -> Value = _
+
+@inline_rust("almide_rt_value_to_snake_case({v})")
+fn to_snake_case(v: Value) -> Value = _
+
+@inline_rust("almide_rt_value_field({v}, {key})")
+fn field(v: Value, key: String) -> Result[Value, String] = _

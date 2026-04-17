@@ -315,6 +315,14 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             steps: steps.into_iter().map(|s| s.map_exprs(&mut rewrite_expr)).collect(),
             collector: collector.map_exprs(&mut rewrite_expr),
         },
+        // Recurse into InlineRust args so `__`-prefixed runtime calls
+        // nested inside them (e.g. `__encode_option_string` inside a
+        // `value.object(pairs)` InlineRust produced by stdlib lowering)
+        // are reached by the `__` prefix transformer.
+        IrExprKind::InlineRust { template, args } => IrExprKind::InlineRust {
+            template,
+            args: args.into_iter().map(|(n, a)| (n, rewrite_expr(a))).collect(),
+        },
         other => other,
     };
 
