@@ -84,21 +84,32 @@ Each module needs:
 - Regression: Rust + WASM pass spec/ after migration, dojo MSR
   unchanged
 
-## Phase 4 proposed structure
+## 移行構造 (Stage 1-4)
 
-- **Phase 4a**: define attribute syntax + codegen reader. Migrate one
+- **Stage 1**: define attribute syntax + codegen reader. Migrate one
   trivial module (`int`) as proof-of-concept. Keep TOML / runtime / emit
   in parallel during migration.
-- **Phase 4b**: migrate 5 non-closure modules (int, float, bytes,
+- **Stage 2**: migrate 5 non-closure modules (int, float, bytes,
   base64, hex). Delete corresponding TOML + runtime + emit.
-- **Phase 4c**: closure-bearing modules (list, option, result, map, set).
+- **Stage 3**: closure-bearing modules (list, option, result, map, set).
   Requires attribute recipes that encode closure ABI.
-- **Phase 4d**: effect modules (fs, http, process, io, env, datetime,
+- **Stage 4**: effect modules (fs, http, process, io, env, datetime,
   random, regex, json, testing, matrix). These have WASM runtime
   interactions that may need different attribute shapes.
 
-Target release cadence: one sub-phase per `0.14.N`. Full unification
-land in `0.15.0`.
+Target release cadence: one stage per `0.14.N` / early `0.15.x`. Full
+unification lands in `0.15.0`.
+
+## MLIR Backend + Egg arc との関係
+
+本 arc は [mlir-backend-adoption.md](./mlir-backend-adoption.md) の **準備運動**でもある。各アウトプットが次 arc (egg + MLIR) でそのまま活用される:
+
+- `stdlib/<m>.almd` の pure Almide body → Almide dialect (MLIR) への入力
+- typed intrinsic (`@intrinsic(rust=..., wasm=...)`) → MLIR FunctionImport
+- `@rewrite` declarative rule → egg e-graph rewrite rule に自動コンパイル
+- `@schedule` block → affine dialect schedule attribute
+
+本 arc を skip して MLIR arc 直行は技術的に可能だが、stdlib が 3 層定義のままだと MLIR 移植工数が 2 倍になる。順序は動かさない。
 
 ## Non-goals
 
@@ -119,8 +130,8 @@ land in `0.15.0`.
 
 ## Scope estimate
 
-Phase 4 full arc: **2-4 weeks of concentrated work**, split into
-four releases. Not a single-session task.
+Full arc: **2-4 weeks of concentrated work**, split into four releases.
+Not a single-session task.
 
 ## Decision points before starting
 

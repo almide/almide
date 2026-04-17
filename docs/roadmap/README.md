@@ -6,7 +6,7 @@
 
 ## Active
 
-25 items
+26 items
 
 | Item | Description |
 |------|-------------|
@@ -27,6 +27,7 @@
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [`almide docs-gen` — llms.txt Auto-Generation](active/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | [lumen — Pure Graphics Math](active/lumen-graphics-math.md) | lumen — pure graphics math library (vec3, mat4, color), used by webgl/canvas/obsid |
+| [MLIR Backend + Egg Rewrite Engine](active/mlir-backend-adoption.md) | MLIR backend + egg e-graph rewriter for pure-Almide optimal lowering |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](active/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |

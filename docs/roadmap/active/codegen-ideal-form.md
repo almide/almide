@@ -278,8 +278,9 @@ CHANGELOG `[0.14.7]` for the full patch-layer audit and per-step notes.
 
 Phase 3 focus: **dispatch layer deduplication**. The definition layer
 (TOML + `runtime/rs` + `emit_wasm/calls_*.rs`) is still triple-written;
-that is Phase 4's scope — see
-`active/stdlib-declarative-unification.md`.
+that scope belongs to the Stdlib Declarative Unification arc — see
+`active/stdlib-declarative-unification.md`. Beyond that, the egg + MLIR
+arc picks up at `active/mlir-backend-adoption.md`.
 
 ### Historical Phase 3 plan (below)
 
@@ -359,5 +360,5 @@ target に対して discover するだけになる)。
 ### Non-goals
 
 - 新 stdlib fn 追加は Phase 3 では行わない (infra 完成まで待つ)
-- 語彙追加 (Phase 4 候補、UFCS / ? chain) は 0.15 以降に後送り
+- 語彙追加 (UFCS / ? chain の拡張候補) は 0.15 以降に後送り
 - dojo task bank 拡張は dojo チーム側で並行
