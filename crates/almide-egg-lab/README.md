@@ -9,9 +9,12 @@ terminate quickly, and pick the fused form?*
 
 ## Verdict
 
-**Yes.** The 5 tests below pass in 1.5s on release build, covering
-the three most common fusion shapes plus transitive / cross-rule
-composition.
+**Yes.** Both the toy PoC (5 tests) and the real-IR bridge (6 tests)
+pass in ~2s on release build. Fusion fires on three canonical shapes,
+saturation converges inside a small iteration budget, and — most
+importantly — cross-rule composition works without manual phase
+ordering on both string-parsed expressions *and* real `IrExpr`
+fragments.
 
 | Test | What it proves |
 |---|---|
@@ -37,10 +40,23 @@ in the e-graph and the extractor picks the cheapest.
 - Not wired into the main compiler pipeline. No codegen impact,
   deletable with zero blast radius.
 
+## What's included
+
+- **Toy Language PoC** (`src/lib.rs`, `tests::`): string-parsed
+  `AlmideExpr` expressions, three fusion rules, five tests.
+- **IrExpr bridge** (`src/bridge.rs`, `tests/bridge_test.rs`): lifts
+  `almide_ir::IrExpr` subtrees (list combinators + identity-lambda
+  detection) into `RecExpr<AlmideExpr>`. Six tests covering identity
+  elimination, map/filter fusion, cross-rule composition, and
+  opaque pass-through on real IR.
+
 ## What this does NOT yet answer
 
 Tracked as open questions in the arc document:
 
+- **Round-trip lower.** The bridge only lifts today; reconstruction
+  from `RecExpr` back to a well-typed `IrExpr` requires beta-reducing
+  the `compose` / `and-pred` markers into real lambdas (Phase C).
 - **Type-aware rules.** Real Almide rules depend on element types
   (`List[Int]` vs `List[String]`). egg supports this via `Analysis`
   but we haven't exercised it.
@@ -50,8 +66,6 @@ Tracked as open questions in the arc document:
 - **Cost-function calibration for targets.** The current `FusionCost`
   just penalizes loops. Real target-aware costs (Rust iter-collect
   vs WASM manual loop vs GPU offload) are a Stage 3 concern.
-- **Integration with `almide-ir::IrExpr`.** Translation in both
-  directions (`IrExpr` ↔ `RecExpr<AlmideExpr>`) is Stage 1 scope.
 
 ## Running
 

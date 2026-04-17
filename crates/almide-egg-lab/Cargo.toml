@@ -7,3 +7,6 @@ description = "Experimental crate: egg-based equality saturation over a minimal 
 
 [dependencies]
 egg = "0.10"
+almide-ir = { path = "../almide-ir" }
+almide-lang = { path = "../almide-lang" }
+almide-base = { path = "../almide-base" }
