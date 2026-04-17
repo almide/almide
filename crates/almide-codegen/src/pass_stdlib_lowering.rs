@@ -298,6 +298,26 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
 
     let kind = match expr.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
+            // Stage 3c: list operations migrate to bundled `@inline_rust`
+            // like every other module, BUT the Rust target needs the
+            // fused-iterator lowering (`IterChain`) for isolated closure
+            // ops (`list.map(xs, f)` outside a pipe) to stay zero-copy.
+            // `StreamFusionPass` (runs earlier, pipeline-level) already
+            // handles pipe chains; `try_lower_to_iter_chain` is the
+            // fallback for single-call shape. Putting it BEFORE the
+            // `inline_rust_spec` intercept keeps the perf win — if it
+            // declines (non-closure ops like `len`, `push`), we fall
+            // through to the declarative bundled dispatch below.
+            if module.as_ref() == "list" {
+                let args_for_fusion: Vec<IrExpr> = args.iter().cloned()
+                    .map(|a| rewrite_expr(a))
+                    .collect();
+                if let Some(iter_expr) = try_lower_to_iter_chain(
+                    &func, args_for_fusion, &ty, span,
+                ) {
+                    return iter_expr;
+                }
+            }
             // Stdlib Unification Stage 1: if a bundled stdlib fn
             // declares `@inline_rust("template")`, produce an
             // InlineRust IR node with the template + param-keyed args.

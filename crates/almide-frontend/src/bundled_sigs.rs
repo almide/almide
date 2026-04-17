@@ -146,21 +146,28 @@ fn build_fn_sig(
     r#async: &Option<bool>,
     generics: &Option<Vec<ast::GenericParam>>,
 ) -> FnSig {
-    // Use the shared resolver with no ambient type context. Bundled
-    // stdlib sigs currently reference only built-in primitives and
-    // generic container types (List, Option, Result, ...) which the
-    // resolver recognizes unconditionally. A bundled fn that refers
-    // to a user-defined type inside its signature is beyond the
-    // current migration scope and will surface as `Ty::Unknown` here.
-    let ptys: Vec<(Sym, almide_lang::types::Ty)> = params
-        .iter()
-        .map(|p| (p.name, crate::canonicalize::resolve::resolve_type_expr(&p.ty, None)))
-        .collect();
-    let ret = crate::canonicalize::resolve::resolve_type_expr(return_type, None);
+    // Build a `known_types` map that resolves each generic param name
+    // (`[A, B]`) to `Ty::TypeVar(name)`. Without this, the shared
+    // resolver would see bare `A` inside `List[A]` and return
+    // `Ty::Named("A", [])` — the checker's unifier then treats `A` as
+    // a nominal type and rejects callers like `list.len(xs: List[Int])`
+    // with "expected List[A] but got List[Int]". The TOML-generated
+    // `stdlib_sigs.rs` emits `Ty::TypeVar(s("A"))` directly; we match
+    // that convention here.
     let gnames: Vec<Sym> = generics
         .as_ref()
         .map(|gs| gs.iter().map(|g| g.name).collect())
         .unwrap_or_default();
+    let mut known_types: HashMap<Sym, almide_lang::types::Ty> = HashMap::new();
+    for g in &gnames {
+        known_types.insert(*g, almide_lang::types::Ty::TypeVar(*g));
+    }
+    let resolver_ctx = if gnames.is_empty() { None } else { Some(&known_types) };
+    let ptys: Vec<(Sym, almide_lang::types::Ty)> = params
+        .iter()
+        .map(|p| (p.name, crate::canonicalize::resolve::resolve_type_expr(&p.ty, resolver_ctx)))
+        .collect();
+    let ret = crate::canonicalize::resolve::resolve_type_expr(return_type, resolver_ctx);
     let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
     FnSig {
         generics: gnames,
