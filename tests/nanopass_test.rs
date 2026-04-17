@@ -502,8 +502,14 @@ mod stdlib_lowering {
     use almide::codegen::pass_stdlib_lowering::StdlibLoweringPass;
 
     #[test]
-    fn module_call_becomes_named() {
-        // string.len(s) → almide_rt_string_len(s)
+    fn module_call_becomes_inline_rust() {
+        // string.len(s) → InlineRust { "almide_rt_string_len(&*{s})", args=[(s, _)] }
+        // After Stage 4a the `string` module lives in `stdlib/string.almd`
+        // with `@inline_rust` templates. `StdlibLoweringPass` intercepts
+        // bundled module calls before the legacy TOML/`arg_transforms`
+        // path and emits `IrExprKind::InlineRust` with the template plus
+        // param-keyed args. The walker substitutes `{placeholder}` at
+        // emit time.
         let mut vt = VarTable::new();
         let p = mk_param(&mut vt, "s", Ty::String);
         let var_id = p.var;
@@ -518,13 +524,14 @@ mod stdlib_lowering {
         let program = mk_program(vec![func], vt);
         let result = run_pass(&StdlibLoweringPass, program, Target::Rust);
 
-        // Module call should be lowered to Named call
         match &result.functions[0].body.kind {
-            IrExprKind::Call { target: CallTarget::Named { name }, .. } => {
-                assert!(name.as_str().contains("string") && name.as_str().contains("len"),
-                    "Expected lowered stdlib call, got {}", name);
+            IrExprKind::InlineRust { template, args } => {
+                assert!(template.contains("almide_rt_string_len"),
+                    "expected runtime fn in template, got: {}", template);
+                assert_eq!(args.len(), 1, "expected one param-keyed arg");
+                assert_eq!(args[0].0.as_str(), "s");
             }
-            other => panic!("Expected Named call, got {:?}", other),
+            other => panic!("Expected InlineRust, got {:?}", other),
         }
     }
 }
