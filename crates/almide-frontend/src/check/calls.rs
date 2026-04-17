@@ -136,7 +136,12 @@ impl Checker {
                 // If obj_ty maps to a stdlib module, suggest the module-call
                 // form (plus the closest existing name if there's a typo).
                 if let Some(module) = builtin_module {
-                    let module_funcs = crate::stdlib::module_functions(module);
+                    // Use the *full* surface (TOML + bundled `.almd`) so fns
+                    // migrated through the Stdlib Unification arc still power
+                    // the E002 suggestion. `module_functions` only sees TOML,
+                    // so after `stdlib/string.almd` replaced the TOML the
+                    // method-call try-snippet silently disappeared.
+                    let module_funcs = crate::stdlib::module_functions_all(module);
                     let suggestion = almide_base::diagnostic::suggest(&field, module_funcs.iter().copied());
                     let hint = if let Some(close) = &suggestion {
                         format!(
