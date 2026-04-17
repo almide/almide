@@ -196,7 +196,7 @@ fn collect_stdlib_outline(module: &str) -> Result<Outline, String> {
         ));
     }
 
-    let mut functions: Vec<OutlineFn> = almide::stdlib::module_functions(module)
+    let mut functions: Vec<OutlineFn> = almide::stdlib::module_functions_all(module)
         .into_iter()
         .filter_map(|fname| almide::stdlib::lookup_sig(module, fname).map(|sig| (fname, sig)))
         .map(|(fname, sig)| OutlineFn {

@@ -260,7 +260,10 @@ impl Checker {
                 // For module-qualified calls (e.g. "string.uppercase"), narrow candidates
                 // to the same module and compare only the function part for better suggestions.
                 if let Some((module, func)) = name.split_once('.') {
-                    let module_funcs = crate::stdlib::module_functions(module);
+                    // Use the *full* surface (TOML + bundled) so diagnostic
+                    // suggestions see fns migrated to `stdlib/<m>.almd` even
+                    // after their TOML entries have been deleted.
+                    let module_funcs = crate::stdlib::module_functions_all(module);
                     if !module_funcs.is_empty() {
                         // Check known alias map first (catches common hallucinations)
                         if let Some(alias) = crate::stdlib::suggest_alias(module, func) {

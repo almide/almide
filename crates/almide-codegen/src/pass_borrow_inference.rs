@@ -112,6 +112,24 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
 
 fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
     CURRENT_FN.with(|c| *c.borrow_mut() = Some(func.name.to_string()));
+
+    // `@inline_rust` / `@wasm_intrinsic` fns (Stdlib Declarative
+    // Unification Stage 2+) are dispatch-only declarations with a
+    // Hole body. Their call sites route through a literal template
+    // that is authoritative for borrow semantics — if the template
+    // writes `&*{s}`, the underlying runtime takes `&str`; if it
+    // writes `{s}`, the runtime consumes ownership. Running the
+    // inference on a Hole body would spuriously mark every heap
+    // param as `RefStr` / `RefSlice`, causing BorrowInsertionPass
+    // to wrap the arg again and produce `&*&*` in the emitted Rust.
+    // Default every param to Own here so the template is the sole
+    // authority.
+    let has_template = func.attrs.iter().any(|a|
+        matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"));
+    if has_template {
+        return func.params.iter().map(|_| ParamBorrow::Own).collect();
+    }
+
     func.params.iter().map(|param| {
         if !is_heap_type(&param.ty) {
             return ParamBorrow::Own;
