@@ -6,7 +6,7 @@
 
 ## Active
 
-30 items
+31 items
 
 | Item | Description |
 |------|-------------|
@@ -20,6 +20,7 @@
 | [Unify Diagnostic Emission with Docs](active/diagnostic-emit-doc-unification.md) | Unify diagnostic emission sites with their docs/diagnostics/*.md files |
 | [Externalize `try:` Snippets from Rust Literals](active/diagnostic-snippet-externalization.md) | Move try: snippet text out of Rust literals into stdlib/diagnostics/*.almd |
 | [Diagnostics: Here / Try / Hint Format](active/diagnostics-here-try-hint.md) | Standardize diagnostics to Here/Try/Hint three-part format with CI-verified hint correctness |
+| [Dispatch Unification Plan (S3 Phase 1e)](active/dispatch-unification-plan.md) | Unify Rust + WASM stdlib dispatch via @wasm_intrinsic template expansion |
 | [DX & Codegen Papercuts](active/dx-codegen-papercuts.md) | Codegen bugs (effect fn unification) + DX papercuts (test stderr, explain, local imports) |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with rush/spawn/link/cancel |
