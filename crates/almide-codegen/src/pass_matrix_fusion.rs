@@ -250,6 +250,18 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
         changed = true;
     }
 
+    // Scaled-matmul fusion:
+    //   matrix.mul(a, matrix.scale(b, s)) → matrix.mul_scaled(a, s, b)
+    //   matrix.mul(matrix.scale(a, s), b) → matrix.mul_scaled(a, s, b)
+    // Drops the intermediate scaled allocation — the scalar α flows into
+    // cblas_dgemm's alpha parameter directly at no extra FLOPs (up to
+    // the FUSED_ALPHA_MAX=512 crossover; above that the runtime falls
+    // back to scale+mul).
+    if let Some(new_kind) = try_fuse_mul_scaled(&expr.kind) {
+        expr.kind = new_kind;
+        changed = true;
+    }
+
     changed
 }
 
@@ -300,6 +312,51 @@ fn try_fuse_gemm_bias_scale_gelu(kind: &IrExprKind) -> Option<IrExprKind> {
         args: vec![a.clone(), b.clone(), bias.clone(), alpha.clone()],
         type_args: vec![],
     })
+}
+
+/// Pattern-match `matrix.mul(a, matrix.scale(b, s))` and its mirror
+/// `matrix.mul(matrix.scale(a, s), b)` → `matrix.mul_scaled(a, s, b)`.
+/// The runtime folds the scalar into cblas_dgemm's `alpha` parameter,
+/// so the intermediate `scale` allocation and pass vanish. Works up to
+/// 512² — above that, the runtime itself reverts to scale-then-mul
+/// because the alpha!=1 BLAS penalty is worse than the alloc cost.
+fn try_fuse_mul_scaled(kind: &IrExprKind) -> Option<IrExprKind> {
+    let (lhs, rhs) = match kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "mul" && args.len() == 2 =>
+        {
+            (&args[0], &args[1])
+        }
+        _ => return None,
+    };
+
+    // Case 1: mul(a, scale(b, s))
+    if let Some((b_inner, s)) = match_matrix_scale(rhs) {
+        return Some(IrExprKind::Call {
+            target: CallTarget::Module {
+                module: sym("matrix"),
+                func: sym("mul_scaled"),
+            },
+            args: vec![lhs.clone(), s, b_inner],
+            type_args: vec![],
+        });
+    }
+
+    // Case 2: mul(scale(a, s), b) — still `s * (a @ b)`, so the same
+    // `mul_scaled(a, s, b)` form applies. Runtime contract uses the
+    // first matrix argument as `a`, so we unpack the scaled side.
+    if let Some((a_inner, s)) = match_matrix_scale(lhs) {
+        return Some(IrExprKind::Call {
+            target: CallTarget::Module {
+                module: sym("matrix"),
+                func: sym("mul_scaled"),
+            },
+            args: vec![a_inner, s, rhs.clone()],
+            type_args: vec![],
+        });
+    }
+
+    None
 }
 
 /// Pattern-match `linear_row(layer_norm_rows(x, γ, β, ε), W, b)` →
@@ -520,6 +577,36 @@ fn fuse_let_split_chain(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>) -> bool 
             }
         }
         if i + 2 <= stmts.len() {
+            if let Some(m) = match_mul_scaled_2gram(&stmts[i..i + 2]) {
+                let rest = &stmts[i + 2..];
+                if count_refs_in_stmts_and_tail(rest, tail, m.s_id) == 0 {
+                    let span = stmts[i + 1].span;
+                    let fused_value = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("matrix"),
+                                func: sym("mul_scaled"),
+                            },
+                            args: vec![m.a, m.alpha, m.b],
+                            type_args: vec![],
+                        },
+                        ty: m.c_ty.clone(),
+                        span,
+                    };
+                    let new_bind = IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: m.c_id,
+                            mutability: m.c_mutability,
+                            ty: m.c_ty,
+                            value: fused_value,
+                        },
+                        span,
+                    };
+                    stmts.splice(i..i + 2, std::iter::once(new_bind));
+                    changed = true;
+                    continue;
+                }
+            }
             if let Some(m) = match_pre_norm_linear_2gram(&stmts[i..i + 2]) {
                 let rest = &stmts[i + 2..];
                 if count_refs_in_stmts_and_tail(rest, tail, m.n_id) == 0 {
@@ -618,6 +705,50 @@ fn fuse_let_split_chain(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>) -> bool 
         i += 1;
     }
     changed
+}
+
+struct MulScaledMatch {
+    s_id: VarId,
+    c_id: VarId,
+    a: IrExpr,
+    b: IrExpr,
+    alpha: IrExpr,
+    c_mutability: Mutability,
+    c_ty: almide_lang::types::Ty,
+}
+
+/// Match either
+///     let s = matrix.scale(b, α); let c = matrix.mul(a, s)
+///     let s = matrix.scale(a, α); let c = matrix.mul(s, b)
+/// and collapse to `let c = matrix.mul_scaled(a, α, b)`. Single-use
+/// check on `s` is done by the caller.
+fn match_mul_scaled_2gram(window: &[IrStmt]) -> Option<MulScaledMatch> {
+    if window.len() < 2 { return None; }
+    let (s_id, s_value) = as_bind(&window[0])?;
+    let (scaled_base, alpha) = match_matrix_binary(s_value, "scale")?;
+
+    let (c_id, c_value) = as_bind(&window[1])?;
+    let (mul_lhs, mul_rhs) = match_matrix_binary(c_value, "mul")?;
+
+    let (a, b) = if is_var_with_id(mul_rhs, s_id) {
+        (mul_lhs.clone(), scaled_base.clone())
+    } else if is_var_with_id(mul_lhs, s_id) {
+        (scaled_base.clone(), mul_rhs.clone())
+    } else {
+        return None;
+    };
+
+    let (c_mutability, c_ty) = match &window[1].kind {
+        IrStmtKind::Bind { mutability, ty, .. } => (*mutability, ty.clone()),
+        _ => return None,
+    };
+
+    Some(MulScaledMatch {
+        s_id, c_id,
+        a, b,
+        alpha: alpha.clone(),
+        c_mutability, c_ty,
+    })
 }
 
 struct PreNormLinearMatch {
