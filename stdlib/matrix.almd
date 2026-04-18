@@ -101,6 +101,20 @@ fn broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix = _
 @intrinsic("almide_rt_matrix_layer_norm_rows")
 fn layer_norm_rows(m: Matrix, gamma: List[Float], beta: List[Float], eps: Float) -> Matrix = _
 
+// Root-Mean-Square Normalization (Llama / Mistral). Cheaper than
+// layer_norm_rows because there's no mean subtraction or beta term.
+// y[i,j] = x[i,j] * gamma[j] / sqrt(mean(x[i,:]²) + eps)
+@intrinsic("almide_rt_matrix_rms_norm_rows")
+fn rms_norm_rows(m: Matrix, gamma: List[Float], eps: Float) -> Matrix = _
+
+// SwiGLU gate (Llama / Mistral FFN): silu(x @ W_gate) ⊙ (x @ W_up).
+// Two cblas_dgemm(transB=Trans) into separate buffers, then a single
+// element-wise sweep applies silu and the gate-up product. Output
+// shape is (r, d_inner) — the down-projection W_down @ y is left as a
+// follow-up linear_row call.
+@intrinsic("almide_rt_matrix_swiglu_gate")
+fn swiglu_gate(x: Matrix, w_gate: Matrix, w_up: Matrix) -> Matrix = _
+
 @intrinsic("almide_rt_matrix_softmax_rows")
 fn softmax_rows(m: Matrix) -> Matrix = _
 
@@ -120,6 +134,14 @@ fn fused_gemm_bias_scale_gelu(a: Matrix, b: Matrix, bias: Matrix, alpha: Float) 
 // both the nested-expression and let-split forms.
 @intrinsic("almide_rt_matrix_attention_weights")
 fn attention_weights(q: Matrix, kt: Matrix, scale: Float) -> Matrix = _
+
+// Fusion target: `mul(attention_weights(Q, Kt, s), V)` — full scaled
+// dot-product attention. Two cblas_dgemm calls + in-place row softmax.
+// Produces `(softmax_rows(s · Q @ Kt)) @ V` without ever materialising
+// the post-scale or post-softmax matrix as a heap object — both stages
+// reuse the same flat buffer.
+@intrinsic("almide_rt_matrix_scaled_dot_product_attention")
+fn scaled_dot_product_attention(q: Matrix, kt: Matrix, v: Matrix, scale: Float) -> Matrix = _
 
 // Fusion target: `gelu(linear_row(x, W, b))` — FFN first sub-layer.
 // cblas_dgemm(transB=Trans) with the output row-seeded from bias plus

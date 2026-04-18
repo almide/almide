@@ -93,7 +93,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let mut compiled: Vec<(String, Result<std::path::PathBuf, String>)> = Vec::new();
     for test_file in &test_files {
         eprintln!("Compiling {}", test_file);
-        let result = super::run::compile_to_binary(test_file, no_check, true);
+        let result = super::run::compile_to_binary(test_file, no_check, true, false);
         compiled.push((test_file.clone(), result));
     }
 
@@ -568,7 +568,7 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
     }
 
     for test_file in &test_files {
-        let code = super::cmd_run_inner(test_file, &program_args, false, true);
+        let code = super::cmd_run_inner(test_file, &program_args, false, true, false);
         // Emit JSON per file
         let status = if code == 0 { "pass" } else { "fail" };
         println!(

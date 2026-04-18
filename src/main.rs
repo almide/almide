@@ -29,6 +29,11 @@ enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Build with optimisations (cargo --release). Required for any
+        /// performance-sensitive comparison; without it the generated
+        /// Rust runs in dev profile.
+        #[arg(long)]
+        release: bool,
         /// Arguments passed to the program
         #[arg(allow_hyphen_values = true)]
         program_args: Vec<String>,
@@ -527,9 +532,9 @@ fn main() {
 fn dispatch(cli: Cli) {
     match cli.command {
         Commands::Init => cli::cmd_init(),
-        Commands::Run { file, no_check, program_args } => {
+        Commands::Run { file, no_check, release, program_args } => {
             let file = resolve_file(file);
-            cli::cmd_run(&file, &program_args, no_check);
+            cli::cmd_run(&file, &program_args, no_check, release);
         }
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib } => {
             let file = resolve_file(file);
