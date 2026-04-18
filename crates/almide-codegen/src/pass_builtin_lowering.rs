@@ -323,6 +323,13 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             template,
             args: args.into_iter().map(|(n, a)| (n, rewrite_expr(a))).collect(),
         },
+        // Traverse RuntimeCall args so `panic(...)` / `assert_eq(...)` etc.
+        // nested inside a `@intrinsic` fn (e.g. `assert_throws(|| panic(...), msg)`)
+        // get lowered to their RustMacro form instead of staying as free fn calls.
+        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
+            symbol,
+            args: args.into_iter().map(rewrite_expr).collect(),
+        },
         other => other,
     };
 

@@ -217,29 +217,31 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Pre-resolved runtime call (from @intrinsic) ──
         IrExprKind::RuntimeCall { symbol, args } => {
-            // Emit `<symbol>(<arg1>, <arg2>, ...)`. For String args that
-            // didn't pick up a Borrow / Clone IR wrapper upstream (common
-            // for UFCS rewrites and lambda bodies that BorrowInsertion
-            // doesn't traverse the same way), insert `&*` so Rust runtime
-            // fns expecting `&str` compile. Mirrors the `&*{s}` convention
-            // the legacy `@inline_rust` templates spelled out manually.
+            // `@intrinsic` is template-authoritative: BorrowInsertion
+            // assigns every param `Own` (see
+            // `pass_borrow_inference::infer_function_borrows`), so the
+            // walker decides decoration from `expr.ty`. Copy scalars
+            // pass through; String → `&*` (auto-deref to &str); every
+            // other heap value passed into a runtime fn → `&` (runtime
+            // takes `&Vec<T>` / `&Bytes` / `&Record`).
             let args_str = args.iter().map(|a| {
                 let rendered = render_expr(ctx, a);
-                let already_decorated = matches!(&a.kind,
-                    IrExprKind::Borrow { .. } | IrExprKind::Deref { .. }
+                if matches!(&a.kind, IrExprKind::Borrow { .. } | IrExprKind::Deref { .. }) {
+                    return rendered;
+                }
+                let is_copy = matches!(a.ty,
+                    Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                    | Ty::Float | Ty::Float32 | Ty::Bool
                 );
-                // String args need `&*` when passing to a Rust fn that
-                // takes `&str`. Detect via expr.ty first (the typed IR),
-                // and also via LitStr kind as a fallback for cases where
-                // upstream concretization may have left ty as Unknown.
-                let needs_str_borrow = !already_decorated && (
-                    matches!(a.ty, Ty::String)
-                    || matches!(&a.kind, IrExprKind::LitStr { .. })
-                );
-                if needs_str_borrow {
+                let is_str_like = matches!(a.ty, Ty::String)
+                    || matches!(&a.kind, IrExprKind::LitStr { .. });
+                if is_copy {
+                    rendered
+                } else if is_str_like {
                     format!("&*{}", rendered)
                 } else {
-                    rendered
+                    format!("&{}", rendered)
                 }
             }).collect::<Vec<_>>().join(", ");
             format!("{}({})", symbol.as_str(), args_str)

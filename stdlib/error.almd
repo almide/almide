@@ -6,11 +6,11 @@
 // `runtime/rs/src/error.rs` stays as the implementation target.
 // WASM dispatch continues through `emit_wasm/calls_error.rs`.
 
-@intrinsic("almide_rt_error_chain")
+@inline_rust("almide_rt_error_chain(&*{outer}, &*{cause})")
 fn chain(outer: String, cause: String) -> String = _
 
-@intrinsic("almide_rt_error_context")
+@inline_rust("almide_rt_error_context(&{r}, &*{msg})")
 fn context[T, E](r: Result[T, E], msg: String) -> Result[T, String] = _
 
-@intrinsic("almide_rt_error_message")
+@inline_rust("almide_rt_error_message(&{r})")
 fn message[T](r: Result[T, String]) -> String = _

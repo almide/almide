@@ -254,13 +254,13 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 
     // base64 / hex runtime helpers. All take (bytes_or_str_ptr: i32) -> ptr: i32.
     let i32_i32_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
-    emitter.rt.base64_encode = emitter.register_func("__base64_encode", i32_i32_ty);
-    emitter.rt.base64_decode = emitter.register_func("__base64_decode", i32_i32_ty);
-    emitter.rt.base64_encode_url = emitter.register_func("__base64_encode_url", i32_i32_ty);
-    emitter.rt.base64_decode_url = emitter.register_func("__base64_decode_url", i32_i32_ty);
-    emitter.rt.hex_encode = emitter.register_func("__hex_encode", i32_i32_ty);
-    emitter.rt.hex_encode_upper = emitter.register_func("__hex_encode_upper", i32_i32_ty);
-    emitter.rt.hex_decode = emitter.register_func("__hex_decode", i32_i32_ty);
+    emitter.rt.base64_encode = emitter.register_func("almide_rt_base64_encode", i32_i32_ty);
+    emitter.rt.base64_decode = emitter.register_func("almide_rt_base64_decode", i32_i32_ty);
+    emitter.rt.base64_encode_url = emitter.register_func("almide_rt_base64_encode_url", i32_i32_ty);
+    emitter.rt.base64_decode_url = emitter.register_func("almide_rt_base64_decode_url", i32_i32_ty);
+    emitter.rt.hex_encode = emitter.register_func("almide_rt_hex_encode", i32_i32_ty);
+    emitter.rt.hex_encode_upper = emitter.register_func("almide_rt_hex_encode_upper", i32_i32_ty);
+    emitter.rt.hex_decode = emitter.register_func("almide_rt_hex_decode", i32_i32_ty);
 
     // String stdlib runtime (delegated to rt_string module)
     super::rt_string::register(emitter);

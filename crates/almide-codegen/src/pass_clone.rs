@@ -115,6 +115,9 @@ fn count_syntactic(expr: &IrExpr, counts: &mut HashMap<VarId, u32>) {
             }
             for a in args { count_syntactic(a, counts); }
         }
+        IrExprKind::RuntimeCall { args, .. } => {
+            for a in args { count_syntactic(a, counts); }
+        }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements }
         | IrExprKind::Fan { exprs: elements } => {
             for e in elements { count_syntactic(e, counts); }
@@ -378,6 +381,10 @@ fn insert_clones_live(
                 other => other,
             };
             IrExprKind::Call { target, args, type_args }
+        }
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let args = args.into_iter().map(|a| insert_clones_live(a, always, eligible, remaining, in_loop)).collect();
+            IrExprKind::RuntimeCall { symbol, args }
         }
 
         // ── IndexAccess: borrow container, clone element ───────────

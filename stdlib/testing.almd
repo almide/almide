@@ -3,24 +3,28 @@
 // Migrated mechanically from `stdlib/defs/testing.toml` (7 fns). All
 // pure assertion helpers. `assert_throws` accepts a thunk; the lambda
 // prep applied to bundled InlineRust args passes it through intact.
+//
+// @inline_rust is retained (not @intrinsic) because the WASM backend
+// has no dedicated runtime fn for these assertions — they are used
+// primarily in Rust-target test harnesses.
 
-@intrinsic("almide_rt_test_assert_throws")
+@inline_rust("almide_rt_test_assert_throws({f}, &*{expected})")
 fn assert_throws(f: () -> Unit, expected: String) -> Unit = _
 
-@intrinsic("almide_rt_test_assert_contains")
+@inline_rust("almide_rt_test_assert_contains(&*{haystack}, &*{needle})")
 fn assert_contains(haystack: String, needle: String) -> Unit = _
 
-@intrinsic("almide_rt_test_assert_approx")
+@inline_rust("almide_rt_test_assert_approx({a}, {b}, {tolerance})")
 fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
 
-@intrinsic("almide_rt_test_assert_gt")
+@inline_rust("almide_rt_test_assert_gt({a}, {b})")
 fn assert_gt(a: Int, b: Int) -> Unit = _
 
-@intrinsic("almide_rt_test_assert_lt")
+@inline_rust("almide_rt_test_assert_lt({a}, {b})")
 fn assert_lt(a: Int, b: Int) -> Unit = _
 
-@intrinsic("almide_rt_test_assert_some")
+@inline_rust("almide_rt_test_assert_some(&{opt})")
 fn assert_some[A](opt: Option[A]) -> Unit = _
 
-@intrinsic("almide_rt_test_assert_ok")
+@inline_rust("almide_rt_test_assert_ok(&{result})")
 fn assert_ok[A, B](result: Result[A, B]) -> Unit = _

@@ -143,7 +143,7 @@ fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
     // Default every param to Own here so the template is the sole
     // authority.
     let has_template = func.attrs.iter().any(|a|
-        matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"));
+        matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic" | "intrinsic"));
     if has_template {
         return func.params.iter().map(|_| ParamBorrow::Own).collect();
     }
