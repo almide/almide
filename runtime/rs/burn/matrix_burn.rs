@@ -766,6 +766,99 @@ pub fn almide_rt_matrix_fused_gemm_bias_scale_gelu(
     }
 }
 
+/// Fused attention weights: `softmax_rows(scale * (Q @ Kt))` in one pass.
+///
+/// The canonical scaled-dot-product-attention numerator. Implemented as:
+/// 1. `cblas_dgemm(alpha=scale, Q, Kt, beta=0, C)` — one BLAS call.
+/// 2. In-place row softmax with Accelerate `vvexp`.
+///
+/// Replaces the 3-op chain `softmax_rows(scale(mul(Q, Kt), s))` that
+/// otherwise allocates two intermediate matrices and loops over them
+/// separately. At seq=128 the fused path is ~2-3× faster than the
+/// unfused chain; at seq=512 the chain allocates ~2 MiB per call that
+/// this path skips entirely.
+pub fn almide_rt_matrix_attention_weights(
+    q: &AlmideMatrix,
+    kt: &AlmideMatrix,
+    scale: f64,
+) -> AlmideMatrix {
+    match (q, kt) {
+        (AlmideMatrix::Small { rows: m, cols: k, data: qd },
+         AlmideMatrix::Small { rows: _, cols: n, data: kd })
+            if kd.len() == *k * *n =>
+        {
+            let (m, k, n) = (*m, *k, *n);
+            let mut c: Vec<f64> = Vec::with_capacity(m * n);
+            unsafe {
+                c.set_len(m * n);
+                cblas_dgemm(
+                    101, 111, 111,
+                    m as i32, n as i32, k as i32,
+                    scale,
+                    qd.as_ptr(), k as i32,
+                    kd.as_ptr(), n as i32,
+                    0.0,
+                    c.as_mut_ptr(), n as i32,
+                );
+                // Row-wise stable softmax, in-place.
+                let n_i32 = n as i32;
+                let dst = c.as_mut_ptr();
+                for i in 0..m {
+                    let base = i * n;
+                    let mut max = f64::NEG_INFINITY;
+                    for j in 0..n {
+                        let v = *dst.add(base + j);
+                        if v > max { max = v; }
+                    }
+                    for j in 0..n { *dst.add(base + j) -= max; }
+                    vvexp(dst.add(base), dst.add(base), &n_i32);
+                    let mut sum = 0.0f64;
+                    for j in 0..n { sum += *dst.add(base + j); }
+                    let inv = 1.0 / sum;
+                    for j in 0..n { *dst.add(base + j) *= inv; }
+                }
+            }
+            AlmideMatrix::Small { rows: m, cols: n, data: c }
+        }
+        (AlmideMatrix::SmallF32 { rows: m, cols: k, data: qd },
+         AlmideMatrix::SmallF32 { rows: _, cols: n, data: kd })
+            if kd.len() == *k * *n =>
+        {
+            let (m, k, n) = (*m, *k, *n);
+            let scale_f = scale as f32;
+            let mut c: Vec<f32> = Vec::with_capacity(m * n);
+            unsafe {
+                c.set_len(m * n);
+                cblas_sgemm(
+                    101, 111, 111,
+                    m as i32, n as i32, k as i32,
+                    scale_f,
+                    qd.as_ptr(), k as i32,
+                    kd.as_ptr(), n as i32,
+                    0.0,
+                    c.as_mut_ptr(), n as i32,
+                );
+                let n_i32 = n as i32;
+                for i in 0..m {
+                    let row = &mut c[i * n..(i + 1) * n];
+                    let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                    for v in row.iter_mut() { *v -= max; }
+                    vvexpf(row.as_mut_ptr(), row.as_ptr(), &n_i32);
+                    let sum: f32 = row.iter().sum();
+                    let inv = 1.0f32 / sum;
+                    for v in row.iter_mut() { *v *= inv; }
+                }
+            }
+            AlmideMatrix::SmallF32 { rows: m, cols: n, data: c }
+        }
+        _ => {
+            let prod = almide_rt_matrix_mul(q, kt);
+            let scaled = almide_rt_matrix_scale(&prod, scale);
+            almide_rt_matrix_softmax_rows(&scaled)
+        }
+    }
+}
+
 pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideMatrix> {
     let t = m.to_burn();
     let [r, c] = t.dims();

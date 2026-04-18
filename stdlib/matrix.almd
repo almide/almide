@@ -114,6 +114,13 @@ fn gelu(m: Matrix) -> Matrix = _
 @intrinsic("almide_rt_matrix_fused_gemm_bias_scale_gelu")
 fn fused_gemm_bias_scale_gelu(a: Matrix, b: Matrix, bias: Matrix, alpha: Float) -> Matrix = _
 
+// Fusion target: `softmax_rows(scale(mul(Q, Kt), s))` — scaled-dot-product
+// attention numerator. One cblas_dgemm (alpha=s, beta=0) plus in-place
+// row softmax (stable max-subtract + vvexp + normalize). Pass recognizes
+// both the nested-expression and let-split forms.
+@intrinsic("almide_rt_matrix_attention_weights")
+fn attention_weights(q: Matrix, kt: Matrix, scale: Float) -> Matrix = _
+
 @intrinsic("almide_rt_matrix_split_cols_even")
 fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 
