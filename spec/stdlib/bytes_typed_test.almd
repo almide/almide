@@ -1,8 +1,7 @@
-// wasm:skip — typed bytes API is Rust-only at the MVP layer. The WASM
-// dispatcher needs an arm in `emit_bytes_call` for each new name
-// (`read_uint32` etc.) before it can cover this surface. Follow-up.
-//
-// Stage 4a MVP: typed byte IO via `Endian` variant.
+// Stage 4a/4b: typed byte IO via `Endian` variant.
+// WASM dispatch lives in `emit_wasm/calls_bytes.rs` — each typed name
+// expands to an `if_i64` / `if_empty` branch on the Endian tag that
+// reuses the existing `_le` / `_be` emitters.
 //
 // Exercises the new `bytes.read_uintN` / `read_intN` / `read_float32`
 // family that replaces the combinatorial `_le` / `_be` suffixes with
