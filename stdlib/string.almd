@@ -14,137 +14,137 @@
 // existing 2-arg call sites (`string.slice(s, 3)`) keep working
 // without any API change.
 
-@inline_rust("almide_rt_string_trim(&*{s})")
+@intrinsic("almide_rt_string_trim")
 fn trim(s: String) -> String = _
 
-@inline_rust("almide_rt_string_split(&*{s}, &*{sep})")
+@intrinsic("almide_rt_string_split")
 fn split(s: String, sep: String) -> List[String] = _
 
-@inline_rust("almide_rt_string_join(&{list}, &*{sep})")
+@intrinsic("almide_rt_string_join")
 fn join(list: List[String], sep: String) -> String = _
 
-@inline_rust("almide_rt_string_len(&*{s})")
+@intrinsic("almide_rt_string_len")
 fn len(s: String) -> Int = _
 
-@inline_rust("almide_rt_string_contains(&*{s}, &*{sub})")
+@intrinsic("almide_rt_string_contains")
 fn contains(s: String, sub: String) -> Bool = _
 
-@inline_rust("almide_rt_string_starts_with(&*{s}, &*{prefix})")
+@intrinsic("almide_rt_string_starts_with")
 fn starts_with(s: String, prefix: String) -> Bool = _
 
-@inline_rust("almide_rt_string_ends_with(&*{s}, &*{suffix})")
+@intrinsic("almide_rt_string_ends_with")
 fn ends_with(s: String, suffix: String) -> Bool = _
 
 @inline_rust("almide_rt_string_slice(&*{s}, {start}, Some({end}))")
 fn slice(s: String, start: Int, end: Int = 9223372036854775807) -> String = _
 
-@inline_rust("almide_rt_string_pad_left(&*{s}, {n}, &*{ch})")
+@intrinsic("almide_rt_string_pad_left")
 fn pad_start(s: String, n: Int, ch: String) -> String = _
 
-@inline_rust("almide_rt_string_to_bytes(&*{s})")
+@intrinsic("almide_rt_string_to_bytes")
 fn to_bytes(s: String) -> List[Int] = _
 
-@inline_rust("almide_rt_string_capitalize(&*{s})")
+@intrinsic("almide_rt_string_capitalize")
 fn capitalize(s: String) -> String = _
 
-@inline_rust("almide_rt_string_to_upper(&*{s})")
+@intrinsic("almide_rt_string_to_upper")
 fn to_upper(s: String) -> String = _
 
-@inline_rust("almide_rt_string_to_lower(&*{s})")
+@intrinsic("almide_rt_string_to_lower")
 fn to_lower(s: String) -> String = _
 
-@inline_rust("almide_rt_string_replace(&*{s}, &*{from}, &*{to})")
+@intrinsic("almide_rt_string_replace")
 fn replace(s: String, from: String, to: String) -> String = _
 
-@inline_rust("almide_rt_string_char_at(&*{s}, {i})")
+@intrinsic("almide_rt_string_char_at")
 fn get(s: String, i: Int) -> Option[String] = _
 
-@inline_rust("almide_rt_string_lines(&*{s})")
+@intrinsic("almide_rt_string_lines")
 fn lines(s: String) -> List[String] = _
 
-@inline_rust("almide_rt_string_chars(&*{s})")
+@intrinsic("almide_rt_string_chars")
 fn chars(s: String) -> List[String] = _
 
-@inline_rust("almide_rt_string_index_of(&*{s}, &*{needle})")
+@intrinsic("almide_rt_string_index_of")
 fn index_of(s: String, needle: String) -> Option[Int] = _
 
-@inline_rust("almide_rt_string_repeat(&*{s}, {n})")
+@intrinsic("almide_rt_string_repeat")
 fn repeat(s: String, n: Int) -> String = _
 
-@inline_rust("almide_rt_string_from_bytes(&{bytes})")
+@intrinsic("almide_rt_string_from_bytes")
 fn from_bytes(bytes: List[Int]) -> String = _
 
-@inline_rust("almide_rt_string_is_digit(&*{s})")
+@intrinsic("almide_rt_string_is_digit")
 fn is_digit(s: String) -> Bool = _
 
-@inline_rust("almide_rt_string_is_alpha(&*{s})")
+@intrinsic("almide_rt_string_is_alpha")
 fn is_alpha(s: String) -> Bool = _
 
-@inline_rust("almide_rt_string_is_alphanumeric(&*{s})")
+@intrinsic("almide_rt_string_is_alphanumeric")
 fn is_alphanumeric(s: String) -> Bool = _
 
-@inline_rust("almide_rt_string_is_whitespace(&*{s})")
+@intrinsic("almide_rt_string_is_whitespace")
 fn is_whitespace(s: String) -> Bool = _
 
-@inline_rust("almide_rt_string_is_upper(&*{s})")
+@intrinsic("almide_rt_string_is_upper")
 fn is_upper(s: String) -> Bool = _
 
-@inline_rust("almide_rt_string_is_lower(&*{s})")
+@intrinsic("almide_rt_string_is_lower")
 fn is_lower(s: String) -> Bool = _
 
-@inline_rust("almide_rt_string_codepoint(&*{s})")
+@intrinsic("almide_rt_string_codepoint")
 fn codepoint(s: String) -> Option[Int] = _
 
-@inline_rust("almide_rt_string_from_codepoint({n})")
+@intrinsic("almide_rt_string_from_codepoint")
 fn from_codepoint(n: Int) -> String = _
 
-@inline_rust("almide_rt_string_pad_right(&*{s}, {n}, &*{ch})")
+@intrinsic("almide_rt_string_pad_right")
 fn pad_end(s: String, n: Int, ch: String) -> String = _
 
-@inline_rust("almide_rt_string_trim_start(&*{s})")
+@intrinsic("almide_rt_string_trim_start")
 fn trim_start(s: String) -> String = _
 
-@inline_rust("almide_rt_string_trim_end(&*{s})")
+@intrinsic("almide_rt_string_trim_end")
 fn trim_end(s: String) -> String = _
 
-@inline_rust("almide_rt_string_count(&*{s}, &*{sub})")
+@intrinsic("almide_rt_string_count")
 fn count(s: String, sub: String) -> Int = _
 
-@inline_rust("almide_rt_string_is_empty(&*{s})")
+@intrinsic("almide_rt_string_is_empty")
 fn is_empty(s: String) -> Bool = _
 
-@inline_rust("almide_rt_string_reverse(&*{s})")
+@intrinsic("almide_rt_string_reverse")
 fn reverse(s: String) -> String = _
 
-@inline_rust("almide_rt_string_strip_prefix(&*{s}, &*{prefix})")
+@intrinsic("almide_rt_string_strip_prefix")
 fn strip_prefix(s: String, prefix: String) -> Option[String] = _
 
-@inline_rust("almide_rt_string_strip_suffix(&*{s}, &*{suffix})")
+@intrinsic("almide_rt_string_strip_suffix")
 fn strip_suffix(s: String, suffix: String) -> Option[String] = _
 
-@inline_rust("almide_rt_string_replace_first(&*{s}, &*{from}, &*{to})")
+@intrinsic("almide_rt_string_replace_first")
 fn replace_first(s: String, from: String, to: String) -> String = _
 
-@inline_rust("almide_rt_string_last_index_of(&*{s}, &*{needle})")
+@intrinsic("almide_rt_string_last_index_of")
 fn last_index_of(s: String, needle: String) -> Option[Int] = _
 
-@inline_rust("almide_rt_string_first(&*{s})")
+@intrinsic("almide_rt_string_first")
 fn first(s: String) -> Option[String] = _
 
-@inline_rust("almide_rt_string_last(&*{s})")
+@intrinsic("almide_rt_string_last")
 fn last(s: String) -> Option[String] = _
 
-@inline_rust("almide_rt_string_take(&*{s}, {n})")
+@intrinsic("almide_rt_string_take")
 fn take(s: String, n: Int) -> String = _
 
-@inline_rust("almide_rt_string_take_end(&*{s}, {n})")
+@intrinsic("almide_rt_string_take_end")
 fn take_end(s: String, n: Int) -> String = _
 
-@inline_rust("almide_rt_string_drop(&*{s}, {n})")
+@intrinsic("almide_rt_string_drop")
 fn drop(s: String, n: Int) -> String = _
 
-@inline_rust("almide_rt_string_drop_end(&*{s}, {n})")
+@intrinsic("almide_rt_string_drop_end")
 fn drop_end(s: String, n: Int) -> String = _
 
-@inline_rust("almide_rt_string_run_length_encode(&*{s})")
+@intrinsic("almide_rt_string_run_length_encode")
 fn run_length_encode(s: String) -> List[(String, Int)] = _
