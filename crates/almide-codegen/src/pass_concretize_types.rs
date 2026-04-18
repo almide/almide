@@ -365,10 +365,12 @@ fn is_fold_like_call(expr: &IrExpr) -> bool {
     }
 }
 
-/// For `list.fold(xs, init, f)` where `f: (acc, t) -> acc`: merge `init.ty`
-/// with `f.body.ty` and, if the merged type is strictly more concrete than
-/// `init.ty`, push it back into the init sub-expression + the lambda's acc
-/// parameter (IR annotation + VarTable). Returns true when changes were made.
+/// For `list.fold(xs, init, f)` where `f: (acc, t) -> acc`: the accumulator
+/// type `A` has two sources — `init.ty` and `f.body.ty` — which must agree.
+/// Pick the most concrete form available, then push it back into the init
+/// sub-expression, the lambda's acc parameter (IR annotation + VarTable),
+/// the Ty::Fn wrapper, and the Call's own ty. Returns true when changes
+/// were made.
 fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
     let args = match &mut expr.kind {
         IrExprKind::Call { args, .. } => args,
@@ -380,36 +382,61 @@ fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
         IrExprKind::Lambda { body, .. } => body.ty.clone(),
         _ => return false,
     };
-    if body_ty.has_unresolved_deep() { return false; }
-
     let init_ty = args[1].ty.clone();
-    let Some(merged) = merge_more_concrete(&init_ty, &body_ty) else { return false; };
-    if merged == init_ty { return false; }
 
-    // Push merged into the init sub-expression
-    propagate_ty_down(&mut args[1], &merged);
+    // Accumulator type: merge init and body, picking the most concrete
+    // shape when both are known and compatible. Fall back to whichever is
+    // concrete when only one side has a type.
+    let acc_ty = if !init_ty.has_unresolved_deep() && !body_ty.has_unresolved_deep() {
+        merge_more_concrete(&init_ty, &body_ty)
+    } else if !init_ty.has_unresolved_deep() {
+        Some(init_ty.clone())
+    } else if !body_ty.has_unresolved_deep() {
+        Some(body_ty.clone())
+    } else {
+        None
+    };
+    let Some(acc_ty) = acc_ty else { return false; };
+
+    let mut changed = false;
+
+    // Push acc_ty into the init sub-expression when init has weaker shape
+    if init_ty != acc_ty {
+        propagate_ty_down(&mut args[1], &acc_ty);
+        changed = true;
+    }
 
     // Update lambda's acc param (IR + VarTable) and the Ty::Fn wrapper
     if let IrExprKind::Lambda { params, .. } = &mut args[2].kind {
         if let Some((vid, pty)) = params.get_mut(0) {
             if pty.has_unresolved_deep() {
-                *pty = merged.clone();
+                *pty = acc_ty.clone();
                 if (vid.0 as usize) < vt.len() {
-                    vt.entries[vid.0 as usize].ty = merged.clone();
+                    vt.entries[vid.0 as usize].ty = acc_ty.clone();
                 }
+                changed = true;
             }
         }
     }
     if let Ty::Fn { params: ps, ret } = &mut args[2].ty {
         if let Some(p0) = ps.get_mut(0) {
-            if p0.has_unresolved_deep() { *p0 = merged.clone(); }
+            if p0.has_unresolved_deep() {
+                *p0 = acc_ty.clone();
+                changed = true;
+            }
         }
-        if ret.has_unresolved_deep() { **ret = merged.clone(); }
+        if ret.has_unresolved_deep() {
+            **ret = acc_ty.clone();
+            changed = true;
+        }
     }
 
-    // Update Call's own ty
-    expr.ty = merged;
-    true
+    // Update Call's own ty if it's still unresolved
+    if expr.ty.has_unresolved_deep() {
+        expr.ty = acc_ty;
+        changed = true;
+    }
+    changed
 }
 
 // ── Core walker ────────────────────────────────────────────────────
@@ -888,7 +915,27 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
                 // here as "harmless: ok branch unreachable".
                 || matches!(&expr.kind,
                     IrExprKind::Unwrap { expr: inner }
-                        if matches!(inner.kind, IrExprKind::ResultErr { .. }));
+                        if matches!(inner.kind, IrExprKind::ResultErr { .. }))
+                // `Block` whose sole tail is the same skipped `Unwrap`
+                // pattern — the block is just the desugared `else
+                // { err(...)! }` wrapper that lowering emits for
+                // `guard` statements. `Block.ty` mirrors `tail.ty`, so
+                // marking only the Unwrap would leave the outer Block
+                // as a spurious violation.
+                || matches!(&expr.kind,
+                    IrExprKind::Block { stmts, expr: Some(tail) }
+                        if stmts.is_empty()
+                            && matches!(&tail.kind,
+                                IrExprKind::Unwrap { expr: inner }
+                                    if matches!(inner.kind, IrExprKind::ResultErr { .. })))
+                // OpenRecord-typed expressions: an open-record bound
+                // (`fn f(x: { name: String, .. })`) is a structural
+                // constraint, not an inference failure. The Var node
+                // for such a param trivially carries its declared
+                // OpenRecord ty through monomorphization's `__Unknown`
+                // fallback path. Emit handles OpenRecord via its
+                // structural dispatch — no Unknown slot to fill.
+                || matches!(&expr.ty, Ty::OpenRecord { .. });
                 if !skip {
                     self.remaining += 1;
                     if self.samples.len() < 5 {
