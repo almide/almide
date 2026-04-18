@@ -11,6 +11,7 @@
 
 use almide_base::intern::sym;
 use almide_ir::*;
+use almide_ir::visit::{IrVisitor, walk_expr};
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -105,6 +106,10 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
         IrExprKind::Block { stmts, expr: tail } => {
             for stmt in stmts.iter_mut() { if rewrite_stmt(stmt) { changed = true; } }
             if let Some(e) = tail { if rewrite_expr(e) { changed = true; } }
+            // Collapse let-split gemm-bias-scale-gelu chains inside this
+            // block. Runs after the per-stmt rewrites so every inner
+            // expression is already in its fused-or-final form.
+            if fuse_let_split_chain(stmts, tail.as_deref()) { changed = true; }
         }
         IrExprKind::If { cond, then, else_ } => {
             if rewrite_expr(cond) { changed = true; }
@@ -121,10 +126,12 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
         IrExprKind::ForIn { iterable, body, .. } => {
             if rewrite_expr(iterable) { changed = true; }
             for stmt in body.iter_mut() { if rewrite_stmt(stmt) { changed = true; } }
+            if fuse_let_split_chain(body, None) { changed = true; }
         }
         IrExprKind::While { cond, body } => {
             if rewrite_expr(cond) { changed = true; }
             for stmt in body.iter_mut() { if rewrite_stmt(stmt) { changed = true; } }
+            if fuse_let_split_chain(body, None) { changed = true; }
         }
         IrExprKind::Lambda { body, .. } => {
             if rewrite_expr(body) { changed = true; }
@@ -338,6 +345,152 @@ fn mul_scalar(x: IrExpr, y: IrExpr) -> IrExpr {
         ty: almide_lang::types::Ty::Float,
         span: None,
     }
+}
+
+/// Let-split chain fusion: collapse
+///   let c = matrix.mul(a, b);
+///   let d = matrix.add(c, bias);
+///   let e = matrix.scale(d, alpha);
+///   let f = matrix.gelu(e);
+/// into a single
+///   let f = matrix.fused_gemm_bias_scale_gelu(a, b, bias, alpha);
+///
+/// Safety conditions enforced:
+/// 1. The four bindings must appear in sequence, each a single `Bind`.
+/// 2. Each intermediate var (c, d, e) must flow directly into the next op
+///    — no interposed uses or transforms.
+/// 3. c, d, and e must have **zero** references in the remainder of the
+///    block (subsequent stmts + tail). This is conservative (some valid
+///    fusions get skipped) but keeps us from dropping values a later
+///    line still needs.
+///
+/// Without this pass the nested-expression form is the only way to opt
+/// into fusion, which is unnatural for human-written code that tends to
+/// name intermediate stages. With it, both styles compile to the same
+/// single-BLAS-call path.
+fn fuse_let_split_chain(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    while i + 4 <= stmts.len() {
+        if let Some(m) = match_chain_4gram(&stmts[i..i + 4]) {
+            let rest = &stmts[i + 4..];
+            let c_out = count_refs_in_stmts_and_tail(rest, tail, m.c_id);
+            let d_out = count_refs_in_stmts_and_tail(rest, tail, m.d_id);
+            let e_out = count_refs_in_stmts_and_tail(rest, tail, m.e_id);
+            if c_out == 0 && d_out == 0 && e_out == 0 {
+                let span = stmts[i + 3].span;
+                let fused_value = IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Module {
+                            module: sym("matrix"),
+                            func: sym("fused_gemm_bias_scale_gelu"),
+                        },
+                        args: vec![m.a, m.b, m.bias, m.alpha],
+                        type_args: vec![],
+                    },
+                    ty: m.f_ty.clone(),
+                    span,
+                };
+                let new_bind = IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: m.f_id,
+                        mutability: m.f_mutability,
+                        ty: m.f_ty,
+                        value: fused_value,
+                    },
+                    span,
+                };
+                stmts.splice(i..i + 4, std::iter::once(new_bind));
+                changed = true;
+                // Don't advance i — re-check starting here in case the
+                // new shorter window opens another match.
+                continue;
+            }
+        }
+        i += 1;
+    }
+    changed
+}
+
+/// Pattern match helper for `fuse_let_split_chain`. Returns extracted
+/// operands if the 4-stmt window is a `mul → add → scale → gelu` chain
+/// threaded through single-use intermediate vars.
+struct ChainMatch {
+    c_id: VarId,
+    d_id: VarId,
+    e_id: VarId,
+    f_id: VarId,
+    a: IrExpr,
+    b: IrExpr,
+    bias: IrExpr,
+    alpha: IrExpr,
+    f_mutability: Mutability,
+    f_ty: almide_lang::types::Ty,
+}
+
+fn match_chain_4gram(window: &[IrStmt]) -> Option<ChainMatch> {
+    if window.len() < 4 { return None; }
+    let (c_id, c_value) = as_bind(&window[0])?;
+    let (a, b) = match_matrix_binary(c_value, "mul")?;
+
+    let (d_id, d_value) = as_bind(&window[1])?;
+    let (add_lhs, bias) = match_matrix_binary(d_value, "add")?;
+    if !is_var_with_id(add_lhs, c_id) { return None; }
+
+    let (e_id, e_value) = as_bind(&window[2])?;
+    let (scale_lhs, alpha) = match_matrix_binary(e_value, "scale")?;
+    if !is_var_with_id(scale_lhs, d_id) { return None; }
+
+    let (f_id, f_value) = as_bind(&window[3])?;
+    let gelu_arg = match_matrix_unary(f_value, "gelu")?;
+    if !is_var_with_id(gelu_arg, e_id) { return None; }
+
+    let (f_mutability, f_ty) = match &window[3].kind {
+        IrStmtKind::Bind { mutability, ty, .. } => (*mutability, ty.clone()),
+        _ => return None,
+    };
+
+    Some(ChainMatch {
+        c_id, d_id, e_id, f_id,
+        a: a.clone(),
+        b: b.clone(),
+        bias: bias.clone(),
+        alpha: alpha.clone(),
+        f_mutability,
+        f_ty,
+    })
+}
+
+fn as_bind(stmt: &IrStmt) -> Option<(VarId, &IrExpr)> {
+    match &stmt.kind {
+        IrStmtKind::Bind { var, value, .. } => Some((*var, value)),
+        _ => None,
+    }
+}
+
+fn is_var_with_id(expr: &IrExpr, target: VarId) -> bool {
+    matches!(&expr.kind, IrExprKind::Var { id } if *id == target)
+}
+
+struct VarRefCounter {
+    target: VarId,
+    count: usize,
+}
+
+impl IrVisitor for VarRefCounter {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        if let IrExprKind::Var { id } = &expr.kind {
+            if *id == self.target { self.count += 1; }
+        }
+        walk_expr(self, expr);
+    }
+}
+
+fn count_refs_in_stmts_and_tail(stmts: &[IrStmt], tail: Option<&IrExpr>, target: VarId) -> usize {
+    let mut v = VarRefCounter { target, count: 0 };
+    for s in stmts { v.visit_stmt(s); }
+    if let Some(t) = tail { v.visit_expr(t); }
+    v.count
 }
 
 fn rewrite_stmt(stmt: &mut IrStmt) -> bool {
