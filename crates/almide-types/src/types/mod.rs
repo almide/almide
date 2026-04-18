@@ -363,17 +363,25 @@ impl Ty {
             (Ty::Unit, Ty::Unit) => true,
             (Ty::Bytes, Ty::Bytes) => true,
             (Ty::Matrix, Ty::Matrix) => true,
-            // Matrix ↔ Matrix[T] — bidirectional interop (lenient).
-            // pre-P4 stdlib accepts typed values; post-P4 typed fn
-            // sites accept bare `Matrix` values via the symmetric
-            // `types_mismatch` check. Strict one-way discrimination
-            // (reject bare `Matrix` at a typed call site) requires
-            // threading an asymmetric "accepts" relation through the
-            // full inference + mono pipeline — queued for a follow-up
-            // arc once the plumbing is ready to distinguish call-site
-            // narrowing from value upcasting.
-            (Ty::Matrix, Ty::Applied(TypeConstructorId::Matrix, _))
-            | (Ty::Applied(TypeConstructorId::Matrix, _), Ty::Matrix) => true,
+            // Matrix ↔ Matrix[T] — asymmetric discrimination:
+            //   - `Matrix.compatible(Matrix[T])` = true for all T
+            //     (bare param accepts any typed value — pre-P4 stdlib
+            //     `matrix.shape(m: Matrix)` stays usable with
+            //     `matrix.zeros_f32` results).
+            //   - `Matrix[Ty::Float].compatible(Matrix)` = true only
+            //     for the `Float` dtype (`Matrix` is the alias for
+            //     `Matrix[Float]`; bare runtime repr is f64).
+            //   - `Matrix[Ty::Float32].compatible(Matrix)` etc = false,
+            //     enforced by falling through to the default arm: a
+            //     typed-arity fn like `mul_f32(a: Matrix[Float32])`
+            //     REJECTS a bare `Matrix` value, since the bare form
+            //     carries no f32 guarantee.
+            // `types_mismatch` is single-directional so this
+            // asymmetry reaches call-site diagnostics unaltered.
+            (Ty::Matrix, Ty::Applied(TypeConstructorId::Matrix, _)) => true,
+            (Ty::Applied(TypeConstructorId::Matrix, args), Ty::Matrix) => {
+                args.len() == 1 && matches!(args[0], Ty::Float | Ty::Float64)
+            }
             (Ty::RawPtr, Ty::RawPtr) => true,
             (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
                 args1.iter().zip(args2.iter()).all(|(a, b)| a.compatible(b))
