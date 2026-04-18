@@ -7,11 +7,11 @@
 // Templates route the Rust target to `runtime/rs/src/hex.rs`; WASM
 // continues through `emit_wasm/calls_hex.rs` until a later arc.
 
-@inline_rust("almide_rt_hex_encode(&{b})")
+@intrinsic("almide_rt_hex_encode")
 fn encode(b: Bytes) -> String = _
 
-@inline_rust("almide_rt_hex_encode_upper(&{b})")
+@intrinsic("almide_rt_hex_encode_upper")
 fn encode_upper(b: Bytes) -> String = _
 
-@inline_rust("almide_rt_hex_decode(&{s})")
+@intrinsic("almide_rt_hex_decode")
 fn decode(s: String) -> Result[Bytes, String] = _

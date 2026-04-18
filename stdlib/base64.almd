@@ -10,14 +10,14 @@
 // dispatch continues through `emit_wasm/calls_base64.rs` (pending a
 // separate `@wasm_intrinsic` migration).
 
-@inline_rust("almide_rt_base64_encode(&{b})")
+@intrinsic("almide_rt_base64_encode")
 fn encode(b: Bytes) -> String = _
 
-@inline_rust("almide_rt_base64_decode(&{s})")
+@intrinsic("almide_rt_base64_decode")
 fn decode(s: String) -> Result[Bytes, String] = _
 
-@inline_rust("almide_rt_base64_encode_url(&{b})")
+@intrinsic("almide_rt_base64_encode_url")
 fn encode_url(b: Bytes) -> String = _
 
-@inline_rust("almide_rt_base64_decode_url(&{s})")
+@intrinsic("almide_rt_base64_decode_url")
 fn decode_url(s: String) -> Result[Bytes, String] = _
