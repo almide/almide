@@ -60,15 +60,35 @@ impl NanoPass for IntrinsicLoweringPass {
                         expr.kind = IrExprKind::RuntimeCall { symbol, args };
                     }
                     CallTarget::Named { name } => {
-                        // Frontend may have pre-lowered `int.parse(s)` to
+                        // Frontend pre-lowers `int.parse(s)` to
                         // `Named { "almide_rt_int_parse" }` before this pass
-                        // runs. If the symbol matches one declared via
-                        // `@intrinsic(...)`, take ownership and rewrite to
-                        // RuntimeCall so downstream emit paths converge.
-                        if !self.symbols.contains(name) { return; }
-                        let symbol = *name;
-                        let args = std::mem::take(args);
-                        expr.kind = IrExprKind::RuntimeCall { symbol, args };
+                        // runs. Two resolution paths:
+                        //   1. Direct symbol match — the `@intrinsic` value
+                        //      equals the frontend's mangled name.
+                        //   2. Mangled-name match — the frontend mangled
+                        //      `(module, func)` doesn't equal the
+                        //      `@intrinsic` value (e.g. `int.from_hex`
+                        //      mangles to `almide_rt_int_from_hex` but the
+                        //      attribute names `almide_rt_int_parse_hex`).
+                        //      Decode the mangled prefix to (module, func)
+                        //      and look that up in `map`, so the
+                        //      attribute's symbol wins.
+                        if self.symbols.contains(name) {
+                            let symbol = *name;
+                            let args = std::mem::take(args);
+                            expr.kind = IrExprKind::RuntimeCall { symbol, args };
+                            return;
+                        }
+                        if let Some(rest) = name.as_str().strip_prefix("almide_rt_") {
+                            if let Some(underscore) = rest.find('_') {
+                                let m = sym(&rest[..underscore]);
+                                let f = sym(&rest[underscore + 1..]);
+                                if let Some(&symbol) = self.map.get(&(m, f)) {
+                                    let args = std::mem::take(args);
+                                    expr.kind = IrExprKind::RuntimeCall { symbol, args };
+                                }
+                            }
+                        }
                     }
                     CallTarget::Method { object, method } => {
                         // UFCS: `obj.method(args)`. Method name may arrive

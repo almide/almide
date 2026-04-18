@@ -218,7 +218,7 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 
     // __int_from_hex(s: i32) -> i32 (Result[Int, String])
     let int_from_hex_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
-    emitter.rt.int_from_hex = emitter.register_func("__int_from_hex", int_from_hex_ty);
+    emitter.rt.int_from_hex = emitter.register_func("almide_rt_int_parse_hex", int_from_hex_ty);
 
     // __float_parse(s: i32) -> i32 (Result[Float, String]: [tag:i32][f64 or str_ptr:i32] = 12 bytes)
     let float_parse_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
