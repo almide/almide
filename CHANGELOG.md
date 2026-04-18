@@ -9,6 +9,35 @@ each entry groups by diagnostic-/tooling-/language-/stdlib-facing intent
 because that's what downstream consumers (LLM harnesses, editors, users)
 care about.
 
+## [Unreleased]
+
+### S2 flip — ConcretizeTypes postcondition is now a hard contract
+
+`expr.ty` is trustworthy by contract. The Pipeline harness
+(`crates/almide-codegen/src/pass.rs`) no longer reads `ALMIDE_CHECK_IR` /
+`ALMIDE_VERIFY_IR`; inter-pass IR verification and every pass's
+`Postcondition` list run on every build. Debug builds panic on
+violation (so CI and local `cargo test` never ship a program with an
+unresolved type); release builds print the same
+`[POSTCONDITION VIOLATION]` / `[IR CHECK]` diagnostic to stderr and keep
+compiling, so an end-user `almide build` does not crash on a compiler
+bug.
+
+After this flip, downstream passes (closure conversion, WASM emit,
+stdlib dispatch, `resolve_list_elem`, etc.) may rely on non-Unknown
+`IrExpr.ty` unconditionally. Defensive "if the type is still
+Unknown, try emit-time fallback X" shims added under v0.14.6–0.14.7
+become deletable as a follow-up.
+
+Residual WASM-target lifted-lambda TypeVars produced by
+`ClosureConversion` remain as a pre-existing pass-boundary issue
+tracked in S3 (`pass_resolve_calls` Phase 1b-c); they do not surface
+under the default spec/ sweep.
+
+Removed surface:
+- `ALMIDE_CHECK_IR` / `ALMIDE_VERIFY_IR` env vars (no replacement —
+  contract always enforced).
+
 ## [0.14.8] — 2026-04-17
 
 Hotfix for a v0.14.7 regression: external package dispatch (e.g. `almai`

@@ -60,16 +60,16 @@ impl NanoPass for ConcretizeTypesPass {
     }
 
     fn postconditions(&self) -> Vec<Postcondition> {
-        // S2 (v0.14.7-phase3.1): audit runs on every build; violations are
-        // printed by the harness as `[POSTCONDITION VIOLATION] ...` and
-        // escalate to a panic under `ALMIDE_CHECK_IR=1`. spec/ runs clean
-        // on Rust at default + ALMIDE_CHECK_IR=1. WASM target on
-        // ALMIDE_CHECK_IR=1 still trips on lifted-lambda TypeVar residue
-        // produced by ClosureConversion (the second `ConcretizeTypes`
-        // pass cannot fully recover the lambda param type from VarTable
-        // when the source generic was already specialized away). Closing
-        // that gap is part of S3 (pass_resolve_calls Phase 1b-c) — see
-        // codegen-ideal-form.md §Phase 3 Arc.
+        // S2 flip (v0.14.7-phase3.2): audit is a hard contract. Debug
+        // builds panic on violation so CI and local dev never ship a
+        // program with unresolved `IrExpr.ty`; release builds print the
+        // diagnostic and keep compiling. Downstream passes (closure
+        // conversion, WASM emit, stdlib dispatch) rely on non-Unknown
+        // `expr.ty` unconditionally and no longer carry defensive
+        // fallbacks. Residual WASM-target lifted-lambda TypeVars produced
+        // by ClosureConversion are tracked separately in S3
+        // (pass_resolve_calls Phase 1b-c) — see codegen-ideal-form.md
+        // §Phase 3 Arc.
         vec![Postcondition::Custom(audit_remaining_unresolved)]
     }
 
@@ -871,9 +871,11 @@ fn reconcile_binop(op: BinOp, lt: &Ty, rt: &Ty) -> Option<BinOp> {
 // ── Audit: count remaining unresolved types (diagnostic) ────────────
 
 /// Postcondition audit: report any reachable IrExpr with an unresolved
-/// type after this pass. Emitted only under ALMIDE_CHECK_IR=1. Treated
-/// as informational — some cases (Break/Continue, error recovery paths)
-/// legitimately have unresolved types.
+/// type after this pass. Runs on every build. Violations are the
+/// harness's responsibility (panic in debug, diagnostic in release).
+/// A few node shapes (Break/Continue, `err(_)!` guards, OpenRecord
+/// constraints) legitimately carry unresolved types at runtime and are
+/// skipped below.
 fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
     struct Auditor {
         location: String,
