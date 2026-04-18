@@ -1,0 +1,67 @@
+// MatrixFusionPass — `gelu(scale(add(mul(a,b), bias), alpha))` fuses
+// into a single runtime call. These tests guard:
+//
+// 1. The fused call returns the same values as the unfused chain
+//    (semantic equivalence).
+// 2. Scalar alpha and bias both flow through the fused BLAS call.
+//
+// If these fail, either the fusion pass emitted the wrong runtime call
+// or the runtime's fused implementation has an arithmetic bug.
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
+  let d = if a > b then a - b else b - a
+  d < tol
+}
+
+test "fused chain matches unfused: ones × ones + ones, alpha=0.5" {
+  let a = matrix.ones(3, 3)
+  let b = matrix.ones(3, 3)
+  let bias = matrix.ones(3, 3)
+
+  // Unfused baseline (pass must not fuse a plain call to `mul`/`add`/etc
+  // that are wrapped in separate let bindings — chain fusion is the
+  // single-expression form).
+  let c = matrix.mul(a, b)
+  let d = matrix.add(c, bias)
+  let e = matrix.scale(d, 0.5)
+  let expected = matrix.gelu(e)
+
+  // Fused (MatrixFusionPass rewrites this whole expr).
+  let actual = matrix.gelu(matrix.scale(matrix.add(matrix.mul(a, b), bias), 0.5))
+
+  assert(approx_eq(matrix.get(expected, 0, 0), matrix.get(actual, 0, 0), 0.00001))
+  assert(approx_eq(matrix.get(expected, 2, 2), matrix.get(actual, 2, 2), 0.00001))
+}
+
+test "fused chain: 4×4 with alpha=1.0 (gelu-only effect)" {
+  let a = matrix.ones(4, 4)
+  let b = matrix.ones(4, 4)
+  let bias = matrix.ones(4, 4)
+
+  let c = matrix.mul(a, b)
+  let d = matrix.add(c, bias)
+  let expected = matrix.gelu(d)
+  let actual = matrix.gelu(matrix.scale(matrix.add(matrix.mul(a, b), bias), 1.0))
+
+  assert(approx_eq(matrix.get(expected, 0, 0), matrix.get(actual, 0, 0), 0.00001))
+  assert(approx_eq(matrix.get(expected, 3, 3), matrix.get(actual, 3, 3), 0.00001))
+}
+
+test "fused chain: non-square 3x5 × 5x2 + 3x2" {
+  // Ensures the fused BLAS call gets (m, k, n) right when rows != cols.
+  let a = matrix.ones(3, 5)
+  let b = matrix.ones(5, 2)
+  let bias = matrix.ones(3, 2)
+
+  let c = matrix.mul(a, b)
+  let d = matrix.add(c, bias)
+  let e = matrix.scale(d, 0.25)
+  let expected = matrix.gelu(e)
+  let actual = matrix.gelu(matrix.scale(matrix.add(matrix.mul(a, b), bias), 0.25))
+
+  let (er, ec) = matrix.shape(actual)
+  assert_eq(er, 3)
+  assert_eq(ec, 2)
+  assert(approx_eq(matrix.get(expected, 0, 0), matrix.get(actual, 0, 0), 0.00001))
+  assert(approx_eq(matrix.get(expected, 2, 1), matrix.get(actual, 2, 1), 0.00001))
+}

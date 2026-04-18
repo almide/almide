@@ -263,6 +263,18 @@ pub fn almide_rt_matrix_gelu(m: &AlmideMatrix) -> AlmideMatrix {
     }).collect()).collect()
 }
 
+pub fn almide_rt_matrix_fused_gemm_bias_scale_gelu(
+    a: &AlmideMatrix,
+    b: &AlmideMatrix,
+    bias: &AlmideMatrix,
+    alpha: f64,
+) -> AlmideMatrix {
+    let mul = almide_rt_matrix_mul(a, b);
+    let added = almide_rt_matrix_add(&mul, bias);
+    let scaled = almide_rt_matrix_scale(&added, alpha);
+    almide_rt_matrix_gelu(&scaled)
+}
+
 pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideMatrix> {
     let n = n as usize;
     if m.is_empty() || n == 0 { return vec![]; }

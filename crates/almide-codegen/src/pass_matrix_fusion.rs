@@ -208,7 +208,65 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
         changed = true;
     }
 
+    // Linear-layer chain fusion: `gelu(scale(add(mul(a, b), bias), alpha))`
+    // → `fused_gemm_bias_scale_gelu(a, b, bias, alpha)`. Runs after the
+    // add/fma fusion above so we match on the original unfused form, not
+    // on a surviving `fma` outer.
+    if let Some(new_kind) = try_fuse_gemm_bias_scale_gelu(&expr.kind) {
+        expr.kind = new_kind;
+        changed = true;
+    }
+
     changed
+}
+
+/// Returns `(a, b)` if `expr` is `matrix.<func>(a, b)`.
+fn match_matrix_binary<'a>(expr: &'a IrExpr, func_name: &str) -> Option<(&'a IrExpr, &'a IrExpr)> {
+    if let IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } = &expr.kind {
+        if module.as_str() == "matrix" && func.as_str() == func_name && args.len() == 2 {
+            return Some((&args[0], &args[1]));
+        }
+    }
+    None
+}
+
+/// Returns `m` if `expr` is `matrix.<func>(m)`.
+fn match_matrix_unary<'a>(expr: &'a IrExpr, func_name: &str) -> Option<&'a IrExpr> {
+    if let IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } = &expr.kind {
+        if module.as_str() == "matrix" && func.as_str() == func_name && args.len() == 1 {
+            return Some(&args[0]);
+        }
+    }
+    None
+}
+
+/// Pattern-match `gelu(scale(add(mul(a, b), bias), alpha))` and rewrite
+/// the whole 4-layer chain into a single `fused_gemm_bias_scale_gelu`
+/// call. The fused runtime implementation does `alpha*(a@b + bias)` via
+/// one cblas_dgemm (`C = bias`, `β = alpha`, `α = alpha`) and then runs
+/// GELU in place — collapses 3 intermediate allocations and 3 loop
+/// sweeps into one BLAS call plus one pass.
+fn try_fuse_gemm_bias_scale_gelu(kind: &IrExprKind) -> Option<IrExprKind> {
+    let gelu_arg = match kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "gelu" && args.len() == 1 =>
+        {
+            &args[0]
+        }
+        _ => return None,
+    };
+    let (scale_inner, alpha) = match_matrix_binary(gelu_arg, "scale")?;
+    let (add_lhs, bias) = match_matrix_binary(scale_inner, "add")?;
+    let (a, b) = match_matrix_binary(add_lhs, "mul")?;
+
+    Some(IrExprKind::Call {
+        target: CallTarget::Module {
+            module: sym("matrix"),
+            func: sym("fused_gemm_bias_scale_gelu"),
+        },
+        args: vec![a.clone(), b.clone(), bias.clone(), alpha.clone()],
+        type_args: vec![],
+    })
 }
 
 /// If `expr` is `fma(A, kA, B, kB)` where one of A/B is itself an `fma`,

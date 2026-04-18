@@ -51,6 +51,9 @@ fn month(ts: Int) -> Int = _
 @intrinsic("almide_rt_datetime_now")
 fn now() -> Int = _
 
+@intrinsic("almide_rt_datetime_monotonic_ns")
+fn monotonic_ns() -> Int = _
+
 @intrinsic("almide_rt_datetime_parse_iso")
 fn parse_iso(s: String) -> Result[Int, String] = _
 
