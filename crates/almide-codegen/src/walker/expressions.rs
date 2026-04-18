@@ -217,33 +217,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Pre-resolved runtime call (from @intrinsic) ──
         IrExprKind::RuntimeCall { symbol, args } => {
-            // `@intrinsic` is template-authoritative: BorrowInsertion
-            // assigns every param `Own` (see
-            // `pass_borrow_inference::infer_function_borrows`), so the
-            // walker decides decoration from `expr.ty`. Copy scalars
-            // pass through; String → `&*` (auto-deref to &str); every
-            // other heap value passed into a runtime fn → `&` (runtime
-            // takes `&Vec<T>` / `&Bytes` / `&Record`).
-            let args_str = args.iter().map(|a| {
-                let rendered = render_expr(ctx, a);
-                if matches!(&a.kind, IrExprKind::Borrow { .. } | IrExprKind::Deref { .. }) {
-                    return rendered;
-                }
-                let is_copy = matches!(a.ty,
-                    Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32
-                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                    | Ty::Float | Ty::Float32 | Ty::Bool
-                );
-                let is_str_like = matches!(a.ty, Ty::String)
-                    || matches!(&a.kind, IrExprKind::LitStr { .. });
-                if is_copy {
-                    rendered
-                } else if is_str_like {
-                    format!("&*{}", rendered)
-                } else {
-                    format!("&{}", rendered)
-                }
-            }).collect::<Vec<_>>().join(", ");
+            // BorrowInsertion wraps args with Borrow / Clone IR nodes
+            // based on the `@intrinsic` fn's derived signature
+            // (`intrinsic_borrow_mode`). The walker just renders.
+            let args_str = args.iter().map(|a| render_expr(ctx, a))
+                .collect::<Vec<_>>().join(", ");
             format!("{}({})", symbol.as_str(), args_str)
         }
 
@@ -620,6 +598,18 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("(*{})", name_s))
         }
         IrExprKind::Borrow { expr: inner, as_str, mutable } => {
+            // If the borrowed operand is a Var referencing a fn param
+            // already emitted as a reference (`&T`, `&[T]`, `&str`),
+            // skip the outer `&` to avoid `&&T` double-borrow. The
+            // `&*` (deref-then-ref) decoration still renders because
+            // it rewraps via `Deref`.
+            if !*as_str && !*mutable {
+                if let IrExprKind::Var { id } = &inner.kind {
+                    if ctx.ref_params.contains(id) {
+                        return render_expr(ctx, inner);
+                    }
+                }
+            }
             if *mutable {
                 format!("&mut {}", render_expr(ctx, inner))
             } else if *as_str {

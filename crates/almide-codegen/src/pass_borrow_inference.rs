@@ -83,6 +83,32 @@ fn lookup_user_borrows(callee: &str) -> Option<Vec<ParamBorrow>> {
 pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<ParamBorrow>> {
     let mut sigs: HashMap<String, Vec<ParamBorrow>> = HashMap::new();
 
+    // Seed `sigs` with `@intrinsic` fns from every bundled stdlib
+    // module — including ones that weren't lowered into
+    // `program.modules` (non auto-imported modules like `bytes`,
+    // `regex`, `fs`). The key is the mangled runtime symbol so
+    // `rewrite_calls` can look it up from `RuntimeCall.symbol` verbatim.
+    {
+        use almide_lang::ast::{AttrValue, Decl};
+        for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
+            let Some(parsed) = almide_lang::parse_cached(source) else { continue };
+            for decl in &parsed.decls {
+                let Decl::Fn { params, attrs, .. } = decl else { continue };
+                let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else { continue };
+                let Some(first) = attr.args.first() else { continue };
+                let AttrValue::String { value: symbol } = &first.value else { continue };
+                // Params in AST are `TypeExpr`, not resolved `Ty`. Convert
+                // the simple cases into a `Ty` so `intrinsic_borrow_mode`
+                // can reuse the same logic as the IR-side path.
+                let borrows: Vec<ParamBorrow> = params.iter()
+                    .map(|p| intrinsic_borrow_mode_from_type_expr(&p.ty))
+                    .collect();
+                sigs.insert(symbol.clone(), borrows);
+            }
+        }
+    }
+
     for _iter in 0..6 {
         // Snapshot current sigs into thread-local so check_needs_ownership can see them.
         SIGS_SNAPSHOT.with(|s| *s.borrow_mut() = sigs.clone());
@@ -142,10 +168,30 @@ fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
     // to wrap the arg again and produce `&*&*` in the emitted Rust.
     // Default every param to Own here so the template is the sole
     // authority.
-    let has_template = func.attrs.iter().any(|a|
-        matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic" | "intrinsic"));
-    if has_template {
+    // `@inline_rust` / `@wasm_intrinsic`: the template is authoritative
+    // for borrow semantics (it spells out `&*{s}` / `&{m}` / `{n}`
+    // explicitly), so every param is `Own` and the template controls
+    // the arg decoration verbatim.
+    let has_inline_template = func.attrs.iter().any(|a|
+        matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"));
+    if has_inline_template {
         return func.params.iter().map(|_| ParamBorrow::Own).collect();
+    }
+
+    // `@intrinsic`: no template. Derive the borrow mode mechanically
+    // from each param's Almide type so BorrowInsertion (not the walker)
+    // decorates args at the call site:
+    //   String                        → RefStr   (`&*{s}`)
+    //   List / Bytes / Record / Option / Result / Map / Set
+    //                                 → Ref      (`&{m}`)
+    //   Int / Float / Bool / sized numerics
+    //                                 → Own      (by value)
+    //   Generic (TypeVar)             → Own      (caller decides)
+    let has_intrinsic = func.attrs.iter().any(|a| a.name.as_str() == "intrinsic");
+    if has_intrinsic {
+        return func.params.iter().map(|param| {
+            intrinsic_borrow_mode(&param.ty)
+        }).collect();
     }
 
     func.params.iter().map(|param| {
@@ -181,6 +227,95 @@ fn is_derive_fn(name: &str) -> bool {
 
 fn is_monomorphized(name: &str) -> bool {
     name.contains("__")
+}
+
+/// AST-side variant of `intrinsic_borrow_mode` — derives the borrow
+/// mode directly from an `ast::TypeExpr` (no resolve pass needed).
+/// Used to seed the signature table from bundled stdlib source before
+/// the IR-level fns are visited.
+fn intrinsic_borrow_mode_from_type_expr(ty: &almide_lang::ast::TypeExpr) -> ParamBorrow {
+    use almide_lang::ast::TypeExpr;
+    match ty {
+        TypeExpr::Simple { name } => {
+            let n = name.as_str();
+            match n {
+                "Int" | "Int8" | "Int16" | "Int32" | "Int64"
+                | "UInt8" | "UInt16" | "UInt32" | "UInt64"
+                | "Float" | "Float32" | "Float64"
+                | "Bool" | "Unit"
+                    => ParamBorrow::Own,
+                "String" => ParamBorrow::RefStr,
+                "Bytes" => ParamBorrow::Ref,
+                // Known stdlib struct types whose runtime fns uniformly
+                // take `&T`. `Value` is the codec universal model,
+                // `Matrix` / `AlmideMatrix` is the numeric tensor, both
+                // heavy enough that pass-by-ref is the default.
+                "Value" | "Matrix" | "AlmideMatrix" => ParamBorrow::Ref,
+                // Named types, possibly type parameters (`A`, `B`) —
+                // treat as Own so the caller keeps ownership. When the
+                // concrete type is a heap value, the Borrow/Clone IR
+                // nodes travel through unchanged.
+                _ => ParamBorrow::Own,
+            }
+        }
+        TypeExpr::Generic { name, .. } => {
+            let n = name.as_str();
+            match n {
+                "List" => ParamBorrow::RefSlice,
+                "Map" | "Set" => ParamBorrow::Ref,
+                // Option / Result: consume by value (see doc on the
+                // IR-side `intrinsic_borrow_mode`).
+                "Option" | "Result" => ParamBorrow::Own,
+                _ => ParamBorrow::Own,
+            }
+        }
+        TypeExpr::Record { .. } | TypeExpr::Variant { .. } => ParamBorrow::Ref,
+        TypeExpr::Tuple { .. } => ParamBorrow::Ref,
+        // Fn / OpenRecord / Union — pass owned.
+        _ => ParamBorrow::Own,
+    }
+}
+
+/// Borrow mode derived from an `@intrinsic` fn's Almide param type.
+/// Used to populate the signature table so `BorrowInsertion` can
+/// decorate call-site args uniformly without walker-side heuristics.
+fn intrinsic_borrow_mode(ty: &Ty) -> ParamBorrow {
+    match ty {
+        // Owned scalars — pass by value.
+        Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32
+        | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+        | Ty::Float | Ty::Float32 | Ty::Bool | Ty::Unit
+            => ParamBorrow::Own,
+
+        // String → &str.
+        Ty::String => ParamBorrow::RefStr,
+
+        // List → &Vec / &[T].
+        Ty::Applied(TypeConstructorId::List, _) => ParamBorrow::RefSlice,
+
+        // Bytes / Record / Variant / Map / Set → & reference.
+        Ty::Bytes
+        | Ty::Record { .. } | Ty::Variant { .. }
+        | Ty::Applied(TypeConstructorId::Map, _)
+        | Ty::Applied(TypeConstructorId::Set, _)
+            => ParamBorrow::Ref,
+
+        // Option / Result → Own. `.unwrap_or` / `.map` consume the
+        // container, and the walker renders `.is_some()` /
+        // `.is_none()` via `Fn(Option<T>) -> bool` signatures that
+        // accept the value by move and borrow internally. Passing a
+        // `&Option<T>` would break the runtime-fn ergonomics for no
+        // Almide-level gain.
+        Ty::Applied(TypeConstructorId::Option, _)
+        | Ty::Applied(TypeConstructorId::Result, _)
+            => ParamBorrow::Own,
+
+        // Generic TypeVar / user types / Fn / Tuple / etc. — pass owned.
+        // The caller knows the concrete type; if it resolves to a borrow
+        // type downstream, Clone/Borrow annotations travel through the
+        // call unchanged.
+        _ => ParamBorrow::Own,
+    }
 }
 
 /// Eligible types for borrow inference. Bytes is the key addition here —
@@ -730,10 +865,32 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name, args: args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect(),
         },
-        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
-            symbol,
-            args: args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect(),
-        },
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let args: Vec<IrExpr> = args.into_iter()
+                .map(|a| rewrite_calls(a, sigs, mod_scope))
+                .collect();
+            // Look up the borrow signature by the mangled runtime symbol
+            // (populated from bundled `@intrinsic` attrs at the top of
+            // `infer_borrow_signatures`). On hit, wrap each arg with the
+            // corresponding Borrow IR node; on miss, leave args untouched
+            // (walker still has its ty-based fallback).
+            let args = if let Some(borrows) = sigs.get(symbol.as_str()) {
+                args.into_iter().enumerate().map(|(i, arg)| {
+                    match borrows.get(i) {
+                        Some(ParamBorrow::Ref | ParamBorrow::RefSlice) => {
+                            let t = arg.ty.clone(); let s = arg.span;
+                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: false }, ty: t, span: s }
+                        }
+                        Some(ParamBorrow::RefStr) => {
+                            let t = arg.ty.clone(); let s = arg.span;
+                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true, mutable: false }, ty: t, span: s }
+                        }
+                        _ => arg,
+                    }
+                }).collect()
+            } else { args };
+            IrExprKind::RuntimeCall { symbol, args }
+        }
         other => other,
     };
 

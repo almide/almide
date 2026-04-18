@@ -72,13 +72,15 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(ConstFoldPass)
             // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
             .add(StreamFusionPass)
-            .add(BorrowInsertionPass)
-            // @intrinsic(symbol) → RuntimeCall. Must run AFTER
-            // BorrowInsertionPass so String / List args are already wrapped
-            // in IR `Borrow` nodes when the walker renders them. Runs
-            // before StdlibLowering so @inline_rust does not double-lower
-            // intrinsic fns.
+            // @intrinsic(symbol) → RuntimeCall must run BEFORE
+            // BorrowInsertion so the subsequent pass can look up the
+            // borrow signature by the mangled runtime symbol
+            // (`almide_rt_<m>_<f>`) and wrap args with the right
+            // Borrow IR node. BorrowInsertion's signature table is
+            // seeded from bundled `@intrinsic` declarations at
+            // `infer_borrow_signatures` entry.
             .add(IntrinsicLoweringPass)
+            .add(BorrowInsertionPass)
             // TCO: convert self-recursive tail calls to loops AFTER BorrowInsertion
             // (so that param types are already finalized — avoids String/&str mismatch)
             .add(TailCallOptPass)

@@ -46,11 +46,15 @@ pub struct RenderContext<'a> {
     pub minimal_generic_bounds: bool,
     /// Emit `#[repr(C)]` on structs/enums for stable C ABI layout.
     pub repr_c: bool,
+    /// VarIds of current fn params emitted as Rust references (`&T`,
+    /// `&[T]`, `&str`). Used by the Borrow walker to avoid
+    /// double-borrowing an already-reference binding.
+    pub ref_params: std::collections::HashSet<VarId>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -89,6 +93,18 @@ impl<'a> RenderContext<'a> {
 // ── Function rendering ──
 
 pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
+    // Collect VarIds of fn params that will be emitted as references
+    // (`&T` / `&[T]` / `&str`). The Borrow walker uses this to skip
+    // outer `&` wrap on already-borrowed bindings.
+    let mut ref_params: std::collections::HashSet<VarId> =
+        std::collections::HashSet::new();
+    for p in &func.params {
+        use almide_ir::ParamBorrow;
+        if matches!(p.borrow, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr) {
+            ref_params.insert(p.var);
+        }
+    }
+
     // Set effect fn context for auto-? insertion
     let fn_ctx = RenderContext {
         templates: ctx.templates,
@@ -102,6 +118,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         generic_types: ctx.generic_types.clone(),
         minimal_generic_bounds: ctx.minimal_generic_bounds,
         repr_c: ctx.repr_c,
+        ref_params,
     };
 
     // Stdlib Unification: fns declared with `@inline_rust(...)` or
@@ -320,6 +337,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         generic_types,
         minimal_generic_bounds: false,
         repr_c: ctx.repr_c,
+        ref_params: std::collections::HashSet::new(),
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
@@ -465,6 +483,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             generic_types: ctx.generic_types.clone(),
             minimal_generic_bounds: is_bundled,
             repr_c: ctx.repr_c,
+            ref_params: std::collections::HashSet::new(),
         };
         // Module type decls — skip if already emitted by parent or another module
         for td in &module.type_decls {

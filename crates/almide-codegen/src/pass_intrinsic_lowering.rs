@@ -181,12 +181,23 @@ fn module_for_ty(ty: &Ty) -> Option<Sym> {
 }
 
 /// Collect every `(module, func) → runtime_symbol` declared via
-/// `@intrinsic("symbol")` across bundled stdlib / user modules.
+/// `@intrinsic("symbol")`.
+///
+/// Two sources:
+///   1. `program.modules[*].functions[*].attrs` — user packages + any
+///      bundled stdlib module that was lowered into the IR
+///      (auto-import).
+///   2. Bundled stdlib sources parsed directly. Not every stdlib module
+///      is auto-imported (e.g. `bytes`, `regex`, `fs`) so they never
+///      appear in `program.modules`, but their call sites still use
+///      `CallTarget::Module { bytes, len }` which must still rewrite to
+///      `RuntimeCall`. Parsing `stdlib_info::bundled_source` picks those up.
 fn collect_intrinsics(program: &IrProgram) -> HashMap<(Sym, Sym), Sym> {
-    use almide_lang::ast::AttrValue;
-    use almide_base::intern::sym;
+    use almide_lang::ast::{AttrValue, Decl};
 
     let mut out = HashMap::new();
+
+    // Source 1: lowered modules already in the IR.
     for module in &program.modules {
         for func in &module.functions {
             let Some(attr) = func.attrs.iter().find(|a| a.name.as_str() == "intrinsic") else {
@@ -197,5 +208,23 @@ fn collect_intrinsics(program: &IrProgram) -> HashMap<(Sym, Sym), Sym> {
             out.insert((module.name, func.name), sym(value));
         }
     }
+
+    // Source 2: bundled `.almd` stdlib sources. User-module entries above
+    // take precedence via `entry().or_insert_with`.
+    for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
+        let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
+        let Some(parsed) = almide_lang::parse_cached(source) else { continue };
+        let module_sym = sym(mod_name);
+        for decl in &parsed.decls {
+            let Decl::Fn { name, attrs, .. } = decl else { continue };
+            let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else {
+                continue;
+            };
+            let Some(first) = attr.args.first() else { continue };
+            let AttrValue::String { value } = &first.value else { continue };
+            out.entry((module_sym, *name)).or_insert_with(|| sym(value));
+        }
+    }
+
     out
 }
