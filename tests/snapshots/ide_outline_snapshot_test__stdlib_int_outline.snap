@@ -1,6 +1,5 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
-assertion_line: 44
 expression: "run_outline(&[\"@stdlib/int\"])"
 ---
 fn int.abs(n: Int) -> Int
@@ -20,11 +19,11 @@ fn int.rotate_left(a: Int, n: Int, bits: Int) -> Int
 fn int.rotate_right(a: Int, n: Int, bits: Int) -> Int
 fn int.to_float(n: Int) -> Float
 fn int.to_float32(n: Int) -> Float32
-fn int.to_float64(n: Int) -> Float
+fn int.to_float64(n: Int) -> Float64
 fn int.to_hex(n: Int) -> String
 fn int.to_int16(n: Int) -> Int16
 fn int.to_int32(n: Int) -> Int32
-fn int.to_int64(n: Int) -> Int
+fn int.to_int64(n: Int) -> Int64
 fn int.to_int8(n: Int) -> Int8
 fn int.to_string(n: Int) -> String
 fn int.to_u32(a: Int) -> Int
