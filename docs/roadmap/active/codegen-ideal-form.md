@@ -323,22 +323,29 @@ codegen-ideal-form #4 の完成。phase3.1 で audit を常時実行 + `ALMIDE_C
 残 WASM lifted-lambda TypeVar は `ClosureConversion` 由来の pass boundary
 issue で、S3 (pass_resolve_calls Phase 1b-c) で自然に解消する見込み。
 
-### Step S3 — pass_resolve_calls Phase 1b-c + stub 廃止 `0.14.7-phase3.2`
+### Step S3 — pass_resolve_calls Phase 1b-d + stub 廃止
 
-codegen-ideal-form #1 の Phase 1b (IR 書き換え) と 1c (`emit_stub_call` 削除)
-を完遂。私の arc 提案の step 3 + 4 を 1 PR にまとめる:
+codegen-ideal-form #1 / #7 を段階的に完遂するアーク。
 
-- `CallTarget::Module` / `CallTarget::Named` 全てを `CallTarget::Resolved`
-  (or `Named` で resolved symbol) に書き換える mutating pass
+- **Phase 1b** *(shipped, `0.14.7-phase3.5`)* — bundled-Almide stdlib fn の
+  `CallTarget::Module` → `CallTarget::Named { almide_rt_<m>_<f> }` 書き換え。
+- **Phase 1c** *(shipped, `0.14.7-phase3.2`)* — `emit_stub_call*` を
+  compile-time panic 化 (runtime trap 廃止)。
+- **Phase 1d** *(shipped, `0.14.7-phase3.3`)* — `emit_stub_call_named` /
+  `emit_stub_call` helper を完全削除し、各 WASM dispatcher の `_` fallback を
+  inline `panic!("[ICE] emit_wasm: no WASM dispatch for ...")` に置換。
+  S2 flip 下で既に compile-time ICE だったので behavior 不変、診断文が
+  module / dispatcher 固有になった。
+
+残タスク (Phase 1e+):
+
 - Rust + WASM 両 dispatch entry を `dispatch_module_call` 1 本に統合
   - priority: (a) IR に user/bundled fn → user-fn call / (b) TOML → inline emit
     / (c) どちらも無し → compile-time ICE
-- `emit_stub_call_named` を削除、全 `_` fall-through を compile-time error に
 - WASM emit 側 `emit_list_call` / `emit_int_call` 等の match arm に fallback
   が不要になる (resolve パスが事前解決)
 
-**見積**: 4-6h、実装は複数 sub-commit に分割 (resolve pass 拡張 / Rust dispatch
-統合 / WASM dispatch 統合 / stub 削除)。arc の主軸。
+**見積**: Phase 1e は 4-6h、resolve pass 拡張 + Rust/WASM dispatch 統合。arc の主軸。
 
 ### Step S4 — Monomorphize coverage 拡張 `0.14.7-phase3.3`
 

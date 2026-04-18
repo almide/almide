@@ -210,9 +210,11 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(v);
             }
-            _ => {
-                self.emit_stub_call_named("value", func, args);
-            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `value.{}` — \
+                 add an arm in emit_value_call or resolve upstream",
+                func
+            ),
         }
     }
 
@@ -346,9 +348,11 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { call(self.emitter.rt.json_remove_path); });
             }
-            _ => {
-                self.emit_stub_call_named("value", func, args);
-            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `value.{}` — \
+                 add an arm in emit_value_call or resolve upstream",
+                func
+            ),
         }
     }
 

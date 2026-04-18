@@ -1,8 +1,10 @@
 //! Call Resolution pass: verify-and-rewrite for every `CallTarget::Module`.
 //!
 //! Phase 1a (v0.14.5): user-module call verification.
-//! Phase 1b (v0.14.7-phase3.5, this revision): IR rewrite + stdlib coverage.
+//! Phase 1b (v0.14.7-phase3.5): IR rewrite + stdlib coverage.
 //! Phase 1c (v0.14.7-phase3.2): `emit_stub_call*` panic on reach.
+//! Phase 1d (v0.14.7-phase3.3): `emit_stub_call*` helpers deleted; each
+//! WASM dispatcher fallback is an inline `panic!("[ICE] ...")`.
 //!
 //! ## What this pass does
 //!

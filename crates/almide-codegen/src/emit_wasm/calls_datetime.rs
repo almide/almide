@@ -439,9 +439,11 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(s);
             }
-            _ => {
-                self.emit_stub_call_named("datetime", func, args);
-            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `datetime.{}` — \
+                 add an arm in emit_datetime_call or resolve upstream",
+                func
+            ),
         }
     }
 

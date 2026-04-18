@@ -360,27 +360,47 @@ impl FuncCompiler<'_> {
                 match (module.as_str(), func.as_str()) {
                     _ if module == "int" => {
                         if !self.emit_int_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "float" => {
                         if !self.emit_float_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "string" => {
                         if !self.emit_string_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "option" => {
                         if !self.emit_option_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "result" => {
                         if !self.emit_result_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "list" => {
@@ -392,17 +412,29 @@ impl FuncCompiler<'_> {
                             // Anything that gets here is a TOML stdlib fn whose
                             // dispatch is missing in emit_list_call. Hard ICE so the
                             // gap is fixed at the source, not papered over.
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "bytes" => {
                         if !self.emit_bytes_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "matrix" => {
                         if !self.emit_matrix_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "base64" => {
@@ -417,7 +449,11 @@ impl FuncCompiler<'_> {
                             self.emit_expr(&args[0]);
                             wasm!(self.func, { call(rt); });
                         } else {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "hex" => {
@@ -431,17 +467,29 @@ impl FuncCompiler<'_> {
                             self.emit_expr(&args[0]);
                             wasm!(self.func, { call(rt); });
                         } else {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "map" => {
                         if !self.emit_map_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "math" => {
                         if !self.emit_math_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     ("error", "message") => {
@@ -528,7 +576,11 @@ impl FuncCompiler<'_> {
                     }
                     _ if module == "set" => {
                         if !self.emit_set_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "fan" => {
@@ -600,7 +652,11 @@ impl FuncCompiler<'_> {
                                     for arg in args { self.emit_expr(arg); }
                                     wasm!(self.func, { call(func_idx); });
                                 } else {
-                                    self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                                    panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                                 }
                             }
                         }
@@ -686,7 +742,12 @@ impl FuncCompiler<'_> {
                         fake_args.extend(args.iter().cloned());
                         let m = method.strip_prefix("option.").unwrap_or(method);
                         if !self.emit_option_call(m, &fake_args) {
-                            self.emit_stub_call(args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for Option method \
+                                 `{}` (stripped: `{}`) — add an arm in emit_option_call \
+                                 or resolve upstream",
+                                method, m
+                            );
                         }
                     }
                     _ if matches!(&object.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)) => {
@@ -801,12 +862,12 @@ impl FuncCompiler<'_> {
                             wasm!(self.func, { call(func_idx); });
                             return;
                         }
-                        // Fallback: stub
-                        self.emit_expr(object);
-                        if values::ty_to_valtype(&object.ty).is_some() {
-                            wasm!(self.func, { drop; });
-                        }
-                        self.emit_stub_call(args);
+                        panic!(
+                            "[ICE] emit_wasm: unresolved method call `.{}` on \
+                             object ty={:?} — expected TypeName.method or func_map \
+                             hit, but both lookups missed",
+                            method, object.ty
+                        );
                     }
                 }
             }
@@ -936,32 +997,6 @@ impl FuncCompiler<'_> {
         }
     }
 
-    /// S3 (v0.14.7-phase3.2): the WASM dispatcher used to route unknown
-    /// stdlib calls to `emit_stub_call`, which deferred the failure to a
-    /// runtime `unreachable` trap. spec/ + nn (v0.14.6 stub-panic sweep)
-    /// proved every reachable code path resolves before reaching here, so
-    /// reaching the stub now is a compile-time ICE — there is no runtime
-    /// trap to debug. If you hit this panic, it means a `module.func` call
-    /// survived `pass_resolve_calls` without a TOML or bundled IR target;
-    /// add the missing dispatch arm or fix the resolver, do not relax this
-    /// panic.
-    pub(super) fn emit_stub_call_named(&mut self, module: &str, func: &str, _args: &[IrExpr]) -> ! {
-        panic!(
-            "[ICE] WASM emit reached emit_stub_call_named for `{}.{}`. \
-             No runtime stub remains; resolve the call (TOML / bundled IR) \
-             or add a dispatch arm in emit_wasm/calls_*.rs.",
-            module, func
-        );
-    }
-
-    pub(super) fn emit_stub_call(&mut self, _args: &[IrExpr]) -> ! {
-        panic!(
-            "[ICE] WASM emit reached emit_stub_call (no module/func context). \
-             A stdlib dispatcher returned false without going through \
-             emit_stub_call_named — fix the caller."
-        );
-    }
-
     /// Emit a safe default value for a given type.
     /// String → empty string, List → empty list, Option → none, Bool → false, etc.
     pub(super) fn emit_typed_default(&mut self, ty: &Ty) {
@@ -1028,8 +1063,8 @@ impl FuncCompiler<'_> {
         }
     }
 
-    /// Emit assert_eq(left, right): compare values, trap if not equal.
-    /// UFCS fallback: try func_map lookup for user-defined functions before stubbing.
+    /// UFCS fallback: try func_map lookup for user-defined functions.
+    /// Panics on miss — a resolved call should never reach here unresolved.
     fn emit_ufcs_fallback(&mut self, object: &IrExpr, method: &str, args: &[IrExpr]) {
         // Try bare method name in func_map (user-defined function)
         let bare = method.split('.').last().unwrap_or(method);
@@ -1046,12 +1081,11 @@ impl FuncCompiler<'_> {
             wasm!(self.func, { call(func_idx); });
             return;
         }
-        // Stub
-        self.emit_expr(object);
-        if values::ty_to_valtype(&object.ty).is_some() {
-            wasm!(self.func, { drop; });
-        }
-        self.emit_stub_call(args);
+        panic!(
+            "[ICE] emit_wasm: UFCS fallback for `.{}` (object ty={:?}) found \
+             no entry in func_map — resolve upstream or register the function",
+            method, object.ty
+        );
     }
 
     /// Stage 3 of the sized-numeric-types arc: emit WASM conversion
@@ -1406,9 +1440,11 @@ impl FuncCompiler<'_> {
                 }
                 self.scratch.free_i32(closure);
             }
-            _ => {
-                self.emit_stub_call(args);
-            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `fan.{}` — \
+                 add an arm in emit_fan_call or resolve upstream",
+                func
+            ),
         }
     }
 

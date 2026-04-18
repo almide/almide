@@ -151,9 +151,9 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                 // expands to `almide_rt_list_len(&{xs})` regardless of `A`.
                 // Specializing them just produces bare-body clones whose
                 // names (`len__Int`) the WASM dispatcher's per-module match
-                // arms cannot recognise, which is exactly the gap the
-                // `emit_stub_call_named` panic plugs after the fact. Skip
-                // them here so the call site stays `Module { list, len }`
+                // arms cannot recognise, which would trip the inline
+                // `panic!("[ICE] ...")` fallback each dispatcher carries.
+                // Skip them here so the call site stays `Module { list, len }`
                 // and the dispatcher sees the unsuffixed name.
                 let is_template_dispatch = f.attrs.iter().any(|a|
                     matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"));
