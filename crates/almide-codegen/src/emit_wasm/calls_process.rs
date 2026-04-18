@@ -268,9 +268,11 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(capacity);
                 self.scratch.free_i32(buf);
             }
-            _ => {
-                self.emit_stub_call_named("process", func, args);
-            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `process.{}` — \
+                 add an arm in emit_process_call or resolve upstream",
+                func
+            ),
         }
 }
 }

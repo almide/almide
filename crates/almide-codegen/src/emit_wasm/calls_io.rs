@@ -411,9 +411,11 @@ impl FuncCompiler<'_> {
                     self.scratch.free_i32(list_ptr);
                 }
             }
-            _ => {
-                self.emit_stub_call_named("io", func, args);
-            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `io.{}` — \
+                 add an arm in emit_io_call or resolve upstream",
+                func
+            ),
         }
     }
 }

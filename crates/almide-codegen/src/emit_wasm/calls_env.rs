@@ -59,9 +59,11 @@ impl FuncCompiler<'_> {
                 let s = self.emitter.intern_string("/tmp");
                 wasm!(self.func, { i32_const(s as i32); });
             }
-            _ => {
-                self.emit_stub_call_named("env", func, args);
-            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `env.{}` — \
+                 add an arm in emit_env_call or resolve upstream",
+                func
+            ),
         }
     }
 

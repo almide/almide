@@ -38,6 +38,24 @@ Removed surface:
 - `ALMIDE_CHECK_IR` / `ALMIDE_VERIFY_IR` env vars (no replacement —
   contract always enforced).
 
+### S3 Phase 1d — delete `emit_stub_call` / `emit_stub_call_named` helpers
+
+The two helpers sitting in `emit_wasm/calls.rs` existed only to `panic!`
+with an `[ICE]` message when a stdlib dispatcher's `_` arm was reached.
+Every call site has been replaced with an inline
+`panic!("[ICE] emit_wasm: no WASM dispatch for `<m>.<func>` — ...")`
+carrying the specific module / dispatcher name so the diagnostic points
+straight at the missing arm. With no remaining callers, the helpers
+themselves are deleted — `calls.rs`, `calls_io.rs`, `calls_value.rs`,
+`calls_http.rs`, `calls_datetime.rs`, `calls_process.rs`, `calls_fs.rs`,
+`calls_env.rs`, `calls_random.rs`, `calls_regex.rs`,
+`calls_list_helpers.rs` all go through inline panics now.
+
+Behavior is unchanged: reaching a dispatcher fallback was already a
+compile-time ICE under S2 flip. The cleanup removes one layer of
+indirection and surfaces the correct module / dispatcher in the error
+message.
+
 ## [0.14.8] — 2026-04-17
 
 Hotfix for a v0.14.7 regression: external package dispatch (e.g. `almai`
