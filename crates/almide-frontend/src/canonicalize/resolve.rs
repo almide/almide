@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use almide_lang::ast;
-use crate::types::{Ty, VariantCase, VariantPayload};
+use crate::types::{Ty, TypeConstructorId, VariantCase, VariantPayload};
 use almide_base::intern::{Sym, sym};
 
 /// Resolve an AST type expression to a Ty.
@@ -97,6 +97,12 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
                 "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
                 "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
                 "Set" => Ty::set_of(ra.first().cloned().unwrap_or(Ty::Unknown)),
+                // Sized Numeric Types P4 kickoff: `Matrix[T]` resolves
+                // to `Applied(Matrix, [T])` so the checker can discriminate
+                // `Matrix[Float32]` / `Matrix[Float64]`. Bare `Matrix`
+                // (no args) stays as `Ty::Matrix` — the compat rule in
+                // `types/mod.rs` bridges bare `Matrix` ↔ `Matrix[Float]`.
+                "Matrix" => Ty::Applied(TypeConstructorId::Matrix, ra),
                 _ => {
                     let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
                     Ty::Named(resolved_name, ra)

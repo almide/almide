@@ -26,6 +26,14 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::Unit => template_or(ctx, "type_unit", &[], "()"),
         Ty::Bytes => template_or(ctx, "type_bytes", &[], "Vec<u8>"),
         Ty::Matrix => template_or(ctx, "type_matrix", &[], "AlmideMatrix"),
+        // Matrix[T] parametric form (Sized Numeric Types arc P4 kickoff):
+        // runtime representation stays `AlmideMatrix` (a tagged enum that
+        // dispatches to SmallF32 / Vec<Vec<f64>> backends). The `T`
+        // parameter gates type-level distinction only — user code can
+        // mix `Matrix[Float32]` / `Matrix[Float64]` annotations without
+        // a separate Rust type surface yet. Type-specialised layouts
+        // will fold into this arm in a follow-up codegen arc.
+        Ty::Applied(TypeConstructorId::Matrix, _) => template_or(ctx, "type_matrix", &[], "AlmideMatrix"),
         Ty::RawPtr => "*mut u8".to_string(),
         Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
             let inner = &args[0];
