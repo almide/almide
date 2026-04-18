@@ -286,15 +286,15 @@ impl Checker {
                             let is_numeric = |t: &Ty| matches!(
                                 t,
                                 Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_)
-                                    | Ty::Int8 | Ty::Int16 | Ty::Int32
+                                    | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
                                     | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                                    | Ty::Float32
+                                    | Ty::Float32 | Ty::Float64
                             );
                             let is_sized_scalar = |t: &Ty| matches!(
                                 t,
-                                Ty::Int8 | Ty::Int16 | Ty::Int32
+                                Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
                                     | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                                    | Ty::Float32
+                                    | Ty::Float32 | Ty::Float64
                             );
                             if !is_numeric(&lc) || !is_numeric(&rc) {
                                 self.emit(super::err(
@@ -1014,9 +1014,9 @@ impl Checker {
         let is_numeric = |t: &Ty| matches!(
             t,
             Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_)
-                | Ty::Int8 | Ty::Int16 | Ty::Int32
+                | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
                 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                | Ty::Float32
+                | Ty::Float32 | Ty::Float64
         );
         if !is_numeric(lc) || !is_numeric(rc) {
             self.emit(super::err(
@@ -1031,9 +1031,9 @@ impl Checker {
         //     we just fall through with `lt` to avoid an extra error.
         let is_sized_scalar = |t: &Ty| matches!(
             t,
-            Ty::Int8 | Ty::Int16 | Ty::Int32
+            Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
                 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                | Ty::Float32
+                | Ty::Float32 | Ty::Float64
         );
         // Sized Numeric Types (Stage 1c): both sides sized AND widths
         // differ is a type error. The permissive `Ty::Int` / `Ty::Float`

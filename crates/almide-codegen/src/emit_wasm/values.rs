@@ -15,8 +15,9 @@ pub fn ty_to_valtype(ty: &Ty) -> Option<ValType> {
         // subsequent sub-phases when load/store sites appear).
         Ty::Int8 | Ty::Int16 | Ty::Int32
         | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 => Some(ValType::I32),
-        Ty::UInt64 => Some(ValType::I64),
+        Ty::Int64 | Ty::UInt64 => Some(ValType::I64),
         Ty::Float32 => Some(ValType::F32),
+        Ty::Float64 => Some(ValType::F64),
         Ty::Bool => Some(ValType::I32),
         Ty::String => Some(ValType::I32), // pointer to [len:i32][data:u8...]
         Ty::Bytes => Some(ValType::I32),  // pointer to [len:i32][data:u8...]
@@ -35,7 +36,7 @@ pub fn byte_size(ty: &Ty) -> u32 {
         Ty::Int8 | Ty::UInt8 => 1,
         Ty::Int16 | Ty::UInt16 => 2,
         Ty::Int32 | Ty::UInt32 | Ty::Float32 => 4,
-        Ty::UInt64 => 8,
+        Ty::Int64 | Ty::UInt64 | Ty::Float64 => 8,
         Ty::Bool => 4,   // i32
         Ty::String => 4, // i32 pointer
         Ty::Bytes => 4,  // i32 pointer

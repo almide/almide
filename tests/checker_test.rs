@@ -966,3 +966,64 @@ fn sized_mixed_all_ops_rejected() {
             "operator '{}' should reject mixed sized types, got: {:?}", op, errs);
     }
 }
+
+// ── Numeric protocol (P3 of Matrix[T] dtype arc) ──
+
+#[test]
+fn numeric_protocol_accepts_int() {
+    has_no_errors("fn double[T: Numeric](x: T) -> T = x + x\nfn use_it() -> Int = double(21)");
+}
+
+#[test]
+fn numeric_protocol_accepts_float() {
+    has_no_errors("fn double[T: Numeric](x: T) -> T = x + x\nfn use_it() -> Float = double(1.5)");
+}
+
+#[test]
+fn numeric_protocol_accepts_int32() {
+    has_no_errors("fn double[T: Numeric](x: T) -> T = x + x\nfn use_it(x: Int32) -> Int32 = double(x)");
+}
+
+#[test]
+fn numeric_protocol_rejects_string() {
+    let errs = errors(
+        "fn double[T: Numeric](x: T) -> T = x + x\nfn use_it() -> String = double(\"x\")"
+    );
+    assert!(errs.iter().any(|e| e.contains("does not implement protocol 'Numeric'")),
+        "should reject String, got: {:?}", errs);
+}
+
+#[test]
+fn numeric_protocol_rejects_bool() {
+    let errs = errors(
+        "fn double[T: Numeric](x: T) -> T = x + x\nfn use_it() -> Bool = double(true)"
+    );
+    assert!(errs.iter().any(|e| e.contains("does not implement protocol 'Numeric'")),
+        "should reject Bool, got: {:?}", errs);
+}
+
+#[test]
+fn sized_int64_explicit_vs_int32_rejected() {
+    let errs = errors(
+        "fn mix(a: Int32, b: Int64) -> Int32 = a + b"
+    );
+    assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "should reject Int32 + Int64, got: {:?}", errs);
+}
+
+#[test]
+fn sized_float64_explicit_vs_float32_rejected() {
+    let errs = errors(
+        "fn mix(a: Float32, b: Float64) -> Float64 = a + b"
+    );
+    assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "should reject Float32 + Float64, got: {:?}", errs);
+}
+
+#[test]
+fn sized_int_and_int64_interop_ok() {
+    // Canonical `Int` stays the literal-coercion slot; it interops
+    // with `Int64` freely at the same width.
+    has_no_errors("fn f(a: Int, b: Int64) -> Int64 = b");
+    has_no_errors("fn f(a: Int64) -> Int = a");
+}

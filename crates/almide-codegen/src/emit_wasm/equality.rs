@@ -50,10 +50,11 @@ impl FuncCompiler<'_> {
             | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 => {
                 wasm!(self.func, { i32_eq; });
             }
-            Ty::UInt64 => { wasm!(self.func, { i64_eq; }); }
+            Ty::Int64 | Ty::UInt64 => { wasm!(self.func, { i64_eq; }); }
             Ty::Float32 => {
                 self.func.instruction(&wasm_encoder::Instruction::F32Eq);
             }
+            Ty::Float64 => { wasm!(self.func, { f64_eq; }); }
             Ty::Bool => { wasm!(self.func, { i32_eq; }); }
             Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
 
@@ -468,14 +469,43 @@ impl FuncCompiler<'_> {
 
     pub(super) fn emit_cmp_instruction(&mut self, ty: &Ty, kind: CmpKind) {
         match (ty, kind) {
-            (Ty::Int, CmpKind::Lt) => { wasm!(self.func, { i64_lt_s; }); }
-            (Ty::Int, CmpKind::Gt) => { wasm!(self.func, { i64_gt_s; }); }
-            (Ty::Int, CmpKind::Lte) => { wasm!(self.func, { i64_le_s; }); }
-            (Ty::Int, CmpKind::Gte) => { wasm!(self.func, { i64_ge_s; }); }
-            (Ty::Float, CmpKind::Lt) => { wasm!(self.func, { f64_lt; }); }
-            (Ty::Float, CmpKind::Gt) => { wasm!(self.func, { f64_gt; }); }
-            (Ty::Float, CmpKind::Lte) => { wasm!(self.func, { f64_le; }); }
-            (Ty::Float, CmpKind::Gte) => { wasm!(self.func, { f64_ge; }); }
+            (Ty::Int | Ty::Int64, CmpKind::Lt) => { wasm!(self.func, { i64_lt_s; }); }
+            (Ty::Int | Ty::Int64, CmpKind::Gt) => { wasm!(self.func, { i64_gt_s; }); }
+            (Ty::Int | Ty::Int64, CmpKind::Lte) => { wasm!(self.func, { i64_le_s; }); }
+            (Ty::Int | Ty::Int64, CmpKind::Gte) => { wasm!(self.func, { i64_ge_s; }); }
+            (Ty::UInt64, cmp_kind) => {
+                use wasm_encoder::Instruction;
+                self.func.instruction(&match cmp_kind {
+                    CmpKind::Lt => Instruction::I64LtU,
+                    CmpKind::Gt => Instruction::I64GtU,
+                    CmpKind::Lte => Instruction::I64LeU,
+                    CmpKind::Gte => Instruction::I64GeU,
+                });
+            }
+            // Narrow sized ints ride in WASM i32. Sign is preserved by
+            // the upstream `i32_load<N>_s/u`; at compare time, treat
+            // signed variants as signed and unsigned as unsigned.
+            (Ty::Int8 | Ty::Int16 | Ty::Int32, CmpKind::Lt) => { wasm!(self.func, { i32_lt_s; }); }
+            (Ty::Int8 | Ty::Int16 | Ty::Int32, CmpKind::Gt) => { wasm!(self.func, { i32_gt_s; }); }
+            (Ty::Int8 | Ty::Int16 | Ty::Int32, CmpKind::Lte) => { wasm!(self.func, { i32_le_s; }); }
+            (Ty::Int8 | Ty::Int16 | Ty::Int32, CmpKind::Gte) => { wasm!(self.func, { i32_ge_s; }); }
+            (Ty::UInt8 | Ty::UInt16 | Ty::UInt32, CmpKind::Lt) => { wasm!(self.func, { i32_lt_u; }); }
+            (Ty::UInt8 | Ty::UInt16 | Ty::UInt32, CmpKind::Gt) => { wasm!(self.func, { i32_gt_u; }); }
+            (Ty::UInt8 | Ty::UInt16 | Ty::UInt32, CmpKind::Lte) => { wasm!(self.func, { i32_le_u; }); }
+            (Ty::UInt8 | Ty::UInt16 | Ty::UInt32, CmpKind::Gte) => { wasm!(self.func, { i32_ge_u; }); }
+            (Ty::Float | Ty::Float64, CmpKind::Lt) => { wasm!(self.func, { f64_lt; }); }
+            (Ty::Float | Ty::Float64, CmpKind::Gt) => { wasm!(self.func, { f64_gt; }); }
+            (Ty::Float | Ty::Float64, CmpKind::Lte) => { wasm!(self.func, { f64_le; }); }
+            (Ty::Float | Ty::Float64, CmpKind::Gte) => { wasm!(self.func, { f64_ge; }); }
+            (Ty::Float32, cmp_kind) => {
+                use wasm_encoder::Instruction;
+                self.func.instruction(&match cmp_kind {
+                    CmpKind::Lt => Instruction::F32Lt,
+                    CmpKind::Gt => Instruction::F32Gt,
+                    CmpKind::Lte => Instruction::F32Le,
+                    CmpKind::Gte => Instruction::F32Ge,
+                });
+            }
             (Ty::String, CmpKind::Lt) => {
                 wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_lt_s; });
             }
