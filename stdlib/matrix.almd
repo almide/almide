@@ -107,6 +107,13 @@ fn softmax_rows(m: Matrix) -> Matrix = _
 @intrinsic("almide_rt_matrix_gelu")
 fn gelu(m: Matrix) -> Matrix = _
 
+// Fusion target for MatrixFusionPass: `gelu(scale(add(mul(a, b), bias), alpha))`
+// collapses to this single cblas_dgemm call (alpha + beta both bound to alpha,
+// C seeded with bias) followed by an in-place GELU sweep. Users should keep
+// writing the unfused chain — the pass rewrites it mechanically.
+@intrinsic("almide_rt_matrix_fused_gemm_bias_scale_gelu")
+fn fused_gemm_bias_scale_gelu(a: Matrix, b: Matrix, bias: Matrix, alpha: Float) -> Matrix = _
+
 @intrinsic("almide_rt_matrix_split_cols_even")
 fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 

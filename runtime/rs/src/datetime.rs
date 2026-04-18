@@ -5,6 +5,18 @@ pub fn almide_rt_datetime_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64
 }
 
+/// Monotonic nanosecond clock for benchmarking. Returns nanoseconds
+/// since an unspecified reference point; only differences are
+/// meaningful. Never goes backwards, unlike `now()` which follows
+/// wall-clock adjustments.
+pub fn almide_rt_datetime_monotonic_ns() -> i64 {
+    use std::time::Instant;
+    use std::sync::OnceLock;
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    let start = ORIGIN.get_or_init(Instant::now);
+    start.elapsed().as_nanos() as i64
+}
+
 pub fn almide_rt_datetime_year(ts: i64) -> i64 { civil_from_epoch(ts).0 }
 pub fn almide_rt_datetime_month(ts: i64) -> i64 { civil_from_epoch(ts).1 }
 pub fn almide_rt_datetime_day(ts: i64) -> i64 { civil_from_epoch(ts).2 }

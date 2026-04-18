@@ -27,6 +27,7 @@ use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
 use super::pass_matrix_fusion::MatrixFusionPass;
+use super::pass_matrix_shape_spec::MatrixShapeSpecPass;
 use super::pass_const_fold::ConstFoldPass;
 use super::pass_rust_lowering::RustLoweringPass;
 use super::pass_lambda_type_resolve::LambdaTypeResolvePass;
@@ -68,6 +69,10 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(LICMPass)
             // MatrixFusion BEFORE borrow/clone (matches raw Module-call IR shape)
             .add(MatrixFusionPass)
+            // MatrixShapeSpec: unroll small-shape matmuls inline before
+            // the stdlib lowering pass turns them into `InlineRust`
+            // blobs that no longer carry structural info.
+            .add(MatrixShapeSpecPass)
             // Clean up arithmetic on numeric literals (e.g. (kb * -1.0) → -kb)
             .add(ConstFoldPass)
             // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
