@@ -212,7 +212,8 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
                 let fn_key = format!("{}.{}", type_name, method_sig.name);
                 if !env.functions.contains_key(&sym(&fn_key)) {
                     let is_builtin = matches!(proto_name.as_str(),
-                        "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode");
+                        "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode"
+                        | "Numeric");
                     if !is_builtin {
                         diagnostics.push(err(
                             format!("type '{}' declares protocol '{}' but missing method '{}'",

@@ -205,6 +205,25 @@ impl Checker {
                     (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| *name)
                 })
             }
+            // Numeric primitive types — canonicalised so `T: Numeric`
+            // bounds can look them up in `env.type_protocols` (the
+            // `register_builtin_protocols` pass seeds this table with
+            // the primitive ↔ `Numeric` links).
+            Ty::Int => Some(sym("Int")),
+            Ty::Float => Some(sym("Float")),
+            Ty::Int8 => Some(sym("Int8")),
+            Ty::Int16 => Some(sym("Int16")),
+            Ty::Int32 => Some(sym("Int32")),
+            Ty::UInt8 => Some(sym("UInt8")),
+            Ty::UInt16 => Some(sym("UInt16")),
+            Ty::UInt32 => Some(sym("UInt32")),
+            Ty::UInt64 => Some(sym("UInt64")),
+            Ty::Float32 => Some(sym("Float32")),
+            Ty::String => Some(sym("String")),
+            Ty::Bool => Some(sym("Bool")),
+            Ty::Bytes => Some(sym("Bytes")),
+            Ty::Matrix => Some(sym("Matrix")),
+            Ty::Unit => Some(sym("Unit")),
             // TypeVars and inference vars are not concrete — skip protocol checking
             Ty::TypeVar(_) | Ty::Unknown => None,
             _ => None,

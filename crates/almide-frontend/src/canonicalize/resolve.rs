@@ -23,8 +23,8 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
             // either form is indistinguishable at the type checker layer, so
             // existing code that uses `Int` keeps compiling while new code
             // can use the precise width name.
-            "Int64" => Ty::Int,
-            "Float64" => Ty::Float,
+            "Int64" => Ty::Int64,
+            "Float64" => Ty::Float64,
             "Int8" => Ty::Int8,
             "Int16" => Ty::Int16,
             "Int32" => Ty::Int32,

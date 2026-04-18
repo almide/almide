@@ -357,6 +357,24 @@ fn remap_pattern_varids(pattern: &mut IrPattern, remap: &HashMap<VarId, VarId>) 
     }
 }
 
+/// Re-dispatch a type-dispatched `BinOp` when a generic binding
+/// resolves to a concrete numeric width. Returns the input `op`
+/// unchanged when the pairing already matches (or when the operator
+/// is already kind-neutral like `Eq` / `Lt` / `ConcatStr`).
+fn repair_binop_for_types(op: BinOp, left_ty: &Ty, right_ty: &Ty) -> BinOp {
+    let is_float = |t: &Ty| matches!(t, Ty::Float | Ty::Float32);
+    let float_pair = is_float(left_ty) || is_float(right_ty);
+    match op {
+        BinOp::AddInt if float_pair => BinOp::AddFloat,
+        BinOp::SubInt if float_pair => BinOp::SubFloat,
+        BinOp::MulInt if float_pair => BinOp::MulFloat,
+        BinOp::DivInt if float_pair => BinOp::DivFloat,
+        BinOp::ModInt if float_pair => BinOp::ModFloat,
+        BinOp::PowInt if float_pair => BinOp::PowFloat,
+        other => other,
+    }
+}
+
 /// Substitute TypeVars with concrete types.
 /// Uses Ty::map_children for uniform recursive traversal.
 pub(super) fn substitute_ty(ty: &Ty, bindings: &HashMap<String, Ty>) -> Ty {
@@ -383,9 +401,16 @@ pub(super) fn substitute_ty(ty: &Ty, bindings: &HashMap<String, Ty>) -> Ty {
 fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
     expr.ty = substitute_ty(&expr.ty, bindings);
     match &mut expr.kind {
-        IrExprKind::BinOp { left, right, .. } => {
+        IrExprKind::BinOp { op, left, right } => {
             substitute_expr_types(left, bindings);
             substitute_expr_types(right, bindings);
+            // Re-dispatch the binop kind when the operand types become
+            // concrete. Numeric protocol bounds (`T: Numeric`) admit
+            // `Int` or `Float` at mono time — a `T + T` that lowered
+            // as `AddInt` under TypeVar must flip to `AddFloat` when
+            // T resolves to Float, otherwise the IR verifier flags the
+            // mismatch.
+            *op = repair_binop_for_types(*op, &left.ty, &right.ty);
         }
         IrExprKind::UnOp { operand, .. } => substitute_expr_types(operand, bindings),
         IrExprKind::If { cond, then, else_ } => {
