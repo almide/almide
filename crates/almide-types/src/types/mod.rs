@@ -335,6 +335,16 @@ impl Ty {
             (Ty::Unit, Ty::Unit) => true,
             (Ty::Bytes, Ty::Bytes) => true,
             (Ty::Matrix, Ty::Matrix) => true,
+            // Matrix[T] parametric form — the P4 arc introduces
+            // `Matrix[Float32]`, `Matrix[Float64]`, etc. Bare `Matrix`
+            // (legacy, unparameterised) is treated as the default
+            // `Matrix[Float64]` so existing `Matrix` code interops with
+            // typed code that asks for `Matrix[Float]`. Typed-typed
+            // pairings fall through to the generic `Applied` arm below.
+            (Ty::Matrix, Ty::Applied(TypeConstructorId::Matrix, args))
+            | (Ty::Applied(TypeConstructorId::Matrix, args), Ty::Matrix) => {
+                args.len() == 1 && matches!(args[0], Ty::Float)
+            }
             (Ty::RawPtr, Ty::RawPtr) => true,
             (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
                 args1.iter().zip(args2.iter()).all(|(a, b)| a.compatible(b))

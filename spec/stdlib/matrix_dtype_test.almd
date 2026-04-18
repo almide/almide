@@ -1,0 +1,59 @@
+// wasm:skip — `Matrix[T]` parametric type is the P4 kickoff for the
+// Sized Numeric Types arc. Runtime representation stays `AlmideMatrix`
+// for now (SmallF32 tagged enum); WASM emit picks up in a follow-up
+// once the codegen dispatcher reads `Applied(Matrix, [T])`.
+
+// Matrix[T] typed matrix handles — MVP scope
+//
+// Landing in this session:
+//   - `Matrix[T]` syntax parses + resolves to `Ty::Applied(Matrix, [T])`
+//   - Compat rule: bare `Matrix` interops with `Matrix[Float]` both ways
+//   - Codegen `render_type` treats parametric form as `AlmideMatrix`
+//     (runtime representation unchanged)
+//
+// Not covered yet (follow-up arcs):
+//   - Per-dtype runtime dispatch at the IR layer (stays via runtime tag)
+//   - `matrix.zeros[T]()` generic form → needs `T: Numeric` protocol
+//   - WASM target
+//   - `Matrix[Int32]` etc beyond the Float pair
+
+fn row_count(m: Matrix[Float]) -> Int = matrix.rows(m)
+fn double_matrix(m: Matrix) -> Matrix = matrix.scale(m, 2.0)
+
+test "Matrix[Float] annotation binds to bare Matrix value" {
+  let m: Matrix[Float] = matrix.zeros(3, 3)
+  assert_eq(row_count(m), 3)
+}
+
+test "bare Matrix interops with Matrix[Float] param" {
+  let m: Matrix = matrix.ones(2, 5)
+  assert_eq(row_count(m), 2)
+}
+
+test "Matrix[Float] return can feed bare Matrix caller" {
+  let m: Matrix[Float] = matrix.zeros(4, 4)
+  let scaled = double_matrix(m)
+  let (r, c) = matrix.shape(scaled)
+  assert_eq(r, 4)
+  assert_eq(c, 4)
+}
+
+test "Matrix[Float] shape accessor" {
+  let m: Matrix[Float] = matrix.ones(7, 2)
+  let (r, c) = matrix.shape(m)
+  assert_eq(r, 7)
+  assert_eq(c, 2)
+}
+
+test "Matrix[Float] and Matrix unify in let" {
+  let a: Matrix = matrix.zeros(2, 2)
+  let b: Matrix[Float] = a
+  let (r, _) = matrix.shape(b)
+  assert_eq(r, 2)
+}
+
+test "Matrix[Float] arith returns Matrix[Float] at type level" {
+  let a: Matrix[Float] = matrix.ones(3, 3)
+  let b: Matrix[Float] = matrix.scale(a, 0.5)
+  assert_eq(matrix.get(b, 0, 0), 0.5)
+}
