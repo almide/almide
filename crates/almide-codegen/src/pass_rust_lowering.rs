@@ -250,6 +250,9 @@ fn expr_references_var(expr: &IrExpr, var: VarId) -> bool {
             };
             t || args.iter().any(|a| expr_references_var(a, var))
         }
+        IrExprKind::RuntimeCall { args, .. } => {
+            args.iter().any(|a| expr_references_var(a, var))
+        }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
             expr_references_var(object, var) || expr_references_var(index, var)
         }

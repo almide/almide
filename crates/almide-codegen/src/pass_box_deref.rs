@@ -193,6 +193,10 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
             };
             IrExprKind::Call { target, args, type_args }
         }
+        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
+            symbol,
+            args: args.into_iter().map(|a| insert_derefs(a, deref_ids)).collect(),
+        },
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(insert_derefs(*cond, deref_ids)),
             then: Box::new(insert_derefs(*then, deref_ids)),
@@ -330,7 +334,8 @@ fn collect_from_expr(expr: &IrExpr, recursive_enums: &HashSet<String>, type_decl
             collect_from_expr(then, recursive_enums, type_decls, name_to_var, deref_vars);
             collect_from_expr(else_, recursive_enums, type_decls, name_to_var, deref_vars);
         }
-        IrExprKind::Call { args, .. } => {
+        IrExprKind::Call { args, .. }
+        | IrExprKind::RuntimeCall { args, .. } => {
             for a in args { collect_from_expr(a, recursive_enums, type_decls, name_to_var, deref_vars); }
         }
         IrExprKind::BinOp { left, right, .. } => {

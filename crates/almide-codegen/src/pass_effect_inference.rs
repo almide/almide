@@ -164,6 +164,18 @@ fn collect_effects_inner(expr: &IrExpr, effects: &mut HashSet<Effect>) {
             }
         }
 
+        // Pre-resolved runtime call (from @intrinsic). Symbol follows
+        // the same `almide_rt_<m>_<f>` mangling as Named, so reuse
+        // `runtime_name_to_effect`.
+        IrExprKind::RuntimeCall { symbol, args } => {
+            if let Some(effect) = runtime_name_to_effect(symbol) {
+                effects.insert(effect);
+            }
+            for arg in args {
+                collect_effects_inner(arg, effects);
+            }
+        }
+
         // Fan expressions
         IrExprKind::Fan { exprs } => {
             effects.insert(Effect::Fan);

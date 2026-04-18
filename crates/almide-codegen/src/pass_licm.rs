@@ -373,6 +373,11 @@ fn try_hoist_expr(
                 try_hoist_expr(arg, loop_defined, vt, hoisted, pure_fns);
             }
         }
+        IrExprKind::RuntimeCall { args, .. } => {
+            for arg in args {
+                try_hoist_expr(arg, loop_defined, vt, hoisted, pure_fns);
+            }
+        }
         IrExprKind::BinOp { left, right, .. } => {
             try_hoist_expr(left, loop_defined, vt, hoisted, pure_fns);
             try_hoist_expr(right, loop_defined, vt, hoisted, pure_fns);
@@ -483,6 +488,9 @@ fn has_control_flow(expr: &IrExpr) -> bool {
                 _ => false,
             };
             target_cf || args.iter().any(|a| has_control_flow(a))
+        }
+        IrExprKind::RuntimeCall { args, .. } => {
+            args.iter().any(|a| has_control_flow(a))
         }
         IrExprKind::If { cond, then, else_ } => {
             has_control_flow(cond) || has_control_flow(then) || has_control_flow(else_)

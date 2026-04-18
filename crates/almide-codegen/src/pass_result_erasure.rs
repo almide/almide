@@ -113,6 +113,10 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
             };
             IrExprKind::Call { target, args, type_args }
         }
+        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
+            symbol,
+            args: args.into_iter().map(erase_expr).collect(),
+        },
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(erase_expr(*cond)),
             then: Box::new(erase_expr(*then)),

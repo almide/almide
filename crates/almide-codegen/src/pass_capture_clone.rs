@@ -128,6 +128,9 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
             }
             for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
         }
+        IrExprKind::RuntimeCall { args, .. } => {
+            for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
+        }
         IrExprKind::BinOp { left, right, .. } => {
             if transform_expr(left, vt, scope_vars) { changed = true; }
             if transform_expr(right, vt, scope_vars) { changed = true; }
@@ -341,6 +344,9 @@ fn collect_free_vars(expr: &IrExpr, bound: &HashSet<VarId>, free: &mut HashSet<V
             }
             for a in args { collect_free_vars(a, bound, free); }
         }
+        IrExprKind::RuntimeCall { args, .. } => {
+            for a in args { collect_free_vars(a, bound, free); }
+        }
         IrExprKind::BinOp { left, right, .. } => {
             collect_free_vars(left, bound, free);
             collect_free_vars(right, bound, free);
@@ -517,6 +523,9 @@ fn replace_vars(expr: &mut IrExpr, renames: &std::collections::HashMap<VarId, Va
                 CallTarget::Computed { callee } => replace_vars(callee, renames),
                 _ => {}
             }
+            for a in args { replace_vars(a, renames); }
+        }
+        IrExprKind::RuntimeCall { args, .. } => {
             for a in args { replace_vars(a, renames); }
         }
         IrExprKind::BinOp { left, right, .. } => {

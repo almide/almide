@@ -730,6 +730,10 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name, args: args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect(),
         },
+        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
+            symbol,
+            args: args.into_iter().map(|a| rewrite_calls(a, sigs, mod_scope)).collect(),
+        },
         other => other,
     };
 
