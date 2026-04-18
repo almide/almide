@@ -79,24 +79,30 @@ impl NanoPass for ConcretizeTypesPass {
         // return types without deferring to emit-time guessing.
         let symbols = build_symbol_table(&program);
 
+        // Take var_table out of program so we can mutate it while also
+        // mutating program.functions. Back-propagation (below) updates
+        // VarTable entries for lambda accumulator params and match-pattern
+        // bindings; downstream passes expect the updates to persist.
+        let mut prog_vt = std::mem::take(&mut program.var_table);
         for func in &mut program.functions {
-            let vt = program.var_table.clone();
             let ret = func.ret_ty.clone();
-            concretize_expr(&mut func.body, &vt, &symbols, &ret);
+            concretize_expr(&mut func.body, &mut prog_vt, &symbols, &ret);
         }
         for tl in &mut program.top_lets {
-            let vt = program.var_table.clone();
-            concretize_expr(&mut tl.value, &vt, &symbols, &Ty::Unknown);
+            concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
         }
+        program.var_table = prog_vt;
+
         for module in &mut program.modules {
-            let vt = module.var_table.clone();
+            let mut mod_vt = std::mem::take(&mut module.var_table);
             for func in &mut module.functions {
                 let ret = func.ret_ty.clone();
-                concretize_expr(&mut func.body, &vt, &symbols, &ret);
+                concretize_expr(&mut func.body, &mut mod_vt, &symbols, &ret);
             }
             for tl in &mut module.top_lets {
-                concretize_expr(&mut tl.value, &vt, &symbols, &Ty::Unknown);
+                concretize_expr(&mut tl.value, &mut mod_vt, &symbols, &Ty::Unknown);
             }
+            module.var_table = mod_vt;
         }
         PassResult { program, changed: true }
     }
@@ -228,15 +234,193 @@ fn propagate_expected_ty(expr: &mut IrExpr, expected: &Ty) {
     }
 }
 
+// ── Generic back-propagation helpers ────────────────────────────────
+
+/// Shape-aware merge: returns the most concrete type when `a` and `b`
+/// share a shape but differ in `Unknown` slots. Returns `None` when the
+/// shapes disagree (can't safely merge). Leaves TypeVar alone since the
+/// pre-pass is already expected to have substituted generics.
+fn merge_more_concrete(a: &Ty, b: &Ty) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let _ = TypeConstructorId::List; // silence unused warning in some builds
+    match (a, b) {
+        (Ty::Unknown, other) | (other, Ty::Unknown) => Some(other.clone()),
+        (Ty::Applied(c1, a1), Ty::Applied(c2, a2)) if c1 == c2 && a1.len() == a2.len() => {
+            let merged: Option<Vec<Ty>> = a1.iter().zip(a2.iter())
+                .map(|(x, y)| merge_more_concrete(x, y))
+                .collect();
+            merged.map(|m| Ty::Applied(c1.clone(), m))
+        }
+        (Ty::Tuple(e1), Ty::Tuple(e2)) if e1.len() == e2.len() => {
+            let merged: Option<Vec<Ty>> = e1.iter().zip(e2.iter())
+                .map(|(x, y)| merge_more_concrete(x, y))
+                .collect();
+            merged.map(Ty::Tuple)
+        }
+        (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 })
+            if p1.len() == p2.len() =>
+        {
+            let merged_params: Option<Vec<Ty>> = p1.iter().zip(p2.iter())
+                .map(|(x, y)| merge_more_concrete(x, y))
+                .collect();
+            let merged_ret = merge_more_concrete(r1, r2);
+            match (merged_params, merged_ret) {
+                (Some(ps), Some(r)) => Some(Ty::Fn { params: ps, ret: Box::new(r) }),
+                _ => None,
+            }
+        }
+        (x, y) if x == y => Some(x.clone()),
+        _ => None,
+    }
+}
+
+/// Push `expected` down into `expr`, recursing into wrappers (OptionSome,
+/// Result*, List, Tuple). Updates expr.ty and any matching sub-expressions
+/// whose own types have unresolved slots compatible with `expected`.
+fn propagate_ty_down(expr: &mut IrExpr, expected: &Ty) {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    if let Some(merged) = merge_more_concrete(&expr.ty, expected) {
+        expr.ty = merged;
+    }
+    match (&mut expr.kind, expected) {
+        (IrExprKind::OptionSome { expr: inner }, Ty::Applied(TCI::Option, args))
+            if args.len() == 1 =>
+        {
+            propagate_ty_down(inner, &args[0]);
+        }
+        (IrExprKind::ResultOk { expr: inner }, Ty::Applied(TCI::Result, args))
+            if !args.is_empty() =>
+        {
+            propagate_ty_down(inner, &args[0]);
+        }
+        (IrExprKind::ResultErr { expr: inner }, Ty::Applied(TCI::Result, args))
+            if args.len() >= 2 =>
+        {
+            propagate_ty_down(inner, &args[1]);
+        }
+        (IrExprKind::List { elements }, Ty::Applied(TCI::List, args))
+            if args.len() == 1 =>
+        {
+            for e in elements.iter_mut() { propagate_ty_down(e, &args[0]); }
+        }
+        (IrExprKind::Tuple { elements }, Ty::Tuple(ts)) if elements.len() == ts.len() => {
+            for (e, t) in elements.iter_mut().zip(ts.iter()) {
+                propagate_ty_down(e, t);
+            }
+        }
+        (IrExprKind::If { then, else_, .. }, _) => {
+            propagate_ty_down(then, expected);
+            propagate_ty_down(else_, expected);
+        }
+        (IrExprKind::Block { expr: Some(tail), .. }, _) => {
+            propagate_ty_down(tail, expected);
+        }
+        (IrExprKind::Match { arms, .. }, _) => {
+            for arm in arms.iter_mut() {
+                propagate_ty_down(&mut arm.body, expected);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Propagate a subject type into a match pattern, updating `Bind` pattern
+/// ty + the matching VarTable entry. Supports Some/Ok/Err/Tuple destructuring
+/// (the shapes that actually surface in spec/).
+fn propagate_pattern_ty(pat: &mut IrPattern, subj_ty: &Ty, vt: &mut VarTable) {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    match (pat, subj_ty) {
+        (IrPattern::Bind { var, ty }, t) => {
+            if ty.has_unresolved_deep() && !t.has_unresolved_deep() {
+                *ty = t.clone();
+                if (var.0 as usize) < vt.len() {
+                    vt.entries[var.0 as usize].ty = t.clone();
+                }
+            }
+        }
+        (IrPattern::Some { inner }, Ty::Applied(TCI::Option, args)) if args.len() == 1 => {
+            propagate_pattern_ty(inner, &args[0], vt);
+        }
+        (IrPattern::Ok { inner }, Ty::Applied(TCI::Result, args)) if !args.is_empty() => {
+            propagate_pattern_ty(inner, &args[0], vt);
+        }
+        (IrPattern::Err { inner }, Ty::Applied(TCI::Result, args)) if args.len() >= 2 => {
+            propagate_pattern_ty(inner, &args[1], vt);
+        }
+        (IrPattern::Tuple { elements }, Ty::Tuple(ts)) if elements.len() == ts.len() => {
+            for (e, t) in elements.iter_mut().zip(ts.iter()) {
+                propagate_pattern_ty(e, t, vt);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_fold_like_call(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, .. } => {
+            module.as_str() == "list" && matches!(func.as_str(), "fold" | "scan")
+        }
+        _ => false,
+    }
+}
+
+/// For `list.fold(xs, init, f)` where `f: (acc, t) -> acc`: merge `init.ty`
+/// with `f.body.ty` and, if the merged type is strictly more concrete than
+/// `init.ty`, push it back into the init sub-expression + the lambda's acc
+/// parameter (IR annotation + VarTable). Returns true when changes were made.
+fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
+    let args = match &mut expr.kind {
+        IrExprKind::Call { args, .. } => args,
+        _ => return false,
+    };
+    if args.len() < 3 { return false; }
+
+    let body_ty = match &args[2].kind {
+        IrExprKind::Lambda { body, .. } => body.ty.clone(),
+        _ => return false,
+    };
+    if body_ty.has_unresolved_deep() { return false; }
+
+    let init_ty = args[1].ty.clone();
+    let Some(merged) = merge_more_concrete(&init_ty, &body_ty) else { return false; };
+    if merged == init_ty { return false; }
+
+    // Push merged into the init sub-expression
+    propagate_ty_down(&mut args[1], &merged);
+
+    // Update lambda's acc param (IR + VarTable) and the Ty::Fn wrapper
+    if let IrExprKind::Lambda { params, .. } = &mut args[2].kind {
+        if let Some((vid, pty)) = params.get_mut(0) {
+            if pty.has_unresolved_deep() {
+                *pty = merged.clone();
+                if (vid.0 as usize) < vt.len() {
+                    vt.entries[vid.0 as usize].ty = merged.clone();
+                }
+            }
+        }
+    }
+    if let Ty::Fn { params: ps, ret } = &mut args[2].ty {
+        if let Some(p0) = ps.get_mut(0) {
+            if p0.has_unresolved_deep() { *p0 = merged.clone(); }
+        }
+        if ret.has_unresolved_deep() { **ret = merged.clone(); }
+    }
+
+    // Update Call's own ty
+    expr.ty = merged;
+    true
+}
+
 // ── Core walker ────────────────────────────────────────────────────
 
-fn concretize_expr(expr: &mut IrExpr, vt: &VarTable, symbols: &SymbolTable, enclosing_ret: &Ty) {
+fn concretize_expr(expr: &mut IrExpr, vt: &mut VarTable, symbols: &SymbolTable, enclosing_ret: &Ty) {
     let mut c = Concretizer { vt, symbols, enclosing_ret };
     c.visit_expr_mut(expr);
 }
 
 struct Concretizer<'a> {
-    vt: &'a VarTable,
+    vt: &'a mut VarTable,
     symbols: &'a SymbolTable,
     /// Return type of the enclosing IrFunction (post-`ResultPropagation`
     /// lift when applicable). Used to fill in the `Ok` slot of a
@@ -247,6 +431,45 @@ struct Concretizer<'a> {
 
 impl<'a> IrMutVisitor for Concretizer<'a> {
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        // Custom Match handling: propagate subject ty into pattern bindings
+        // (updating both the pattern's declared ty and the VarTable entry)
+        // BEFORE visiting arm bodies, so Var references to pattern-bound
+        // names pick up the refreshed ty during the bottom-up walk.
+        if let IrExprKind::Match { subject, arms } = &mut expr.kind {
+            self.visit_expr_mut(subject);
+            let sty = subject.ty.clone();
+            if !sty.has_unresolved_deep() {
+                for arm in arms.iter_mut() {
+                    propagate_pattern_ty(&mut arm.pattern, &sty, self.vt);
+                }
+            }
+            for arm in arms.iter_mut() {
+                if let Some(g) = &mut arm.guard { self.visit_expr_mut(g); }
+                self.visit_expr_mut(&mut arm.body);
+            }
+            // After arms are fully resolved, push any concrete arm body ty
+            // into sibling arms whose body is an unresolved shape wrapper
+            // (e.g. `none => none` has body ty Option[Unknown] but the
+            // sibling `some(...)` arm resolves to Option[List[String]]).
+            let concrete_arm_ty = arms.iter().find_map(|arm| {
+                if !arm.body.ty.has_unresolved_deep() { Some(arm.body.ty.clone()) } else { None }
+            });
+            if let Some(cty) = concrete_arm_ty {
+                for arm in arms.iter_mut() {
+                    if arm.body.ty.has_unresolved_deep() {
+                        propagate_ty_down(&mut arm.body, &cty);
+                    }
+                }
+            }
+            // Resolve the Match node itself
+            if expr.ty.has_unresolved_deep() {
+                if let Some(ty) = resolve_node_ty(expr, self.vt, self.symbols) {
+                    expr.ty = ty;
+                }
+            }
+            return;
+        }
+
         // Recurse into children FIRST (bottom-up) so nested types are
         // concrete before we use them here.
         walk_expr_mut(self, expr);
@@ -287,6 +510,28 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
                     if let Some(expected) = self.symbols.lookup_field(&rname, fname.as_str()) {
                         if !expected.has_unresolved_deep() {
                             propagate_expected_ty(fvalue, expected);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Generic-accumulator back-propagation for `list.fold` / `list.scan`:
+        // both `init` arg and lambda `body.ty` represent the accumulator A.
+        // After the bottom-up walk, body.ty may be strictly more concrete
+        // than init.ty (because init started from a literal like `some([])`
+        // whose empty list has element type Unknown). Merge, push the
+        // merged shape back into init's sub-expressions, and update the
+        // lambda's acc param + VarTable so arm Var refs refresh on the
+        // re-visit below.
+        if is_fold_like_call(expr) {
+            if back_propagate_fold_acc(expr, self.vt) {
+                // Re-visit the lambda body so pattern bindings and Var
+                // references pick up the refreshed acc type.
+                if let IrExprKind::Call { args, .. } = &mut expr.kind {
+                    if let Some(lambda) = args.get_mut(2) {
+                        if let IrExprKind::Lambda { body, .. } = &mut lambda.kind {
+                            self.visit_expr_mut(body);
                         }
                     }
                 }
