@@ -107,6 +107,20 @@ test "Int16 modulo" { assert_eq(mod_i16(23, 5), 3) }
 test "Float32 addition" { assert_eq(add_f32(1.5, 2.5), 4.0) }
 test "UInt64 subtraction" { assert_eq(sub_u64(1000, 200), 800) }
 
+// Mixed-width arithmetic with explicit conversion — compiles and runs.
+// The negative path (unconverted mix is a compile error) is covered by
+// `tests/check_sized_numeric_mixed_width.rs` at the Rust-side checker
+// layer because `.almd` has no negative-test syntax.
+fn a32_plus_b8_via_i32(a: Int32, b: Int8) -> Int32 = a + b.to_int32()
+fn f32_plus_i32_via_float(a: Float32, b: Int32) -> Float32 = a + b.to_float32()
+
+test "Int32 + Int8 via .to_int32()" {
+  assert_eq(a32_plus_b8_via_i32(100, 5), 105)
+}
+test "Float32 + Int32 via .to_float32()" {
+  assert_eq(f32_plus_i32_via_float(1.5, 3), 4.5)
+}
+
 // ── Stage 3: UFCS conversion methods ─────────────────────────────
 
 test "Int32 to Int64" {

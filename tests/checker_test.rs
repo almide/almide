@@ -905,3 +905,64 @@ fn exhaust_guard_not_counted() {
     );
     assert!(errs.iter().any(|e| e.contains("B")), "guarded B should not count, got: {:?}", errs);
 }
+
+// ── Sized Numeric Types Stage 1c: mixed-width arithmetic rejection ──
+
+#[test]
+fn sized_mixed_width_int8_int32_rejected() {
+    let errs = errors(
+        "fn f(a: Int8, b: Int32) -> Int32 = a + b"
+    );
+    assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "should reject Int8 + Int32, got: {:?}", errs);
+}
+
+#[test]
+fn sized_mixed_width_float32_int32_rejected() {
+    let errs = errors(
+        "fn f(a: Float32, b: Int32) -> Float32 = a + b"
+    );
+    assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "should reject Float32 + Int32, got: {:?}", errs);
+}
+
+#[test]
+fn sized_mixed_width_uint16_int16_rejected() {
+    let errs = errors(
+        "fn f(a: UInt16, b: Int16) -> Int16 = a * b"
+    );
+    assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "should reject UInt16 * Int16 (even same width, different signedness), got: {:?}", errs);
+}
+
+#[test]
+fn sized_same_width_arith_ok() {
+    has_no_errors("fn f(a: Int32, b: Int32) -> Int32 = a + b");
+    has_no_errors("fn f(a: UInt8, b: UInt8) -> UInt8 = a - b");
+    has_no_errors("fn f(a: Float32, b: Float32) -> Float32 = a * b");
+}
+
+#[test]
+fn sized_literal_coercion_ok() {
+    has_no_errors("fn f(a: Int32) -> Int32 = a + 5");
+    has_no_errors("fn f(a: Int32) -> Int32 = 10 + a");
+    has_no_errors("fn f(a: Float32) -> Float32 = a + 1.5");
+}
+
+#[test]
+fn sized_canonical_int_plus_sized_ok() {
+    // `Int` / `Float` canonical types stay permissive to preserve the
+    // literal-coercion story. `Int + Int32` is therefore accepted (the
+    // right-hand side collapses to the sized variant at emit time).
+    has_no_errors("fn f(a: Int, b: Int32) -> Int32 = a + b");
+}
+
+#[test]
+fn sized_mixed_all_ops_rejected() {
+    for op in ["-", "*", "/", "%", "^"] {
+        let src = format!("fn f(a: Int8, b: Int32) -> Int32 = a {} b", op);
+        let errs = errors(&src);
+        assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+            "operator '{}' should reject mixed sized types, got: {:?}", op, errs);
+    }
+}
