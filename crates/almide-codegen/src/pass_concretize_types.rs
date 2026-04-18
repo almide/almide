@@ -81,19 +81,21 @@ impl NanoPass for ConcretizeTypesPass {
 
         for func in &mut program.functions {
             let vt = program.var_table.clone();
-            concretize_expr(&mut func.body, &vt, &symbols);
+            let ret = func.ret_ty.clone();
+            concretize_expr(&mut func.body, &vt, &symbols, &ret);
         }
         for tl in &mut program.top_lets {
             let vt = program.var_table.clone();
-            concretize_expr(&mut tl.value, &vt, &symbols);
+            concretize_expr(&mut tl.value, &vt, &symbols, &Ty::Unknown);
         }
         for module in &mut program.modules {
             let vt = module.var_table.clone();
             for func in &mut module.functions {
-                concretize_expr(&mut func.body, &vt, &symbols);
+                let ret = func.ret_ty.clone();
+                concretize_expr(&mut func.body, &vt, &symbols, &ret);
             }
             for tl in &mut module.top_lets {
-                concretize_expr(&mut tl.value, &vt, &symbols);
+                concretize_expr(&mut tl.value, &vt, &symbols, &Ty::Unknown);
             }
         }
         PassResult { program, changed: true }
@@ -169,6 +171,34 @@ fn build_symbol_table(program: &IrProgram) -> SymbolTable {
     SymbolTable { sigs, record_fields }
 }
 
+/// For `ResultErr(payload)` with `ty = Result[Unknown, E]` inside an
+/// effect fn whose ret_ty was lifted to `Result[T, String]`, fill the
+/// Unknown Ok slot with `T`. The err-channel type stays whatever the
+/// inner expression produced so `err("msg")` / `err(custom_err)` both
+/// work. Returns `None` when the enclosing fn isn't a lifted Result
+/// or the inner doesn't have an Err ty yet.
+fn infer_err_ty_from_enclosing(enclosing_ret: &Ty, inner_ty: &Ty) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let ok_ty = match enclosing_ret {
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2
+            && !args[0].has_unresolved_deep() =>
+        {
+            args[0].clone()
+        }
+        _ => return None,
+    };
+    // Pick the Err type: prefer the inner's concrete ty, fall back to
+    // the enclosing fn's Err type.
+    let err_ty = if !inner_ty.has_unresolved_deep() {
+        inner_ty.clone()
+    } else if let Ty::Applied(TypeConstructorId::Result, args) = enclosing_ret {
+        args[1].clone()
+    } else {
+        return None;
+    };
+    Some(Ty::Applied(TypeConstructorId::Result, vec![ok_ty, err_ty]))
+}
+
 /// Push an expected type into an expression whose own inference left it
 /// `Unknown`. Narrow by design: the target is `Applied(List, [Unknown])`
 /// (the empty-list literal case) and the expected type fills the element
@@ -200,14 +230,19 @@ fn propagate_expected_ty(expr: &mut IrExpr, expected: &Ty) {
 
 // ── Core walker ────────────────────────────────────────────────────
 
-fn concretize_expr(expr: &mut IrExpr, vt: &VarTable, symbols: &SymbolTable) {
-    let mut c = Concretizer { vt, symbols };
+fn concretize_expr(expr: &mut IrExpr, vt: &VarTable, symbols: &SymbolTable, enclosing_ret: &Ty) {
+    let mut c = Concretizer { vt, symbols, enclosing_ret };
     c.visit_expr_mut(expr);
 }
 
 struct Concretizer<'a> {
     vt: &'a VarTable,
     symbols: &'a SymbolTable,
+    /// Return type of the enclosing IrFunction (post-`ResultPropagation`
+    /// lift when applicable). Used to fill in the `Ok` slot of a
+    /// `ResultErr` whose payload was written without the Ok type the
+    /// checker could infer (`guard x else err(...)!` style).
+    enclosing_ret: &'a Ty,
 }
 
 impl<'a> IrMutVisitor for Concretizer<'a> {
@@ -226,6 +261,19 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
             }
         }
 
+        // Effect-fn `guard` / `?` paths can leave a `ResultErr` with
+        // `Ok = Unknown` when the error value is the only thing the
+        // checker can pin down (`guard x else err("msg")!`). The Ok
+        // slot is the enclosing fn's return Ok type — after
+        // ResultPropagation has lifted it to `Result[T, String]`, we
+        // know `T` precisely.
+        if let IrExprKind::ResultErr { expr: inner } = &mut expr.kind {
+            if expr.ty.has_unresolved_deep() {
+                if let Some(fixed) = infer_err_ty_from_enclosing(self.enclosing_ret, &inner.ty) {
+                    expr.ty = fixed;
+                }
+            }
+        }
         // Record literal construction: push the declared field types from
         // the registered type down into field value expressions whose own
         // inference left them unresolved (typically `Applied(List,
@@ -580,7 +628,22 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
                 // `for _ in []` / `fan.map([], f)` style uses that have
                 // no bearing on runtime behavior.
                 || matches!(&expr.kind,
-                    IrExprKind::List { elements } if elements.is_empty());
+                    IrExprKind::List { elements } if elements.is_empty())
+                // `Unwrap { ResultErr(...) }` in the `guard x else err(_)!`
+                // idiom: the inner expression is a compile-time-known `err`
+                // literal, so the "ok path" value the Unwrap would produce
+                // is unreachable. The checker leaves the Unwrap's ty
+                // `Unknown` for the same reason (`err()` doesn't fix the
+                // Ok type). Leaving the Unwrap's ty concrete would
+                // desynchronise the WASM emit — the "ok path" branch in
+                // `emit_wasm/expressions.rs::Unwrap` would try to
+                // `emit_load_at` an i64 value into a function whose sig
+                // returns i32 (the Result pointer), tripping the
+                // validator on otherwise-dead code. Accept the Unknown
+                // here as "harmless: ok branch unreachable".
+                || matches!(&expr.kind,
+                    IrExprKind::Unwrap { expr: inner }
+                        if matches!(inner.kind, IrExprKind::ResultErr { .. }));
                 if !skip {
                     self.remaining += 1;
                     if self.samples.len() < 5 {
