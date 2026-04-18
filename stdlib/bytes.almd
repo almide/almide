@@ -55,94 +55,94 @@ fn append_u32_le(b: Bytes, val: Int) -> Unit = _
 @inline_rust("almide_rt_bytes_append_u8(&mut {b}, {val})")
 fn append_u8(b: Bytes, val: Int) -> Unit = _
 
-@inline_rust("almide_rt_bytes_as_mut_ptr(&mut {b})")
+@intrinsic("almide_rt_bytes_as_mut_ptr")
 fn as_mut_ptr(b: Bytes) -> RawPtr = _
 
-@inline_rust("almide_rt_bytes_as_ptr(&{b})")
+@intrinsic("almide_rt_bytes_as_ptr")
 fn as_ptr(b: Bytes) -> RawPtr = _
 
-@inline_rust("almide_rt_bytes_chunks(&{b}, {size})")
+@intrinsic("almide_rt_bytes_chunks")
 fn chunks(b: Bytes, size: Int) -> List[Bytes] = _
 
-@inline_rust("almide_rt_bytes_clear(&mut {b})")
+@intrinsic("almide_rt_bytes_clear")
 fn clear(b: Bytes) -> Unit = _
 
-@inline_rust("almide_rt_bytes_cmp(&{a}, &{b})")
+@intrinsic("almide_rt_bytes_cmp")
 fn cmp(a: Bytes, b: Bytes) -> Int = _
 
-@inline_rust("almide_rt_bytes_concat(&{a}, &{b})")
+@intrinsic("almide_rt_bytes_concat")
 fn concat(a: Bytes, b: Bytes) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_contains(&{b}, &{pattern})")
+@intrinsic("almide_rt_bytes_contains")
 fn contains(b: Bytes, pattern: Bytes) -> Bool = _
 
-@inline_rust("almide_rt_bytes_copy_from(&mut {dst}, &{src}, {dst_off}, {src_off}, {len})")
+@intrinsic("almide_rt_bytes_copy_from")
 fn copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
 
-@inline_rust("almide_rt_bytes_copy_to_ptr(&{b}, {ptr}, {cap})")
+@intrinsic("almide_rt_bytes_copy_to_ptr")
 fn copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = _
 
-@inline_rust("almide_rt_bytes_data_ptr(&{b})")
+@intrinsic("almide_rt_bytes_data_ptr")
 fn data_ptr(b: Bytes) -> Int = _
 
-@inline_rust("almide_rt_bytes_ends_with(&{b}, &{suffix})")
+@intrinsic("almide_rt_bytes_ends_with")
 fn ends_with(b: Bytes, suffix: Bytes) -> Bool = _
 
-@inline_rust("almide_rt_bytes_eof(&{b}, {pos})")
+@intrinsic("almide_rt_bytes_eof")
 fn eof(b: Bytes, pos: Int) -> Bool = _
 
-@inline_rust("almide_rt_bytes_fill(&mut {b}, {val})")
+@intrinsic("almide_rt_bytes_fill")
 fn fill(b: Bytes, val: Int) -> Unit = _
 
-@inline_rust("almide_rt_bytes_from_list(&{xs})")
+@intrinsic("almide_rt_bytes_from_list")
 fn from_list(xs: List[Int]) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_from_raw_ptr({ptr}, {len})")
+@intrinsic("almide_rt_bytes_from_raw_ptr")
 fn from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_from_string(&*{s})")
+@intrinsic("almide_rt_bytes_from_string")
 fn from_string(s: String) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_get(&{b}, {i})")
+@intrinsic("almide_rt_bytes_get")
 fn get(b: Bytes, i: Int) -> Option[Int] = _
 
-@inline_rust("almide_rt_bytes_get_or(&{b}, {i}, {default})")
+@intrinsic("almide_rt_bytes_get_or")
 fn get_or(b: Bytes, i: Int, default: Int) -> Int = _
 
-@inline_rust("almide_rt_bytes_index_of(&{b}, &{pattern})")
+@intrinsic("almide_rt_bytes_index_of")
 fn index_of(b: Bytes, pattern: Bytes) -> Option[Int] = _
 
-@inline_rust("almide_rt_bytes_insert(&{b}, {pos}, {val})")
+@intrinsic("almide_rt_bytes_insert")
 fn insert(b: Bytes, pos: Int, val: Int) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_is_empty(&{b})")
+@intrinsic("almide_rt_bytes_is_empty")
 fn is_empty(b: Bytes) -> Bool = _
 
 @inline_rust("almide_rt_bytes_is_valid_utf8(&{b})")
 fn is_valid_utf8(b: Bytes) -> Bool = _
 
-@inline_rust("almide_rt_bytes_len(&{b})")
+@intrinsic("almide_rt_bytes_len")
 fn len(b: Bytes) -> Int = _
 
-@inline_rust("almide_rt_bytes_lines(&{b})")
+@intrinsic("almide_rt_bytes_lines")
 fn lines(b: Bytes) -> List[Bytes] = _
 
-@inline_rust("almide_rt_bytes_map_each(&{b}, {f})")
+@intrinsic("almide_rt_bytes_map_each")
 fn map_each(b: Bytes, f: fn(Int) -> Int) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_new({len})")
+@intrinsic("almide_rt_bytes_new")
 fn new(len: Int) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_pad_left(&{b}, {target_len}, {val})")
+@intrinsic("almide_rt_bytes_pad_left")
 fn pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_pad_right(&{b}, {target_len}, {val})")
+@intrinsic("almide_rt_bytes_pad_right")
 fn pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_push(&mut {b}, {val})")
+@intrinsic("almide_rt_bytes_push")
 fn push(b: Bytes, val: Int) -> Unit = _
 
-@inline_rust("almide_rt_bytes_read_bool(&{b}, {pos})")
+@intrinsic("almide_rt_bytes_read_bool")
 fn read_bool(b: Bytes, pos: Int) -> Bool = _
 
 @inline_rust("almide_rt_bytes_read_f16_le(&{b}, {pos})")
@@ -235,13 +235,13 @@ fn read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 @inline_rust("almide_rt_bytes_read_i64_le_at(&{b}, {pos})")
 fn read_i64_le_at(b: Bytes, pos: Int) -> (Int, Option[Int]) = _
 
-@inline_rust("almide_rt_bytes_read_length_prefixed_strings_le(&{b}, {pos}, {count})")
+@intrinsic("almide_rt_bytes_read_length_prefixed_strings_le")
 fn read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String] = _
 
-@inline_rust("almide_rt_bytes_read_string_at(&{b}, {pos}, {len})")
+@intrinsic("almide_rt_bytes_read_string_at")
 fn read_string_at(b: Bytes, pos: Int, len: Int) -> String = _
 
-@inline_rust("almide_rt_bytes_read_string_be(&{b}, {pos})")
+@intrinsic("almide_rt_bytes_read_string_be")
 fn read_string_be(b: Bytes, pos: Int) -> String = _
 
 @inline_rust("almide_rt_bytes_read_u16_be(&{b}, {pos})")
@@ -283,16 +283,16 @@ fn read_u8(b: Bytes, pos: Int) -> Int = _
 @inline_rust("almide_rt_bytes_read_u8_at(&{b}, {pos})")
 fn read_u8_at(b: Bytes, pos: Int) -> (Int, Option[Int]) = _
 
-@inline_rust("almide_rt_bytes_remove_at(&{b}, {pos})")
+@intrinsic("almide_rt_bytes_remove_at")
 fn remove_at(b: Bytes, pos: Int) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_repeat(&{b}, {n})")
+@intrinsic("almide_rt_bytes_repeat")
 fn repeat(b: Bytes, n: Int) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_reverse(&{b})")
+@intrinsic("almide_rt_bytes_reverse")
 fn reverse(b: Bytes) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_set({b}, {i}, {val})")
+@intrinsic("almide_rt_bytes_set")
 fn set(b: Bytes, i: Int, val: Int) -> Bytes = _
 
 @inline_rust("almide_rt_bytes_set_f32_be(&mut {b}, {pos}, {val})")
@@ -340,34 +340,34 @@ fn set_u32_le(b: Bytes, pos: Int, val: Int) -> Unit = _
 @inline_rust("almide_rt_bytes_set_u8(&mut {b}, {pos}, {val})")
 fn set_u8(b: Bytes, pos: Int, val: Int) -> Unit = _
 
-@inline_rust("almide_rt_bytes_skip(&{b}, {pos}, {n})")
+@intrinsic("almide_rt_bytes_skip")
 fn skip(b: Bytes, pos: Int, n: Int) -> Int = _
 
-@inline_rust("almide_rt_bytes_skip_length_prefixed_le(&{b}, {pos}, {count})")
+@intrinsic("almide_rt_bytes_skip_length_prefixed_le")
 fn skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = _
 
-@inline_rust("almide_rt_bytes_slice(&{b}, {start}, {end})")
+@intrinsic("almide_rt_bytes_slice")
 fn slice(b: Bytes, start: Int, end: Int) -> Bytes = _
 
-@inline_rust("almide_rt_bytes_split(&{b}, &{sep})")
+@intrinsic("almide_rt_bytes_split")
 fn split(b: Bytes, sep: Bytes) -> List[Bytes] = _
 
-@inline_rust("almide_rt_bytes_starts_with(&{b}, &{prefix})")
+@intrinsic("almide_rt_bytes_starts_with")
 fn starts_with(b: Bytes, prefix: Bytes) -> Bool = _
 
-@inline_rust("almide_rt_bytes_take_at(&{b}, {pos}, {n})")
+@intrinsic("almide_rt_bytes_take_at")
 fn take_at(b: Bytes, pos: Int, n: Int) -> (Int, Option[Bytes]) = _
 
-@inline_rust("almide_rt_bytes_to_list(&{b})")
+@intrinsic("almide_rt_bytes_to_list")
 fn to_list(b: Bytes) -> List[Int] = _
 
-@inline_rust("almide_rt_bytes_to_string(&{b})")
+@intrinsic("almide_rt_bytes_to_string")
 fn to_string(b: Bytes) -> Result[String, String] = _
 
-@inline_rust("almide_rt_bytes_to_string_lossy(&{b})")
+@intrinsic("almide_rt_bytes_to_string_lossy")
 fn to_string_lossy(b: Bytes) -> String = _
 
-@inline_rust("almide_rt_bytes_write_bool(&mut {b}, {val})")
+@intrinsic("almide_rt_bytes_write_bool")
 fn write_bool(b: Bytes, val: Bool) -> Unit = _
 
 @inline_rust("almide_rt_bytes_write_f64_be(&mut {b}, {val})")
@@ -376,7 +376,7 @@ fn write_f64_be(b: Bytes, val: Float) -> Unit = _
 @inline_rust("almide_rt_bytes_write_i64_be(&mut {b}, {val})")
 fn write_i64_be(b: Bytes, val: Int) -> Unit = _
 
-@inline_rust("almide_rt_bytes_write_string_be(&mut {b}, &*{s})")
+@intrinsic("almide_rt_bytes_write_string_be")
 fn write_string_be(b: Bytes, s: String) -> Unit = _
 
 @inline_rust("almide_rt_bytes_write_u32_be(&mut {b}, {val})")
@@ -385,5 +385,5 @@ fn write_u32_be(b: Bytes, val: Int) -> Unit = _
 @inline_rust("almide_rt_bytes_write_u8(&mut {b}, {val})")
 fn write_u8(b: Bytes, val: Int) -> Unit = _
 
-@inline_rust("almide_rt_bytes_xor(&{a}, &{b})")
+@intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _

@@ -227,6 +227,10 @@ fn convert_expr(
             args: args.into_iter().map(|a| convert_expr(a, lifted, counter, vt)).collect(),
             type_args,
         },
+        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
+            symbol,
+            args: args.into_iter().map(|a| convert_expr(a, lifted, counter, vt)).collect(),
+        },
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(convert_expr(*cond, lifted, counter, vt)),
             then: Box::new(convert_expr(*then, lifted, counter, vt)),

@@ -3,6 +3,10 @@
 // Migrated mechanically from `stdlib/defs/testing.toml` (7 fns). All
 // pure assertion helpers. `assert_throws` accepts a thunk; the lambda
 // prep applied to bundled InlineRust args passes it through intact.
+//
+// @inline_rust is retained (not @intrinsic) because the WASM backend
+// has no dedicated runtime fn for these assertions — they are used
+// primarily in Rust-target test harnesses.
 
 @inline_rust("almide_rt_test_assert_throws({f}, &*{expected})")
 fn assert_throws(f: () -> Unit, expected: String) -> Unit = _

@@ -4,13 +4,13 @@
 // are `effect` (non-deterministic); the runtime impls stay in
 // `runtime/rs/src/random.rs`.
 
-@inline_rust("almide_rt_random_int({min}, {max})")
+@intrinsic("almide_rt_random_int")
 effect fn int(min: Int, max: Int) -> Int = _
 
-@inline_rust("almide_rt_random_float()")
+@intrinsic("almide_rt_random_float")
 effect fn float() -> Float = _
 
-@inline_rust("almide_rt_random_choice(&{xs})")
+@intrinsic("almide_rt_random_choice")
 effect fn choice[T](xs: List[T]) -> Option[T] = _
 
 @inline_rust("almide_rt_random_shuffle(({xs}).to_vec())")

@@ -929,6 +929,45 @@ impl FuncCompiler<'_> {
 
     /// Emit a tail call (WASM `return_call` / `return_call_indirect`).
     /// Falls back to normal call for targets that don't resolve to a known function.
+    /// Hybrid fallback for `RuntimeCall` whose `symbol` is not registered
+    /// in `func_map`. Routes through the legacy `emit_<module>_call`
+    /// dispatcher so fns still lowered via inline i64 ops (e.g. `int.abs`)
+    /// keep working until their WASM runtime fn lands. Returns `true` on
+    /// successful dispatch, `false` otherwise.
+    pub(super) fn dispatch_runtime_fallback(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+        ret_ty: &Ty,
+    ) -> bool {
+        let _ = ret_ty;
+        match module {
+            "int" => self.emit_int_call(func, args),
+            "float" => self.emit_float_call(func, args),
+            "math" => self.emit_math_call(func, args),
+            "string" => self.emit_string_call(func, args),
+            "list" => self.emit_list_call(func, args),
+            "map" => self.emit_map_call(func, args),
+            "set" => self.emit_set_call(func, args),
+            "option" => self.emit_option_call(func, args),
+            "result" => self.emit_result_call(func, args),
+            "bytes" => self.emit_bytes_call(func, args),
+            "matrix" => self.emit_matrix_call(func, args),
+            "io" => { self.emit_io_call(func, args); true }
+            "regex" => { self.emit_regex_call(func, args); true }
+            "value" => { self.emit_value_call(func, args); true }
+            "http" => { self.emit_http_call(func, args); true }
+            "datetime" => { self.emit_datetime_call(func, args); true }
+            "process" => { self.emit_process_call(func, args); true }
+            "random" => { self.emit_random_call(func, args); true }
+            "env" => { self.emit_env_call(func, args); true }
+            "fs" => { self.emit_fs_call(func, args); true }
+            "json" => { self.emit_json_call(func, args); true }
+            _ => false,
+        }
+    }
+
     pub(super) fn emit_tail_call(&mut self, target: &CallTarget, args: &[IrExpr], ret_ty: &Ty) {
         match target {
             CallTarget::Named { name } => {

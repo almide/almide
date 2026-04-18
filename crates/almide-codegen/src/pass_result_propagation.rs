@@ -245,6 +245,13 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
             let final_ty = fn_name.as_ref().and_then(|n| lifted.get(n)).cloned().unwrap_or(ty);
             return IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty: final_ty, span };
         }
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let args = args.into_iter().map(|a| update_call_types(a, lifted)).collect();
+            return IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol, args },
+                ty, span,
+            };
+        }
         IrExprKind::Block { stmts, expr: e } => IrExprKind::Block {
             stmts: stmts.into_iter().map(|s| update_call_types_stmt(s, lifted)).collect(),
             expr: e.map(|e| Box::new(update_call_types(*e, lifted))),
@@ -467,6 +474,10 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                     let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
                     IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty, span }
                 }
+                IrExprKind::RuntimeCall { symbol, args } => {
+                    let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
+                    IrExpr { kind: IrExprKind::RuntimeCall { symbol, args }, ty, span }
+                }
                 _ => unreachable!()
             }
         }
@@ -538,6 +549,10 @@ fn insert_try_for_lifted_no_unwrap(expr: IrExpr, lifted: &HashMap<String, Ty>) -
                 IrExprKind::Call { target, args, type_args } => {
                     let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
                     IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty, span }
+                }
+                IrExprKind::RuntimeCall { symbol, args } => {
+                    let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
+                    IrExpr { kind: IrExprKind::RuntimeCall { symbol, args }, ty, span }
                 }
                 _ => unreachable!()
             }

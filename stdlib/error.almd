@@ -9,8 +9,8 @@
 @inline_rust("almide_rt_error_chain(&*{outer}, &*{cause})")
 fn chain(outer: String, cause: String) -> String = _
 
-@inline_rust("almide_rt_error_context({r}, &*{msg})")
+@inline_rust("almide_rt_error_context(&{r}, &*{msg})")
 fn context[T, E](r: Result[T, E], msg: String) -> Result[T, String] = _
 
-@inline_rust("almide_rt_error_message({r})")
+@inline_rust("almide_rt_error_message(&{r})")
 fn message[T](r: Result[T, String]) -> String = _

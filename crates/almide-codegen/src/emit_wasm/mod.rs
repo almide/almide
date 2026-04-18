@@ -952,7 +952,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             // fn's body (typically `_` / Hole) is never needed and would
             // fail to compile. Skip registration + emission.
             if func.attrs.iter().any(|a|
-                matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"))
+                matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic" | "intrinsic"))
             {
                 continue;
             }

@@ -14,20 +14,20 @@ pub enum Value {
 
 // ── Construction ──
 
-pub fn almide_rt_value_str(s: String) -> Value { Value::Str(s) }
+pub fn almide_rt_value_str(s: &str) -> Value { Value::Str(s.to_string()) }
 pub fn almide_rt_value_int(n: i64) -> Value { Value::Int(n) }
 pub fn almide_rt_value_float(f: f64) -> Value { Value::Float(f) }
 pub fn almide_rt_value_bool(b: bool) -> Value { Value::Bool(b) }
-pub fn almide_rt_value_array(items: Vec<Value>) -> Value { Value::Array(items) }
-pub fn almide_rt_value_object(pairs: Vec<(String, Value)>) -> Value { Value::Object(pairs) }
+pub fn almide_rt_value_array(items: &Vec<Value>) -> Value { Value::Array(items.clone()) }
+pub fn almide_rt_value_object(pairs: &Vec<(String, Value)>) -> Value { Value::Object(pairs.clone()) }
 pub fn almide_rt_value_null() -> Value { Value::Null }
 
 // ── Access ──
 
-pub fn almide_rt_value_field(v: Value, key: String) -> Result<Value, String> {
+pub fn almide_rt_value_field(v: &Value, key: &str) -> Result<Value, String> {
     if let Value::Object(pairs) = v {
         for (k, val) in pairs {
-            if k == key { return Ok(val); }
+            if k == key { return Ok(val.clone()); }
         }
         Err(format!("missing field '{}'", key))
     } else {
@@ -35,20 +35,20 @@ pub fn almide_rt_value_field(v: Value, key: String) -> Result<Value, String> {
     }
 }
 
-pub fn almide_rt_value_as_string(v: Value) -> Result<String, String> {
-    match v { Value::Str(s) => Ok(s), _ => Err("expected Str".to_string()) }
+pub fn almide_rt_value_as_string(v: &Value) -> Result<String, String> {
+    match v { Value::Str(s) => Ok(s.clone()), _ => Err("expected Str".to_string()) }
 }
-pub fn almide_rt_value_as_int(v: Value) -> Result<i64, String> {
-    match v { Value::Int(n) => Ok(n), _ => Err("expected Int".to_string()) }
+pub fn almide_rt_value_as_int(v: &Value) -> Result<i64, String> {
+    match v { Value::Int(n) => Ok(*n), _ => Err("expected Int".to_string()) }
 }
-pub fn almide_rt_value_as_float(v: Value) -> Result<f64, String> {
-    match v { Value::Float(f) => Ok(f), _ => Err("expected Float".to_string()) }
+pub fn almide_rt_value_as_float(v: &Value) -> Result<f64, String> {
+    match v { Value::Float(f) => Ok(*f), _ => Err("expected Float".to_string()) }
 }
-pub fn almide_rt_value_as_bool(v: Value) -> Result<bool, String> {
-    match v { Value::Bool(b) => Ok(b), _ => Err("expected Bool".to_string()) }
+pub fn almide_rt_value_as_bool(v: &Value) -> Result<bool, String> {
+    match v { Value::Bool(b) => Ok(*b), _ => Err("expected Bool".to_string()) }
 }
-pub fn almide_rt_value_as_array(v: Value) -> Result<Vec<Value>, String> {
-    match v { Value::Array(a) => Ok(a), _ => Err("expected Array".to_string()) }
+pub fn almide_rt_value_as_array(v: &Value) -> Result<Vec<Value>, String> {
+    match v { Value::Array(a) => Ok(a.clone()), _ => Err("expected Array".to_string()) }
 }
 
 // ── List encode/decode ──
@@ -69,14 +69,14 @@ pub fn almide_rt_value_option_encode<T, F: Fn(T) -> Value>(opt: Option<T>, f: F)
     match opt { Some(v) => f(v), None => Value::Null }
 }
 pub fn almide_rt_value_decode_option<T, F: Fn(Value) -> Result<T, String>>(v: &Value, key: &str, f: F) -> Result<Option<T>, String> {
-    match almide_rt_value_field(v.clone(), key.to_string()) {
+    match almide_rt_value_field(v, key) {
         Ok(Value::Null) => Ok(None),
         Ok(val) => f(val).map(Some),
         Err(_) => Ok(None),
     }
 }
 pub fn almide_rt_value_decode_with_default<T: Clone, F: Fn(Value) -> Result<T, String>>(v: &Value, key: &str, default: T, f: F) -> Result<T, String> {
-    match almide_rt_value_field(v.clone(), key.to_string()) {
+    match almide_rt_value_field(v, key) {
         Ok(Value::Null) => Ok(default),
         Ok(val) => f(val),
         Err(_) => Ok(default),
@@ -85,81 +85,82 @@ pub fn almide_rt_value_decode_with_default<T: Clone, F: Fn(Value) -> Result<T, S
 
 // ── Concrete list helpers ──
 
-pub fn almide_rt___encode_list_string(items: Vec<String>) -> Value { almide_rt_value_encode_list(items, almide_rt_value_str) }
+pub fn almide_rt___encode_list_string(items: Vec<String>) -> Value { almide_rt_value_encode_list(items, |s| almide_rt_value_str(&s)) }
 pub fn almide_rt___encode_list_int(items: Vec<i64>) -> Value { almide_rt_value_encode_list(items, almide_rt_value_int) }
 pub fn almide_rt___encode_list_float(items: Vec<f64>) -> Value { almide_rt_value_encode_list(items, almide_rt_value_float) }
 pub fn almide_rt___encode_list_bool(items: Vec<bool>) -> Value { almide_rt_value_encode_list(items, almide_rt_value_bool) }
-pub fn almide_rt___decode_list_string(v: Value) -> Result<Vec<String>, String> { almide_rt_value_decode_list(v, almide_rt_value_as_string) }
-pub fn almide_rt___decode_list_int(v: Value) -> Result<Vec<i64>, String> { almide_rt_value_decode_list(v, almide_rt_value_as_int) }
-pub fn almide_rt___decode_list_float(v: Value) -> Result<Vec<f64>, String> { almide_rt_value_decode_list(v, almide_rt_value_as_float) }
-pub fn almide_rt___decode_list_bool(v: Value) -> Result<Vec<bool>, String> { almide_rt_value_decode_list(v, almide_rt_value_as_bool) }
+pub fn almide_rt___decode_list_string(v: Value) -> Result<Vec<String>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_string(&x)) }
+pub fn almide_rt___decode_list_int(v: Value) -> Result<Vec<i64>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_int(&x)) }
+pub fn almide_rt___decode_list_float(v: Value) -> Result<Vec<f64>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_float(&x)) }
+pub fn almide_rt___decode_list_bool(v: Value) -> Result<Vec<bool>, String> { almide_rt_value_decode_list(v, |x| almide_rt_value_as_bool(&x)) }
 
 // ── Concrete option helpers ──
 
-pub fn almide_rt___encode_option_string(v: Option<String>) -> Value { almide_rt_value_option_encode(v, almide_rt_value_str) }
+pub fn almide_rt___encode_option_string(v: Option<String>) -> Value { almide_rt_value_option_encode(v, |s| almide_rt_value_str(&s)) }
 pub fn almide_rt___encode_option_int(v: Option<i64>) -> Value { almide_rt_value_option_encode(v, almide_rt_value_int) }
 pub fn almide_rt___encode_option_float(v: Option<f64>) -> Value { almide_rt_value_option_encode(v, almide_rt_value_float) }
 pub fn almide_rt___encode_option_bool(v: Option<bool>) -> Value { almide_rt_value_option_encode(v, almide_rt_value_bool) }
-pub fn almide_rt___decode_option_string(v: Value, key: String) -> Result<Option<String>, String> { almide_rt_value_decode_option(&v, &key, almide_rt_value_as_string) }
-pub fn almide_rt___decode_option_int(v: Value, key: String) -> Result<Option<i64>, String> { almide_rt_value_decode_option(&v, &key, almide_rt_value_as_int) }
-pub fn almide_rt___decode_option_float(v: Value, key: String) -> Result<Option<f64>, String> { almide_rt_value_decode_option(&v, &key, almide_rt_value_as_float) }
-pub fn almide_rt___decode_option_bool(v: Value, key: String) -> Result<Option<bool>, String> { almide_rt_value_decode_option(&v, &key, almide_rt_value_as_bool) }
-pub fn almide_rt___decode_default_string(v: Value, key: String, default: String) -> Result<String, String> { almide_rt_value_decode_with_default(&v, &key, default, almide_rt_value_as_string) }
-pub fn almide_rt___decode_default_int(v: Value, key: String, default: i64) -> Result<i64, String> { almide_rt_value_decode_with_default(&v, &key, default, almide_rt_value_as_int) }
-pub fn almide_rt___decode_default_float(v: Value, key: String, default: f64) -> Result<f64, String> { almide_rt_value_decode_with_default(&v, &key, default, almide_rt_value_as_float) }
-pub fn almide_rt___decode_default_bool(v: Value, key: String, default: bool) -> Result<bool, String> { almide_rt_value_decode_with_default(&v, &key, default, almide_rt_value_as_bool) }
+pub fn almide_rt___decode_option_string(v: Value, key: String) -> Result<Option<String>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_string(&x)) }
+pub fn almide_rt___decode_option_int(v: Value, key: String) -> Result<Option<i64>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_int(&x)) }
+pub fn almide_rt___decode_option_float(v: Value, key: String) -> Result<Option<f64>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_float(&x)) }
+pub fn almide_rt___decode_option_bool(v: Value, key: String) -> Result<Option<bool>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_bool(&x)) }
+pub fn almide_rt___decode_default_string(v: Value, key: String, default: String) -> Result<String, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_string(&x)) }
+pub fn almide_rt___decode_default_int(v: Value, key: String, default: i64) -> Result<i64, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_int(&x)) }
+pub fn almide_rt___decode_default_float(v: Value, key: String, default: f64) -> Result<f64, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_float(&x)) }
+pub fn almide_rt___decode_default_bool(v: Value, key: String, default: bool) -> Result<bool, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_bool(&x)) }
 
 // ── Value utilities ──
 
 /// Pick specific keys from an Object, discarding the rest.
-pub fn almide_rt_value_pick(v: Value, keys: Vec<String>) -> Value {
+pub fn almide_rt_value_pick(v: &Value, keys: &[String]) -> Value {
     match v {
         Value::Object(pairs) => {
-            Value::Object(pairs.into_iter().filter(|(k, _)| keys.contains(k)).collect())
+            Value::Object(pairs.iter().filter(|(k, _)| keys.contains(k)).cloned().collect())
         }
-        other => other,
+        other => other.clone(),
     }
 }
 
 /// Rename keys in an Object using a transform function.
-pub fn almide_rt_value_rename_keys(v: Value, f: impl Fn(String) -> String) -> Value {
+pub fn almide_rt_value_rename_keys(v: &Value, f: impl Fn(String) -> String) -> Value {
     match v {
         Value::Object(pairs) => {
-            Value::Object(pairs.into_iter().map(|(k, v)| (f(k), v)).collect())
+            Value::Object(pairs.iter().map(|(k, v)| (f(k.clone()), v.clone())).collect())
         }
-        other => other,
+        other => other.clone(),
     }
 }
 
 /// Merge two Objects. Keys from `b` override keys from `a`.
-pub fn almide_rt_value_merge(a: Value, b: Value) -> Value {
+pub fn almide_rt_value_merge(a: &Value, b: &Value) -> Value {
     match (a, b) {
-        (Value::Object(mut pa), Value::Object(pb)) => {
+        (Value::Object(pa), Value::Object(pb)) => {
+            let mut pa = pa.clone();
             for (k, v) in pb {
-                if let Some(pos) = pa.iter().position(|(ek, _)| ek == &k) {
-                    pa[pos] = (k, v);
+                if let Some(pos) = pa.iter().position(|(ek, _)| ek == k) {
+                    pa[pos] = (k.clone(), v.clone());
                 } else {
-                    pa.push((k, v));
+                    pa.push((k.clone(), v.clone()));
                 }
             }
             Value::Object(pa)
         }
-        (_, b) => b,
+        (_, b) => b.clone(),
     }
 }
 
 /// Remove specific keys from an Object.
-pub fn almide_rt_value_omit(v: Value, keys: Vec<String>) -> Value {
+pub fn almide_rt_value_omit(v: &Value, keys: &[String]) -> Value {
     match v {
         Value::Object(pairs) => {
-            Value::Object(pairs.into_iter().filter(|(k, _)| !keys.contains(k)).collect())
+            Value::Object(pairs.iter().filter(|(k, _)| !keys.contains(k)).cloned().collect())
         }
-        other => other,
+        other => other.clone(),
     }
 }
 
 /// Convert snake_case key to camelCase.
-pub fn almide_rt_value_to_camel_case(v: Value) -> Value {
+pub fn almide_rt_value_to_camel_case(v: &Value) -> Value {
     almide_rt_value_rename_keys(v, |k| {
         let mut result = String::new();
         let mut capitalize_next = false;
@@ -173,7 +174,7 @@ pub fn almide_rt_value_to_camel_case(v: Value) -> Value {
 }
 
 /// Convert camelCase key to snake_case.
-pub fn almide_rt_value_to_snake_case(v: Value) -> Value {
+pub fn almide_rt_value_to_snake_case(v: &Value) -> Value {
     almide_rt_value_rename_keys(v, |k| {
         let mut result = String::new();
         for (i, c) in k.chars().enumerate() {

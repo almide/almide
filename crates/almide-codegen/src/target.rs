@@ -18,6 +18,7 @@ use super::pass_capture_clone::CaptureClonePass;
 use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_result_propagation::ResultPropagationPass;
+use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::pass_match_subject::MatchSubjectPass;
 use super::pass_effect_inference::EffectInferencePass;
@@ -71,6 +72,14 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(ConstFoldPass)
             // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
             .add(StreamFusionPass)
+            // @intrinsic(symbol) → RuntimeCall must run BEFORE
+            // BorrowInsertion so the subsequent pass can look up the
+            // borrow signature by the mangled runtime symbol
+            // (`almide_rt_<m>_<f>`) and wrap args with the right
+            // Borrow IR node. BorrowInsertion's signature table is
+            // seeded from bundled `@intrinsic` declarations at
+            // `infer_borrow_signatures` entry.
+            .add(IntrinsicLoweringPass)
             .add(BorrowInsertionPass)
             // TCO: convert self-recursive tail calls to loops AFTER BorrowInsertion
             // (so that param types are already finalized — avoids String/&str mismatch)
@@ -117,6 +126,8 @@ fn build_pipeline(target: Target) -> Pipeline {
 
         Target::Wasm => Pipeline::new()
             .add(ListPatternLoweringPass)
+            // @intrinsic(symbol) → RuntimeCall. See Rust pipeline comment.
+            .add(IntrinsicLoweringPass)
             // Verify all user-module calls resolve to known IrFunctions.
             // Runs early so violations surface before deep transformations.
             .add(ResolveCallsPass)

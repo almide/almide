@@ -30,6 +30,13 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             },
             ty: expr.ty.clone(), span: expr.span,
         },
+        IrExprKind::RuntimeCall { symbol, args } => IrExpr {
+            kind: IrExprKind::RuntimeCall {
+                symbol: *symbol,
+                args: args.iter().map(sub).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span,
+        },
         IrExprKind::BinOp { op, left, right } => IrExpr {
             kind: IrExprKind::BinOp {
                 op: *op,

@@ -20,76 +20,76 @@
 
 // ── Conversions ──
 
-@inline_rust("almide_rt_int_to_string({n})")
+@intrinsic("almide_rt_int_to_string")
 fn to_string(n: Int) -> String = _
 
-@inline_rust("almide_rt_int_to_hex({n})")
+@intrinsic("almide_rt_int_to_hex")
 fn to_hex(n: Int) -> String = _
 
-@inline_rust("almide_rt_int_parse(&*{s})")
+@intrinsic("almide_rt_int_parse")
 fn parse(s: String) -> Result[Int, String] = _
 
-@inline_rust("almide_rt_int_parse_hex(&*{s})")
+@intrinsic("almide_rt_int_parse_hex")
 fn from_hex(s: String) -> Result[Int, String] = _
 
-@inline_rust("almide_rt_int_to_float({n})")
+@intrinsic("almide_rt_int_to_float")
 fn to_float(n: Int) -> Float = _
 
-@inline_rust("almide_rt_int_bits_to_float({bits})")
+@intrinsic("almide_rt_int_bits_to_float")
 fn bits_to_float(bits: Int) -> Float = _
 
 // ── Arithmetic ──
 
-@inline_rust("almide_rt_int_abs({n})")
+@intrinsic("almide_rt_int_abs")
 fn abs(n: Int) -> Int = _
 
-@inline_rust("almide_rt_int_min({a}, {b})")
+@intrinsic("almide_rt_int_min")
 fn min(a: Int, b: Int) -> Int = _
 
-@inline_rust("almide_rt_int_max({a}, {b})")
+@intrinsic("almide_rt_int_max")
 fn max(a: Int, b: Int) -> Int = _
 
-@inline_rust("almide_rt_int_clamp({n}, {lo}, {hi})")
+@intrinsic("almide_rt_int_clamp")
 fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
 
 // ── Bitwise ──
 
-@inline_rust("almide_rt_int_band({a}, {b})")
+@intrinsic("almide_rt_int_band")
 fn band(a: Int, b: Int) -> Int = _
 
-@inline_rust("almide_rt_int_bor({a}, {b})")
+@intrinsic("almide_rt_int_bor")
 fn bor(a: Int, b: Int) -> Int = _
 
-@inline_rust("almide_rt_int_bxor({a}, {b})")
+@intrinsic("almide_rt_int_bxor")
 fn bxor(a: Int, b: Int) -> Int = _
 
-@inline_rust("almide_rt_int_bnot({a})")
+@intrinsic("almide_rt_int_bnot")
 fn bnot(a: Int) -> Int = _
 
-@inline_rust("almide_rt_int_bshl({a}, {n})")
+@intrinsic("almide_rt_int_bshl")
 fn bshl(a: Int, n: Int) -> Int = _
 
-@inline_rust("almide_rt_int_bshr({a}, {n})")
+@intrinsic("almide_rt_int_bshr")
 fn bshr(a: Int, n: Int) -> Int = _
 
 // ── Wrapping / masking ──
 
-@inline_rust("almide_rt_int_wrap_add({a}, {b}, {bits})")
+@intrinsic("almide_rt_int_wrap_add")
 fn wrap_add(a: Int, b: Int, bits: Int) -> Int = _
 
-@inline_rust("almide_rt_int_wrap_mul({a}, {b}, {bits})")
+@intrinsic("almide_rt_int_wrap_mul")
 fn wrap_mul(a: Int, b: Int, bits: Int) -> Int = _
 
-@inline_rust("almide_rt_int_rotate_right({a}, {n}, {bits})")
+@intrinsic("almide_rt_int_rotate_right")
 fn rotate_right(a: Int, n: Int, bits: Int) -> Int = _
 
-@inline_rust("almide_rt_int_rotate_left({a}, {n}, {bits})")
+@intrinsic("almide_rt_int_rotate_left")
 fn rotate_left(a: Int, n: Int, bits: Int) -> Int = _
 
-@inline_rust("almide_rt_int_to_u32({a})")
+@intrinsic("almide_rt_int_to_u32")
 fn to_u32(a: Int) -> Int = _
 
-@inline_rust("almide_rt_int_to_u8({a})")
+@intrinsic("almide_rt_int_to_u8")
 fn to_u8(a: Int) -> Int = _
 
 // ── Sized type conversions (Stage 3) ──

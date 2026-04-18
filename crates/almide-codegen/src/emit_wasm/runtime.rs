@@ -149,7 +149,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 
     // __int_to_string(n: i64) -> i32
     let itoa_ty = emitter.register_type(vec![ValType::I64], vec![ValType::I32]);
-    emitter.rt.int_to_string = emitter.register_func("__int_to_string", itoa_ty);
+    // Register under the Rust runtime-fn name so `@intrinsic(...)` lookups
+    // resolve directly (Phase 1e-3). Rust side already uses the same
+    // symbol, so this is the single-name contract.
+    emitter.rt.int_to_string = emitter.register_func("almide_rt_int_to_string", itoa_ty);
 
     // __float_to_string(f: f64) -> i32
     let ftoa_ty = emitter.register_type(vec![ValType::F64], vec![ValType::I32]);
@@ -211,11 +214,11 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 
     // __int_parse(s: i32) -> i32 (Result[Int, String])
     let int_parse_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
-    emitter.rt.int_parse = emitter.register_func("__int_parse", int_parse_ty);
+    emitter.rt.int_parse = emitter.register_func("almide_rt_int_parse", int_parse_ty);
 
     // __int_from_hex(s: i32) -> i32 (Result[Int, String])
     let int_from_hex_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
-    emitter.rt.int_from_hex = emitter.register_func("__int_from_hex", int_from_hex_ty);
+    emitter.rt.int_from_hex = emitter.register_func("almide_rt_int_parse_hex", int_from_hex_ty);
 
     // __float_parse(s: i32) -> i32 (Result[Float, String]: [tag:i32][f64 or str_ptr:i32] = 12 bytes)
     let float_parse_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
@@ -251,13 +254,13 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 
     // base64 / hex runtime helpers. All take (bytes_or_str_ptr: i32) -> ptr: i32.
     let i32_i32_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
-    emitter.rt.base64_encode = emitter.register_func("__base64_encode", i32_i32_ty);
-    emitter.rt.base64_decode = emitter.register_func("__base64_decode", i32_i32_ty);
-    emitter.rt.base64_encode_url = emitter.register_func("__base64_encode_url", i32_i32_ty);
-    emitter.rt.base64_decode_url = emitter.register_func("__base64_decode_url", i32_i32_ty);
-    emitter.rt.hex_encode = emitter.register_func("__hex_encode", i32_i32_ty);
-    emitter.rt.hex_encode_upper = emitter.register_func("__hex_encode_upper", i32_i32_ty);
-    emitter.rt.hex_decode = emitter.register_func("__hex_decode", i32_i32_ty);
+    emitter.rt.base64_encode = emitter.register_func("almide_rt_base64_encode", i32_i32_ty);
+    emitter.rt.base64_decode = emitter.register_func("almide_rt_base64_decode", i32_i32_ty);
+    emitter.rt.base64_encode_url = emitter.register_func("almide_rt_base64_encode_url", i32_i32_ty);
+    emitter.rt.base64_decode_url = emitter.register_func("almide_rt_base64_decode_url", i32_i32_ty);
+    emitter.rt.hex_encode = emitter.register_func("almide_rt_hex_encode", i32_i32_ty);
+    emitter.rt.hex_encode_upper = emitter.register_func("almide_rt_hex_encode_upper", i32_i32_ty);
+    emitter.rt.hex_decode = emitter.register_func("almide_rt_hex_decode", i32_i32_ty);
 
     // String stdlib runtime (delegated to rt_string module)
     super::rt_string::register(emitter);

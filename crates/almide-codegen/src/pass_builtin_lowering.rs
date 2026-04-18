@@ -323,6 +323,22 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             template,
             args: args.into_iter().map(|(n, a)| (n, rewrite_expr(a))).collect(),
         },
+        // Traverse RuntimeCall args so `panic(...)` / `assert_eq(...)` etc.
+        // nested inside a `@intrinsic` fn (e.g. `assert_throws(|| panic(...), msg)`)
+        // get lowered to their RustMacro form instead of staying as free fn calls.
+        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
+            symbol,
+            args: args.into_iter().map(rewrite_expr).collect(),
+        },
+        // Recurse through ownership wrappers inserted by BorrowInsertion /
+        // CloneInsertion so derive-generated `__encode_*` calls living
+        // inside a `Borrow { List { Tuple { __encode_* } } }` spine still
+        // get rewritten to `almide_rt_*`.
+        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow {
+            expr: Box::new(rewrite_expr(*expr)), as_str, mutable,
+        },
+        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_expr(*expr)) },
         other => other,
     };
 

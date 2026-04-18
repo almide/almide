@@ -11,38 +11,38 @@ type ProcessStatus = {
   stderr: String,
 }
 
-@inline_rust("almide_rt_process_exec({cmd}, {args})")
+@intrinsic("almide_rt_process_exec")
 effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
-@inline_rust("almide_rt_process_exit({code})")
+@intrinsic("almide_rt_process_exit")
 effect fn exit(code: Int) -> Never = _
 
-@inline_rust("almide_rt_process_args()")
+@intrinsic("almide_rt_process_args")
 fn args() -> List[String] = _
 
-@inline_rust("almide_rt_process_stdin_lines()")
+@intrinsic("almide_rt_process_stdin_lines")
 effect fn stdin_lines() -> Result[List[String], String] = _
 
-@inline_rust("almide_rt_process_exec_in({dir}, {cmd}, {args})")
+@intrinsic("almide_rt_process_exec_in")
 effect fn exec_in(dir: String, cmd: String, args: List[String]) -> Result[String, String] = _
 
-@inline_rust("almide_rt_process_exec_with_stdin({cmd}, {args}, {input})")
+@intrinsic("almide_rt_process_exec_with_stdin")
 effect fn exec_with_stdin(cmd: String, args: List[String], input: String) -> Result[String, String] = _
 
-@inline_rust("almide_rt_process_exec_status({cmd}, {args})")
+@intrinsic("almide_rt_process_exec_status")
 effect fn exec_status(cmd: String, args: List[String]) -> Result[ProcessStatus, String] = _
 
-@inline_rust("almide_rt_process_pid()")
+@intrinsic("almide_rt_process_pid")
 fn pid() -> Int = _
 
-@inline_rust("almide_rt_process_env({key})")
+@intrinsic("almide_rt_process_env")
 fn env(key: String) -> Option[String] = _
 
-@inline_rust("almide_rt_process_spawn({cmd}, {args})")
+@intrinsic("almide_rt_process_spawn")
 effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
 
-@inline_rust("almide_rt_process_kill({pid}, {signal})")
+@intrinsic("almide_rt_process_kill")
 effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 
-@inline_rust("almide_rt_process_is_alive({pid})")
+@intrinsic("almide_rt_process_is_alive")
 fn is_alive(pid: Int) -> Bool = _

@@ -14,59 +14,59 @@
 
 // ── Conversions ──
 
-@inline_rust("almide_rt_float_to_string({n})")
+@intrinsic("almide_rt_float_to_string")
 fn to_string(n: Float) -> String = _
 
-@inline_rust("almide_rt_float_to_int({n})")
+@intrinsic("almide_rt_float_to_int")
 fn to_int(n: Float) -> Int = _
 
-@inline_rust("almide_rt_float_from_int({n})")
+@intrinsic("almide_rt_float_from_int")
 fn from_int(n: Int) -> Float = _
 
-@inline_rust("almide_rt_float_parse({s})")
+@intrinsic("almide_rt_float_parse")
 fn parse(s: String) -> Result[Float, String] = _
 
-@inline_rust("almide_rt_float_to_fixed({n}, {decimals})")
+@intrinsic("almide_rt_float_to_fixed")
 fn to_fixed(n: Float, decimals: Int) -> String = _
 
-@inline_rust("almide_rt_float_to_bits({f})")
+@intrinsic("almide_rt_float_to_bits")
 fn to_bits(f: Float) -> Int = _
 
 // ── Arithmetic (inlined as native Rust method calls) ──
 
-@inline_rust("({n}).sqrt()")
+@intrinsic("almide_rt_float_sqrt")
 fn sqrt(n: Float) -> Float = _
 
-@inline_rust("({n}).abs()")
+@intrinsic("almide_rt_float_abs")
 fn abs(n: Float) -> Float = _
 
-@inline_rust("({n}).floor()")
+@intrinsic("almide_rt_float_floor")
 fn floor(n: Float) -> Float = _
 
-@inline_rust("({n}).ceil()")
+@intrinsic("almide_rt_float_ceil")
 fn ceil(n: Float) -> Float = _
 
-@inline_rust("({n}).round()")
+@intrinsic("almide_rt_float_round")
 fn round(n: Float) -> Float = _
 
-@inline_rust("almide_rt_float_min({a}, {b})")
+@intrinsic("almide_rt_float_min")
 fn min(a: Float, b: Float) -> Float = _
 
-@inline_rust("almide_rt_float_max({a}, {b})")
+@intrinsic("almide_rt_float_max")
 fn max(a: Float, b: Float) -> Float = _
 
-@inline_rust("almide_rt_float_clamp({n}, {lo}, {hi})")
+@intrinsic("almide_rt_float_clamp")
 fn clamp(n: Float, lo: Float, hi: Float) -> Float = _
 
-@inline_rust("almide_rt_float_sign({n})")
+@intrinsic("almide_rt_float_sign")
 fn sign(n: Float) -> Float = _
 
 // ── Classification ──
 
-@inline_rust("({n}).is_nan()")
+@intrinsic("almide_rt_float_is_nan")
 fn is_nan(n: Float) -> Bool = _
 
-@inline_rust("({n}).is_infinite()")
+@intrinsic("almide_rt_float_is_infinite")
 fn is_infinite(n: Float) -> Bool = _
 
 // ── Sized type conversions (Stage 3) ──

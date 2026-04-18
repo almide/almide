@@ -7,38 +7,38 @@
 // ride the generic lambda-prep in `pass_stdlib_lowering` — same
 // clone-binding logic as the TOML path's `ArgTransform::LambdaClone`.
 
-@inline_rust("almide_rt_option_map({o}, {f})")
+@intrinsic("almide_rt_option_map")
 fn map[A, B](o: Option[A], f: (A) -> B) -> Option[B] = _
 
-@inline_rust("almide_rt_option_and_then({o}, {f})")
+@intrinsic("almide_rt_option_and_then")
 fn flat_map[A, B](o: Option[A], f: (A) -> Option[B]) -> Option[B] = _
 
-@inline_rust("almide_rt_option_flatten({o})")
+@intrinsic("almide_rt_option_flatten")
 fn flatten[A](o: Option[Option[A]]) -> Option[A] = _
 
-@inline_rust("almide_rt_option_unwrap_or({o}, {default})")
+@intrinsic("almide_rt_option_unwrap_or")
 fn unwrap_or[A](o: Option[A], default: A) -> A = _
 
-@inline_rust("almide_rt_option_unwrap_or_else({o}, {f})")
+@intrinsic("almide_rt_option_unwrap_or_else")
 fn unwrap_or_else[A](o: Option[A], f: () -> A) -> A = _
 
-@inline_rust("almide_rt_option_is_some(&{o})")
+@intrinsic("almide_rt_option_is_some")
 fn is_some[A](o: Option[A]) -> Bool = _
 
-@inline_rust("almide_rt_option_is_none(&{o})")
+@intrinsic("almide_rt_option_is_none")
 fn is_none[A](o: Option[A]) -> Bool = _
 
-@inline_rust("almide_rt_option_to_result({o}, {msg})")
+@intrinsic("almide_rt_option_to_result")
 fn to_result[A](o: Option[A], msg: String) -> Result[A, String] = _
 
-@inline_rust("almide_rt_option_filter({o}, {f})")
+@intrinsic("almide_rt_option_filter")
 fn filter[A](o: Option[A], f: (A) -> Bool) -> Option[A] = _
 
-@inline_rust("almide_rt_option_zip({a}, {b})")
+@intrinsic("almide_rt_option_zip")
 fn zip[A, B](a: Option[A], b: Option[B]) -> Option[(A, B)] = _
 
-@inline_rust("almide_rt_option_or_else({o}, {f})")
+@intrinsic("almide_rt_option_or_else")
 fn or_else[A](o: Option[A], f: () -> Option[A]) -> Option[A] = _
 
-@inline_rust("almide_rt_option_to_list({o})")
+@intrinsic("almide_rt_option_to_list")
 fn to_list[A](o: Option[A]) -> List[A] = _

@@ -8,23 +8,23 @@
 // fns stay as plain `fn` (matching the existing TOML contract where
 // the sole difference was an omitted effect-context check).
 
-@inline_rust("almide_rt_io_read_line()")
+@intrinsic("almide_rt_io_read_line")
 effect fn read_line() -> String = _
 
-@inline_rust("almide_rt_io_print(&*{s})")
+@intrinsic("almide_rt_io_print")
 effect fn print(s: String) -> Unit = _
 
-@inline_rust("almide_rt_io_read_all()")
+@intrinsic("almide_rt_io_read_all")
 effect fn read_all() -> String = _
 
-@inline_rust("almide_rt_io_read_byte()")
+@intrinsic("almide_rt_io_read_byte")
 fn read_byte() -> Int = _
 
-@inline_rust("almide_rt_io_read_n_bytes({n})")
+@intrinsic("almide_rt_io_read_n_bytes")
 fn read_n_bytes(n: Int) -> List[Int] = _
 
-@inline_rust("almide_rt_io_write_bytes(&{data})")
+@intrinsic("almide_rt_io_write_bytes")
 fn write_bytes(data: List[Int]) -> Unit = _
 
-@inline_rust("almide_rt_io_write(&{data})")
+@intrinsic("almide_rt_io_write")
 fn write(data: Bytes) -> Unit = _

@@ -65,6 +65,9 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
             }
             for a in args { count_uses_in_expr(a, table); }
         }
+        IrExprKind::RuntimeCall { args, .. } => {
+            for a in args { count_uses_in_expr(a, table); }
+        }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements }
         | IrExprKind::Fan { exprs: elements } => {
             for e in elements { count_uses_in_expr(e, table); }
@@ -313,7 +316,8 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
             bump_vars_in_expr(subject, locals, table);
             for a in arms { bump_vars_in_expr(&a.body, locals, table); }
         }
-        IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } => { for a in args { bump_vars_in_expr(a, locals, table); } }
+        IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. }
+        | IrExprKind::RuntimeCall { args, .. } => { for a in args { bump_vars_in_expr(a, locals, table); } }
         IrExprKind::BinOp { left, right, .. } => {
             bump_vars_in_expr(left, locals, table);
             bump_vars_in_expr(right, locals, table);

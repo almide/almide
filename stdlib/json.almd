@@ -17,10 +17,10 @@
 // Almide-level signature returns `Result[Value, String]`, so callers
 // propagate via `!` / `?` / match.
 
-@inline_rust("almide_rt_json_parse({text})")
+@intrinsic("almide_rt_json_parse")
 fn parse(text: String) -> Result[Value, String] = _
 
-@inline_rust("almide_rt_json_stringify({v})")
+@intrinsic("almide_rt_json_stringify")
 fn stringify(v: Value) -> String = _
 
 @inline_rust("almide_json_get(&{j}, &{key})")
@@ -38,7 +38,7 @@ fn from_int(n: Int) -> Value = _
 @inline_rust("almide_json_from_bool({b})")
 fn from_bool(b: Bool) -> Value = _
 
-@inline_rust("almide_rt_value_null()")
+@intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
 @inline_rust("almide_json_array({items})")
@@ -89,13 +89,13 @@ fn as_array(j: Value) -> Option[List[Value]] = _
 
 // ── path API ──
 
-@inline_rust("almide_rt_json_root()")
+@intrinsic("almide_rt_json_root")
 fn root() -> JsonPath = _
 
-@inline_rust("almide_rt_json_field({path}, {name})")
+@intrinsic("almide_rt_json_field")
 fn field(path: JsonPath, name: String) -> JsonPath = _
 
-@inline_rust("almide_rt_json_index({path}, {i})")
+@intrinsic("almide_rt_json_index")
 fn index(path: JsonPath, i: Int) -> JsonPath = _
 
 @inline_rust("almide_json_get_path(&{j}, &{path})")

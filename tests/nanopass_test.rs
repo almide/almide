@@ -503,32 +503,35 @@ mod stdlib_lowering {
 
     #[test]
     fn module_call_becomes_inline_rust() {
-        // string.len(s) → InlineRust { "almide_rt_string_len(&*{s})", args=[(s, _)] }
-        // After Stage 4a the `string` module lives in `stdlib/string.almd`
-        // with `@inline_rust` templates. `StdlibLoweringPass` intercepts
-        // bundled module calls before the legacy TOML/`arg_transforms`
-        // path and emits `IrExprKind::InlineRust` with the template plus
-        // param-keyed args. The walker substitutes `{placeholder}` at
-        // emit time.
+        // string.slice(s, 0, 0) → InlineRust { "almide_rt_string_slice(&*{s}, ..)", args=[(s, _), ..] }
+        // `string.slice` is one of the remaining `@inline_rust` fns
+        // (non-primitive signature with `Option<usize>`), so it still
+        // takes the `StdlibLoweringPass` → `InlineRust` path. Most other
+        // stdlib fns now use `@intrinsic` and are lowered by
+        // `IntrinsicLoweringPass` into `RuntimeCall` before this pass.
         let mut vt = VarTable::new();
         let p = mk_param(&mut vt, "s", Ty::String);
         let var_id = p.var;
 
         let body = mk_expr(IrExprKind::Call {
-            target: CallTarget::Module { module: sym("string"), func: sym("len") },
-            args: vec![mk_expr(IrExprKind::Var { id: var_id }, Ty::String)],
+            target: CallTarget::Module { module: sym("string"), func: sym("slice") },
+            args: vec![
+                mk_expr(IrExprKind::Var { id: var_id }, Ty::String),
+                mk_expr(IrExprKind::LitInt { value: 0 }, Ty::Int),
+                mk_expr(IrExprKind::LitInt { value: 0 }, Ty::Int),
+            ],
             type_args: vec![],
-        }, Ty::Int);
+        }, Ty::String);
 
-        let func = mk_fn("test_len", vec![p], Ty::Int, body, false);
+        let func = mk_fn("test_slice", vec![p], Ty::String, body, false);
         let program = mk_program(vec![func], vt);
         let result = run_pass(&StdlibLoweringPass, program, Target::Rust);
 
         match &result.functions[0].body.kind {
             IrExprKind::InlineRust { template, args } => {
-                assert!(template.contains("almide_rt_string_len"),
+                assert!(template.contains("almide_rt_string_slice"),
                     "expected runtime fn in template, got: {}", template);
-                assert_eq!(args.len(), 1, "expected one param-keyed arg");
+                assert_eq!(args.len(), 3, "expected three param-keyed args");
                 assert_eq!(args[0].0.as_str(), "s");
             }
             other => panic!("Expected InlineRust, got {:?}", other),

@@ -77,6 +77,9 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
             }
             for a in args { v.visit_expr(a); }
         }
+        IrExprKind::RuntimeCall { args, .. } => {
+            for a in args { v.visit_expr(a); }
+        }
 
         // ── Collections ──
         IrExprKind::List { elements } | IrExprKind::Tuple { elements }

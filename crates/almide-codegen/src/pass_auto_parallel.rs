@@ -146,6 +146,20 @@ fn is_pure_expr(
             args.iter().all(|a| is_pure_expr(a, local_vars, effect_fns, mutable_vars))
         }
 
+        // Resolved runtime call: purity follows the same effect-module
+        // rules as Module calls. `almide_rt_fs_*` / `almide_rt_http_*` /
+        // etc. are effects and block parallelization.
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let name = symbol.as_str();
+            if let Some(rest) = name.strip_prefix("almide_rt_") {
+                let module = rest.split('_').next().unwrap_or("");
+                if matches!(module, "fs" | "http" | "env" | "process" | "time") {
+                    return false;
+                }
+            }
+            args.iter().all(|a| is_pure_expr(a, local_vars, effect_fns, mutable_vars))
+        }
+
         // Literals: always pure
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } |
         IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } |

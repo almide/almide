@@ -7,63 +7,63 @@
 
 // ── basic accessors & construction ──
 
-@inline_rust("almide_rt_set_new()")
+@intrinsic("almide_rt_set_new")
 fn new[A]() -> Set[A] = _
 
-@inline_rust("almide_rt_set_from_list({xs})")
+@intrinsic("almide_rt_set_from_list")
 fn from_list[A](xs: List[A]) -> Set[A] = _
 
-@inline_rust("almide_rt_set_insert({s}, {value})")
+@intrinsic("almide_rt_set_insert")
 fn insert[A](s: Set[A], value: A) -> Set[A] = _
 
-@inline_rust("almide_rt_set_remove({s}, &{value})")
+@intrinsic("almide_rt_set_remove")
 fn remove[A](s: Set[A], value: A) -> Set[A] = _
 
-@inline_rust("almide_rt_set_contains(&{s}, &{value})")
+@intrinsic("almide_rt_set_contains")
 fn contains[A](s: Set[A], value: A) -> Bool = _
 
-@inline_rust("almide_rt_set_len(&{s})")
+@intrinsic("almide_rt_set_len")
 fn len[A](s: Set[A]) -> Int = _
 
-@inline_rust("almide_rt_set_is_empty(&{s})")
+@intrinsic("almide_rt_set_is_empty")
 fn is_empty[A](s: Set[A]) -> Bool = _
 
-@inline_rust("almide_rt_set_to_list({s})")
+@intrinsic("almide_rt_set_to_list")
 fn to_list[A](s: Set[A]) -> List[A] = _
 
 // ── set algebra ──
 
-@inline_rust("almide_rt_set_union(&{a}, &{b})")
+@intrinsic("almide_rt_set_union")
 fn union[A](a: Set[A], b: Set[A]) -> Set[A] = _
 
-@inline_rust("almide_rt_set_intersection(&{a}, &{b})")
+@intrinsic("almide_rt_set_intersection")
 fn intersection[A](a: Set[A], b: Set[A]) -> Set[A] = _
 
-@inline_rust("almide_rt_set_difference(&{a}, &{b})")
+@intrinsic("almide_rt_set_difference")
 fn difference[A](a: Set[A], b: Set[A]) -> Set[A] = _
 
-@inline_rust("almide_rt_set_symmetric_difference(&{a}, &{b})")
+@intrinsic("almide_rt_set_symmetric_difference")
 fn symmetric_difference[A](a: Set[A], b: Set[A]) -> Set[A] = _
 
-@inline_rust("almide_rt_set_is_subset(&{a}, &{b})")
+@intrinsic("almide_rt_set_is_subset")
 fn is_subset[A](a: Set[A], b: Set[A]) -> Bool = _
 
-@inline_rust("almide_rt_set_is_disjoint(&{a}, &{b})")
+@intrinsic("almide_rt_set_is_disjoint")
 fn is_disjoint[A](a: Set[A], b: Set[A]) -> Bool = _
 
 // ── closure-bearing ──
 
-@inline_rust("almide_rt_set_filter(&{s}, {f})")
+@intrinsic("almide_rt_set_filter")
 fn filter[A](s: Set[A], f: (A) -> Bool) -> Set[A] = _
 
-@inline_rust("almide_rt_set_map({s}, {f})")
+@intrinsic("almide_rt_set_map")
 fn map[A, B](s: Set[A], f: (A) -> B) -> Set[B] = _
 
-@inline_rust("almide_rt_set_fold({s}, {init}, {f})")
+@intrinsic("almide_rt_set_fold")
 fn fold[A, B](s: Set[A], init: B, f: (B, A) -> B) -> B = _
 
-@inline_rust("almide_rt_set_any(&{s}, {f})")
+@intrinsic("almide_rt_set_any")
 fn any[A](s: Set[A], f: (A) -> Bool) -> Bool = _
 
-@inline_rust("almide_rt_set_all(&{s}, {f})")
+@intrinsic("almide_rt_set_all")
 fn all[A](s: Set[A], f: (A) -> Bool) -> Bool = _

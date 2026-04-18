@@ -18,22 +18,22 @@ fn add_minutes(ts: Int, n: Int) -> Int = _
 @inline_rust("{ts} + {n}")
 fn add_seconds(ts: Int, n: Int) -> Int = _
 
-@inline_rust("almide_rt_datetime_day({ts})")
+@intrinsic("almide_rt_datetime_day")
 fn day(ts: Int) -> Int = _
 
 @inline_rust("{a} - {b}")
 fn diff_seconds(a: Int, b: Int) -> Int = _
 
-@inline_rust("almide_rt_datetime_format({ts}, {pattern})")
+@intrinsic("almide_rt_datetime_format")
 fn format(ts: Int, pattern: String) -> String = _
 
-@inline_rust("almide_rt_datetime_from_parts({y}, {m}, {d}, {h}, {min}, {s})")
+@intrinsic("almide_rt_datetime_from_parts")
 fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
 
 @inline_rust("{seconds}")
 fn from_unix(seconds: Int) -> Int = _
 
-@inline_rust("almide_rt_datetime_hour({ts})")
+@intrinsic("almide_rt_datetime_hour")
 fn hour(ts: Int) -> Int = _
 
 @inline_rust("{a} > {b}")
@@ -42,29 +42,29 @@ fn is_after(a: Int, b: Int) -> Bool = _
 @inline_rust("{a} < {b}")
 fn is_before(a: Int, b: Int) -> Bool = _
 
-@inline_rust("almide_rt_datetime_minute({ts})")
+@intrinsic("almide_rt_datetime_minute")
 fn minute(ts: Int) -> Int = _
 
-@inline_rust("almide_rt_datetime_month({ts})")
+@intrinsic("almide_rt_datetime_month")
 fn month(ts: Int) -> Int = _
 
-@inline_rust("almide_rt_datetime_now()")
+@intrinsic("almide_rt_datetime_now")
 fn now() -> Int = _
 
-@inline_rust("almide_rt_datetime_parse_iso({s})")
+@intrinsic("almide_rt_datetime_parse_iso")
 fn parse_iso(s: String) -> Result[Int, String] = _
 
-@inline_rust("almide_rt_datetime_second({ts})")
+@intrinsic("almide_rt_datetime_second")
 fn second(ts: Int) -> Int = _
 
-@inline_rust("almide_rt_datetime_to_iso({ts})")
+@intrinsic("almide_rt_datetime_to_iso")
 fn to_iso(ts: Int) -> String = _
 
 @inline_rust("{ts}")
 fn to_unix(ts: Int) -> Int = _
 
-@inline_rust("almide_rt_datetime_weekday({ts})")
+@intrinsic("almide_rt_datetime_weekday")
 fn weekday(ts: Int) -> String = _
 
-@inline_rust("almide_rt_datetime_year({ts})")
+@intrinsic("almide_rt_datetime_year")
 fn year(ts: Int) -> Int = _
