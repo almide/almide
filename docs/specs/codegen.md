@@ -103,7 +103,10 @@ pub trait NanoPass: std::fmt::Debug {
 Passes compose into a `Pipeline`. The pipeline runner:
 - Skips passes not relevant to the current target
 - Validates declared dependencies (panics if a dependency has not executed)
-- Optionally verifies IR integrity between passes (`ALMIDE_VERIFY_IR=1`)
+- Verifies IR integrity and declared `Postcondition`s between passes on every
+  build — violations panic in debug and print as diagnostics in release. No
+  opt-in env var (`ALMIDE_CHECK_IR` / `ALMIDE_VERIFY_IR` removed in
+  v0.14.7-phase3.2); `expr.ty` is trustworthy by contract
 
 ### Rust Pipeline (in order)
 

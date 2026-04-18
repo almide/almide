@@ -8,8 +8,8 @@
 //!
 //! Walks every `CallTarget::Module { module, func }` and either:
 //! - **Verifies**: a TOML-backed stdlib fn or a user-module fn exists; if
-//!   neither matches, emits a postcondition violation (compile-time ICE
-//!   under `ALMIDE_CHECK_IR=1`).
+//!   neither matches, emits a postcondition violation — a hard contract
+//!   (panic in debug, diagnostic in release; S2 flip).
 //! - **Rewrites**: a bundled-Almide stdlib fn (`(m, f)` not in TOML, but
 //!   present as `IrFunction` inside `program.modules[m]`) → rewrite the
 //!   call target to `CallTarget::Named { name: "almide_rt_<m>_<f>" }`,

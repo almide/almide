@@ -306,18 +306,22 @@ arc picks up at `active/mlir-backend-adoption.md`.
 **見積**: 2-3h、1 commit。#7 (stub 廃止) の前にやる必要がある
 (option/result で引っかかるため)。
 
-### Step S2 — ConcretizeTypes hard postcondition `0.14.7-phase3.1`
+### Step S2 — ConcretizeTypes hard postcondition `0.14.7-phase3.2` *(shipped)*
 
-codegen-ideal-form #4 の完成。既存の `ALMIDE_AUDIT_TYPES=1` soft audit を
-hard postcondition に flip:
+codegen-ideal-form #4 の完成。phase3.1 で audit を常時実行 + `ALMIDE_CHECK_IR`
+での panic escalate まで到達、phase3.2 で **flip to hard** を完了:
 
-- 既知残 gap を close (list.zip 系 `Option[Unknown]` 6件の specific 源泉に
-  対処)
-- debug build で panic、release build で diagnostic error
-- env var を削除
-- nn モジュールを含む regression sweep
+- spec/ WASM sweep の ConcretizeTypes audit: 3 class → 0 (PRs #194–#198)
+  - list.zip 系 `Option[Unknown]` 含む 15-21 件の実ケースを
+    empty-list elem ty / ResultErr Ok slot / fold acc back-prop / Match
+    subject → pattern bindings / OpenRecord skip の組合せで closure
+- `pass.rs` の `ALMIDE_CHECK_IR` / `ALMIDE_VERIFY_IR` gating 削除
+- debug build で IR verify + Postcondition violation を常時 panic、
+  release build では diagnostic (非 panic) として stderr に出す
+- CHANGELOG 「`expr.ty` is now trustworthy by contract」で entry
 
-**見積**: 2h、1 commit。S3 の safety net。
+残 WASM lifted-lambda TypeVar は `ClosureConversion` 由来の pass boundary
+issue で、S3 (pass_resolve_calls Phase 1b-c) で自然に解消する見込み。
 
 ### Step S3 — pass_resolve_calls Phase 1b-c + stub 廃止 `0.14.7-phase3.2`
 
