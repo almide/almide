@@ -1,0 +1,89 @@
+// MatrixFusionPass — `softmax_rows(scale(mul(Q, Kt), s))` fuses into
+// matrix.attention_weights(Q, Kt, s). Guards:
+//   1. Nested expression form rewrites correctly.
+//   2. Let-split form (3 intermediate bindings) also rewrites.
+//   3. Safety: fusion skipped when intermediate var is used elsewhere.
+//   4. Non-square shapes (typical seq_len × head_dim) stay correct.
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
+  let d = if a > b then a - b else b - a
+  d < tol
+}
+
+test "attention_weights: rows sum to 1 on ones input" {
+  // For Q=K=ones(r,d), Q @ K^T = d * ones(r,r). After scale s and
+  // softmax along each row, every row becomes uniform 1/r.
+  let q = matrix.ones(4, 8)
+  let kt = matrix.ones(8, 4)  // K^T shape (d, r)
+  let s = 0.125
+
+  let weights = matrix.softmax_rows(matrix.scale(matrix.mul(q, kt), s))
+  let (rows, cols) = matrix.shape(weights)
+  assert_eq(rows, 4)
+  assert_eq(cols, 4)
+  // Uniform: each element = 1/4 = 0.25
+  assert(approx_eq(matrix.get(weights, 0, 0), 0.25, 0.00001))
+  assert(approx_eq(matrix.get(weights, 3, 2), 0.25, 0.00001))
+}
+
+test "let-split attention chain fuses to same result" {
+  let q = matrix.ones(4, 8)
+  let kt = matrix.ones(8, 4)
+
+  // Let-split form — Phase C-style use-def chain fusion kicks in.
+  let s = matrix.mul(q, kt)
+  let t = matrix.scale(s, 0.125)
+  let w = matrix.softmax_rows(t)
+
+  assert(approx_eq(matrix.get(w, 0, 0), 0.25, 0.00001))
+  assert(approx_eq(matrix.get(w, 2, 3), 0.25, 0.00001))
+}
+
+test "attention_weights skipped when intermediate var is used elsewhere" {
+  let q = matrix.ones(3, 6)
+  let kt = matrix.ones(6, 3)
+
+  let s = matrix.mul(q, kt)
+  let t = matrix.scale(s, 0.5)
+  let w = matrix.softmax_rows(t)
+
+  // External ref to `s` must prevent fusion. If fusion fires anyway,
+  // `s` would be dropped and this assertion would fail at codegen.
+  let raw_dot = matrix.get(s, 0, 0)
+  let weight = matrix.get(w, 0, 0)
+
+  assert_eq(raw_dot, 6.0)  // Q @ K^T on ones with d=6 gives 6 per cell
+  assert(approx_eq(weight, 0.33333, 0.0001))  // 1/3 for rows=3
+}
+
+test "attention_weights: non-square — seq=4 × d=8" {
+  // Two distinct rows in Q so softmax output differs per row.
+  let q = matrix.from_lists([
+    [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+  ])
+  let kt = matrix.from_lists([
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0],
+    [0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0]
+  ])
+
+  // Q @ K^T gives an identity-like 4x4 with 1s on the diagonal.
+  // scale by 1.0 leaves it as-is. softmax_rows: each row has a 1 and
+  // three 0s, so softmax([1,0,0,0]) ≈ [0.475, 0.175, 0.175, 0.175].
+  let w = matrix.softmax_rows(matrix.scale(matrix.mul(q, kt), 1.0))
+  let (rr, rc) = matrix.shape(w)
+  assert_eq(rr, 4)
+  assert_eq(rc, 4)
+  // Diagonal entry is the largest; off-diagonal is the same for the
+  // other three positions.
+  assert(approx_eq(matrix.get(w, 0, 0), 0.4754, 0.001))
+  assert(approx_eq(matrix.get(w, 0, 1), 0.1749, 0.001))
+}

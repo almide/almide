@@ -275,6 +275,16 @@ pub fn almide_rt_matrix_fused_gemm_bias_scale_gelu(
     almide_rt_matrix_gelu(&scaled)
 }
 
+pub fn almide_rt_matrix_attention_weights(
+    q: &AlmideMatrix,
+    kt: &AlmideMatrix,
+    scale: f64,
+) -> AlmideMatrix {
+    let prod = almide_rt_matrix_mul(q, kt);
+    let scaled = almide_rt_matrix_scale(&prod, scale);
+    almide_rt_matrix_softmax_rows(&scaled)
+}
+
 pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideMatrix> {
     let n = n as usize;
     if m.is_empty() || n == 0 { return vec![]; }
@@ -394,6 +404,27 @@ pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias
         }
     }
     out
+}
+
+pub fn almide_rt_matrix_linear_row_gelu(
+    x: &AlmideMatrix,
+    weight: &AlmideMatrix,
+    bias: &[f64],
+) -> AlmideMatrix {
+    let lin = almide_rt_matrix_linear_row(x, weight, bias);
+    almide_rt_matrix_gelu(&lin)
+}
+
+pub fn almide_rt_matrix_pre_norm_linear(
+    x: &AlmideMatrix,
+    gamma: &[f64],
+    beta: &[f64],
+    eps: f64,
+    weight: &AlmideMatrix,
+    bias: &[f64],
+) -> AlmideMatrix {
+    let normed = almide_rt_matrix_layer_norm_rows(x, gamma, beta, eps);
+    almide_rt_matrix_linear_row(&normed, weight, bias)
 }
 
 pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatrix) -> AlmideMatrix {

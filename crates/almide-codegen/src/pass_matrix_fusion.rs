@@ -224,6 +224,44 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
         changed = true;
     }
 
+    // Attention weights fusion: `softmax_rows(scale(mul(Q, Kt), s))`
+    // → `attention_weights(Q, Kt, s)`. The scaled-dot-product attention
+    // numerator — one of the two hottest chains in any transformer.
+    if let Some(new_kind) = try_fuse_attention_weights(&expr.kind) {
+        expr.kind = new_kind;
+        changed = true;
+    }
+
+    // FFN first sub-layer fusion: `gelu(linear_row(x, W, b))` →
+    // `linear_row_gelu(x, W, b)`. Single cblas_dgemm (transB=Trans, C
+    // bias-seeded) plus in-place GELU.
+    if let Some(new_kind) = try_fuse_linear_row_gelu(&expr.kind) {
+        expr.kind = new_kind;
+        changed = true;
+    }
+
+    // Pre-norm linear fusion:
+    // `linear_row(layer_norm_rows(x, γ, β, ε), W, b)` → `pre_norm_linear(x, γ, β, ε, W, b)`.
+    // Transformer pre-norm first sub-layer. Fuses the LN row sweep and
+    // the linear projection into one pass that calls cblas_dgemm directly
+    // and skips burn's linear_row dispatch on the Small path.
+    if let Some(new_kind) = try_fuse_pre_norm_linear(&expr.kind) {
+        expr.kind = new_kind;
+        changed = true;
+    }
+
+    // Scaled-matmul fusion:
+    //   matrix.mul(a, matrix.scale(b, s)) → matrix.mul_scaled(a, s, b)
+    //   matrix.mul(matrix.scale(a, s), b) → matrix.mul_scaled(a, s, b)
+    // Drops the intermediate scaled allocation — the scalar α flows into
+    // cblas_dgemm's alpha parameter directly at no extra FLOPs (up to
+    // the FUSED_ALPHA_MAX=512 crossover; above that the runtime falls
+    // back to scale+mul).
+    if let Some(new_kind) = try_fuse_mul_scaled(&expr.kind) {
+        expr.kind = new_kind;
+        changed = true;
+    }
+
     changed
 }
 
@@ -272,6 +310,135 @@ fn try_fuse_gemm_bias_scale_gelu(kind: &IrExprKind) -> Option<IrExprKind> {
             func: sym("fused_gemm_bias_scale_gelu"),
         },
         args: vec![a.clone(), b.clone(), bias.clone(), alpha.clone()],
+        type_args: vec![],
+    })
+}
+
+/// Pattern-match `matrix.mul(a, matrix.scale(b, s))` and its mirror
+/// `matrix.mul(matrix.scale(a, s), b)` → `matrix.mul_scaled(a, s, b)`.
+/// The runtime folds the scalar into cblas_dgemm's `alpha` parameter,
+/// so the intermediate `scale` allocation and pass vanish. Works up to
+/// 512² — above that, the runtime itself reverts to scale-then-mul
+/// because the alpha!=1 BLAS penalty is worse than the alloc cost.
+fn try_fuse_mul_scaled(kind: &IrExprKind) -> Option<IrExprKind> {
+    let (lhs, rhs) = match kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "mul" && args.len() == 2 =>
+        {
+            (&args[0], &args[1])
+        }
+        _ => return None,
+    };
+
+    // Case 1: mul(a, scale(b, s))
+    if let Some((b_inner, s)) = match_matrix_scale(rhs) {
+        return Some(IrExprKind::Call {
+            target: CallTarget::Module {
+                module: sym("matrix"),
+                func: sym("mul_scaled"),
+            },
+            args: vec![lhs.clone(), s, b_inner],
+            type_args: vec![],
+        });
+    }
+
+    // Case 2: mul(scale(a, s), b) — still `s * (a @ b)`, so the same
+    // `mul_scaled(a, s, b)` form applies. Runtime contract uses the
+    // first matrix argument as `a`, so we unpack the scaled side.
+    if let Some((a_inner, s)) = match_matrix_scale(lhs) {
+        return Some(IrExprKind::Call {
+            target: CallTarget::Module {
+                module: sym("matrix"),
+                func: sym("mul_scaled"),
+            },
+            args: vec![a_inner, s, rhs.clone()],
+            type_args: vec![],
+        });
+    }
+
+    None
+}
+
+/// Pattern-match `linear_row(layer_norm_rows(x, γ, β, ε), W, b)` →
+/// `pre_norm_linear(x, γ, β, ε, W, b)`.
+fn try_fuse_pre_norm_linear(kind: &IrExprKind) -> Option<IrExprKind> {
+    let (norm_arg, w_arg, b_arg) = match kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "linear_row" && args.len() == 3 =>
+        {
+            (&args[0], &args[1], &args[2])
+        }
+        _ => return None,
+    };
+    let (x, gamma, beta, eps) = if let IrExprKind::Call {
+        target: CallTarget::Module { module, func }, args, ..
+    } = &norm_arg.kind {
+        if module.as_str() == "matrix" && func.as_str() == "layer_norm_rows" && args.len() == 4 {
+            (args[0].clone(), args[1].clone(), args[2].clone(), args[3].clone())
+        } else { return None; }
+    } else { return None; };
+
+    Some(IrExprKind::Call {
+        target: CallTarget::Module {
+            module: sym("matrix"),
+            func: sym("pre_norm_linear"),
+        },
+        args: vec![x, gamma, beta, eps, w_arg.clone(), b_arg.clone()],
+        type_args: vec![],
+    })
+}
+
+/// Pattern-match `gelu(linear_row(x, W, b))` → `linear_row_gelu(x, W, b)`.
+/// Covers only the nested form here; let-split is handled in
+/// `fuse_let_split_chain`.
+fn try_fuse_linear_row_gelu(kind: &IrExprKind) -> Option<IrExprKind> {
+    let gelu_arg = match kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "gelu" && args.len() == 1 =>
+        {
+            &args[0]
+        }
+        _ => return None,
+    };
+    // `linear_row` has arity 3.
+    if let IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } = &gelu_arg.kind {
+        if module.as_str() == "matrix" && func.as_str() == "linear_row" && args.len() == 3 {
+            return Some(IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: sym("matrix"),
+                    func: sym("linear_row_gelu"),
+                },
+                args: args.clone(),
+                type_args: vec![],
+            });
+        }
+    }
+    None
+}
+
+/// Pattern-match `softmax_rows(scale(mul(Q, Kt), s))` → `attention_weights(Q, Kt, s)`.
+/// This is the scaled-dot-product attention numerator — the 3-op chain
+/// that every transformer inference runs once per attention head. The
+/// fused runtime call does one cblas_dgemm(alpha=s, beta=0) followed by
+/// an in-place row softmax, skipping two intermediate allocations.
+fn try_fuse_attention_weights(kind: &IrExprKind) -> Option<IrExprKind> {
+    let softmax_arg = match kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "softmax_rows" && args.len() == 1 =>
+        {
+            &args[0]
+        }
+        _ => return None,
+    };
+    let (scale_inner, scale_s) = match_matrix_binary(softmax_arg, "scale")?;
+    let (q, kt) = match_matrix_binary(scale_inner, "mul")?;
+
+    Some(IrExprKind::Call {
+        target: CallTarget::Module {
+            module: sym("matrix"),
+            func: sym("attention_weights"),
+        },
+        args: vec![q.clone(), kt.clone(), scale_s.clone()],
         type_args: vec![],
     })
 }
@@ -371,45 +538,340 @@ fn mul_scalar(x: IrExpr, y: IrExpr) -> IrExpr {
 fn fuse_let_split_chain(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>) -> bool {
     let mut changed = false;
     let mut i = 0;
-    while i + 4 <= stmts.len() {
-        if let Some(m) = match_chain_4gram(&stmts[i..i + 4]) {
-            let rest = &stmts[i + 4..];
-            let c_out = count_refs_in_stmts_and_tail(rest, tail, m.c_id);
-            let d_out = count_refs_in_stmts_and_tail(rest, tail, m.d_id);
-            let e_out = count_refs_in_stmts_and_tail(rest, tail, m.e_id);
-            if c_out == 0 && d_out == 0 && e_out == 0 {
-                let span = stmts[i + 3].span;
-                let fused_value = IrExpr {
-                    kind: IrExprKind::Call {
-                        target: CallTarget::Module {
-                            module: sym("matrix"),
-                            func: sym("fused_gemm_bias_scale_gelu"),
+    while i < stmts.len() {
+        // Try the 4-gram gemm+bias+scale+gelu pattern first (longer, more
+        // specific match wins). Fall back to the 3-gram attention pattern.
+        if i + 4 <= stmts.len() {
+            if let Some(m) = match_chain_4gram(&stmts[i..i + 4]) {
+                let rest = &stmts[i + 4..];
+                if count_refs_in_stmts_and_tail(rest, tail, m.c_id) == 0
+                    && count_refs_in_stmts_and_tail(rest, tail, m.d_id) == 0
+                    && count_refs_in_stmts_and_tail(rest, tail, m.e_id) == 0
+                {
+                    let span = stmts[i + 3].span;
+                    let fused_value = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("matrix"),
+                                func: sym("fused_gemm_bias_scale_gelu"),
+                            },
+                            args: vec![m.a, m.b, m.bias, m.alpha],
+                            type_args: vec![],
                         },
-                        args: vec![m.a, m.b, m.bias, m.alpha],
-                        type_args: vec![],
-                    },
-                    ty: m.f_ty.clone(),
-                    span,
-                };
-                let new_bind = IrStmt {
-                    kind: IrStmtKind::Bind {
-                        var: m.f_id,
-                        mutability: m.f_mutability,
-                        ty: m.f_ty,
-                        value: fused_value,
-                    },
-                    span,
-                };
-                stmts.splice(i..i + 4, std::iter::once(new_bind));
-                changed = true;
-                // Don't advance i — re-check starting here in case the
-                // new shorter window opens another match.
-                continue;
+                        ty: m.f_ty.clone(),
+                        span,
+                    };
+                    let new_bind = IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: m.f_id,
+                            mutability: m.f_mutability,
+                            ty: m.f_ty,
+                            value: fused_value,
+                        },
+                        span,
+                    };
+                    stmts.splice(i..i + 4, std::iter::once(new_bind));
+                    changed = true;
+                    continue; // re-check same index with new shorter window
+                }
+            }
+        }
+        if i + 2 <= stmts.len() {
+            if let Some(m) = match_mul_scaled_2gram(&stmts[i..i + 2]) {
+                let rest = &stmts[i + 2..];
+                if count_refs_in_stmts_and_tail(rest, tail, m.s_id) == 0 {
+                    let span = stmts[i + 1].span;
+                    let fused_value = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("matrix"),
+                                func: sym("mul_scaled"),
+                            },
+                            args: vec![m.a, m.alpha, m.b],
+                            type_args: vec![],
+                        },
+                        ty: m.c_ty.clone(),
+                        span,
+                    };
+                    let new_bind = IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: m.c_id,
+                            mutability: m.c_mutability,
+                            ty: m.c_ty,
+                            value: fused_value,
+                        },
+                        span,
+                    };
+                    stmts.splice(i..i + 2, std::iter::once(new_bind));
+                    changed = true;
+                    continue;
+                }
+            }
+            if let Some(m) = match_pre_norm_linear_2gram(&stmts[i..i + 2]) {
+                let rest = &stmts[i + 2..];
+                if count_refs_in_stmts_and_tail(rest, tail, m.n_id) == 0 {
+                    let span = stmts[i + 1].span;
+                    let fused_value = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("matrix"),
+                                func: sym("pre_norm_linear"),
+                            },
+                            args: vec![m.x, m.gamma, m.beta, m.eps, m.w, m.bias],
+                            type_args: vec![],
+                        },
+                        ty: m.l_ty.clone(),
+                        span,
+                    };
+                    let new_bind = IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: m.l_id,
+                            mutability: m.l_mutability,
+                            ty: m.l_ty,
+                            value: fused_value,
+                        },
+                        span,
+                    };
+                    stmts.splice(i..i + 2, std::iter::once(new_bind));
+                    changed = true;
+                    continue;
+                }
+            }
+            if let Some(m) = match_linear_row_gelu_2gram(&stmts[i..i + 2]) {
+                let rest = &stmts[i + 2..];
+                if count_refs_in_stmts_and_tail(rest, tail, m.l_id) == 0 {
+                    let span = stmts[i + 1].span;
+                    let fused_value = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("matrix"),
+                                func: sym("linear_row_gelu"),
+                            },
+                            args: vec![m.x, m.w, m.bias],
+                            type_args: vec![],
+                        },
+                        ty: m.g_ty.clone(),
+                        span,
+                    };
+                    let new_bind = IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: m.g_id,
+                            mutability: m.g_mutability,
+                            ty: m.g_ty,
+                            value: fused_value,
+                        },
+                        span,
+                    };
+                    stmts.splice(i..i + 2, std::iter::once(new_bind));
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        if i + 3 <= stmts.len() {
+            if let Some(m) = match_attention_3gram(&stmts[i..i + 3]) {
+                let rest = &stmts[i + 3..];
+                if count_refs_in_stmts_and_tail(rest, tail, m.s_id) == 0
+                    && count_refs_in_stmts_and_tail(rest, tail, m.t_id) == 0
+                {
+                    let span = stmts[i + 2].span;
+                    let fused_value = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("matrix"),
+                                func: sym("attention_weights"),
+                            },
+                            args: vec![m.q, m.kt, m.scale],
+                            type_args: vec![],
+                        },
+                        ty: m.w_ty.clone(),
+                        span,
+                    };
+                    let new_bind = IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: m.w_id,
+                            mutability: m.w_mutability,
+                            ty: m.w_ty,
+                            value: fused_value,
+                        },
+                        span,
+                    };
+                    stmts.splice(i..i + 3, std::iter::once(new_bind));
+                    changed = true;
+                    continue;
+                }
             }
         }
         i += 1;
     }
     changed
+}
+
+struct MulScaledMatch {
+    s_id: VarId,
+    c_id: VarId,
+    a: IrExpr,
+    b: IrExpr,
+    alpha: IrExpr,
+    c_mutability: Mutability,
+    c_ty: almide_lang::types::Ty,
+}
+
+/// Match either
+///     let s = matrix.scale(b, α); let c = matrix.mul(a, s)
+///     let s = matrix.scale(a, α); let c = matrix.mul(s, b)
+/// and collapse to `let c = matrix.mul_scaled(a, α, b)`. Single-use
+/// check on `s` is done by the caller.
+fn match_mul_scaled_2gram(window: &[IrStmt]) -> Option<MulScaledMatch> {
+    if window.len() < 2 { return None; }
+    let (s_id, s_value) = as_bind(&window[0])?;
+    let (scaled_base, alpha) = match_matrix_binary(s_value, "scale")?;
+
+    let (c_id, c_value) = as_bind(&window[1])?;
+    let (mul_lhs, mul_rhs) = match_matrix_binary(c_value, "mul")?;
+
+    let (a, b) = if is_var_with_id(mul_rhs, s_id) {
+        (mul_lhs.clone(), scaled_base.clone())
+    } else if is_var_with_id(mul_lhs, s_id) {
+        (scaled_base.clone(), mul_rhs.clone())
+    } else {
+        return None;
+    };
+
+    let (c_mutability, c_ty) = match &window[1].kind {
+        IrStmtKind::Bind { mutability, ty, .. } => (*mutability, ty.clone()),
+        _ => return None,
+    };
+
+    Some(MulScaledMatch {
+        s_id, c_id,
+        a, b,
+        alpha: alpha.clone(),
+        c_mutability, c_ty,
+    })
+}
+
+struct PreNormLinearMatch {
+    n_id: VarId,
+    l_id: VarId,
+    x: IrExpr,
+    gamma: IrExpr,
+    beta: IrExpr,
+    eps: IrExpr,
+    w: IrExpr,
+    bias: IrExpr,
+    l_mutability: Mutability,
+    l_ty: almide_lang::types::Ty,
+}
+
+fn match_pre_norm_linear_2gram(window: &[IrStmt]) -> Option<PreNormLinearMatch> {
+    if window.len() < 2 { return None; }
+    let (n_id, n_value) = as_bind(&window[0])?;
+    let (x, gamma, beta, eps) = if let IrExprKind::Call {
+        target: CallTarget::Module { module, func }, args, ..
+    } = &n_value.kind {
+        if module.as_str() == "matrix" && func.as_str() == "layer_norm_rows" && args.len() == 4 {
+            (args[0].clone(), args[1].clone(), args[2].clone(), args[3].clone())
+        } else { return None; }
+    } else { return None; };
+
+    let (l_id, l_value) = as_bind(&window[1])?;
+    let (norm_arg, w, bias) = if let IrExprKind::Call {
+        target: CallTarget::Module { module, func }, args, ..
+    } = &l_value.kind {
+        if module.as_str() == "matrix" && func.as_str() == "linear_row" && args.len() == 3 {
+            (args[0].clone(), args[1].clone(), args[2].clone())
+        } else { return None; }
+    } else { return None; };
+    if !is_var_with_id(&norm_arg, n_id) { return None; }
+
+    let (l_mutability, l_ty) = match &window[1].kind {
+        IrStmtKind::Bind { mutability, ty, .. } => (*mutability, ty.clone()),
+        _ => return None,
+    };
+
+    Some(PreNormLinearMatch {
+        n_id, l_id,
+        x, gamma, beta, eps, w, bias,
+        l_mutability, l_ty,
+    })
+}
+
+struct LinearGeluMatch {
+    l_id: VarId,
+    g_id: VarId,
+    x: IrExpr,
+    w: IrExpr,
+    bias: IrExpr,
+    g_mutability: Mutability,
+    g_ty: almide_lang::types::Ty,
+}
+
+fn match_linear_row_gelu_2gram(window: &[IrStmt]) -> Option<LinearGeluMatch> {
+    if window.len() < 2 { return None; }
+    let (l_id, l_value) = as_bind(&window[0])?;
+    // linear_row has arity 3: (x, W, bias).
+    let (x, w, bias) = if let IrExprKind::Call {
+        target: CallTarget::Module { module, func }, args, ..
+    } = &l_value.kind {
+        if module.as_str() == "matrix" && func.as_str() == "linear_row" && args.len() == 3 {
+            (args[0].clone(), args[1].clone(), args[2].clone())
+        } else { return None; }
+    } else { return None; };
+
+    let (g_id, g_value) = as_bind(&window[1])?;
+    let gelu_arg = match_matrix_unary(g_value, "gelu")?;
+    if !is_var_with_id(gelu_arg, l_id) { return None; }
+
+    let (g_mutability, g_ty) = match &window[1].kind {
+        IrStmtKind::Bind { mutability, ty, .. } => (*mutability, ty.clone()),
+        _ => return None,
+    };
+
+    Some(LinearGeluMatch {
+        l_id, g_id,
+        x, w, bias,
+        g_mutability, g_ty,
+    })
+}
+
+struct AttentionMatch {
+    s_id: VarId,
+    t_id: VarId,
+    w_id: VarId,
+    q: IrExpr,
+    kt: IrExpr,
+    scale: IrExpr,
+    w_mutability: Mutability,
+    w_ty: almide_lang::types::Ty,
+}
+
+fn match_attention_3gram(window: &[IrStmt]) -> Option<AttentionMatch> {
+    if window.len() < 3 { return None; }
+    let (s_id, s_value) = as_bind(&window[0])?;
+    let (q, kt) = match_matrix_binary(s_value, "mul")?;
+
+    let (t_id, t_value) = as_bind(&window[1])?;
+    let (scale_lhs, scale_s) = match_matrix_binary(t_value, "scale")?;
+    if !is_var_with_id(scale_lhs, s_id) { return None; }
+
+    let (w_id, w_value) = as_bind(&window[2])?;
+    let softmax_arg = match_matrix_unary(w_value, "softmax_rows")?;
+    if !is_var_with_id(softmax_arg, t_id) { return None; }
+
+    let (w_mutability, w_ty) = match &window[2].kind {
+        IrStmtKind::Bind { mutability, ty, .. } => (*mutability, ty.clone()),
+        _ => return None,
+    };
+
+    Some(AttentionMatch {
+        s_id, t_id, w_id,
+        q: q.clone(),
+        kt: kt.clone(),
+        scale: scale_s.clone(),
+        w_mutability,
+        w_ty,
+    })
 }
 
 /// Pattern match helper for `fuse_let_split_chain`. Returns extracted
