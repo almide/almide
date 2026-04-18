@@ -719,6 +719,8 @@ pub enum ParamBorrow {
     RefStr,
     /// Parameter can be borrowed as &[T] (for Vec<T> params)
     RefSlice,
+    /// Parameter is mutably borrowed as &mut T (for mutating intrinsics)
+    RefMut,
 }
 
 /// Info about an open record field (destructured from a record param).

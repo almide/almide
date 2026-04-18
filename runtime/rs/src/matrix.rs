@@ -34,8 +34,8 @@ pub fn almide_rt_matrix_transpose(m: &AlmideMatrix) -> AlmideMatrix {
     (0..cols).map(|c| (0..rows).map(|r| m[r][c]).collect()).collect()
 }
 
-pub fn almide_rt_matrix_from_lists(rows: &Vec<Vec<f64>>) -> AlmideMatrix {
-    rows.clone()
+pub fn almide_rt_matrix_from_lists(rows: &[Vec<f64>]) -> AlmideMatrix {
+    rows.to_vec()
 }
 
 pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> AlmideMatrix {
@@ -222,11 +222,11 @@ pub fn almide_rt_matrix_map(m: &AlmideMatrix, f: impl Fn(f64) -> f64) -> AlmideM
     m.iter().map(|row| row.iter().map(|x| f(*x)).collect()).collect()
 }
 
-pub fn almide_rt_matrix_broadcast_add_row(m: &AlmideMatrix, bias: &Vec<f64>) -> AlmideMatrix {
+pub fn almide_rt_matrix_broadcast_add_row(m: &AlmideMatrix, bias: &[f64]) -> AlmideMatrix {
     m.iter().map(|row| row.iter().zip(bias.iter()).map(|(x, b)| x + b).collect()).collect()
 }
 
-pub fn almide_rt_matrix_layer_norm_rows(m: &AlmideMatrix, gamma: &Vec<f64>, beta: &Vec<f64>, eps: f64) -> AlmideMatrix {
+pub fn almide_rt_matrix_layer_norm_rows(m: &AlmideMatrix, gamma: &[f64], beta: &[f64], eps: f64) -> AlmideMatrix {
     m.iter().map(|row| {
         let n = row.len() as f64;
         let mut sum = 0.0;
@@ -275,7 +275,7 @@ pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideM
     }).collect()
 }
 
-pub fn almide_rt_matrix_concat_cols_many(matrices: &Vec<AlmideMatrix>) -> AlmideMatrix {
+pub fn almide_rt_matrix_concat_cols_many(matrices: &[AlmideMatrix]) -> AlmideMatrix {
     if matrices.is_empty() { return vec![]; }
     let rows = matrices[0].len();
     if rows == 0 { return vec![vec![]]; }
@@ -362,7 +362,7 @@ pub fn almide_rt_matrix_mha_core(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideM
     out
 }
 
-pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias: &Vec<f64>) -> AlmideMatrix {
+pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias: &[f64]) -> AlmideMatrix {
     // y[i][j] = sum_k x[i][k] * weight[j][k] + bias[j]
     if x.is_empty() || weight.is_empty() { return vec![]; }
     let r = x.len();
@@ -412,7 +412,7 @@ pub fn almide_rt_matrix_slice_rows(m: &AlmideMatrix, start: i64, end: i64) -> Al
     m[s..e].to_vec()
 }
 
-pub fn almide_rt_matrix_conv1d(input: &AlmideMatrix, weight: &AlmideMatrix, bias: &Vec<f64>, kernel: i64, stride: i64, padding: i64) -> AlmideMatrix {
+pub fn almide_rt_matrix_conv1d(input: &AlmideMatrix, weight: &AlmideMatrix, bias: &[f64], kernel: i64, stride: i64, padding: i64) -> AlmideMatrix {
     // input: (T, in_ch). weight: (out_ch, in_ch * kernel). bias: (out_ch,).
     // Output: (T_out, out_ch) where T_out = floor((T + 2P - K) / S) + 1.
     // Weight layout within a row: for c in 0..in_ch, for k in 0..kernel: weight[o][c*kernel + k].
@@ -496,7 +496,7 @@ pub fn almide_rt_matrix_from_bytes_f64_le(data: &Vec<u8>, offset: i64, rows: i64
     result
 }
 
-pub fn almide_rt_matrix_gather_rows(m: &AlmideMatrix, indices: &Vec<i64>) -> AlmideMatrix {
+pub fn almide_rt_matrix_gather_rows(m: &AlmideMatrix, indices: &[i64]) -> AlmideMatrix {
     if m.is_empty() { return vec![]; }
     let cols = m[0].len();
     indices.iter().map(|&idx| {
@@ -505,7 +505,7 @@ pub fn almide_rt_matrix_gather_rows(m: &AlmideMatrix, indices: &Vec<i64>) -> Alm
     }).collect()
 }
 
-pub fn almide_rt_matrix_row_dot(m: &AlmideMatrix, r: i64, vec: &Vec<f64>) -> f64 {
+pub fn almide_rt_matrix_row_dot(m: &AlmideMatrix, r: i64, vec: &[f64]) -> f64 {
     let r = r as usize;
     if r >= m.len() { return 0.0; }
     let row = &m[r];

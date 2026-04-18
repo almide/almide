@@ -187,6 +187,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             let type_s = match p.borrow {
                 ParamBorrow::Own => render_type_fn(&fn_ctx, &p.ty),
                 ParamBorrow::Ref => format!("&{}", render_type_fn(&fn_ctx, &p.ty)),
+                ParamBorrow::RefMut => format!("&mut {}", render_type_fn(&fn_ctx, &p.ty)),
                 ParamBorrow::RefStr => "&str".to_string(),
                 ParamBorrow::RefSlice => {
                     if let almide_lang::types::Ty::Applied(_, args) = &p.ty {

@@ -198,6 +198,7 @@ fn binary_search(xs: List[Int], target: Int) -> Option[Int] = _
 fn push[A](xs: List[A], x: A) -> Unit = _
 
 @intrinsic("almide_rt_list_pop")
+@mutating
 fn pop[A](xs: List[A]) -> Option[A] = _
 
 @intrinsic("almide_rt_list_clear")

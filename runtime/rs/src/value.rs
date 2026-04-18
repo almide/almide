@@ -112,54 +112,55 @@ pub fn almide_rt___decode_default_bool(v: Value, key: String, default: bool) -> 
 // ── Value utilities ──
 
 /// Pick specific keys from an Object, discarding the rest.
-pub fn almide_rt_value_pick(v: Value, keys: Vec<String>) -> Value {
+pub fn almide_rt_value_pick(v: &Value, keys: &[String]) -> Value {
     match v {
         Value::Object(pairs) => {
-            Value::Object(pairs.into_iter().filter(|(k, _)| keys.contains(k)).collect())
+            Value::Object(pairs.iter().filter(|(k, _)| keys.contains(k)).cloned().collect())
         }
-        other => other,
+        other => other.clone(),
     }
 }
 
 /// Rename keys in an Object using a transform function.
-pub fn almide_rt_value_rename_keys(v: Value, f: impl Fn(String) -> String) -> Value {
+pub fn almide_rt_value_rename_keys(v: &Value, f: impl Fn(String) -> String) -> Value {
     match v {
         Value::Object(pairs) => {
-            Value::Object(pairs.into_iter().map(|(k, v)| (f(k), v)).collect())
+            Value::Object(pairs.iter().map(|(k, v)| (f(k.clone()), v.clone())).collect())
         }
-        other => other,
+        other => other.clone(),
     }
 }
 
 /// Merge two Objects. Keys from `b` override keys from `a`.
-pub fn almide_rt_value_merge(a: Value, b: Value) -> Value {
+pub fn almide_rt_value_merge(a: &Value, b: &Value) -> Value {
     match (a, b) {
-        (Value::Object(mut pa), Value::Object(pb)) => {
+        (Value::Object(pa), Value::Object(pb)) => {
+            let mut pa = pa.clone();
             for (k, v) in pb {
-                if let Some(pos) = pa.iter().position(|(ek, _)| ek == &k) {
-                    pa[pos] = (k, v);
+                if let Some(pos) = pa.iter().position(|(ek, _)| ek == k) {
+                    pa[pos] = (k.clone(), v.clone());
                 } else {
-                    pa.push((k, v));
+                    pa.push((k.clone(), v.clone()));
                 }
             }
             Value::Object(pa)
         }
-        (_, b) => b,
+        (_, b) => b.clone(),
     }
 }
 
 /// Remove specific keys from an Object.
-pub fn almide_rt_value_omit(v: Value, keys: Vec<String>) -> Value {
+pub fn almide_rt_value_omit(v: &Value, keys: &[String]) -> Value {
     match v {
         Value::Object(pairs) => {
-            Value::Object(pairs.into_iter().filter(|(k, _)| !keys.contains(k)).collect())
+            Value::Object(pairs.iter().filter(|(k, _)| !keys.contains(k)).cloned().collect())
         }
-        other => other,
+        other => other.clone(),
     }
 }
 
 /// Convert snake_case key to camelCase.
-pub fn almide_rt_value_to_camel_case(v: Value) -> Value {
+pub fn almide_rt_value_to_camel_case(v: &Value) -> Value {
     almide_rt_value_rename_keys(v, |k| {
         let mut result = String::new();
         let mut capitalize_next = false;
@@ -173,7 +174,7 @@ pub fn almide_rt_value_to_camel_case(v: Value) -> Value {
 }
 
 /// Convert camelCase key to snake_case.
-pub fn almide_rt_value_to_snake_case(v: Value) -> Value {
+pub fn almide_rt_value_to_snake_case(v: &Value) -> Value {
     almide_rt_value_rename_keys(v, |k| {
         let mut result = String::new();
         for (i, c) in k.chars().enumerate() {

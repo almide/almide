@@ -5,7 +5,7 @@ pub fn almide_rt_bytes_len(b: &Vec<u8>) -> i64 { b.len() as i64 }
 pub fn almide_rt_bytes_is_empty(b: &Vec<u8>) -> bool { b.is_empty() }
 pub fn almide_rt_bytes_get(b: &Vec<u8>, i: i64) -> Option<i64> { b.get(i as usize).map(|&x| x as i64) }
 pub fn almide_rt_bytes_get_or(b: &Vec<u8>, i: i64, default: i64) -> i64 { b.get(i as usize).map(|&x| x as i64).unwrap_or(default) }
-pub fn almide_rt_bytes_set(mut b: Vec<u8>, i: i64, val: i64) -> Vec<u8> { if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
+pub fn almide_rt_bytes_set(b: &Vec<u8>, i: i64, val: i64) -> Vec<u8> { let mut b = b.clone(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
 pub fn almide_rt_bytes_slice(b: &Vec<u8>, start: i64, end: i64) -> Vec<u8> {
     let s = (start as usize).min(b.len());
     let e = (end as usize).min(b.len());

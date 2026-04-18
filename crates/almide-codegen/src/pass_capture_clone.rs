@@ -34,6 +34,9 @@ impl NanoPass for CaptureClonePass {
         let mut changed = false;
         for func in &mut program.functions {
             let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
+            PARAM_BORROWS.with(|m| {
+                *m.borrow_mut() = func.params.iter().map(|p| (p.var, p.borrow)).collect();
+            });
             if transform_expr(&mut func.body, &mut program.var_table, &param_vars) {
                 changed = true;
             }
@@ -41,13 +44,23 @@ impl NanoPass for CaptureClonePass {
         for module in &mut program.modules {
             for func in &mut module.functions {
                 let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
+                PARAM_BORROWS.with(|m| {
+                    *m.borrow_mut() = func.params.iter().map(|p| (p.var, p.borrow)).collect();
+                });
                 if transform_expr(&mut func.body, &mut module.var_table, &param_vars) {
                     changed = true;
                 }
             }
         }
+        PARAM_BORROWS.with(|m| m.borrow_mut().clear());
         PassResult { program, changed }
     }
+}
+
+use std::cell::RefCell;
+thread_local! {
+    static PARAM_BORROWS: RefCell<std::collections::HashMap<VarId, ParamBorrow>> =
+        RefCell::new(std::collections::HashMap::new());
 }
 
 /// Collect all variables bound by a statement (Bind + BindDestructure).
@@ -276,16 +289,39 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
         );
         renames.insert(var_id, cap_var);
 
+        // If the captured var is a fn param with a borrowed runtime
+        // representation (`&[T]` / `&str` / `&T`), the bare `Var` IR
+        // renders as the borrow — but `__cap_N: Vec<T>` / `String` / `T`
+        // (the Almide-level owned type) expects an owned value. Materialise
+        // the owned form explicitly so the `move |..|` closure can take it.
+        let borrow = PARAM_BORROWS.with(|m| m.borrow().get(&var_id).copied());
+        let bind_value = match borrow {
+            Some(ParamBorrow::RefSlice) => IrExpr {
+                kind: IrExprKind::ToVec {
+                    expr: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None }),
+                },
+                ty: ty.clone(), span: None,
+            },
+            Some(ParamBorrow::RefStr) => IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Method {
+                        object: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None }),
+                        method: almide_base::intern::sym("to_string"),
+                    },
+                    args: vec![],
+                    type_args: vec![],
+                },
+                ty: ty.clone(), span: None,
+            },
+            _ => IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None },
+        };
+
         stmts.push(IrStmt {
             kind: IrStmtKind::Bind {
                 var: cap_var,
                 mutability: Mutability::Let,
                 ty: ty.clone(),
-                value: IrExpr {
-                    kind: IrExprKind::Var { id: var_id },
-                    ty,
-                    span: None,
-                },
+                value: bind_value,
             },
             span: None,
         });
