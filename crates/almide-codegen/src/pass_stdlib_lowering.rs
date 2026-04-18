@@ -644,6 +644,15 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name, args: args.into_iter().map(|a| rewrite_expr(a)).collect(),
         },
+        // Phase 1e-2: traverse RuntimeCall args so inner `@inline_rust`
+        // calls (e.g. `almide_rt_int_to_string(list.len(xs))`) still get
+        // their template substitution. Without this, Module calls nested
+        // inside a RuntimeCall fall through `other => other` untouched
+        // and emit as bare Module calls, losing the `&{xs}` borrow.
+        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
+            symbol,
+            args: args.into_iter().map(|a| rewrite_expr(a)).collect(),
+        },
         other => other,
     };
 

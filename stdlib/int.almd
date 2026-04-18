@@ -20,13 +20,13 @@
 
 // ── Conversions ──
 
-@inline_rust("almide_rt_int_to_string({n})")
+@intrinsic("almide_rt_int_to_string")
 fn to_string(n: Int) -> String = _
 
 @inline_rust("almide_rt_int_to_hex({n})")
 fn to_hex(n: Int) -> String = _
 
-@inline_rust("almide_rt_int_parse(&*{s})")
+@intrinsic("almide_rt_int_parse")
 fn parse(s: String) -> Result[Int, String] = _
 
 @inline_rust("almide_rt_int_parse_hex(&*{s})")

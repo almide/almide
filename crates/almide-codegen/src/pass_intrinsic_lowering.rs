@@ -20,7 +20,7 @@
 //! same call. Also before `ResolveCalls` to avoid the bundled → Named
 //! rewrite competing with this rewrite.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use almide_base::intern::{Sym, sym};
 use almide_ir::*;
 use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut};
@@ -43,8 +43,12 @@ impl NanoPass for IntrinsicLoweringPass {
         if map.is_empty() {
             return PassResult { program, changed: false };
         }
+        let symbols: HashSet<Sym> = map.values().copied().collect();
 
-        struct Rewriter<'a> { map: &'a HashMap<(Sym, Sym), Sym> }
+        struct Rewriter<'a> {
+            map: &'a HashMap<(Sym, Sym), Sym>,
+            symbols: &'a HashSet<Sym>,
+        }
         impl<'a> IrMutVisitor for Rewriter<'a> {
             fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
                 walk_expr_mut(self, expr);
@@ -55,13 +59,33 @@ impl NanoPass for IntrinsicLoweringPass {
                         let args = std::mem::take(args);
                         expr.kind = IrExprKind::RuntimeCall { symbol, args };
                     }
+                    CallTarget::Named { name } => {
+                        // Frontend may have pre-lowered `int.parse(s)` to
+                        // `Named { "almide_rt_int_parse" }` before this pass
+                        // runs. If the symbol matches one declared via
+                        // `@intrinsic(...)`, take ownership and rewrite to
+                        // RuntimeCall so downstream emit paths converge.
+                        if !self.symbols.contains(name) { return; }
+                        let symbol = *name;
+                        let args = std::mem::take(args);
+                        expr.kind = IrExprKind::RuntimeCall { symbol, args };
+                    }
                     CallTarget::Method { object, method } => {
-                        // UFCS: `obj.method(args)` — resolve `obj.ty` to a
-                        // stdlib module name, then look up `(module, method)`
-                        // in the intrinsic map. On hit, prepend `obj` to the
-                        // arg list and rewrite to RuntimeCall.
-                        let Some(module) = module_for_ty(&object.ty) else { return };
-                        let Some(&symbol) = self.map.get(&(module, *method)) else { return };
+                        // UFCS: `obj.method(args)`. Method name may arrive
+                        // either as a bare `"to_string"` (resolve module
+                        // from `object.ty`) or as a prefixed `"int.to_string"`
+                        // (module is explicit) — the frontend emits the
+                        // prefixed form for bundled-stdlib UFCS. On hit,
+                        // prepend `obj` to the arg list and rewrite to
+                        // RuntimeCall.
+                        let method_str = method.as_str();
+                        let (module, func) = if let Some(dot) = method_str.find('.') {
+                            (sym(&method_str[..dot]), sym(&method_str[dot + 1..]))
+                        } else {
+                            let Some(m) = module_for_ty(&object.ty) else { return };
+                            (m, *method)
+                        };
+                        let Some(&symbol) = self.map.get(&(module, func)) else { return };
                         let obj = std::mem::replace(object.as_mut(), IrExpr::default());
                         let mut new_args = Vec::with_capacity(args.len() + 1);
                         new_args.push(obj);
@@ -76,7 +100,7 @@ impl NanoPass for IntrinsicLoweringPass {
             }
         }
 
-        let mut rw = Rewriter { map: &map };
+        let mut rw = Rewriter { map: &map, symbols: &symbols };
         for func in &mut program.functions {
             rw.visit_expr_mut(&mut func.body);
         }

@@ -217,12 +217,31 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Pre-resolved runtime call (from @intrinsic) ──
         IrExprKind::RuntimeCall { symbol, args } => {
-            // Emit `<symbol>(<arg1>, <arg2>, ...)`. Borrow decoration is
-            // decided by PR passes (CloneInsertionPass, BorrowInsertionPass)
-            // which wrap args in IR-level Clone / Borrow nodes before this
-            // walker runs — so this arm only renders children directly.
-            let args_str = args.iter().map(|a| render_expr(ctx, a))
-                .collect::<Vec<_>>().join(", ");
+            // Emit `<symbol>(<arg1>, <arg2>, ...)`. For String args that
+            // didn't pick up a Borrow / Clone IR wrapper upstream (common
+            // for UFCS rewrites and lambda bodies that BorrowInsertion
+            // doesn't traverse the same way), insert `&*` so Rust runtime
+            // fns expecting `&str` compile. Mirrors the `&*{s}` convention
+            // the legacy `@inline_rust` templates spelled out manually.
+            let args_str = args.iter().map(|a| {
+                let rendered = render_expr(ctx, a);
+                let already_decorated = matches!(&a.kind,
+                    IrExprKind::Borrow { .. } | IrExprKind::Deref { .. }
+                );
+                // String args need `&*` when passing to a Rust fn that
+                // takes `&str`. Detect via expr.ty first (the typed IR),
+                // and also via LitStr kind as a fallback for cases where
+                // upstream concretization may have left ty as Unknown.
+                let needs_str_borrow = !already_decorated && (
+                    matches!(a.ty, Ty::String)
+                    || matches!(&a.kind, IrExprKind::LitStr { .. })
+                );
+                if needs_str_borrow {
+                    format!("&*{}", rendered)
+                } else {
+                    rendered
+                }
+            }).collect::<Vec<_>>().join(", ");
             format!("{}({})", symbol.as_str(), args_str)
         }
 
