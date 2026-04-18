@@ -60,10 +60,6 @@ fn build_pipeline(target: Target) -> Pipeline {
         Target::Rust => Pipeline::new()
             // ListPatternLowering: desugar list patterns to if/else before any other pass
             .add(ListPatternLoweringPass)
-            // @intrinsic(symbol) → RuntimeCall. Must run before ResolveCalls
-            // (so bundled → Named rewrite skips intrinsic fns) and before
-            // StdlibLowering (so @inline_rust does not double-lower them).
-            .add(IntrinsicLoweringPass)
             // Verify all user-module calls resolve to known IrFunctions.
             .add(ResolveCallsPass)
             // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
@@ -77,6 +73,12 @@ fn build_pipeline(target: Target) -> Pipeline {
             // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
             .add(StreamFusionPass)
             .add(BorrowInsertionPass)
+            // @intrinsic(symbol) → RuntimeCall. Must run AFTER
+            // BorrowInsertionPass so String / List args are already wrapped
+            // in IR `Borrow` nodes when the walker renders them. Runs
+            // before StdlibLowering so @inline_rust does not double-lower
+            // intrinsic fns.
+            .add(IntrinsicLoweringPass)
             // TCO: convert self-recursive tail calls to loops AFTER BorrowInsertion
             // (so that param types are already finalized — avoids String/&str mismatch)
             .add(TailCallOptPass)

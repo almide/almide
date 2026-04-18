@@ -149,7 +149,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 
     // __int_to_string(n: i64) -> i32
     let itoa_ty = emitter.register_type(vec![ValType::I64], vec![ValType::I32]);
-    emitter.rt.int_to_string = emitter.register_func("__int_to_string", itoa_ty);
+    // Register under the Rust runtime-fn name so `@intrinsic(...)` lookups
+    // resolve directly (Phase 1e-3). Rust side already uses the same
+    // symbol, so this is the single-name contract.
+    emitter.rt.int_to_string = emitter.register_func("almide_rt_int_to_string", itoa_ty);
 
     // __float_to_string(f: f64) -> i32
     let ftoa_ty = emitter.register_type(vec![ValType::F64], vec![ValType::I32]);
@@ -211,7 +214,7 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 
     // __int_parse(s: i32) -> i32 (Result[Int, String])
     let int_parse_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
-    emitter.rt.int_parse = emitter.register_func("__int_parse", int_parse_ty);
+    emitter.rt.int_parse = emitter.register_func("almide_rt_int_parse", int_parse_ty);
 
     // __int_from_hex(s: i32) -> i32 (Result[Int, String])
     let int_from_hex_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);

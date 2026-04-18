@@ -21,9 +21,10 @@
 //! rewrite competing with this rewrite.
 
 use std::collections::HashMap;
-use almide_base::intern::Sym;
+use almide_base::intern::{Sym, sym};
 use almide_ir::*;
 use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut};
+use almide_lang::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -48,10 +49,27 @@ impl NanoPass for IntrinsicLoweringPass {
             fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
                 walk_expr_mut(self, expr);
                 let IrExprKind::Call { target, args, .. } = &mut expr.kind else { return };
-                let CallTarget::Module { module, func } = target else { return };
-                let Some(&symbol) = self.map.get(&(*module, *func)) else { return };
-                let args = std::mem::take(args);
-                expr.kind = IrExprKind::RuntimeCall { symbol, args };
+                match target {
+                    CallTarget::Module { module, func } => {
+                        let Some(&symbol) = self.map.get(&(*module, *func)) else { return };
+                        let args = std::mem::take(args);
+                        expr.kind = IrExprKind::RuntimeCall { symbol, args };
+                    }
+                    CallTarget::Method { object, method } => {
+                        // UFCS: `obj.method(args)` — resolve `obj.ty` to a
+                        // stdlib module name, then look up `(module, method)`
+                        // in the intrinsic map. On hit, prepend `obj` to the
+                        // arg list and rewrite to RuntimeCall.
+                        let Some(module) = module_for_ty(&object.ty) else { return };
+                        let Some(&symbol) = self.map.get(&(module, *method)) else { return };
+                        let obj = std::mem::replace(object.as_mut(), IrExpr::default());
+                        let mut new_args = Vec::with_capacity(args.len() + 1);
+                        new_args.push(obj);
+                        new_args.extend(std::mem::take(args));
+                        expr.kind = IrExprKind::RuntimeCall { symbol, args: new_args };
+                    }
+                    _ => {}
+                }
             }
             fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
                 walk_stmt_mut(self, stmt);
@@ -85,6 +103,37 @@ impl NanoPass for IntrinsicLoweringPass {
         }
         PassResult { program, changed: true }
     }
+}
+
+/// Map a UFCS receiver type to the stdlib module name that owns
+/// methods for it. Used to resolve `Method` call targets (`42.to_string()`)
+/// to their stdlib module (`int`) so the intrinsic map can be queried.
+fn module_for_ty(ty: &Ty) -> Option<Sym> {
+    let name = match ty {
+        Ty::Int => "int",
+        Ty::Int8 => "int8",
+        Ty::Int16 => "int16",
+        Ty::Int32 => "int32",
+        Ty::UInt8 => "uint8",
+        Ty::UInt16 => "uint16",
+        Ty::UInt32 => "uint32",
+        Ty::UInt64 => "uint64",
+        Ty::Float => "float",
+        Ty::Float32 => "float32",
+        Ty::String => "string",
+        Ty::Bool => "bool",
+        Ty::Bytes => "bytes",
+        Ty::Applied(tc, _) => match tc {
+            TypeConstructorId::List => "list",
+            TypeConstructorId::Map => "map",
+            TypeConstructorId::Set => "set",
+            TypeConstructorId::Option => "option",
+            TypeConstructorId::Result => "result",
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(sym(name))
 }
 
 /// Collect every `(module, func) → runtime_symbol` declared via
