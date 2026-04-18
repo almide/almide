@@ -121,6 +121,20 @@ fn fused_gemm_bias_scale_gelu(a: Matrix, b: Matrix, bias: Matrix, alpha: Float) 
 @intrinsic("almide_rt_matrix_attention_weights")
 fn attention_weights(q: Matrix, kt: Matrix, scale: Float) -> Matrix = _
 
+// Fusion target: `gelu(linear_row(x, W, b))` — FFN first sub-layer.
+// cblas_dgemm(transB=Trans) with the output row-seeded from bias plus
+// an in-place GELU sweep. Skips one r×n_out allocation and one pass
+// over the output.
+@intrinsic("almide_rt_matrix_linear_row_gelu")
+fn linear_row_gelu(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
+
+// Fusion target: `linear_row(layer_norm_rows(x, γ, β, ε), W, b)` — the
+// pre-norm residual block first sub-layer. Computes per-row normalize
+// into a fresh buffer then drives cblas_dgemm with that buffer, skipping
+// burn's `linear_row` dispatch on the Small path.
+@intrinsic("almide_rt_matrix_pre_norm_linear")
+fn pre_norm_linear(x: Matrix, gamma: List[Float], beta: List[Float], eps: Float, weight: Matrix, bias: List[Float]) -> Matrix = _
+
 @intrinsic("almide_rt_matrix_split_cols_even")
 fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 

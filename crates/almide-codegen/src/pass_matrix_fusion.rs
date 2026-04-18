@@ -232,6 +232,24 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
         changed = true;
     }
 
+    // FFN first sub-layer fusion: `gelu(linear_row(x, W, b))` →
+    // `linear_row_gelu(x, W, b)`. Single cblas_dgemm (transB=Trans, C
+    // bias-seeded) plus in-place GELU.
+    if let Some(new_kind) = try_fuse_linear_row_gelu(&expr.kind) {
+        expr.kind = new_kind;
+        changed = true;
+    }
+
+    // Pre-norm linear fusion:
+    // `linear_row(layer_norm_rows(x, γ, β, ε), W, b)` → `pre_norm_linear(x, γ, β, ε, W, b)`.
+    // Transformer pre-norm first sub-layer. Fuses the LN row sweep and
+    // the linear projection into one pass that calls cblas_dgemm directly
+    // and skips burn's linear_row dispatch on the Small path.
+    if let Some(new_kind) = try_fuse_pre_norm_linear(&expr.kind) {
+        expr.kind = new_kind;
+        changed = true;
+    }
+
     changed
 }
 
@@ -282,6 +300,63 @@ fn try_fuse_gemm_bias_scale_gelu(kind: &IrExprKind) -> Option<IrExprKind> {
         args: vec![a.clone(), b.clone(), bias.clone(), alpha.clone()],
         type_args: vec![],
     })
+}
+
+/// Pattern-match `linear_row(layer_norm_rows(x, γ, β, ε), W, b)` →
+/// `pre_norm_linear(x, γ, β, ε, W, b)`.
+fn try_fuse_pre_norm_linear(kind: &IrExprKind) -> Option<IrExprKind> {
+    let (norm_arg, w_arg, b_arg) = match kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "linear_row" && args.len() == 3 =>
+        {
+            (&args[0], &args[1], &args[2])
+        }
+        _ => return None,
+    };
+    let (x, gamma, beta, eps) = if let IrExprKind::Call {
+        target: CallTarget::Module { module, func }, args, ..
+    } = &norm_arg.kind {
+        if module.as_str() == "matrix" && func.as_str() == "layer_norm_rows" && args.len() == 4 {
+            (args[0].clone(), args[1].clone(), args[2].clone(), args[3].clone())
+        } else { return None; }
+    } else { return None; };
+
+    Some(IrExprKind::Call {
+        target: CallTarget::Module {
+            module: sym("matrix"),
+            func: sym("pre_norm_linear"),
+        },
+        args: vec![x, gamma, beta, eps, w_arg.clone(), b_arg.clone()],
+        type_args: vec![],
+    })
+}
+
+/// Pattern-match `gelu(linear_row(x, W, b))` → `linear_row_gelu(x, W, b)`.
+/// Covers only the nested form here; let-split is handled in
+/// `fuse_let_split_chain`.
+fn try_fuse_linear_row_gelu(kind: &IrExprKind) -> Option<IrExprKind> {
+    let gelu_arg = match kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "gelu" && args.len() == 1 =>
+        {
+            &args[0]
+        }
+        _ => return None,
+    };
+    // `linear_row` has arity 3.
+    if let IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } = &gelu_arg.kind {
+        if module.as_str() == "matrix" && func.as_str() == "linear_row" && args.len() == 3 {
+            return Some(IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: sym("matrix"),
+                    func: sym("linear_row_gelu"),
+                },
+                args: args.clone(),
+                type_args: vec![],
+            });
+        }
+    }
+    None
 }
 
 /// Pattern-match `softmax_rows(scale(mul(Q, Kt), s))` → `attention_weights(Q, Kt, s)`.
@@ -444,6 +519,68 @@ fn fuse_let_split_chain(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>) -> bool 
                 }
             }
         }
+        if i + 2 <= stmts.len() {
+            if let Some(m) = match_pre_norm_linear_2gram(&stmts[i..i + 2]) {
+                let rest = &stmts[i + 2..];
+                if count_refs_in_stmts_and_tail(rest, tail, m.n_id) == 0 {
+                    let span = stmts[i + 1].span;
+                    let fused_value = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("matrix"),
+                                func: sym("pre_norm_linear"),
+                            },
+                            args: vec![m.x, m.gamma, m.beta, m.eps, m.w, m.bias],
+                            type_args: vec![],
+                        },
+                        ty: m.l_ty.clone(),
+                        span,
+                    };
+                    let new_bind = IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: m.l_id,
+                            mutability: m.l_mutability,
+                            ty: m.l_ty,
+                            value: fused_value,
+                        },
+                        span,
+                    };
+                    stmts.splice(i..i + 2, std::iter::once(new_bind));
+                    changed = true;
+                    continue;
+                }
+            }
+            if let Some(m) = match_linear_row_gelu_2gram(&stmts[i..i + 2]) {
+                let rest = &stmts[i + 2..];
+                if count_refs_in_stmts_and_tail(rest, tail, m.l_id) == 0 {
+                    let span = stmts[i + 1].span;
+                    let fused_value = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("matrix"),
+                                func: sym("linear_row_gelu"),
+                            },
+                            args: vec![m.x, m.w, m.bias],
+                            type_args: vec![],
+                        },
+                        ty: m.g_ty.clone(),
+                        span,
+                    };
+                    let new_bind = IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: m.g_id,
+                            mutability: m.g_mutability,
+                            ty: m.g_ty,
+                            value: fused_value,
+                        },
+                        span,
+                    };
+                    stmts.splice(i..i + 2, std::iter::once(new_bind));
+                    changed = true;
+                    continue;
+                }
+            }
+        }
         if i + 3 <= stmts.len() {
             if let Some(m) = match_attention_3gram(&stmts[i..i + 3]) {
                 let rest = &stmts[i + 3..];
@@ -481,6 +618,90 @@ fn fuse_let_split_chain(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>) -> bool 
         i += 1;
     }
     changed
+}
+
+struct PreNormLinearMatch {
+    n_id: VarId,
+    l_id: VarId,
+    x: IrExpr,
+    gamma: IrExpr,
+    beta: IrExpr,
+    eps: IrExpr,
+    w: IrExpr,
+    bias: IrExpr,
+    l_mutability: Mutability,
+    l_ty: almide_lang::types::Ty,
+}
+
+fn match_pre_norm_linear_2gram(window: &[IrStmt]) -> Option<PreNormLinearMatch> {
+    if window.len() < 2 { return None; }
+    let (n_id, n_value) = as_bind(&window[0])?;
+    let (x, gamma, beta, eps) = if let IrExprKind::Call {
+        target: CallTarget::Module { module, func }, args, ..
+    } = &n_value.kind {
+        if module.as_str() == "matrix" && func.as_str() == "layer_norm_rows" && args.len() == 4 {
+            (args[0].clone(), args[1].clone(), args[2].clone(), args[3].clone())
+        } else { return None; }
+    } else { return None; };
+
+    let (l_id, l_value) = as_bind(&window[1])?;
+    let (norm_arg, w, bias) = if let IrExprKind::Call {
+        target: CallTarget::Module { module, func }, args, ..
+    } = &l_value.kind {
+        if module.as_str() == "matrix" && func.as_str() == "linear_row" && args.len() == 3 {
+            (args[0].clone(), args[1].clone(), args[2].clone())
+        } else { return None; }
+    } else { return None; };
+    if !is_var_with_id(&norm_arg, n_id) { return None; }
+
+    let (l_mutability, l_ty) = match &window[1].kind {
+        IrStmtKind::Bind { mutability, ty, .. } => (*mutability, ty.clone()),
+        _ => return None,
+    };
+
+    Some(PreNormLinearMatch {
+        n_id, l_id,
+        x, gamma, beta, eps, w, bias,
+        l_mutability, l_ty,
+    })
+}
+
+struct LinearGeluMatch {
+    l_id: VarId,
+    g_id: VarId,
+    x: IrExpr,
+    w: IrExpr,
+    bias: IrExpr,
+    g_mutability: Mutability,
+    g_ty: almide_lang::types::Ty,
+}
+
+fn match_linear_row_gelu_2gram(window: &[IrStmt]) -> Option<LinearGeluMatch> {
+    if window.len() < 2 { return None; }
+    let (l_id, l_value) = as_bind(&window[0])?;
+    // linear_row has arity 3: (x, W, bias).
+    let (x, w, bias) = if let IrExprKind::Call {
+        target: CallTarget::Module { module, func }, args, ..
+    } = &l_value.kind {
+        if module.as_str() == "matrix" && func.as_str() == "linear_row" && args.len() == 3 {
+            (args[0].clone(), args[1].clone(), args[2].clone())
+        } else { return None; }
+    } else { return None; };
+
+    let (g_id, g_value) = as_bind(&window[1])?;
+    let gelu_arg = match_matrix_unary(g_value, "gelu")?;
+    if !is_var_with_id(gelu_arg, l_id) { return None; }
+
+    let (g_mutability, g_ty) = match &window[1].kind {
+        IrStmtKind::Bind { mutability, ty, .. } => (*mutability, ty.clone()),
+        _ => return None,
+    };
+
+    Some(LinearGeluMatch {
+        l_id, g_id,
+        x, w, bias,
+        g_mutability, g_ty,
+    })
 }
 
 struct AttentionMatch {

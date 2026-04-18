@@ -1,0 +1,63 @@
+// MatrixFusionPass: `linear_row(layer_norm_rows(x, γ, β, ε), W, b)` →
+// `pre_norm_linear(x, γ, β, ε, W, b)`. Guards nested + let-split.
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
+  let d = if a > b then a - b else b - a
+  d < tol
+}
+
+test "pre_norm_linear: nested form matches unfused chain" {
+  let x = matrix.from_lists([
+    [1.0, 2.0, 3.0, 4.0],
+    [2.0, 1.0, 0.0, 3.0]
+  ])
+  let gamma = [1.0, 1.0, 1.0, 1.0]
+  let beta = [0.0, 0.0, 0.0, 0.0]
+  let weight = matrix.from_lists([
+    [0.5, 0.5, 0.5, 0.5],
+    [1.0, 0.0, 1.0, 0.0]
+  ])
+  let bias = [0.0, 0.0]
+
+  let normed = matrix.layer_norm_rows(x, gamma, beta, 0.00001)
+  let expected = matrix.linear_row(normed, weight, bias)
+
+  let actual = matrix.linear_row(matrix.layer_norm_rows(x, gamma, beta, 0.00001), weight, bias)
+
+  assert(approx_eq(matrix.get(expected, 0, 0), matrix.get(actual, 0, 0), 0.00001))
+  assert(approx_eq(matrix.get(expected, 0, 1), matrix.get(actual, 0, 1), 0.00001))
+  assert(approx_eq(matrix.get(expected, 1, 0), matrix.get(actual, 1, 0), 0.00001))
+  assert(approx_eq(matrix.get(expected, 1, 1), matrix.get(actual, 1, 1), 0.00001))
+}
+
+test "pre_norm_linear let-split fuses when normalized is single-use" {
+  let x = matrix.from_lists([[1.0, 2.0, 3.0]])
+  let gamma = [1.0, 1.0, 1.0]
+  let beta = [0.0, 0.0, 0.0]
+  let weight = matrix.from_lists([[1.0, 1.0, 1.0]])
+  let bias = [0.0]
+
+  let n = matrix.layer_norm_rows(x, gamma, beta, 0.00001)
+  let y = matrix.linear_row(n, weight, bias)
+
+  // Normalized row of [1,2,3] has mean=2, var=2/3, inv_std = sqrt(1.5).
+  // Normed: [(1-2)*sqrt(1.5), 0, (3-2)*sqrt(1.5)]
+  //       ≈ [-1.2247, 0, 1.2247]
+  // Linear row with W=[1,1,1]: sum ≈ 0 (symmetric).
+  assert(approx_eq(matrix.get(y, 0, 0), 0.0, 0.0001))
+}
+
+test "pre_norm_linear let-split skipped when normalized is reused" {
+  let x = matrix.from_lists([[1.0, 2.0, 3.0]])
+  let gamma = [1.0, 1.0, 1.0]
+  let beta = [0.0, 0.0, 0.0]
+  let weight = matrix.from_lists([[1.0, 1.0, 1.0]])
+  let bias = [0.0]
+
+  let n = matrix.layer_norm_rows(x, gamma, beta, 0.00001)
+  let y = matrix.linear_row(n, weight, bias)
+  let external = matrix.get(n, 0, 1)  // extra use → no fusion
+
+  assert(approx_eq(matrix.get(y, 0, 0), 0.0, 0.0001))
+  assert(approx_eq(external, 0.0, 0.0001))  // mean-centered, middle = 0
+}
