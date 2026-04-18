@@ -275,6 +275,48 @@ pub fn almide_rt_matrix_fused_gemm_bias_scale_gelu(
     almide_rt_matrix_gelu(&scaled)
 }
 
+pub fn almide_rt_matrix_rms_norm_rows(
+    m: &AlmideMatrix,
+    gamma: &[f64],
+    eps: f64,
+) -> AlmideMatrix {
+    m.iter().map(|row| {
+        let n = row.len() as f64;
+        let mut sq = 0.0;
+        for &x in row { sq += x * x; }
+        let inv = 1.0 / (sq / n + eps).sqrt();
+        row.iter().zip(gamma.iter()).map(|(x, g)| x * inv * g).collect()
+    }).collect()
+}
+
+pub fn almide_rt_matrix_swiglu_gate(
+    x: &AlmideMatrix,
+    w_gate: &AlmideMatrix,
+    w_up: &AlmideMatrix,
+) -> AlmideMatrix {
+    if x.is_empty() || w_gate.is_empty() || w_up.is_empty() { return vec![]; }
+    let r = x.len();
+    let d_in = x[0].len();
+    let d_out = w_gate.len();
+    let mut out = vec![vec![0.0f64; d_out]; r];
+    for i in 0..r {
+        let xi = &x[i];
+        for j in 0..d_out {
+            let wg = &w_gate[j];
+            let wu = &w_up[j];
+            let mut g = 0.0;
+            let mut u = 0.0;
+            for k in 0..d_in {
+                g += xi[k] * wg[k];
+                u += xi[k] * wu[k];
+            }
+            let sig = 1.0 / (1.0 + (-g).exp());
+            out[i][j] = g * sig * u;
+        }
+    }
+    out
+}
+
 pub fn almide_rt_matrix_attention_weights(
     q: &AlmideMatrix,
     kt: &AlmideMatrix,
@@ -283,6 +325,16 @@ pub fn almide_rt_matrix_attention_weights(
     let prod = almide_rt_matrix_mul(q, kt);
     let scaled = almide_rt_matrix_scale(&prod, scale);
     almide_rt_matrix_softmax_rows(&scaled)
+}
+
+pub fn almide_rt_matrix_scaled_dot_product_attention(
+    q: &AlmideMatrix,
+    kt: &AlmideMatrix,
+    v: &AlmideMatrix,
+    scale: f64,
+) -> AlmideMatrix {
+    let w = almide_rt_matrix_attention_weights(q, kt, scale);
+    almide_rt_matrix_mul(&w, v)
 }
 
 pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideMatrix> {

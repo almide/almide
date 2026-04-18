@@ -250,6 +250,16 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
         changed = true;
     }
 
+    // Full scaled-dot-product attention fusion:
+    //   matrix.mul(matrix.attention_weights(Q, Kt, s), V)
+    //   → matrix.scaled_dot_product_attention(Q, Kt, V, s)
+    // Runtime collapses the second matmul into the same flat buffer used
+    // by the in-place softmax — no separate weights matrix object.
+    if let Some(new_kind) = try_fuse_scaled_dot_product_attention(&expr.kind) {
+        expr.kind = new_kind;
+        changed = true;
+    }
+
     // Scaled-matmul fusion:
     //   matrix.mul(a, matrix.scale(b, s)) → matrix.mul_scaled(a, s, b)
     //   matrix.mul(matrix.scale(a, s), b) → matrix.mul_scaled(a, s, b)
@@ -312,6 +322,38 @@ fn try_fuse_gemm_bias_scale_gelu(kind: &IrExprKind) -> Option<IrExprKind> {
         args: vec![a.clone(), b.clone(), bias.clone(), alpha.clone()],
         type_args: vec![],
     })
+}
+
+/// Pattern-match `matrix.mul(matrix.attention_weights(Q, Kt, s), V)` →
+/// `matrix.scaled_dot_product_attention(Q, Kt, V, s)`.
+///
+/// Note this looks for the post-fusion `attention_weights` form. The
+/// upstream `try_fuse_attention_weights` already collapses
+/// `softmax_rows(scale(mul(...)))` to it, so by the time the outer
+/// expression is rebuilt we see `mul(attention_weights(...), V)` and
+/// can fold the second matmul in.
+fn try_fuse_scaled_dot_product_attention(kind: &IrExprKind) -> Option<IrExprKind> {
+    let (lhs, v) = match kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "mul" && args.len() == 2 =>
+        {
+            (&args[0], &args[1])
+        }
+        _ => return None,
+    };
+    if let IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } = &lhs.kind {
+        if module.as_str() == "matrix" && func.as_str() == "attention_weights" && args.len() == 3 {
+            return Some(IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: sym("matrix"),
+                    func: sym("scaled_dot_product_attention"),
+                },
+                args: vec![args[0].clone(), args[1].clone(), v.clone(), args[2].clone()],
+                type_args: vec![],
+            });
+        }
+    }
+    None
 }
 
 /// Pattern-match `matrix.mul(a, matrix.scale(b, s))` and its mirror
@@ -577,6 +619,36 @@ fn fuse_let_split_chain(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>) -> bool 
             }
         }
         if i + 2 <= stmts.len() {
+            if let Some(m) = match_sdpa_2gram(&stmts[i..i + 2]) {
+                let rest = &stmts[i + 2..];
+                if count_refs_in_stmts_and_tail(rest, tail, m.w_id) == 0 {
+                    let span = stmts[i + 1].span;
+                    let fused_value = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("matrix"),
+                                func: sym("scaled_dot_product_attention"),
+                            },
+                            args: vec![m.q, m.kt, m.v, m.scale],
+                            type_args: vec![],
+                        },
+                        ty: m.o_ty.clone(),
+                        span,
+                    };
+                    let new_bind = IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: m.o_id,
+                            mutability: m.o_mutability,
+                            ty: m.o_ty,
+                            value: fused_value,
+                        },
+                        span,
+                    };
+                    stmts.splice(i..i + 2, std::iter::once(new_bind));
+                    changed = true;
+                    continue;
+                }
+            }
             if let Some(m) = match_mul_scaled_2gram(&stmts[i..i + 2]) {
                 let rest = &stmts[i + 2..];
                 if count_refs_in_stmts_and_tail(rest, tail, m.s_id) == 0 {
@@ -705,6 +777,50 @@ fn fuse_let_split_chain(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>) -> bool 
         i += 1;
     }
     changed
+}
+
+struct SdpaMatch {
+    w_id: VarId,
+    o_id: VarId,
+    q: IrExpr,
+    kt: IrExpr,
+    v: IrExpr,
+    scale: IrExpr,
+    o_mutability: Mutability,
+    o_ty: almide_lang::types::Ty,
+}
+
+/// Match `let w = attention_weights(q, kt, s); let o = mul(w, v)` and
+/// collapse to `let o = scaled_dot_product_attention(q, kt, v, s)`.
+/// `attention_weights` itself is the post-fusion form, so this catches
+/// chains that the upstream attention_3gram has already collapsed.
+fn match_sdpa_2gram(window: &[IrStmt]) -> Option<SdpaMatch> {
+    if window.len() < 2 { return None; }
+    let (w_id, w_value) = as_bind(&window[0])?;
+    let (q, kt, scale) = if let IrExprKind::Call {
+        target: CallTarget::Module { module, func }, args, ..
+    } = &w_value.kind {
+        if module.as_str() == "matrix" && func.as_str() == "attention_weights" && args.len() == 3 {
+            (args[0].clone(), args[1].clone(), args[2].clone())
+        } else { return None; }
+    } else { return None; };
+
+    let (o_id, o_value) = as_bind(&window[1])?;
+    let (mul_lhs, v) = match_matrix_binary(o_value, "mul")?;
+    if !is_var_with_id(mul_lhs, w_id) { return None; }
+
+    let (o_mutability, o_ty) = match &window[1].kind {
+        IrStmtKind::Bind { mutability, ty, .. } => (*mutability, ty.clone()),
+        _ => return None,
+    };
+
+    Some(SdpaMatch {
+        w_id, o_id,
+        q, kt,
+        v: v.clone(),
+        scale,
+        o_mutability, o_ty,
+    })
 }
 
 struct MulScaledMatch {

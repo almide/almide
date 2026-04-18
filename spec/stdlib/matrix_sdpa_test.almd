@@ -1,0 +1,83 @@
+// MatrixFusionPass: scaled_dot_product_attention.
+// Detects `mul(attention_weights(Q, Kt, s), V)` (which itself comes from
+// `mul(softmax_rows(scale(mul(Q, Kt), s)), V)` after attention_weights
+// fusion) and rewrites to a single fused runtime call.
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
+  let d = if a > b then a - b else b - a
+  d < tol
+}
+
+test "SDPA: ones inputs collapse to V row mean" {
+  // Q = K = ones(seq=3, d=4), so attention weights are 1/3 (uniform).
+  // Output[i] = mean(V rows). With V = ones, every output row = 1.
+  let q = matrix.ones(3, 4)
+  let kt = matrix.ones(4, 3)
+  let v = matrix.ones(3, 4)
+
+  let out = matrix.mul(matrix.attention_weights(q, kt, 0.5), v)
+  let (r, c) = matrix.shape(out)
+  assert_eq(r, 3)
+  assert_eq(c, 4)
+  assert(approx_eq(matrix.get(out, 0, 0), 1.0, 0.00001))
+  assert(approx_eq(matrix.get(out, 2, 3), 1.0, 0.00001))
+}
+
+test "SDPA from raw mul/scale/softmax/mul chain" {
+  // Should fuse all 4 steps via attention_weights then SDPA.
+  let q = matrix.ones(2, 4)
+  let kt = matrix.ones(4, 2)
+  let v = matrix.ones(2, 4)
+
+  let out = matrix.mul(matrix.softmax_rows(matrix.scale(matrix.mul(q, kt), 0.5)), v)
+  assert(approx_eq(matrix.get(out, 0, 0), 1.0, 0.00001))
+}
+
+test "SDPA let-split form fuses" {
+  let q = matrix.ones(3, 4)
+  let kt = matrix.ones(4, 3)
+  let v = matrix.ones(3, 4)
+
+  let aw = matrix.attention_weights(q, kt, 0.5)
+  let out = matrix.mul(aw, v)
+  assert(approx_eq(matrix.get(out, 1, 1), 1.0, 0.00001))
+}
+
+test "SDPA skipped when attention weights reused" {
+  let q = matrix.ones(3, 4)
+  let kt = matrix.ones(4, 3)
+  let v = matrix.ones(3, 4)
+
+  let aw = matrix.attention_weights(q, kt, 0.5)
+  let out = matrix.mul(aw, v)
+  let raw_w = matrix.get(aw, 0, 0)  // extra use → no SDPA fusion
+
+  assert(approx_eq(matrix.get(out, 0, 0), 1.0, 0.00001))
+  assert(approx_eq(raw_w, 0.33333, 0.0001))  // 1/3 uniform
+}
+
+test "SDPA distinguishes V rows" {
+  // Q identity-like → each row of Q strongly attends a different K row.
+  let q = matrix.from_lists([
+    [10.0, 0.0, 0.0],
+    [0.0, 10.0, 0.0]
+  ])
+  let kt = matrix.from_lists([
+    [1.0, 0.0],
+    [0.0, 1.0],
+    [0.0, 0.0]
+  ])
+  let v = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0, 4.0],
+    [5.0, 6.0]
+  ])
+
+  // Q[0]·K[0] = 10 (large), Q[0]·K[1] = 0, Q[0]·K[2] = 0 → softmax peaks at K[0].
+  // Out[0] ≈ V[0] = (1, 2). Q[1] peaks at K[1] → Out[1] ≈ V[1] = (3, 4).
+  let out = matrix.mul(matrix.attention_weights(q, kt, 1.0), v)
+  assert(approx_eq(matrix.get(out, 0, 0), 1.0, 0.01))
+  assert(approx_eq(matrix.get(out, 0, 1), 2.0, 0.01))
+  assert(approx_eq(matrix.get(out, 1, 0), 3.0, 0.01))
+  assert(approx_eq(matrix.get(out, 1, 1), 4.0, 0.01))
+}
