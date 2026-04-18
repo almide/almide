@@ -38,6 +38,7 @@ pub mod pass_match_subject;
 pub mod pass_result_erasure;
 pub mod pass_result_propagation;
 pub mod pass_shadow_resolve;
+pub mod pass_intrinsic_lowering;
 pub mod pass_stdlib_lowering;
 pub mod pass_effect_inference;
 pub mod pass_stream_fusion;

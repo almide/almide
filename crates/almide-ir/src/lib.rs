@@ -256,6 +256,12 @@ pub enum IrExprKind {
     /// Tail call: same as Call but emits `return_call` in WASM.
     /// Inserted by TailCallMarkPass for calls in tail position.
     TailCall { target: CallTarget, args: Vec<IrExpr> },
+    /// Fully resolved runtime-fn call. Emitted by `pass_intrinsic_lowering`
+    /// from `@intrinsic(symbol)`-annotated stdlib fns. Downstream emit
+    /// (Rust walker, WASM emitter) looks up `symbol` directly — borrow /
+    /// clone decoration is derived from each arg's `IrExpr.ty`. See
+    /// `docs/roadmap/active/dispatch-unification-plan.md` §Phase 1e-2.
+    RuntimeCall { symbol: Sym, args: Vec<IrExpr> },
 
     // ── Collections ──
     List { elements: Vec<IrExpr> },
@@ -485,6 +491,10 @@ impl IrExpr {
                     other => other,
                 };
                 IrExprKind::Call { target, args, type_args }
+            }
+            IrExprKind::RuntimeCall { symbol, args } => {
+                let args = args.into_iter().map(|a| f(a)).collect();
+                IrExprKind::RuntimeCall { symbol, args }
             }
             IrExprKind::TailCall { target, args } => {
                 let args = args.into_iter().map(|a| f(a)).collect();

@@ -215,6 +215,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             out
         }
 
+        // ── Pre-resolved runtime call (from @intrinsic) ──
+        IrExprKind::RuntimeCall { symbol, args } => {
+            // Emit `<symbol>(<arg1>, <arg2>, ...)`. Borrow decoration is
+            // decided by PR passes (CloneInsertionPass, BorrowInsertionPass)
+            // which wrap args in IR-level Clone / Borrow nodes before this
+            // walker runs — so this arm only renders children directly.
+            let args_str = args.iter().map(|a| render_expr(ctx, a))
+                .collect::<Vec<_>>().join(", ");
+            format!("{}({})", symbol.as_str(), args_str)
+        }
+
         // ── Calls ──
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
             match target {

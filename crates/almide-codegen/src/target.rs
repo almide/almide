@@ -18,6 +18,7 @@ use super::pass_capture_clone::CaptureClonePass;
 use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_result_propagation::ResultPropagationPass;
+use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::pass_match_subject::MatchSubjectPass;
 use super::pass_effect_inference::EffectInferencePass;
@@ -59,6 +60,10 @@ fn build_pipeline(target: Target) -> Pipeline {
         Target::Rust => Pipeline::new()
             // ListPatternLowering: desugar list patterns to if/else before any other pass
             .add(ListPatternLoweringPass)
+            // @intrinsic(symbol) → RuntimeCall. Must run before ResolveCalls
+            // (so bundled → Named rewrite skips intrinsic fns) and before
+            // StdlibLowering (so @inline_rust does not double-lower them).
+            .add(IntrinsicLoweringPass)
             // Verify all user-module calls resolve to known IrFunctions.
             .add(ResolveCallsPass)
             // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
@@ -117,6 +122,8 @@ fn build_pipeline(target: Target) -> Pipeline {
 
         Target::Wasm => Pipeline::new()
             .add(ListPatternLoweringPass)
+            // @intrinsic(symbol) → RuntimeCall. See Rust pipeline comment.
+            .add(IntrinsicLoweringPass)
             // Verify all user-module calls resolve to known IrFunctions.
             // Runs early so violations surface before deep transformations.
             .add(ResolveCallsPass)

@@ -80,6 +80,9 @@ pub fn walk_expr_mut<V: IrMutVisitor>(v: &mut V, expr: &mut IrExpr) {
             }
             for a in args { v.visit_expr_mut(a); }
         }
+        IrExprKind::RuntimeCall { args, .. } => {
+            for a in args { v.visit_expr_mut(a); }
+        }
 
         // ── Collections ──
         IrExprKind::List { elements } | IrExprKind::Tuple { elements }

@@ -258,6 +258,26 @@ impl FuncCompiler<'_> {
             IrExprKind::TailCall { target, args } => {
                 self.emit_tail_call(target, args, &expr.ty);
             }
+            IrExprKind::RuntimeCall { symbol, args } => {
+                // Resolved runtime call from @intrinsic. Look up the
+                // mangled symbol in func_map and emit `call(idx)` after
+                // each arg. Any pre/post decoration that applied to
+                // hand-written dispatchers (scratch / drop / intern)
+                // should not be needed here: upstream `CloneInsertion` /
+                // similar passes wrap args via IR nodes the walker
+                // traverses normally.
+                for a in args { self.emit_expr(a); }
+                let sym = symbol.as_str();
+                let Some(&idx) = self.emitter.func_map.get(sym) else {
+                    panic!(
+                        "[ICE] emit_wasm: RuntimeCall symbol `{}` not in \
+                         func_map — register the WASM runtime fn or fix \
+                         the @intrinsic symbol",
+                        sym
+                    );
+                };
+                wasm!(self.func, { call(idx); });
+            }
 
             // ── String interpolation ──
             IrExprKind::StringInterp { parts } => {
