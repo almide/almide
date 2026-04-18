@@ -32,10 +32,10 @@ fn parse(s: String) -> Result[Int, String] = _
 @intrinsic("almide_rt_int_parse_hex")
 fn from_hex(s: String) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_int_to_float")
+@inline_rust("almide_rt_int_to_float({n})")
 fn to_float(n: Int) -> Float = _
 
-@intrinsic("almide_rt_int_bits_to_float")
+@inline_rust("almide_rt_int_bits_to_float({bits})")
 fn bits_to_float(bits: Int) -> Float = _
 
 // ── Arithmetic ──

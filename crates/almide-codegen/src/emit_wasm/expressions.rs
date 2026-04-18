@@ -259,24 +259,46 @@ impl FuncCompiler<'_> {
                 self.emit_tail_call(target, args, &expr.ty);
             }
             IrExprKind::RuntimeCall { symbol, args } => {
-                // Resolved runtime call from @intrinsic. Look up the
-                // mangled symbol in func_map and emit `call(idx)` after
-                // each arg. Any pre/post decoration that applied to
-                // hand-written dispatchers (scratch / drop / intern)
-                // should not be needed here: upstream `CloneInsertion` /
-                // similar passes wrap args via IR nodes the walker
-                // traverses normally.
-                for a in args { self.emit_expr(a); }
+                // Resolved runtime call from @intrinsic. Preferred path:
+                // look up the mangled symbol in `func_map` and emit
+                // `call(idx)` after each arg. Fallback: the WASM runtime
+                // fn may not be registered yet (migration in progress).
+                // Decode the symbol back to (module, func) and route
+                // through the legacy `emit_<m>_call` dispatcher so the
+                // inline-emitted variant (`int.abs` as i64 ops, etc.)
+                // keeps working until the runtime fn lands.
                 let sym = symbol.as_str();
-                let Some(&idx) = self.emitter.func_map.get(sym) else {
+                if let Some(&idx) = self.emitter.func_map.get(sym) {
+                    for a in args { self.emit_expr(a); }
+                    wasm!(self.func, { call(idx); });
+                } else if let Some(rest) = sym.strip_prefix("almide_rt_") {
+                    if let Some(underscore) = rest.find('_') {
+                        let module = &rest[..underscore];
+                        let func = &rest[underscore + 1..];
+                        if !self.dispatch_runtime_fallback(module, func, args, &expr.ty) {
+                            panic!(
+                                "[ICE] emit_wasm: RuntimeCall `{}` — no WASM \
+                                 runtime fn and no legacy dispatcher fallback. \
+                                 Register the runtime fn or add a dispatch arm \
+                                 for `{}.{}`.",
+                                sym, module, func
+                            );
+                        }
+                    } else {
+                        panic!(
+                            "[ICE] emit_wasm: RuntimeCall symbol `{}` has no \
+                             recoverable (module, func) prefix for fallback dispatch.",
+                            sym
+                        );
+                    }
+                } else {
                     panic!(
-                        "[ICE] emit_wasm: RuntimeCall symbol `{}` not in \
-                         func_map — register the WASM runtime fn or fix \
-                         the @intrinsic symbol",
+                        "[ICE] emit_wasm: RuntimeCall symbol `{}` lacks the \
+                         `almide_rt_` prefix — cannot look up in func_map or \
+                         derive fallback dispatch.",
                         sym
                     );
-                };
-                wasm!(self.func, { call(idx); });
+                }
             }
 
             // ── String interpolation ──
