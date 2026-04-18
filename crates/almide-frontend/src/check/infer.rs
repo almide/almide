@@ -301,7 +301,19 @@ impl Checker {
                                     format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
                                     "Use numeric types (Int or Float)", format!("operator {}", op)));
                             }
-                            if lc.compatible(&rc) && is_sized_scalar(&lc) {
+                            // Stage 1c: reject mixed-sized-width arithmetic.
+                            // See `infer_plus_op` for rationale.
+                            if is_sized_scalar(&lc) && is_sized_scalar(&rc) && lc != rc {
+                                self.emit(super::err(
+                                    format!(
+                                        "operator '{}' mixes sized numeric types {} and {} — \
+                                         explicit conversion required (e.g. `.to_{}()`)",
+                                        op, lc.display(), rc.display(),
+                                        lc.display().to_lowercase()),
+                                    "Convert one side with `.to_intN()` / `.to_floatN()` before the op",
+                                    format!("operator {}", op)));
+                                lc
+                            } else if lc.compatible(&rc) && is_sized_scalar(&lc) {
                                 lc
                             } else if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
                         }
@@ -1023,6 +1035,23 @@ impl Checker {
                 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
                 | Ty::Float32
         );
+        // Sized Numeric Types (Stage 1c): both sides sized AND widths
+        // differ is a type error. The permissive `Ty::Int` / `Ty::Float`
+        // canonical pair stays (it carries the literal-coercion slot for
+        // `let x: Int32 = 42` style bindings). Mixing `Int32` and `Int16`
+        // has no such cover — it's always wrong, always needs explicit
+        // `.to_intN()`.
+        if is_sized_scalar(lc) && is_sized_scalar(rc) && lc != rc {
+            self.emit(super::err(
+                format!(
+                    "operator '+' mixes sized numeric types {} and {} — \
+                     explicit conversion required (e.g. `.to_{}()`)",
+                    lc.display(), rc.display(),
+                    lc.display().to_lowercase()),
+                "Convert one side with `.to_intN()` / `.to_floatN()` before the op",
+                format!("operator +")));
+            return lc.clone();
+        }
         if lc.compatible(rc) && is_sized_scalar(lc) {
             return lc.clone();
         }
