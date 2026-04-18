@@ -51,6 +51,6 @@ pub fn almide_rt_int_to_u32(n: i64) -> i64 { (n as u32) as i64 }
 pub fn almide_rt_int_to_u8(n: i64) -> i64 { (n as u8) as i64 }
 pub fn almide_rt_int_bits_to_float(bits: i64) -> f64 { f64::from_bits(bits as u64) }
 
-pub fn parse_int(s: String) -> Result<i64, String> {
+pub fn parse_int(s: &str) -> Result<i64, String> {
     Ok((almide_rt_int_parse(&*s))?)
 }
