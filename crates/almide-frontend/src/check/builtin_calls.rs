@@ -29,10 +29,17 @@ pub(crate) fn builtin_module_for_type(ty: &Ty) -> Option<&'static str> {
     }
 }
 
-/// Check if two types are mismatched (neither Unknown, not compatible in either direction).
+/// Check if an argument type mismatches a parameter slot.
+///
+/// Matches the "expected accepts actual" semantic: the provided value
+/// must be assignable to the parameter. Asymmetric compat rules (e.g.
+/// `Matrix.compatible(Matrix[T])` = true but the reverse is false)
+/// depend on this directional check; the bidirectional variant used
+/// before P5 Matrix[T] discrimination let narrowing assignments slip
+/// through silently.
 pub(crate) fn types_mismatch(expected: &Ty, actual: &Ty) -> bool {
     *expected != Ty::Unknown && *actual != Ty::Unknown
-        && !expected.compatible(actual) && !actual.compatible(expected)
+        && !expected.compatible(actual)
 }
 
 impl Checker {

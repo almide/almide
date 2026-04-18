@@ -1027,3 +1027,37 @@ fn sized_int_and_int64_interop_ok() {
     has_no_errors("fn f(a: Int, b: Int64) -> Int64 = b");
     has_no_errors("fn f(a: Int64) -> Int = a");
 }
+
+// ── Strict Matrix[T] discrimination (post-C) ──
+
+#[test]
+fn strict_matrix_f32_rejects_bare_matrix() {
+    // A fn that asks for `Matrix[Float32]` MUST NOT accept a bare
+    // `Matrix` value — bare carries no f32 guarantee.
+    let errs = errors(
+        "fn needs_f32(m: Matrix[Float32]) -> Int = matrix.rows(m)\nfn use_bare() -> Int = needs_f32(matrix.zeros(3, 3))"
+    );
+    assert!(errs.iter().any(|e| e.contains("expects")),
+        "should reject bare Matrix passed to Matrix[Float32] param, got: {:?}", errs);
+}
+
+#[test]
+fn strict_matrix_bare_accepts_typed() {
+    // `matrix.shape(m: Matrix)` still accepts `Matrix[Float32]`
+    // (bare widens to typed downstream via the runtime tag).
+    has_no_errors(
+        "fn row_count_f32(m: Matrix[Float32]) -> Int = matrix.rows(m)"
+    );
+}
+
+#[test]
+fn strict_matrix_float_alias_interop() {
+    // `Matrix[Float]` is the legacy alias for bare `Matrix` — both
+    // directions stay compatible at the checker layer.
+    has_no_errors(
+        "fn f(m: Matrix[Float]) -> Int = matrix.rows(m)\nfn g() -> Int = f(matrix.zeros(3, 3))"
+    );
+    has_no_errors(
+        "fn f(m: Matrix) -> Int = matrix.rows(m)\nfn g() -> Int = {\n  let m: Matrix[Float] = matrix.zeros(3, 3)\n  f(m)\n}"
+    );
+}
