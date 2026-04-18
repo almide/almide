@@ -1,59 +1,59 @@
-@inline_rust("almide_rt_value_array({items})")
+@intrinsic("almide_rt_value_array")
 fn array(items: List[Value]) -> Value = _
 
-@inline_rust("almide_rt_value_as_array({v})")
+@intrinsic("almide_rt_value_as_array")
 fn as_array(v: Value) -> Result[List[Value], String] = _
 
-@inline_rust("almide_rt_value_as_bool({v})")
+@intrinsic("almide_rt_value_as_bool")
 fn as_bool(v: Value) -> Result[Bool, String] = _
 
-@inline_rust("almide_rt_value_as_float({v})")
+@intrinsic("almide_rt_value_as_float")
 fn as_float(v: Value) -> Result[Float, String] = _
 
-@inline_rust("almide_rt_value_as_int({v})")
+@intrinsic("almide_rt_value_as_int")
 fn as_int(v: Value) -> Result[Int, String] = _
 
-@inline_rust("almide_rt_value_as_string({v})")
+@intrinsic("almide_rt_value_as_string")
 fn as_string(v: Value) -> Result[String, String] = _
 
-@inline_rust("almide_rt_value_bool({b})")
+@intrinsic("almide_rt_value_bool")
 fn bool(b: Bool) -> Value = _
 
-@inline_rust("almide_rt_value_float({f})")
+@intrinsic("almide_rt_value_float")
 fn float(f: Float) -> Value = _
 
-@inline_rust("almide_rt_value_field({v}, {key})")
+@intrinsic("almide_rt_value_field")
 fn get(v: Value, key: String) -> Result[Value, String] = _
 
-@inline_rust("almide_rt_value_int({n})")
+@intrinsic("almide_rt_value_int")
 fn int(n: Int) -> Value = _
 
-@inline_rust("almide_rt_value_merge({a}, {b})")
+@intrinsic("almide_rt_value_merge")
 fn merge(a: Value, b: Value) -> Value = _
 
-@inline_rust("almide_rt_value_null()")
+@intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
-@inline_rust("almide_rt_value_object({pairs})")
+@intrinsic("almide_rt_value_object")
 fn object(pairs: List[(String, Value)]) -> Value = _
 
-@inline_rust("almide_rt_value_omit({v}, {keys})")
+@intrinsic("almide_rt_value_omit")
 fn omit(v: Value, keys: List[String]) -> Value = _
 
-@inline_rust("almide_rt_value_pick({v}, {keys})")
+@intrinsic("almide_rt_value_pick")
 fn pick(v: Value, keys: List[String]) -> Value = _
 
-@inline_rust("almide_rt_value_str({s})")
+@intrinsic("almide_rt_value_str")
 fn str(s: String) -> Value = _
 
-@inline_rust("almide_rt_value_stringify(&{v})")
+@intrinsic("almide_rt_value_stringify")
 fn stringify(v: Value) -> String = _
 
-@inline_rust("almide_rt_value_to_camel_case({v})")
+@intrinsic("almide_rt_value_to_camel_case")
 fn to_camel_case(v: Value) -> Value = _
 
-@inline_rust("almide_rt_value_to_snake_case({v})")
+@intrinsic("almide_rt_value_to_snake_case")
 fn to_snake_case(v: Value) -> Value = _
 
-@inline_rust("almide_rt_value_field({v}, {key})")
+@intrinsic("almide_rt_value_field")
 fn field(v: Value, key: String) -> Result[Value, String] = _

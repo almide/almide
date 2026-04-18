@@ -17,63 +17,63 @@
 
 // ── construction + metadata ──
 
-@inline_rust("almide_rt_matrix_zeros({rows}, {cols})")
+@intrinsic("almide_rt_matrix_zeros")
 fn zeros(rows: Int, cols: Int) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_ones({rows}, {cols})")
+@intrinsic("almide_rt_matrix_ones")
 fn ones(rows: Int, cols: Int) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_shape(&{m})")
+@intrinsic("almide_rt_matrix_shape")
 fn shape(m: Matrix) -> (Int, Int) = _
 
-@inline_rust("almide_rt_matrix_transpose(&{m})")
+@intrinsic("almide_rt_matrix_transpose")
 fn transpose(m: Matrix) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_from_lists(&{rows})")
+@intrinsic("almide_rt_matrix_from_lists")
 fn from_lists(rows: List[List[Float]]) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_to_lists(&{m})")
+@intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 
-@inline_rust("almide_rt_matrix_get(&{m}, {row}, {col})")
+@intrinsic("almide_rt_matrix_get")
 fn get(m: Matrix, row: Int, col: Int) -> Float = _
 
-@inline_rust("almide_rt_matrix_rows(&{m})")
+@intrinsic("almide_rt_matrix_rows")
 fn rows(m: Matrix) -> Int = _
 
-@inline_rust("almide_rt_matrix_cols(&{m})")
+@intrinsic("almide_rt_matrix_cols")
 fn cols(m: Matrix) -> Int = _
 
 // ── elementwise arithmetic ──
 
-@inline_rust("almide_rt_matrix_add(&{a}, &{b})")
+@intrinsic("almide_rt_matrix_add")
 fn add(a: Matrix, b: Matrix) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_mul(&{a}, &{b})")
+@intrinsic("almide_rt_matrix_mul")
 fn mul(a: Matrix, b: Matrix) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_scale(&{m}, {s})")
+@intrinsic("almide_rt_matrix_scale")
 fn scale(m: Matrix, s: Float) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_fma(&{a}, {ka}, &{b}, {kb})")
+@intrinsic("almide_rt_matrix_fma")
 fn fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix = _
 
 @inline_rust("almide_rt_matrix_fma3(&{a}, {ka}, &{b}, {kb}, &{c}, {kc})")
 fn fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_sub(&{a}, &{b})")
+@intrinsic("almide_rt_matrix_sub")
 fn sub(a: Matrix, b: Matrix) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_div(&{a}, &{b})")
+@intrinsic("almide_rt_matrix_div")
 fn div(a: Matrix, b: Matrix) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_neg(&{m})")
+@intrinsic("almide_rt_matrix_neg")
 fn neg(m: Matrix) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_pow(&{m}, {exp})")
+@intrinsic("almide_rt_matrix_pow")
 fn pow(m: Matrix, exp: Float) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_map(&{m}, {f})")
+@intrinsic("almide_rt_matrix_map")
 fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 // ── bytes serialisation ──
@@ -95,57 +95,57 @@ fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix =
 
 // ── neural-network primitives (row-wise) ──
 
-@inline_rust("almide_rt_matrix_broadcast_add_row(&{m}, &{bias})")
+@intrinsic("almide_rt_matrix_broadcast_add_row")
 fn broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_layer_norm_rows(&{m}, &{gamma}, &{beta}, {eps})")
+@intrinsic("almide_rt_matrix_layer_norm_rows")
 fn layer_norm_rows(m: Matrix, gamma: List[Float], beta: List[Float], eps: Float) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_softmax_rows(&{m})")
+@intrinsic("almide_rt_matrix_softmax_rows")
 fn softmax_rows(m: Matrix) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_gelu(&{m})")
+@intrinsic("almide_rt_matrix_gelu")
 fn gelu(m: Matrix) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_split_cols_even(&{m}, {n})")
+@intrinsic("almide_rt_matrix_split_cols_even")
 fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 
-@inline_rust("almide_rt_matrix_concat_cols_many(&{matrices})")
+@intrinsic("almide_rt_matrix_concat_cols_many")
 fn concat_cols(matrices: List[Matrix]) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_concat_cols_many(&{matrices})")
+@intrinsic("almide_rt_matrix_concat_cols_many")
 fn concat_cols_many(matrices: List[Matrix]) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_causal_mask_add(&{m}, {mask_val})")
+@intrinsic("almide_rt_matrix_causal_mask_add")
 fn causal_mask_add(m: Matrix, mask_val: Float) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_multi_head_attention(&{q}, &{k}, &{v}, {n_heads})")
+@intrinsic("almide_rt_matrix_multi_head_attention")
 fn multi_head_attention(q: Matrix, k: Matrix, v: Matrix, n_heads: Int) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_masked_multi_head_attention(&{q}, &{k}, &{v}, {n_heads})")
+@intrinsic("almide_rt_matrix_masked_multi_head_attention")
 fn masked_multi_head_attention(q: Matrix, k: Matrix, v: Matrix, n_heads: Int) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_linear_row(&{x}, &{weight}, &{bias})")
+@intrinsic("almide_rt_matrix_linear_row")
 fn linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_linear_row_no_bias(&{x}, &{weight})")
+@intrinsic("almide_rt_matrix_linear_row_no_bias")
 fn linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_slice_rows(&{m}, {start}, {end})")
+@intrinsic("almide_rt_matrix_slice_rows")
 fn slice_rows(m: Matrix, start: Int, end: Int) -> Matrix = _
 
 @inline_rust("almide_rt_matrix_conv1d(&{input}, &{weight}, &{bias}, {kernel}, {stride}, {padding})")
 fn conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_gather_rows(&{m}, &{indices})")
+@intrinsic("almide_rt_matrix_gather_rows")
 fn gather_rows(m: Matrix, indices: List[Int]) -> Matrix = _
 
 // ── row-vector dot products ──
 
-@inline_rust("almide_rt_matrix_row_dot(&{m}, {r}, &{vec})")
+@intrinsic("almide_rt_matrix_row_dot")
 fn dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 
-@inline_rust("almide_rt_matrix_row_dot(&{m}, {r}, &{vec})")
+@intrinsic("almide_rt_matrix_row_dot")
 fn row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 
 // ── f32 preview path ──
@@ -168,5 +168,5 @@ fn mul_f32_t(a: Matrix, b: Matrix) -> Matrix = _
 @inline_rust("almide_rt_matrix_mul_f32_t_scaled(&{a}, {alpha}, &{b})")
 fn mul_f32_t_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_mul_scaled(&{a}, {alpha}, &{b})")
+@intrinsic("almide_rt_matrix_mul_scaled")
 fn mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _

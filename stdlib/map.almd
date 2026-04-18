@@ -12,80 +12,80 @@
 
 // ── basic accessors ──
 
-@inline_rust("almide_rt_map_new()")
+@intrinsic("almide_rt_map_new")
 fn new[K, V]() -> Map[K, V] = _
 
-@inline_rust("almide_rt_map_get(&{m}, &{key})")
+@intrinsic("almide_rt_map_get")
 fn get[K, V](m: Map[K, V], key: K) -> Option[V] = _
 
-@inline_rust("almide_rt_map_get_or(&{m}, &{key}, {default})")
+@intrinsic("almide_rt_map_get_or")
 fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
 
-@inline_rust("almide_rt_map_set(&{m}, {key}, {value})")
+@intrinsic("almide_rt_map_set")
 fn set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] = _
 
-@inline_rust("almide_rt_map_contains(&{m}, &{key})")
+@intrinsic("almide_rt_map_contains")
 fn contains[K, V](m: Map[K, V], key: K) -> Bool = _
 
-@inline_rust("almide_rt_map_remove(&{m}, &{key})")
+@intrinsic("almide_rt_map_remove")
 fn remove[K, V](m: Map[K, V], key: K) -> Map[K, V] = _
 
-@inline_rust("almide_rt_map_keys(&{m})")
+@intrinsic("almide_rt_map_keys")
 fn keys[K, V](m: Map[K, V]) -> List[K] = _
 
-@inline_rust("almide_rt_map_values(&{m})")
+@intrinsic("almide_rt_map_values")
 fn values[K, V](m: Map[K, V]) -> List[V] = _
 
-@inline_rust("almide_rt_map_len(&{m})")
+@intrinsic("almide_rt_map_len")
 fn len[K, V](m: Map[K, V]) -> Int = _
 
-@inline_rust("almide_rt_map_entries(&{m})")
+@intrinsic("almide_rt_map_entries")
 fn entries[K, V](m: Map[K, V]) -> List[(K, V)] = _
 
-@inline_rust("almide_rt_map_merge(&{a}, &{b})")
+@intrinsic("almide_rt_map_merge")
 fn merge[K, V](a: Map[K, V], b: Map[K, V]) -> Map[K, V] = _
 
-@inline_rust("almide_rt_map_is_empty(&{m})")
+@intrinsic("almide_rt_map_is_empty")
 fn is_empty[K, V](m: Map[K, V]) -> Bool = _
 
 // ── construction ──
 
-@inline_rust("almide_rt_map_from_entries({pairs})")
+@intrinsic("almide_rt_map_from_entries")
 fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
 
 // ── closure-bearing (direct runtime dispatch — map has no IterChain) ──
 
-@inline_rust("almide_rt_map_map_values(&{m}, {f})")
+@intrinsic("almide_rt_map_map_values")
 fn map[K, V, B](m: Map[K, V], f: (V) -> B) -> Map[K, B] = _
 
-@inline_rust("almide_rt_map_filter(&{m}, {f})")
+@intrinsic("almide_rt_map_filter")
 fn filter[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V] = _
 
-@inline_rust("almide_rt_map_fold(&{m}, {init}, {f})")
+@intrinsic("almide_rt_map_fold")
 fn fold[K, V, A](m: Map[K, V], init: A, f: (A, K, V) -> A) -> A = _
 
-@inline_rust("almide_rt_map_any(&{m}, {f})")
+@intrinsic("almide_rt_map_any")
 fn any[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Bool = _
 
-@inline_rust("almide_rt_map_all(&{m}, {f})")
+@intrinsic("almide_rt_map_all")
 fn all[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Bool = _
 
-@inline_rust("almide_rt_map_count(&{m}, {f})")
+@intrinsic("almide_rt_map_count")
 fn count[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Int = _
 
-@inline_rust("almide_rt_map_find(&{m}, {f})")
+@intrinsic("almide_rt_map_find")
 fn find[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)] = _
 
-@inline_rust("almide_rt_map_update({m}, {key}, {f})")
+@intrinsic("almide_rt_map_update")
 fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 
 // ── mutable (in-place) ──
 
-@inline_rust("almide_rt_map_insert(&mut {m}, {key}, {value})")
+@intrinsic("almide_rt_map_insert")
 fn insert[K, V](m: Map[K, V], key: K, value: V) -> Unit = _
 
-@inline_rust("almide_rt_map_delete(&mut {m}, &{key})")
+@intrinsic("almide_rt_map_delete")
 fn delete[K, V](m: Map[K, V], key: K) -> Unit = _
 
-@inline_rust("almide_rt_map_clear(&mut {m})")
+@intrinsic("almide_rt_map_clear")
 fn clear[K, V](m: Map[K, V]) -> Unit = _

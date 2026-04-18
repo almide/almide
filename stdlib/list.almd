@@ -12,28 +12,28 @@
 
 // ── basic accessors ──
 
-@inline_rust("almide_rt_list_len(&{xs})")
+@intrinsic("almide_rt_list_len")
 fn len[A](xs: List[A]) -> Int = _
 
-@inline_rust("almide_rt_list_get(&{xs}, {i})")
+@intrinsic("almide_rt_list_get")
 fn get[A](xs: List[A], i: Int) -> Option[A] = _
 
-@inline_rust("almide_rt_list_get_or(&{xs}, {i}, {default})")
+@intrinsic("almide_rt_list_get_or")
 fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
 
-@inline_rust("almide_rt_list_set(&{xs}, {i}, {val})")
+@intrinsic("almide_rt_list_set")
 fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
 
-@inline_rust("almide_rt_list_swap(&{xs}, {i}, {j})")
+@intrinsic("almide_rt_list_swap")
 fn swap[A](xs: List[A], i: Int, j: Int) -> List[A] = _
 
-@inline_rust("almide_rt_list_sort(&{xs})")
+@intrinsic("almide_rt_list_sort")
 fn sort[A](xs: List[A]) -> List[A] = _
 
-@inline_rust("almide_rt_list_reverse(&{xs})")
+@intrinsic("almide_rt_list_reverse")
 fn reverse[A](xs: List[A]) -> List[A] = _
 
-@inline_rust("almide_rt_list_contains(&{xs}, &{x})")
+@intrinsic("almide_rt_list_contains")
 fn contains[A](xs: List[A], x: A) -> Bool = _
 
 @inline_rust("almide_rt_list_enumerate(({xs}).to_vec())")
@@ -51,37 +51,37 @@ fn take[A](xs: List[A], n: Int) -> List[A] = _
 @inline_rust("almide_rt_list_drop(({xs}).to_vec(), {n})")
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
-@inline_rust("almide_rt_list_unique(&{xs})")
+@intrinsic("almide_rt_list_unique")
 fn unique[A](xs: List[A]) -> List[A] = _
 
-@inline_rust("almide_rt_list_index_of(&{xs}, &{x})")
+@intrinsic("almide_rt_list_index_of")
 fn index_of[A](xs: List[A], x: A) -> Option[Int] = _
 
-@inline_rust("almide_rt_list_last(&{xs})")
+@intrinsic("almide_rt_list_last")
 fn last[A](xs: List[A]) -> Option[A] = _
 
-@inline_rust("almide_rt_list_chunk(&{xs}, {n})")
+@intrinsic("almide_rt_list_chunk")
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-@inline_rust("almide_rt_list_sum(&{xs})")
+@intrinsic("almide_rt_list_sum")
 fn sum(xs: List[Int]) -> Int = _
 
-@inline_rust("almide_rt_list_product(&{xs})")
+@intrinsic("almide_rt_list_product")
 fn product(xs: List[Int]) -> Int = _
 
-@inline_rust("almide_rt_list_first(&{xs})")
+@intrinsic("almide_rt_list_first")
 fn first[A](xs: List[A]) -> Option[A] = _
 
-@inline_rust("almide_rt_list_is_empty(&{xs})")
+@intrinsic("almide_rt_list_is_empty")
 fn is_empty[A](xs: List[A]) -> Bool = _
 
-@inline_rust("almide_rt_list_min(&{xs})")
+@intrinsic("almide_rt_list_min")
 fn min[A](xs: List[A]) -> Option[A] = _
 
-@inline_rust("almide_rt_list_max(&{xs})")
+@intrinsic("almide_rt_list_max")
 fn max[A](xs: List[A]) -> Option[A] = _
 
-@inline_rust("almide_rt_list_join(&{xs}, &*{sep})")
+@intrinsic("almide_rt_list_join")
 fn join(xs: List[String], sep: String) -> String = _
 
 // ── closure-bearing (IterChain-handled: map, filter, find, any, all,
@@ -98,13 +98,13 @@ fn filter[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 @inline_rust("almide_rt_list_find(({xs}).to_vec(), {f})")
 fn find[A](xs: List[A], f: (A) -> Bool) -> Option[A] = _
 
-@inline_rust("almide_rt_list_any(&{xs}, {f})")
+@intrinsic("almide_rt_list_any")
 fn any[A](xs: List[A], f: (A) -> Bool) -> Bool = _
 
-@inline_rust("almide_rt_list_all(&{xs}, {f})")
+@intrinsic("almide_rt_list_all")
 fn all[A](xs: List[A], f: (A) -> Bool) -> Bool = _
 
-@inline_rust("almide_rt_list_count(&{xs}, {f})")
+@intrinsic("almide_rt_list_count")
 fn count[A](xs: List[A], f: (A) -> Bool) -> Int = _
 
 @inline_rust("almide_rt_list_flat_map(({xs}).to_vec(), {f})")
@@ -153,7 +153,7 @@ fn unique_by[A, K](xs: List[A], f: (A) -> K) -> List[A] = _
 
 // ── non-closure constructors / slicing ──
 
-@inline_rust("almide_rt_list_range({start}, {end})")
+@intrinsic("almide_rt_list_range")
 fn range(start: Int, end: Int) -> List[Int] = _
 
 @inline_rust("almide_rt_list_slice(({xs}).to_vec(), {start}, {end})")
@@ -165,16 +165,16 @@ fn insert[A](xs: List[A], i: Int, val: A) -> List[A] = _
 @inline_rust("almide_rt_list_remove_at(({xs}).to_vec(), {i})")
 fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
 
-@inline_rust("almide_rt_list_repeat({val}, {n})")
+@intrinsic("almide_rt_list_repeat")
 fn repeat[A](val: A, n: Int) -> List[A] = _
 
 @inline_rust("almide_rt_list_intersperse(({xs}).to_vec(), {sep})")
 fn intersperse[A](xs: List[A], sep: A) -> List[A] = _
 
-@inline_rust("almide_rt_list_windows(&{xs}, {n})")
+@intrinsic("almide_rt_list_windows")
 fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-@inline_rust("almide_rt_list_dedup(&{xs})")
+@intrinsic("almide_rt_list_dedup")
 fn dedup[A](xs: List[A]) -> List[A] = _
 
 @inline_rust("almide_rt_list_take_end(({xs}).to_vec(), {n})")
@@ -189,18 +189,18 @@ fn shuffle[A](xs: List[A]) -> List[A] = _
 @inline_rust("almide_rt_list_window(({xs}).to_vec(), {n})")
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-@inline_rust("almide_rt_list_binary_search(&{xs}, {target})")
+@intrinsic("almide_rt_list_binary_search")
 fn binary_search(xs: List[Int], target: Int) -> Option[Int] = _
 
 // ── mutable (in-place) ──
 
-@inline_rust("almide_rt_list_push(&mut {xs}, {x})")
+@intrinsic("almide_rt_list_push")
 fn push[A](xs: List[A], x: A) -> Unit = _
 
-@inline_rust("almide_rt_list_pop(&mut {xs})")
+@intrinsic("almide_rt_list_pop")
 fn pop[A](xs: List[A]) -> Option[A] = _
 
-@inline_rust("almide_rt_list_clear(&mut {xs})")
+@intrinsic("almide_rt_list_clear")
 fn clear[A](xs: List[A]) -> Unit = _
 
 // ── bundled-Almide extensions (non-TOML, pure Almide body) ──
