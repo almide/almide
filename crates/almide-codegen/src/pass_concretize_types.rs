@@ -106,6 +106,11 @@ struct SymbolTable {
     /// (module_name, func_name) → return type
     /// "" as module means top-level (for CallTarget::Named).
     sigs: std::collections::HashMap<(String, String), Ty>,
+    /// Record and record-payload variant case field types.
+    /// Keyed by the record / case name (matches `IrExprKind::Record.name`).
+    /// Used to push an expected element / payload type down into empty
+    /// list / map literals whose own inference left them `Unknown`.
+    record_fields: std::collections::HashMap<String, Vec<(almide_base::intern::Sym, Ty)>>,
 }
 
 impl SymbolTable {
@@ -114,6 +119,10 @@ impl SymbolTable {
     }
     fn lookup_named(&self, func: &str) -> Option<&Ty> {
         self.sigs.get(&(String::new(), func.to_string()))
+    }
+    fn lookup_field(&self, record: &str, field: &str) -> Option<&Ty> {
+        let fs = self.record_fields.get(record)?;
+        fs.iter().find(|(n, _)| n.as_str() == field).map(|(_, t)| t)
     }
 }
 
@@ -135,7 +144,58 @@ fn build_symbol_table(program: &IrProgram) -> SymbolTable {
             }
         }
     }
-    SymbolTable { sigs }
+    let mut record_fields = std::collections::HashMap::new();
+    for decl in &program.type_decls {
+        match &decl.kind {
+            almide_ir::IrTypeDeclKind::Record { fields } => {
+                let fs: Vec<_> = fields.iter()
+                    .map(|f| (f.name, f.ty.clone()))
+                    .collect();
+                record_fields.insert(decl.name.to_string(), fs);
+            }
+            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+                for case in cases {
+                    if let almide_ir::IrVariantKind::Record { fields } = &case.kind {
+                        let v: Vec<_> = fields.iter()
+                            .map(|f| (f.name, f.ty.clone()))
+                            .collect();
+                        record_fields.insert(case.name.to_string(), v);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    SymbolTable { sigs, record_fields }
+}
+
+/// Push an expected type into an expression whose own inference left it
+/// `Unknown`. Narrow by design: the target is `Applied(List, [Unknown])`
+/// (the empty-list literal case) and the expected type fills the element
+/// slot. Other shapes could be added as specific gaps surface, but kept
+/// out for now so the audit keeps teeth around shapes we don't fully
+/// understand.
+fn propagate_expected_ty(expr: &mut IrExpr, expected: &Ty) {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match (&expr.ty, expected) {
+        (Ty::Applied(TypeConstructorId::List, args),
+         Ty::Applied(TypeConstructorId::List, exp_args))
+            if args.len() == 1 && exp_args.len() == 1
+                && args[0].has_unresolved_deep()
+                && !exp_args[0].has_unresolved_deep() =>
+        {
+            expr.ty = expected.clone();
+            // Tighten the List literal's declared element type too so
+            // downstream consumers (e.g. `emit_wasm::values::byte_size`)
+            // see the resolved shape.
+            if let IrExprKind::List { elements } = &mut expr.kind {
+                if elements.is_empty() {
+                    // nothing to rewrite inside — ty was the only carrier
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 // ── Core walker ────────────────────────────────────────────────────
@@ -163,6 +223,25 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
         if let IrExprKind::BinOp { op, left, right } = &mut expr.kind {
             if let Some(new_op) = reconcile_binop(*op, &left.ty, &right.ty) {
                 *op = new_op;
+            }
+        }
+
+        // Record literal construction: push the declared field types from
+        // the registered type down into field value expressions whose own
+        // inference left them unresolved (typically `Applied(List,
+        // [Unknown])` for a field defaulted to `[]`). The checker sees
+        // `items: []` and can only type it `List[Unknown]`; we know from
+        // the record decl that `items: List[Int]`, so substitute.
+        if let IrExprKind::Record { name: Some(name), fields } = &mut expr.kind {
+            let rname = name.to_string();
+            for (fname, fvalue) in fields.iter_mut() {
+                if fvalue.ty.has_unresolved_deep() {
+                    if let Some(expected) = self.symbols.lookup_field(&rname, fname.as_str()) {
+                        if !expected.has_unresolved_deep() {
+                            propagate_expected_ty(fvalue, expected);
+                        }
+                    }
+                }
             }
         }
 
@@ -490,7 +569,18 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
                     | IrExprKind::Hole | IrExprKind::Todo { .. }
                     | IrExprKind::OptionNone
                     | IrExprKind::EmptyMap
-                );
+                )
+                // Empty list literal `[]` whose element type could not be
+                // pinned down by either upstream inference or
+                // `propagate_expected_ty`. The stored element count is
+                // zero, so every emit path — `Vec::<T>::new()` on Rust,
+                // the 4-byte `[len=0]` header on WASM — produces the same
+                // bytes regardless of `T`. Treating it as a violation
+                // would force the audit to stay soft just to cover
+                // `for _ in []` / `fan.map([], f)` style uses that have
+                // no bearing on runtime behavior.
+                || matches!(&expr.kind,
+                    IrExprKind::List { elements } if elements.is_empty());
                 if !skip {
                     self.remaining += 1;
                     if self.samples.len() < 5 {
