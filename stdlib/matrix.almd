@@ -125,13 +125,27 @@ fn gelu(m: Matrix) -> Matrix = _
 // collapses to this single cblas_dgemm call (alpha + beta both bound to alpha,
 // C seeded with bias) followed by an in-place GELU sweep. Users should keep
 // writing the unfused chain — the pass rewrites it mechanically.
+//
+// The @rewrite attribute below declares the fusion pattern directly in
+// stdlib — build script lifts this into the codegen FusionRule registry,
+// and the same declaration will translate 1:1 into an egg Rewrite<L, N>
+// when the MLIR/egg arc lands (roadmap: active/mlir-backend-adoption.md).
+@rewrite(
+  name = "gemm_bias_scale_gelu",
+  from = "matrix.gelu(matrix.scale(matrix.add(matrix.mul(?a, ?b), ?bias), ?alpha))",
+  to = "matrix.fused_gemm_bias_scale_gelu(?a, ?b, ?bias, ?alpha)"
+)
 @intrinsic("almide_rt_matrix_fused_gemm_bias_scale_gelu")
 fn fused_gemm_bias_scale_gelu(a: Matrix, b: Matrix, bias: Matrix, alpha: Float) -> Matrix = _
 
 // Fusion target: `softmax_rows(scale(mul(Q, Kt), s))` — scaled-dot-product
 // attention numerator. One cblas_dgemm (alpha=s, beta=0) plus in-place
-// row softmax (stable max-subtract + vvexp + normalize). Pass recognizes
-// both the nested-expression and let-split forms.
+// row softmax (stable max-subtract + vvexp + normalize).
+@rewrite(
+  name = "attention_weights",
+  from = "matrix.softmax_rows(matrix.scale(matrix.mul(?q, ?kt), ?scale))",
+  to = "matrix.attention_weights(?q, ?kt, ?scale)"
+)
 @intrinsic("almide_rt_matrix_attention_weights")
 fn attention_weights(q: Matrix, kt: Matrix, scale: Float) -> Matrix = _
 
@@ -140,6 +154,11 @@ fn attention_weights(q: Matrix, kt: Matrix, scale: Float) -> Matrix = _
 // Produces `(softmax_rows(s · Q @ Kt)) @ V` without ever materialising
 // the post-scale or post-softmax matrix as a heap object — both stages
 // reuse the same flat buffer.
+@rewrite(
+  name = "scaled_dot_product_attention",
+  from = "matrix.mul(matrix.attention_weights(?q, ?kt, ?scale), ?v)",
+  to = "matrix.scaled_dot_product_attention(?q, ?kt, ?v, ?scale)"
+)
 @intrinsic("almide_rt_matrix_scaled_dot_product_attention")
 fn scaled_dot_product_attention(q: Matrix, kt: Matrix, v: Matrix, scale: Float) -> Matrix = _
 
@@ -147,6 +166,11 @@ fn scaled_dot_product_attention(q: Matrix, kt: Matrix, v: Matrix, scale: Float) 
 // cblas_dgemm(transB=Trans) with the output row-seeded from bias plus
 // an in-place GELU sweep. Skips one r×n_out allocation and one pass
 // over the output.
+@rewrite(
+  name = "linear_row_gelu",
+  from = "matrix.gelu(matrix.linear_row(?x, ?w, ?bias))",
+  to = "matrix.linear_row_gelu(?x, ?w, ?bias)"
+)
 @intrinsic("almide_rt_matrix_linear_row_gelu")
 fn linear_row_gelu(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
 
@@ -154,6 +178,11 @@ fn linear_row_gelu(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
 // pre-norm residual block first sub-layer. Computes per-row normalize
 // into a fresh buffer then drives cblas_dgemm with that buffer, skipping
 // burn's `linear_row` dispatch on the Small path.
+@rewrite(
+  name = "pre_norm_linear",
+  from = "matrix.linear_row(matrix.layer_norm_rows(?x, ?gamma, ?beta, ?eps), ?w, ?bias)",
+  to = "matrix.pre_norm_linear(?x, ?gamma, ?beta, ?eps, ?w, ?bias)"
+)
 @intrinsic("almide_rt_matrix_pre_norm_linear")
 fn pre_norm_linear(x: Matrix, gamma: List[Float], beta: List[Float], eps: Float, weight: Matrix, bias: List[Float]) -> Matrix = _
 
@@ -226,5 +255,19 @@ fn mul_f32_t(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32] = _
 @inline_rust("almide_rt_matrix_mul_f32_t_scaled(&{a}, {alpha}, &{b})")
 fn mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32] = _
 
+// mul_scaled folds a scalar into cblas_dgemm's `alpha` parameter. Two
+// mirror fusions exist since either operand may carry the scale. The
+// runtime has a `FUSED_ALPHA_MAX=512` crossover above which it reverts
+// to scale+mul; both rules still fire and let the runtime decide.
+@rewrite(
+  name = "mul_scaled_rhs",
+  from = "matrix.mul(?a, matrix.scale(?b, ?s))",
+  to = "matrix.mul_scaled(?a, ?s, ?b)"
+)
+@rewrite(
+  name = "mul_scaled_lhs",
+  from = "matrix.mul(matrix.scale(?a, ?s), ?b)",
+  to = "matrix.mul_scaled(?a, ?s, ?b)"
+)
 @intrinsic("almide_rt_matrix_mul_scaled")
 fn mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
