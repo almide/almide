@@ -42,6 +42,17 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
         (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
             args1.iter().zip(args2.iter()).all(|(a, b)| unify(a, b, bindings))
         }
+        // Bare `Matrix` unifies with `Matrix[T]` by binding T → Float.
+        // `Matrix` is the legacy non-parametric form; pre-P4 code treats
+        // it as Matrix[Float] (the f64 default). Without this bridge,
+        // a generic fn like `fn get[T](m: Matrix[T], ...)` rejects
+        // every bare-Matrix call site because the TypeVar never binds.
+        (Ty::Applied(crate::types::TypeConstructorId::Matrix, args), Ty::Matrix)
+        | (Ty::Matrix, Ty::Applied(crate::types::TypeConstructorId::Matrix, args))
+            if args.len() == 1 =>
+        {
+            unify(&args[0], &Ty::Float, bindings)
+        }
         (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
             if p1.len() != p2.len() { return false; }
             p1.iter().zip(p2.iter()).all(|(a, b)| unify(a, b, bindings)) && unify(r1, r2, bindings)

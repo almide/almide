@@ -149,24 +149,32 @@ fn dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 fn row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 
 // ── f32 preview path ──
+//
+// Stage 4 P5: the f32 constructors / BLAS ops now carry `Matrix[Float32]`
+// at the type level. Runtime representation is unchanged (tagged
+// `AlmideMatrix` enum with SmallF32 variant + Accelerate `cblas_sgemm`
+// dispatch). The type annotation keeps f32 and f64 matrices from
+// silently mixing — passing a `Matrix[Float32]` to a fn expecting
+// bare `Matrix` (= `Matrix[Float]` default) now surfaces as a checker
+// error instead of runtime storage churn.
 
 @inline_rust("almide_rt_matrix_zeros_f32({rows}, {cols})")
-fn zeros_f32(rows: Int, cols: Int) -> Matrix = _
+fn zeros_f32(rows: Int, cols: Int) -> Matrix[Float32] = _
 
 @inline_rust("almide_rt_matrix_ones_f32({rows}, {cols})")
-fn ones_f32(rows: Int, cols: Int) -> Matrix = _
+fn ones_f32(rows: Int, cols: Int) -> Matrix[Float32] = _
 
 @inline_rust("almide_rt_matrix_mul_f32(&{a}, &{b})")
-fn mul_f32(a: Matrix, b: Matrix) -> Matrix = _
+fn mul_f32(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32] = _
 
 @inline_rust("almide_rt_matrix_mul_f32_scaled(&{a}, {alpha}, &{b})")
-fn mul_f32_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
+fn mul_f32_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32] = _
 
 @inline_rust("almide_rt_matrix_mul_f32_t(&{a}, &{b})")
-fn mul_f32_t(a: Matrix, b: Matrix) -> Matrix = _
+fn mul_f32_t(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32] = _
 
 @inline_rust("almide_rt_matrix_mul_f32_t_scaled(&{a}, {alpha}, &{b})")
-fn mul_f32_t_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
+fn mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32] = _
 
 @intrinsic("almide_rt_matrix_mul_scaled")
 fn mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _

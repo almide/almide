@@ -337,14 +337,18 @@ impl Ty {
             (Ty::Matrix, Ty::Matrix) => true,
             // Matrix[T] parametric form — the P4 arc introduces
             // `Matrix[Float32]`, `Matrix[Float64]`, etc. Bare `Matrix`
-            // (legacy, unparameterised) is treated as the default
-            // `Matrix[Float64]` so existing `Matrix` code interops with
-            // typed code that asks for `Matrix[Float]`. Typed-typed
-            // pairings fall through to the generic `Applied` arm below.
-            (Ty::Matrix, Ty::Applied(TypeConstructorId::Matrix, args))
-            | (Ty::Applied(TypeConstructorId::Matrix, args), Ty::Matrix) => {
-                args.len() == 1 && matches!(args[0], Ty::Float)
-            }
+            // interops bidirectionally with **every** `Matrix[T]` so
+            // pre-P4 stdlib fns (`matrix.shape(m: Matrix)`) keep
+            // accepting the new typed constructors (`matrix.zeros_f32`
+            // returns `Matrix[Float32]`). Discrimination lives between
+            // the typed forms: `Matrix[Float32] ↔ Matrix[Float64]` is
+            // still rejected by the generic `Applied` arm below. The
+            // `Matrix ↔ Matrix[T]` bridge is "untyped ↔ typed" only;
+            // call sites that explicitly ask for a typed form reject
+            // bare `Matrix`, preserving the dtype invariant at the
+            // typed surface.
+            (Ty::Matrix, Ty::Applied(TypeConstructorId::Matrix, _))
+            | (Ty::Applied(TypeConstructorId::Matrix, _), Ty::Matrix) => true,
             (Ty::RawPtr, Ty::RawPtr) => true,
             (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
                 args1.iter().zip(args2.iter()).all(|(a, b)| a.compatible(b))

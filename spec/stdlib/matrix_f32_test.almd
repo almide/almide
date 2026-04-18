@@ -33,13 +33,19 @@ test "scale preserves SmallF32 variant" {
   assert_eq(matrix.get(s, 1, 1), 0.5)
 }
 
-test "mul_f32 on identity returns same values" {
-  let a = matrix.ones_f32(3, 3) |> (m) => matrix.scale(m, 0.5)
-  let id = matrix.from_lists([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-  // Mixing SmallF32 with f64 auto-promotes to f64 matmul via to_burn.
-  // Here we just check value semantics, not storage.
-  let r = matrix.mul(a, id)
-  assert(approx_eq(matrix.get(r, 0, 0), 0.5, 0.00001))
+// Post-P5 note: the former "mul_f32 on identity returns same values"
+// test exercised implicit f32 × f64 promotion via the runtime tagged
+// enum. That behaviour is now surfaced as a compile error at the type
+// layer — typed matrix ops stay within their dtype. Replaced with the
+// f32-only identity below that never crosses dtypes.
+
+test "mul_f32 on scaled ones × ones" {
+  // 0.5 × 1.0 matmul on all-ones → each element = 3 * 0.5 * 1.0 = 1.5
+  let a: Matrix[Float32] = matrix.ones_f32(3, 3) |> (m) => matrix.scale(m, 0.5)
+  let b: Matrix[Float32] = matrix.ones_f32(3, 3)
+  let r = matrix.mul_f32(a, b)
+  assert(approx_eq(matrix.get(r, 0, 0), 1.5, 0.00001))
+  assert(approx_eq(matrix.get(r, 1, 1), 1.5, 0.00001))
 }
 
 test "mul_f32 of ones(3,3) * 0.5 × ones(3,3) * 0.5 = all 0.75" {

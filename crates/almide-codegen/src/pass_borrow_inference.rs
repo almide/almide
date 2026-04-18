@@ -278,6 +278,10 @@ fn intrinsic_borrow_mode_from_type_expr(ty: &almide_lang::ast::TypeExpr) -> Para
                 // Option / Result: consume by value (see doc on the
                 // IR-side `intrinsic_borrow_mode`).
                 "Option" | "Result" => ParamBorrow::Own,
+                // `Matrix[T]` parametric form — same borrow surface as
+                // bare `Matrix` (both map to `&AlmideMatrix` at the
+                // runtime boundary).
+                "Matrix" => ParamBorrow::Ref,
                 _ => ParamBorrow::Own,
             }
         }
