@@ -75,6 +75,201 @@ fn mk(rows: usize, cols: usize, data: Vec<f64>) -> AlmideMatrix {
 
 fn wrap(t: Tensor<B, 2>) -> AlmideMatrix { AlmideMatrix::Burn(t) }
 
+// ── Fused-matmul helpers ────────────────────────────────────────────
+//
+// The fused runtime fns below (fused_gemm_bias_scale_gelu,
+// attention_weights, scaled_dot_product_attention, linear_row_gelu,
+// pre_norm_linear, swiglu_gate) all share the same skeleton:
+//
+//   1. Build a fresh output buffer, optionally seeded from `bias` / a
+//      previous result for `β != 0` GEMM use.
+//   2. Call `cblas_{d,s}gemm` with a particular `α / β / trans` combo.
+//   3. Sweep the result once to apply an element-wise post-op (gelu,
+//      softmax, silu⊙up, bias-scale).
+//
+// These helpers pull step 1+2 out so each fused fn only has to declare
+// its GEMM config and write its post loop. The helper signatures are
+// intentionally close to what a future `@fused_runtime` attribute
+// schema would serialize — one `GemmConfig` entry per fused call, post
+// loop in the runtime DSL. When that arc lands the translation from
+// attribute metadata to these structs is direct.
+//
+// NB: both helpers take the `C` buffer ownership path (Uninit / Copy /
+// BroadcastRow) explicitly because `β=0` wants an uninitialized buffer
+// for BLAS-owned writes while `β=1` needs a seeded one; hiding that in
+// the helper would force unnecessary zero-initialization on the hot
+// path.
+
+/// BLAS transpose convention, i32-compatible with CBLAS enum values.
+pub const CBLAS_NO_TRANS: i32 = 111;
+pub const CBLAS_TRANS: i32 = 112;
+
+/// How to initialize the output buffer `C` before `cblas_*gemm`.
+pub enum CSeed<'a, T> {
+    /// Uninit. Use with `β = 0` so every element is written by GEMM.
+    Uninit,
+    /// Copy `src` into C. Use when C participates in the result
+    /// (`β != 0`), e.g. residual add as part of GEMM.
+    Copy(&'a [T]),
+    /// Broadcast `row` (length = n) to every output row. Use for
+    /// bias-seeded GEMM with `β = 1`: the GEMM's `β·C` contributes the
+    /// bias row to every output row without a separate add pass.
+    BroadcastRow(&'a [T]),
+}
+
+/// GEMM config, f64 variant. `ldc` is always `n` (row-major tight).
+pub struct GemmF64<'a> {
+    pub m: usize,
+    pub k: usize,
+    pub n: usize,
+    pub alpha: f64,
+    pub beta: f64,
+    pub trans_a: i32,
+    pub trans_b: i32,
+    pub a: &'a [f64],
+    pub lda: i32,
+    pub b: &'a [f64],
+    pub ldb: i32,
+    pub c_seed: CSeed<'a, f64>,
+}
+
+/// Run a single `cblas_dgemm` according to `cfg` and return the result
+/// buffer. Safety: the caller guarantees `a.len() >= (trans_a ? k*m : m*k)`,
+/// `b.len() >= (trans_b ? n*k : k*n)`, and (when seeded) the seed slice
+/// lengths match `m*n` / `n`.
+pub fn run_gemm_f64(cfg: GemmF64<'_>) -> Vec<f64> {
+    let mut c = match cfg.c_seed {
+        CSeed::Uninit => {
+            let mut v = Vec::with_capacity(cfg.m * cfg.n);
+            unsafe { v.set_len(cfg.m * cfg.n); }
+            v
+        }
+        CSeed::Copy(src) => src.to_vec(),
+        CSeed::BroadcastRow(row) => {
+            let mut v = Vec::with_capacity(cfg.m * cfg.n);
+            for _ in 0..cfg.m { v.extend_from_slice(row); }
+            v
+        }
+    };
+    unsafe {
+        cblas_dgemm(
+            101,
+            cfg.trans_a, cfg.trans_b,
+            cfg.m as i32, cfg.n as i32, cfg.k as i32,
+            cfg.alpha,
+            cfg.a.as_ptr(), cfg.lda,
+            cfg.b.as_ptr(), cfg.ldb,
+            cfg.beta,
+            c.as_mut_ptr(), cfg.n as i32,
+        );
+    }
+    c
+}
+
+/// GEMM config, f32 variant (mirror of `GemmF64`).
+pub struct GemmF32<'a> {
+    pub m: usize,
+    pub k: usize,
+    pub n: usize,
+    pub alpha: f32,
+    pub beta: f32,
+    pub trans_a: i32,
+    pub trans_b: i32,
+    pub a: &'a [f32],
+    pub lda: i32,
+    pub b: &'a [f32],
+    pub ldb: i32,
+    pub c_seed: CSeed<'a, f32>,
+}
+
+pub fn run_gemm_f32(cfg: GemmF32<'_>) -> Vec<f32> {
+    let mut c = match cfg.c_seed {
+        CSeed::Uninit => {
+            let mut v = Vec::with_capacity(cfg.m * cfg.n);
+            unsafe { v.set_len(cfg.m * cfg.n); }
+            v
+        }
+        CSeed::Copy(src) => src.to_vec(),
+        CSeed::BroadcastRow(row) => {
+            let mut v = Vec::with_capacity(cfg.m * cfg.n);
+            for _ in 0..cfg.m { v.extend_from_slice(row); }
+            v
+        }
+    };
+    unsafe {
+        cblas_sgemm(
+            101,
+            cfg.trans_a, cfg.trans_b,
+            cfg.m as i32, cfg.n as i32, cfg.k as i32,
+            cfg.alpha,
+            cfg.a.as_ptr(), cfg.lda,
+            cfg.b.as_ptr(), cfg.ldb,
+            cfg.beta,
+            c.as_mut_ptr(), cfg.n as i32,
+        );
+    }
+    c
+}
+
+/// In-place row-wise stable softmax over an `m × n` row-major buffer.
+/// Uses vForce's `vvexp` for vectorised exponential — critical for
+/// softmax throughput at seq ≥ 128.
+pub fn softmax_rows_inplace_f64(buf: &mut [f64], m: usize, n: usize) {
+    let n_i32 = n as i32;
+    let dst = buf.as_mut_ptr();
+    unsafe {
+        for i in 0..m {
+            let base = i * n;
+            let mut max = f64::NEG_INFINITY;
+            for j in 0..n {
+                let x = *dst.add(base + j);
+                if x > max { max = x; }
+            }
+            for j in 0..n { *dst.add(base + j) -= max; }
+            vvexp(dst.add(base), dst.add(base), &n_i32);
+            let mut sum = 0.0f64;
+            for j in 0..n { sum += *dst.add(base + j); }
+            let inv = 1.0 / sum;
+            for j in 0..n { *dst.add(base + j) *= inv; }
+        }
+    }
+}
+
+pub fn softmax_rows_inplace_f32(buf: &mut [f32], m: usize, n: usize) {
+    let n_i32 = n as i32;
+    for i in 0..m {
+        let row = &mut buf[i * n..(i + 1) * n];
+        let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        for v in row.iter_mut() { *v -= max; }
+        unsafe { vvexpf(row.as_mut_ptr(), row.as_ptr(), &n_i32); }
+        let sum: f32 = row.iter().sum();
+        let inv = 1.0f32 / sum;
+        for v in row.iter_mut() { *v *= inv; }
+    }
+}
+
+/// Tanh-based GELU approximation: `0.5·x·(1 + tanh(√(2/π)·(x + 0.044715·x³)))`.
+/// Applied in place, one coefficient choice for both f64 and f32.
+pub fn gelu_inplace_f64(buf: &mut [f64]) {
+    const K: f64 = 0.7978845608028654;
+    for v in buf.iter_mut() {
+        let x = *v;
+        let x3 = x * x * x;
+        let inner = K * (x + 0.044715 * x3);
+        *v = 0.5 * x * (1.0 + inner.tanh());
+    }
+}
+
+pub fn gelu_inplace_f32(buf: &mut [f32]) {
+    const K: f32 = 0.7978845608028654;
+    for v in buf.iter_mut() {
+        let x = *v;
+        let x3 = x * x * x;
+        let inner = K * (x + 0.044715 * x3);
+        *v = 0.5 * x * (1.0 + inner.tanh());
+    }
+}
+
 impl AlmideMatrix {
     fn dims2(&self) -> [usize; 2] {
         match self {
@@ -698,30 +893,22 @@ pub fn almide_rt_matrix_fused_gemm_bias_scale_gelu(
             if *br == *m && *bc == *n && bd.len() == *k * *n =>
         {
             let (m, k, n) = (*m, *k, *n);
-            // dgemm with beta=0 is write-only — skips the initial read of
-            // C and lets BLAS use its fastest code path. We then fuse the
-            // scale, bias-add, and GELU into a single element-wise sweep
-            // over the output, so total memory BW is 1(dgemm) + 2(fused
-            // post-pass) vs 2+2 for the beta=alpha+bias.clone() approach.
-            let mut c: Vec<f64> = Vec::with_capacity(m * n);
-            unsafe {
-                c.set_len(m * n);
-                cblas_dgemm(
-                    101, 111, 111,
-                    m as i32, n as i32, k as i32,
-                    1.0,
-                    ad.as_ptr(), k as i32,
-                    bd.as_ptr(), n as i32,
-                    0.0,
-                    c.as_mut_ptr(), n as i32,
-                );
-            }
+            let mut c = run_gemm_f64(GemmF64 {
+                m, k, n,
+                alpha: 1.0, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_NO_TRANS,
+                a: ad, lda: k as i32,
+                b: bd, ldb: n as i32,
+                c_seed: CSeed::Uninit,
+            });
+            // Post: `v = alpha * (out + bias); out = gelu(v)` in a
+            // single sweep. Alpha stays scalar and fuses with the bias
+            // add; no intermediate buffer.
             const K: f64 = 0.7978845608028654;
             for (out, &bi) in c.iter_mut().zip(biasd.iter()) {
                 let v = alpha * (*out + bi);
                 let v3 = v * v * v;
-                let inner = K * (v + 0.044715 * v3);
-                *out = 0.5 * v * (1.0 + inner.tanh());
+                *out = 0.5 * v * (1.0 + (K * (v + 0.044715 * v3)).tanh());
             }
             AlmideMatrix::Small { rows: m, cols: n, data: c }
         }
@@ -732,32 +919,23 @@ pub fn almide_rt_matrix_fused_gemm_bias_scale_gelu(
         {
             let (m, k, n) = (*m, *k, *n);
             let alpha_f = alpha as f32;
-            let mut c: Vec<f32> = Vec::with_capacity(m * n);
-            unsafe {
-                c.set_len(m * n);
-                cblas_sgemm(
-                    101, 111, 111,
-                    m as i32, n as i32, k as i32,
-                    1.0,
-                    ad.as_ptr(), k as i32,
-                    bd.as_ptr(), n as i32,
-                    0.0,
-                    c.as_mut_ptr(), n as i32,
-                );
-            }
+            let mut c = run_gemm_f32(GemmF32 {
+                m, k, n,
+                alpha: 1.0, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_NO_TRANS,
+                a: ad, lda: k as i32,
+                b: bd, ldb: n as i32,
+                c_seed: CSeed::Uninit,
+            });
             const K: f32 = 0.7978845608028654;
             for (out, &bi) in c.iter_mut().zip(biasd.iter()) {
                 let v = alpha_f * (*out + bi);
                 let v3 = v * v * v;
-                let inner = K * (v + 0.044715 * v3);
-                *out = 0.5 * v * (1.0 + inner.tanh());
+                *out = 0.5 * v * (1.0 + (K * (v + 0.044715 * v3)).tanh());
             }
             AlmideMatrix::SmallF32 { rows: m, cols: n, data: c }
         }
         _ => {
-            // Shape or variant mismatch — fall back to the naive chain
-            // so the semantics match what the user wrote even when the
-            // fast path can't apply.
             let mul = almide_rt_matrix_mul(a, b);
             let added = almide_rt_matrix_add(&mul, bias);
             let scaled = almide_rt_matrix_scale(&added, alpha);
@@ -788,36 +966,15 @@ pub fn almide_rt_matrix_attention_weights(
             if kd.len() == *k * *n =>
         {
             let (m, k, n) = (*m, *k, *n);
-            let mut c: Vec<f64> = Vec::with_capacity(m * n);
-            unsafe {
-                c.set_len(m * n);
-                cblas_dgemm(
-                    101, 111, 111,
-                    m as i32, n as i32, k as i32,
-                    scale,
-                    qd.as_ptr(), k as i32,
-                    kd.as_ptr(), n as i32,
-                    0.0,
-                    c.as_mut_ptr(), n as i32,
-                );
-                // Row-wise stable softmax, in-place.
-                let n_i32 = n as i32;
-                let dst = c.as_mut_ptr();
-                for i in 0..m {
-                    let base = i * n;
-                    let mut max = f64::NEG_INFINITY;
-                    for j in 0..n {
-                        let v = *dst.add(base + j);
-                        if v > max { max = v; }
-                    }
-                    for j in 0..n { *dst.add(base + j) -= max; }
-                    vvexp(dst.add(base), dst.add(base), &n_i32);
-                    let mut sum = 0.0f64;
-                    for j in 0..n { sum += *dst.add(base + j); }
-                    let inv = 1.0 / sum;
-                    for j in 0..n { *dst.add(base + j) *= inv; }
-                }
-            }
+            let mut c = run_gemm_f64(GemmF64 {
+                m, k, n,
+                alpha: scale, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_NO_TRANS,
+                a: qd, lda: k as i32,
+                b: kd, ldb: n as i32,
+                c_seed: CSeed::Uninit,
+            });
+            softmax_rows_inplace_f64(&mut c, m, n);
             AlmideMatrix::Small { rows: m, cols: n, data: c }
         }
         (AlmideMatrix::SmallF32 { rows: m, cols: k, data: qd },
@@ -825,30 +982,15 @@ pub fn almide_rt_matrix_attention_weights(
             if kd.len() == *k * *n =>
         {
             let (m, k, n) = (*m, *k, *n);
-            let scale_f = scale as f32;
-            let mut c: Vec<f32> = Vec::with_capacity(m * n);
-            unsafe {
-                c.set_len(m * n);
-                cblas_sgemm(
-                    101, 111, 111,
-                    m as i32, n as i32, k as i32,
-                    scale_f,
-                    qd.as_ptr(), k as i32,
-                    kd.as_ptr(), n as i32,
-                    0.0,
-                    c.as_mut_ptr(), n as i32,
-                );
-                let n_i32 = n as i32;
-                for i in 0..m {
-                    let row = &mut c[i * n..(i + 1) * n];
-                    let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                    for v in row.iter_mut() { *v -= max; }
-                    vvexpf(row.as_mut_ptr(), row.as_ptr(), &n_i32);
-                    let sum: f32 = row.iter().sum();
-                    let inv = 1.0f32 / sum;
-                    for v in row.iter_mut() { *v *= inv; }
-                }
-            }
+            let mut c = run_gemm_f32(GemmF32 {
+                m, k, n,
+                alpha: scale as f32, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_NO_TRANS,
+                a: qd, lda: k as i32,
+                b: kd, ldb: n as i32,
+                c_seed: CSeed::Uninit,
+            });
+            softmax_rows_inplace_f32(&mut c, m, n);
             AlmideMatrix::SmallF32 { rows: m, cols: n, data: c }
         }
         _ => {
@@ -883,30 +1025,25 @@ pub fn almide_rt_matrix_swiglu_gate(
                 && wud.len() == *d_out * *d_in =>
         {
             let (r, d_in, d_out) = (*r, *d_in, *d_out);
-            let mut gate: Vec<f64> = Vec::with_capacity(r * d_out);
-            let mut up: Vec<f64> = Vec::with_capacity(r * d_out);
-            unsafe {
-                gate.set_len(r * d_out);
-                up.set_len(r * d_out);
-                cblas_dgemm(
-                    101, 111, 112,
-                    r as i32, d_out as i32, d_in as i32,
-                    1.0,
-                    xd.as_ptr(), d_in as i32,
-                    wgd.as_ptr(), d_in as i32,
-                    0.0,
-                    gate.as_mut_ptr(), d_out as i32,
-                );
-                cblas_dgemm(
-                    101, 111, 112,
-                    r as i32, d_out as i32, d_in as i32,
-                    1.0,
-                    xd.as_ptr(), d_in as i32,
-                    wud.as_ptr(), d_in as i32,
-                    0.0,
-                    up.as_mut_ptr(), d_out as i32,
-                );
-            }
+            // Same x, different W: two independent GEMMs with transB=Trans
+            // (W stored as (d_out, d_in), we want x @ W^T).
+            let mut gate = run_gemm_f64(GemmF64 {
+                m: r, k: d_in, n: d_out,
+                alpha: 1.0, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_TRANS,
+                a: xd, lda: d_in as i32,
+                b: wgd, ldb: d_in as i32,
+                c_seed: CSeed::Uninit,
+            });
+            let up = run_gemm_f64(GemmF64 {
+                m: r, k: d_in, n: d_out,
+                alpha: 1.0, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_TRANS,
+                a: xd, lda: d_in as i32,
+                b: wud, ldb: d_in as i32,
+                c_seed: CSeed::Uninit,
+            });
+            // Post: silu(gate) ⊙ up, in place on `gate`.
             for (g, &u) in gate.iter_mut().zip(up.iter()) {
                 let z = *g;
                 let sig = 1.0 / (1.0 + (-z).exp());
@@ -922,30 +1059,22 @@ pub fn almide_rt_matrix_swiglu_gate(
                 && wud.len() == *d_out * *d_in =>
         {
             let (r, d_in, d_out) = (*r, *d_in, *d_out);
-            let mut gate: Vec<f32> = Vec::with_capacity(r * d_out);
-            let mut up: Vec<f32> = Vec::with_capacity(r * d_out);
-            unsafe {
-                gate.set_len(r * d_out);
-                up.set_len(r * d_out);
-                cblas_sgemm(
-                    101, 111, 112,
-                    r as i32, d_out as i32, d_in as i32,
-                    1.0,
-                    xd.as_ptr(), d_in as i32,
-                    wgd.as_ptr(), d_in as i32,
-                    0.0,
-                    gate.as_mut_ptr(), d_out as i32,
-                );
-                cblas_sgemm(
-                    101, 111, 112,
-                    r as i32, d_out as i32, d_in as i32,
-                    1.0,
-                    xd.as_ptr(), d_in as i32,
-                    wud.as_ptr(), d_in as i32,
-                    0.0,
-                    up.as_mut_ptr(), d_out as i32,
-                );
-            }
+            let mut gate = run_gemm_f32(GemmF32 {
+                m: r, k: d_in, n: d_out,
+                alpha: 1.0, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_TRANS,
+                a: xd, lda: d_in as i32,
+                b: wgd, ldb: d_in as i32,
+                c_seed: CSeed::Uninit,
+            });
+            let up = run_gemm_f32(GemmF32 {
+                m: r, k: d_in, n: d_out,
+                alpha: 1.0, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_TRANS,
+                a: xd, lda: d_in as i32,
+                b: wud, ldb: d_in as i32,
+                c_seed: CSeed::Uninit,
+            });
             for (g, &u) in gate.iter_mut().zip(up.iter()) {
                 let z = *g;
                 let sig = 1.0f32 / (1.0f32 + (-z).exp());
@@ -1081,48 +1210,26 @@ pub fn almide_rt_matrix_scaled_dot_product_attention(
             if kd.len() == *dq * *sk && vd.len() == *sk * *dv =>
         {
             let (sq, dq, sk, dv) = (*sq, *dq, *sk, *dv);
-            let mut weights: Vec<f64> = Vec::with_capacity(sq * sk);
-            unsafe {
-                weights.set_len(sq * sk);
-                cblas_dgemm(
-                    101, 111, 111,
-                    sq as i32, sk as i32, dq as i32,
-                    scale,
-                    qd.as_ptr(), dq as i32,
-                    kd.as_ptr(), sk as i32,
-                    0.0,
-                    weights.as_mut_ptr(), sk as i32,
-                );
-                let sk_i32 = sk as i32;
-                let dst = weights.as_mut_ptr();
-                for i in 0..sq {
-                    let base = i * sk;
-                    let mut max = f64::NEG_INFINITY;
-                    for j in 0..sk {
-                        let x = *dst.add(base + j);
-                        if x > max { max = x; }
-                    }
-                    for j in 0..sk { *dst.add(base + j) -= max; }
-                    vvexp(dst.add(base), dst.add(base), &sk_i32);
-                    let mut sum = 0.0f64;
-                    for j in 0..sk { sum += *dst.add(base + j); }
-                    let inv = 1.0 / sum;
-                    for j in 0..sk { *dst.add(base + j) *= inv; }
-                }
-            }
-            let mut out: Vec<f64> = Vec::with_capacity(sq * dv);
-            unsafe {
-                out.set_len(sq * dv);
-                cblas_dgemm(
-                    101, 111, 111,
-                    sq as i32, dv as i32, sk as i32,
-                    1.0,
-                    weights.as_ptr(), sk as i32,
-                    vd.as_ptr(), dv as i32,
-                    0.0,
-                    out.as_mut_ptr(), dv as i32,
-                );
-            }
+            // GEMM 1: scores = scale · Q @ K^T (shape sq × sk).
+            let mut weights = run_gemm_f64(GemmF64 {
+                m: sq, k: dq, n: sk,
+                alpha: scale, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_NO_TRANS,
+                a: qd, lda: dq as i32,
+                b: kd, ldb: sk as i32,
+                c_seed: CSeed::Uninit,
+            });
+            // In-place row softmax normalises without a second buffer.
+            softmax_rows_inplace_f64(&mut weights, sq, sk);
+            // GEMM 2: output = weights @ V (shape sq × dv).
+            let out = run_gemm_f64(GemmF64 {
+                m: sq, k: sk, n: dv,
+                alpha: 1.0, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_NO_TRANS,
+                a: &weights, lda: sk as i32,
+                b: vd, ldb: dv as i32,
+                c_seed: CSeed::Uninit,
+            });
             AlmideMatrix::Small { rows: sq, cols: dv, data: out }
         }
         (AlmideMatrix::SmallF32 { rows: sq, cols: dq, data: qd },
@@ -1131,43 +1238,23 @@ pub fn almide_rt_matrix_scaled_dot_product_attention(
             if kd.len() == *dq * *sk && vd.len() == *sk * *dv =>
         {
             let (sq, dq, sk, dv) = (*sq, *dq, *sk, *dv);
-            let scale_f = scale as f32;
-            let mut weights: Vec<f32> = Vec::with_capacity(sq * sk);
-            unsafe {
-                weights.set_len(sq * sk);
-                cblas_sgemm(
-                    101, 111, 111,
-                    sq as i32, sk as i32, dq as i32,
-                    scale_f,
-                    qd.as_ptr(), dq as i32,
-                    kd.as_ptr(), sk as i32,
-                    0.0,
-                    weights.as_mut_ptr(), sk as i32,
-                );
-                let sk_i32 = sk as i32;
-                for i in 0..sq {
-                    let row = &mut weights[i * sk..(i + 1) * sk];
-                    let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                    for v in row.iter_mut() { *v -= max; }
-                    vvexpf(row.as_mut_ptr(), row.as_ptr(), &sk_i32);
-                    let sum: f32 = row.iter().sum();
-                    let inv = 1.0f32 / sum;
-                    for v in row.iter_mut() { *v *= inv; }
-                }
-            }
-            let mut out: Vec<f32> = Vec::with_capacity(sq * dv);
-            unsafe {
-                out.set_len(sq * dv);
-                cblas_sgemm(
-                    101, 111, 111,
-                    sq as i32, dv as i32, sk as i32,
-                    1.0,
-                    weights.as_ptr(), sk as i32,
-                    vd.as_ptr(), dv as i32,
-                    0.0,
-                    out.as_mut_ptr(), dv as i32,
-                );
-            }
+            let mut weights = run_gemm_f32(GemmF32 {
+                m: sq, k: dq, n: sk,
+                alpha: scale as f32, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_NO_TRANS,
+                a: qd, lda: dq as i32,
+                b: kd, ldb: sk as i32,
+                c_seed: CSeed::Uninit,
+            });
+            softmax_rows_inplace_f32(&mut weights, sq, sk);
+            let out = run_gemm_f32(GemmF32 {
+                m: sq, k: sk, n: dv,
+                alpha: 1.0, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_NO_TRANS,
+                a: &weights, lda: sk as i32,
+                b: vd, ldb: dv as i32,
+                c_seed: CSeed::Uninit,
+            });
             AlmideMatrix::SmallF32 { rows: sq, cols: dv, data: out }
         }
         _ => {
@@ -1267,19 +1354,14 @@ pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatr
             if wd.len() == *n_out * *n_in =>
         {
             let (r, n_in, n_out) = (*r, *n_in, *n_out);
-            let mut c: Vec<f64> = Vec::with_capacity(r * n_out);
-            unsafe {
-                c.set_len(r * n_out);
-                cblas_dgemm(
-                    101, 111, 112,
-                    r as i32, n_out as i32, n_in as i32,
-                    1.0,
-                    xd.as_ptr(), n_in as i32,
-                    wd.as_ptr(), n_in as i32,
-                    0.0,
-                    c.as_mut_ptr(), n_out as i32,
-                );
-            }
+            let c = run_gemm_f64(GemmF64 {
+                m: r, k: n_in, n: n_out,
+                alpha: 1.0, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_TRANS,
+                a: xd, lda: n_in as i32,
+                b: wd, ldb: n_in as i32,
+                c_seed: CSeed::Uninit,
+            });
             AlmideMatrix::Small { rows: r, cols: n_out, data: c }
         }
         (AlmideMatrix::SmallF32 { rows: r, cols: n_in, data: xd },
@@ -1287,19 +1369,14 @@ pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatr
             if wd.len() == *n_out * *n_in =>
         {
             let (r, n_in, n_out) = (*r, *n_in, *n_out);
-            let mut c: Vec<f32> = Vec::with_capacity(r * n_out);
-            unsafe {
-                c.set_len(r * n_out);
-                cblas_sgemm(
-                    101, 111, 112,
-                    r as i32, n_out as i32, n_in as i32,
-                    1.0,
-                    xd.as_ptr(), n_in as i32,
-                    wd.as_ptr(), n_in as i32,
-                    0.0,
-                    c.as_mut_ptr(), n_out as i32,
-                );
-            }
+            let c = run_gemm_f32(GemmF32 {
+                m: r, k: n_in, n: n_out,
+                alpha: 1.0, beta: 0.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_TRANS,
+                a: xd, lda: n_in as i32,
+                b: wd, ldb: n_in as i32,
+                c_seed: CSeed::Uninit,
+            });
             AlmideMatrix::SmallF32 { rows: r, cols: n_out, data: c }
         }
         _ => {
@@ -1341,6 +1418,8 @@ pub fn almide_rt_matrix_pre_norm_linear(
                 && bias.len() == *n_out && wd.len() == *n_out * *n_in =>
         {
             let (r, n_in, n_out) = (*r, *n_in, *n_out);
+            // Build the normalised buffer in one sweep; LN is row-local
+            // so no BLAS help is available here.
             let mut normalized: Vec<f64> = Vec::with_capacity(r * n_in);
             unsafe {
                 normalized.set_len(r * n_in);
@@ -1363,23 +1442,16 @@ pub fn almide_rt_matrix_pre_norm_linear(
                     }
                 }
             }
-            let mut c: Vec<f64> = Vec::with_capacity(r * n_out);
-            unsafe {
-                c.set_len(r * n_out);
-                for i in 0..r {
-                    let row = &mut c[i * n_out..(i + 1) * n_out];
-                    row.copy_from_slice(bias);
-                }
-                cblas_dgemm(
-                    101, 111, 112,
-                    r as i32, n_out as i32, n_in as i32,
-                    1.0,
-                    normalized.as_ptr(), n_in as i32,
-                    wd.as_ptr(), n_in as i32,
-                    1.0,
-                    c.as_mut_ptr(), n_out as i32,
-                );
-            }
+            // GEMM with bias-seeded C + β=1 folds the row bias into the
+            // matmul without a separate add pass.
+            let c = run_gemm_f64(GemmF64 {
+                m: r, k: n_in, n: n_out,
+                alpha: 1.0, beta: 1.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_TRANS,
+                a: &normalized, lda: n_in as i32,
+                b: wd, ldb: n_in as i32,
+                c_seed: CSeed::BroadcastRow(bias),
+            });
             AlmideMatrix::Small { rows: r, cols: n_out, data: c }
         }
         _ => {
@@ -1400,32 +1472,15 @@ pub fn almide_rt_matrix_linear_row_gelu(
             if bias.len() == *n_out && wd.len() == *n_out * *n_in =>
         {
             let (r, n_in, n_out) = (*r, *n_in, *n_out);
-            let mut c: Vec<f64> = Vec::with_capacity(r * n_out);
-            unsafe {
-                c.set_len(r * n_out);
-                // Seed each row with bias: c[i][j] = bias[j].
-                for i in 0..r {
-                    let row = &mut c[i * n_out..(i + 1) * n_out];
-                    row.copy_from_slice(bias);
-                }
-                // Cblas: RowMajor, NoTrans, Trans on B.
-                cblas_dgemm(
-                    101, 111, 112,
-                    r as i32, n_out as i32, n_in as i32,
-                    1.0,
-                    xd.as_ptr(), n_in as i32,
-                    wd.as_ptr(), n_in as i32,
-                    1.0,
-                    c.as_mut_ptr(), n_out as i32,
-                );
-            }
-            const K: f64 = 0.7978845608028654;
-            for v in c.iter_mut() {
-                let x = *v;
-                let x3 = x * x * x;
-                let inner = K * (x + 0.044715 * x3);
-                *v = 0.5 * x * (1.0 + inner.tanh());
-            }
+            let mut c = run_gemm_f64(GemmF64 {
+                m: r, k: n_in, n: n_out,
+                alpha: 1.0, beta: 1.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_TRANS,
+                a: xd, lda: n_in as i32,
+                b: wd, ldb: n_in as i32,
+                c_seed: CSeed::BroadcastRow(bias),
+            });
+            gelu_inplace_f64(&mut c);
             AlmideMatrix::Small { rows: r, cols: n_out, data: c }
         }
         (AlmideMatrix::SmallF32 { rows: r, cols: n_in, data: xd },
@@ -1434,30 +1489,15 @@ pub fn almide_rt_matrix_linear_row_gelu(
         {
             let (r, n_in, n_out) = (*r, *n_in, *n_out);
             let bias_f: Vec<f32> = bias.iter().map(|&v| v as f32).collect();
-            let mut c: Vec<f32> = Vec::with_capacity(r * n_out);
-            unsafe {
-                c.set_len(r * n_out);
-                for i in 0..r {
-                    let row = &mut c[i * n_out..(i + 1) * n_out];
-                    row.copy_from_slice(&bias_f);
-                }
-                cblas_sgemm(
-                    101, 111, 112,
-                    r as i32, n_out as i32, n_in as i32,
-                    1.0,
-                    xd.as_ptr(), n_in as i32,
-                    wd.as_ptr(), n_in as i32,
-                    1.0,
-                    c.as_mut_ptr(), n_out as i32,
-                );
-            }
-            const K: f32 = 0.7978845608028654;
-            for v in c.iter_mut() {
-                let x = *v;
-                let x3 = x * x * x;
-                let inner = K * (x + 0.044715 * x3);
-                *v = 0.5 * x * (1.0 + inner.tanh());
-            }
+            let mut c = run_gemm_f32(GemmF32 {
+                m: r, k: n_in, n: n_out,
+                alpha: 1.0, beta: 1.0,
+                trans_a: CBLAS_NO_TRANS, trans_b: CBLAS_TRANS,
+                a: xd, lda: n_in as i32,
+                b: wd, ldb: n_in as i32,
+                c_seed: CSeed::BroadcastRow(&bias_f),
+            });
+            gelu_inplace_f32(&mut c);
             AlmideMatrix::SmallF32 { rows: r, cols: n_out, data: c }
         }
         _ => {
