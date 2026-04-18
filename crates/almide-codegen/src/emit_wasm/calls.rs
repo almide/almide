@@ -963,6 +963,7 @@ impl FuncCompiler<'_> {
             "random" => { self.emit_random_call(func, args); true }
             "env" => { self.emit_env_call(func, args); true }
             "fs" => { self.emit_fs_call(func, args); true }
+            "json" => { self.emit_json_call(func, args); true }
             _ => false,
         }
     }

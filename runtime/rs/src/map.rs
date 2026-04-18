@@ -22,7 +22,7 @@ pub fn almide_rt_map_map_values<K: Eq + std::hash::Hash + Clone, V: Clone, W>(m:
     m.iter().map(|(k, v)| (k.clone(), f((*v).clone()))).collect()
 }
 
-pub fn almide_rt_map_from_entries<K: Eq + std::hash::Hash + Clone, V: Clone>(entries: &[(K, V)]) -> HashMap<K, V> { entries.iter().cloned().collect() }
+pub fn almide_rt_map_from_entries<K: Eq + std::hash::Hash, V>(entries: Vec<(K, V)>) -> HashMap<K, V> { entries.into_iter().collect() }
 pub fn almide_rt_map_from_list<K: Eq + std::hash::Hash + Clone, V: Clone>(keys: &[K], values: &[V]) -> HashMap<K, V> { keys.iter().cloned().zip(values.iter().cloned()).collect() }
 
 pub fn almide_rt_map_fold<K: Clone, V: Clone, A>(m: &HashMap<K, V>, init: A, mut f: impl FnMut(A, K, V) -> A) -> A {

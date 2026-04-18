@@ -57,7 +57,7 @@ fn unique[A](xs: List[A]) -> List[A] = _
 @intrinsic("almide_rt_list_index_of")
 fn index_of[A](xs: List[A], x: A) -> Option[Int] = _
 
-@intrinsic("almide_rt_list_last")
+@inline_rust("almide_rt_list_last(&{xs})")
 fn last[A](xs: List[A]) -> Option[A] = _
 
 @intrinsic("almide_rt_list_chunk")

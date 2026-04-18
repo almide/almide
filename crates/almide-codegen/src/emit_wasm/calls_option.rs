@@ -118,9 +118,13 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(opt);
             }
-            "flat_map" => {
+            "flat_map" | "and_then" => {
                 // flat_map(opt, f) → Option[B]
                 // if opt == 0 → 0; else → f(*opt) (f returns Option)
+                // `and_then` alias: @intrinsic stdlib binds the mangled
+                // symbol `almide_rt_option_and_then` to `fn flat_map`, so
+                // the WASM dispatch fallback decodes to method name
+                // `and_then` and must route here.
                 let inner_ty = self.option_inner_ty(&args[0].ty);
                 let opt = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();

@@ -50,12 +50,12 @@ fn is_empty[K, V](m: Map[K, V]) -> Bool = _
 
 // ── construction ──
 
-@intrinsic("almide_rt_map_from_entries")
+@inline_rust("almide_rt_map_from_entries(({pairs}).to_vec())")
 fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
 
 // ── closure-bearing (direct runtime dispatch — map has no IterChain) ──
 
-@intrinsic("almide_rt_map_map_values")
+@inline_rust("almide_rt_map_map_values(&{m}, {f})")
 fn map[K, V, B](m: Map[K, V], f: (V) -> B) -> Map[K, B] = _
 
 @intrinsic("almide_rt_map_filter")

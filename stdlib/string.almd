@@ -38,7 +38,7 @@ fn ends_with(s: String, suffix: String) -> Bool = _
 @inline_rust("almide_rt_string_slice(&*{s}, {start}, Some({end}))")
 fn slice(s: String, start: Int, end: Int = 9223372036854775807) -> String = _
 
-@intrinsic("almide_rt_string_pad_left")
+@inline_rust("almide_rt_string_pad_left(&*{s}, {n}, &*{ch})")
 fn pad_start(s: String, n: Int, ch: String) -> String = _
 
 @intrinsic("almide_rt_string_to_bytes")
@@ -56,7 +56,7 @@ fn to_lower(s: String) -> String = _
 @intrinsic("almide_rt_string_replace")
 fn replace(s: String, from: String, to: String) -> String = _
 
-@intrinsic("almide_rt_string_char_at")
+@inline_rust("almide_rt_string_char_at(&*{s}, {i})")
 fn get(s: String, i: Int) -> Option[String] = _
 
 @intrinsic("almide_rt_string_lines")
@@ -98,7 +98,7 @@ fn codepoint(s: String) -> Option[Int] = _
 @intrinsic("almide_rt_string_from_codepoint")
 fn from_codepoint(n: Int) -> String = _
 
-@intrinsic("almide_rt_string_pad_right")
+@inline_rust("almide_rt_string_pad_right(&*{s}, {n}, &*{ch})")
 fn pad_end(s: String, n: Int, ch: String) -> String = _
 
 @intrinsic("almide_rt_string_trim_start")
