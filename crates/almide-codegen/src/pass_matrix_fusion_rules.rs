@@ -302,103 +302,16 @@ pub fn build_matrix_call(func: &'static str, args: Vec<IrExpr>) -> IrExprKind {
 
 // ── The rule registry ───────────────────────────────────────────────
 
-/// All chain-fusion rules considered by `MatrixFusionPass`. Order is
-/// deliberate: rules matching **more specific** / **deeper** patterns
-/// come first so an outer rule can't fire before its inner
-/// prerequisites are rewritten into their canonical form.
+/// All chain-fusion rules considered by `MatrixFusionPass`, sourced
+/// from `stdlib/matrix.almd`'s `@rewrite` attributes via the build
+/// script (`buildscript/fusion_rules.rs` → `src/generated/fusion_rules.rs`).
+/// The order is inherited from the stdlib file, which arranges deeper /
+/// more specific patterns ahead of shallower mirrors so an outer rule
+/// can't fire before its inner prerequisites are rewritten into their
+/// canonical form.
+///
+/// Adding a new fusion = adding one `@rewrite(name = "...", from = "...", to = "...")`
+/// attribute to the runtime intrinsic in stdlib. No Rust code changes.
 pub fn fusion_rules() -> Vec<FusionRule> {
-    vec![
-        // 4-deep: gelu(scale(add(mul(a, b), bias), alpha)) →
-        //         fused_gemm_bias_scale_gelu(a, b, bias, alpha)
-        FusionRule {
-            name: "gemm_bias_scale_gelu",
-            pattern: call("gelu", vec![
-                call("scale", vec![
-                    call("add", vec![
-                        call("mul", vec![cap("a"), cap("b")]),
-                        cap("bias"),
-                    ]),
-                    cap("alpha"),
-                ]),
-            ]),
-            rewrite: |m| build_matrix_call("fused_gemm_bias_scale_gelu", vec![
-                m.get("a"), m.get("b"), m.get("bias"), m.get("alpha"),
-            ]),
-        },
-        // 3-deep: softmax_rows(scale(mul(q, kt), s)) → attention_weights(q, kt, s)
-        FusionRule {
-            name: "attention_weights",
-            pattern: call("softmax_rows", vec![
-                call("scale", vec![
-                    call("mul", vec![cap("q"), cap("kt")]),
-                    cap("scale"),
-                ]),
-            ]),
-            rewrite: |m| build_matrix_call("attention_weights", vec![
-                m.get("q"), m.get("kt"), m.get("scale"),
-            ]),
-        },
-        // 2-deep: mul(attention_weights(q, kt, s), v) →
-        //         scaled_dot_product_attention(q, kt, v, s)
-        FusionRule {
-            name: "scaled_dot_product_attention",
-            pattern: call("mul", vec![
-                call("attention_weights", vec![cap("q"), cap("kt"), cap("scale")]),
-                cap("v"),
-            ]),
-            rewrite: |m| build_matrix_call("scaled_dot_product_attention", vec![
-                m.get("q"), m.get("kt"), m.get("v"), m.get("scale"),
-            ]),
-        },
-        // 2-deep: linear_row(layer_norm_rows(x, γ, β, ε), W, b) →
-        //         pre_norm_linear(x, γ, β, ε, W, b)
-        FusionRule {
-            name: "pre_norm_linear",
-            pattern: call("linear_row", vec![
-                call("layer_norm_rows", vec![
-                    cap("x"), cap("gamma"), cap("beta"), cap("eps"),
-                ]),
-                cap("w"),
-                cap("bias"),
-            ]),
-            rewrite: |m| build_matrix_call("pre_norm_linear", vec![
-                m.get("x"), m.get("gamma"), m.get("beta"), m.get("eps"),
-                m.get("w"), m.get("bias"),
-            ]),
-        },
-        // 2-deep: gelu(linear_row(x, W, b)) → linear_row_gelu(x, W, b)
-        FusionRule {
-            name: "linear_row_gelu",
-            pattern: call("gelu", vec![
-                call("linear_row", vec![cap("x"), cap("w"), cap("bias")]),
-            ]),
-            rewrite: |m| build_matrix_call("linear_row_gelu", vec![
-                m.get("x"), m.get("w"), m.get("bias"),
-            ]),
-        },
-        // 2-deep: mul(a, scale(b, s)) → mul_scaled(a, s, b)
-        FusionRule {
-            name: "mul_scaled_rhs",
-            pattern: call("mul", vec![
-                cap("a"),
-                call("scale", vec![cap("b"), cap("s")]),
-            ]),
-            rewrite: |m| build_matrix_call("mul_scaled", vec![
-                m.get("a"), m.get("s"), m.get("b"),
-            ]),
-        },
-        // 2-deep: mul(scale(a, s), b) → mul_scaled(a, s, b). Same fused
-        // runtime, different input shape — the lhs-scaled mirror
-        // collapses to the same α(A@B) identity.
-        FusionRule {
-            name: "mul_scaled_lhs",
-            pattern: call("mul", vec![
-                call("scale", vec![cap("a"), cap("s")]),
-                cap("b"),
-            ]),
-            rewrite: |m| build_matrix_call("mul_scaled", vec![
-                m.get("a"), m.get("s"), m.get("b"),
-            ]),
-        },
-    ]
+    super::generated::fusion_rules::generated_fusion_rules()
 }

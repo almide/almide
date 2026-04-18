@@ -9,6 +9,9 @@
 #[path = "buildscript/runtime_registry.rs"]
 mod runtime_registry;
 
+#[path = "buildscript/fusion_rules.rs"]
+mod fusion_rules;
+
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let workspace_root = std::path::Path::new(&manifest_dir).join("../..");
@@ -16,4 +19,5 @@ fn main() {
     std::fs::create_dir_all(out_dir).unwrap();
 
     runtime_registry::generate(&workspace_root, out_dir);
+    fusion_rules::generate(&workspace_root, out_dir);
 }
