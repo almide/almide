@@ -107,6 +107,31 @@ fn to_string(n: Int) -> String"#,
     }
 
     #[test]
+    fn intrinsic_attribute_symbol_arg() {
+        // Phase 1e-1: `@intrinsic("symbol")` is the forward-looking dispatch
+        // attribute. The parser treats it as any other generic `@name(arg)`
+        // — no parser change was required. This test pins the expected
+        // shape so downstream lowering (Phase 1e-2) can rely on it.
+        let prog = parse_program(
+            r#"@intrinsic("almide_rt_int_parse")
+fn parse(s: String) -> Result[Int, String]"#,
+        );
+        let Decl::Fn { attrs, .. } = first_fn(&prog) else {
+            panic!("expected fn")
+        };
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].name.as_str(), "intrinsic");
+        assert_eq!(attrs[0].args.len(), 1);
+        assert!(attrs[0].args[0].name.is_none(), "positional arg");
+        match &attrs[0].args[0].value {
+            AttrValue::String { value } => {
+                assert_eq!(value, "almide_rt_int_parse");
+            }
+            other => panic!("expected string, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn schedule_with_named_args() {
         let prog = parse_program(
             r#"@schedule(device=gpu, tile=32, unroll=true)
