@@ -387,3 +387,46 @@ fn write_u8(b: Bytes, val: Int) -> Unit = _
 
 @intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _
+
+// ── Typed byte IO (Stage 4a, Sized Numeric Types integration) ──
+//
+// The new preferred surface: one function per (operation × width × kind),
+// parameterized by `Endian` instead of burnt into the name. Replaces
+// `read_u32_le` / `read_u32_be` / ... with `read_uint32(b, pos, .le)` /
+// `read_uint32(b, pos, .be)`. The old names stay for now; a later arc
+// will flip usage and delete them. Each typed wrapper dispatches at
+// compile time (match on a unit-variant arm), so there is no runtime
+// overhead over calling the legacy fn directly.
+//
+// Covered in this MVP:
+//   - read/write × {UInt16, UInt32, Int32, Float32}
+//
+// Follow-ups (not blocking this arc):
+//   - UInt8 / Int8 / Int16 / UInt64 / Int64 / Float64
+//   - `set[T]` / `append[T]` typed families
+//   - `FixedWidthInteger` / `BinaryFloatingPoint` protocols once the
+//     generic-dispatch infrastructure lands
+
+type Endian = | LittleEndian | BigEndian
+
+// Typed read wrappers expand inline via `@inline_rust` so the bundled-
+// Almide body layer never sits between the caller's `Bytes` value and
+// the `&{b}`-borrowing runtime fn. This avoids the bundled-body +
+// `&mut` template combinatorics the follow-up arc will address.
+
+@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_read_u16_le(&{b}, {offset}) as u16, Endian::BigEndian => almide_rt_bytes_read_u16_be(&{b}, {offset}) as u16 }")
+fn read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16 = _
+
+@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_read_u32_le(&{b}, {offset}) as u32, Endian::BigEndian => almide_rt_bytes_read_u32_be(&{b}, {offset}) as u32 }")
+fn read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32 = _
+
+@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_read_i32_le(&{b}, {offset}) as i32, Endian::BigEndian => almide_rt_bytes_read_i32_be(&{b}, {offset}) as i32 }")
+fn read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32 = _
+
+@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_read_f32_le(&{b}, {offset}) as f32, Endian::BigEndian => almide_rt_bytes_read_f32_be(&{b}, {offset}) as f32 }")
+fn read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32 = _
+
+// Write counterparts (write_uint32, write_float32, ...) are deferred
+// from this MVP. Mutating bundled fns pairing with `&mut {b}` inline
+// templates needs a codegen adapter; lands in a follow-up arc per
+// `docs/roadmap/active/sized-numeric-types.md` §Stage 4.
