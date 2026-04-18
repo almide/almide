@@ -4,23 +4,23 @@
 // pure assertion helpers. `assert_throws` accepts a thunk; the lambda
 // prep applied to bundled InlineRust args passes it through intact.
 
-@inline_rust("almide_rt_test_assert_throws({f}, &*{expected})")
+@intrinsic("almide_rt_test_assert_throws")
 fn assert_throws(f: () -> Unit, expected: String) -> Unit = _
 
-@inline_rust("almide_rt_test_assert_contains(&*{haystack}, &*{needle})")
+@intrinsic("almide_rt_test_assert_contains")
 fn assert_contains(haystack: String, needle: String) -> Unit = _
 
-@inline_rust("almide_rt_test_assert_approx({a}, {b}, {tolerance})")
+@intrinsic("almide_rt_test_assert_approx")
 fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
 
-@inline_rust("almide_rt_test_assert_gt({a}, {b})")
+@intrinsic("almide_rt_test_assert_gt")
 fn assert_gt(a: Int, b: Int) -> Unit = _
 
-@inline_rust("almide_rt_test_assert_lt({a}, {b})")
+@intrinsic("almide_rt_test_assert_lt")
 fn assert_lt(a: Int, b: Int) -> Unit = _
 
-@inline_rust("almide_rt_test_assert_some(&{opt})")
+@intrinsic("almide_rt_test_assert_some")
 fn assert_some[A](opt: Option[A]) -> Unit = _
 
-@inline_rust("almide_rt_test_assert_ok(&{result})")
+@intrinsic("almide_rt_test_assert_ok")
 fn assert_ok[A, B](result: Result[A, B]) -> Unit = _
