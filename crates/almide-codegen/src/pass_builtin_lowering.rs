@@ -196,11 +196,27 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
 
                     // Other Type.method patterns → Type_method standalone calls
                     if method.contains('.') {
+                        // Bundled-stdlib modules (lowercase heads like
+                        // `uint32.to_int64`) carry the `almide_rt_` prefix
+                        // at their definition site (see `walker/mod.rs`
+                        // rename of `fn <clean_name>` → `fn almide_rt_<m>_<clean>`).
+                        // Mirror that prefix at the call site so UFCS
+                        // dispatch resolves to the emitted symbol.
+                        // Convention methods (uppercase head — `List.encode`)
+                        // use the `Type_method` flat naming and stay as-is.
+                        let dot_pos = method.find('.').unwrap();
+                        let module_head = &method.as_str()[..dot_pos];
+                        let is_bundled = almide_lang::stdlib_info::is_any_stdlib(module_head);
                         let flat = method.replace('.', "_");
+                        let name = if is_bundled {
+                            format!("almide_rt_{}", flat)
+                        } else {
+                            flat
+                        };
                         let mut call_args = vec![*object];
                         call_args.extend(args);
                         return IrExpr { kind: IrExprKind::Call {
-                            target: CallTarget::Named { name: flat.into() },
+                            target: CallTarget::Named { name: name.into() },
                             args: call_args, type_args,
                         }, ty, span };
                     }

@@ -948,7 +948,9 @@ impl FuncCompiler<'_> {
         // matrix. Before `@intrinsic` migration these rode the Module
         // dispatcher at line ~356 of this file, but the post-migration
         // `RuntimeCall` path lands here instead.
-        if func.starts_with("to_") && sized_type_info(module).is_some() {
+        if (func.starts_with("to_") || func.starts_with("from_"))
+            && sized_type_info(module).is_some()
+        {
             if self.emit_sized_conv_call(module, func, args) {
                 return true;
             }

@@ -1,42 +1,24 @@
 // int8 — bundled-Almide sized-numeric conversion module.
 //
-// Generated alongside the Sized Numeric Types arc (Stage 3).
-// Every fn here is a mechanical `as` cast expressed through
-// `@inline_rust`; Rust chooses the correct truncation / sign-extend /
-// float-round semantics based on source and target Rust primitive
-// types. Overflow on narrow integer downcasts wraps — the checked
-// (`to_<T>_checked`) / saturating variants land in a later sub-phase.
+// Pure Almide bodies routed through canonical `int` (= i64) as a
+// dimensional pivot. `int.from_int8(x)` widens to i64, then
+// `int.to_<dst>(...)` narrows / re-widens to the target width. Rust
+// collapses the double cast; WASM resolves both hops through
+// `emit_sized_conv_call` inline. Same `as`-semantics as the previous
+// `@inline_rust` templates — wrapping on narrow int downcasts,
+// saturating truncation on float→int, sign behaviour from src kind.
 //
 // All fns are UFCS-dispatched: `x.to_int64()` on `x: Int8`
-// resolves to `int8.to_int64(x)` via the resolver in
-// `almide-codegen::pass_stdlib_lowering::resolve_module_from_ty`.
+// resolves to `int8.to_int64(x)` via `pass_stdlib_lowering::
+// resolve_module_from_ty`.
 
-@inline_rust("({x}) as i16")
-fn to_int16(x: Int8) -> Int16 = _
-
-@inline_rust("({x}) as i32")
-fn to_int32(x: Int8) -> Int32 = _
-
-@inline_rust("({x}) as u8")
-fn to_uint8(x: Int8) -> UInt8 = _
-
-@inline_rust("({x}) as u16")
-fn to_uint16(x: Int8) -> UInt16 = _
-
-@inline_rust("({x}) as u32")
-fn to_uint32(x: Int8) -> UInt32 = _
-
-@inline_rust("({x}) as u64")
-fn to_uint64(x: Int8) -> UInt64 = _
-
-@inline_rust("({x}) as f32")
-fn to_float32(x: Int8) -> Float32 = _
-
-@inline_rust("({x}) as i64")
-fn to_int64(x: Int8) -> Int64 = _
-
-@inline_rust("({x}) as f64")
-fn to_float64(x: Int8) -> Float64 = _
-
-@inline_rust("format!(\"{}\", {x})")
-fn to_string(x: Int8) -> String = _
+fn to_int16(x: Int8) -> Int16 = int.to_int16(int.from_int8(x))
+fn to_int32(x: Int8) -> Int32 = int.to_int32(int.from_int8(x))
+fn to_int64(x: Int8) -> Int64 = int.to_int64(int.from_int8(x))
+fn to_uint8(x: Int8) -> UInt8 = int.to_uint8(int.from_int8(x))
+fn to_uint16(x: Int8) -> UInt16 = int.to_uint16(int.from_int8(x))
+fn to_uint32(x: Int8) -> UInt32 = int.to_uint32(int.from_int8(x))
+fn to_uint64(x: Int8) -> UInt64 = int.to_uint64(int.from_int8(x))
+fn to_float32(x: Int8) -> Float32 = int.to_float32(int.from_int8(x))
+fn to_float64(x: Int8) -> Float64 = int.to_float64(int.from_int8(x))
+fn to_string(x: Int8) -> String = int.to_string(int.from_int8(x))

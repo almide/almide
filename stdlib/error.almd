@@ -1,16 +1,19 @@
-// error — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2d).
+// error — bundled-Almide stdlib module.
 //
-// Migrated mechanically from the matching `stdlib/defs/*.toml`.
-// Signatures (including any generic type params) match the legacy
-// TOML definitions byte-for-byte; the Rust runtime in
-// `runtime/rs/src/error.rs` stays as the implementation target.
-// WASM dispatch continues through `emit_wasm/calls_error.rs`.
+// `@intrinsic` + per-fn borrow overrides now drive the dispatch; the
+// Rust runtime in `runtime/rs/src/error.rs` keeps `&str` / `&Result`
+// signatures. `context` / `message` need `@borrow_ref(r)` because the
+// default `Result → Own` would collide with their `&Result<T, String>`
+// runtime fn; `chain`'s two `String`s flow through the default
+// `String → RefStr` decoration without an override.
 
-@inline_rust("almide_rt_error_chain(&*{outer}, &*{cause})")
+@intrinsic("almide_rt_error_chain")
 fn chain(outer: String, cause: String) -> String = _
 
-@inline_rust("almide_rt_error_context(&{r}, &*{msg})")
-fn context[T, E](r: Result[T, E], msg: String) -> Result[T, String] = _
+@intrinsic("almide_rt_error_context")
+@borrow_ref(r)
+fn context[T](r: Result[T, String], msg: String) -> Result[T, String] = _
 
-@inline_rust("almide_rt_error_message(&{r})")
+@intrinsic("almide_rt_error_message")
+@borrow_ref(r)
 fn message[T](r: Result[T, String]) -> String = _

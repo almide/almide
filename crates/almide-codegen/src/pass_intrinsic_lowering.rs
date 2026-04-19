@@ -24,8 +24,14 @@ use std::collections::{HashMap, HashSet};
 use almide_base::intern::{Sym, sym};
 use almide_ir::*;
 use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut};
+use almide_lang::ast;
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, PassResult, Target};
+
+/// Param default info for a single `@intrinsic` fn. The `Vec<Option<T>>`
+/// aligns with the param list: `Some(expr)` where a default exists,
+/// `None` for required positional params.
+type DefaultArgs = Vec<Option<ast::Expr>>;
 
 #[derive(Debug)]
 pub struct IntrinsicLoweringPass;
@@ -39,7 +45,7 @@ impl NanoPass for IntrinsicLoweringPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        let map = collect_intrinsics(&program);
+        let (map, defaults) = collect_intrinsics(&program);
         if map.is_empty() {
             return PassResult { program, changed: false };
         }
@@ -47,7 +53,19 @@ impl NanoPass for IntrinsicLoweringPass {
 
         struct Rewriter<'a> {
             map: &'a HashMap<(Sym, Sym), Sym>,
+            defaults: &'a HashMap<Sym, DefaultArgs>,
             symbols: &'a HashSet<Sym>,
+        }
+        impl<'a> Rewriter<'a> {
+            fn fill_defaults(&self, symbol: Sym, args: &mut Vec<IrExpr>) {
+                let Some(defs) = self.defaults.get(&symbol) else { return };
+                if args.len() >= defs.len() { return; }
+                for idx in args.len()..defs.len() {
+                    if let Some(def_expr) = &defs[idx] {
+                        args.push(ast_literal_to_ir_expr(def_expr));
+                    }
+                }
+            }
         }
         impl<'a> IrMutVisitor for Rewriter<'a> {
             fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
@@ -56,7 +74,8 @@ impl NanoPass for IntrinsicLoweringPass {
                 match target {
                     CallTarget::Module { module, func } => {
                         let Some(&symbol) = self.map.get(&(*module, *func)) else { return };
-                        let args = std::mem::take(args);
+                        let mut args = std::mem::take(args);
+                        self.fill_defaults(symbol, &mut args);
                         expr.kind = IrExprKind::RuntimeCall { symbol, args };
                     }
                     CallTarget::Named { name } => {
@@ -75,7 +94,8 @@ impl NanoPass for IntrinsicLoweringPass {
                         //      attribute's symbol wins.
                         if self.symbols.contains(name) {
                             let symbol = *name;
-                            let args = std::mem::take(args);
+                            let mut args = std::mem::take(args);
+                            self.fill_defaults(symbol, &mut args);
                             expr.kind = IrExprKind::RuntimeCall { symbol, args };
                             return;
                         }
@@ -84,7 +104,8 @@ impl NanoPass for IntrinsicLoweringPass {
                                 let m = sym(&rest[..underscore]);
                                 let f = sym(&rest[underscore + 1..]);
                                 if let Some(&symbol) = self.map.get(&(m, f)) {
-                                    let args = std::mem::take(args);
+                                    let mut args = std::mem::take(args);
+                                    self.fill_defaults(symbol, &mut args);
                                     expr.kind = IrExprKind::RuntimeCall { symbol, args };
                                 }
                             }
@@ -110,6 +131,7 @@ impl NanoPass for IntrinsicLoweringPass {
                         let mut new_args = Vec::with_capacity(args.len() + 1);
                         new_args.push(obj);
                         new_args.extend(std::mem::take(args));
+                        self.fill_defaults(symbol, &mut new_args);
                         expr.kind = IrExprKind::RuntimeCall { symbol, args: new_args };
                     }
                     _ => {}
@@ -120,7 +142,7 @@ impl NanoPass for IntrinsicLoweringPass {
             }
         }
 
-        let mut rw = Rewriter { map: &map, symbols: &symbols };
+        let mut rw = Rewriter { map: &map, defaults: &defaults, symbols: &symbols };
         for func in &mut program.functions {
             rw.visit_expr_mut(&mut func.body);
         }
@@ -192,12 +214,18 @@ fn module_for_ty(ty: &Ty) -> Option<Sym> {
 ///      appear in `program.modules`, but their call sites still use
 ///      `CallTarget::Module { bytes, len }` which must still rewrite to
 ///      `RuntimeCall`. Parsing `stdlib_info::bundled_source` picks those up.
-fn collect_intrinsics(program: &IrProgram) -> HashMap<(Sym, Sym), Sym> {
+fn collect_intrinsics(program: &IrProgram) -> (HashMap<(Sym, Sym), Sym>, HashMap<Sym, DefaultArgs>) {
     use almide_lang::ast::{AttrValue, Decl};
 
     let mut out = HashMap::new();
+    let mut defaults: HashMap<Sym, DefaultArgs> = HashMap::new();
 
-    // Source 1: lowered modules already in the IR.
+    // Source 1: lowered modules already in the IR. `IrFunction` no
+    // longer carries ast-level default exprs so we rely on Source 2
+    // (bundled-source AST re-parse) for defaults when the module came
+    // from the bundled stdlib. External user packages hit only Source 1;
+    // they shouldn't declare `@intrinsic` fns with defaults in
+    // practice — the sentinel-less dispatch is the common case.
     for module in &program.modules {
         for func in &module.functions {
             let Some(attr) = func.attrs.iter().find(|a| a.name.as_str() == "intrinsic") else {
@@ -210,21 +238,61 @@ fn collect_intrinsics(program: &IrProgram) -> HashMap<(Sym, Sym), Sym> {
     }
 
     // Source 2: bundled `.almd` stdlib sources. User-module entries above
-    // take precedence via `entry().or_insert_with`.
+    // take precedence via `entry().or_insert_with`. Defaults are harvested
+    // from the AST params (which do carry `default: Option<Expr>`), keyed
+    // by the runtime symbol for direct Rewriter lookup.
     for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
         let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
         let Some(parsed) = almide_lang::parse_cached(source) else { continue };
         let module_sym = sym(mod_name);
         for decl in &parsed.decls {
-            let Decl::Fn { name, attrs, .. } = decl else { continue };
+            let Decl::Fn { name, attrs, params, .. } = decl else { continue };
             let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else {
                 continue;
             };
             let Some(first) = attr.args.first() else { continue };
             let AttrValue::String { value } = &first.value else { continue };
-            out.entry((module_sym, *name)).or_insert_with(|| sym(value));
+            let symbol = sym(value);
+            out.entry((module_sym, *name)).or_insert(symbol);
+            if params.iter().any(|p| p.default.is_some()) {
+                let defs: DefaultArgs = params.iter()
+                    .map(|p| p.default.as_ref().map(|d| (**d).clone()))
+                    .collect();
+                defaults.entry(symbol).or_insert(defs);
+            }
         }
     }
 
-    out
+    (out, defaults)
+}
+
+/// Convert an `ast::Expr` literal (as seen in `@intrinsic` fn default
+/// values like `end: Int = 9223372036854775807`) into a minimal
+/// `IrExpr`. Only the literal forms that can legally appear as default
+/// args are supported — anything else lowers to `IrExpr::default()`
+/// which will surface as an obvious codegen error.
+fn ast_literal_to_ir_expr(expr: &ast::Expr) -> IrExpr {
+    use almide_lang::ast::ExprKind;
+    let (kind, ty) = match &expr.kind {
+        ExprKind::Int { value, .. } => {
+            let n = value.as_i64().unwrap_or_else(|| {
+                value.as_f64().map(|f| f as i64).unwrap_or(0)
+            });
+            (IrExprKind::LitInt { value: n }, Ty::Int)
+        }
+        ExprKind::Float { value } => (
+            IrExprKind::LitFloat { value: *value },
+            Ty::Float,
+        ),
+        ExprKind::Bool { value } => (
+            IrExprKind::LitBool { value: *value },
+            Ty::Bool,
+        ),
+        ExprKind::String { value } => (
+            IrExprKind::LitStr { value: value.clone() },
+            Ty::String,
+        ),
+        _ => return IrExpr::default(),
+    };
+    IrExpr { kind, ty, span: expr.span }
 }

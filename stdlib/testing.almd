@@ -1,12 +1,9 @@
-// testing — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4b).
+// testing — bundled-Almide stdlib module.
 //
-// Migrated mechanically from `stdlib/defs/testing.toml` (7 fns). All
-// pure assertion helpers. `assert_throws` accepts a thunk; the lambda
-// prep applied to bundled InlineRust args passes it through intact.
-//
-// @inline_rust is retained (not @intrinsic) because the WASM backend
-// has no dedicated runtime fn for these assertions — they are used
-// primarily in Rust-target test harnesses.
+// Pure assertion helpers dispatched via `@intrinsic`. WASM routing
+// lives in `emit_wasm/calls.rs::dispatch_runtime_fallback` (routes
+// `testing.*` to the Named dispatcher, where the hardcoded
+// assert_contains / assert_approx / etc. implementations live).
 
 @intrinsic("almide_rt_test_assert_throws")
 fn assert_throws(f: () -> Unit, expected: String) -> Unit = _

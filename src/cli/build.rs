@@ -259,8 +259,20 @@ fn run_wasm_opt(path: &str) -> Result<usize, String> {
     // --enable-bulk-memory required: matrix runtime emits memory.fill for
     // result buffer zero-init. --enable-simd preserves f64x2 instructions
     // from matrix.scale / add / sub / div / fma / fma3.
+    // --enable-nontrapping-float-to-int: sized numeric conversions now
+    // emit `i32.trunc_sat_f64_s` etc. (post-Stdlib-Unification, all
+    // float→int routes through `emit_sized_conv_call`).
     let status = std::process::Command::new("wasm-opt")
-        .args(["-O3", "--enable-simd", "--enable-bulk-memory", path, "-o", path])
+        .args([
+            "-O3",
+            "--enable-simd",
+            "--enable-bulk-memory",
+            "--enable-nontrapping-float-to-int",
+            "--enable-tail-call",
+            path,
+            "-o",
+            path,
+        ])
         .status()
         .map_err(|e| format!("wasm-opt not available ({})", e))?;
     if !status.success() {

@@ -502,13 +502,16 @@ mod stdlib_lowering {
     use almide::codegen::pass_stdlib_lowering::StdlibLoweringPass;
 
     #[test]
-    fn module_call_becomes_inline_rust() {
-        // string.slice(s, 0, 0) → InlineRust { "almide_rt_string_slice(&*{s}, ..)", args=[(s, _), ..] }
-        // `string.slice` is one of the remaining `@inline_rust` fns
-        // (non-primitive signature with `Option<usize>`), so it still
-        // takes the `StdlibLoweringPass` → `InlineRust` path. Most other
-        // stdlib fns now use `@intrinsic` and are lowered by
-        // `IntrinsicLoweringPass` into `RuntimeCall` before this pass.
+    fn module_call_passes_through_stdlib_lowering() {
+        // Post Stdlib-Unification completion, every bundled stdlib fn
+        // routes through either `@intrinsic` (→ `IntrinsicLoweringPass`
+        // produces `RuntimeCall`) or a TOML-dispatcher. `StdlibLowering`
+        // now sees neither — any residual `CallTarget::Module` at this
+        // stage is a test-synthesized fragment with no pass-level
+        // rewriting to apply, so the pass leaves it untouched. This test
+        // pins that "left untouched" contract so a future regression
+        // that unintentionally re-introduces `@inline_rust` → InlineRust
+        // dispatch for stdlib shows up here.
         let mut vt = VarTable::new();
         let p = mk_param(&mut vt, "s", Ty::String);
         let var_id = p.var;
@@ -527,14 +530,15 @@ mod stdlib_lowering {
         let program = mk_program(vec![func], vt);
         let result = run_pass(&StdlibLoweringPass, program, Target::Rust);
 
+        // StdlibLowering leaves the Module call intact — the real
+        // lowering happens in IntrinsicLoweringPass which runs before it
+        // in the full pipeline.
         match &result.functions[0].body.kind {
-            IrExprKind::InlineRust { template, args } => {
-                assert!(template.contains("almide_rt_string_slice"),
-                    "expected runtime fn in template, got: {}", template);
-                assert_eq!(args.len(), 3, "expected three param-keyed args");
-                assert_eq!(args[0].0.as_str(), "s");
+            IrExprKind::Call { target: CallTarget::Module { module, func }, .. } => {
+                assert_eq!(module.as_str(), "string");
+                assert_eq!(func.as_str(), "slice");
             }
-            other => panic!("Expected InlineRust, got {:?}", other),
+            other => panic!("Expected untouched Module call, got {:?}", other),
         }
     }
 }
