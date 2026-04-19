@@ -441,10 +441,29 @@ cursor_read_int!(almide_rt_bytes_read_u32_be_at, 4, |b: &[u8]| u32::from_be_byte
 cursor_read_int!(almide_rt_bytes_read_i32_be_at, 4, |b: &[u8]| i32::from_be_bytes([b[0], b[1], b[2], b[3]]) as i64);
 cursor_read_int!(almide_rt_bytes_read_i64_be_at, 8, |b: &[u8]| i64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
 
+cursor_read_float!(almide_rt_bytes_read_f16_le_at, 2, |b: &[u8]| f16_bits_to_f64(u16::from_le_bytes([b[0], b[1]])) as f64);
 cursor_read_float!(almide_rt_bytes_read_f32_le_at, 4, |b: &[u8]| f32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64);
 cursor_read_float!(almide_rt_bytes_read_f64_le_at, 8, |b: &[u8]| f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
 cursor_read_float!(almide_rt_bytes_read_f32_be_at, 4, |b: &[u8]| f32::from_be_bytes([b[0], b[1], b[2], b[3]]) as f64);
 cursor_read_float!(almide_rt_bytes_read_f64_be_at, 8, |b: &[u8]| f64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
+
+pub fn almide_rt_bytes_read_bool_at(b: &Vec<u8>, pos: i64) -> (i64, Option<bool>) {
+    let p = pos as usize;
+    if p >= b.len() { return (pos, None); }
+    (pos + 1, Some(b[p] != 0))
+}
+
+/// Cursor form of `read_string_be` — u32 big-endian length prefix + UTF-8 body.
+/// Returns `(pos, None)` without advancing when either the prefix or the body
+/// runs off the end.
+pub fn almide_rt_bytes_read_string_be_at(b: &Vec<u8>, pos: i64) -> (i64, Option<String>) {
+    let p = pos as usize;
+    if p + 4 > b.len() { return (pos, None); }
+    let slen = u32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as usize;
+    if p + 4 + slen > b.len() { return (pos, None); }
+    let s = String::from_utf8_lossy(&b[p+4..p+4+slen]).into_owned();
+    (pos + 4 + slen as i64, Some(s))
+}
 
 pub fn almide_rt_bytes_take_at(b: &Vec<u8>, pos: i64, n: i64) -> (i64, Option<Vec<u8>>) {
     let p = pos as usize;

@@ -123,3 +123,77 @@ test "read_i16_be_at sign-extends negatives" {
   assert_eq(v |> option.unwrap_or(0), -42)
 }
 
+// ── read_bool_at / read_f16_le_at / read_string_be_at ──
+
+test "read_bool_at advances and returns Some" {
+  var b = bytes.new(0)
+  bytes.append_u8(b, 1)
+  bytes.append_u8(b, 0)
+  let (p1, v1) = bytes.read_bool_at(b, 0)
+  assert_eq(p1, 1)
+  assert_eq(v1 |> option.unwrap_or(false), true)
+  let (p2, v2) = bytes.read_bool_at(b, p1)
+  assert_eq(p2, 2)
+  assert_eq(v2 |> option.unwrap_or(true), false)
+}
+
+test "read_bool_at none at EOF" {
+  let b = bytes.new(0)
+  let (p, v) = bytes.read_bool_at(b, 0)
+  assert_eq(p, 0)
+  assert(option.is_none(v), "expected none at empty buf")
+}
+
+test "read_f16_le_at advances by 2 and decodes half" {
+  // 0x3C00 = 1.0 in IEEE-754 half. LE bytes = 00 3C.
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0x00)
+  bytes.append_u8(b, 0x3C)
+  let (p, v) = bytes.read_f16_le_at(b, 0)
+  assert_eq(p, 2)
+  assert_eq(v |> option.unwrap_or(0.0), 1.0)
+}
+
+test "read_f16_le_at none at partial EOF" {
+  let b = bytes.new(1)
+  let (p, v) = bytes.read_f16_le_at(b, 0)
+  assert_eq(p, 0)
+  assert(option.is_none(v), "expected none at partial eof")
+}
+
+test "read_string_be_at decodes u32 BE prefix + body" {
+  // slen = 3, body = "hey" (0x68 0x65 0x79)
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0x00)
+  bytes.append_u8(b, 0x00)
+  bytes.append_u8(b, 0x00)
+  bytes.append_u8(b, 0x03)
+  bytes.append_u8(b, 0x68)
+  bytes.append_u8(b, 0x65)
+  bytes.append_u8(b, 0x79)
+  let (p, v) = bytes.read_string_be_at(b, 0)
+  assert_eq(p, 7)
+  assert_eq(v |> option.unwrap_or(""), "hey")
+}
+
+test "read_string_be_at none when prefix runs off" {
+  let b = bytes.new(3)
+  let (p, v) = bytes.read_string_be_at(b, 0)
+  assert_eq(p, 0)
+  assert(option.is_none(v), "expected none at short prefix")
+}
+
+test "read_string_be_at none when body runs off" {
+  // prefix says 10 bytes but only 2 follow
+  var b = bytes.new(0)
+  bytes.append_u8(b, 0x00)
+  bytes.append_u8(b, 0x00)
+  bytes.append_u8(b, 0x00)
+  bytes.append_u8(b, 0x0A)
+  bytes.append_u8(b, 0x61)
+  bytes.append_u8(b, 0x62)
+  let (p, v) = bytes.read_string_be_at(b, 0)
+  assert_eq(p, 0)
+  assert(option.is_none(v), "expected none at short body")
+}
+

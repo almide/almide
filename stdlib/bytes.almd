@@ -145,8 +145,14 @@ fn push(b: Bytes, val: Int) -> Unit = _
 @intrinsic("almide_rt_bytes_read_bool")
 fn read_bool(b: Bytes, pos: Int) -> Bool = _
 
+@inline_rust("almide_rt_bytes_read_bool_at(&{b}, {pos})")
+fn read_bool_at(b: Bytes, pos: Int) -> (Int, Option[Bool]) = _
+
 @inline_rust("almide_rt_bytes_read_f16_le(&{b}, {pos})")
 fn read_f16_le(b: Bytes, pos: Int) -> Float = _
+
+@inline_rust("almide_rt_bytes_read_f16_le_at(&{b}, {pos})")
+fn read_f16_le_at(b: Bytes, pos: Int) -> (Int, Option[Float]) = _
 
 @inline_rust("almide_rt_bytes_read_f16_le_array(&{b}, {pos}, {count})")
 fn read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
@@ -249,6 +255,9 @@ fn read_string_at(b: Bytes, pos: Int, len: Int) -> String = _
 
 @intrinsic("almide_rt_bytes_read_string_be")
 fn read_string_be(b: Bytes, pos: Int) -> String = _
+
+@inline_rust("almide_rt_bytes_read_string_be_at(&{b}, {pos})")
+fn read_string_be_at(b: Bytes, pos: Int) -> (Int, Option[String]) = _
 
 @inline_rust("almide_rt_bytes_read_u16_be(&{b}, {pos})")
 fn read_u16_be(b: Bytes, pos: Int) -> Int = _

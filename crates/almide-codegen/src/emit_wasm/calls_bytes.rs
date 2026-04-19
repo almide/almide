@@ -646,10 +646,13 @@ impl FuncCompiler<'_> {
             "read_u32_be_at" => self.emit_cursor_read_int(args, 4, false, true),
             "read_i32_be_at" => self.emit_cursor_read_int(args, 4, true, true),
             "read_i64_be_at" => self.emit_cursor_read_int(args, 8, true, true),
+            "read_f16_le_at" => self.emit_cursor_read_f16_le(args),
             "read_f32_le_at" => self.emit_cursor_read_float(args, 4, false),
             "read_f64_le_at" => self.emit_cursor_read_float(args, 8, false),
             "read_f32_be_at" => self.emit_cursor_read_float(args, 4, true),
             "read_f64_be_at" => self.emit_cursor_read_float(args, 8, true),
+            "read_bool_at" => self.emit_cursor_read_bool(args),
+            "read_string_be_at" => self.emit_cursor_read_string_be(args),
             "take_at" => self.emit_cursor_take(args),
             "read_i16_le" => self.emit_typed_byte_read(&args[0], &args[1], ByteReadOp::I16Le),
             "read_u16_be" => self.emit_byte_read_be_int(&args[0], &args[1], 2, /*signed=*/false),
@@ -2462,6 +2465,159 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(opt_ptr);
         self.scratch.free_i64(new_pos);
         self.scratch.free_i32(n_i32);
+        self.scratch.free_i32(pos_i32);
+        self.scratch.free_i64(pos);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.read_bool_at(b, pos) -> (Int, Option[Bool])`.
+    /// Option[Bool] payload is a 4-byte i32 cell (0 or 1).
+    pub(super) fn emit_cursor_read_bool(&mut self, args: &[IrExpr]) {
+        let buf = self.scratch.alloc_i32();
+        let pos = self.scratch.alloc_i64();
+        let pos_i32 = self.scratch.alloc_i32();
+        let new_pos = self.scratch.alloc_i64();
+        let opt_ptr = self.scratch.alloc_i32();
+        let payload = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]); wasm!(self.func, {
+            local_set(pos);
+            local_get(pos); i32_wrap_i64; local_set(pos_i32);
+            local_get(pos_i32); i32_const(1); i32_add;
+            local_get(buf); i32_load(0);
+            i32_le_u;
+            if_empty;
+              i32_const(4); call(self.emitter.rt.alloc); local_set(payload);
+              local_get(payload);
+              local_get(buf); i32_const(4); i32_add; local_get(pos_i32); i32_add;
+              i32_load8_u(0); i32_const(0); i32_ne;
+              i32_store(0);
+              local_get(payload); local_set(opt_ptr);
+              local_get(pos); i64_const(1); i64_add; local_set(new_pos);
+            else_;
+              i32_const(0); local_set(opt_ptr);
+              local_get(pos); local_set(new_pos);
+            end;
+        });
+        self.emit_cursor_pack_tuple(new_pos, opt_ptr);
+        self.scratch.free_i32(payload);
+        self.scratch.free_i32(opt_ptr);
+        self.scratch.free_i64(new_pos);
+        self.scratch.free_i32(pos_i32);
+        self.scratch.free_i64(pos);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.read_f16_le_at(b, pos) -> (Int, Option[Float])`.
+    /// Reads 2 bytes LE, expands half → f64 via the `__bytes_f16_to_f64`
+    /// runtime helper, stores in an 8-byte payload cell.
+    pub(super) fn emit_cursor_read_f16_le(&mut self, args: &[IrExpr]) {
+        let buf = self.scratch.alloc_i32();
+        let pos = self.scratch.alloc_i64();
+        let pos_i32 = self.scratch.alloc_i32();
+        let new_pos = self.scratch.alloc_i64();
+        let opt_ptr = self.scratch.alloc_i32();
+        let payload = self.scratch.alloc_i32();
+        let fval = self.scratch.alloc_f64();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]); wasm!(self.func, {
+            local_set(pos);
+            local_get(pos); i32_wrap_i64; local_set(pos_i32);
+            local_get(pos_i32); i32_const(2); i32_add;
+            local_get(buf); i32_load(0);
+            i32_le_u;
+            if_empty;
+              local_get(buf); i32_const(4); i32_add; local_get(pos_i32); i32_add;
+              i32_load16_u(0);
+              call(self.emitter.rt.bytes_f16_to_f64);
+              local_set(fval);
+              i32_const(8); call(self.emitter.rt.alloc); local_set(payload);
+              local_get(payload); local_get(fval); f64_store(0);
+              local_get(payload); local_set(opt_ptr);
+              local_get(pos); i64_const(2); i64_add; local_set(new_pos);
+            else_;
+              i32_const(0); local_set(opt_ptr);
+              local_get(pos); local_set(new_pos);
+            end;
+        });
+        self.emit_cursor_pack_tuple(new_pos, opt_ptr);
+        self.scratch.free_f64(fval);
+        self.scratch.free_i32(payload);
+        self.scratch.free_i32(opt_ptr);
+        self.scratch.free_i64(new_pos);
+        self.scratch.free_i32(pos_i32);
+        self.scratch.free_i64(pos);
+        self.scratch.free_i32(buf);
+    }
+
+    /// `bytes.read_string_be_at(b, pos) -> (Int, Option[String])`.
+    /// u32 big-endian length prefix, then UTF-8 body. Returns
+    /// `(pos, None)` without advancing when either the prefix or the body
+    /// runs off the end.
+    pub(super) fn emit_cursor_read_string_be(&mut self, args: &[IrExpr]) {
+        let buf = self.scratch.alloc_i32();
+        let pos = self.scratch.alloc_i64();
+        let pos_i32 = self.scratch.alloc_i32();
+        let new_pos = self.scratch.alloc_i64();
+        let opt_ptr = self.scratch.alloc_i32();
+        let slen = self.scratch.alloc_i32();
+        let str_ptr = self.scratch.alloc_i32();
+        let buf_len = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]); wasm!(self.func, { local_set(buf); });
+        self.emit_expr(&args[1]); wasm!(self.func, {
+            local_set(pos);
+            local_get(pos); i32_wrap_i64; local_set(pos_i32);
+            local_get(buf); i32_load(0); local_set(buf_len);
+            // Prefix bounds: pos + 4 <= len?
+            local_get(pos_i32); i32_const(4); i32_add;
+            local_get(buf_len); i32_le_u;
+            if_empty;
+              // Read u32 BE length (4 bytes, big-endian).
+              i32_const(0); local_set(slen);
+              local_get(slen);
+              local_get(buf); i32_const(4); i32_add; local_get(pos_i32); i32_add;
+              i32_load8_u(0); i32_const(24); i32_shl; i32_or;
+              local_get(buf); i32_const(4); i32_add; local_get(pos_i32); i32_add;
+              i32_load8_u(1); i32_const(16); i32_shl; i32_or;
+              local_get(buf); i32_const(4); i32_add; local_get(pos_i32); i32_add;
+              i32_load8_u(2); i32_const(8); i32_shl; i32_or;
+              local_get(buf); i32_const(4); i32_add; local_get(pos_i32); i32_add;
+              i32_load8_u(3); i32_or;
+              local_set(slen);
+              // Body bounds: pos + 4 + slen <= len?
+              local_get(pos_i32); i32_const(4); i32_add; local_get(slen); i32_add;
+              local_get(buf_len); i32_le_u;
+              if_empty;
+                // Alloc String: [len:i32][utf8...]
+                local_get(slen); i32_const(4); i32_add;
+                call(self.emitter.rt.alloc); local_set(str_ptr);
+                local_get(str_ptr); local_get(slen); i32_store(0);
+                local_get(str_ptr); i32_const(4); i32_add;
+                local_get(buf); i32_const(4); i32_add; local_get(pos_i32); i32_add; i32_const(4); i32_add;
+                local_get(slen);
+                memory_copy;
+                // Option[String] cell is a 4-byte pointer wrapper.
+                i32_const(4); call(self.emitter.rt.alloc); local_set(opt_ptr);
+                local_get(opt_ptr); local_get(str_ptr); i32_store(0);
+                // new_pos = pos + 4 + slen
+                local_get(pos); i64_const(4); i64_add;
+                local_get(slen); i64_extend_i32_u; i64_add;
+                local_set(new_pos);
+              else_;
+                i32_const(0); local_set(opt_ptr);
+                local_get(pos); local_set(new_pos);
+              end;
+            else_;
+              i32_const(0); local_set(opt_ptr);
+              local_get(pos); local_set(new_pos);
+            end;
+        });
+        self.emit_cursor_pack_tuple(new_pos, opt_ptr);
+        self.scratch.free_i32(buf_len);
+        self.scratch.free_i32(str_ptr);
+        self.scratch.free_i32(slen);
+        self.scratch.free_i32(opt_ptr);
+        self.scratch.free_i64(new_pos);
         self.scratch.free_i32(pos_i32);
         self.scratch.free_i64(pos);
         self.scratch.free_i32(buf);
