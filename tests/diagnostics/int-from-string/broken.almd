@@ -1,0 +1,1 @@
+fn from_str(s: String) -> Result[Int, String] = parseInt(s)

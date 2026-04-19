@@ -1,5 +1,20 @@
 <!-- description: Whisper speech recognition implemented entirely in Almide -->
+<!-- done: 2026-04-20 -->
 # Whisper in Pure Almide
+
+## Completion status (2026-04-20)
+
+Phase 1-5 完遂 (2026-04-13):
+- native (Rust target): ggml-tiny.bin + hello.wav → 正確転写 (~16s)
+- WASM: 同一パイプラインを Almide→WASM 後 Node.js (WASI) で実行
+  - hello.wav → `" Hello World, this is a test of whisker speech recognition."` (36s, 30 tokens)
+  - jfk.wav → `" And so my fellow Americans ask not what your country can do for you ask what you can do for your country"` (47s, 30 tokens)
+
+決定的だった修正: `gelu` の tanh `(e^2x-1)/(e^2x+1)` で `Inf/Inf=NaN` → inner を `[-20, 20]` にクランプ。
+
+Phase 6 (optimization — WASM SIMD matmul / quantization / ndarray・Burn backend) は arc の success criteria に含まれない optional。「速度は runtime swap から、コード変更ではない」という方針に従い、別アークとして立てる場合のみ再着手。
+
+Memory: `project_wasm_whisper.md` に詳細。
 
 ## Goal
 

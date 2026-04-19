@@ -1,0 +1,1 @@
+fn check_admin(user_is_admin: Bool) -> Bool = !user_is_admin

@@ -1,5 +1,22 @@
 <!-- description: CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures -->
+<!-- done: 2026-04-20 -->
 # Stdlib Defs / Runtime Consistency Check
+
+## Completion status (2026-04-20) — obsoleted by Stdlib Declarative Unification
+
+本 arc を生んだ原因 (`stdlib/defs/*.toml` と `runtime/rs/src/*.rs` の二重宣言) は Stdlib Declarative Unification arc の完遂 (2026-04-19, 956dc96c / 49d341f6) により消失した:
+
+- `stdlib/defs/` ディレクトリ自体が削除済み (`ls stdlib/defs/ → No such file or directory`)
+- 旧 TOML の型宣言層は全て `stdlib/*.almd` 上の `@intrinsic("symbol")` に集約
+- `pass_borrow_inference::intrinsic_borrow_mode` が Almide 型から runtime ABI decoration を一意に導出するため、宣言側と実装側の型乖離が発生するパスが構造的に存在しない
+- runtime fn signature が `@intrinsic` 宣言と不一致なら `cargo build` が即落ちる (latent bug 化しない)
+
+元の #148 (`process.exec_status` / `fs.stat` の匿名 record ↔ tuple 不整合) は pragmatic fix で既解決、かつ同種 bug の再発経路が閉じた。
+
+**Residual concerns (別 arc で扱う):**
+
+- **Test coverage gate** (`stdlib coverage: 76.8%` 時点 audit): 全 runtime fn に spec test を必須化する CI rule は別 arc (「stdlib coverage audit」) で扱う。本 arc は解消理由 (TOML/runtime 二重宣言) が違うので分離する。
+- **Named stdlib types** (`ProcessStatus` 等の named record 返し): API ergonomics の別 arc。TOML 時代の制約ではないので本 arc の目標とは独立。
 
 ## Motivation
 

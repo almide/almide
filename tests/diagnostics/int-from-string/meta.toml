@@ -1,0 +1,2 @@
+expects_code = "E002"
+expects_error = "undefined function 'parseInt'"

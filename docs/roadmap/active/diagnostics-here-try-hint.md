@@ -74,17 +74,35 @@ CI が次を実行：
 4. **Phase 4**: CI ゲート有効化：新しい診断は Here/Try/Hint 必須、hint self-test 必須
 5. **Phase 5**: `docs/diagnostics/` のコードレジストリ公開
 
-## Progress (2026-04-19)
+## Progress
 
-- **Phase 1 MVP landed**. `Diagnostic::here_snippet: Option<String>` +
-  `with_here(s)` builder added in `almide-base`. Renderer emits a
-  `  here: <snippet>` row between `in <context>` and `hint: ...` when
-  the field is set. `display_with_source` auto-populates it from the
-  primary span's source line (non-breaking: any existing diagnostic
-  rendered with source now gains an inline `here:` row for free).
-  `to_json` emits `"here":` and `"try":` fields (null when unset).
-  8 test cases in `tests/here_snippet_test.rs`. `Try:` / `Hint:`
-  label capitalization + full migration left for Phase 3.
+### 2026-04-19 — Phase 1 MVP
+
+- `Diagnostic::here_snippet: Option<String>` + `with_here(s)` builder
+  added in `almide-base`. Renderer emits a `  here: <snippet>` row
+  between `in <context>` and `hint: ...` when the field is set.
+- `display_with_source` auto-populates it from the primary span's
+  source line (non-breaking: any existing diagnostic rendered with
+  source now gains an inline `here:` row for free).
+- `to_json` emits `"here":` and `"try":` fields (null when unset).
+- 8 test cases in `tests/here_snippet_test.rs`.
+
+### 2026-04-20 — Phase 2 harness
+
+- `tests/diagnostics/<case>/` fixture structure defined. Each case has
+  `broken.almd` (fails to compile), `fixed.almd` (compiles cleanly),
+  and optional `meta.toml` declaring `expects_code` / `expects_error`
+  / `hint_substring`.
+- `tests/diagnostic_harness_test.rs` runs `almide check` on every
+  case and enforces: (a) every case has broken+fixed, (b) broken
+  produces the expected diagnostic, (c) fixed compiles cleanly.
+- Seed fixtures: `bang-not`, `int-from-string`, `non-exhaustive-match`,
+  `arity-mismatch`. Target for Phase 2 closing: 30 fixtures covering
+  the full set of codes currently using `with_code(...)`.
+- Mechanical `Try:` snippet application (the "copy-paste and it
+  compiles" guarantee) is deferred to Phase 3 — requires each
+  diagnostic's `with_try(...)` call to emit a concrete replacement
+  range for the broken span.
 
 ## Acceptance Criteria
 

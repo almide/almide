@@ -1,0 +1,2 @@
+expects_code = "E004"
+expects_error = "expects 2 argument"
