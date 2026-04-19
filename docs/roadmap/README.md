@@ -6,7 +6,7 @@
 
 ## Active
 
-25 items
+24 items
 
 | Item | Description |
 |------|-------------|
@@ -30,7 +30,6 @@
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](active/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
 | [Sized Numeric Types](active/sized-numeric-types.md) | Swift-style Int8/Int32/UInt32/Float32 scalar types; unblocks bytes redesign + Matrix[T] dtype |
-| [Stdlib Declarative Unification — Toward a Single Source of Truth](active/stdlib-declarative-unification.md) | Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes |
 | [Stdlib Defs / Runtime Consistency Check](active/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | [Stdlib Symmetry Audit](active/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
 | [Variant Exhaustiveness Refinement](active/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
@@ -71,14 +70,15 @@
 
 ## Done
 
-214 items
+215 items
 
 <details>
-<summary>Show all 214 completed items</summary>
+<summary>Show all 215 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
 | 2026-04-19 | [VarTable Unification](done/var-table-unification.md) | Unify program/module var_tables into a single program-level table |
+| 2026-04-19 | [Stdlib Declarative Unification — Toward a Single Source of Truth](done/stdlib-declarative-unification.md) | Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes |
 | 2026-04-19 | [Compiler Version Pin](done/compiler-version-pin.md) | minimum compiler version pinning in almide.toml (Cargo rust-version style) |
 | 2026-04-19 | [Codegen Ideal Form](done/codegen-ideal-form.md) | WASM codegen redesign toward declarative dispatch and explicit symbol resolution |
 | 2026-04-19 | [bytes: unify bounds-check semantics](done/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |

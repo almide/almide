@@ -1,5 +1,24 @@
 <!-- description: Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes -->
+<!-- done: 2026-04-19 -->
 # Stdlib Declarative Unification — Toward a Single Source of Truth
+
+## Completion status (2026-04-19)
+
+Arc delivered across Stages 2 → 4, closed in two final commits:
+
+- **PR 3b00b1ba** (2026-04-19): the last 13 L3 dispatch patterns (12 bytes `Endian`-dispatch wrappers + `http.serve`) moved off `@inline_rust` onto bundled Almide bodies + `@intrinsic` runtime wrappers. Shipped supporting compiler work — `check_needs_refmut` in `pass_borrow_inference` (bundled bodies now forward `&mut` correctly), walker auto-reborrow for `RefMut` params, mangled-key sig mirror so `ResolveCallsPass`-rewritten Named calls can still be looked up.
+- **PR 49d341f6** (2026-04-19): every remaining `@inline_rust` declaration retired. `error`/`string` migrated to `@intrinsic`. 8 sized-type modules (`int8…uint64`, `float32`) rewritten as pure Almide bodies pivoted through canonical `int`/`float`. Compiler side: `@intrinsic` fns gained AST-default support via `pass_intrinsic_lowering`; UFCS Method→Named rewrite now prepends `almide_rt_` for lowercase-head bundled modules; WASM `dispatch_runtime_fallback` accepts `from_*` alongside `to_*`.
+
+Post-arc grep (2026-04-19):
+
+```bash
+$ grep -c '^@inline_rust' stdlib/*.almd
+0
+```
+
+219/219 spec tests + all cargo tests green. Retained: the `@inline_rust` syntax itself and the `pass_stdlib_lowering` template dispatcher — they'll remain as escape hatches for future edge cases (no current user), but the stdlib no longer needs them.
+
+## Original plan (retained for history)
 
 ## Current state after v0.14.7
 
