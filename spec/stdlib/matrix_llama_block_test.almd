@@ -1,0 +1,110 @@
+// Llama 1-block forward pass: exercises the full stack of fusion
+// targets the egg saturation pass produces for Llama-style models:
+//   rms_norm_rows, linear_row_no_bias, masked_multi_head_attention,
+//   matrix.add (residual), swiglu_gate, linear_row_no_bias (down).
+//
+// Verifies shape integrity end-to-end and a few analytic identities
+// that hold when all weights and normalisation gammas are 1. With
+// rms_norm_rows on an all-ones input and gamma=1s, the normalised
+// matrix stays ones; linear_row_no_bias(1s, 1s[d×d]) produces a
+// constant matrix of d; masked MHA on uniform Q/K/V is a row-wise
+// weighted average of V, which for uniform V stays uniform.
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
+  let d = if a > b then a - b else b - a
+  d < tol
+}
+
+test "llama 1-block forward: shape end-to-end" {
+  let seq = 4
+  let d = 16
+  let n_heads = 2
+  let d_inner = 32
+  let eps = 0.000001
+
+  let x = matrix.ones(seq, d)
+  let gamma1 = list.repeat(1.0, d)
+  let gamma2 = list.repeat(1.0, d)
+  let wq = matrix.ones(d, d)
+  let wk = matrix.ones(d, d)
+  let wv = matrix.ones(d, d)
+  let wo = matrix.ones(d, d)
+  let w_gate = matrix.ones(d_inner, d)
+  let w_up = matrix.ones(d_inner, d)
+  let w_down = matrix.ones(d, d_inner)
+
+  // Pre-norm + attention
+  let normed = matrix.rms_norm_rows(x, gamma1, eps)
+  let q = matrix.linear_row_no_bias(normed, wq)
+  let k = matrix.linear_row_no_bias(normed, wk)
+  let v = matrix.linear_row_no_bias(normed, wv)
+  let attn = matrix.masked_multi_head_attention(q, k, v, n_heads)
+  let attn_out = matrix.linear_row_no_bias(attn, wo)
+
+  // Residual 1
+  let x_attn = matrix.add(x, attn_out)
+
+  // Pre-norm + FFN (SwiGLU)
+  let normed2 = matrix.rms_norm_rows(x_attn, gamma2, eps)
+  let gated = matrix.swiglu_gate(normed2, w_gate, w_up)
+  let ffn_out = matrix.linear_row_no_bias(gated, w_down)
+
+  // Residual 2
+  let x_out = matrix.add(x_attn, ffn_out)
+
+  let (r, c) = matrix.shape(x_out)
+  assert_eq(r, seq)
+  assert_eq(c, d)
+}
+
+test "llama 1-block: uniform input propagates uniformly through attention" {
+  // All-ones input + all-ones Q/K/V weights + uniform gamma → attention
+  // sub-block output must stay row-uniform (one value per row). We
+  // verify this up to the residual-1 point to keep the assertion
+  // focused on attention correctness.
+  let seq = 4
+  let d = 8
+  let n_heads = 2
+  let eps = 0.000001
+
+  let x = matrix.ones(seq, d)
+  let gamma = list.repeat(1.0, d)
+  let wq = matrix.ones(d, d)
+  let wk = matrix.ones(d, d)
+  let wv = matrix.ones(d, d)
+  let wo = matrix.ones(d, d)
+
+  let normed = matrix.rms_norm_rows(x, gamma, eps)
+  let q = matrix.linear_row_no_bias(normed, wq)
+  let k = matrix.linear_row_no_bias(normed, wk)
+  let v = matrix.linear_row_no_bias(normed, wv)
+  let attn = matrix.masked_multi_head_attention(q, k, v, n_heads)
+  let attn_out = matrix.linear_row_no_bias(attn, wo)
+
+  // Every cell in attn_out should be the same value when inputs are
+  // uniform — the attention distribution is softmax over identical
+  // keys so it averages identical values.
+  let (_rows, cols) = matrix.shape(attn_out)
+  let val00 = matrix.get(attn_out, 0, 0)
+  let val0_last = matrix.get(attn_out, 0, cols - 1)
+  assert(approx_eq(val00, val0_last, 0.001))
+  // Last row (can see all keys under causal mask) should match row 0
+  // up to normalisation; for uniform V the mask doesn't change the
+  // result since every accessible V row is identical.
+  let val_last_0 = matrix.get(attn_out, seq - 1, 0)
+  assert(approx_eq(val00, val_last_0, 0.001))
+}
+
+test "llama 1-block: residual add preserves scale" {
+  // Sanity-check that `matrix.add(a, b)` used as a residual connection
+  // produces the expected per-cell sum. Uses small concrete values so
+  // the test is a drop-in semantic unit, independent of the
+  // attention/FFN heavy machinery.
+  let a = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let b = matrix.from_lists([[10.0, 20.0], [30.0, 40.0]])
+  let r = matrix.add(a, b)
+  assert_eq(matrix.get(r, 0, 0), 11.0)
+  assert_eq(matrix.get(r, 0, 1), 22.0)
+  assert_eq(matrix.get(r, 1, 0), 33.0)
+  assert_eq(matrix.get(r, 1, 1), 44.0)
+}

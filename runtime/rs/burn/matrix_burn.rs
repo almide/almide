@@ -676,7 +676,7 @@ pub fn almide_rt_matrix_map(m: &AlmideMatrix, f: impl Fn(f64) -> f64) -> AlmideM
     }
 }
 
-pub fn almide_rt_matrix_broadcast_add_row(m: &AlmideMatrix, bias: &Vec<f64>) -> AlmideMatrix {
+pub fn almide_rt_matrix_broadcast_add_row(m: &AlmideMatrix, bias: &[f64]) -> AlmideMatrix {
     match m {
         AlmideMatrix::Small { rows, cols, data } => {
             let (r, c) = (*rows, *cols);
@@ -710,13 +710,13 @@ pub fn almide_rt_matrix_broadcast_add_row(m: &AlmideMatrix, bias: &Vec<f64>) -> 
         }
         AlmideMatrix::Burn(_) => {
             let bias_t: Tensor<B, 2> = Tensor::from_data(
-                TensorData::new(bias.clone(), [1, bias.len()]), &dev());
+                TensorData::new(bias.to_vec(), [1, bias.len()]), &dev());
             wrap(m.to_burn().add(bias_t))
         }
     }
 }
 
-pub fn almide_rt_matrix_layer_norm_rows(m: &AlmideMatrix, gamma: &Vec<f64>, beta: &Vec<f64>, eps: f64) -> AlmideMatrix {
+pub fn almide_rt_matrix_layer_norm_rows(m: &AlmideMatrix, gamma: &[f64], beta: &[f64], eps: f64) -> AlmideMatrix {
     match m {
         AlmideMatrix::Small { rows, cols, data } => {
             let (r, c) = (*rows, *cols);
@@ -773,8 +773,8 @@ pub fn almide_rt_matrix_layer_norm_rows(m: &AlmideMatrix, gamma: &Vec<f64>, beta
             let var = centered.clone().powf_scalar(2.0).mean_dim(1);
             let inv_std = var.add_scalar(eps).sqrt().recip();
             let normed = centered.mul(inv_std);
-            let gamma_t: Tensor<B, 2> = Tensor::from_data(TensorData::new(gamma.clone(), [1, c]), &dev());
-            let beta_t: Tensor<B, 2> = Tensor::from_data(TensorData::new(beta.clone(), [1, c]), &dev());
+            let gamma_t: Tensor<B, 2> = Tensor::from_data(TensorData::new(gamma.to_vec(), [1, c]), &dev());
+            let beta_t: Tensor<B, 2> = Tensor::from_data(TensorData::new(beta.to_vec(), [1, c]), &dev());
             wrap(normed.mul(gamma_t).add(beta_t))
         }
     }
@@ -1122,7 +1122,7 @@ pub fn almide_rt_matrix_swiglu_gate(
 /// `layer_norm_rows` for consistency on the Small path.
 pub fn almide_rt_matrix_rms_norm_rows(
     m: &AlmideMatrix,
-    gamma: &Vec<f64>,
+    gamma: &[f64],
     eps: f64,
 ) -> AlmideMatrix {
     match m {
@@ -1176,7 +1176,7 @@ pub fn almide_rt_matrix_rms_norm_rows(
                 .powf_scalar(-1.0);
             let scaled = t.mul(inv_rms);
             let gamma_t: Tensor<B, 2> = Tensor::from_data(
-                TensorData::new(gamma.clone(), [1, c_dim]),
+                TensorData::new(gamma.to_vec(), [1, c_dim]),
                 &dev(),
             );
             wrap(scaled.mul(gamma_t))
@@ -1337,9 +1337,9 @@ fn almide_rt_matrix_mha_core_burn(q: &Tensor<B, 2>, k: &Tensor<B, 2>, v: &Tensor
     wrap(out3.swap_dims(0, 1).reshape([sq, d]))
 }
 
-pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias: &Vec<f64>) -> AlmideMatrix {
+pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias: &[f64]) -> AlmideMatrix {
     let wt = weight.to_burn().swap_dims(0, 1);
-    let bias_t: Tensor<B, 2> = Tensor::from_data(TensorData::new(bias.clone(), [1, bias.len()]), &dev());
+    let bias_t: Tensor<B, 2> = Tensor::from_data(TensorData::new(bias.to_vec(), [1, bias.len()]), &dev());
     wrap(x.to_burn().matmul(wt).add(bias_t))
 }
 
@@ -1405,11 +1405,11 @@ pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatr
 /// eliminated entirely on the Small path.
 pub fn almide_rt_matrix_pre_norm_linear(
     x: &AlmideMatrix,
-    gamma: &Vec<f64>,
-    beta: &Vec<f64>,
+    gamma: &[f64],
+    beta: &[f64],
     eps: f64,
     weight: &AlmideMatrix,
-    bias: &Vec<f64>,
+    bias: &[f64],
 ) -> AlmideMatrix {
     match (x, weight) {
         (AlmideMatrix::Small { rows: r, cols: n_in, data: xd },
@@ -1464,7 +1464,7 @@ pub fn almide_rt_matrix_pre_norm_linear(
 pub fn almide_rt_matrix_linear_row_gelu(
     x: &AlmideMatrix,
     weight: &AlmideMatrix,
-    bias: &Vec<f64>,
+    bias: &[f64],
 ) -> AlmideMatrix {
     match (x, weight) {
         (AlmideMatrix::Small { rows: r, cols: n_in, data: xd },
@@ -1518,7 +1518,7 @@ pub fn almide_rt_matrix_slice_rows(m: &AlmideMatrix, start: i64, end: i64) -> Al
     wrap(t.clone().slice([s..e, 0..t.dims()[1]]))
 }
 
-pub fn almide_rt_matrix_conv1d(input: &AlmideMatrix, weight: &AlmideMatrix, bias: &Vec<f64>, kernel: i64, stride: i64, padding: i64) -> AlmideMatrix {
+pub fn almide_rt_matrix_conv1d(input: &AlmideMatrix, weight: &AlmideMatrix, bias: &[f64], kernel: i64, stride: i64, padding: i64) -> AlmideMatrix {
     let [t_in, in_ch] = input.dims2();
     let [out_ch, _] = weight.dims2();
     let k = kernel as usize;
