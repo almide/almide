@@ -23,68 +23,68 @@ fn parse(text: String) -> Result[Value, String] = _
 @intrinsic("almide_rt_json_stringify")
 fn stringify(v: Value) -> String = _
 
-@inline_rust("almide_json_get(&{j}, &{key})")
+@intrinsic("almide_json_get")
 fn get(j: Value, key: String) -> Option[Value] = _
 
-@inline_rust("almide_json_keys(&{j})")
+@intrinsic("almide_json_keys")
 fn keys(j: Value) -> List[String] = _
 
-@inline_rust("almide_json_from_string({s})")
+@intrinsic("almide_json_from_string")
 fn from_string(s: String) -> Value = _
 
-@inline_rust("almide_json_from_int({n})")
+@intrinsic("almide_json_from_int")
 fn from_int(n: Int) -> Value = _
 
-@inline_rust("almide_json_from_bool({b})")
+@intrinsic("almide_json_from_bool")
 fn from_bool(b: Bool) -> Value = _
 
 @intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
-@inline_rust("almide_json_array({items})")
+@intrinsic("almide_json_array")
 fn array(items: List[Value]) -> Value = _
 
-@inline_rust("almide_json_from_float({n})")
+@intrinsic("almide_json_from_float")
 fn from_float(n: Float) -> Value = _
 
-@inline_rust("almide_json_stringify_pretty(&{j})")
+@intrinsic("almide_json_stringify_pretty")
 fn stringify_pretty(j: Value) -> String = _
 
-@inline_rust("almide_json_object({entries})")
+@intrinsic("almide_json_object")
 fn object(entries: List[(String, Value)]) -> Value = _
 
 // ── key-based typed extraction ──
 
-@inline_rust("almide_json_get_string(&{j}, &{key})")
+@intrinsic("almide_json_get_string")
 fn get_string(j: Value, key: String) -> Option[String] = _
 
-@inline_rust("almide_json_get_int(&{j}, &{key})")
+@intrinsic("almide_json_get_int")
 fn get_int(j: Value, key: String) -> Option[Int] = _
 
-@inline_rust("almide_json_get_float(&{j}, &{key})")
+@intrinsic("almide_json_get_float")
 fn get_float(j: Value, key: String) -> Option[Float] = _
 
-@inline_rust("almide_json_get_bool(&{j}, &{key})")
+@intrinsic("almide_json_get_bool")
 fn get_bool(j: Value, key: String) -> Option[Bool] = _
 
-@inline_rust("almide_json_get_array(&{j}, &{key})")
+@intrinsic("almide_json_get_array")
 fn get_array(j: Value, key: String) -> Option[List[Value]] = _
 
 // ── value extraction (keyless) ──
 
-@inline_rust("almide_json_to_string(&{j})")
+@intrinsic("almide_json_to_string")
 fn as_string(j: Value) -> Option[String] = _
 
-@inline_rust("almide_json_to_int(&{j})")
+@intrinsic("almide_json_to_int")
 fn as_int(j: Value) -> Option[Int] = _
 
-@inline_rust("almide_json_as_float(&{j})")
+@intrinsic("almide_json_as_float")
 fn as_float(j: Value) -> Option[Float] = _
 
-@inline_rust("almide_json_as_bool(&{j})")
+@intrinsic("almide_json_as_bool")
 fn as_bool(j: Value) -> Option[Bool] = _
 
-@inline_rust("almide_json_as_array(&{j})")
+@intrinsic("almide_json_as_array")
 fn as_array(j: Value) -> Option[List[Value]] = _
 
 // ── path API ──
@@ -98,14 +98,18 @@ fn field(path: JsonPath, name: String) -> JsonPath = _
 @intrinsic("almide_rt_json_index")
 fn index(path: JsonPath, i: Int) -> JsonPath = _
 
-@inline_rust("almide_json_get_path(&{j}, &{path})")
+@intrinsic("almide_json_get_path")
+@borrow_ref(path)
 fn get_path(j: Value, path: JsonPath) -> Option[Value] = _
 
-@inline_rust("almide_json_set_path(&{j}, &{path}, {value})")
+@intrinsic("almide_json_set_path")
+@borrow_ref(path)
+@consume(value)
 fn set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String] = _
 
-@inline_rust("almide_json_remove_path(&{j}, &{path})")
+@intrinsic("almide_json_remove_path")
+@borrow_ref(path)
 fn remove_path(j: Value, path: JsonPath) -> Value = _
 
-@inline_rust("almide_json_to_map(&{j})")
+@intrinsic("almide_json_to_map")
 fn to_map(j: Value) -> Option[Map[String, String]] = _

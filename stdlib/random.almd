@@ -13,5 +13,6 @@ effect fn float() -> Float = _
 @intrinsic("almide_rt_random_choice")
 effect fn choice[T](xs: List[T]) -> Option[T] = _
 
-@inline_rust("almide_rt_random_shuffle(({xs}).to_vec())")
+@intrinsic("almide_rt_random_shuffle")
+@consume(xs)
 effect fn shuffle[T](xs: List[T]) -> List[T] = _

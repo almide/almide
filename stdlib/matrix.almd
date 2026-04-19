@@ -58,7 +58,7 @@ fn scale(m: Matrix, s: Float) -> Matrix = _
 @intrinsic("almide_rt_matrix_fma")
 fn fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_fma3(&{a}, {ka}, &{b}, {kb}, &{c}, {kc})")
+@intrinsic("almide_rt_matrix_fma3")
 fn fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix = _
 
 @intrinsic("almide_rt_matrix_sub")
@@ -78,19 +78,19 @@ fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 // ── bytes serialisation ──
 
-@inline_rust("almide_rt_matrix_from_bytes_f32_le(&{data}, {offset}, {rows}, {cols})")
+@intrinsic("almide_rt_matrix_from_bytes_f32_le")
 fn from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_to_bytes_f64_le(&{m})")
+@intrinsic("almide_rt_matrix_to_bytes_f64_le")
 fn to_bytes_f64_le(m: Matrix) -> Bytes = _
 
-@inline_rust("almide_rt_matrix_to_bytes_f32_le(&{m})")
+@intrinsic("almide_rt_matrix_to_bytes_f32_le")
 fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 
-@inline_rust("almide_rt_matrix_from_bytes_f16_le(&{data}, {offset}, {rows}, {cols})")
+@intrinsic("almide_rt_matrix_from_bytes_f16_le")
 fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_from_bytes_f64_le(&{data}, {offset}, {rows}, {cols})")
+@intrinsic("almide_rt_matrix_from_bytes_f64_le")
 fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
 // ── neural-network primitives (row-wise) ──
@@ -213,7 +213,7 @@ fn linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix = _
 @intrinsic("almide_rt_matrix_slice_rows")
 fn slice_rows(m: Matrix, start: Int, end: Int) -> Matrix = _
 
-@inline_rust("almide_rt_matrix_conv1d(&{input}, &{weight}, &{bias}, {kernel}, {stride}, {padding})")
+@intrinsic("almide_rt_matrix_conv1d")
 fn conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix = _
 
 @intrinsic("almide_rt_matrix_gather_rows")
@@ -237,22 +237,22 @@ fn row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 // bare `Matrix` (= `Matrix[Float]` default) now surfaces as a checker
 // error instead of runtime storage churn.
 
-@inline_rust("almide_rt_matrix_zeros_f32({rows}, {cols})")
+@intrinsic("almide_rt_matrix_zeros_f32")
 fn zeros_f32(rows: Int, cols: Int) -> Matrix[Float32] = _
 
-@inline_rust("almide_rt_matrix_ones_f32({rows}, {cols})")
+@intrinsic("almide_rt_matrix_ones_f32")
 fn ones_f32(rows: Int, cols: Int) -> Matrix[Float32] = _
 
-@inline_rust("almide_rt_matrix_mul_f32(&{a}, &{b})")
+@intrinsic("almide_rt_matrix_mul_f32")
 fn mul_f32(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32] = _
 
-@inline_rust("almide_rt_matrix_mul_f32_scaled(&{a}, {alpha}, &{b})")
+@intrinsic("almide_rt_matrix_mul_f32_scaled")
 fn mul_f32_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32] = _
 
-@inline_rust("almide_rt_matrix_mul_f32_t(&{a}, &{b})")
+@intrinsic("almide_rt_matrix_mul_f32_t")
 fn mul_f32_t(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32] = _
 
-@inline_rust("almide_rt_matrix_mul_f32_t_scaled(&{a}, {alpha}, &{b})")
+@intrinsic("almide_rt_matrix_mul_f32_t_scaled")
 fn mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32] = _
 
 // mul_scaled folds a scalar into cblas_dgemm's `alpha` parameter. Two

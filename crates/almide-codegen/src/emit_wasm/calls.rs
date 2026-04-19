@@ -942,6 +942,17 @@ impl FuncCompiler<'_> {
         ret_ty: &Ty,
     ) -> bool {
         let _ = ret_ty;
+        // Sized numeric conversion: `int.to_uint8` / `float.to_int32` /
+        // `int64.to_float64` / ... flow through the name-driven
+        // `emit_sized_conv_call` that covers the full kind×width
+        // matrix. Before `@intrinsic` migration these rode the Module
+        // dispatcher at line ~356 of this file, but the post-migration
+        // `RuntimeCall` path lands here instead.
+        if func.starts_with("to_") && sized_type_info(module).is_some() {
+            if self.emit_sized_conv_call(module, func, args) {
+                return true;
+            }
+        }
         match module {
             "int" => self.emit_int_call(func, args),
             "float" => self.emit_float_call(func, args),
@@ -964,6 +975,18 @@ impl FuncCompiler<'_> {
             "env" => { self.emit_env_call(func, args); true }
             "fs" => { self.emit_fs_call(func, args); true }
             "json" => { self.emit_json_call(func, args); true }
+            "testing" => {
+                // Route to Named dispatch: `testing.assert_contains`
+                // → `assert_contains` (handlers live under the
+                // hardcoded Named dispatch at calls.rs ~line 178).
+                // Mirror Module-dispatch's mono-suffix strip so
+                // specialized fns (e.g. `assert_some__String`) still
+                // route to the base handler.
+                let base = func.split_once("__").map(|(b, _)| b).unwrap_or(func);
+                let target = CallTarget::Named { name: almide_base::intern::sym(base) };
+                self.emit_call(&target, args, ret_ty);
+                true
+            }
             _ => false,
         }
     }

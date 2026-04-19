@@ -24,3 +24,16 @@ pub fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> String { format!("{:.1
 pub fn almide_rt_float_is_nan(n: f64) -> bool { n.is_nan() }
 pub fn almide_rt_float_is_infinite(n: f64) -> bool { n.is_infinite() }
 pub fn almide_rt_float_to_bits(f: f64) -> i64 { f.to_bits() as i64 }
+
+// ── Sized conversions (for `@intrinsic` migration of `float.to_*`) ──
+
+pub fn almide_rt_float_to_int8(n: f64) -> i8 { n as i8 }
+pub fn almide_rt_float_to_int16(n: f64) -> i16 { n as i16 }
+pub fn almide_rt_float_to_int32(n: f64) -> i32 { n as i32 }
+pub fn almide_rt_float_to_int64(n: f64) -> i64 { n as i64 }
+pub fn almide_rt_float_to_uint8(n: f64) -> u8 { n as u8 }
+pub fn almide_rt_float_to_uint16(n: f64) -> u16 { n as u16 }
+pub fn almide_rt_float_to_uint32(n: f64) -> u32 { n as u32 }
+pub fn almide_rt_float_to_uint64(n: f64) -> u64 { n as u64 }
+pub fn almide_rt_float_to_float32(n: f64) -> f32 { n as f32 }
+pub fn almide_rt_float_to_float64(n: f64) -> f64 { n }

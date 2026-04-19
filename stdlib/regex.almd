@@ -5,26 +5,26 @@
 // `almide_rt_*` used by most other modules) — this mirrors the
 // existing TOML templates verbatim.
 
-@inline_rust("almide_regex_is_match(&{pat}, &{s})")
+@intrinsic("almide_regex_is_match")
 fn is_match(pat: String, s: String) -> Bool = _
 
-@inline_rust("almide_regex_full_match(&{pat}, &{s})")
+@intrinsic("almide_regex_full_match")
 fn full_match(pat: String, s: String) -> Bool = _
 
-@inline_rust("almide_regex_find(&{pat}, &{s})")
+@intrinsic("almide_regex_find")
 fn find(pat: String, s: String) -> Option[String] = _
 
-@inline_rust("almide_regex_find_all(&{pat}, &{s})")
+@intrinsic("almide_regex_find_all")
 fn find_all(pat: String, s: String) -> List[String] = _
 
-@inline_rust("almide_regex_replace(&{pat}, &{s}, &{rep})")
+@intrinsic("almide_regex_replace")
 fn replace(pat: String, s: String, rep: String) -> String = _
 
-@inline_rust("almide_regex_replace_first(&{pat}, &{s}, &{rep})")
+@intrinsic("almide_regex_replace_first")
 fn replace_first(pat: String, s: String, rep: String) -> String = _
 
-@inline_rust("almide_regex_split(&{pat}, &{s})")
+@intrinsic("almide_regex_split")
 fn split(pat: String, s: String) -> List[String] = _
 
-@inline_rust("almide_regex_captures(&{pat}, &{s})")
+@intrinsic("almide_regex_captures")
 fn captures(pat: String, s: String) -> Option[List[String]] = _

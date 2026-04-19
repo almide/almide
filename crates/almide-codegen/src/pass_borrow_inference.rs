@@ -121,15 +121,41 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
                         borrows[idx] = ParamBorrow::Own;
                     }
                 }
+                // `@borrow_ref(p1, p2, ...)` — opposite override: force
+                // `Ref` on params the default heuristic would pass by
+                // value (e.g. user-defined named types whose runtime fn
+                // takes `&T`, like `JsonPath`).
+                let borrow_ref_names: Vec<&str> = attrs.iter()
+                    .filter(|a| a.name.as_str() == "borrow_ref")
+                    .flat_map(|a| a.args.iter().filter_map(|arg| match &arg.value {
+                        AttrValue::Ident { name } => Some(name.as_str()),
+                        AttrValue::String { value } => Some(value.as_str()),
+                        _ => None,
+                    }))
+                    .collect();
+                for (idx, p) in params.iter().enumerate() {
+                    if borrow_ref_names.iter().any(|n| n == &p.name.as_str()) {
+                        borrows[idx] = ParamBorrow::Ref;
+                    }
+                }
                 // First param is mutated in place when: Almide fn is marked
                 // `@mutating`, or returns Unit with a Ref-mode container
                 // first arg (common case for `.clear`, `.push`, etc.).
+                // Explicit `@borrow_ref(first_param)` always wins — the
+                // caller has opted into "read-only reference even if
+                // return is Unit" (e.g. `almide_rt_test_assert_some`).
                 let has_mutating = attrs.iter().any(|a| a.name.as_str() == "mutating");
                 let implicit_mut = is_unit_type_expr(return_type);
                 if has_mutating || implicit_mut {
-                    if let Some(first_borrow) = borrows.first_mut() {
-                        if matches!(first_borrow, ParamBorrow::Ref | ParamBorrow::RefSlice) {
-                            *first_borrow = ParamBorrow::RefMut;
+                    let first_name = params.first().map(|p| p.name.as_str());
+                    let first_is_borrow_ref = first_name
+                        .map(|n| borrow_ref_names.iter().any(|r| r == &n))
+                        .unwrap_or(false);
+                    if !first_is_borrow_ref {
+                        if let Some(first_borrow) = borrows.first_mut() {
+                            if matches!(first_borrow, ParamBorrow::Ref | ParamBorrow::RefSlice) {
+                                *first_borrow = ParamBorrow::RefMut;
+                            }
                         }
                     }
                 }

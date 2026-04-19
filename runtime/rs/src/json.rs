@@ -117,15 +117,15 @@ pub fn almide_json_to_map(j: &Value) -> Option<HashMap<String, String>> {
     }
 }
 
-pub fn almide_json_object(entries: Vec<(String, Value)>) -> Value {
-    Value::Object(entries)
+pub fn almide_json_object(entries: &[(String, Value)]) -> Value {
+    Value::Object(entries.to_vec())
 }
 
 pub fn almide_json_from_float(n: f64) -> Value { Value::Float(n) }
-pub fn almide_json_from_string(s: String) -> Value { Value::Str(s) }
+pub fn almide_json_from_string(s: &str) -> Value { Value::Str(s.to_string()) }
 pub fn almide_json_from_int(n: i64) -> Value { Value::Int(n) }
 pub fn almide_json_from_bool(b: bool) -> Value { Value::Bool(b) }
-pub fn almide_json_array(items: Vec<Value>) -> Value { Value::Array(items) }
+pub fn almide_json_array(items: &[Value]) -> Value { Value::Array(items.to_vec()) }
 
 // ── Stringify pretty ──
 
