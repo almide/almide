@@ -65,11 +65,25 @@ impl Checker {
                     };
                     let mut diag = super::err(format!("undefined variable '{}'", name), hint, format!("variable {}", name)).with_code("E003");
                     if let Some(fix) = fix {
-                        diag = if fix.starts_with("import ") {
-                            diag.with_try(fix)
+                        if let Some(stripped) = fix.strip_prefix("import ") {
+                            // Zero-width insert at the top of file — the
+                            // new `import <module>\n` line is prepended.
+                            // `apply_try_to` handles `end_col == col` as
+                            // an insertion point.
+                            diag = diag.with_try_replace(
+                                1, 1, 1,
+                                format!("import {}\n", stripped),
+                            );
+                        } else if let Some(span) = self.current_span {
+                            // Typo fuzzy suggestion: replace the
+                            // offending identifier with the suggested name.
+                            diag = diag.with_try_replace(
+                                span.line, span.col, span.end_col,
+                                fix,
+                            );
                         } else {
-                            diag.with_try(format!("// {}  →  {}\n{}", name, fix, fix))
-                        };
+                            diag = diag.with_try(format!("// {}  →  {}\n{}", name, fix, fix));
+                        }
                     }
                     self.emit(diag);
                     Ty::Unknown

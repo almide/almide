@@ -1,0 +1,3 @@
+expects_code = "E003"
+expects_error = "undefined variable 'json'"
+hint_substring = "Add `import json`"

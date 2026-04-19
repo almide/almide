@@ -1,0 +1,5 @@
+import json
+effect fn main() -> Unit = {
+  let v = json.stringify(json.null())
+  println(v)
+}

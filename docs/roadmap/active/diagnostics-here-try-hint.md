@@ -158,6 +158,48 @@ exprs record only the `.` token, not `object.field`).
 snippets (JDN sqrt conversion, operator suggestions) stay
 display-only and document why.
 
+### 2026-04-20 — Phase 3 second migration (E003 undefined variable)
+
+E003 covers two shapes, both now mechanically-applicable:
+
+- **Typo** (`y` where `x` is in scope): `try_replace` targets the
+  offending Ident's `current_span`; the snippet is the suggested
+  name. Fixture `tests/diagnostics/e003-typo-var/`.
+- **Missing import** (`json.stringify(...)` without `import json`):
+  zero-width `try_replace` at `(line: 1, col: 1, end_col: 1)` with
+  snippet `"import <module>\n"`. `apply_try_to` handles `end_col ==
+  col` as an insertion point. Fixture `tests/diagnostics/e003-missing-import/`.
+
+### Remaining `with_try` sites (classified display-only)
+
+Audit of the 11 surviving call sites — why each stays on `with_try`
+rather than migrating to `with_try_replace`:
+
+| Site | Class | Why display-only |
+|------|-------|------------------|
+| `solving.rs:45` (E001 Unit-leak) | Multi-line comment | Replacement goes at fn-body tail; span is structural (AST-level), not a contiguous source range. Comment-first snippet is the right format. |
+| `calls.rs:171` (E002 method-UFCS) | Whole-expression rewrite | `x.to_uppercase()` → `string.to_upper(x)` requires capturing the object's source text, not just the method-name range. Deferred until source-extraction utility lands. |
+| `calls.rs:364` (E002 rich snippet) | Multi-line wrapper | JDN sqrt, operator-replacement — conversion wrappers, not renames. |
+| `calls.rs:374` (E002 fix_name fallback) | Safety net | Reached only when `callee_span_hint` is absent. Kept as backup. |
+| `calls.rs:413` (E004 arity mismatch) | Placeholder snippet | `add(<x: Int>, <y: Int>)` — placeholders aren't valid Almide. |
+| `infer.rs:238` (E013 no-field) | Whole-expression | Same rewrite-shape as E002 method-UFCS. |
+| `infer.rs:878` (E009 immutable-reassign) | Structural fix | `let x` → `var x` requires rewriting the original binding site, not the assignment site. Cross-statement range. |
+| `statements.rs:56` (let-rec) | Illustrative example | `let rec` is parser-level; snippet teaches the canonical form. Not a replacement for the broken code. |
+| `statements.rs:128` (let-in) | Illustrative example | Same shape as let-rec. |
+| `primary.rs:308` (while-do-done) | Illustrative example | Same shape. |
+| `diagnostic.rs:291` | Test fixture | `with_try("fix")` in a unit test. N/A. |
+
+The `with_try` API stays as the display-only escape hatch — eight
+current call sites (five if you exclude the three parser "teach the
+canonical form" snippets) are legitimately on it, and that's fine.
+
+### Phase 3 status
+
+Mechanical-apply path lands for E002 (rename-alias) + E003 (typo /
+missing-import). Harness `try_snippets_with_replace_span_apply_cleanly`
+now exercises three fixtures (string-length-alias, e003-typo-var,
+e003-missing-import) for a full compile-and-diff round-trip per case.
+
 ## Acceptance Criteria
 
 - すべての診断が Here / Try / Hint（または Here / Hint）の形式で出力される
