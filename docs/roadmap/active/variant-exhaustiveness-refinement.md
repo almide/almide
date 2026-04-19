@@ -85,6 +85,19 @@ Guard at line 17 is not total
 - Variant の Codec がデフォルトで自動導出される
 - 既存 snapshot テストが更新され、診断のゴールデンファイルが新形式に揃う
 
+## Progress (2026-04-19)
+
+- **§1 paste-ready missing arms landed** — `check_exhaustiveness` now
+  returns `Vec<MissingArm>` carrying both the compact witness pattern
+  (`Node(_, _, _)`) and a paste-ready arm template
+  (`Node(arg1, arg2, arg3) => _`). The E010 diagnostic hint uses the
+  latter; tuple variants get positional `argN` bindings, record
+  variants reuse declared field names, `some/ok/err` get `x` / `e`.
+  Tests in `tests/exhaustiveness_hint_test.rs` (4 cases: tuple
+  variant, Option missing-arm, unit variants, catch-all for Int).
+- **§2 unreachable → error**, **§3 nested**, **§4 guard totality**,
+  **§5 Variant Codec auto-derive** — still open.
+
 ## Dependencies
 
 - なし（型チェッカと診断の局所的変更で完結）

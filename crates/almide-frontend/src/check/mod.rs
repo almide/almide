@@ -346,9 +346,13 @@ impl Checker {
     pub(crate) fn check_match_exhaustiveness(&mut self, subject_ty: &Ty, arms: &[ast::MatchArm]) {
         let missing = exhaustiveness::check_exhaustiveness(subject_ty, arms, &self.env);
         if !missing.is_empty() {
-            let list = missing.join(", ");
+            let list = missing
+                .iter()
+                .map(|m| m.pattern.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
             let resolved = self.env.resolve_named(subject_ty);
-            let hint = if missing.len() == 1 && missing[0] == "_" {
+            let hint = if missing.len() == 1 && missing[0].pattern == "_" {
                 let ty_name = match &resolved {
                     Ty::Int => "Int",
                     Ty::Float => "Float",
@@ -357,7 +361,19 @@ impl Checker {
                 };
                 format!("match on {} requires a catch-all '_' pattern", ty_name)
             } else {
-                format!("Add arms for {}, or use '_'", list)
+                // Paste-ready arms: indent + join with newlines so the LLM
+                // (or user) can copy the block straight into the source.
+                // `_ => todo()` is appended as a fallback for incremental
+                // compilation, mirroring Rust's `unimplemented!()` idiom.
+                let arms_block = missing
+                    .iter()
+                    .map(|m| format!("  {}", m.arm_template))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!(
+                    "add arms for {}:\n{}\nOr use `_ => todo()` to compile incrementally.",
+                    list, arms_block
+                )
             };
             self.emit(Diagnostic::error(
                 format!("non-exhaustive match: missing {}", list),

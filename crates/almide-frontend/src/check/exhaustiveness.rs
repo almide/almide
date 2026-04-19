@@ -349,19 +349,122 @@ fn fmt_pat(pat: &Pat) -> String {
     }
 }
 
+/// Paste-ready arm template for a witness pattern. Unlike `fmt_pat`
+/// (which emits `Node(_, _)` with wildcards), this produces
+/// `Node(arg1, arg2) => _` with positional binding placeholders so the
+/// LLM can copy the arm directly into the source. Field names are
+/// reconstructed from the variant's `VariantPayload::Record` when
+/// available, otherwise positional `argN`.
+fn fmt_arm_template(pat: &Pat, subject_ty: &Ty, env: &TypeEnv) -> String {
+    let resolved = env.resolve_named(subject_ty);
+    let head = fmt_arm_head(pat, &resolved, env);
+    format!("{} => _", head)
+}
+
+fn fmt_arm_head(pat: &Pat, ty: &Ty, env: &TypeEnv) -> String {
+    match pat {
+        Pat::Wild => "_".into(),
+        Pat::Ctor(ctor, _args) => {
+            // Wildcard bindings cannot shadow anything at lint time, so
+            // positional names don't need to be unique across rows — the
+            // emitted arm is purely paste fodder.
+            let (name, is_tuple, is_prefix_call) = match ctor {
+                CtorId::Variant(s) => (s.to_string(), false, true),
+                CtorId::Some => ("some".into(), false, true),
+                CtorId::None => ("none".into(), false, false),
+                CtorId::Ok => ("ok".into(), false, true),
+                CtorId::Err => ("err".into(), false, true),
+                CtorId::True => ("true".into(), false, false),
+                CtorId::False => ("false".into(), false, false),
+                CtorId::Tuple => (String::new(), true, false),
+                CtorId::Lit(v) => (v.clone(), false, false),
+            };
+            let names = field_names(ctor, ty, env);
+            if names.is_empty() {
+                name
+            } else if is_tuple {
+                format!("({})", names.join(", "))
+            } else if is_prefix_call {
+                // Record-payload variants render as `Name { f1, f2 }`
+                if let CtorId::Variant(vname) = ctor {
+                    if is_record_payload(vname, ty, env) {
+                        return format!("{} {{ {} }}", name, names.join(", "));
+                    }
+                }
+                format!("{}({})", name, names.join(", "))
+            } else {
+                name
+            }
+        }
+    }
+}
+
+/// Binding placeholder names for a ctor's fields. Record payloads reuse
+/// the variant's declared field names; tuple payloads get `arg1..N`.
+fn field_names(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> Vec<String> {
+    let resolved = env.resolve_named(ty);
+    match ctor {
+        CtorId::Variant(name) => match &resolved {
+            Ty::Variant { cases, .. } => cases
+                .iter()
+                .find(|c| c.name == *name)
+                .map_or(vec![], |c| match &c.payload {
+                    VariantPayload::Unit => vec![],
+                    VariantPayload::Tuple(tys) => (1..=tys.len())
+                        .map(|i| format!("arg{}", i))
+                        .collect(),
+                    VariantPayload::Record(fields) => fields
+                        .iter()
+                        .map(|(n, _)| n.to_string())
+                        .collect(),
+                }),
+            _ => vec![],
+        },
+        CtorId::Some | CtorId::Ok => vec!["x".into()],
+        CtorId::Err => vec!["e".into()],
+        CtorId::Tuple => match &resolved {
+            Ty::Tuple(tys) => (1..=tys.len()).map(|i| format!("arg{}", i)).collect(),
+            _ => vec![],
+        },
+        CtorId::None | CtorId::True | CtorId::False | CtorId::Lit(_) => vec![],
+    }
+}
+
+fn is_record_payload(vname: &Sym, ty: &Ty, env: &TypeEnv) -> bool {
+    let resolved = env.resolve_named(ty);
+    match &resolved {
+        Ty::Variant { cases, .. } => cases
+            .iter()
+            .find(|c| c.name == *vname)
+            .map_or(false, |c| matches!(c.payload, VariantPayload::Record(_))),
+        _ => false,
+    }
+}
+
 // ────────────────────────────────────────────────
 //  Public API
 // ────────────────────────────────────────────────
 
+/// Result of an exhaustiveness check for a single match.
+#[derive(Debug, Clone)]
+pub struct MissingArm {
+    /// Compact witness pattern, e.g. `Node(_, _)` — used in the
+    /// "missing: …" summary of the diagnostic.
+    pub pattern: String,
+    /// Paste-ready arm template, e.g. `Node(arg1, arg2) => _` — used in
+    /// the hint so LLMs / users can copy the arm directly.
+    pub arm_template: String,
+}
+
 /// Check if a match expression is exhaustive.
 ///
-/// Returns a list of formatted missing-pattern strings (empty = exhaustive).
-/// At most 3 witnesses are reported.
+/// Returns a list of missing-arm descriptors (empty = exhaustive). At
+/// most 3 witnesses are reported.
 pub fn check_exhaustiveness(
     subject_ty: &Ty,
     arms: &[ast::MatchArm],
     env: &TypeEnv,
-) -> Vec<String> {
+) -> Vec<MissingArm> {
     let resolved = env.resolve_named(subject_ty);
 
     // Skip unanalyzable types.
@@ -395,7 +498,11 @@ pub fn check_exhaustiveness(
         .iter()
         .map(|w| {
             debug_assert_eq!(w.len(), 1, "witness should have exactly 1 column");
-            fmt_pat(w.first().unwrap_or(&Pat::Wild))
+            let pat = w.first().unwrap_or(&Pat::Wild);
+            MissingArm {
+                pattern: fmt_pat(pat),
+                arm_template: fmt_arm_template(pat, subject_ty, env),
+            }
         })
         .collect()
 }
