@@ -89,10 +89,17 @@ Each module needs:
 - **Stage 1** (完了): define attribute syntax + codegen reader.
   `int.to_string` を `stdlib/int.almd` に `@inline_rust` 経由で migrate。
   TOML / runtime / emit は並列維持。
-- **Stage 2** (進行中): migrate 5 non-closure modules (int, float, bytes,
-  base64, hex). `int` 22 fn 全移行 + `stdlib/defs/int.toml` 削除 完了。
-  残り 4 モジュール。Runtime Rust fns (`runtime/rs/src/<m>.rs`) は維持、
-  WASM は `calls_<m>.rs` 経由の既存 dispatch を使う。
+- **Stage 2** (完了 2026-04-19): 5 non-closure modules migrated to
+  `@intrinsic`:
+  - `int` — 22 fn (+ `stdlib/defs/int.toml` 削除)
+  - `float` — 17 runtime-call fn (残り 10 は `as T` 型変換で runtime fn なし、`@inline_rust` 維持が正解)
+  - `base64` — 4 fn 全移行
+  - `hex` — 3 fn 全移行
+  - `bytes` — 84 pass-through fn 移行、残 12 は Endian runtime dispatch + sized-numeric cast 混在 (L3) で維持
+  - `env` — 9 fn 全移行 (`pass_result_propagation::is_template_dispatch` の `intrinsic` 漏れを同時に修正 — effect fn + `@intrinsic` の組合せが bare fn-name 衝突でクロスモジュール retyping を引き起こしていた)
+
+  Runtime Rust fns (`runtime/rs/src/<m>.rs`) + WASM `calls_<m>.rs` は
+  引き続き維持 (`dispatch_runtime_fallback` が symbol から逆引き)。
 - **Stage 3**: closure-bearing modules (list, option, result, map, set).
   Requires attribute recipes that encode closure ABI.
 - **Stage 4**: effect modules (fs, http, process, io, env, datetime,
