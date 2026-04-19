@@ -190,11 +190,17 @@ fn read_f64_le_at(b: Bytes, pos: Int) -> (Int, Option[Float]) = _
 @inline_rust("almide_rt_bytes_read_i16_be(&{b}, {pos})")
 fn read_i16_be(b: Bytes, pos: Int) -> Int = _
 
+@inline_rust("almide_rt_bytes_read_i16_be_at(&{b}, {pos})")
+fn read_i16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int]) = _
+
 @inline_rust("almide_rt_bytes_read_i16_be_array(&{b}, {pos}, {count})")
 fn read_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 @inline_rust("almide_rt_bytes_read_i16_le(&{b}, {pos})")
 fn read_i16_le(b: Bytes, pos: Int) -> Int = _
+
+@inline_rust("almide_rt_bytes_read_i16_le_at(&{b}, {pos})")
+fn read_i16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int]) = _
 
 @inline_rust("almide_rt_bytes_read_i16_le_array(&{b}, {pos}, {count})")
 fn read_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
@@ -246,6 +252,9 @@ fn read_string_be(b: Bytes, pos: Int) -> String = _
 
 @inline_rust("almide_rt_bytes_read_u16_be(&{b}, {pos})")
 fn read_u16_be(b: Bytes, pos: Int) -> Int = _
+
+@inline_rust("almide_rt_bytes_read_u16_be_at(&{b}, {pos})")
+fn read_u16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int]) = _
 
 @inline_rust("almide_rt_bytes_read_u16_be_array(&{b}, {pos}, {count})")
 fn read_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _

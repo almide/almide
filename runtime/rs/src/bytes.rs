@@ -431,6 +431,9 @@ macro_rules! cursor_read_float {
 
 cursor_read_int!(almide_rt_bytes_read_u8_at, 1, |b: &[u8]| b[0] as i64);
 cursor_read_int!(almide_rt_bytes_read_u16_le_at, 2, |b: &[u8]| u16::from_le_bytes([b[0], b[1]]) as i64);
+cursor_read_int!(almide_rt_bytes_read_u16_be_at, 2, |b: &[u8]| u16::from_be_bytes([b[0], b[1]]) as i64);
+cursor_read_int!(almide_rt_bytes_read_i16_le_at, 2, |b: &[u8]| i16::from_le_bytes([b[0], b[1]]) as i64);
+cursor_read_int!(almide_rt_bytes_read_i16_be_at, 2, |b: &[u8]| i16::from_be_bytes([b[0], b[1]]) as i64);
 cursor_read_int!(almide_rt_bytes_read_u32_le_at, 4, |b: &[u8]| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as i64);
 cursor_read_int!(almide_rt_bytes_read_i32_le_at, 4, |b: &[u8]| i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as i64);
 cursor_read_int!(almide_rt_bytes_read_i64_le_at, 8, |b: &[u8]| i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));

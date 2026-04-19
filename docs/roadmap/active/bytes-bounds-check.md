@@ -41,3 +41,17 @@ Same naming convention as existing `bytes.get` (Option-returning) vs `bytes.get_
 - For every existing `bytes.read_<dtype>_le` and `..._be` there is a `..._at` variant returning `Option[T]`.
 - Spec tests cover the in-bounds and out-of-bounds case for each pair.
 - `docs/stdlib/bytes.md` documents both families and explains when to use which.
+
+## Progress (2026-04-19)
+
+- **Integer `_at` le/be symmetry closed** — added `read_u16_be_at`,
+  `read_i16_le_at`, `read_i16_be_at`. Runtime cursor macros +
+  WASM dispatch + 3 new spec tests under
+  `spec/stdlib/bytes_cursor_test.almd`. All other le/be integer pairs
+  (u8, u16_le, u32 le/be, i32 le/be, i64 le/be) already had `_at`
+  variants; this commit finishes symmetry. Both Rust and WASM green.
+- **Still open**:
+  - `read_bool_at`, `read_f16_le_at`, `read_string_be_at` — need dedicated
+    WASM emit (bool payload layout, half-to-double, length-prefixed
+    UTF-8). Defer to a follow-up since no active caller blocks on them.
+  - `_array_at` bulk readers — design question from doc (§2) still open.

@@ -89,3 +89,37 @@ test "take_at returns none when not enough bytes" {
   assert_eq(p, 1)
   assert(option.is_none(slice), "expected none")
 }
+
+// ── New _at scalars (u16_be, i16_le, i16_be) — completes le/be symmetry ──
+
+test "read_u16_be_at advances and is big-endian" {
+  var b = bytes.new(0)
+  bytes.append_u16_be(b, 0x1234)
+  let (p, v) = bytes.read_u16_be_at(b, 0)
+  assert_eq(p, 2)
+  assert_eq(v |> option.unwrap_or(0), 0x1234)
+}
+
+test "read_u16_be_at none at EOF without advancing" {
+  let b = bytes.new(1)
+  let (p, v) = bytes.read_u16_be_at(b, 0)
+  assert_eq(p, 0)
+  assert(option.is_none(v), "expected none at partial eof")
+}
+
+test "read_i16_le_at sign-extends negatives" {
+  var b = bytes.new(0)
+  bytes.append_i16_le(b, -1)
+  let (p, v) = bytes.read_i16_le_at(b, 0)
+  assert_eq(p, 2)
+  assert_eq(v |> option.unwrap_or(0), -1)
+}
+
+test "read_i16_be_at sign-extends negatives" {
+  var b = bytes.new(0)
+  bytes.append_i16_be(b, -42)
+  let (p, v) = bytes.read_i16_be_at(b, 0)
+  assert_eq(p, 2)
+  assert_eq(v |> option.unwrap_or(0), -42)
+}
+
