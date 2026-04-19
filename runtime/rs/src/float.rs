@@ -37,3 +37,8 @@ pub fn almide_rt_float_to_uint32(n: f64) -> u32 { n as u32 }
 pub fn almide_rt_float_to_uint64(n: f64) -> u64 { n as u64 }
 pub fn almide_rt_float_to_float32(n: f64) -> f32 { n as f32 }
 pub fn almide_rt_float_to_float64(n: f64) -> f64 { n }
+
+// ── Widening conversions (sized → Float, for typed-bytes Endian dispatch) ──
+
+pub fn almide_rt_float_from_float32(n: f32) -> f64 { n as f64 }
+pub fn almide_rt_float_from_float64(n: f64) -> f64 { n }

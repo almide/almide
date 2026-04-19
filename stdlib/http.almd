@@ -15,11 +15,13 @@
 // - HTTP client (`get`/`post`/...) take `&str` URLs and bodies —
 //   plain pass-through once `Map` heads get `@borrow_ref(headers)`.
 //
-// `serve` still uses `@inline_rust` because its template wraps the
-// user callback with `Ok(...)` + trailing `?`, which `@intrinsic`
-// cannot express without a runtime-side wrapper.
+// `serve` routes through `almide_rt_http_serve` (runtime wrapper) which
+// composes the user callback with `Ok(...)` internally so the bundled
+// `(Request) -> Response` signature lines up with the legacy
+// `Fn(...) -> Result<Response, String>` contract expected by the TCP
+// listener loop.
 
-@inline_rust("almide_http_serve({port}, |__req| Ok(({f})(__req)))?")
+@intrinsic("almide_rt_http_serve")
 effect fn serve(port: Int, f: (Request) -> Response) -> Unit = _
 
 // ── Response builders ──

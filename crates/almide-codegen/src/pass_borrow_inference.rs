@@ -191,6 +191,24 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
                 if func.is_test || is_derive_fn(&func.name) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
                 let borrows = infer_function_borrows(func);
                 sigs.insert(format!("{}::{}", mod_name, func.name), borrows.clone());
+                // `ResolveCallsPass` rewrites bundled-Almide calls to
+                // `CallTarget::Named { almide_rt_<m>_<f> }`. BorrowInsertion
+                // looks up that Named key directly, so also mirror the
+                // signature under the mangled symbol. Skip for
+                // @inline_rust / @intrinsic fns — those are already seeded
+                // under the mangled runtime symbol in the first loop and
+                // shouldn't be overwritten by bundled-body inference.
+                let is_dispatch_only = func.attrs.iter().any(|a|
+                    matches!(a.name.as_str(),
+                        "inline_rust" | "wasm_intrinsic" | "intrinsic"));
+                if !is_dispatch_only {
+                    let mangled = format!(
+                        "almide_rt_{}_{}",
+                        mod_name.replace('.', "_"),
+                        func.name.as_str().replace('.', "_"),
+                    );
+                    sigs.insert(mangled, borrows.clone());
+                }
                 for (param, borrow) in func.params.iter_mut().zip(borrows) {
                     param.borrow = borrow;
                 }
@@ -264,8 +282,23 @@ fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
 
 
         if needs_own {
-            ParamBorrow::Own
-        } else if matches!(&param.ty, Ty::String) {
+            return ParamBorrow::Own;
+        }
+
+        // Implicit_mut for bundled bodies: when the body forwards this
+        // param into a callee that expects `RefMut` (`bytes.set_u16_le`
+        // et al), the caller's own param must also be `RefMut`. Without
+        // this promotion the generated code writes `&mut b` against a
+        // `b: &Vec<u8>` sig, which fails to borrow-check. Only applies
+        // when `needs_own` was false — if the param was already owned
+        // the `&mut` wrap would go through a local mutable binding.
+        let mut needs_refmut = false;
+        check_needs_refmut(&func.body, param.var, &mut needs_refmut);
+        if needs_refmut {
+            return ParamBorrow::RefMut;
+        }
+
+        if matches!(&param.ty, Ty::String) {
             ParamBorrow::RefStr
         } else if matches!(&param.ty, Ty::Applied(TypeConstructorId::List, _)) {
             ParamBorrow::RefSlice
@@ -650,6 +683,122 @@ fn check_needs_ownership_stmt(stmt: &IrStmt, var: VarId, needs: &mut bool) {
         IrStmtKind::Guard { cond, else_ } => {
             check_needs_ownership(cond, var, needs);
             check_needs_ownership(else_, var, needs);
+        }
+        _ => {}
+    }
+}
+
+/// Companion to `check_needs_ownership`: true when the body passes
+/// `var` into a callee slot that expects `RefMut`. Used to promote a
+/// bundled body's own param from `Ref` to `RefMut` so the forwarded
+/// `&mut {arg}` wraps a `&mut Vec<u8>` instead of a `&Vec<u8>`.
+fn check_needs_refmut(expr: &IrExpr, var: VarId, needs: &mut bool) {
+    if *needs { return; }
+    match &expr.kind {
+        IrExprKind::Var { .. } => {}
+        IrExprKind::Block { stmts, expr } => {
+            for s in stmts { check_needs_refmut_stmt(s, var, needs); }
+            if let Some(tail) = expr { check_needs_refmut(tail, var, needs); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            check_needs_refmut(cond, var, needs);
+            check_needs_refmut(then, var, needs);
+            check_needs_refmut(else_, var, needs);
+        }
+        IrExprKind::Match { subject, arms } => {
+            check_needs_refmut(subject, var, needs);
+            for arm in arms {
+                if let Some(g) = &arm.guard { check_needs_refmut(g, var, needs); }
+                check_needs_refmut(&arm.body, var, needs);
+            }
+        }
+        // `RuntimeCall` — lowered `@intrinsic` with a mangled symbol.
+        // Consult SIGS_SNAPSHOT (which carries the @intrinsic seed
+        // sigs, including implicit_mut promotions) to learn the callee
+        // slot kinds.
+        IrExprKind::RuntimeCall { symbol, args } => {
+            if let Some(borrows) = SIGS_SNAPSHOT.with(|s| s.borrow().get(symbol.as_str()).cloned()) {
+                for (i, arg) in args.iter().enumerate() {
+                    if matches!(borrows.get(i), Some(ParamBorrow::RefMut))
+                        && is_var(arg, var)
+                    {
+                        *needs = true;
+                        return;
+                    }
+                }
+            }
+            for arg in args { check_needs_refmut(arg, var, needs); }
+        }
+        // Named / Module call — look up user-defined borrow signatures.
+        IrExprKind::Call { target, args, .. } => {
+            let callee_sig: Option<Vec<ParamBorrow>> = match target {
+                CallTarget::Named { name } => lookup_user_borrows(name.as_str()),
+                CallTarget::Module { module, func } => {
+                    let key = format!("{}::{}", module, func);
+                    SIGS_SNAPSHOT.with(|s| s.borrow().get(&key).cloned())
+                }
+                _ => None,
+            };
+            if let Some(borrows) = callee_sig {
+                for (i, arg) in args.iter().enumerate() {
+                    if matches!(borrows.get(i), Some(ParamBorrow::RefMut))
+                        && is_var(arg, var)
+                    {
+                        *needs = true;
+                        return;
+                    }
+                }
+            }
+            if let CallTarget::Method { object, .. } = target {
+                check_needs_refmut(object, var, needs);
+            }
+            for arg in args { check_needs_refmut(arg, var, needs); }
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            check_needs_refmut(iterable, var, needs);
+            for s in body { check_needs_refmut_stmt(s, var, needs); }
+        }
+        IrExprKind::While { cond, body } => {
+            check_needs_refmut(cond, var, needs);
+            for s in body { check_needs_refmut_stmt(s, var, needs); }
+        }
+        IrExprKind::BinOp { left, right, .. } => {
+            check_needs_refmut(left, var, needs);
+            check_needs_refmut(right, var, needs);
+        }
+        IrExprKind::UnOp { operand, .. } => check_needs_refmut(operand, var, needs),
+        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
+            check_needs_refmut(expr, var, needs);
+        }
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            check_needs_refmut(expr, var, needs);
+            check_needs_refmut(fallback, var, needs);
+        }
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } => check_needs_refmut(expr, var, needs),
+        IrExprKind::Lambda { body, .. } => check_needs_refmut(body, var, needs),
+        _ => {}
+    }
+}
+
+fn check_needs_refmut_stmt(stmt: &IrStmt, var: VarId, needs: &mut bool) {
+    if *needs { return; }
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
+        | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
+            check_needs_refmut(value, var, needs);
+        }
+        IrStmtKind::IndexAssign { index, value, .. } | IrStmtKind::MapInsert { key: index, value, .. } => {
+            check_needs_refmut(index, var, needs);
+            check_needs_refmut(value, var, needs);
+        }
+        IrStmtKind::Expr { expr } => check_needs_refmut(expr, var, needs),
+        IrStmtKind::Guard { cond, else_ } => {
+            check_needs_refmut(cond, var, needs);
+            check_needs_refmut(else_, var, needs);
         }
         _ => {}
     }

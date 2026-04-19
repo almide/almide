@@ -610,6 +610,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     }
                 }
             }
+            // Same idea for `&mut b` against a `b: &mut T` param:
+            // Rust auto-reborrows when you pass the naked var, so
+            // dropping the outer `&mut` here keeps the callee's
+            // `&mut T` slot filled without a `&mut &mut T` layer.
+            if *mutable {
+                if let IrExprKind::Var { id } = &inner.kind {
+                    if ctx.ref_mut_params.contains(id) {
+                        return render_expr(ctx, inner);
+                    }
+                }
+            }
             if *mutable {
                 format!("&mut {}", render_expr(ctx, inner))
             } else if *as_str {

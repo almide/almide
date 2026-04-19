@@ -99,3 +99,10 @@ fn to_int64(n: Float) -> Int64 = _
 
 @intrinsic("almide_rt_float_to_float64")
 fn to_float64(n: Float) -> Float64 = _
+
+// ── Widening: sized float → Float ──
+@intrinsic("almide_rt_float_from_float32")
+fn from_float32(n: Float32) -> Float = _
+
+@intrinsic("almide_rt_float_from_float64")
+fn from_float64(n: Float64) -> Float = _

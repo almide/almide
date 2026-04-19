@@ -1168,8 +1168,17 @@ impl FuncCompiler<'_> {
         // Determine source / destination kind+width purely from names so
         // this dispatcher is closed over the entire sized-type matrix
         // regardless of which .almd module hosts the fn.
-        let src = sized_type_info(module);
-        let dst = func.strip_prefix("to_").and_then(sized_type_info);
+        // `int.to_int32(n: Int)` / `float.to_uint16(n: Float)` style:
+        //   module names the SRC; `to_<T>` names the DST.
+        // `int.from_uint16(n: UInt16)` / `float.from_float32(n: Float32)` style:
+        //   module names the DST; `from_<T>` names the SRC.
+        let (src, dst) = if let Some(to_part) = func.strip_prefix("to_") {
+            (sized_type_info(module), sized_type_info(to_part))
+        } else if let Some(from_part) = func.strip_prefix("from_") {
+            (sized_type_info(from_part), sized_type_info(module))
+        } else {
+            return false;
+        };
         let (Some((src_kind, src_bits)), Some((dst_kind, dst_bits))) = (src, dst) else {
             return false;
         };

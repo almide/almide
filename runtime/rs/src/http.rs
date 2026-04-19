@@ -236,6 +236,17 @@ pub fn almide_http_serve(port: i64, handler: impl Fn(AlmideHttpRequest) -> Resul
     Ok(())
 }
 
+// Handler-as-closure wrapper for `@intrinsic` migration of `http.serve`.
+// The Almide side passes a `(Request) -> Response` closure; this wrapper
+// composes it with `Ok(...)` so the inner `almide_http_serve` keeps its
+// `Result<Response, String>` contract (future error-in-handler support).
+pub fn almide_rt_http_serve(
+    port: i64,
+    handler: impl Fn(AlmideHttpRequest) -> AlmideHttpResponse,
+) -> Result<(), String> {
+    almide_http_serve(port, move |req| Ok(handler(req)))
+}
+
 // ── Helpers ──
 
 fn parse_url(url: &str) -> Result<(bool, String, u16, String), String> {

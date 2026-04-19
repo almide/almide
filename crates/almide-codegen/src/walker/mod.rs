@@ -50,11 +50,16 @@ pub struct RenderContext<'a> {
     /// `&[T]`, `&str`). Used by the Borrow walker to avoid
     /// double-borrowing an already-reference binding.
     pub ref_params: std::collections::HashSet<VarId>,
+    /// VarIds of current fn params emitted as `&mut T`. Used by the
+    /// Borrow walker to skip the outer `&mut` wrap when forwarding a
+    /// `RefMut` param into another `RefMut` callee slot (Rust
+    /// auto-reborrows).
+    pub ref_mut_params: std::collections::HashSet<VarId>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -98,10 +103,18 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // outer `&` wrap on already-borrowed bindings.
     let mut ref_params: std::collections::HashSet<VarId> =
         std::collections::HashSet::new();
+    let mut ref_mut_params: std::collections::HashSet<VarId> =
+        std::collections::HashSet::new();
     for p in &func.params {
         use almide_ir::ParamBorrow;
-        if matches!(p.borrow, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr) {
-            ref_params.insert(p.var);
+        match p.borrow {
+            ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr => {
+                ref_params.insert(p.var);
+            }
+            ParamBorrow::RefMut => {
+                ref_mut_params.insert(p.var);
+            }
+            _ => {}
         }
     }
 
@@ -119,6 +132,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         minimal_generic_bounds: ctx.minimal_generic_bounds,
         repr_c: ctx.repr_c,
         ref_params,
+        ref_mut_params,
     };
 
     // Stdlib Unification: fns declared with `@inline_rust(...)` or
@@ -336,6 +350,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         minimal_generic_bounds: false,
         repr_c: ctx.repr_c,
         ref_params: std::collections::HashSet::new(),
+        ref_mut_params: std::collections::HashSet::new(),
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
@@ -481,6 +496,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             minimal_generic_bounds: is_bundled,
             repr_c: ctx.repr_c,
             ref_params: std::collections::HashSet::new(),
+            ref_mut_params: std::collections::HashSet::new(),
         };
         // Module type decls — skip if already emitted by parent or another module
         for td in &module.type_decls {

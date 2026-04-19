@@ -427,50 +427,80 @@ fn xor(a: Bytes, b: Bytes) -> Bytes = _
 
 type Endian = | LittleEndian | BigEndian
 
-// Typed read wrappers expand inline via `@inline_rust` so the bundled-
-// Almide body layer never sits between the caller's `Bytes` value and
-// the `&{b}`-borrowing runtime fn. This avoids the bundled-body +
-// `&mut` template combinatorics the follow-up arc will address.
+// Typed read/write/set wrappers are bundled-Almide bodies that match
+// on `Endian` and dispatch to the existing `read_u16_le` / `append_u16_be`
+// etc. @intrinsic fns. Int/Float ↔ sized conversions live in
+// `int.to_uint16` / `int.from_uint16` / `float.to_float32` / etc.
 
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_read_u16_le(&{b}, {offset}) as u16, Endian::BigEndian => almide_rt_bytes_read_u16_be(&{b}, {offset}) as u16 }")
-fn read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16 = _
+fn read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16 =
+  int.to_uint16(match endian {
+    LittleEndian => bytes.read_u16_le(b, offset),
+    BigEndian    => bytes.read_u16_be(b, offset),
+  })
 
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_read_u32_le(&{b}, {offset}) as u32, Endian::BigEndian => almide_rt_bytes_read_u32_be(&{b}, {offset}) as u32 }")
-fn read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32 = _
+fn read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32 =
+  int.to_uint32(match endian {
+    LittleEndian => bytes.read_u32_le(b, offset),
+    BigEndian    => bytes.read_u32_be(b, offset),
+  })
 
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_read_i32_le(&{b}, {offset}) as i32, Endian::BigEndian => almide_rt_bytes_read_i32_be(&{b}, {offset}) as i32 }")
-fn read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32 = _
+fn read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32 =
+  int.to_int32(match endian {
+    LittleEndian => bytes.read_i32_le(b, offset),
+    BigEndian    => bytes.read_i32_be(b, offset),
+  })
 
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_read_f32_le(&{b}, {offset}) as f32, Endian::BigEndian => almide_rt_bytes_read_f32_be(&{b}, {offset}) as f32 }")
-fn read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32 = _
+fn read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32 =
+  float.to_float32(match endian {
+    LittleEndian => bytes.read_f32_le(b, offset),
+    BigEndian    => bytes.read_f32_be(b, offset),
+  })
 
-// Write counterparts expand the same way — the `&mut {b}` sigil in
-// the `@inline_rust` template lands directly on the caller's `var`,
-// so the mutation reaches the original `Bytes` (not a temp clone).
-// Bundled-Almide bodies can't currently route `&mut` through their
-// own params, so we keep these inline.
+fn write_uint16(b: Bytes, value: UInt16, endian: Endian) -> Unit =
+  match endian {
+    LittleEndian => bytes.append_u16_le(b, int.from_uint16(value)),
+    BigEndian    => bytes.append_u16_be(b, int.from_uint16(value)),
+  }
 
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_append_u16_le(&mut {b}, {value} as i64), Endian::BigEndian => almide_rt_bytes_append_u16_be(&mut {b}, {value} as i64) }")
-fn write_uint16(b: Bytes, value: UInt16, endian: Endian) -> Unit = _
+fn write_uint32(b: Bytes, value: UInt32, endian: Endian) -> Unit =
+  match endian {
+    LittleEndian => bytes.append_u32_le(b, int.from_uint32(value)),
+    BigEndian    => bytes.append_u32_be(b, int.from_uint32(value)),
+  }
 
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_append_u32_le(&mut {b}, {value} as i64), Endian::BigEndian => almide_rt_bytes_append_u32_be(&mut {b}, {value} as i64) }")
-fn write_uint32(b: Bytes, value: UInt32, endian: Endian) -> Unit = _
+fn write_int32(b: Bytes, value: Int32, endian: Endian) -> Unit =
+  match endian {
+    LittleEndian => bytes.append_i32_le(b, int.from_int32(value)),
+    BigEndian    => bytes.append_i32_be(b, int.from_int32(value)),
+  }
 
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_append_i32_le(&mut {b}, {value} as i64), Endian::BigEndian => almide_rt_bytes_append_i32_be(&mut {b}, {value} as i64) }")
-fn write_int32(b: Bytes, value: Int32, endian: Endian) -> Unit = _
-
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_append_f32_le(&mut {b}, {value} as f64), Endian::BigEndian => almide_rt_bytes_append_f32_be(&mut {b}, {value} as f64) }")
-fn write_float32(b: Bytes, value: Float32, endian: Endian) -> Unit = _
+fn write_float32(b: Bytes, value: Float32, endian: Endian) -> Unit =
+  match endian {
+    LittleEndian => bytes.append_f32_le(b, float.from_float32(value)),
+    BigEndian    => bytes.append_f32_be(b, float.from_float32(value)),
+  }
 
 // In-place set at offset (no allocation, no length change)
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_set_u16_le(&mut {b}, {offset}, {value} as i64), Endian::BigEndian => almide_rt_bytes_set_u16_be(&mut {b}, {offset}, {value} as i64) }")
-fn set_uint16(b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit = _
+fn set_uint16(b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit =
+  match endian {
+    LittleEndian => bytes.set_u16_le(b, offset, int.from_uint16(value)),
+    BigEndian    => bytes.set_u16_be(b, offset, int.from_uint16(value)),
+  }
 
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_set_u32_le(&mut {b}, {offset}, {value} as i64), Endian::BigEndian => almide_rt_bytes_set_u32_be(&mut {b}, {offset}, {value} as i64) }")
-fn set_uint32(b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit = _
+fn set_uint32(b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit =
+  match endian {
+    LittleEndian => bytes.set_u32_le(b, offset, int.from_uint32(value)),
+    BigEndian    => bytes.set_u32_be(b, offset, int.from_uint32(value)),
+  }
 
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_set_i32_le(&mut {b}, {offset}, {value} as i64), Endian::BigEndian => almide_rt_bytes_set_i32_be(&mut {b}, {offset}, {value} as i64) }")
-fn set_int32(b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = _
+fn set_int32(b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit =
+  match endian {
+    LittleEndian => bytes.set_i32_le(b, offset, int.from_int32(value)),
+    BigEndian    => bytes.set_i32_be(b, offset, int.from_int32(value)),
+  }
 
-@inline_rust("match {endian} { Endian::LittleEndian => almide_rt_bytes_set_f32_le(&mut {b}, {offset}, {value} as f64), Endian::BigEndian => almide_rt_bytes_set_f32_be(&mut {b}, {offset}, {value} as f64) }")
-fn set_float32(b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
+fn set_float32(b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit =
+  match endian {
+    LittleEndian => bytes.set_f32_le(b, offset, float.from_float32(value)),
+    BigEndian    => bytes.set_f32_be(b, offset, float.from_float32(value)),
+  }
