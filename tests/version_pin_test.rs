@@ -45,31 +45,30 @@ fn check_passes_on_sufficient_version() {
 }
 
 #[test]
-fn check_errors_on_insufficient_version() {
-    let p = mk_project(Some("99.0.0"));
-    let err = check_compiler_version(&p).unwrap_err();
-    assert!(err.contains("requires almide >= 99.0.0"), "msg:\n{}", err);
-    assert!(err.contains("installed version"), "msg:\n{}", err);
-}
-
-#[test]
 fn check_skipped_when_field_omitted() {
     let p = mk_project(None);
     assert!(check_compiler_version(&p).is_ok());
 }
 
+// NOTE: the insufficient-version and env-var-bypass paths both touch
+// the shared `ALMIDE_SKIP_VERSION_CHECK` env var. Running them as
+// separate `#[test]` cases lets them interleave under cargo's parallel
+// runner — the bypass case's set/unset window can leak into the error
+// case. We fold them into a single test so the env manipulation is
+// strictly serial.
 #[test]
-fn check_bypassed_by_env_var() {
+fn check_errors_and_env_bypass_are_both_respected() {
+    // Part 1 — without the env var set, an insufficient pin errors.
+    unsafe { std::env::remove_var("ALMIDE_SKIP_VERSION_CHECK"); }
     let p = mk_project(Some("99.0.0"));
-    // SAFETY: test is not concurrent-safe on shared env; we set and clear.
-    // Alternative is a separate binary fixture, but this is smaller.
-    unsafe {
-        std::env::set_var("ALMIDE_SKIP_VERSION_CHECK", "1");
-    }
+    let err = check_compiler_version(&p).unwrap_err();
+    assert!(err.contains("requires almide >= 99.0.0"), "msg:\n{}", err);
+    assert!(err.contains("installed version"), "msg:\n{}", err);
+
+    // Part 2 — with the env var set, the same call bypasses.
+    unsafe { std::env::set_var("ALMIDE_SKIP_VERSION_CHECK", "1"); }
     let ok = check_compiler_version(&p).is_ok();
-    unsafe {
-        std::env::remove_var("ALMIDE_SKIP_VERSION_CHECK");
-    }
+    unsafe { std::env::remove_var("ALMIDE_SKIP_VERSION_CHECK"); }
     assert!(ok, "skip env var should bypass");
 }
 

@@ -61,6 +61,12 @@ pub fn display(d: &Diagnostic) -> String {
         let line = if color { format!("{}in {}{}", DIM, d.context, RESET) } else { format!("in {}", d.context) };
         out.push_str(&format!("\n  {}", line));
     }
+    if let Some(here) = &d.here_snippet {
+        if !here.is_empty() {
+            let line = if color { format!("{}here:{} {}", CYAN, RESET, here) } else { format!("here: {}", here) };
+            out.push_str(&format!("\n  {}", line));
+        }
+    }
     if !d.hint.is_empty() {
         let line = if color { format!("{}hint:{} {}", CYAN, RESET, d.hint) } else { format!("hint: {}", d.hint) };
         out.push_str(&format!("\n  {}", line));
@@ -96,12 +102,27 @@ pub fn to_json(d: &Diagnostic) -> String {
         )
     }).collect();
     let secondary = format!("[{}]", secondary_items.join(","));
+    let here_json = match &d.here_snippet {
+        Some(s) => format!(
+            "\"{}\"",
+            s.replace('"', r#"\""#).replace('\n', "\\n")
+        ),
+        None => "null".to_string(),
+    };
+    let try_json = match &d.try_snippet {
+        Some(s) => format!(
+            "\"{}\"",
+            s.replace('"', r#"\""#).replace('\n', "\\n")
+        ),
+        None => "null".to_string(),
+    };
     // Manual JSON to avoid serde dependency in this module
     format!(
-        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
+        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","here":{},"try":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
         level, code,
         d.message.replace('"', r#"\""#).replace('\n', "\\n"),
         d.hint.replace('"', r#"\""#).replace('\n', "\\n"),
+        here_json, try_json,
         d.context.replace('"', r#"\""#),
         file.replace('"', r#"\""#),
         line, col, end_col, secondary,
@@ -110,8 +131,25 @@ pub fn to_json(d: &Diagnostic) -> String {
 
 pub fn display_with_source(d: &Diagnostic, source: &str) -> String {
     let color = use_color();
-    let mut out = display(d);
     let source_lines: Vec<&str> = source.lines().collect();
+
+    // Auto-populate `here_snippet` from the primary span's source line
+    // (if not already set) so plain `display()` consumers still see the
+    // inline `here:` row. The gutter-formatted source below is the
+    // full Here/Try/Hint triple's visual context.
+    let mut enriched = d.clone();
+    if enriched.here_snippet.is_none() {
+        if let Some(line_num) = d.line {
+            if let Some(src) = source_lines.get(line_num.saturating_sub(1)) {
+                let trimmed = src.trim();
+                if !trimmed.is_empty() {
+                    enriched.here_snippet = Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    let d = &enriched;
+    let mut out = display(d);
 
     // Render secondary spans first (declaration sites, etc.)
     for sec in &d.secondary {

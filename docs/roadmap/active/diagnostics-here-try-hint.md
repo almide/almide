@@ -74,6 +74,18 @@ CI が次を実行：
 4. **Phase 4**: CI ゲート有効化：新しい診断は Here/Try/Hint 必須、hint self-test 必須
 5. **Phase 5**: `docs/diagnostics/` のコードレジストリ公開
 
+## Progress (2026-04-19)
+
+- **Phase 1 MVP landed**. `Diagnostic::here_snippet: Option<String>` +
+  `with_here(s)` builder added in `almide-base`. Renderer emits a
+  `  here: <snippet>` row between `in <context>` and `hint: ...` when
+  the field is set. `display_with_source` auto-populates it from the
+  primary span's source line (non-breaking: any existing diagnostic
+  rendered with source now gains an inline `here:` row for free).
+  `to_json` emits `"here":` and `"try":` fields (null when unset).
+  8 test cases in `tests/here_snippet_test.rs`. `Try:` / `Hint:`
+  label capitalization + full migration left for Phase 3.
+
 ## Acceptance Criteria
 
 - すべての診断が Here / Try / Hint（または Here / Hint）の形式で出力される

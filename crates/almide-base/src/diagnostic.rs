@@ -70,6 +70,16 @@ pub struct Diagnostic {
     /// hint so LLMs and humans can apply the fix without re-reading the docs.
     /// Multi-line; renderer prints each line with a `    ` indent under `try:`.
     pub try_snippet: Option<String>,
+    /// Inline compact snippet of the offending source fragment (the
+    /// `here:` row of the Here/Try/Hint three-part format). Single line,
+    /// typically the trimmed source at the primary span. Rendered as
+    /// `  here: <snippet>` above `hint:` / `try:` when present.
+    ///
+    /// Complements the gutter-formatted source rendered by
+    /// `display_with_source` — useful for plain `display()` contexts
+    /// like JSON output, CI logs, and IDE hover previews where the
+    /// multi-line gutter form is unwanted.
+    pub here_snippet: Option<String>,
 }
 
 impl Diagnostic {
@@ -78,7 +88,7 @@ impl Diagnostic {
             level: Level::Error, code: None,
             message: message.into(), hint: hint.into(), context: context.into(),
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
-            try_snippet: None,
+            try_snippet: None, here_snippet: None,
         }
     }
 
@@ -87,7 +97,7 @@ impl Diagnostic {
             level: Level::Warning, code: None,
             message: message.into(), hint: hint.into(), context: context.into(),
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
-            try_snippet: None,
+            try_snippet: None, here_snippet: None,
         }
     }
 
@@ -99,6 +109,22 @@ impl Diagnostic {
     /// Attach a copy-pasteable fix snippet.
     pub fn with_try(mut self, snippet: impl Into<String>) -> Self {
         self.try_snippet = Some(snippet.into());
+        self
+    }
+
+    /// Attach an inline source snippet — the `here:` line of the
+    /// Here/Try/Hint three-part format (roadmap: diagnostics-here-try-hint).
+    /// Single line, trimmed. Multi-line input is collapsed to its
+    /// first non-empty line so the inline label stays compact.
+    pub fn with_here(mut self, snippet: impl Into<String>) -> Self {
+        let s = snippet.into();
+        let one = s
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or("")
+            .to_string();
+        self.here_snippet = Some(one);
         self
     }
 
@@ -147,6 +173,11 @@ impl Diagnostic {
         }
         if !self.context.is_empty() {
             out.push_str(&format!("\n  in {}", self.context));
+        }
+        if let Some(here) = &self.here_snippet {
+            if !here.is_empty() {
+                out.push_str(&format!("\n  here: {}", here));
+            }
         }
         if !self.hint.is_empty() {
             out.push_str(&format!("\n  hint: {}", self.hint));
