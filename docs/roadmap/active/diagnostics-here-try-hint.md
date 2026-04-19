@@ -99,10 +99,38 @@ CI が次を実行：
 - Seed fixtures: `bang-not`, `int-from-string`, `non-exhaustive-match`,
   `arity-mismatch`. Target for Phase 2 closing: 30 fixtures covering
   the full set of codes currently using `with_code(...)`.
-- Mechanical `Try:` snippet application (the "copy-paste and it
-  compiles" guarantee) is deferred to Phase 3 — requires each
-  diagnostic's `with_try(...)` call to emit a concrete replacement
-  range for the broken span.
+
+### 2026-04-20 — Phase 3 foundations
+
+Machinery for mechanically-applicable `Try:` snippets landed; no
+diagnostic emits the new field yet (that's the Phase 3 body work).
+
+- `Diagnostic::try_replace_span: Option<(line, col, end_col)>` —
+  1-indexed, end-exclusive range the `try_snippet` is a drop-in
+  replacement for.
+- `Diagnostic::with_try_replace(line, col, end_col, snippet)` builder
+  — sets both `try_snippet` and `try_replace_span` atomically.
+- `Diagnostic::apply_try_to(source: &str) -> Option<String>` — byte-
+  accurate char-indexed rewrite of `source` at the stored range; 8
+  unit tests in `crates/almide-base/src/diagnostic.rs` cover the
+  bang-replace / token-rename / multi-line / zero-width-insert /
+  out-of-bounds cases.
+- `diagnostic_render::to_json` emits `"try_replace":{line,col,end_col}`
+  alongside the existing `try` string.
+- `tests/diagnostic_harness_test.rs` gained `try_snippets_with_replace_span_apply_cleanly`:
+  for every fixture, any diagnostic with both `try` + `try_replace`
+  fields auto-rewrites `broken.almd`, compiles the result, and
+  compares against `fixed.almd` (whitespace-normalised). The test
+  is a no-op right now — nothing in the frontend populates
+  `try_replace_span` — and acts as the regression gate for the
+  upcoming per-diagnostic migrations.
+
+**Next sub-arc (Phase 3 body):** migrate individual diagnostics to
+`with_try_replace`, starting with the cases that already have a
+precise name-token span at the emission site. The E002 rename path
+(`string.length` → `string.len`) is the intended first target; it's
+blocked on the parser exposing the full callee span (currently Member
+exprs record only the `.` token, not `object.field`).
 
 ## Acceptance Criteria
 

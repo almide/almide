@@ -46,6 +46,11 @@ pub struct Checker {
     pub source_file: Option<String>,
     pub source_text: Option<String>,
     pub(crate) current_span: Option<crate::ast::Span>,
+    /// Span of the current call's callee expression (the identifier
+    /// / member reference). Set by `check_named_call_spanned` so E002
+    /// can emit a `try_replace` range pointing exactly at the name
+    /// token rather than the whole call. Cleared after each callee.
+    pub(crate) callee_span_hint: Option<crate::ast::Span>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
 }
@@ -58,6 +63,7 @@ impl Checker {
             diagnostics: Vec::new(),
             source_file: None, source_text: None,
             current_span: None,
+            callee_span_hint: None,
             constraints: Vec::new(), uf: UnionFind::new(),
         }
     }

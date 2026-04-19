@@ -80,6 +80,24 @@ pub struct Diagnostic {
     /// like JSON output, CI logs, and IDE hover previews where the
     /// multi-line gutter form is unwanted.
     pub here_snippet: Option<String>,
+    /// Exact source range that `try_snippet` is a drop-in replacement for.
+    /// When set, `apply_try_to(source)` rewrites `source[line:col..line:end_col]`
+    /// to `try_snippet`, and the result is expected to compile.
+    ///
+    /// Semantics:
+    /// - `line` / `col` / `end_col` are 1-indexed char offsets to match
+    ///   the primary-span convention on this struct.
+    /// - `col` is inclusive, `end_col` is exclusive (consistent with
+    ///   `Diagnostic::at_span` treating `end_col > col` as the exclusive
+    ///   upper bound of the highlight range).
+    /// - None means the `try_snippet` is display-only (may contain
+    ///   human-readable placeholders or comments that don't compile).
+    ///
+    /// The Phase 3 target of `docs/roadmap/active/diagnostics-here-try-hint.md`
+    /// is to populate this on every diagnostic that emits a
+    /// mechanically-applicable fix — `tests/diagnostic_harness_test.rs`
+    /// will auto-apply and verify against `fixed.almd`.
+    pub try_replace_span: Option<(usize, usize, usize)>,
 }
 
 impl Diagnostic {
@@ -88,7 +106,7 @@ impl Diagnostic {
             level: Level::Error, code: None,
             message: message.into(), hint: hint.into(), context: context.into(),
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
-            try_snippet: None, here_snippet: None,
+            try_snippet: None, here_snippet: None, try_replace_span: None,
         }
     }
 
@@ -97,7 +115,7 @@ impl Diagnostic {
             level: Level::Warning, code: None,
             message: message.into(), hint: hint.into(), context: context.into(),
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
-            try_snippet: None, here_snippet: None,
+            try_snippet: None, here_snippet: None, try_replace_span: None,
         }
     }
 
@@ -110,6 +128,72 @@ impl Diagnostic {
     pub fn with_try(mut self, snippet: impl Into<String>) -> Self {
         self.try_snippet = Some(snippet.into());
         self
+    }
+
+    /// Attach a mechanically-applicable fix: `snippet` replaces the
+    /// source range `[line:col..line:end_col]` verbatim (1-indexed,
+    /// `end_col` exclusive, same convention as `at_span`).
+    ///
+    /// Sets both `try_snippet` (for display) and `try_replace_span`
+    /// (for machine apply). When both are present, `apply_try_to`
+    /// performs the substitution and the result is guaranteed by the
+    /// diagnostic author to compile cleanly.
+    pub fn with_try_replace(
+        mut self,
+        line: usize,
+        col: usize,
+        end_col: usize,
+        snippet: impl Into<String>,
+    ) -> Self {
+        let s = snippet.into();
+        self.try_replace_span = Some((line, col, end_col));
+        self.try_snippet = Some(s);
+        self
+    }
+
+    /// Apply `try_snippet` to `source` at `try_replace_span`, returning
+    /// the rewritten source. `None` when either field is missing or the
+    /// span can't be located (out-of-bounds line / col). Callers verify
+    /// the result compiles — the diagnostic author's job is to emit a
+    /// range whose replacement produces valid Almide code.
+    pub fn apply_try_to(&self, source: &str) -> Option<String> {
+        let snippet = self.try_snippet.as_ref()?;
+        let (line, col, end_col) = self.try_replace_span?;
+        if line == 0 || col == 0 || end_col < col { return None; }
+        // Locate the byte range of `line` (1-indexed) within `source`.
+        let mut line_start = 0usize;
+        let mut cur_line = 1usize;
+        for (i, b) in source.bytes().enumerate() {
+            if cur_line == line { break; }
+            if b == b'\n' {
+                cur_line += 1;
+                line_start = i + 1;
+            }
+        }
+        if cur_line != line { return None; }
+        let line_tail = &source[line_start..];
+        let line_end = line_tail.find('\n').map(|i| line_start + i).unwrap_or(source.len());
+        let line_slice = &source[line_start..line_end];
+        // Byte offset of the `target`-th char within `line_slice`
+        // (1-indexed). Accepts `target = char_count + 1` as the
+        // exclusive end-of-line marker.
+        let col_to_byte = |target: usize| -> Option<usize> {
+            match line_slice.char_indices().nth(target - 1) {
+                Some((b, _)) => Some(b),
+                None => {
+                    let n = line_slice.chars().count();
+                    if target == n + 1 { Some(line_slice.len()) } else { None }
+                }
+            }
+        };
+        let start_off = line_start + col_to_byte(col)?;
+        let end_off = line_start + col_to_byte(end_col)?;
+        if end_off < start_off || end_off > line_end { return None; }
+        let mut out = String::with_capacity(source.len() + snippet.len());
+        out.push_str(&source[..start_off]);
+        out.push_str(snippet);
+        out.push_str(&source[end_off..]);
+        Some(out)
     }
 
     /// Attach an inline source snippet — the `here:` line of the
@@ -189,5 +273,72 @@ impl Diagnostic {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod apply_try_tests {
+    use super::*;
+
+    #[test]
+    fn no_try_snippet_returns_none() {
+        let d = Diagnostic::error("e", "h", "c");
+        assert!(d.apply_try_to("abc").is_none());
+    }
+
+    #[test]
+    fn no_replace_span_returns_none() {
+        let d = Diagnostic::error("e", "h", "c").with_try("fix");
+        assert!(d.apply_try_to("abc").is_none());
+    }
+
+    #[test]
+    fn replaces_bang_with_not() {
+        // source: "if !user_admin then x"
+        //         123456789012345...
+        //            ^            col 4 is `!`, col 5..15 is `user_admin`.
+        // Replace just `!` (col 4..5) with `not `.
+        let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 4, 5, "not ");
+        let out = d.apply_try_to("if !user_admin then x").unwrap();
+        assert_eq!(out, "if not user_admin then x");
+    }
+
+    #[test]
+    fn replace_whole_token_round_trip() {
+        // Rename `parseInt` → `int.parse`. `parseInt` starts at col 7 and
+        // ends at col 15 (exclusive) in "let x=parseInt(s)".
+        let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 7, 15, "int.parse");
+        let out = d.apply_try_to("let x=parseInt(s)").unwrap();
+        assert_eq!(out, "let x=int.parse(s)");
+    }
+
+    #[test]
+    fn replace_on_second_line() {
+        let src = "fn main() -> Int =\n    parseInt(s)\n";
+        // Line 2: `    parseInt(s)`. `parseInt` at cols 5..13 exclusive.
+        let d = Diagnostic::error("e", "h", "c").with_try_replace(2, 5, 13, "int.parse");
+        let out = d.apply_try_to(src).unwrap();
+        assert_eq!(out, "fn main() -> Int =\n    int.parse(s)\n");
+    }
+
+    #[test]
+    fn replace_zero_width_inserts() {
+        // `end_col == col` — insert `snippet` at that column without
+        // deleting anything. Useful for "missing import" style fixes.
+        let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 1, 1, "import json\n");
+        let out = d.apply_try_to("effect fn main() = ...").unwrap();
+        assert_eq!(out, "import json\neffect fn main() = ...");
+    }
+
+    #[test]
+    fn out_of_bounds_line_returns_none() {
+        let d = Diagnostic::error("e", "h", "c").with_try_replace(5, 1, 2, "x");
+        assert!(d.apply_try_to("only one line").is_none());
+    }
+
+    #[test]
+    fn out_of_bounds_col_returns_none() {
+        let d = Diagnostic::error("e", "h", "c").with_try_replace(1, 100, 110, "x");
+        assert!(d.apply_try_to("short").is_none());
     }
 }

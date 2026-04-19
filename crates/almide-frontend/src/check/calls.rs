@@ -25,6 +25,7 @@ pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
 impl Checker {
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
         let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
+        let callee_span_snapshot = callee.span;
         match &mut callee.kind {
             ExprKind::Ident { name, .. } => {
                 let name = name.clone();
@@ -33,7 +34,7 @@ impl Checker {
                 if self.env.lookup_var(&name).is_some() {
                     let _ = self.infer_expr(callee);
                 }
-                self.check_named_call_with_type_args(&name, &arg_tys, type_args)
+                self.check_named_call_spanned(&name, &arg_tys, type_args, callee_span_snapshot)
             }
             ExprKind::TypeName { name, .. } => {
                 if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
@@ -67,7 +68,14 @@ impl Checker {
             // Module call: string.trim(s), list.map(xs, f), etc.
             ExprKind::Member { object, field, .. } => {
                 // Try static resolution: module.func, alias.func, TypeName.method, codec.encode
-                if let Some(result) = self.resolve_static_member(object, field, &arg_tys) {
+                // Thread the callee's span so `E002` can emit a
+                // mechanically-applicable `try_replace` when the stdlib
+                // alias map supplies a clean rename target.
+                let prev = self.callee_span_hint.take();
+                self.callee_span_hint = callee_span_snapshot;
+                let resolved = self.resolve_static_member(object, field, &arg_tys);
+                self.callee_span_hint = prev;
+                if let Some(result) = resolved {
                     return result;
                 }
                 // UFCS method: obj.method(args) -> module.method(obj, args)
@@ -234,6 +242,25 @@ impl Checker {
         self.check_named_call_with_type_args(name, arg_tys, None)
     }
 
+    /// Like `check_named_call_with_type_args`, but also records the
+    /// callee's source span so `E002` can emit a mechanically-applicable
+    /// `try_replace` range when a rename suggestion is available.
+    /// Prefer this over the plain variant from call sites that have the
+    /// callee AST node in hand (`check_call_with_type_args` etc.).
+    pub(crate) fn check_named_call_spanned(
+        &mut self,
+        name: &str,
+        arg_tys: &[Ty],
+        type_args: Option<&[Ty]>,
+        callee_span: Option<ast::Span>,
+    ) -> Ty {
+        let prev = self.callee_span_hint.take();
+        self.callee_span_hint = callee_span;
+        let ty = self.check_named_call_with_type_args(name, arg_tys, type_args);
+        self.callee_span_hint = prev;
+        ty
+    }
+
     pub(crate) fn check_named_call_with_type_args(&mut self, name: &str, arg_tys: &[Ty], type_args: Option<&[Ty]>) -> Ty {
         // Try builtin resolution first
         if let Some(ty) = self.check_builtin_call(name, arg_tys) {
@@ -329,9 +356,19 @@ impl Checker {
             let mut diag = super::err(format!("undefined function '{}'", name), hint, format!("call to {}()", name)).with_code("E002");
             if let Some(rich) = rich_snippet {
                 diag = diag.with_try(rich.to_string());
-            } else if let Some(fix) = fix_name {
+            } else if let Some(fix) = &fix_name {
                 diag = diag.with_try(format!("// {wrong}(...)  →  {right}(...)\n{right}(...)", wrong = name, right = fix));
             }
+            // `try_replace` (Phase 3): populating this field requires the
+            // exact source span of the offending name. The current
+            // callee-span plumbing (`callee_span_hint`) resolves to the
+            // `.` token on Member calls — not the whole `object.field`
+            // range — so per-diagnostic migration waits on a parser-side
+            // span upgrade. The infrastructure (`with_try_replace`,
+            // `apply_try_to`, JSON emit, harness auto-apply) is in place
+            // so individual diagnostics can opt in once their spans are
+            // precise.
+            let _ = self.callee_span_hint;
             self.emit(diag);
             return Ty::Unknown;
         };

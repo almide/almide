@@ -116,13 +116,17 @@ pub fn to_json(d: &Diagnostic) -> String {
         ),
         None => "null".to_string(),
     };
+    let try_replace_json = match d.try_replace_span {
+        Some((l, c, e)) => format!(r#"{{"line":{},"col":{},"end_col":{}}}"#, l, c, e),
+        None => "null".to_string(),
+    };
     // Manual JSON to avoid serde dependency in this module
     format!(
-        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","here":{},"try":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
+        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","here":{},"try":{},"try_replace":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
         level, code,
         d.message.replace('"', r#"\""#).replace('\n', "\\n"),
         d.hint.replace('"', r#"\""#).replace('\n', "\\n"),
-        here_json, try_json,
+        here_json, try_json, try_replace_json,
         d.context.replace('"', r#"\""#),
         file.replace('"', r#"\""#),
         line, col, end_col, secondary,
