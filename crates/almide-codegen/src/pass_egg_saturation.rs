@@ -37,7 +37,11 @@ impl NanoPass for EggSaturationPass {
     fn targets(&self) -> Option<Vec<Target>> { None }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        let rules = almide_egg_lab::matrix_fusion_rules();
+        // Full rule set — list combinators + matrix. Using only
+        // `matrix_fusion_rules()` silently disabled the Stream fusion
+        // rewrites and was the source of the `snapshot_pipe_chain`
+        // regression on v1 of this pass.
+        let rules = almide_egg_lab::fusion_rules();
         let mut v = EggVisitor { rules: &rules, vt: &mut program.var_table, changed: false };
         for func in &mut program.functions {
             v.visit_expr_mut(&mut func.body);

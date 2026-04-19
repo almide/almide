@@ -827,8 +827,20 @@ fn lambda_ret_ty(expr: &IrExpr) -> Option<Ty> {
     }
 }
 
+use std::sync::atomic::{AtomicU64, Ordering};
+static EGG_FRESH_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Produce a uniquely-named `Sym` for lambda parameters synthesised
+/// during lower-time beta reduction. The codegen walker identifies
+/// variables by name (`var_table.get(id).name`), so two distinct
+/// `VarId`s with the same name collide into the same Rust binding —
+/// the Stage-1 `snapshot_pipe_chain` regression was caused by
+/// `compose_map_into_fold_fresh` allocating two params with the
+/// previous fixed name `__egg_v`. A process-local counter sidesteps
+/// the collision without needing walker changes.
 fn fresh_sym() -> Sym {
-    sym("__egg_v")
+    let n = EGG_FRESH_COUNTER.fetch_add(1, Ordering::Relaxed);
+    sym(&format!("__egg_v{n}"))
 }
 
 fn build_identity_lambda(elem_ty: Ty, vt: &mut VarTable) -> IrExpr {
@@ -956,42 +968,26 @@ fn binary_lambda_parts(
     Ok((*a_id, a_ty.clone(), *b_id, b_ty.clone(), body.as_ref()))
 }
 
-/// Compose map f into fold reducer g: λ(acc, x). g(acc, f(x)) with
-/// fresh VarIds. `f` is a unary lambda λy. f_body(y), `g` is a
-/// binary lambda λ(acc, elem). g_body(acc, elem).
+/// Compose map f into fold reducer g: λ(acc, x). g(acc, f(x)).
+/// Reuses the original `g`'s `acc` param VarId and `f`'s param VarId
+/// so that existing variable names (`acc`, `x`, …) round-trip
+/// through codegen. Substitutes `g`'s elem param with `f`'s body
+/// (re-written to use `f_param_id`). `f` is unary, `g` is binary.
 fn compose_map_into_fold_fresh(
     f: &IrExpr,
     g: &IrExpr,
-    vt: &mut VarTable,
+    _vt: &mut VarTable,
 ) -> Result<IrExpr, LowerError> {
     let (f_param_id, f_param_ty, f_body) = unary_lambda_parts(f)?;
     let (g_acc_id, g_acc_ty, g_elem_id, _g_elem_ty, g_body) = binary_lambda_parts(g)?;
 
-    let fresh_acc = vt.alloc(fresh_sym(), g_acc_ty.clone(), Mutability::Let, None);
-    let fresh_elem = vt.alloc(fresh_sym(), f_param_ty.clone(), Mutability::Let, None);
-    let fresh_elem_ref = IrExpr {
-        kind: IrExprKind::Var { id: fresh_elem },
-        ty: f_param_ty.clone(),
-        span: None,
-    };
-    let fresh_acc_ref = IrExpr {
-        kind: IrExprKind::Var { id: fresh_acc },
-        ty: g_acc_ty.clone(),
-        span: None,
-    };
-    // Substitute f's param to fresh_elem in f_body.
-    let f_body_fresh = substitute_var_in_expr(f_body, f_param_id, &fresh_elem_ref);
-    // Substitute g's elem param with f_body_fresh, and g's acc param
-    // with fresh_acc_ref.
-    let g_body_fresh = substitute_var_in_expr(g_body, g_acc_id, &fresh_acc_ref);
-    let composed_body = substitute_var_in_expr(&g_body_fresh, g_elem_id, &f_body_fresh);
-
+    let composed_body = substitute_var_in_expr(g_body, g_elem_id, f_body);
     let ret_ty = composed_body.ty.clone();
     Ok(IrExpr {
         kind: IrExprKind::Lambda {
             params: vec![
-                (fresh_acc, g_acc_ty.clone()),
-                (fresh_elem, f_param_ty.clone()),
+                (g_acc_id, g_acc_ty.clone()),
+                (f_param_id, f_param_ty.clone()),
             ],
             body: Box::new(composed_body),
             lambda_id: None,
@@ -1005,24 +1001,16 @@ fn compose_map_into_fold_fresh(
 }
 
 /// Compose two flat_map functions: λx. list.flat_map(f(x), g). `f`
-/// is unary (x → List[U]), `g` is unary (U → List[V]); the composed
-/// lambda returns List[V].
+/// is unary (x → List[U]), `g` is unary (U → List[V]). Reuses `f`'s
+/// param VarId so the generated binding keeps its original name.
 fn compose_flatmaps_fresh(
     f: &IrExpr,
     g: &IrExpr,
-    vt: &mut VarTable,
+    _vt: &mut VarTable,
 ) -> Result<IrExpr, LowerError> {
     let (f_param_id, f_param_ty, f_body) = unary_lambda_parts(f)?;
     let g_ty = g.ty.clone();
     let g_ret = lambda_ret_ty(g).unwrap_or_else(|| g_ty.clone());
-
-    let fresh = vt.alloc(fresh_sym(), f_param_ty.clone(), Mutability::Let, None);
-    let fresh_ref = IrExpr {
-        kind: IrExprKind::Var { id: fresh },
-        ty: f_param_ty.clone(),
-        span: None,
-    };
-    let f_body_fresh = substitute_var_in_expr(f_body, f_param_id, &fresh_ref);
 
     let inner_call = IrExpr {
         kind: IrExprKind::Call {
@@ -1030,7 +1018,7 @@ fn compose_flatmaps_fresh(
                 module: sym("list"),
                 func: sym("flat_map"),
             },
-            args: vec![f_body_fresh, g.clone()],
+            args: vec![f_body.clone(), g.clone()],
             type_args: vec![],
         },
         ty: g_ret.clone(),
@@ -1039,7 +1027,7 @@ fn compose_flatmaps_fresh(
 
     Ok(IrExpr {
         kind: IrExprKind::Lambda {
-            params: vec![(fresh, f_param_ty.clone())],
+            params: vec![(f_param_id, f_param_ty.clone())],
             body: Box::new(inner_call),
             lambda_id: None,
         },
@@ -1053,29 +1041,22 @@ fn compose_flatmaps_fresh(
 
 /// Compose map f and filter p into a filter_map lambda:
 ///   λx. if p(f(x)) then some(f(x)) else none
+/// Reuses `f`'s param VarId as the outer lambda param.
 fn compose_map_filter_fresh(
     f: &IrExpr,
     p: &IrExpr,
-    vt: &mut VarTable,
+    _vt: &mut VarTable,
 ) -> Result<IrExpr, LowerError> {
     let (f_param_id, f_param_ty, f_body) = unary_lambda_parts(f)?;
     let (p_param_id, _p_param_ty, p_body) = unary_lambda_parts(p)?;
 
-    let fresh = vt.alloc(fresh_sym(), f_param_ty.clone(), Mutability::Let, None);
-    let fresh_ref = IrExpr {
-        kind: IrExprKind::Var { id: fresh },
-        ty: f_param_ty.clone(),
-        span: None,
-    };
-    let f_body_fresh = substitute_var_in_expr(f_body, f_param_id, &fresh_ref);
-    let p_applied = substitute_var_in_expr(p_body, p_param_id, &f_body_fresh);
-
-    let result_ty = f_body_fresh.ty.clone();
+    let p_applied = substitute_var_in_expr(p_body, p_param_id, f_body);
+    let result_ty = f_body.ty.clone();
     let composed_body = IrExpr {
         kind: IrExprKind::If {
             cond: Box::new(p_applied),
             then: Box::new(IrExpr {
-                kind: IrExprKind::OptionSome { expr: Box::new(f_body_fresh.clone()) },
+                kind: IrExprKind::OptionSome { expr: Box::new(f_body.clone()) },
                 ty: Ty::option(result_ty.clone()),
                 span: None,
             }),
@@ -1091,7 +1072,7 @@ fn compose_map_filter_fresh(
 
     Ok(IrExpr {
         kind: IrExprKind::Lambda {
-            params: vec![(fresh, f_param_ty.clone())],
+            params: vec![(f_param_id, f_param_ty.clone())],
             body: Box::new(composed_body),
             lambda_id: None,
         },
@@ -1106,59 +1087,37 @@ fn compose_map_filter_fresh(
 /// Compose filter_map lambda into fold reducer: produce
 ///   λ(acc, x). match fm(x) { some(y) ⇒ g(acc, y), none ⇒ acc }
 /// `fm` is unary (x → Option[U]), `g` is binary (acc, U → acc').
+/// Reuses `g.acc`, `fm.param`, and `g.elem` VarIds.
 fn compose_filter_map_into_fold_fresh(
     fm: &IrExpr,
     g: &IrExpr,
-    vt: &mut VarTable,
+    _vt: &mut VarTable,
 ) -> Result<IrExpr, LowerError> {
     let (fm_param_id, fm_param_ty, fm_body) = unary_lambda_parts(fm)?;
     let (g_acc_id, g_acc_ty, g_elem_id, g_elem_ty, g_body) = binary_lambda_parts(g)?;
 
-    // Fresh VarIds for the composed reducer params + the pattern
-    // bind in the `some` arm.
-    let fresh_acc = vt.alloc(fresh_sym(), g_acc_ty.clone(), Mutability::Let, None);
-    let fresh_elem = vt.alloc(fresh_sym(), fm_param_ty.clone(), Mutability::Let, None);
-    let fresh_y = vt.alloc(fresh_sym(), g_elem_ty.clone(), Mutability::Let, None);
-
-    let fresh_acc_ref = IrExpr {
-        kind: IrExprKind::Var { id: fresh_acc },
+    let acc_ref = IrExpr {
+        kind: IrExprKind::Var { id: g_acc_id },
         ty: g_acc_ty.clone(),
         span: None,
     };
-    let fresh_elem_ref = IrExpr {
-        kind: IrExprKind::Var { id: fresh_elem },
-        ty: fm_param_ty.clone(),
-        span: None,
-    };
-    let fresh_y_ref = IrExpr {
-        kind: IrExprKind::Var { id: fresh_y },
-        ty: g_elem_ty.clone(),
-        span: None,
-    };
-
-    // fm(fresh_elem) — subject of the match.
-    let fm_body_fresh = substitute_var_in_expr(fm_body, fm_param_id, &fresh_elem_ref);
-
-    // some(y) arm body = g(fresh_acc, fresh_y)
-    let g_with_acc = substitute_var_in_expr(g_body, g_acc_id, &fresh_acc_ref);
-    let some_arm_body = substitute_var_in_expr(&g_with_acc, g_elem_id, &fresh_y_ref);
 
     use almide_ir::{IrMatchArm, IrPattern};
     let some_arm = IrMatchArm {
         pattern: IrPattern::Some {
-            inner: Box::new(IrPattern::Bind { var: fresh_y, ty: g_elem_ty.clone() }),
+            inner: Box::new(IrPattern::Bind { var: g_elem_id, ty: g_elem_ty.clone() }),
         },
         guard: None,
-        body: some_arm_body,
+        body: g_body.clone(),
     };
     let none_arm = IrMatchArm {
         pattern: IrPattern::None,
         guard: None,
-        body: fresh_acc_ref.clone(),
+        body: acc_ref,
     };
     let match_expr = IrExpr {
         kind: IrExprKind::Match {
-            subject: Box::new(fm_body_fresh),
+            subject: Box::new(fm_body.clone()),
             arms: vec![some_arm, none_arm],
         },
         ty: g_acc_ty.clone(),
@@ -1168,8 +1127,8 @@ fn compose_filter_map_into_fold_fresh(
     Ok(IrExpr {
         kind: IrExprKind::Lambda {
             params: vec![
-                (fresh_acc, g_acc_ty.clone()),
-                (fresh_elem, fm_param_ty.clone()),
+                (g_acc_id, g_acc_ty.clone()),
+                (fm_param_id, fm_param_ty.clone()),
             ],
             body: Box::new(match_expr),
             lambda_id: None,
