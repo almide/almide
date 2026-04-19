@@ -1,5 +1,10 @@
 <!-- description: WASM codegen redesign toward declarative dispatch and explicit symbol resolution -->
+<!-- done: 2026-04-19 -->
 # Codegen Ideal Form
+
+> **Arc status (2026-04-19): CLOSED.** All seven items landed or split into
+> their own arcs. See "Final status" below for per-item landing and the
+> outstanding follow-ups that were deliberately scoped out.
 
 v0.13 シリーズで継ぎ足した codegen を、**理想形**に向けて段階的にリファクタする。今回の nn/WASM 対応で表面化したバグ群 (型解決の散逸、test関数の name衝突、lifted closure の var_table 混線、stdlib emit の `list_elem_ty` 20箇所バグ) は、すべて**設計レベルの腐り**が根本原因。
 
@@ -396,3 +401,50 @@ target に対して discover するだけになる)。
 - 新 stdlib fn 追加は Phase 3 では行わない (infra 完成まで待つ)
 - 語彙追加 (UFCS / ? chain の拡張候補) は 0.15 以降に後送り
 - dojo task bank 拡張は dojo チーム側で並行
+
+---
+
+## Final status (2026-04-19)
+
+| # | Item | Status | Landed |
+|---|---|---|---|
+| #1 | Resolve-calls independent pass | **done** | v0.14.7-phase3.5 (PR #202) |
+| #2 | Stdlib declarative dispatch | **split** | → `active/stdlib-declarative-unification.md` |
+| #3 | `IrMutVisitor` | **done** | phase 1a (2026-04-13) |
+| #4 | ConcretizeTypes hard postcondition | **done** | v0.14.7-phase3.2 (PR #199) |
+| #5 | VarTable unification | **done** | commit `ba50fd7b` → `done/var-table-unification.md` |
+| #6 | Test namespace normalization | **done** | commit `496c51e4` |
+| #7 | `emit_stub_call` removal | **done** | v0.14.7-phase3.3 |
+
+`#2` remains the only outstanding item — it was rescoped because the
+dispatch layer deduplication finished here, but the definition layer
+(TOML + `runtime/rs` + `emit_wasm/calls_*.rs`) is still triple-written
+and that work lives in its own arc.
+
+### What this arc actually shipped
+
+- **Call resolution is a pass**, not emit-time guessing. Compile-time
+  ICE on unresolved calls; `emit_stub_call_*` helpers are deleted;
+  each WASM dispatcher fallback is an inline `panic!("[ICE] ...")`
+  that the spec sweeps have proven unreachable.
+- **`expr.ty` is trustworthy by contract.** `ConcretizeTypes` is a
+  hard postcondition. Emit-time type re-derivation (`resolve_expr_ty`
+  / `resolve_list_elem`'s 4-segment fallback) is deleted. Debug
+  builds panic on any residual `Unknown`; release emits a diagnostic.
+- **`IrMutVisitor`** lets VarId-rewriting passes be 30 lines instead
+  of 200, and new IR variants don't break downstream passes silently.
+- **Test blocks carry `TEST_NAME_PREFIX` upstream** — no more per-site
+  `if is_test { format!("__test_…") }` name-collision guards in
+  walker / emit_wasm.
+- **VarTables are unified** — `IrModule.var_table` is drained into
+  `IrProgram.var_table` by the first codegen pass. The name-keyed
+  `top_let_globals_by_name` mirror is now a backup rather than the
+  primary cross-module lookup.
+
+### Follow-ups (not part of this arc)
+
+- `active/stdlib-declarative-unification.md` — definition-layer
+  triple-write removal.
+- `active/mlir-backend-adoption.md` — egg + MLIR compiler-world arc.
+- `active/dispatch-unification-plan.md` — unifying the Rust and WASM
+  stdlib dispatch entries.
