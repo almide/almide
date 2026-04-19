@@ -6,7 +6,7 @@
 
 ## Active
 
-29 items
+28 items
 
 | Item | Description |
 |------|-------------|
@@ -14,7 +14,6 @@
 | [Almide Dojo — Continuous MSR Measurement](active/almide-dojo.md) | Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration |
 | [bytes: unify bounds-check semantics](active/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
 | [Codegen Ideal Form](active/codegen-ideal-form.md) | WASM codegen redesign toward declarative dispatch and explicit symbol resolution |
-| [Compiler Version Pin](active/compiler-version-pin.md) | minimum compiler version pinning in almide.toml (Cargo rust-version style) |
 | [Unify Diagnostic Emission with Docs](active/diagnostic-emit-doc-unification.md) | Unify diagnostic emission sites with their docs/diagnostics/*.md files |
 | [Externalize `try:` Snippets from Rust Literals](active/diagnostic-snippet-externalization.md) | Move try: snippet text out of Rust literals into stdlib/diagnostics/*.almd |
 | [Diagnostics: Here / Try / Hint Format](active/diagnostics-here-try-hint.md) | Standardize diagnostics to Here/Try/Hint three-part format with CI-verified hint correctness |
@@ -75,13 +74,14 @@
 
 ## Done
 
-210 items
+211 items
 
 <details>
-<summary>Show all 210 completed items</summary>
+<summary>Show all 211 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-04-19 | [Compiler Version Pin](done/compiler-version-pin.md) | minimum compiler version pinning in almide.toml (Cargo rust-version style) |
 | 2026-04-19 | [`cargo test --all` Cache Race](done/cargo-test-cache-race.md) | Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures |
 | 2026-04-17 | [Option/Result Bundled `.almd` — Not Cosmetic After All](done/option-result-bundled-cleanup.md) | Bundled option/result are signature-override layer; pick a path to consolidate |
 | 2026-04-17 | [Bundled-Almide Stdlib — Ideal Form](done/bundled-almide-ideal-form.md) | Ideal form for bundled-Almide stdlib: one dispatch path, no patch-layer special cases |

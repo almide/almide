@@ -288,6 +288,11 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         None
     };
 
+    if let Some(ref proj) = parsed_project {
+        project::check_compiler_version(proj)
+            .map_err(|e| { eprintln!("{}", e); e })?;
+    }
+
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if let Some(ref proj) = parsed_project {
         project_fetch::fetch_all_deps(proj)
             .map_err(|e| { eprintln!("{}", e); e.to_string() })?

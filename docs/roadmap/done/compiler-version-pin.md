@@ -1,4 +1,5 @@
 <!-- description: minimum compiler version pinning in almide.toml (Cargo rust-version style) -->
+<!-- done: 2026-04-19 -->
 # Compiler Version Pin
 
 ## Current State
@@ -136,3 +137,13 @@ fn version_satisfies(installed: &str, required: &str) -> bool {
 - [ ] フィールド省略時は後方互換でチェックスキップ
 - [ ] テストカバレッジ
 - [ ] obsid に `almide = "0.13.2"` を追加して動作確認
+
+---
+
+## Resolution (2026-04-19)
+
+- `[package].almide` field parsed into `Package::almide_min: Option<String>`.
+- `project::check_compiler_version` uses `semver` crate (`>=` range).
+- Check fires in `try_compile_with_ir` (single choke point for run/build/check/test).
+- `ALMIDE_SKIP_VERSION_CHECK=1` bypasses; omitted field is a no-op.
+- 7 cases covered in `tests/version_pin_test.rs`.

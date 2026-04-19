@@ -50,6 +50,9 @@ pub struct FetchedDep {
 pub struct Package {
     pub name: String,
     pub version: String,
+    /// Minimum compiler version required (Cargo `rust-version` style).
+    /// `None` = no check (backward compatible).
+    pub almide_min: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +90,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
 
     let mut name = String::new();
     let mut version = "0.1.0".to_string();
+    let mut almide_min: Option<String> = None;
     let mut deps: Vec<Dependency> = Vec::new();
     let mut permissions: Vec<String> = Vec::new();
     let mut native_deps: Vec<NativeDep> = Vec::new();
@@ -117,6 +121,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
                     match key {
                         "name" => name = val,
                         "version" => version = val,
+                        "almide" => almide_min = Some(val),
                         _ => {}
                     }
                 }
@@ -149,11 +154,33 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     }
 
     Ok(Project {
-        package: Package { name, version },
+        package: Package { name, version, almide_min },
         dependencies: deps,
         permissions,
         native_deps,
     })
+}
+
+/// Verify the installed compiler satisfies the package's minimum version.
+/// Returns `Err` with a human-readable message when the pin is violated.
+/// `ALMIDE_SKIP_VERSION_CHECK=1` bypasses the check.
+pub fn check_compiler_version(project: &Project) -> Result<(), String> {
+    let Some(required) = project.package.almide_min.as_deref() else { return Ok(()); };
+    if std::env::var("ALMIDE_SKIP_VERSION_CHECK").is_ok() { return Ok(()); }
+    let installed = env!("CARGO_PKG_VERSION");
+    let req = semver::VersionReq::parse(&format!(">={}", required))
+        .map_err(|e| format!(
+            "invalid `almide` version pin '{}' in almide.toml [package]: {}",
+            required, e
+        ))?;
+    let have = semver::Version::parse(installed)
+        .map_err(|e| format!("internal: installed version '{}' unparseable: {}", installed, e))?;
+    if req.matches(&have) { return Ok(()); }
+    Err(format!(
+        "package '{}' requires almide >= {}\n  installed version: {}\n  run 'almide self-update' to update, \
+         or set ALMIDE_SKIP_VERSION_CHECK=1 to bypass",
+        project.package.name, required, installed
+    ))
 }
 
 fn parse_kv(line: &str) -> Option<(&str, String)> {
