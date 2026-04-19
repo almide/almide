@@ -264,6 +264,22 @@ impl Bridge {
             | AlmideExpr::AndPred(_) => Err(LowerError::UnexpectedNode(
                 "lambda-position marker in expression position".into(),
             )),
+            // Matrix variants are outside this bridge's scope — the
+            // list-bridge rules never emit them. A matrix lowering
+            // bridge will land in Stage 1 proper; until then, seeing
+            // one here is a programmer error.
+            AlmideExpr::MatrixMul(_) | AlmideExpr::MatrixAdd(_)
+            | AlmideExpr::MatrixScale(_) | AlmideExpr::MatrixGelu(_)
+            | AlmideExpr::MatrixSoftmaxRows(_) | AlmideExpr::MatrixLinearRow(_)
+            | AlmideExpr::MatrixLayerNormRows(_)
+            | AlmideExpr::MatrixFusedGemmBiasScaleGelu(_)
+            | AlmideExpr::MatrixAttentionWeights(_)
+            | AlmideExpr::MatrixScaledDotProductAttention(_)
+            | AlmideExpr::MatrixPreNormLinear(_)
+            | AlmideExpr::MatrixLinearRowGelu(_)
+            | AlmideExpr::MatrixMulScaled(_) => Err(LowerError::UnexpectedNode(
+                "matrix node reached list bridge (Stage-1 matrix lowering pending)".into(),
+            )),
         }
     }
 
@@ -345,6 +361,18 @@ impl Bridge {
                     "non-lambda node in lambda position".into(),
                 ))
             }
+            AlmideExpr::MatrixMul(_) | AlmideExpr::MatrixAdd(_)
+            | AlmideExpr::MatrixScale(_) | AlmideExpr::MatrixGelu(_)
+            | AlmideExpr::MatrixSoftmaxRows(_) | AlmideExpr::MatrixLinearRow(_)
+            | AlmideExpr::MatrixLayerNormRows(_)
+            | AlmideExpr::MatrixFusedGemmBiasScaleGelu(_)
+            | AlmideExpr::MatrixAttentionWeights(_)
+            | AlmideExpr::MatrixScaledDotProductAttention(_)
+            | AlmideExpr::MatrixPreNormLinear(_)
+            | AlmideExpr::MatrixLinearRowGelu(_)
+            | AlmideExpr::MatrixMulScaled(_) => Err(LowerError::UnexpectedNode(
+                "matrix node in lambda position".into(),
+            )),
         }
     }
 

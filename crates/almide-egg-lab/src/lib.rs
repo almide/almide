@@ -33,50 +33,62 @@ pub use bridge::{Bridge, LowerError};
 define_language! {
     /// Minimal Almide IR fragment for fusion experiments.
     ///
-    /// `map`, `filter`, `fold` are modeled as loop-bearing ops (high
-    /// cost). `compose` / `and-pred` are zero-cost markers that stand
-    /// in for "the optimizer has fused two stages into one body"
-    /// without actually rebuilding the lambda.
+    /// Three ledgers share the language:
+    /// - **List combinators** — `map` / `filter` / `fold` + fusion
+    ///   markers (`compose` / `and-pred`). Original feasibility PoC.
+    /// - **Matrix atomic ops** — direct counterparts of the stdlib
+    ///   `matrix.<op>` intrinsics. Op names use underscores here
+    ///   (`matrix_mul`) because egg's S-expr tokenizer reads `.` as a
+    ///   separator; the buildscript that translates `@rewrite` from
+    ///   stdlib will perform the `matrix.mul` → `matrix_mul` rename.
+    /// - **Matrix fused ops** — one variant per `@rewrite` RHS. Cost
+    ///   function treats these as cheaper than the unfused chain so
+    ///   equality saturation picks them.
     ///
-    /// Atoms (`xs`, `identity`, variable names) are represented as
-    /// the default `Symbol` variant. Named lambda references use the
-    /// unary `(lam f)` form, where `f` is itself a `Symbol` node.
+    /// Atoms (`xs`, `identity`, capture names) use the default
+    /// `Symbol` variant.
     pub enum AlmideExpr {
         // ── Numeric literal ───────────────────────────────────────
         Num(i64),
 
-        // ── List combinators (each represents one traversal) ──────
-        "map" = Map([Id; 2]),        // (map xs f)
-        "filter" = Filter([Id; 2]),  // (filter xs p)
-        "fold" = Fold([Id; 3]),      // (fold xs init f)
+        // ── List combinators ──────────────────────────────────────
+        "map" = Map([Id; 2]),
+        "filter" = Filter([Id; 2]),
+        "fold" = Fold([Id; 3]),
 
-        // ── Lambda reference ──────────────────────────────────────
-        // `(lam f)` — opaque reference to a lambda named `f`. In a
-        // real lowering these would be IrExpr::Lambda nodes; the PoC
-        // treats them as atoms keyed by their Symbol payload.
         "lam" = Lam([Id; 1]),
-
-        // ── Fusion markers (zero-cost pseudo-ops) ─────────────────
-        // `(compose g f)` means `λx. g(f(x))`. A later pass would
-        // replace this with a real lambda IR node.
         "compose" = Compose([Id; 2]),
-        // `(and-pred p q)` means `λx. p(x) and q(x)`.
         "and-pred" = AndPred([Id; 2]),
 
-        // ── Default variant ───────────────────────────────────────
-        // Any bare atom: variable name (`xs`), lambda marker
-        // (`identity`), user-supplied fn symbol (`f`, `g`, `p`).
+        // ── Matrix atomic ops (LHS of fusion rules) ───────────────
+        "matrix_mul" = MatrixMul([Id; 2]),
+        "matrix_add" = MatrixAdd([Id; 2]),
+        "matrix_scale" = MatrixScale([Id; 2]),
+        "matrix_gelu" = MatrixGelu([Id; 1]),
+        "matrix_softmax_rows" = MatrixSoftmaxRows([Id; 1]),
+        "matrix_linear_row" = MatrixLinearRow([Id; 3]),
+        "matrix_layer_norm_rows" = MatrixLayerNormRows([Id; 4]),
+
+        // ── Matrix fused targets (RHS of fusion rules) ────────────
+        "matrix_fused_gemm_bias_scale_gelu" = MatrixFusedGemmBiasScaleGelu([Id; 4]),
+        "matrix_attention_weights" = MatrixAttentionWeights([Id; 3]),
+        "matrix_scaled_dot_product_attention" = MatrixScaledDotProductAttention([Id; 4]),
+        "matrix_pre_norm_linear" = MatrixPreNormLinear([Id; 6]),
+        "matrix_linear_row_gelu" = MatrixLinearRowGelu([Id; 3]),
+        "matrix_mul_scaled" = MatrixMulScaled([Id; 3]),
+
+        // ── Default variant (atoms, identifiers) ──────────────────
         Symbol(Symbol),
     }
 }
 
-/// Rewrite rules mirroring the behavior of the imperative
-/// `pass_stream_fusion` in `almide-codegen`.
+/// List fusion rules (the original feasibility PoC).
 ///
 /// These three are the minimum needed to demonstrate that egg
-/// subsumes the existing fusion logic. Adding more (`map_fold`,
-/// `flatmap_flatmap`, `filter_map_fold`, …) follows the same shape.
-pub fn fusion_rules() -> Vec<Rewrite<AlmideExpr, ()>> {
+/// subsumes the existing imperative `pass_stream_fusion`. Adding
+/// more (`map_fold`, `flatmap_flatmap`, `filter_map_fold`, …) follows
+/// the same shape.
+pub fn list_fusion_rules() -> Vec<Rewrite<AlmideExpr, ()>> {
     vec![
         // FunctorIdentity: map(xs, (x => x)) ≡ xs
         rewrite!("identity-map"; "(map ?xs identity)" => "?xs"),
@@ -91,6 +103,57 @@ pub fn fusion_rules() -> Vec<Rewrite<AlmideExpr, ()>> {
             "(filter (filter ?xs ?p) ?q)"
             => "(filter ?xs (and-pred ?p ?q))"),
     ]
+}
+
+/// Matrix fusion rules — direct egg transcription of the seven
+/// `@rewrite` attributes currently living in `stdlib/matrix.almd`.
+/// When Stage 1's buildscript-to-egg emitter lands, this table will
+/// be **generated** from those same attributes (one of the PR #215
+/// skeleton's payoffs).
+///
+/// Names match the `name = "..."` arg on each stdlib attribute so
+/// that future regression tooling can pair egg vs imperative firings
+/// by rule name.
+pub fn matrix_fusion_rules() -> Vec<Rewrite<AlmideExpr, ()>> {
+    vec![
+        rewrite!("gemm_bias_scale_gelu";
+            "(matrix_gelu (matrix_scale (matrix_add (matrix_mul ?a ?b) ?bias) ?alpha))"
+            => "(matrix_fused_gemm_bias_scale_gelu ?a ?b ?bias ?alpha)"),
+
+        rewrite!("attention_weights";
+            "(matrix_softmax_rows (matrix_scale (matrix_mul ?q ?kt) ?scale))"
+            => "(matrix_attention_weights ?q ?kt ?scale)"),
+
+        rewrite!("scaled_dot_product_attention";
+            "(matrix_mul (matrix_attention_weights ?q ?kt ?scale) ?v)"
+            => "(matrix_scaled_dot_product_attention ?q ?kt ?v ?scale)"),
+
+        rewrite!("pre_norm_linear";
+            "(matrix_linear_row (matrix_layer_norm_rows ?x ?gamma ?beta ?eps) ?w ?bias)"
+            => "(matrix_pre_norm_linear ?x ?gamma ?beta ?eps ?w ?bias)"),
+
+        rewrite!("linear_row_gelu";
+            "(matrix_gelu (matrix_linear_row ?x ?w ?bias))"
+            => "(matrix_linear_row_gelu ?x ?w ?bias)"),
+
+        rewrite!("mul_scaled_rhs";
+            "(matrix_mul ?a (matrix_scale ?b ?s))"
+            => "(matrix_mul_scaled ?a ?s ?b)"),
+
+        rewrite!("mul_scaled_lhs";
+            "(matrix_mul (matrix_scale ?a ?s) ?b)"
+            => "(matrix_mul_scaled ?a ?s ?b)"),
+    ]
+}
+
+/// All rules usable by the saturator. Call sites that only need the
+/// list fragment (existing bridge tests) can still use
+/// `list_fusion_rules()` directly; callers that expect mixed
+/// expressions use this union.
+pub fn fusion_rules() -> Vec<Rewrite<AlmideExpr, ()>> {
+    let mut rules = list_fusion_rules();
+    rules.extend(matrix_fusion_rules());
+    rules
 }
 
 /// Cost function that reflects Almide's real target preference:
@@ -109,10 +172,36 @@ impl CostFunction<AlmideExpr> for FusionCost {
     where
         C: FnMut(Id) -> u64,
     {
+        // Rough cost model:
+        //   - List loop-bearing ops (map/filter/fold): 100 each — one
+        //     traversal per node.
+        //   - Matrix atomic ops: 200 each. Bigger than list loops
+        //     because each stems from a BLAS call or a full matrix
+        //     allocation; fusion avoiding even one of these is worth
+        //     dozens of scalar ops.
+        //   - Fused matrix ops: 110 each. One BLAS call + in-place
+        //     post-pass. Cheaper than the ~4-op chain it replaces
+        //     (the 4-op gemm_bias_scale_gelu chain = 4×200 = 800)
+        //     so extraction always prefers the fused form.
+        //   - Fusion markers (compose / and-pred / lam): 1. Bookkeeping.
+        //   - Atoms (Num / Symbol): 1.
         let self_cost: u64 = match enode {
             AlmideExpr::Map(_) | AlmideExpr::Filter(_) | AlmideExpr::Fold(_) => 100,
-            AlmideExpr::Compose(_) | AlmideExpr::AndPred(_) => 1,
-            _ => 1,
+
+            AlmideExpr::MatrixMul(_) | AlmideExpr::MatrixAdd(_)
+            | AlmideExpr::MatrixScale(_) | AlmideExpr::MatrixGelu(_)
+            | AlmideExpr::MatrixSoftmaxRows(_) | AlmideExpr::MatrixLinearRow(_)
+            | AlmideExpr::MatrixLayerNormRows(_) => 200,
+
+            AlmideExpr::MatrixFusedGemmBiasScaleGelu(_)
+            | AlmideExpr::MatrixAttentionWeights(_)
+            | AlmideExpr::MatrixScaledDotProductAttention(_)
+            | AlmideExpr::MatrixPreNormLinear(_)
+            | AlmideExpr::MatrixLinearRowGelu(_)
+            | AlmideExpr::MatrixMulScaled(_) => 110,
+
+            AlmideExpr::Compose(_) | AlmideExpr::AndPred(_) | AlmideExpr::Lam(_) => 1,
+            AlmideExpr::Num(_) | AlmideExpr::Symbol(_) => 1,
         };
         enode.fold(self_cost, |acc, id| acc.saturating_add(costs(id)))
     }
@@ -208,5 +297,99 @@ mod tests {
     fn identity_inside_map_chain_eliminates() {
         let (best, _) = optimize("(map (map xs identity) (lam f))");
         assert_eq!(best.to_string(), "(map xs (lam f))");
+    }
+
+    // ── Matrix fusion rules (Stage 1 skeleton) ────────────────────
+    //
+    // Each `@rewrite` attribute currently driving the imperative
+    // `MatrixFusionPass` has a matching egg `rewrite!` in
+    // `matrix_fusion_rules()`. The tests below prove saturation
+    // reaches the fused form from the unfused chain for every rule,
+    // which is the go-signal for migrating the pass to egg.
+
+    #[test]
+    fn matrix_gemm_bias_scale_gelu_fuses() {
+        let (best, _) = optimize(
+            "(matrix_gelu (matrix_scale (matrix_add (matrix_mul a b) bias) alpha))"
+        );
+        assert_eq!(
+            best.to_string(),
+            "(matrix_fused_gemm_bias_scale_gelu a b bias alpha)"
+        );
+    }
+
+    #[test]
+    fn matrix_attention_weights_fuses() {
+        let (best, _) = optimize(
+            "(matrix_softmax_rows (matrix_scale (matrix_mul q kt) scale))"
+        );
+        assert_eq!(
+            best.to_string(),
+            "(matrix_attention_weights q kt scale)"
+        );
+    }
+
+    /// Scaled dot-product attention. The outer rule depends on the
+    /// inner `attention_weights` fusion having already fired — this
+    /// is where phase-order-free saturation shines: both rewrites
+    /// live in the same e-graph and extraction picks the cheapest
+    /// form without us sequencing them manually.
+    #[test]
+    fn matrix_sdpa_fuses_through_intermediate() {
+        let (best, _) = optimize(
+            "(matrix_mul \
+                (matrix_softmax_rows (matrix_scale (matrix_mul q kt) scale)) \
+                v)"
+        );
+        assert_eq!(
+            best.to_string(),
+            "(matrix_scaled_dot_product_attention q kt v scale)"
+        );
+    }
+
+    #[test]
+    fn matrix_pre_norm_linear_fuses() {
+        let (best, _) = optimize(
+            "(matrix_linear_row \
+                (matrix_layer_norm_rows x gamma beta eps) \
+                w bias)"
+        );
+        assert_eq!(
+            best.to_string(),
+            "(matrix_pre_norm_linear x gamma beta eps w bias)"
+        );
+    }
+
+    #[test]
+    fn matrix_linear_row_gelu_fuses() {
+        let (best, _) = optimize(
+            "(matrix_gelu (matrix_linear_row x w bias))"
+        );
+        assert_eq!(
+            best.to_string(),
+            "(matrix_linear_row_gelu x w bias)"
+        );
+    }
+
+    #[test]
+    fn matrix_mul_scaled_rhs_fuses() {
+        let (best, _) = optimize(
+            "(matrix_mul a (matrix_scale b s))"
+        );
+        assert_eq!(
+            best.to_string(),
+            "(matrix_mul_scaled a s b)"
+        );
+    }
+
+    #[test]
+    fn matrix_mul_scaled_lhs_fuses() {
+        let (best, _) = optimize(
+            "(matrix_mul (matrix_scale a s) b)"
+        );
+        assert_eq!(
+            best.to_string(),
+            "(matrix_mul_scaled a s b)"
+        );
     }
 }
