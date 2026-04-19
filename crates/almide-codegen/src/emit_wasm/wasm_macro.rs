@@ -133,6 +133,12 @@ macro_rules! wasm {
         }));
         wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, i32_load8_s($off:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32Load8S(wasm_encoder::MemArg {
+            offset: $off as u64, align: 0, memory_index: 0,
+        }));
+        wasm!(@emit $f, $($rest)*)
+    };
 
     // ── Memory (i64) ──
     (@emit $f:expr, i64_load($off:expr, $mem:expr); $($rest:tt)*) => {

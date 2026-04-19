@@ -1,5 +1,25 @@
 <!-- description: Unify Rust + WASM stdlib dispatch via IR-level RuntimeCall; attributes become sugar -->
+<!-- done: 2026-04-19 -->
 # Dispatch Unification Plan (S3 Phase 1e)
+
+## Completion status (2026-04-19)
+
+全 sub-commit landed。Option 3 (理想形) 到達:
+
+- **1e-1** (parser + docs): landed — `Attribute` の既存 generic 構造で `@intrinsic("sym")` は最初から受理されていた。
+- **1e-2** (`IrExprKind::RuntimeCall` + `IntrinsicLoweringPass`): landed — `pass_intrinsic_lowering.rs` で `@intrinsic` Module call を `RuntimeCall { symbol, args }` に rewrite。borrow decoration は `pass_borrow_inference::intrinsic_borrow_mode` が param 型から自動導出。
+- **1e-3** (env / int simple 移行): landed — `env` と `int` の single-runtime-call 系は `@intrinsic`。
+- **1e-4+** (L1/L2 モジュール順次移行): landed — `Stdlib Declarative Unification` arc (commit 49d341f6) で list / map / option / result / random / regex / testing / matrix / http / json / datetime / fs / process / io / bytes / float / base64 / hex / string / error + sized type module 全 8 ファイルまで貫通。
+- **1e-last** (`@inline_rust` deprecate): landed — PR 49d341f6 で stdlib から `^@inline_rust` 宣言ゼロ到達。`@inline_rust` 機能自体は escape hatch として残すが、stdlib は使わない。
+
+**Net outcome:**
+- `calls_<m>.rs` の L0-L1 dispatch arm は大幅削減
+- Rust / WASM は `RuntimeCall { symbol, args }` を共通 IR node として消費
+- MLIR arc / egg arc が `RuntimeCall` を MLIR Op / e-graph node に 1-to-1 で写像可能
+
+**Relationship to:** `stdlib-declarative-unification.md` (already done, 2026-04-19) — 本 arc の適用先。
+
+## Original plan (retained for history)
 
 > **立ち位置**: `codegen-ideal-form.md §Phase 3 Arc Step S3` の Phase 1e 設計。
 > Phase 1b (bundled → Named rewrite)、Phase 1c (stub panic 化)、Phase 1d

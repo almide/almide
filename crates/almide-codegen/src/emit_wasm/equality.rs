@@ -552,34 +552,43 @@ impl FuncCompiler<'_> {
 
     /// Emit a store instruction for a value at base_ptr + offset.
     /// Assumes base_ptr is already on stack, followed by the value.
+    ///
+    /// Narrow Almide sized types (Int8/Int16/UInt8/UInt16) ride in the
+    /// WASM i32 bucket but occupy 1 or 2 bytes on the heap — we emit
+    /// the width-matching `i32.store8` / `i32.store16` so adjacent
+    /// fields don't overwrite. Same story for `i64.store8` / `_16` /
+    /// `_32` on Int64 narrow writes (future path).
     pub fn emit_store_at(&mut self, ty: &Ty, offset: u32) {
-        match values::ty_to_valtype(ty) {
-            Some(ValType::I64) => {
-                wasm!(self.func, { i64_store(offset); });
+        match ty {
+            Ty::Int8 | Ty::UInt8 => { wasm!(self.func, { i32_store8(offset); }); }
+            Ty::Int16 | Ty::UInt16 => { wasm!(self.func, { i32_store16(offset); }); }
+            _ => match values::ty_to_valtype(ty) {
+                Some(ValType::I64) => { wasm!(self.func, { i64_store(offset); }); }
+                Some(ValType::F64) => { wasm!(self.func, { f64_store(offset); }); }
+                Some(ValType::F32) => { wasm!(self.func, { f32_store(offset); }); }
+                Some(ValType::I32) => { wasm!(self.func, { i32_store(offset); }); }
+                _ => {}
             }
-            Some(ValType::F64) => {
-                wasm!(self.func, { f64_store(offset); });
-            }
-            Some(ValType::I32) => {
-                wasm!(self.func, { i32_store(offset); });
-            }
-            _ => {}
         }
     }
 
     /// Emit a load instruction from base_ptr (on stack) + offset.
+    /// Narrow sized-int loads use the signed / unsigned variant
+    /// matching the Almide type so the i32-bucket value carries the
+    /// correct sign-extension / zero-extension for subsequent ops.
     pub fn emit_load_at(&mut self, ty: &Ty, offset: u32) {
-        match values::ty_to_valtype(ty) {
-            Some(ValType::I64) => {
-                wasm!(self.func, { i64_load(offset); });
+        match ty {
+            Ty::Int8  => { wasm!(self.func, { i32_load8_s(offset); }); }
+            Ty::UInt8 => { wasm!(self.func, { i32_load8_u(offset); }); }
+            Ty::Int16 => { wasm!(self.func, { i32_load16_s(offset); }); }
+            Ty::UInt16 => { wasm!(self.func, { i32_load16_u(offset); }); }
+            _ => match values::ty_to_valtype(ty) {
+                Some(ValType::I64) => { wasm!(self.func, { i64_load(offset); }); }
+                Some(ValType::F64) => { wasm!(self.func, { f64_load(offset); }); }
+                Some(ValType::F32) => { wasm!(self.func, { f32_load(offset); }); }
+                Some(ValType::I32) => { wasm!(self.func, { i32_load(offset); }); }
+                _ => {}
             }
-            Some(ValType::F64) => {
-                wasm!(self.func, { f64_load(offset); });
-            }
-            Some(ValType::I32) => {
-                wasm!(self.func, { i32_load(offset); });
-            }
-            _ => {}
         }
     }
 

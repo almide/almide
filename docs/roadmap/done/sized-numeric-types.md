@@ -1,5 +1,26 @@
 <!-- description: Swift-style Int8/Int32/UInt32/Float32 scalar types; unblocks bytes redesign + Matrix[T] dtype -->
+<!-- done: 2026-04-19 -->
 # Sized Numeric Types
+
+## Completion status (2026-04-19)
+
+Arc delivered across Stages 1 → 3 plus Stage 4a/4b (bytes typed IO). Closed in three merge points:
+
+- **Stage 1/2** (parser + type system + codegen) landed earlier in the arc (`project_sized_numeric_types.md` memory).
+- **Stage 3 (Conversion UFCS)** landed with the Stdlib Unification push (3b00b1ba / 49d341f6) and completed by the safety-variant pass on 2026-04-19:
+  - Narrowing conversions: `int.to_<T>` (truncating) + `int.from_<T>` (widening) shipped as `@intrinsic` for all 8 sized types (Int8-64, UInt8-64, Float32-64).
+  - Safety variants on top: `int.to_<T>_checked -> Option[T]` and `int.to_<T>_saturating -> T` for 7 narrow int targets + `to_float32`; mirror set on `float.to_<T>_checked` / `_saturating` for 8 int targets + `to_float32`.
+  - `_checked` follows Swift `Int(exactly:)` semantics: NaN / infinity / out-of-range / fractional parts all return `None`. Round-trip via `int.to_float` detects the fractional case.
+  - `_saturating` clamps to `T::MIN` / `T::MAX`; NaN → 0 on float sources.
+  - 22 new spec tests (`spec/stdlib/sized_conversion_safety_test.almd`).
+- **Stage 4a/4b (bytes typed IO)** landed in the Endian-dispatch migration (3b00b1ba): `bytes.{read,write,set}_{uint16,uint32,int32,float32}` as bundled Almide bodies pivoting through canonical `int` / `float`. `bytes.almd` has no width×endian name explosion beyond the `_le` / `_be` runtime primitives it composes over.
+- **WASM bug fix caught during the arc**: `emit_store_at` / `emit_load_at` were missing `Float32` (F32) and narrow int (Int8/16, UInt8/16) variants, causing Option[sized-type] construction to emit unbalanced stack sequences. Fixed — all sized types now round-trip through the heap layout on both targets.
+
+### What remains (deferred, tracked as future work)
+
+- **Generic `bytes.read[T: FixedWidthInteger]`** (Stage 4 full vision) requires a protocol / type-bound system. Currently `bytes.read_uint16` / `read_int32` / `read_float32` are discrete fns; the generic single-entry surface awaits the protocol arc.
+- **`Matrix[T]` dtype parameterization** — landed separately in the Matrix arc (see `project_matrix_dtype_design` memory).
+- **`FixedWidthInteger` / `BinaryFloatingPoint` protocols** — out of scope; belongs in a distinct protocol / trait system arc.
 
 ## Motivation
 

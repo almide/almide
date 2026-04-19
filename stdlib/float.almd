@@ -106,3 +106,101 @@ fn from_float32(n: Float32) -> Float = _
 
 @intrinsic("almide_rt_float_from_float64")
 fn from_float64(n: Float64) -> Float = _
+
+// ── Safety variants: range-checked and saturating ──
+// `to_<T>()` above follows Rust `as`-semantics on float→int (already
+// saturating; NaN → 0; out-of-range clamps to T::MIN / T::MAX). The
+// `_checked` variants return `None` for NaN / infinity / out-of-range
+// so callers can distinguish "lossless conversion" from "data
+// squashed". `_saturating` is an explicit alias over `to_<T>()` for
+// intent; both resolve to `I32TruncSatF64S` / `as i32` etc. which the
+// language contract pins as saturating on both Rust and WASM targets.
+
+// Semantics: `_checked` returns `Some(T)` iff the float is an exact
+// representable integer in T's range — mirrors Swift's
+// `Int(exactly:)`. NaN / infinity / fractional parts / out-of-range
+// all return `None`. The round-trip via `int.to_float` detects
+// fractional parts that truncation would silently drop.
+
+fn to_int8_checked(n: Float) -> Option[Int8] =
+  if float.is_nan(n) or float.is_infinite(n) or n < -128.0 or n > 127.0 then None
+  else {
+    let i: Int8 = float.to_int8(n)
+    if int.to_float(int.from_int8(i)) == n then Some(i) else None
+  }
+
+fn to_int16_checked(n: Float) -> Option[Int16] =
+  if float.is_nan(n) or float.is_infinite(n) or n < -32768.0 or n > 32767.0 then None
+  else {
+    let i: Int16 = float.to_int16(n)
+    if int.to_float(int.from_int16(i)) == n then Some(i) else None
+  }
+
+fn to_int32_checked(n: Float) -> Option[Int32] =
+  if float.is_nan(n) or float.is_infinite(n) or n < -2147483648.0 or n > 2147483647.0 then None
+  else {
+    let i: Int32 = float.to_int32(n)
+    if int.to_float(int.from_int32(i)) == n then Some(i) else None
+  }
+
+fn to_int64_checked(n: Float) -> Option[Int64] =
+  // `Int64::MAX` (9.2e18) is not exactly representable in f64; the
+  // double `9223372036854775808.0` rounds to `2^63`, which is just
+  // above `i64::MAX`. Guard with `>=` so the round-trip is exact.
+  if float.is_nan(n) or float.is_infinite(n) or n < -9223372036854775808.0 or n >= 9223372036854775808.0 then None
+  else {
+    let i: Int64 = float.to_int64(n)
+    // Int64::MAX (and neighboring magnitudes) cannot round-trip
+    // exactly through f64 (24-bit mantissa lands short of the full
+    // 63-bit range), so rely on range clipping above for huge
+    // values and round-trip comparison for the rest.
+    if int.to_float(int.from_int64(i)) == n then Some(i) else None
+  }
+
+fn to_uint8_checked(n: Float) -> Option[UInt8] =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 255.0 then None
+  else {
+    let i: UInt8 = float.to_uint8(n)
+    if int.to_float(int.from_uint8(i)) == n then Some(i) else None
+  }
+
+fn to_uint16_checked(n: Float) -> Option[UInt16] =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 65535.0 then None
+  else {
+    let i: UInt16 = float.to_uint16(n)
+    if int.to_float(int.from_uint16(i)) == n then Some(i) else None
+  }
+
+fn to_uint32_checked(n: Float) -> Option[UInt32] =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 4294967295.0 then None
+  else {
+    let i: UInt32 = float.to_uint32(n)
+    if int.to_float(int.from_uint32(i)) == n then Some(i) else None
+  }
+
+fn to_uint64_checked(n: Float) -> Option[UInt64] =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n >= 18446744073709551616.0 then None
+  else {
+    let i: UInt64 = float.to_uint64(n)
+    if int.to_float(int.from_uint64(i)) == n then Some(i) else None
+  }
+
+// `Float → Float32` loses precision for values outside f32's range
+// (±3.4e38) and for subnormal-boundary reals. Round-trip detects.
+fn to_float32_checked(n: Float) -> Option[Float32] = {
+  let f: Float32 = float.to_float32(n)
+  let back: Float = float.from_float32(f)
+  // NaN: both are NaN but `NaN != NaN`. Only accept finite matches.
+  if float.is_nan(n) then None
+  else if back == n then Some(f)
+  else None
+}
+
+fn to_int8_saturating(n: Float) -> Int8 = float.to_int8(n)
+fn to_int16_saturating(n: Float) -> Int16 = float.to_int16(n)
+fn to_int32_saturating(n: Float) -> Int32 = float.to_int32(n)
+fn to_int64_saturating(n: Float) -> Int64 = float.to_int64(n)
+fn to_uint8_saturating(n: Float) -> UInt8 = float.to_uint8(n)
+fn to_uint16_saturating(n: Float) -> UInt16 = float.to_uint16(n)
+fn to_uint32_saturating(n: Float) -> UInt32 = float.to_uint32(n)
+fn to_uint64_saturating(n: Float) -> UInt64 = float.to_uint64(n)

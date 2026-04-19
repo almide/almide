@@ -1,0 +1,156 @@
+// Stage 3: range-checked + saturating numeric conversions.
+// Covers the narrow int targets and float → int / float → float32
+// paths where Rust `as`-semantics alone silently lose information.
+
+// ── Int → sized int: _checked ──
+
+test "int.to_int8_checked inside range" {
+  assert_eq(int.to_int8_checked(42)!.to_int64(), 42)
+  assert_eq(int.to_int8_checked(-128)!.to_int64(), -128)
+  assert_eq(int.to_int8_checked(127)!.to_int64(), 127)
+}
+
+test "int.to_int8_checked rejects overflow" {
+  assert_eq(int.to_int8_checked(128).is_none(), true)
+  assert_eq(int.to_int8_checked(-129).is_none(), true)
+  assert_eq(int.to_int8_checked(100000).is_none(), true)
+}
+
+test "int.to_uint8_checked rejects negative and overflow" {
+  assert_eq(int.to_uint8_checked(0)!.to_int64(), 0)
+  assert_eq(int.to_uint8_checked(255)!.to_int64(), 255)
+  assert_eq(int.to_uint8_checked(-1).is_none(), true)
+  assert_eq(int.to_uint8_checked(256).is_none(), true)
+}
+
+test "int.to_uint16_checked boundaries" {
+  assert_eq(int.to_uint16_checked(65535)!.to_int64(), 65535)
+  assert_eq(int.to_uint16_checked(65536).is_none(), true)
+  assert_eq(int.to_uint16_checked(-1).is_none(), true)
+}
+
+test "int.to_int32_checked boundaries" {
+  assert_eq(int.to_int32_checked(2147483647)!.to_int64(), 2147483647)
+  assert_eq(int.to_int32_checked(2147483648).is_none(), true)
+  assert_eq(int.to_int32_checked(-2147483648)!.to_int64(), -2147483648)
+  assert_eq(int.to_int32_checked(-2147483649).is_none(), true)
+}
+
+test "int.to_uint32_checked boundaries" {
+  assert_eq(int.to_uint32_checked(4294967295)!.to_int64(), 4294967295)
+  assert_eq(int.to_uint32_checked(4294967296).is_none(), true)
+  assert_eq(int.to_uint32_checked(-1).is_none(), true)
+}
+
+test "int.to_uint64_checked only rejects negative" {
+  assert_eq(int.to_uint64_checked(0)!.to_int64(), 0)
+  assert_eq(int.to_uint64_checked(9223372036854775807)!.to_int64(), 9223372036854775807)
+  assert_eq(int.to_uint64_checked(-1).is_none(), true)
+}
+
+test "int.to_float32_checked detects precision loss" {
+  // 2^24 = 16777216 is the last exactly-representable positive int in f32.
+  assert_eq(int.to_float32_checked(16777216).is_some(), true)
+  assert_eq(int.to_float32_checked(-16777216).is_some(), true)
+  // 2^24 + 1 cannot round-trip — would alias to 2^24 in f32.
+  assert_eq(int.to_float32_checked(16777217).is_none(), true)
+}
+
+// ── Int → sized int: _saturating ──
+
+test "int.to_int8_saturating clamps to range" {
+  assert_eq(int.to_int8_saturating(200).to_int64(), 127)
+  assert_eq(int.to_int8_saturating(-200).to_int64(), -128)
+  assert_eq(int.to_int8_saturating(0).to_int64(), 0)
+  assert_eq(int.to_int8_saturating(100).to_int64(), 100)
+}
+
+test "int.to_uint8_saturating clamps" {
+  assert_eq(int.to_uint8_saturating(-1).to_int64(), 0)
+  assert_eq(int.to_uint8_saturating(500).to_int64(), 255)
+  assert_eq(int.to_uint8_saturating(42).to_int64(), 42)
+}
+
+test "int.to_int32_saturating clamps" {
+  assert_eq(int.to_int32_saturating(3000000000).to_int64(), 2147483647)
+  assert_eq(int.to_int32_saturating(-3000000000).to_int64(), -2147483648)
+  assert_eq(int.to_int32_saturating(42).to_int64(), 42)
+}
+
+test "int.to_uint64_saturating clamps negatives to zero" {
+  assert_eq(int.to_uint64_saturating(-1).to_int64(), 0)
+  assert_eq(int.to_uint64_saturating(42).to_int64(), 42)
+}
+
+// ── Float → sized int: _checked ──
+
+test "float.to_int8_checked exact integers in range" {
+  assert_eq(float.to_int8_checked(42.0)!.to_int64(), 42)
+  assert_eq(float.to_int8_checked(-128.0)!.to_int64(), -128)
+  assert_eq(float.to_int8_checked(127.0)!.to_int64(), 127)
+}
+
+test "float.to_int8_checked rejects out-of-range" {
+  assert_eq(float.to_int8_checked(128.0).is_none(), true)
+  assert_eq(float.to_int8_checked(-129.0).is_none(), true)
+  assert_eq(float.to_int8_checked(1e10).is_none(), true)
+}
+
+test "float.to_int8_checked rejects fractionals" {
+  // Swift `Int(exactly:)` semantics — fractional part means not exact.
+  assert_eq(float.to_int8_checked(42.5).is_none(), true)
+  assert_eq(float.to_int8_checked(0.1).is_none(), true)
+}
+
+test "float.to_int32_checked rejects NaN and infinity" {
+  let nan: Float = 0.0 / 0.0
+  let inf: Float = 1.0 / 0.0
+  assert_eq(float.to_int32_checked(nan).is_none(), true)
+  assert_eq(float.to_int32_checked(inf).is_none(), true)
+  assert_eq(float.to_int32_checked(-inf).is_none(), true)
+  assert_eq(float.to_int32_checked(42.0)!.to_int64(), 42)
+}
+
+test "float.to_uint8_checked rejects negatives and NaN" {
+  let nan: Float = 0.0 / 0.0
+  assert_eq(float.to_uint8_checked(nan).is_none(), true)
+  assert_eq(float.to_uint8_checked(-1.0).is_none(), true)
+  assert_eq(float.to_uint8_checked(256.0).is_none(), true)
+  assert_eq(float.to_uint8_checked(255.0)!.to_int64(), 255)
+}
+
+// ── Float → sized int: _saturating ──
+
+test "float.to_int32_saturating clamps NaN and range" {
+  let nan: Float = 0.0 / 0.0
+  assert_eq(float.to_int32_saturating(nan).to_int64(), 0)
+  assert_eq(float.to_int32_saturating(1e20).to_int64(), 2147483647)
+  assert_eq(float.to_int32_saturating(-1e20).to_int64(), -2147483648)
+  assert_eq(float.to_int32_saturating(42.7).to_int64(), 42)
+}
+
+test "float.to_uint16_saturating clamps" {
+  let inf: Float = 1.0 / 0.0
+  assert_eq(float.to_uint16_saturating(inf).to_int64(), 65535)
+  assert_eq(float.to_uint16_saturating(-1.0).to_int64(), 0)
+  assert_eq(float.to_uint16_saturating(1000.0).to_int64(), 1000)
+}
+
+// ── Float → Float32: _checked (precision detection) ──
+
+test "float.to_float32_checked round-trip exact" {
+  assert_eq(float.to_float32_checked(0.5).is_some(), true)
+  assert_eq(float.to_float32_checked(1.0).is_some(), true)
+  assert_eq(float.to_float32_checked(-42.0).is_some(), true)
+}
+
+test "float.to_float32_checked rejects NaN" {
+  let nan: Float = 0.0 / 0.0
+  assert_eq(float.to_float32_checked(nan).is_none(), true)
+}
+
+test "float.to_float32_checked rejects precision loss" {
+  // 1.1 is not exactly representable in f32 (nor f64, but f32 rounds
+  // to a different value — the round-trip detects the mismatch).
+  assert_eq(float.to_float32_checked(1.1).is_none(), true)
+}

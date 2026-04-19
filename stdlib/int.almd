@@ -147,3 +147,82 @@ fn from_uint32(n: UInt32) -> Int = _
 
 @intrinsic("almide_rt_int_from_uint64")
 fn from_uint64(n: UInt64) -> Int = _
+
+// ── Safety variants: range-checked and saturating narrowing ──
+// `to_<T>()` above is truncating (Rust `as`-semantics on int→int). The
+// `_checked` variants return `None` on out-of-range so callers can
+// detect loss; the `_saturating` variants clamp to the target's min/max.
+// Widening sources (Int is Int64) are implicit here — e.g.
+// `to_int64_checked` is omitted because the identity conversion can't
+// fail.
+
+fn to_int8_checked(n: Int) -> Option[Int8] =
+  if n < -128 or n > 127 then None
+  else Some(int.to_int8(n))
+
+fn to_int16_checked(n: Int) -> Option[Int16] =
+  if n < -32768 or n > 32767 then None
+  else Some(int.to_int16(n))
+
+fn to_int32_checked(n: Int) -> Option[Int32] =
+  if n < -2147483648 or n > 2147483647 then None
+  else Some(int.to_int32(n))
+
+fn to_uint8_checked(n: Int) -> Option[UInt8] =
+  if n < 0 or n > 255 then None
+  else Some(int.to_uint8(n))
+
+fn to_uint16_checked(n: Int) -> Option[UInt16] =
+  if n < 0 or n > 65535 then None
+  else Some(int.to_uint16(n))
+
+fn to_uint32_checked(n: Int) -> Option[UInt32] =
+  if n < 0 or n > 4294967295 then None
+  else Some(int.to_uint32(n))
+
+// Only the sign bit can fail for `Int → UInt64` since `|Int64| ≤ UInt64::MAX`.
+fn to_uint64_checked(n: Int) -> Option[UInt64] =
+  if n < 0 then None
+  else Some(int.to_uint64(n))
+
+// `Int → Float32` loses precision for `|n| > 2^24`. Round-trip through
+// `Float32 → Int` to detect the loss.
+fn to_float32_checked(n: Int) -> Option[Float32] = {
+  let f: Float32 = int.to_float32(n)
+  if float.to_int(float.from_float32(f)) == n then Some(f)
+  else None
+}
+
+fn to_int8_saturating(n: Int) -> Int8 =
+  if n < -128 then int.to_int8(-128)
+  else if n > 127 then int.to_int8(127)
+  else int.to_int8(n)
+
+fn to_int16_saturating(n: Int) -> Int16 =
+  if n < -32768 then int.to_int16(-32768)
+  else if n > 32767 then int.to_int16(32767)
+  else int.to_int16(n)
+
+fn to_int32_saturating(n: Int) -> Int32 =
+  if n < -2147483648 then int.to_int32(-2147483648)
+  else if n > 2147483647 then int.to_int32(2147483647)
+  else int.to_int32(n)
+
+fn to_uint8_saturating(n: Int) -> UInt8 =
+  if n < 0 then int.to_uint8(0)
+  else if n > 255 then int.to_uint8(255)
+  else int.to_uint8(n)
+
+fn to_uint16_saturating(n: Int) -> UInt16 =
+  if n < 0 then int.to_uint16(0)
+  else if n > 65535 then int.to_uint16(65535)
+  else int.to_uint16(n)
+
+fn to_uint32_saturating(n: Int) -> UInt32 =
+  if n < 0 then int.to_uint32(0)
+  else if n > 4294967295 then int.to_uint32(4294967295)
+  else int.to_uint32(n)
+
+fn to_uint64_saturating(n: Int) -> UInt64 =
+  if n < 0 then int.to_uint64(0)
+  else int.to_uint64(n)
