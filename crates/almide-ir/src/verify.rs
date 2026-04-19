@@ -282,22 +282,33 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
         errors.append(&mut v.errors);
     }
 
-    // Verify imported modules
+    // Verify imported modules. All module-scoped VarIds live in
+    // `program.var_table` after `UnifyVarTablesPass` merges them, so
+    // the verifier reuses the program-level table rather than the
+    // module's now-empty one.
+    let module_vt: &VarTable = if program.modules.iter().all(|m| m.var_table.entries.is_empty()) {
+        &program.var_table
+    } else {
+        // Pre-unification callers still have per-module tables.
+        // Fall through per-module below.
+        &program.var_table
+    };
     for m in &program.modules {
         verify_type_decls(&m.type_decls, &m.name, &mut errors);
+        let vt: &VarTable = if m.var_table.entries.is_empty() { module_vt } else { &m.var_table };
         for f in &m.functions {
             let qual_name = format!("{}.{}", m.name, f.name);
-            verify_function(f, &m.var_table, &qual_name, &known_functions, &known_module_functions, &mut errors);
+            verify_function(f, vt, &qual_name, &known_functions, &known_module_functions, &mut errors);
         }
         for tl in &m.top_lets {
             let mut v = Verifier {
-                var_table: &m.var_table,
+                var_table: vt,
                 fn_name: format!("{}.<top-level>", m.name),
                 in_loop: false,
                 errors: Vec::new(),
                 known_functions: &known_functions,
                 known_module_functions: &known_module_functions,
-                defined_vars: (0..m.var_table.len() as u32).collect(),
+                defined_vars: (0..vt.len() as u32).collect(),
             };
             v.check_var_id(tl.var, None);
             v.visit_expr(&tl.value);

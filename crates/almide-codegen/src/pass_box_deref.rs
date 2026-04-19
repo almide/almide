@@ -20,16 +20,22 @@ impl NanoPass for BoxDerefPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        // Step 1: Collect deref vars and insert Deref IR nodes
+        // Step 1: Collect deref vars and insert Deref IR nodes.
+        //         Post `UnifyVarTablesPass` every VarId indexes into
+        //         `program.var_table`; the module walk below reuses the
+        //         same table rather than the now-empty `module.var_table`.
         let (deref_ids, recursive) = collect_deref_vars(&program);
         insert_deref_nodes(&mut program, &deref_ids);
 
-        // Step 2: Process module-level box deref (separate VarId namespace per module)
+        // Step 2: Process module-level box deref using the unified table.
         let all_type_decls: Vec<_> = program.type_decls.iter()
             .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
             .cloned().collect();
+        // Cloning the program-level table is cheap vs. re-collecting per
+        // module and keeps the `&module` read-only for collect_deref_vars_module.
+        let shared_vt = program.var_table.clone();
         for module in &mut program.modules {
-            let mod_deref_ids = collect_module_deref_vars(module, &all_type_decls);
+            let mod_deref_ids = collect_module_deref_vars_with_vt(module, &shared_vt, &all_type_decls);
             insert_module_deref_nodes(module, &mod_deref_ids);
         }
 
@@ -139,12 +145,19 @@ pub fn insert_deref_nodes(program: &mut IrProgram, deref_ids: &HashSet<VarId>) {
     }
 }
 
-/// Collect deref vars for a single module scope (separate VarId namespace).
-pub fn collect_module_deref_vars(module: &IrModule, all_type_decls: &[IrTypeDecl]) -> HashSet<VarId> {
+/// Collect deref vars for a single module scope using the supplied
+/// `VarTable`. Post-unification the supplied table is the
+/// program-level one; callers pass it explicitly to avoid cloning per
+/// module.
+pub fn collect_module_deref_vars_with_vt(
+    module: &IrModule,
+    vt: &VarTable,
+    all_type_decls: &[IrTypeDecl],
+) -> HashSet<VarId> {
     let mut name_to_var: std::collections::HashMap<String, Vec<VarId>> = std::collections::HashMap::new();
-    for i in 0..module.var_table.len() {
+    for i in 0..vt.len() {
         let id = VarId(i as u32);
-        let info = module.var_table.get(id);
+        let info = vt.get(id);
         name_to_var.entry(info.name.to_string()).or_default().push(id);
     }
     let mut deref_vars = HashSet::new();

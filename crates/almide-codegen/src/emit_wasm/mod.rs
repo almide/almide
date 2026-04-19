@@ -859,10 +859,14 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 almide_ir::IrExprKind::LitBool { value } => *value as i64,
                 _ => 0,
             };
-            // Module-local VarId may collide with main's; use name as the
-            // primary key. Skip the id-based map to avoid hijacking main vars.
-            let name = module.var_table.get(tl.var).name.to_string();
+            // Post-unification module top-lets reference the unified
+            // `program.var_table` (see `pass_unify_var_tables`). We
+            // keep the name-keyed map populated for compatibility with
+            // the synthetic Var branch below, but the VarId-keyed
+            // `top_let_globals` is also authoritative now.
+            let name = program.var_table.get(tl.var).name.to_string();
             emitter.top_let_globals_by_name.insert(name, (global_idx, vt));
+            emitter.top_let_globals.insert(tl.var.0, (global_idx, vt));
             emitter.top_let_init.push((global_idx, vt, const_bits));
         }
     }
@@ -1038,11 +1042,12 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         user_idx += 1;
     }
 
-    // Module functions (user packages)
+    // Module functions (user packages). VarIds already point into the
+    // unified `program.var_table` (see `pass_unify_var_tables`).
     for &(mi, fi, type_idx) in &module_func_meta {
         let module = &program.modules[mi];
         let func = &module.functions[fi];
-        let compiled = functions::compile_function(&mut emitter, func, &module.var_table, type_idx);
+        let compiled = functions::compile_function(&mut emitter, func, &program.var_table, type_idx);
         emitter.add_compiled(compiled);
     }
 
@@ -1312,13 +1317,17 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
             depth: 0,
             loop_stack: Vec::new(),
             scratch: scratch_alloc,
-            var_table: &module.var_table,
+            var_table: &program.var_table,
             stub_ret_ty: Ty::Unit,
         };
         for tl in &module.top_lets {
             mc.emit_expr(&tl.value);
-            let name = module.var_table.get(tl.var).name.as_str();
-            if let Some(&(global_idx, _)) = mc.emitter.top_let_globals_by_name.get(name) {
+            // Module top-let VarIds now index into `program.var_table`
+            // thanks to `UnifyVarTablesPass`, so the id-keyed map is
+            // the primary lookup; the name-keyed mirror is a backup.
+            if let Some(&(global_idx, _)) = mc.emitter.top_let_globals.get(&tl.var.0) {
+                mc.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
+            } else if let Some(&(global_idx, _)) = mc.emitter.top_let_globals_by_name.get(program.var_table.get(tl.var).name.as_str()) {
                 mc.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
             } else {
                 mc.func.instruction(&wasm_encoder::Instruction::Drop);

@@ -59,20 +59,14 @@ impl NanoPass for AutoParallelPass {
         for tl in &mut program.top_lets {
             tl.value = rewrite_expr(tl.value.clone(), &effect_fns, &mutable_vars);
         }
+        // Post-unification every VarId lives in `program.var_table`;
+        // `mutable_vars` already covers module-local bindings too.
         for module in &mut program.modules {
-            // Each module has its own var_table for mutable var tracking
-            let mut mod_mutable = std::collections::HashSet::new();
-            for i in 0..module.var_table.len() {
-                let id = VarId(i as u32);
-                if module.var_table.get(id).mutability == Mutability::Var {
-                    mod_mutable.insert(id);
-                }
-            }
             for func in &mut module.functions {
-                func.body = rewrite_expr(func.body.clone(), &effect_fns, &mod_mutable);
+                func.body = rewrite_expr(func.body.clone(), &effect_fns, &mutable_vars);
             }
             for tl in &mut module.top_lets {
-                tl.value = rewrite_expr(tl.value.clone(), &effect_fns, &mod_mutable);
+                tl.value = rewrite_expr(tl.value.clone(), &effect_fns, &mutable_vars);
             }
         }
         PassResult { program, changed: true }

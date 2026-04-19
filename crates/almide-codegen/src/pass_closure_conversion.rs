@@ -35,40 +35,41 @@ impl NanoPass for ClosureConversionPass {
         let mut program_lifted = Vec::new();
         let mut counter = 0u32;
 
-        // Program-level functions: lifted closures go to program.functions
-        // (they share program.var_table).
-        for func in &mut program.functions {
+        // With the unified `program.var_table` (see
+        // `pass_unify_var_tables`) every VarId across the program is a
+        // single global namespace; lifted closures can be placed
+        // wherever they're most convenient. Keeping module-local
+        // closures inside their source module preserves the existing
+        // WASM function-table layout and the per-module emission order.
+        let IrProgram { functions, top_lets, modules, var_table, .. } = &mut program;
+        for func in functions.iter_mut() {
             func.body = convert_expr(
                 std::mem::take(&mut func.body),
-                &mut program_lifted, &mut counter, &mut program.var_table,
+                &mut program_lifted, &mut counter, var_table,
             );
         }
-        for tl in &mut program.top_lets {
+        for tl in top_lets.iter_mut() {
             tl.value = convert_expr(
                 std::mem::take(&mut tl.value),
-                &mut program_lifted, &mut counter, &mut program.var_table,
+                &mut program_lifted, &mut counter, var_table,
             );
         }
         let any_changed = !program_lifted.is_empty();
-        program.functions.extend(program_lifted);
+        functions.extend(program_lifted);
 
-        // Module functions: lifted closures MUST stay in the same module
-        // so they share the module's var_table (WASM emit compiles module
-        // functions with module.var_table). Placing them in program.functions
-        // would break VarId resolution at emit time.
         let mut module_changed = false;
-        for module in &mut program.modules {
+        for module in modules.iter_mut() {
             let mut module_lifted = Vec::new();
-            for func in &mut module.functions {
+            for func in module.functions.iter_mut() {
                 func.body = convert_expr(
                     std::mem::take(&mut func.body),
-                    &mut module_lifted, &mut counter, &mut module.var_table,
+                    &mut module_lifted, &mut counter, var_table,
                 );
             }
-            for tl in &mut module.top_lets {
+            for tl in module.top_lets.iter_mut() {
                 tl.value = convert_expr(
                     std::mem::take(&mut tl.value),
-                    &mut module_lifted, &mut counter, &mut module.var_table,
+                    &mut module_lifted, &mut counter, var_table,
                 );
             }
             if !module_lifted.is_empty() { module_changed = true; }

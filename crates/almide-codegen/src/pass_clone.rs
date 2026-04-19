@@ -43,17 +43,18 @@ impl NanoPass for CloneInsertionPass {
             tl.value = insert_clones_live(std::mem::take(&mut tl.value), &always, &eligible, &mut remaining, false);
         }
 
-        for module in &mut program.modules {
+        let IrProgram { modules, var_table, .. } = &mut program;
+        for module in modules.iter_mut() {
             let module_top_lets: HashSet<VarId> = module.top_lets.iter().map(|tl| tl.var).collect();
             let module_syntactic = compute_syntactic_counts_module(module);
-            let (m_always, m_eligible) = split_clone_ids(&module.var_table, &module_top_lets, &module_syntactic);
+            let (m_always, m_eligible) = split_clone_ids(var_table, &module_top_lets, &module_syntactic);
             let mut m_remaining = build_remaining(&m_eligible, &module_syntactic);
 
-            for func in &mut module.functions {
+            for func in module.functions.iter_mut() {
                 reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
                 func.body = insert_clones_live(std::mem::take(&mut func.body), &m_always, &m_eligible, &mut m_remaining, false);
             }
-            for tl in &mut module.top_lets {
+            for tl in module.top_lets.iter_mut() {
                 reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
                 tl.value = insert_clones_live(std::mem::take(&mut tl.value), &m_always, &m_eligible, &mut m_remaining, false);
             }

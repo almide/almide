@@ -1,5 +1,5 @@
-<!-- description: Unify program/module var_tables into a single program-level table
--->
+<!-- description: Unify program/module var_tables into a single program-level table -->
+<!-- done: 2026-04-19 -->
 # VarTable Unification
 
 `IrProgram.var_table` と `IrModule.var_table` の 2 層構造を 1 層に畳む。
@@ -60,3 +60,33 @@
 
 - `codegen-ideal-form` で #1/#3/#4/#6/#7 を完遂済み (2026-04-19 時点)。
   本 arc はそれらに続く構造 cleanup。
+
+---
+
+## Resolution (2026-04-19)
+
+- `pass_unify_var_tables::UnifyVarTablesPass` wired as first pass in both
+  Rust and WASM pipelines. Walks every `IrModule`, appends its
+  `VarInfo` entries to `program.var_table` with an offset, rewrites
+  every `VarId` in module functions / top_lets through
+  `IrMutVisitor::shift`. After the pass `module.var_table.entries` is
+  empty and every `VarId` indexes into `program.var_table`.
+- Migrated 15 consumers to the unified table via destructure pattern:
+  `pass_list_pattern`, `pass_lambda_type_resolve`, `pass_tco`,
+  `pass_clone`, `pass_shadow_resolve`, `pass_licm`,
+  `pass_capture_clone`, `pass_closure_conversion`,
+  `pass_concretize_types`, `pass_match_lowering`, `pass_box_deref`,
+  `pass_auto_parallel`, `pass_rust_lowering`, `walker/mod.rs`,
+  `emit_wasm/mod.rs`.
+- `almide_ir::use_count::compute_use_counts` now handles both states:
+  pre-unify it walks each module into its module-local table (still
+  used by `almide-optimize::optimize_program`), post-unify it walks
+  into the unified `program.var_table`.
+- `emit_wasm` module top_let registration writes to both
+  `top_let_globals` (VarId-keyed) and `top_let_globals_by_name` —
+  cross-module init now prefers the VarId lookup and falls back to
+  the name mirror for synthetic Vars.
+- `IrVerifier` falls back to `program.var_table` when a module's
+  table is empty, so debug IR checks stay accurate post-unify.
+- Reg sweeps green: spec Rust 219, spec WASM 213 (6 skipped),
+  nn Rust 12, nn WASM 11 (1 skipped), Rust integration 709.

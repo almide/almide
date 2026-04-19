@@ -22,14 +22,15 @@ impl NanoPass for LICMPass {
         // Analyze user function purity (fixpoint computation)
         let pure_fns = analyze_pure_functions(&program);
         let mut changed = false;
-        for func in &mut program.functions {
-            if hoist_loops(&mut func.body, &mut program.var_table, &pure_fns) {
+        let IrProgram { functions, modules, var_table, .. } = &mut program;
+        for func in functions.iter_mut() {
+            if hoist_loops(&mut func.body, var_table, &pure_fns) {
                 changed = true;
             }
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                if hoist_loops(&mut func.body, &mut module.var_table, &pure_fns) {
+        for module in modules.iter_mut() {
+            for func in module.functions.iter_mut() {
+                if hoist_loops(&mut func.body, var_table, &pure_fns) {
                     changed = true;
                 }
             }

@@ -32,22 +32,23 @@ impl NanoPass for CaptureClonePass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
-        for func in &mut program.functions {
+        let IrProgram { functions, modules, var_table, .. } = &mut program;
+        for func in functions.iter_mut() {
             let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
             PARAM_BORROWS.with(|m| {
                 *m.borrow_mut() = func.params.iter().map(|p| (p.var, p.borrow)).collect();
             });
-            if transform_expr(&mut func.body, &mut program.var_table, &param_vars) {
+            if transform_expr(&mut func.body, var_table, &param_vars) {
                 changed = true;
             }
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
+        for module in modules.iter_mut() {
+            for func in module.functions.iter_mut() {
                 let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
                 PARAM_BORROWS.with(|m| {
                     *m.borrow_mut() = func.params.iter().map(|p| (p.var, p.borrow)).collect();
                 });
-                if transform_expr(&mut func.body, &mut module.var_table, &param_vars) {
+                if transform_expr(&mut func.body, var_table, &param_vars) {
                     changed = true;
                 }
             }

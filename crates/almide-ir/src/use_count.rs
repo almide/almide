@@ -3,7 +3,12 @@
 use std::collections::HashSet;
 use super::*;
 
-/// Walk the entire IR program and count variable uses, storing results in VarTable.
+/// Walk the entire IR program and count variable uses, storing results
+/// in VarTable. When invoked post `UnifyVarTablesPass` every
+/// module-scope VarId indexes into `program.var_table`, so the walk
+/// covers module functions / top_lets as well; when invoked before
+/// (e.g. the optimizer's `optimize_program`) each module still owns
+/// its own table and we walk it into the module-local table.
 pub fn compute_use_counts(program: &mut IrProgram) {
     // Reset all counts
     for i in 0..program.var_table.len() {
@@ -18,6 +23,33 @@ pub fn compute_use_counts(program: &mut IrProgram) {
     // Count uses in top-level let values
     for tl in &program.top_lets {
         count_uses_in_expr(&tl.value, &mut program.var_table);
+    }
+
+    // Modules: if the module still owns a populated VarTable (i.e.
+    // unify hasn't run yet or the module happens to be empty), count
+    // into the module's own table — that's what pre-unify callers
+    // like `almide_optimize::optimize_program` rely on. After unify,
+    // the module's table is empty and its VarIds live in
+    // `program.var_table`, so we walk there instead.
+    for module in program.modules.iter_mut() {
+        if module.var_table.entries.is_empty() {
+            for func in &module.functions {
+                count_uses_in_expr(&func.body, &mut program.var_table);
+            }
+            for tl in &module.top_lets {
+                count_uses_in_expr(&tl.value, &mut program.var_table);
+            }
+        } else {
+            for i in 0..module.var_table.len() {
+                module.var_table.entries[i].use_count = 0;
+            }
+            for func in &module.functions {
+                count_uses_in_expr(&func.body, &mut module.var_table);
+            }
+            for tl in &module.top_lets {
+                count_uses_in_expr(&tl.value, &mut module.var_table);
+            }
+        }
     }
 }
 

@@ -35,6 +35,7 @@ use super::pass_closure_conversion::ClosureConversionPass;
 use super::pass_resolve_calls::ResolveCallsPass;
 use super::pass_list_pattern::ListPatternLoweringPass;
 use super::pass_tail_call_mark::TailCallMarkPass;
+use super::pass_unify_var_tables::UnifyVarTablesPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -67,6 +68,10 @@ fn build_pipeline(target: Target) -> Pipeline {
     match target {
         Target::Rust => {
             Pipeline::new()
+                // Merge every `IrModule.var_table` into `program.var_table` up
+                // front so downstream passes see a single unified table.
+                // See `active/var-table-unification.md`.
+                .add(UnifyVarTablesPass)
                 // ListPatternLowering: desugar list patterns to if/else before any other pass
                 .add(ListPatternLoweringPass)
                 // Verify all user-module calls resolve to known IrFunctions.
@@ -138,6 +143,9 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(FanLoweringPass),
 
         Target::Wasm => Pipeline::new()
+            // Merge every `IrModule.var_table` into `program.var_table` up
+            // front so downstream passes see a single unified table.
+            .add(UnifyVarTablesPass)
             .add(ListPatternLoweringPass)
             // @intrinsic(symbol) → RuntimeCall. See Rust pipeline comment.
             .add(IntrinsicLoweringPass)

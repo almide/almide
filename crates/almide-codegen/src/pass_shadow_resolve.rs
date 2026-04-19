@@ -19,14 +19,15 @@ impl NanoPass for ShadowResolvePass {
         Some(vec![Target::TypeScript, Target::Python])
     }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        for func in &mut program.functions {
+        let IrProgram { functions, modules, var_table, .. } = &mut program;
+        for func in functions.iter_mut() {
             let mut seen: HashMap<String, VarId> = HashMap::new();
-            resolve_stmts_block(&mut func.body, &program.var_table, &mut seen);
+            resolve_stmts_block(&mut func.body, var_table, &mut seen);
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
+        for module in modules.iter_mut() {
+            for func in module.functions.iter_mut() {
                 let mut seen: HashMap<String, VarId> = HashMap::new();
-                resolve_stmts_block(&mut func.body, &module.var_table, &mut seen);
+                resolve_stmts_block(&mut func.body, var_table, &mut seen);
             }
         }
         PassResult { program, changed: true }

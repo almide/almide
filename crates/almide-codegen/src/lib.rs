@@ -53,6 +53,7 @@ pub mod pass_lambda_type_resolve;
 pub mod pass_concretize_types;
 pub mod pass_resolve_calls;
 pub mod pass_closure_conversion;
+pub mod pass_unify_var_tables;
 pub mod template;
 pub mod target;
 pub mod walker;

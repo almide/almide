@@ -6,7 +6,7 @@
 
 ## Active
 
-27 items
+26 items
 
 | Item | Description |
 |------|-------------|
@@ -34,7 +34,6 @@
 | [Stdlib Declarative Unification — Toward a Single Source of Truth](active/stdlib-declarative-unification.md) | Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes |
 | [Stdlib Defs / Runtime Consistency Check](active/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | [Stdlib Symmetry Audit](active/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
-| [VarTable Unification](active/var-table-unification.md) | Unify program/module var_tables into a single program-level table |
 | [Variant Exhaustiveness Refinement](active/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
 | [Whisper in Pure Almide](active/whisper-almide.md) | Whisper speech recognition implemented entirely in Almide |
 
@@ -73,13 +72,14 @@
 
 ## Done
 
-212 items
+213 items
 
 <details>
-<summary>Show all 212 completed items</summary>
+<summary>Show all 213 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-04-19 | [VarTable Unification](done/var-table-unification.md) | Unify program/module var_tables into a single program-level table |
 | 2026-04-19 | [Compiler Version Pin](done/compiler-version-pin.md) | minimum compiler version pinning in almide.toml (Cargo rust-version style) |
 | 2026-04-19 | [bytes: unify bounds-check semantics](done/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
 | 2026-04-19 | [`cargo test --all` Cache Race](done/cargo-test-cache-race.md) | Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures |

@@ -32,18 +32,19 @@ impl NanoPass for LambdaTypeResolvePass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        for func in &mut program.functions {
-            resolve_expr(&mut func.body, &mut program.var_table);
+        let IrProgram { functions, top_lets, modules, var_table, .. } = &mut program;
+        for func in functions.iter_mut() {
+            resolve_expr(&mut func.body, var_table);
         }
-        for tl in &mut program.top_lets {
-            resolve_expr(&mut tl.value, &mut program.var_table);
+        for tl in top_lets.iter_mut() {
+            resolve_expr(&mut tl.value, var_table);
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                resolve_expr(&mut func.body, &mut module.var_table);
+        for module in modules.iter_mut() {
+            for func in module.functions.iter_mut() {
+                resolve_expr(&mut func.body, var_table);
             }
-            for tl in &mut module.top_lets {
-                resolve_expr(&mut tl.value, &mut module.var_table);
+            for tl in module.top_lets.iter_mut() {
+                resolve_expr(&mut tl.value, var_table);
             }
         }
         PassResult { program, changed: true }

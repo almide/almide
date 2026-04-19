@@ -464,14 +464,13 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         // because their functions don't require PartialEq/PartialOrd/Debug.
         let is_bundled = almide_lang::stdlib_info::is_bundled_module(&module.name);
         let mut mod_ann = ctx.ann.clone();
-        // Each module has its own VarTable, so VarIds from the parent's
-        // lazy_vars would collide with module-local variables (parameters,
-        // match bindings) that share the same numeric id.
-        // Clear inherited lazy_vars; module-specific ones are added below.
+        // Post `UnifyVarTablesPass` every module function references
+        // `program.var_table`; we still clear the parent's lazy_vars
+        // because module top-lets' lazy bindings are appended below.
         mod_ann.lazy_vars.clear();
         let mut mod_ctx = RenderContext {
             templates: ctx.templates,
-            var_table: &module.var_table,
+            var_table: ctx.var_table,
             indent: ctx.indent,
             target: ctx.target,
             auto_unwrap: false,

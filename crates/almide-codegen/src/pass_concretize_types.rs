@@ -91,19 +91,19 @@ impl NanoPass for ConcretizeTypesPass {
         for tl in &mut program.top_lets {
             concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
         }
-        program.var_table = prog_vt;
-
+        // Module functions / top_lets now index into the unified
+        // program-level VarTable (post `UnifyVarTablesPass`), so we
+        // keep it taken out while we touch them too.
         for module in &mut program.modules {
-            let mut mod_vt = std::mem::take(&mut module.var_table);
             for func in &mut module.functions {
                 let ret = func.ret_ty.clone();
-                concretize_expr(&mut func.body, &mut mod_vt, &symbols, &ret);
+                concretize_expr(&mut func.body, &mut prog_vt, &symbols, &ret);
             }
             for tl in &mut module.top_lets {
-                concretize_expr(&mut tl.value, &mut mod_vt, &symbols, &Ty::Unknown);
+                concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
             }
-            module.var_table = mod_vt;
         }
+        program.var_table = prog_vt;
         PassResult { program, changed: true }
     }
 }
