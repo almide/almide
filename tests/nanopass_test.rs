@@ -664,27 +664,31 @@ mod licm {
     }
 }
 
-// ── StreamFusionPass ────────────────────────────────────────────
+// ── EggSaturationPass ───────────────────────────────────────────
+// Replaces the retired StreamFusionPass / MatrixFusionPass. The
+// equality-saturation driver doesn't see plain IntLit / empty
+// programs (is_saturation_target filters to list + matrix calls),
+// so the same smoke-level pass-identity tests apply.
 
-mod stream_fusion {
+mod egg_saturation {
     use super::*;
-    use almide::codegen::pass_stream_fusion::StreamFusionPass;
+    use almide::codegen::pass_egg_saturation::EggSaturationPass;
 
     #[test]
     fn empty_program_unchanged() {
         let program = mk_program(vec![], VarTable::new());
-        let result = run_pass(&StreamFusionPass, program, Target::Rust);
+        let result = run_pass(&EggSaturationPass, program, Target::Rust);
         assert!(result.functions.is_empty());
     }
 
     #[test]
     fn simple_function_unchanged() {
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::LitInt { value: 1 }, Ty::Int);
         let func = mk_fn("simple", vec![], Ty::Int, body, false);
 
         let program = mk_program(vec![func], vt);
-        let result = run_pass(&StreamFusionPass, program, Target::Rust);
+        let result = run_pass(&EggSaturationPass, program, Target::Rust);
 
         assert_eq!(result.functions.len(), 1);
     }
