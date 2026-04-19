@@ -354,21 +354,25 @@ impl Checker {
                 return Ty::Unknown;
             }
             let mut diag = super::err(format!("undefined function '{}'", name), hint, format!("call to {}()", name)).with_code("E002");
+            // `try_replace` (Phase 3): when the hint is a clean rename
+            // and the callee's source span is available, emit both a
+            // concise `try` and the exact replacement range so
+            // `Diagnostic::apply_try_to` can rewrite the source.
+            // Rich multi-line snippets (conversion wrappers, operator
+            // suggestions) stay display-only via `with_try`.
             if let Some(rich) = rich_snippet {
                 diag = diag.with_try(rich.to_string());
+            } else if let (Some(fix), Some(span)) = (&fix_name, self.callee_span_hint) {
+                // Almide `Span::end_col` is the column one past the last
+                // char (same convention as lexer emit — `end_col = col +
+                // token_len`). `apply_try_to` wants the exclusive upper
+                // bound, so use `end_col` directly.
+                diag = diag.with_try_replace(span.line, span.col, span.end_col, fix.clone());
             } else if let Some(fix) = &fix_name {
+                // Fallback: no span available — fall back to the
+                // comment-headed display form.
                 diag = diag.with_try(format!("// {wrong}(...)  →  {right}(...)\n{right}(...)", wrong = name, right = fix));
             }
-            // `try_replace` (Phase 3): populating this field requires the
-            // exact source span of the offending name. The current
-            // callee-span plumbing (`callee_span_hint`) resolves to the
-            // `.` token on Member calls — not the whole `object.field`
-            // range — so per-diagnostic migration waits on a parser-side
-            // span upgrade. The infrastructure (`with_try_replace`,
-            // `apply_try_to`, JSON emit, harness auto-apply) is in place
-            // so individual diagnostics can opt in once their spans are
-            // precise.
-            let _ = self.callee_span_hint;
             self.emit(diag);
             return Ty::Unknown;
         };

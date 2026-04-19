@@ -132,6 +132,32 @@ precise name-token span at the emission site. The E002 rename path
 blocked on the parser exposing the full callee span (currently Member
 exprs record only the `.` token, not `object.field`).
 
+### 2026-04-20 — Phase 3 first migration (E002 stdlib alias rename)
+
+- **Parser**: `ExprKind::Member`'s span now covers the full
+  `object.field` range (from `object.span.col` to the field token's
+  `end_col`) instead of just the `.` token. Multi-line members (rare —
+  Almide disallows `.` across newlines) fall back to the field span.
+- **Checker**: `check_named_call_spanned` accepts the callee's span
+  via `callee_span_hint`; `check_call_with_type_args` threads this for
+  both `Ident` and `Member` call shapes.
+- **E002 emission**: `rich_snippet` still goes to `with_try` (display-
+  only). Clean `fix_name` suggestions now go through `with_try_replace`
+  with the callee span — `string.length` → `string.len` is now a
+  mechanically-applicable fix.
+- **Fixture**: `tests/diagnostics/string-length-alias/` pairs
+  `broken.almd` (`string.length`) with `fixed.almd` (`string.len`).
+  The `try_snippets_with_replace_span_apply_cleanly` harness test
+  actively fires on this fixture — rewrites `broken.almd` via
+  `apply_try_to`, compiles the result, and asserts it matches
+  `fixed.almd`. End-to-end proof that a compiler-emitted Try snippet
+  round-trips through the apply machinery.
+
+**Remaining Phase 3 work:** every other `with_try(...)` call site
+(12 remaining) that can be shown to round-trip. Rich multi-line
+snippets (JDN sqrt conversion, operator suggestions) stay
+display-only and document why.
+
 ## Acceptance Criteria
 
 - すべての診断が Here / Try / Hint（または Here / Hint）の形式で出力される

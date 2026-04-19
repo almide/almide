@@ -181,20 +181,37 @@ impl Parser {
         let mut expr = self.parse_primary()?;
         loop {
             if self.check(TokenType::Dot) {
-                let span = Some(self.current_span());
+                let dot_span = self.current_span();
                 self.advance();
                 if self.check(TokenType::Int) {
                     let idx_str = self.current().value.clone();
                     self.advance();
                     let index = idx_str.parse::<usize>().map_err(|_| {
-                        format!("invalid tuple index '{}' at line {:?}", idx_str, span)
+                        format!("invalid tuple index '{}' at line {:?}", idx_str, dot_span)
                     })?;
-                    expr = Expr::new(self.next_id(), span, ExprKind::TupleIndex {
+                    expr = Expr::new(self.next_id(), Some(dot_span), ExprKind::TupleIndex {
                         object: Box::new(expr), index,
                     });
                 } else {
+                    // Capture the field's token span BEFORE `expect_any_name`
+                    // advances past it. The Member's span then covers the
+                    // full `object.field` — from the object's starting
+                    // column to the field token's end column (same-line
+                    // assumption: Almide's lexer never emits a Dot across
+                    // lines, since `.` before a newline is a syntax error).
+                    // This precise span powers E002's `try_replace` for
+                    // rename suggestions like `string.length` → `string.len`.
+                    let field_span = self.current_span();
                     let field = self.expect_any_name()?;
-                    expr = Expr::new(self.next_id(), span, ExprKind::Member {
+                    let full_span = match expr.span {
+                        Some(obj_span) if obj_span.line == field_span.line => Span {
+                            line: field_span.line,
+                            col: obj_span.col,
+                            end_col: field_span.end_col,
+                        },
+                        _ => field_span,
+                    };
+                    expr = Expr::new(self.next_id(), Some(full_span), ExprKind::Member {
                         object: Box::new(expr), field,
                     });
                 }
