@@ -36,8 +36,16 @@ impl NanoPass for ResultPropagationPass {
         // template), which collapses local widths and equality dispatch.
         // Keep the IR consistent with what actually gets emitted.
         let is_template_dispatch = |attrs: &[almide_lang::ast::Attribute]| -> bool {
+            // `@intrinsic(symbol)` fns are rewritten to `IrExprKind::RuntimeCall`
+            // by `pass_intrinsic_lowering` and emit a single call to the
+            // named runtime fn. Lifting their declared return type to
+            // `Result[T, String]` collapses WASM equality dispatch (the
+            // emitter routes `Option[String]` through `emit_result_eq_deep`
+            // instead of `emit_option_eq_deep`), and because `lifted_fns`
+            // is keyed by bare fn name, one `@intrinsic` effect fn named
+            // `get` silently retypes every other `get` call across modules.
             attrs.iter().any(|a| matches!(a.name.as_str(),
-                "inline_rust" | "wasm_intrinsic"))
+                "inline_rust" | "wasm_intrinsic" | "intrinsic"))
         };
 
         // Phase 1a: Collect all effect fn names and lift return types.

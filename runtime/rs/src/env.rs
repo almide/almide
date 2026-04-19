@@ -14,11 +14,11 @@ pub fn almide_rt_env_args() -> Vec<String> {
     }
 }
 
-pub fn almide_rt_env_get(name: String) -> Option<String> {
+pub fn almide_rt_env_get(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-pub fn almide_rt_env_set(name: String, value: String) {
+pub fn almide_rt_env_set(name: &str, value: &str) {
     std::env::set_var(name, value);
 }
 
