@@ -41,7 +41,9 @@ fn lower_test_block() {
     let ir = lower("test \"basic\" {\n  assert(true)\n}");
     assert_eq!(ir.functions.len(), 1);
     assert!(ir.functions[0].is_test);
-    assert_eq!(ir.functions[0].name, "basic");
+    // Test names carry TEST_NAME_PREFIX upstream; display_name() strips it.
+    assert_eq!(ir.functions[0].name, "__test_almd_basic");
+    assert_eq!(ir.functions[0].display_name(), "basic");
 }
 
 #[test]

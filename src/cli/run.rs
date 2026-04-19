@@ -7,7 +7,12 @@ use super::{hash64, cargo_build_generated_with_native, cargo_build_test_with_nat
 pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: bool) -> Result<std::path::PathBuf, String> {
     let rs_code = try_compile(file, no_check).map_err(|_| "compile failed".to_string())?;
 
-    let project_dir = std::env::temp_dir().join("almide-run");
+    // Default shared scratch dir. Tests set `ALMIDE_RUN_PROJECT_DIR` to a
+    // unique path so parallel `cargo test --all` can't race on the shared
+    // `src/main.rs` / `target/debug/` inside it.
+    let project_dir = std::env::var_os("ALMIDE_RUN_PROJECT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("almide-run"));
     std::fs::create_dir_all(&project_dir)
         .map_err(|e| format!("Failed to create temp directory: {}", e))?;
 

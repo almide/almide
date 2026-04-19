@@ -1,4 +1,5 @@
 <!-- description: Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures -->
+<!-- done: 2026-04-19 -->
 # `cargo test --all` Cache Race
 
 ## Symptom
@@ -67,3 +68,13 @@ files use.
 
 Not blocking any feature ship — but should be fixed before the
 `release-0.14.6` cut so CI signals are trustworthy.
+
+---
+
+## Resolution (2026-04-19)
+
+`ALMIDE_RUN_PROJECT_DIR` env var support in `cli/run.rs::compile_to_binary`,
+plus a `run_cmd()` helper in `tests/fix_test.rs` that hands each
+`almide run`-using test a `tempfile::TempDir`. Shared
+`/tmp/almide-run/src/main.rs` race eliminated; `cargo test --release
+--test fix_test` now passes parallel for 4 consecutive runs.

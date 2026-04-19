@@ -38,6 +38,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "tempfile",
  "toml",
  "wasm-encoder 0.225.0",
 ]
