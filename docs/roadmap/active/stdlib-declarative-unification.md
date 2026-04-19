@@ -100,11 +100,32 @@ Each module needs:
 
   Runtime Rust fns (`runtime/rs/src/<m>.rs`) + WASM `calls_<m>.rs` は
   引き続き維持 (`dispatch_runtime_fallback` が symbol から逆引き)。
-- **Stage 3**: closure-bearing modules (list, option, result, map, set).
-  Requires attribute recipes that encode closure ABI.
-- **Stage 4**: effect modules (fs, http, process, io, env, datetime,
-  random, regex, json, testing, matrix). These have WASM runtime
-  interactions that may need different attribute shapes.
+- **Stage 3** (大部分完了 2026-04-19): closure-bearing modules.
+  - `list` — 30 closure / container fn migrated to `@intrinsic` +
+    new `@consume(xs[, ys])` attribute. List runtime fns that take
+    `Vec<T>` are pinned to `Own` borrow instead of the default
+    `RefSlice`. Pipeline reordered: `LambdaTypeResolve` + a second
+    `ConcretizeTypes` now run early on both Rust and WASM targets
+    (previously WASM-only) so post-`@intrinsic` `RuntimeCall` nodes
+    still resolve lambda param types and `MatchSubject` sees
+    `c: String` on fold callbacks. Also patched
+    `MatchSubjectPass` to recurse into `RuntimeCall` / `TailCall` /
+    `InlineRust` args, `LambdaTypeResolve::resolve_call_lambdas` +
+    `resolve_list_elem_ty` to decode `Named { almide_rt_list_* }` and
+    `RuntimeCall`, and `pass_concretize_types::resolve_call_ret_ty`
+    to decode the same shapes for return-type substitution. Side
+    effect: `fs.read_bytes_raw` WASM emit stub added — nn WASM
+    skipped `ggml_whisper.almd` pre-existing ICE is now green 12/12.
+  - `map` — `map_values` migrated; remaining 2 entries (`from_list`
+    for `List[Tuple]`, rest) covered by bulk work.
+  - `option` / `set` — already fully `@intrinsic`.
+  - `result` — **残**: `.map` / `.ok()` / `.err()` / `.and_then`
+    are Rust method chains (no `almide_rt_result_*` runtime fn);
+    needs a wrapper-layer in `runtime/rs/src/result.rs` before
+    `@intrinsic` migration. Separate arc.
+- **Stage 4**: effect modules (fs, http, process, io, env (done),
+  datetime, random, regex, json, testing, matrix). These have WASM
+  runtime interactions that may need different attribute shapes.
 
 Target release cadence: one stage per `0.14.N` / early `0.15.x`. Full
 unification lands in `0.15.0`.
