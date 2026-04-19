@@ -909,17 +909,14 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         };
         let results = values::ret_type(&resolved_ret_ty);
         let type_idx = emitter.register_type(params, results);
-        // Use prefixed name for test functions to avoid colliding with user functions
-        let reg_name = if func.is_test {
-            format!("__test_{}", func.name)
-        } else {
-            func.name.to_string()
-        };
+        // Test blocks already carry `TEST_NAME_PREFIX` from lowering so
+        // they cannot collide with user fns — use the name as-is.
+        let reg_name = func.name.to_string();
         let func_idx = emitter.register_func(&reg_name, type_idx);
         user_meta.push(type_idx);
         user_func_indices.push(func_idx);
         if func.is_test {
-            test_func_indices.push((func_idx, func.name.to_string()));
+            test_func_indices.push((func_idx, func.display_name().to_string()));
         }
         if func.is_effect {
             emitter.effect_fns.insert(func.name.to_string());
@@ -957,13 +954,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 continue;
             }
             let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");
-            // Test functions use __test_ prefix so they don't collide with
-            // identically-named user functions (e.g. fn broadcast_add + test "broadcast_add").
-            let prefixed_name = if func.is_test {
-                format!("almide_rt_{}___test_{}", mod_ident, func_name_sanitized)
-            } else {
-                format!("almide_rt_{}_{}", mod_ident, func_name_sanitized)
-            };
+            // Test blocks carry `TEST_NAME_PREFIX` from lowering — no
+            // additional conditional prefix needed here.
+            let prefixed_name = format!("almide_rt_{}_{}", mod_ident, func_name_sanitized);
             let params: Vec<ValType> = func.params.iter()
                 .filter_map(|p| values::ty_to_valtype(&p.ty))
                 .collect();

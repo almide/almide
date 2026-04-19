@@ -784,6 +784,25 @@ pub struct IrFunction {
     pub blank_lines_before: u32,
 }
 
+/// Prefix applied to test function names in lowering to guarantee
+/// uniqueness against same-named user fns (`fn foo` + `test "foo"`).
+/// All downstream passes see a pre-normalized, unique `func.name`.
+pub const TEST_NAME_PREFIX: &str = "__test_almd_";
+
+impl IrFunction {
+    /// Source-visible name. For test blocks this strips the
+    /// `TEST_NAME_PREFIX` so reporters (test runner output, diagnostics)
+    /// show the user's original `test "name"` string.
+    pub fn display_name(&self) -> &str {
+        let n = self.name.as_str();
+        if self.is_test {
+            n.strip_prefix(TEST_NAME_PREFIX).unwrap_or(n)
+        } else {
+            n
+        }
+    }
+}
+
 /// Classification of top-level let bindings for codegen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

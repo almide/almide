@@ -347,6 +347,29 @@ codegen-ideal-form #1 / #7 を段階的に完遂するアーク。
 
 **見積**: Phase 1e は 4-6h、resolve pass 拡張 + Rust/WASM dispatch 統合。arc の主軸。
 
+### Step S5 — Test namespace normalization *(shipped 2026-04-19)*
+
+codegen-ideal-form #6 の完成。`lower_test` が `IrFunction.name` に
+`__test_almd_` prefix を付けるようになり、下流全パス (walker /
+emit_wasm / module emit) から `is_test` 名前衝突回避ロジックが消えた:
+
+- `almide_ir::TEST_NAME_PREFIX` + `IrFunction::display_name()` を新規公開
+- `lower/mod.rs::lower_test` が prefix 付きの `Sym` を allocate
+- `walker/mod.rs` と `emit_wasm/mod.rs` の `if func.is_test { format!("__test_…") }`
+  分岐を削除、`func.name` を直接利用
+- 下流全 spec + WASM 全テスト green (219 + 213)
+
+`is_test` フラグは semantic 用途 (mono 保存 / auto_unwrap / template 選択)
+で残すが、**名前は upstream で unique**。
+
+### Step S6 — VarTable consolidation *(deferred to `active/var-table-unification.md`)*
+
+codegen-ideal-form #5 の残務。`program.var_table` / `module.var_table`
+2 層構造そのものを消す作業。本アークでは core の pain point (lifted
+closure が別 var_table に跨る) が `pass_closure_conversion` の
+module-local 保持で既に解消済みのため、**構造統合は独立アークに切り出す**。
+追跡: `active/var-table-unification.md`。
+
 ### Step S4 — Monomorphize coverage 拡張 `0.14.7-phase3.3`
 
 bundled-almide-ideal-form #5。0.14.6 の `monomorphize_module_fns` は narrow

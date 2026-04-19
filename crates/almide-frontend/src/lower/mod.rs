@@ -504,7 +504,8 @@ fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
     let ir_body = lower_expr(ctx, body);
     ctx.pop_scope();
     IrFunction {
-        name: sym(name), params: vec![], ret_ty: Ty::Unit, body: ir_body,
+        name: sym(&format!("{}{}", almide_ir::TEST_NAME_PREFIX, name)),
+        params: vec![], ret_ty: Ty::Unit, body: ir_body,
         is_effect: true, is_async: false, is_test: true,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
         visibility: IrVisibility::Public,

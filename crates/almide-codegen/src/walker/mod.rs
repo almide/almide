@@ -251,13 +251,10 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         String::new()
     };
 
-    // Sanitize function name: spaces/dots/hyphens → underscores
-    // Prefix test functions to avoid name collision with real functions
-    let raw_name = if func.is_test {
-        format!("__test_almd_{}", func.name)
-    } else {
-        func.name.to_string()
-    };
+    // Sanitize function name: spaces/dots/hyphens → underscores.
+    // Test blocks already carry `TEST_NAME_PREFIX` from lowering so they
+    // cannot collide with user fns here — no conditional prefixing needed.
+    let raw_name = func.name.to_string();
     let mut safe_name = raw_name.replace(' ', "_").replace('-', "_").replace('.', "_")
         .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
         .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
