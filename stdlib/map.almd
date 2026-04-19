@@ -55,7 +55,7 @@ fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
 
 // ── closure-bearing (direct runtime dispatch — map has no IterChain) ──
 
-@inline_rust("almide_rt_map_map_values(&{m}, {f})")
+@intrinsic("almide_rt_map_map_values")
 fn map[K, V, B](m: Map[K, V], f: (V) -> B) -> Map[K, B] = _
 
 @intrinsic("almide_rt_map_filter")

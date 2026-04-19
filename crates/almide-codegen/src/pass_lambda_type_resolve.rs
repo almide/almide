@@ -24,7 +24,15 @@ impl NanoPass for LambdaTypeResolvePass {
     fn name(&self) -> &str { "LambdaTypeResolve" }
 
     fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::Wasm])
+        // Both WASM and Rust targets. Historically Rust avoided the
+        // pass because `@inline_rust` templates carried call-site
+        // type info at expansion time. Once closure-bearing list fns
+        // migrated to `@intrinsic` + `IrExprKind::RuntimeCall`, the
+        // Rust walker no longer has the stdlib call signature to
+        // propagate element types into lambda params; the lambda's
+        // `c: String` stays `TypeVar` and `MatchSubjectPass` fails to
+        // recognise the subject type.
+        Some(vec![Target::Wasm, Target::Rust])
     }
 
     fn postconditions(&self) -> Vec<Postcondition> {
@@ -100,6 +108,28 @@ fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
             // 3. Recurse into args (including lambda bodies)
             for a in args.iter_mut() {
                 resolve_expr(a, vt);
+            }
+            // 4. Update Call's own return type from resolved args for a
+            //    few stdlib list ops whose generic signature left
+            //    TypeVars unsubstituted. Without this, a `let zipped =
+            //    list.zip(filter, spectrum)` inside a closure keeps
+            //    `List[Tuple[TypeVar, Float]]` and the fold callback
+            //    that follows fails to resolve `pair: (Float, Float)`.
+            if expr.ty.has_unresolved_deep() {
+                if let Some(new_ty) = compute_stdlib_call_ret(target, args, vt) {
+                    expr.ty = new_ty;
+                }
+            }
+        }
+        IrExprKind::RuntimeCall { symbol, args } => {
+            for a in args.iter_mut() {
+                resolve_expr(a, vt);
+            }
+            if expr.ty.has_unresolved_deep() {
+                let synthetic = CallTarget::Named { name: *symbol };
+                if let Some(new_ty) = compute_stdlib_call_ret(&synthetic, args, vt) {
+                    expr.ty = new_ty;
+                }
             }
         }
         IrExprKind::Lambda { params, .. } => {
@@ -223,7 +253,25 @@ fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
 
 fn resolve_stmt(stmt: &mut IrStmt, vt: &mut VarTable) {
     match &mut stmt.kind {
-        IrStmtKind::Bind { value, .. } => resolve_expr(value, vt),
+        IrStmtKind::Bind { var, ty, value, .. } => {
+            resolve_expr(value, vt);
+            // Propagate a resolved RHS type up into the Bind's declared
+            // type AND the VarTable entry for the bound var. Without
+            // this, a `let zipped = list.zip(xs, ys)` inside a closure
+            // still carries `TypeVar` for zipped's type at the fold
+            // call-site that follows, because LTR resolved zip's
+            // result but never pushed the type forward through the
+            // Bind boundary.
+            if ty.has_unresolved_deep() && !value.ty.has_unresolved_deep() {
+                *ty = value.ty.clone();
+            }
+            if (var.0 as usize) < vt.len() {
+                let vt_ty = vt.get(*var).ty.clone();
+                if vt_ty.has_unresolved_deep() && !value.ty.has_unresolved_deep() {
+                    vt.entries[var.0 as usize].ty = value.ty.clone();
+                }
+            }
+        }
         IrStmtKind::BindDestructure { value, .. } => resolve_expr(value, vt),
         IrStmtKind::Assign { value, .. } => resolve_expr(value, vt),
         IrStmtKind::IndexAssign { index, value, .. } => {
@@ -265,12 +313,23 @@ const LIST_ELEM_SECOND_METHODS: &[&str] = &[
 const LIST_ELEM_BOTH_METHODS: &[&str] = &["reduce"];
 
 fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut VarTable) {
-    let method_name = match target {
-        CallTarget::Method { method, .. } => Some(method.as_str()),
-        CallTarget::Module { module, func } if module.as_str() == "list" => Some(func.as_str()),
+    // Extract the stdlib method name from every call-target shape the
+    // frontend / ResolveCalls / IntrinsicLowering produce:
+    //   - `Method { method }`                    — UFCS, unresolved module
+    //   - `Module { list, func }`                — pre-ResolveCalls
+    //   - `Named { "almide_rt_list_<func>" }`    — post-ResolveCalls
+    //     or post-frontend-lowering
+    let method_name_owned: Option<String> = match target {
+        CallTarget::Method { method, .. } => Some(method.as_str().to_string()),
+        CallTarget::Module { module, func } if module.as_str() == "list" => Some(func.as_str().to_string()),
+        CallTarget::Named { name } => {
+            let s = name.as_str();
+            s.strip_prefix("almide_rt_list_").map(|rest| rest.to_string())
+        }
         _ => None,
     };
-    let Some(name) = method_name else { return };
+    let Some(name) = method_name_owned else { return };
+    let name = name.as_str();
     // Determine which param(s) of the lambda receive the element type
     let elem_param_indices: &[usize] = if LIST_ELEM_FIRST_METHODS.iter().any(|m| *m == name) {
         &[0]
@@ -386,9 +445,23 @@ fn resolve_list_elem_ty(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
             }
         }
     }
-    // list.zip(xs, ys) → Tuple(xs_elem, ys_elem)
-    if let IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } = &expr.kind {
-        if module.as_str() == "list" && func.as_str() == "zip" && args.len() >= 2 {
+    // list.zip(xs, ys) → Tuple(xs_elem, ys_elem).
+    // Match every call-target shape the frontend / ResolveCalls /
+    // IntrinsicLowering produce for stdlib `list.zip`: pre-lowering
+    // `Module { list, zip }`, frontend-mangled or post-ResolveCalls
+    // `Named { "almide_rt_list_zip" }`, and post-IntrinsicLowering
+    // `RuntimeCall { symbol: "almide_rt_list_zip", .. }`.
+    let zip_args: Option<&Vec<IrExpr>> = match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module.as_str() == "list" && func.as_str() == "zip" => Some(args),
+        IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+            if name.as_str() == "almide_rt_list_zip" => Some(args),
+        IrExprKind::RuntimeCall { symbol, args }
+            if symbol.as_str() == "almide_rt_list_zip" => Some(args),
+        _ => None,
+    };
+    if let Some(args) = zip_args {
+        if args.len() >= 2 {
             let a = resolve_list_elem_ty(&args[0], vt);
             let b = resolve_list_elem_ty(&args[1], vt);
             if let (Some(a), Some(b)) = (a, b) {
@@ -529,4 +602,63 @@ pub(crate) fn infer_param_ty_from_body(body: &IrExpr, target: VarId) -> Option<T
         }
     }
     walk(body, target)
+}
+
+/// Compute the return type of a stdlib list Call node from the
+/// (already-resolved) types of its args. Mirrors the subset of
+/// `pass_concretize_types::resolve_call_ret_ty` that can answer
+/// without a SymbolTable. Used by LTR to propagate concrete types
+/// into downstream Var bindings before ConcretizeTypes runs.
+fn compute_stdlib_call_ret(target: &CallTarget, args: &[IrExpr], vt: &VarTable) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    let (module, func): (&str, &str) = match target {
+        CallTarget::Module { module, func } => (module.as_str(), func.as_str()),
+        CallTarget::Named { name } => {
+            let s = name.as_str();
+            let rest = s.strip_prefix("almide_rt_")?;
+            let under = rest.find('_')?;
+            let module = &rest[..under];
+            let func = &rest[under + 1..];
+            // Returning refs into `s` would outlive the match — rebind.
+            return compute_stdlib_call_ret_inner(module, func, args, vt);
+        }
+        _ => return None,
+    };
+    compute_stdlib_call_ret_inner(module, func, args, vt)
+}
+
+fn compute_stdlib_call_ret_inner(module: &str, func: &str, args: &[IrExpr], vt: &VarTable) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    if module != "list" { return None; }
+    let list_elem = |idx: usize| -> Option<Ty> {
+        let arg = args.get(idx)?;
+        resolve_list_elem_ty(arg, vt)
+    };
+    let list_of = |t: Ty| Ty::Applied(TCI::List, vec![t]);
+    match func {
+        "zip" => {
+            let a = list_elem(0)?;
+            let b = list_elem(1)?;
+            Some(list_of(Ty::Tuple(vec![a, b])))
+        }
+        "enumerate" => {
+            let elem = list_elem(0)?;
+            Some(list_of(Ty::Tuple(vec![Ty::Int, elem])))
+        }
+        "map" | "filter_map" | "flat_map" => None,  // needs lambda ret
+        "filter" | "take_while" | "drop_while"
+        | "take" | "drop" | "reverse" | "sort" | "sort_by"
+        | "dedup" | "slice" | "chunks" | "intersperse" => list_elem(0).map(list_of),
+        "fold" => {
+            let init = args.get(1)?;
+            if !init.ty.has_unresolved_deep() { Some(init.ty.clone()) } else { None }
+        }
+        "any" | "all" => Some(Ty::Bool),
+        "count" | "len" => Some(Ty::Int),
+        "first" | "last" | "find" => {
+            let elem = list_elem(0)?;
+            Some(Ty::Applied(TCI::Option, vec![elem]))
+        }
+        _ => None,
+    }
 }

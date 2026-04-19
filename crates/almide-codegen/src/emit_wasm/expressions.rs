@@ -271,7 +271,23 @@ impl FuncCompiler<'_> {
                 if let Some(&idx) = self.emitter.func_map.get(sym) {
                     for a in args { self.emit_expr(a); }
                     wasm!(self.func, { call(idx); });
+                } else if let Some((module, func)) = self.emitter.intrinsic_symbol_to_fn.get(sym).cloned() {
+                    // Preferred: use the Almide (module, fn) that declared
+                    // the `@intrinsic` — the symbol may rename the fn
+                    // (e.g. `map.map` → `almide_rt_map_map_values`).
+                    if !self.dispatch_runtime_fallback(&module, &func, args, &expr.ty) {
+                        panic!(
+                            "[ICE] emit_wasm: RuntimeCall `{}` declared by `{}.{}` \
+                             — no WASM runtime fn and no legacy dispatcher arm. \
+                             Register the runtime fn or add a dispatch arm.",
+                            sym, module, func
+                        );
+                    }
                 } else if let Some(rest) = sym.strip_prefix("almide_rt_") {
+                    // Legacy fallback: decode module/fn from the mangled
+                    // symbol name. Used when the runtime symbol matches the
+                    // Almide fn name 1:1 and the bundled `@intrinsic` map
+                    // hasn't claimed it.
                     if let Some(underscore) = rest.find('_') {
                         let module = &rest[..underscore];
                         let func = &rest[underscore + 1..];

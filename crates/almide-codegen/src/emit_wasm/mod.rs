@@ -210,6 +210,13 @@ pub struct WasmEmitter {
     // Function index tracking
     next_func_idx: u32,
     pub func_map: HashMap<String, u32>,
+    /// Reverse lookup for `@intrinsic("almide_rt_<m>_<f>")` attributes:
+    /// mangled symbol → (stdlib module name, Almide fn name). Populated
+    /// once from bundled stdlib sources; used by the WASM `RuntimeCall`
+    /// fallback path so that dispatch routes to the correct
+    /// `emit_<m>_call` arm even when the runtime symbol name differs
+    /// from the Almide fn name (e.g. `map.map` → `almide_rt_map_map_values`).
+    pub intrinsic_symbol_to_fn: HashMap<String, (String, String)>,
     // func_idx → type_idx for defined (non-import) functions
     pub func_type_indices: HashMap<u32, u32>,
 
@@ -293,6 +300,7 @@ impl WasmEmitter {
             num_imports: 0,
             next_func_idx: 0,
             func_map: HashMap::new(),
+            intrinsic_symbol_to_fn: HashMap::new(),
             func_type_indices: HashMap::new(),
             compiled: Vec::new(),
             strings: HashMap::new(),
@@ -478,6 +486,29 @@ impl FuncCompiler<'_> {
 /// Emit a WASM binary from an IR program (WASI mode).
 pub fn emit(program: &IrProgram) -> Vec<u8> {
     let mut emitter = WasmEmitter::new();
+
+    // Phase 0: Collect `@intrinsic(symbol)` → (module, fn_name) from every
+    // bundled stdlib source so the `RuntimeCall` fallback path can route
+    // dispatch by the Almide fn name rather than by naively decoding the
+    // runtime symbol. Needed when the runtime symbol differs from the
+    // Almide fn name (e.g. `map.map` → `almide_rt_map_map_values`).
+    {
+        use almide_lang::ast::{AttrValue, Decl};
+        for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
+            let Some(parsed) = almide_lang::parse_cached(source) else { continue };
+            for decl in &parsed.decls {
+                let Decl::Fn { name, attrs, .. } = decl else { continue };
+                let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else { continue };
+                let Some(first) = attr.args.first() else { continue };
+                let AttrValue::String { value: symbol } = &first.value else { continue };
+                emitter.intrinsic_symbol_to_fn.insert(
+                    symbol.clone(),
+                    (mod_name.to_string(), name.to_string()),
+                );
+            }
+        }
+    }
 
     // Phase 1: Register types and function indices
     // Step 1a: WASI imports (must come first — all imports before any defined functions)

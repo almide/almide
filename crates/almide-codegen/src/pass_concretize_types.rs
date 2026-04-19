@@ -683,6 +683,15 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
         IrExprKind::LitStr { .. } => Some(Ty::String),
         IrExprKind::Unit => Some(Ty::Unit),
         IrExprKind::Call { target, args, .. } => resolve_call_ret_ty(target, args, vt, symbols),
+        IrExprKind::RuntimeCall { symbol, args } => {
+            // Post-IntrinsicLowering, the `Call { target: Module }` node
+            // has been rewritten to RuntimeCall. Rebuild a synthetic
+            // `Named { symbol }` target so the existing stdlib
+            // polymorphic logic (list.map / list.zip / ...) keeps
+            // firing for post-lowering shape.
+            let target = CallTarget::Named { name: *symbol };
+            resolve_call_ret_ty(&target, args, vt, symbols)
+        }
         _ => None,
     }
 }
@@ -720,10 +729,24 @@ fn resolve_call_ret_ty(
         _ => {}
     }
 
-    let (module, func) = match target {
-        CallTarget::Module { module, func } => (module.as_str(), func.as_str()),
+    // Decode (module, func) from every stdlib call-target shape:
+    //   - `Module { list, map }`                 — pre-lowering
+    //   - `Named { "almide_rt_list_map" }`       — post-ResolveCalls or
+    //                                              frontend mangling
+    let (module_owned, func_owned): (String, String) = match target {
+        CallTarget::Module { module, func } => (module.as_str().to_string(), func.as_str().to_string()),
+        CallTarget::Named { name } => {
+            let s = name.as_str();
+            if let Some(rest) = s.strip_prefix("almide_rt_") {
+                if let Some(under) = rest.find('_') {
+                    (rest[..under].to_string(), rest[under+1..].to_string())
+                } else { return None }
+            } else { return None }
+        }
         _ => return None,
     };
+    let module = module_owned.as_str();
+    let func = func_owned.as_str();
 
     // 2. Stdlib polymorphic list operations with lambda return types.
     //    These need the lambda argument's Fn::ret, which isn't expressible

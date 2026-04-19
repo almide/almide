@@ -104,6 +104,23 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
                 let mut borrows: Vec<ParamBorrow> = params.iter()
                     .map(|p| intrinsic_borrow_mode_from_type_expr(&p.ty))
                     .collect();
+                // `@consume(p1, p2, ...)` overrides the inferred borrow for
+                // the named params to `Own`. Required when the runtime fn
+                // consumes a container (e.g. `xs: Vec<T>` on
+                // `almide_rt_list_map`) rather than borrowing it.
+                let consume_names: Vec<&str> = attrs.iter()
+                    .filter(|a| a.name.as_str() == "consume")
+                    .flat_map(|a| a.args.iter().filter_map(|arg| match &arg.value {
+                        AttrValue::Ident { name } => Some(name.as_str()),
+                        AttrValue::String { value } => Some(value.as_str()),
+                        _ => None,
+                    }))
+                    .collect();
+                for (idx, p) in params.iter().enumerate() {
+                    if consume_names.iter().any(|n| n == &p.name.as_str()) {
+                        borrows[idx] = ParamBorrow::Own;
+                    }
+                }
                 // First param is mutated in place when: Almide fn is marked
                 // `@mutating`, or returns Unit with a Ref-mode container
                 // first arg (common case for `.clear`, `.push`, etc.).

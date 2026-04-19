@@ -74,6 +74,20 @@ fn build_pipeline(target: Target) -> Pipeline {
                 .add(UnifyVarTablesPass)
                 // ListPatternLowering: desugar list patterns to if/else before any other pass
                 .add(ListPatternLoweringPass)
+                // LambdaTypeResolve runs FIRST (before ResolveCalls /
+                // IntrinsicLowering) so that `CallTarget::Module { list, fold }`
+                // is still present. Both `ResolveCalls` (bundled stdlib →
+                // `Named { almide_rt_... }`) and `IntrinsicLowering` (→
+                // `RuntimeCall`) rewrite the target; after either, the
+                // `resolve_call_lambdas` helper can't recognise the
+                // stdlib method any more, which leaves closure params
+                // as `TypeVar` and breaks `MatchSubject` on
+                // string-folding lambdas. A second
+                // `LambdaTypeResolvePass` invocation runs later for
+                // `Ty::Fn` wrapper refresh; this first one is purely
+                // about pre-rewrite information.
+                .add(LambdaTypeResolvePass)
+                .add(ConcretizeTypesPass)
                 // Verify all user-module calls resolve to known IrFunctions.
                 .add(ResolveCallsPass)
                 // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
@@ -147,6 +161,14 @@ fn build_pipeline(target: Target) -> Pipeline {
             // front so downstream passes see a single unified table.
             .add(UnifyVarTablesPass)
             .add(ListPatternLoweringPass)
+            // Lambda type resolution runs BEFORE IntrinsicLowering so that
+            // `Call { target: Module { list, map } }` still carries the
+            // stdlib call-site signature used to propagate list-elem types
+            // into the lambda param. `IntrinsicLoweringPass` rewrites the
+            // Call into a `RuntimeCall` that no longer exposes the (module,
+            // fn) pair, which would leave closures with `List[TypeVar(A)]`
+            // param types and break ConcretizeTypes / WASM emit downstream.
+            .add(LambdaTypeResolvePass)
             // @intrinsic(symbol) → RuntimeCall. See Rust pipeline comment.
             .add(IntrinsicLoweringPass)
             // Verify all user-module calls resolve to known IrFunctions.
@@ -162,8 +184,6 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(ResultPropagationPass)
         // Peephole: swap/reverse/rotate/copy → specialized IR nodes
         .add(PeepholePass)
-        // Lambda type resolution: top-down propagation of lambda param types
-        .add(LambdaTypeResolvePass)
         // Concretize types: sync every IrExpr.ty with VarTable / parent context,
         // so downstream emit code can trust expr.ty.
         .add(ConcretizeTypesPass)

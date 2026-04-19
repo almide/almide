@@ -36,19 +36,24 @@ fn reverse[A](xs: List[A]) -> List[A] = _
 @intrinsic("almide_rt_list_contains")
 fn contains[A](xs: List[A], x: A) -> Bool = _
 
-@inline_rust("almide_rt_list_enumerate(({xs}).to_vec())")
+@intrinsic("almide_rt_list_enumerate")
+@consume(xs)
 fn enumerate[A](xs: List[A]) -> List[(Int, A)] = _
 
-@inline_rust("almide_rt_list_zip(({xs}).to_vec(), ({ys}).to_vec())")
+@intrinsic("almide_rt_list_zip")
+@consume(xs, ys)
 fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
 
-@inline_rust("almide_rt_list_flatten(({xss}).to_vec())")
+@intrinsic("almide_rt_list_flatten")
+@consume(xss)
 fn flatten[T](xss: List[List[T]]) -> List[T] = _
 
-@inline_rust("almide_rt_list_take(({xs}).to_vec(), {n})")
+@intrinsic("almide_rt_list_take")
+@consume(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
-@inline_rust("almide_rt_list_drop(({xs}).to_vec(), {n})")
+@intrinsic("almide_rt_list_drop")
+@consume(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
 @intrinsic("almide_rt_list_unique")
@@ -57,7 +62,7 @@ fn unique[A](xs: List[A]) -> List[A] = _
 @intrinsic("almide_rt_list_index_of")
 fn index_of[A](xs: List[A], x: A) -> Option[Int] = _
 
-@inline_rust("almide_rt_list_last(&{xs})")
+@intrinsic("almide_rt_list_last")
 fn last[A](xs: List[A]) -> Option[A] = _
 
 @intrinsic("almide_rt_list_chunk")
@@ -89,13 +94,16 @@ fn join(xs: List[String], sep: String) -> String = _
 //    intercept in `pass_stdlib_lowering` fires before the `@inline_rust`
 //    dispatch below and produces a fused iterator chain) ──
 
-@inline_rust("almide_rt_list_map(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_map")
+@consume(xs)
 fn map[A, B](xs: List[A], f: (A) -> B) -> List[B] = _
 
-@inline_rust("almide_rt_list_filter(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_filter")
+@consume(xs)
 fn filter[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
-@inline_rust("almide_rt_list_find(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_find")
+@consume(xs)
 fn find[A](xs: List[A], f: (A) -> Bool) -> Option[A] = _
 
 @intrinsic("almide_rt_list_any")
@@ -107,48 +115,62 @@ fn all[A](xs: List[A], f: (A) -> Bool) -> Bool = _
 @intrinsic("almide_rt_list_count")
 fn count[A](xs: List[A], f: (A) -> Bool) -> Int = _
 
-@inline_rust("almide_rt_list_flat_map(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_flat_map")
+@consume(xs)
 fn flat_map[A, B](xs: List[A], f: (A) -> List[B]) -> List[B] = _
 
-@inline_rust("almide_rt_list_filter_map(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_filter_map")
+@consume(xs)
 fn filter_map[A, B](xs: List[A], f: (A) -> Option[B]) -> List[B] = _
 
-@inline_rust("almide_rt_list_fold(({xs}).to_vec(), {init}, {f})")
+@intrinsic("almide_rt_list_fold")
+@consume(xs)
 fn fold[A, B](xs: List[A], init: B, f: (B, A) -> B) -> B = _
 
 // ── closure-bearing (not IterChain-handled — direct runtime dispatch) ──
 
-@inline_rust("almide_rt_list_sort_by(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_sort_by")
+@consume(xs)
 fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
 
-@inline_rust("almide_rt_list_take_while(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_take_while")
+@consume(xs)
 fn take_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
-@inline_rust("almide_rt_list_drop_while(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_drop_while")
+@consume(xs)
 fn drop_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
-@inline_rust("almide_rt_list_partition(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_partition")
+@consume(xs)
 fn partition[A](xs: List[A], f: (A) -> Bool) -> (List[A], List[A]) = _
 
-@inline_rust("almide_rt_list_reduce(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_reduce")
+@consume(xs)
 fn reduce[A](xs: List[A], f: (A, A) -> A) -> Option[A] = _
 
-@inline_rust("almide_rt_list_group_by(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_group_by")
+@consume(xs)
 fn group_by[A, B](xs: List[A], f: (A) -> B) -> Map[B, List[A]] = _
 
-@inline_rust("almide_rt_list_find_index(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_find_index")
+@consume(xs)
 fn find_index[A](xs: List[A], f: (A) -> Bool) -> Option[Int] = _
 
-@inline_rust("almide_rt_list_update(({xs}).to_vec(), {i}, {f})")
+@intrinsic("almide_rt_list_update")
+@consume(xs)
 fn update[A](xs: List[A], i: Int, f: (A) -> A) -> List[A] = _
 
-@inline_rust("almide_rt_list_scan(({xs}).to_vec(), {init}, {f})")
+@intrinsic("almide_rt_list_scan")
+@consume(xs)
 fn scan[A, B](xs: List[A], init: B, f: (B, A) -> B) -> List[B] = _
 
-@inline_rust("almide_rt_list_zip_with(({xs}).to_vec(), ({ys}).to_vec(), {f})")
+@intrinsic("almide_rt_list_zip_with")
+@consume(xs, ys)
 fn zip_with[A, B, C](xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C] = _
 
-@inline_rust("almide_rt_list_unique_by(({xs}).to_vec(), {f})")
+@intrinsic("almide_rt_list_unique_by")
+@consume(xs)
 fn unique_by[A, K](xs: List[A], f: (A) -> K) -> List[A] = _
 
 // ── non-closure constructors / slicing ──
@@ -156,19 +178,23 @@ fn unique_by[A, K](xs: List[A], f: (A) -> K) -> List[A] = _
 @intrinsic("almide_rt_list_range")
 fn range(start: Int, end: Int) -> List[Int] = _
 
-@inline_rust("almide_rt_list_slice(({xs}).to_vec(), {start}, {end})")
+@intrinsic("almide_rt_list_slice")
+@consume(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
-@inline_rust("almide_rt_list_insert(({xs}).to_vec(), {i}, {val})")
+@intrinsic("almide_rt_list_insert")
+@consume(xs)
 fn insert[A](xs: List[A], i: Int, val: A) -> List[A] = _
 
-@inline_rust("almide_rt_list_remove_at(({xs}).to_vec(), {i})")
+@intrinsic("almide_rt_list_remove_at")
+@consume(xs)
 fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
 
 @intrinsic("almide_rt_list_repeat")
 fn repeat[A](val: A, n: Int) -> List[A] = _
 
-@inline_rust("almide_rt_list_intersperse(({xs}).to_vec(), {sep})")
+@intrinsic("almide_rt_list_intersperse")
+@consume(xs)
 fn intersperse[A](xs: List[A], sep: A) -> List[A] = _
 
 @intrinsic("almide_rt_list_windows")
@@ -177,16 +203,20 @@ fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
 @intrinsic("almide_rt_list_dedup")
 fn dedup[A](xs: List[A]) -> List[A] = _
 
-@inline_rust("almide_rt_list_take_end(({xs}).to_vec(), {n})")
+@intrinsic("almide_rt_list_take_end")
+@consume(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
-@inline_rust("almide_rt_list_drop_end(({xs}).to_vec(), {n})")
+@intrinsic("almide_rt_list_drop_end")
+@consume(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
-@inline_rust("almide_rt_list_shuffle(({xs}).to_vec())")
+@intrinsic("almide_rt_list_shuffle")
+@consume(xs)
 fn shuffle[A](xs: List[A]) -> List[A] = _
 
-@inline_rust("almide_rt_list_window(({xs}).to_vec(), {n})")
+@intrinsic("almide_rt_list_window")
+@consume(xs)
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
 @intrinsic("almide_rt_list_binary_search")
