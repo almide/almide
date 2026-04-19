@@ -9,7 +9,9 @@
 
 use almide_base::intern::sym;
 use almide_egg_lab::{fusion_rules, AlmideExpr, Bridge, FusionCost};
-use almide_ir::{BinOp, CallTarget, IrExpr, IrExprKind, Mutability, VarId, VarTable};
+use almide_ir::{
+    BinOp, CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarId, VarTable,
+};
 use almide_lang::types::{Ty, TypeConstructorId};
 use egg::{Extractor, RecExpr, Runner};
 
@@ -117,6 +119,29 @@ fn list_call(func: &str, args: Vec<IrExpr>, result_ty: Ty) -> IrExpr {
             type_args: vec![],
         },
         ty: result_ty,
+        span: None,
+    }
+}
+
+fn matrix_var(id: u32) -> IrExpr {
+    var(id, Ty::Matrix)
+}
+
+fn scalar_var(id: u32) -> IrExpr {
+    var(id, Ty::Float)
+}
+
+fn matrix_call(func: &str, args: Vec<IrExpr>) -> IrExpr {
+    IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module {
+                module: sym("matrix"),
+                func: sym(func),
+            },
+            args,
+            type_args: vec![],
+        },
+        ty: Ty::Matrix,
         span: None,
     }
 }
@@ -544,4 +569,224 @@ fn lifted_shape_matches_parsed_shape_after_fusion() {
     assert!(parsed_str.starts_with("(map "));
     assert!(from_ir.contains("compose"));
     assert!(parsed_str.contains("compose"));
+}
+
+// ── Matrix fusion round-trip tests ─────────────────────────────────
+
+/// `matrix.mul(a, b)` lifts to a `MatrixMul` node with two slot
+/// leaves. The bridge's round-trip must preserve the semantics: lift
+/// then lower reproduces a `matrix.mul` call on the same args.
+#[test]
+fn matrix_mul_lifts_and_lowers_verbatim() {
+    let a = matrix_var(0);
+    let b = matrix_var(1);
+    let ir = matrix_call("mul", vec![a, b]);
+
+    let mut bridge = Bridge::new();
+    let (rec, _root) = bridge.lift(&ir);
+    assert_eq!(rec.to_string(), "(matrix_mul _slot_0 _slot_1)");
+
+    let mut vt = seeded_var_table(1);
+    let lowered = bridge.lower(&rec, &mut vt).expect("lower succeeds");
+    match &lowered.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } => {
+            assert_eq!(module.as_str(), "matrix");
+            assert_eq!(func.as_str(), "mul");
+            assert_eq!(args.len(), 2);
+        }
+        other => panic!("expected matrix.mul call, got {:?}", other),
+    }
+}
+
+/// Full gemm+bias+scale+gelu chain: saturation fires the
+/// `gemm_bias_scale_gelu` rule and lower emits the fused intrinsic.
+#[test]
+fn matrix_gemm_chain_fuses_on_real_ir() {
+    let a = matrix_var(0);
+    let b = matrix_var(1);
+    let bias = matrix_var(2);
+    let alpha = scalar_var(3);
+
+    let mul = matrix_call("mul", vec![a, b]);
+    let add = matrix_call("add", vec![mul, bias]);
+    let scale = matrix_call("scale", vec![add, alpha]);
+    let gelu = matrix_call("gelu", vec![scale]);
+
+    let mut bridge = Bridge::new();
+    let (rec, root) = bridge.lift(&gelu);
+    let runner = Runner::default()
+        .with_iter_limit(64)
+        .with_node_limit(10_000)
+        .with_expr(&rec)
+        .run(&fusion_rules());
+    let canonical_root = runner.egraph.find(root);
+    let extractor = Extractor::new(&runner.egraph, FusionCost);
+    let (_, best) = extractor.find_best(canonical_root);
+    assert_eq!(
+        best.to_string(),
+        "(matrix_fused_gemm_bias_scale_gelu _slot_0 _slot_1 _slot_2 _slot_3)",
+    );
+
+    let mut vt = seeded_var_table(3);
+    let lowered = bridge.lower(&best, &mut vt).expect("lower succeeds");
+    match &lowered.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } => {
+            assert_eq!(module.as_str(), "matrix");
+            assert_eq!(func.as_str(), "fused_gemm_bias_scale_gelu");
+            assert_eq!(args.len(), 4);
+        }
+        other => panic!("expected fused call, got {:?}", other),
+    }
+}
+
+/// mul(a, scale(b, s)) — the `mul_scaled_rhs` rule — with arg reorder
+/// from the stdlib `(matrix_mul ?a (matrix_scale ?b ?s))` LHS to the
+/// `(matrix_mul_scaled ?a ?s ?b)` RHS. Confirms lower respects the
+/// RHS capture ordering specified in stdlib.
+#[test]
+fn matrix_mul_scaled_reorders_arguments_correctly() {
+    let a = matrix_var(0);
+    let b = matrix_var(1);
+    let s = scalar_var(2);
+
+    let scale = matrix_call("scale", vec![b, s]);
+    let mul = matrix_call("mul", vec![a, scale]);
+
+    let mut bridge = Bridge::new();
+    let (rec, root) = bridge.lift(&mul);
+    let runner = Runner::default()
+        .with_iter_limit(64)
+        .with_node_limit(10_000)
+        .with_expr(&rec)
+        .run(&fusion_rules());
+    let canonical_root = runner.egraph.find(root);
+    let extractor = Extractor::new(&runner.egraph, FusionCost);
+    let (_, best) = extractor.find_best(canonical_root);
+    // Stdlib RHS order: mul_scaled(a, s, b)
+    assert_eq!(
+        best.to_string(),
+        "(matrix_mul_scaled _slot_0 _slot_2 _slot_1)",
+    );
+
+    let mut vt = seeded_var_table(2);
+    let lowered = bridge.lower(&best, &mut vt).expect("lower succeeds");
+    let IrExprKind::Call { args, target: CallTarget::Module { func, .. }, .. } = &lowered.kind else {
+        panic!("expected Call, got {:?}", lowered.kind);
+    };
+    assert_eq!(func.as_str(), "mul_scaled");
+    // args[0] should be the `a` var (VarId 0), args[1] the scalar s
+    // (VarId 2), args[2] the `b` var (VarId 1).
+    let arg_ids: Vec<u32> = args
+        .iter()
+        .map(|e| match &e.kind {
+            IrExprKind::Var { id } => id.0,
+            other => panic!("expected Var arg, got {:?}", other),
+        })
+        .collect();
+    assert_eq!(arg_ids, vec![0, 2, 1]);
+}
+
+/// Build a `Block { stmts; trailing }` IR fragment from a list of
+/// `(var, value)` Bind pairs. Used to feed the let-split inline path.
+fn block_lets(binds: Vec<(VarId, IrExpr)>, trailing: IrExpr) -> IrExpr {
+    let stmts: Vec<IrStmt> = binds
+        .into_iter()
+        .map(|(var, value)| IrStmt {
+            kind: IrStmtKind::Bind {
+                var,
+                mutability: Mutability::Let,
+                ty: value.ty.clone(),
+                value,
+            },
+            span: None,
+        })
+        .collect();
+    let trailing_ty = trailing.ty.clone();
+    IrExpr {
+        kind: IrExprKind::Block { stmts, expr: Some(Box::new(trailing)) },
+        ty: trailing_ty,
+        span: None,
+    }
+}
+
+fn matrix_var_ref(id: u32) -> IrExpr {
+    IrExpr {
+        kind: IrExprKind::Var { id: VarId(id) },
+        ty: Ty::Matrix,
+        span: None,
+    }
+}
+
+/// 4-stage let-split chain matching the imperative MatrixFusionPass's
+/// gemm_bias_scale_gelu shape:
+///   let mul    = matrix.mul(a, b)
+///   let added  = matrix.add(mul, bias)
+///   let scaled = matrix.scale(added, alpha)
+///   matrix.gelu(scaled)
+/// Bridge must inline the chain into the trailing expression so egg
+/// can recognise the `gemm_bias_scale_gelu` rewrite.
+#[test]
+fn matrix_let_split_chain_fuses_via_inline() {
+    let a = matrix_var(0);
+    let b = matrix_var(1);
+    let bias = matrix_var(2);
+    let alpha = scalar_var(3);
+    let mul_id = 10;
+    let added_id = 11;
+    let scaled_id = 12;
+
+    let mul_value = matrix_call("mul", vec![a, b]);
+    let added_value = matrix_call("add", vec![matrix_var_ref(mul_id), bias]);
+    let scaled_value = matrix_call("scale", vec![matrix_var_ref(added_id), alpha]);
+    let trailing = matrix_call("gelu", vec![matrix_var_ref(scaled_id)]);
+
+    let ir = block_lets(
+        vec![
+            (VarId(mul_id), mul_value),
+            (VarId(added_id), added_value),
+            (VarId(scaled_id), scaled_value),
+        ],
+        trailing,
+    );
+
+    let mut bridge = Bridge::new();
+    let (rec, root) = bridge.lift(&ir);
+    let runner = Runner::default()
+        .with_iter_limit(64)
+        .with_node_limit(10_000)
+        .with_expr(&rec)
+        .run(&fusion_rules());
+    let canonical = runner.egraph.find(root);
+    let extractor = Extractor::new(&runner.egraph, FusionCost);
+    let (_, best) = extractor.find_best(canonical);
+    assert_eq!(
+        best.to_string(),
+        "(matrix_fused_gemm_bias_scale_gelu _slot_0 _slot_1 _slot_2 _slot_3)",
+    );
+}
+
+/// Negative case: a let binding whose variable is referenced twice
+/// downstream must NOT be inlined — duplicating the value would
+/// silently change semantics for ops with side-effects (and waste
+/// compute even for pure ones). Bridge falls back to opaque lift.
+#[test]
+fn matrix_let_split_with_duplicate_use_is_not_inlined() {
+    let a = matrix_var(0);
+    let b = matrix_var(1);
+    let mul_id = 10;
+    let mul_value = matrix_call("mul", vec![a, b]);
+    // Trailing references mul twice: matrix.add(mul, mul). Bridge
+    // must not inline.
+    let trailing = matrix_call("add", vec![matrix_var_ref(mul_id), matrix_var_ref(mul_id)]);
+    let ir = block_lets(vec![(VarId(mul_id), mul_value)], trailing);
+
+    // The Block lifts as a single opaque slot; the slot table
+    // keeps the original ir verbatim.
+    let mut bridge = Bridge::new();
+    let (_rec, _root) = bridge.lift(&ir);
+    assert_eq!(bridge.slots().len(), 1);
+    match &bridge.slots()[0].kind {
+        IrExprKind::Block { stmts, .. } => assert_eq!(stmts.len(), 1),
+        other => panic!("expected Block opaque slot, got {:?}", other),
+    }
 }

@@ -55,8 +55,10 @@ name = "almide-codegen"
 version = "0.12.2"
 dependencies = [
  "almide-base",
+ "almide-egg-lab",
  "almide-ir",
  "almide-lang",
+ "egg",
  "serde",
  "serde_json",
  "toml",

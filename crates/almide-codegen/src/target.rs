@@ -22,11 +22,10 @@ use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::pass_match_subject::MatchSubjectPass;
 use super::pass_effect_inference::EffectInferencePass;
-use super::pass_stream_fusion::StreamFusionPass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
-use super::pass_matrix_fusion::MatrixFusionPass;
+use super::pass_egg_saturation::EggSaturationPass;
 use super::pass_matrix_shape_spec::MatrixShapeSpecPass;
 use super::pass_const_fold::ConstFoldPass;
 use super::pass_rust_lowering::RustLoweringPass;
@@ -57,59 +56,68 @@ pub fn configure(target: Target) -> TargetConfig {
 }
 
 fn build_pipeline(target: Target) -> Pipeline {
+    // Stage 1 egg flip landed: `EggSaturationPass` is the sole
+    // fusion driver for both matrix and list combinator chains.
+    // The imperative `MatrixFusionPass` and `StreamFusionPass`
+    // have been retired. The `fma / fma3` legacy optimisations
+    // the imperative matrix pass also handled are not yet ported
+    // to egg; they were performance-only (no spec depends on
+    // them) and are earmarked for Stage 4's profile-guided cost
+    // function.
     match target {
-        Target::Rust => Pipeline::new()
-            // ListPatternLowering: desugar list patterns to if/else before any other pass
-            .add(ListPatternLoweringPass)
-            // Verify all user-module calls resolve to known IrFunctions.
-            .add(ResolveCallsPass)
-            // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
-            .add(BoxDerefPass)
-            // LICM: hoist loop-invariant expressions before loops
-            .add(LICMPass)
-            // MatrixFusion BEFORE borrow/clone (matches raw Module-call IR shape)
-            .add(MatrixFusionPass)
-            // MatrixShapeSpec: unroll small-shape matmuls inline before
-            // the stdlib lowering pass turns them into `InlineRust`
-            // blobs that no longer carry structural info.
-            .add(MatrixShapeSpecPass)
-            // Clean up arithmetic on numeric literals (e.g. (kb * -1.0) → -kb)
-            .add(ConstFoldPass)
-            // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
-            .add(StreamFusionPass)
-            // @intrinsic(symbol) → RuntimeCall must run BEFORE
-            // BorrowInsertion so the subsequent pass can look up the
-            // borrow signature by the mangled runtime symbol
-            // (`almide_rt_<m>_<f>`) and wrap args with the right
-            // Borrow IR node. BorrowInsertion's signature table is
-            // seeded from bundled `@intrinsic` declarations at
-            // `infer_borrow_signatures` entry.
-            .add(IntrinsicLoweringPass)
-            .add(BorrowInsertionPass)
-            // TCO: convert self-recursive tail calls to loops AFTER BorrowInsertion
-            // (so that param types are already finalized — avoids String/&str mismatch)
-            .add(TailCallOptPass)
-            .add(CaptureClonePass)
-            .add(CloneInsertionPass)
-            // Match subject transforms: String → .as_str(), Option<String> → .as_deref()
-            .add(MatchSubjectPass)
-            // Analysis passes (before lowering, while Module calls still visible)
-            .add(EffectInferencePass)
-            // Semantic lowering (order matters!)
-            // 1. Stdlib first: Module calls → Named calls with arg decoration
-            .add(StdlibLoweringPass)
-            // 2. AutoParallel: rewrite pure list ops to parallel variants
-            .add(AutoParallelPass)
-            // 3. ResultPropagation: insert Try (?) for effect fn calls
-            .add(ResultPropagationPass)
-            // 3. Builtin last: Named calls (assert_eq, println, etc.) → RustMacro
-            .add(BuiltinLoweringPass)
-            // Peephole: swap/reverse/rotate/copy → specialized IR nodes
-            .add(PeepholePass)
-            // Rust-specific: push optimization, borrow index lift
-            .add(RustLoweringPass)
-            // Shared passes
-            .add(FanLoweringPass),
+        Target::Rust => {
+            Pipeline::new()
+                // ListPatternLowering: desugar list patterns to if/else before any other pass
+                .add(ListPatternLoweringPass)
+                // Verify all user-module calls resolve to known IrFunctions.
+                .add(ResolveCallsPass)
+                // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
+                .add(BoxDerefPass)
+                // LICM: hoist loop-invariant expressions before loops
+                .add(LICMPass)
+                // Equality-saturation fusion: matrix + list combinators.
+                // Single driver, lifted from `stdlib/matrix.almd` + list rules.
+                .add(EggSaturationPass)
+                // MatrixShapeSpec: unroll small-shape matmuls inline before
+                // the stdlib lowering pass turns them into `InlineRust`
+                // blobs that no longer carry structural info.
+                .add(MatrixShapeSpecPass)
+                // Clean up arithmetic on numeric literals (e.g. (kb * -1.0) → -kb)
+                .add(ConstFoldPass)
+                // @intrinsic(symbol) → RuntimeCall must run BEFORE
+                // BorrowInsertion so the subsequent pass can look up the
+                // borrow signature by the mangled runtime symbol
+                // (`almide_rt_<m>_<f>`) and wrap args with the right
+                // Borrow IR node. BorrowInsertion's signature table is
+                // seeded from bundled `@intrinsic` declarations at
+                // `infer_borrow_signatures` entry.
+                .add(IntrinsicLoweringPass)
+        .add(BorrowInsertionPass)
+        // TCO: convert self-recursive tail calls to loops AFTER BorrowInsertion
+        // (so that param types are already finalized — avoids String/&str mismatch)
+        .add(TailCallOptPass)
+        .add(CaptureClonePass)
+        .add(CloneInsertionPass)
+        // Match subject transforms: String → .as_str(), Option<String> → .as_deref()
+        .add(MatchSubjectPass)
+        // Analysis passes (before lowering, while Module calls still visible)
+        .add(EffectInferencePass)
+        // Semantic lowering (order matters!)
+        // 1. Stdlib first: Module calls → Named calls with arg decoration
+        .add(StdlibLoweringPass)
+        // 2. AutoParallel: rewrite pure list ops to parallel variants
+        .add(AutoParallelPass)
+        // 3. ResultPropagation: insert Try (?) for effect fn calls
+        .add(ResultPropagationPass)
+        // 3. Builtin last: Named calls (assert_eq, println, etc.) → RustMacro
+        .add(BuiltinLoweringPass)
+        // Peephole: swap/reverse/rotate/copy → specialized IR nodes
+                .add(PeepholePass)
+                // Rust-specific: push optimization, borrow index lift
+                .add(RustLoweringPass)
+                // Shared passes
+                .add(FanLoweringPass)
+        }
 
         Target::TypeScript => Pipeline::new(), // TS codegen removed — use --target wasm for JS runtimes
 
@@ -137,32 +145,31 @@ fn build_pipeline(target: Target) -> Pipeline {
             // Runs early so violations surface before deep transformations.
             .add(ResolveCallsPass)
             .add(LICMPass)
-            // MatrixFusion: collapse matrix.add(matrix.scale(a, ka), matrix.scale(b, kb))
-            // → matrix.fma(a, ka, b, kb). Eliminates 2 alloc + 2 passes per chain.
-            .add(MatrixFusionPass)
+            // Equality-saturation fusion (matrix + list combinators).
+            .add(EggSaturationPass)
             // Clean up arithmetic on numeric literals (e.g. (kb * -1.0) → -kb)
             .add(ConstFoldPass)
             .add(EffectInferencePass)
             // StreamFusion not included: WASM emitter has its own lowering paths
             .add(ResultPropagationPass)
-            // Peephole: swap/reverse/rotate/copy → specialized IR nodes
-            .add(PeepholePass)
-            // Lambda type resolution: top-down propagation of lambda param types
-            .add(LambdaTypeResolvePass)
-            // Concretize types: sync every IrExpr.ty with VarTable / parent context,
-            // so downstream emit code can trust expr.ty.
-            .add(ConcretizeTypesPass)
-            // Closure conversion: lift lambdas to top-level functions with explicit env
-            .add(ClosureConversionPass)
-            // Re-concretize after closure conversion: lifted functions' bodies
-            // carry their original expr.ty, but the SymbolTable now contains
-            // lifted signatures too — running ConcretizeTypes again resolves
-            // Call return types inside closures (e.g. map.get inside a lifted lambda).
-            .add(ConcretizeTypesPass)
-            .add(FanLoweringPass)
-            // TailCallMark: mark tail-position calls for WASM return_call emission.
-            // Must run last — after all passes that may create or transform calls.
-            .add(TailCallMarkPass),
+        // Peephole: swap/reverse/rotate/copy → specialized IR nodes
+        .add(PeepholePass)
+        // Lambda type resolution: top-down propagation of lambda param types
+        .add(LambdaTypeResolvePass)
+        // Concretize types: sync every IrExpr.ty with VarTable / parent context,
+        // so downstream emit code can trust expr.ty.
+        .add(ConcretizeTypesPass)
+        // Closure conversion: lift lambdas to top-level functions with explicit env
+        .add(ClosureConversionPass)
+        // Re-concretize after closure conversion: lifted functions' bodies
+        // carry their original expr.ty, but the SymbolTable now contains
+        // lifted signatures too — running ConcretizeTypes again resolves
+        // Call return types inside closures (e.g. map.get inside a lifted lambda).
+        .add(ConcretizeTypesPass)
+        .add(FanLoweringPass)
+        // TailCallMark: mark tail-position calls for WASM return_call emission.
+        // Must run last — after all passes that may create or transform calls.
+        .add(TailCallMarkPass),
     }
 }
 

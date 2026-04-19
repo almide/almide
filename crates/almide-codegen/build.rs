@@ -5,12 +5,14 @@
 //! Stdlib Declarative Unification arc retired the TOML-derived
 //! `arg_transforms` / `stdlib_ret_ty` tables, so only the runtime
 //! registry remains.
+//!
+//! The imperative `FusionRule` emitter (Stage 1 skeleton) was retired
+//! when `EggSaturationPass` became the sole fusion driver; the
+//! `fusion_parse.rs` DSL parser lives on and is shared with
+//! `almide-egg-lab/buildscript/egg_rules.rs` via `#[path]` include.
 
 #[path = "buildscript/runtime_registry.rs"]
 mod runtime_registry;
-
-#[path = "buildscript/fusion_rules.rs"]
-mod fusion_rules;
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -19,5 +21,4 @@ fn main() {
     std::fs::create_dir_all(out_dir).unwrap();
 
     runtime_registry::generate(&workspace_root, out_dir);
-    fusion_rules::generate(&workspace_root, out_dir);
 }
