@@ -1,5 +1,35 @@
 <!-- description: Unify diagnostic emission sites with their docs/diagnostics/*.md files -->
+<!-- done: 2026-04-20 -->
 # Unify Diagnostic Emission with Docs
+
+## Completion status (2026-04-20) — MVP via soft gate
+
+The drift the arc was designed to catch (emission uses E0XX, doc
+registry silently missing or out of sync) is now blocked by the
+Phase 4 soft gate from the `diagnostics-here-try-hint` arc:
+
+- `tests/diagnostic_coverage_test.rs` scans every `with_code("E###")`
+  under `crates/` and enforces that a matching
+  `docs/diagnostics/E###.md` exists (currently 15/15 codes covered,
+  including E014 unreachable-arm and E015 reimpl-lint that landed
+  in the same session).
+- Reverse gate `every_fixture_meta_declares_known_code` catches
+  fixture metadata referring to codes that don't exist in source.
+- New codes landed through this session went through the coverage
+  report + doc authoring in one pass, so the workflow naturally
+  couples code addition to doc addition.
+
+## Deferred to a future arc
+
+- **Registry TOML / attribute macro** (Option A / B from the
+  original plan): the formal `code → title → doc` table would be
+  the definitive source of truth, but the soft-gate already prevents
+  drift at CI time. Promote to a hard gate and / or formal registry
+  when the code set grows past ~30, or when code metadata
+  (try_replace support, auto-fix flags, severity overrides) gets
+  structured enough to deserve its own schema.
+
+## Original plan (retained for history)
 
 Trigger: implement after `diagnostic-snippet-externalization`. Prevents
 E010/E011-class drift (emission code and `docs/diagnostics/EXXX.md`

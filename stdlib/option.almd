@@ -42,3 +42,16 @@ fn or_else[A](o: Option[A], f: () -> Option[A]) -> Option[A] = _
 
 @intrinsic("almide_rt_option_to_list")
 fn to_list[A](o: Option[A]) -> List[A] = _
+
+// ── Symmetry fills (mirrors result.collect / collect_map) ──
+//
+// Short-circuits on the first `none`; contract matches Rust's
+// `Vec<Option<T>>.into_iter().collect::<Option<Vec<T>>>()`.
+
+@intrinsic("almide_rt_option_collect")
+@consume(xs)
+fn collect[T](xs: List[Option[T]]) -> Option[List[T]] = _
+
+@intrinsic("almide_rt_option_collect_map")
+@consume(xs)
+fn collect_map[T, U](xs: List[T], f: (T) -> Option[U]) -> Option[List[U]] = _

@@ -1,5 +1,37 @@
 <!-- description: Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift -->
+<!-- done: 2026-04-20 -->
 # Stdlib Symmetry Audit
+
+## Completion status (2026-04-20)
+
+Core ergonomic gaps filled at the Option ↔ Result layer:
+
+- **result.flatten** — `Result[Result[T, E], E] -> Result[T, E]`.
+- **result.filter(r, pred, err_val)** — consume ok payload through a
+  predicate; missing → supplied `err_val`.
+- **result.zip(a, b)** — both ok → ok tuple; first err wins.
+- **result.or_else(r, f)** — err recovery with a different err type.
+- **result.to_list** — ok → single-element list, err → empty.
+- **option.collect** — `List[Option[T]] -> Option[List[T]]`; short-
+  circuit on first `none`.
+- **option.collect_map(xs, f)** — `List[T] × (T→Option[U]) → Option[List[U]]`.
+
+All 7 fns land as `@intrinsic` + runtime wrappers in
+`runtime/rs/src/{option,result}.rs`. Spec coverage: 17 tests in
+`spec/stdlib/option_result_symmetry_test.almd`.
+
+## Scope closed at documentation / later-arc level
+
+- **`almide lint --symmetry` CLI** — deferred. The dojo MSR loop
+  plus the reimpl-lint (E015 `Possible stdlib reimplementation`)
+  address the LLM-facing half of the drift surface.
+- **Required `example` field on every stdlib fn** — deferred.
+  `LLM-first-language` arc is the better home for documentation
+  density requirements.
+- **`len` / `size` / `count` naming drift audit** — no drift
+  remains: every container exposes `len`; `count` is only used with
+  a predicate (`list.count((x) => ...)`), `size` not present.
+  Re-audit if the stdlib grows.
 
 ## Motivation
 

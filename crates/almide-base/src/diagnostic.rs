@@ -2,8 +2,11 @@
 
 // ── "Did you mean?" suggestions ────────────────────────────────
 
-/// Levenshtein edit distance between two strings.
-fn levenshtein(a: &str, b: &str) -> usize {
+/// Levenshtein edit distance between two strings (case-insensitive).
+/// Public for cross-crate uses that need the raw distance rather than
+/// the threshold-bounded `suggest(...)` helper (e.g. the
+/// `reimpl-lint` pass scans stdlib fn names with a strict `≤ 2` cap).
+pub fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     let (m, n) = (a.len(), b.len());

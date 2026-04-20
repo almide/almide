@@ -6,13 +6,12 @@
 
 ## Active
 
-19 items
+16 items
 
 | Item | Description |
 |------|-------------|
 | [almai — Multi-Provider LLM Client](active/almai-llm-client.md) | almai — multi-provider LLM client library, 8 providers shipped |
 | [Almide Dojo — Continuous MSR Measurement](active/almide-dojo.md) | Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration |
-| [Unify Diagnostic Emission with Docs](active/diagnostic-emit-doc-unification.md) | Unify diagnostic emission sites with their docs/diagnostics/*.md files |
 | [Externalize `try:` Snippets from Rust Literals](active/diagnostic-snippet-externalization.md) | Move try: snippet text out of Rust literals into stdlib/diagnostics/*.almd |
 | [Diagnostics: Here / Try / Hint Format](active/diagnostics-here-try-hint.md) | Standardize diagnostics to Here/Try/Hint three-part format with CI-verified hint correctness |
 | [DX & Codegen Papercuts](active/dx-codegen-papercuts.md) | Codegen bugs (effect fn unification) + DX papercuts (test stderr, explain, local imports) |
@@ -27,8 +26,6 @@
 | [MLIR Backend + Egg Rewrite Engine](active/mlir-backend-adoption.md) | MLIR backend + egg e-graph rewriter for pure-Almide optimal lowering |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
-| [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](active/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
-| [Stdlib Symmetry Audit](active/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
 
 ## On Hold
 
@@ -65,16 +62,19 @@
 
 ## Done
 
-220 items
+223 items
 
 <details>
-<summary>Show all 220 completed items</summary>
+<summary>Show all 223 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
 | 2026-04-20 | [Whisper in Pure Almide](done/whisper-almide.md) | Whisper speech recognition implemented entirely in Almide |
 | 2026-04-20 | [Variant Exhaustiveness Refinement](done/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
+| 2026-04-20 | [Unify Diagnostic Emission with Docs](done/diagnostic-emit-doc-unification.md) | Unify diagnostic emission sites with their docs/diagnostics/*.md files |
+| 2026-04-20 | [Stdlib Symmetry Audit](done/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
 | 2026-04-20 | [Stdlib Defs / Runtime Consistency Check](done/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
+| 2026-04-20 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](done/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
 | 2026-04-19 | [VarTable Unification](done/var-table-unification.md) | Unify program/module var_tables into a single program-level table |
 | 2026-04-19 | [Stdlib Declarative Unification — Toward a Single Source of Truth](done/stdlib-declarative-unification.md) | Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes |
 | 2026-04-19 | [Sized Numeric Types](done/sized-numeric-types.md) | Swift-style Int8/Int32/UInt32/Float32 scalar types; unblocks bytes redesign + Matrix[T] dtype |

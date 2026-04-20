@@ -14,3 +14,13 @@ pub fn almide_rt_option_or_else<T>(o: Option<T>, f: impl Fn() -> Option<T>) -> O
 pub fn almide_rt_option_to_list<T>(o: Option<T>) -> Vec<T> {
     match o { Some(v) => vec![v], None => vec![] }
 }
+
+// ── Symmetry fills (mirrors result.collect / collect_map) ──
+
+pub fn almide_rt_option_collect<T>(xs: Vec<Option<T>>) -> Option<Vec<T>> {
+    xs.into_iter().collect()
+}
+
+pub fn almide_rt_option_collect_map<T, U>(xs: Vec<T>, mut f: impl FnMut(T) -> Option<U>) -> Option<Vec<U>> {
+    xs.into_iter().map(f).collect()
+}

@@ -200,7 +200,91 @@ impl Checker {
                 format!("import at line {}", line),
             ));
         }
+        self.check_reimpl_lint(program);
         std::mem::take(&mut self.diagnostics)
+    }
+
+    /// Reimpl lint — detect top-level user fns whose name is close to a
+    /// stdlib fn AND whose signature matches exactly. Emits a Warning
+    /// with a `try:` delegation shim so LLM retries can converge on
+    /// the idiomatic one-liner. Opt-in strictness: a miss on any of
+    /// (name distance ≤ 2, param count, param types, return type)
+    /// suppresses the suggestion.
+    ///
+    /// Scope: top-level, non-monomorphized, non-derive, non-test fns.
+    /// Roadmap: `docs/roadmap/active/reimpl-lint.md`.
+    pub(crate) fn check_reimpl_lint(&mut self, program: &ast::Program) {
+        for decl in &program.decls {
+            let ast::Decl::Fn { name, params, return_type, span, .. } = decl else { continue };
+            let user_name = name.as_str();
+            if user_name.starts_with("__") { continue; }
+            if user_name.contains('.') { continue; } // convention method like `Type.encode`
+            let user_param_tys: Vec<Ty> = params.iter()
+                .map(|p| self.resolve_type_expr(&p.ty))
+                .collect();
+            let user_ret = self.resolve_type_expr(return_type);
+            if user_param_tys.iter().any(|t| matches!(t, Ty::Unknown)) { continue; }
+            if matches!(user_ret, Ty::Unknown) { continue; }
+            let Some((module, stdlib_fn)) = self.find_stdlib_reimpl(user_name, &user_param_tys, &user_ret)
+                else { continue };
+            let try_shim = format!(
+                "fn {name}({params}) -> {ret} =\n    {module}.{fn}({args})",
+                name = user_name,
+                params = params.iter()
+                    .map(|p| format!("{}: {}", p.name, self.resolve_type_expr(&p.ty).display()))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                ret = user_ret.display(),
+                module = module,
+                fn = stdlib_fn,
+                args = params.iter().map(|p| p.name.to_string()).collect::<Vec<_>>().join(", "),
+            );
+            let mut diag = Diagnostic::warning(
+                format!("fn '{}' has the same signature as stdlib `{}.{}`", user_name, module, stdlib_fn),
+                format!(
+                    "If this is the standard algorithm, delegate to stdlib. \
+                     Keep the local impl only if you need the specific behaviour that differs from `{}.{}`.",
+                    module, stdlib_fn
+                ),
+                format!("fn {}", user_name),
+            ).with_code("E015").with_try(try_shim);
+            if let Some(s) = span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+                if s.end_col > s.col {
+                    diag.end_col = Some(s.end_col);
+                }
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// Structural type-equality for reimpl-lint: `TypeVar` at the
+    /// stdlib side matches any concrete Ty at the user side (a
+    /// monomorphic `List[Int]` fn should match the generic
+    /// `list.binary_search[T]`). Nested `Applied` compares
+    /// element-wise, everything else is exact match.
+    fn find_stdlib_reimpl(
+        &self,
+        user_name: &str,
+        user_param_tys: &[Ty],
+        user_ret: &Ty,
+    ) -> Option<(&'static str, &'static str)> {
+        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            for fn_name in crate::stdlib::module_functions_all(module) {
+                if almide_base::diagnostic::levenshtein(user_name, fn_name) > 2 {
+                    continue;
+                }
+                let Some(sig) = crate::stdlib::lookup_sig(module, fn_name) else { continue };
+                if sig.params.len() != user_param_tys.len() { continue; }
+                if !sigs_match_structurally(&sig.params, &sig.ret, user_param_tys, user_ret) {
+                    continue;
+                }
+                return Some((module, fn_name));
+            }
+        }
+        Option::None
     }
 
     /// Type-check a module's declarations. Populates type_map for all expressions.
@@ -545,5 +629,53 @@ fn trailing_let_name(expr: &ast::Expr) -> Option<String> {
     match stmts.last()? {
         ast::Stmt::Let { name, .. } | ast::Stmt::Var { name, .. } => Some(name.to_string()),
         _ => None,
+    }
+}
+
+/// Structural signature compare for `reimpl-lint`. Param names are
+/// ignored (stdlib uses `xs` / `n` etc., user may use anything);
+/// types are compared element-wise with TypeVar treated as a
+/// wildcard (the stdlib side may be generic, the user side usually
+/// monomorphic — still counts as a reimplementation).
+fn sigs_match_structurally(
+    stdlib_params: &[(almide_base::intern::Sym, Ty)],
+    stdlib_ret: &Ty,
+    user_params: &[Ty],
+    user_ret: &Ty,
+) -> bool {
+    if stdlib_params.len() != user_params.len() { return false; }
+    for ((_, sty), uty) in stdlib_params.iter().zip(user_params.iter()) {
+        if !ty_reimpl_eq(sty, uty) { return false; }
+    }
+    ty_reimpl_eq(stdlib_ret, user_ret)
+}
+
+/// Reimpl-lint type equality: structural on `Applied`, exact on
+/// primitives, `TypeVar` on the stdlib side matches any Ty on the
+/// user side. Asymmetric — user's `TypeVar` doesn't match stdlib
+/// concrete (we don't want a generic user fn to claim reimpl of a
+/// concrete stdlib one).
+fn ty_reimpl_eq(stdlib_ty: &Ty, user_ty: &Ty) -> bool {
+    match (stdlib_ty, user_ty) {
+        (Ty::TypeVar(_), _) => true,
+        (Ty::Applied(sid, sargs), Ty::Applied(uid, uargs)) => {
+            if sid != uid || sargs.len() != uargs.len() { return false; }
+            sargs.iter().zip(uargs.iter()).all(|(s, u)| ty_reimpl_eq(s, u))
+        }
+        (Ty::Tuple(stys), Ty::Tuple(utys)) => {
+            if stys.len() != utys.len() { return false; }
+            stys.iter().zip(utys.iter()).all(|(s, u)| ty_reimpl_eq(s, u))
+        }
+        (Ty::Fn { params: sp, ret: sr }, Ty::Fn { params: up, ret: ur }) => {
+            if sp.len() != up.len() { return false; }
+            sp.iter().zip(up.iter()).all(|(s, u)| ty_reimpl_eq(s, u))
+                && ty_reimpl_eq(sr, ur)
+        }
+        (Ty::Named(sn, sa), Ty::Named(un, ua)) => {
+            sn == un
+                && sa.len() == ua.len()
+                && sa.iter().zip(ua.iter()).all(|(s, u)| ty_reimpl_eq(s, u))
+        }
+        _ => stdlib_ty == user_ty,
     }
 }

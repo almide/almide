@@ -82,3 +82,28 @@ pub fn almide_rt_result_collect_map<T, U, E>(xs: Vec<T>, mut f: impl FnMut(T) ->
     }
     if errs.is_empty() { Ok(oks) } else { Err(errs) }
 }
+
+// ── Symmetry fills (mirrors option.{filter, zip, or_else, to_list}) ──
+
+pub fn almide_rt_result_to_list<T, E>(r: Result<T, E>) -> Vec<T> {
+    match r { Ok(v) => vec![v], Err(_) => Vec::new() }
+}
+
+pub fn almide_rt_result_zip<A, B, E>(a: Result<A, E>, b: Result<B, E>) -> Result<(A, B), E> {
+    match (a, b) {
+        (Ok(va), Ok(vb)) => Ok((va, vb)),
+        (Err(e), _) => Err(e),
+        (_, Err(e)) => Err(e),
+    }
+}
+
+pub fn almide_rt_result_or_else<T, E, F>(r: Result<T, E>, f: impl FnOnce(E) -> Result<T, F>) -> Result<T, F> {
+    match r { Ok(v) => Ok(v), Err(e) => f(e) }
+}
+
+pub fn almide_rt_result_filter<T: Clone, E>(r: Result<T, E>, pred: impl FnOnce(T) -> bool, err_val: E) -> Result<T, E> {
+    match r {
+        Ok(v) => if pred(v.clone()) { Ok(v) } else { Err(err_val) },
+        Err(e) => Err(e),
+    }
+}

@@ -1,5 +1,37 @@
 <!-- description: Detect user fns whose signature matches a stdlib fn, suggest delegation -->
+<!-- done: 2026-04-20 -->
 # Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations
+
+## Completion status (2026-04-20)
+
+Landed as `E015 Possible stdlib reimplementation` — a Warning-level
+diagnostic fired from `check_reimpl_lint` (`crates/almide-frontend/src/check/mod.rs`).
+
+Detection rule:
+
+1. Top-level `fn` (not test / derive / monomorphised / convention method).
+2. Short name within Levenshtein ≤ 2 of a stdlib short name
+   (case-insensitive; the existing `almide_base::diagnostic::levenshtein`
+   helper is now `pub` for cross-crate use).
+3. Parameter arity + types + return type match structurally
+   (`ty_reimpl_eq` in `check/mod.rs`). `TypeVar` on the stdlib side
+   is a wildcard (monomorphic user fn matches generic stdlib fn);
+   the reverse does not match.
+
+All three must hold; any miss suppresses the suggestion so
+false-positive rate stays near zero.
+
+Output is a warning + delegation `try:` shim (`fn <user_name>(args) ->
+T = <module>.<stdlib_fn>(args)`). Doc file at
+`docs/diagnostics/E015.md`. The shim is not auto-applied — user or
+LLM retry must consciously accept it.
+
+Levels: stayed at `Warning` rather than adding `Info` to the
+`Level` enum. Matches roadmap allowance of "info/warning-level" and
+avoids the cross-crate variant cascade. Revisit if dojo measurement
+shows warnings get too noisy.
+
+## Original plan (retained for history)
 
 Trigger: implement when dojo measurement shows `list.binary_search` /
 `string.run_length_encode` / other stdlib primitives are being

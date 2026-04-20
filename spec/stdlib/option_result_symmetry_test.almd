@@ -1,0 +1,117 @@
+// Symmetry fills for the Option/Result pair — landed via
+// `stdlib-symmetry-audit`. Each test exercises the new fn on both
+// the ok/some happy path and the err/none short-circuit path.
+
+// ── Result side ──
+
+test "result.flatten collapses nested ok" {
+  let r: Result[Result[Int, String], String] = ok(ok(42))
+  let f: Result[Int, String] = result.flatten(r)
+  assert_eq(result.unwrap_or(f, -1), 42)
+}
+
+test "result.flatten propagates inner err" {
+  let r: Result[Result[Int, String], String] = ok(err("inside"))
+  let f: Result[Int, String] = result.flatten(r)
+  assert_eq(result.is_err(f), true)
+}
+
+test "result.flatten propagates outer err" {
+  let r: Result[Result[Int, String], String] = err("outside")
+  let f: Result[Int, String] = result.flatten(r)
+  assert_eq(result.is_err(f), true)
+}
+
+test "result.to_list ok → single-element" {
+  let r: Result[Int, String] = ok(7)
+  let xs: List[Int] = result.to_list(r)
+  assert_eq(list.len(xs), 1)
+}
+
+test "result.to_list err → empty" {
+  let r: Result[Int, String] = err("nope")
+  let xs: List[Int] = result.to_list(r)
+  assert_eq(list.len(xs), 0)
+}
+
+test "result.zip both ok" {
+  let r: Result[(Int, Int), String] = result.zip(ok(1), ok(2))
+  let (a, b) = result.unwrap_or(r, (0, 0))
+  assert_eq(a, 1)
+  assert_eq(b, 2)
+}
+
+test "result.zip first err wins" {
+  let a: Result[Int, String] = err("a bad")
+  let b: Result[Int, String] = err("b bad")
+  let r: Result[(Int, Int), String] = result.zip(a, b)
+  assert_eq(result.is_err(r), true)
+}
+
+test "result.or_else falls through on err" {
+  let r: Result[Int, String] = err("orig")
+  let fixed: Result[Int, Int] = result.or_else(r, (_) => ok(99))
+  assert_eq(result.unwrap_or(fixed, -1), 99)
+}
+
+test "result.or_else passes ok through" {
+  let r: Result[Int, String] = ok(5)
+  let unchanged: Result[Int, Int] = result.or_else(r, (_) => err(0))
+  assert_eq(result.unwrap_or(unchanged, -1), 5)
+}
+
+test "result.filter keeps matching ok" {
+  let r: Result[Int, String] = result.filter(ok(10), (v) => v > 0, "bad")
+  assert_eq(result.unwrap_or(r, -1), 10)
+}
+
+test "result.filter rejects non-matching ok with provided err" {
+  let r: Result[Int, String] = result.filter(ok(-5), (v) => v > 0, "not positive")
+  assert_eq(result.is_err(r), true)
+}
+
+test "result.filter passes err through" {
+  let r: Result[Int, String] = err("original")
+  let f: Result[Int, String] = result.filter(r, (v) => v > 0, "unused")
+  assert_eq(result.is_err(f), true)
+}
+
+// ── Option side ──
+
+test "option.collect all some → some list" {
+  let opts: List[Option[Int]] = [some(1), some(2), some(3)]
+  let c: Option[List[Int]] = option.collect(opts)
+  match c {
+    some(vs) => assert_eq(list.len(vs), 3),
+    none => assert_eq(true, false),
+  }
+}
+
+test "option.collect short-circuits on first none" {
+  let opts: List[Option[Int]] = [some(1), none, some(3)]
+  let c: Option[List[Int]] = option.collect(opts)
+  assert_eq(option.is_none(c), true)
+}
+
+test "option.collect empty list → some empty" {
+  let opts: List[Option[Int]] = []
+  let c: Option[List[Int]] = option.collect(opts)
+  match c {
+    some(vs) => assert_eq(list.len(vs), 0),
+    none => assert_eq(true, false),
+  }
+}
+
+test "option.collect_map all some" {
+  let c: Option[List[Int]] = option.collect_map([1, 2, 3], (x) => some(x * 2))
+  match c {
+    some(vs) => assert_eq(list.len(vs), 3),
+    none => assert_eq(true, false),
+  }
+}
+
+test "option.collect_map short-circuits on none" {
+  let c: Option[List[Int]] = option.collect_map([1, 2, 3], (x) =>
+    if x == 2 then none else some(x))
+  assert_eq(option.is_none(c), true)
+}

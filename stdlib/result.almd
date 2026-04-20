@@ -55,3 +55,30 @@ fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = _
 @intrinsic("almide_rt_result_collect_map")
 @consume(xs)
 fn collect_map[T, U, E](xs: List[T], f: (T) -> Result[U, E]) -> Result[List[U], List[E]] = _
+
+// ── Symmetry fills (mirrors option.*) ──
+//
+// `@intrinsic` + runtime wrappers in `runtime/rs/src/result.rs`,
+// matching the pattern of every other result fn above. Closes the
+// ergonomics gap where `Option` had `flatten` / `filter` / `zip` /
+// `or_else` / `to_list` but `Result` silently didn't.
+
+@intrinsic("almide_rt_result_flatten")
+@consume(r)
+fn flatten[A, E](r: Result[Result[A, E], E]) -> Result[A, E] = _
+
+@intrinsic("almide_rt_result_to_list")
+@consume(r)
+fn to_list[A, E](r: Result[A, E]) -> List[A] = _
+
+@intrinsic("almide_rt_result_zip")
+@consume(a, b)
+fn zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E] = _
+
+@intrinsic("almide_rt_result_or_else")
+@consume(r)
+fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] = _
+
+@intrinsic("almide_rt_result_filter")
+@consume(r)
+fn filter[A, E](r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E] = _

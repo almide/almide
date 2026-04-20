@@ -1,7 +1,10 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
+assertion_line: 49
 expression: "run_outline(&[\"@stdlib/option\"])"
 ---
+fn option.collect[T](xs: List[Option[T]]) -> Option[List[T]]
+fn option.collect_map[T, U](xs: List[T], f: fn(T) -> Option[U]) -> Option[List[U]]
 fn option.filter[A](o: Option[A], f: fn(A) -> Bool) -> Option[A]
 fn option.flat_map[A, B](o: Option[A], f: fn(A) -> Option[B]) -> Option[B]
 fn option.flatten[A](o: Option[Option[A]]) -> Option[A]
