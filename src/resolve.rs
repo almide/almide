@@ -230,7 +230,17 @@ fn load_self_module(
                 }
             } else {
                 let dep_name = &path[0];
-                if !stdlib::is_stdlib_module(dep_name) {
+                // Bundled .almd stdlib modules (fs, process, http, json, ...)
+                // must be loaded from embedded source so their type_decls and
+                // @inline_rust fns reach codegen. Without this, a submodule's
+                // `import fs` is silently skipped because is_stdlib_module is
+                // true — the top-level resolver has this branch; recursive
+                // self-module loading needs it too.
+                if let Some(source) = stdlib::get_bundled_source(dep_name) {
+                    if !loaded_names.contains(dep_name.as_str()) {
+                        load_bundled_module(dep_name, source, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                    }
+                } else if !stdlib::is_stdlib_module(dep_name) {
                     load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
                 }
             }
