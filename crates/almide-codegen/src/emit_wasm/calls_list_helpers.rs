@@ -248,7 +248,11 @@ impl FuncCompiler<'_> {
             {
                 self.emit_list_sort_generic(args, SortKind::ListString)
             }
-            _ => self.emit_stub_call(args),
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `list.sort` with \
+                 unsupported element type `{:?}` — extend emit_list_sort_*",
+                elem_ty
+            ),
         }
     }
 

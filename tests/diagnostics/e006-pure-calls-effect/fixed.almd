@@ -1,0 +1,3 @@
+import fs
+
+effect fn read_config() -> Result[String, String] = fs.read_text("config.toml")

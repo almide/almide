@@ -1,17 +1,18 @@
 //! Build script for almide-codegen.
 //!
-//! Generates:
-//!   - arg_transforms.rs: stdlib call info (borrow/clone annotations) from stdlib/defs/*.toml
-//!   - rust_runtime.rs:   runtime module registry from runtime/rs/src/*.rs
-
-#[path = "buildscript/arg_transforms_gen.rs"]
-mod arg_transforms_gen;
+//! Generates `rust_runtime.rs`: the runtime-module registry (source
+//! text embedded into the compiler) from `runtime/rs/src/*.rs`. The
+//! Stdlib Declarative Unification arc retired the TOML-derived
+//! `arg_transforms` / `stdlib_ret_ty` tables, so only the runtime
+//! registry remains.
+//!
+//! The imperative `FusionRule` emitter (Stage 1 skeleton) was retired
+//! when `EggSaturationPass` became the sole fusion driver; the
+//! `fusion_parse.rs` DSL parser lives on and is shared with
+//! `almide-egg-lab/buildscript/egg_rules.rs` via `#[path]` include.
 
 #[path = "buildscript/runtime_registry.rs"]
 mod runtime_registry;
-
-#[path = "buildscript/stdlib_ret_ty_gen.rs"]
-mod stdlib_ret_ty_gen;
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -19,7 +20,5 @@ fn main() {
     let out_dir = std::path::Path::new("src/generated");
     std::fs::create_dir_all(out_dir).unwrap();
 
-    arg_transforms_gen::generate(&workspace_root, out_dir);
     runtime_registry::generate(&workspace_root, out_dir);
-    stdlib_ret_ty_gen::generate(&workspace_root, out_dir);
 }

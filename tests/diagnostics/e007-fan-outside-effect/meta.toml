@@ -1,0 +1,3 @@
+expects_code = "E007"
+expects_error = "fan block"
+hint_substring = "effect fn"

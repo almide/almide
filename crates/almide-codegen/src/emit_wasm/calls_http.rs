@@ -338,9 +338,11 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(tuple);
                 self.scratch.free_i32(s);
             }
-            _ => {
-                self.emit_stub_call_named("http", func, args);
-            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `http.{}` — \
+                 add an arm in emit_http_call or resolve upstream",
+                func
+            ),
         }
     }
 

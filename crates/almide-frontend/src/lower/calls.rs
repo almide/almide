@@ -79,6 +79,48 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
         }
     }
 
+    // Stage 1b: retype Int/Float literal args that flow into sized
+    // numeric params (`Int32`, `UInt8`, `Float32`, ...). Mirrors the
+    // let-binding coercion in `statements.rs::override_record_literal_ty`
+    // so `f(42)` where `f(x: UInt32)` emits `f(42u32)` instead of an
+    // `i64` / `u32` codegen mismatch.
+    if let CallTarget::Named { name } = &target {
+        // Builtin comparison macros (assert_eq / assert_ne) aren't
+        // registered in env.functions, but their semantics demand
+        // width-matched operands on both targets. Coerce literal-side
+        // args toward their typed peer here, before the target-specific
+        // lowering picks up a Macro / RustMacro / direct-emit path.
+        if matches!(name.as_str(), "assert_eq" | "assert_ne") && ir_args.len() == 2 {
+            let l_ty = ir_args[0].ty.clone();
+            let r_ty = ir_args[1].ty.clone();
+            super::statements::coerce_literal_to_sized(&mut ir_args[1], &l_ty);
+            super::statements::coerce_literal_to_sized(&mut ir_args[0], &r_ty);
+        }
+        if let Some(sig) = ctx.env.functions.get(name).cloned() {
+            for (i, (_, param_ty)) in sig.params.iter().enumerate() {
+                if let Some(arg) = ir_args.get_mut(i) {
+                    super::statements::coerce_literal_to_sized(arg, param_ty);
+                }
+            }
+        } else if let Some((module, func)) = name.as_str().split_once('.') {
+            if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
+                for (i, (_, param_ty)) in sig.params.iter().enumerate() {
+                    if let Some(arg) = ir_args.get_mut(i) {
+                        super::statements::coerce_literal_to_sized(arg, param_ty);
+                    }
+                }
+            }
+        }
+    } else if let CallTarget::Module { module, func } = &target {
+        if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
+            for (i, (_, param_ty)) in sig.params.iter().enumerate() {
+                if let Some(arg) = ir_args.get_mut(i) {
+                    super::statements::coerce_literal_to_sized(arg, param_ty);
+                }
+            }
+        }
+    }
+
     ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
 }
 
@@ -175,6 +217,15 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                 Ty::String => Some("string"),
                 Ty::Int => Some("int"),
                 Ty::Float => Some("float"),
+                // Sized numeric types (Stage 3 of the sized-numeric-types arc).
+                Ty::Int8 => Some("int8"),
+                Ty::Int16 => Some("int16"),
+                Ty::Int32 => Some("int32"),
+                Ty::UInt8 => Some("uint8"),
+                Ty::UInt16 => Some("uint16"),
+                Ty::UInt32 => Some("uint32"),
+                Ty::UInt64 => Some("uint64"),
+                Ty::Float32 => Some("float32"),
                 Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
                 Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
                 _ => None,

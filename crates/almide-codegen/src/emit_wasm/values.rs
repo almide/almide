@@ -9,6 +9,15 @@ pub fn ty_to_valtype(ty: &Ty) -> Option<ValType> {
     match ty {
         Ty::Int => Some(ValType::I64),
         Ty::Float => Some(ValType::F64),
+        // Sized numeric types. WASM only has i32/i64/f32/f64 natively;
+        // narrower Almide widths ride in the next-wider WASM type and
+        // get masked/sign-extended at memory boundaries (handled by
+        // subsequent sub-phases when load/store sites appear).
+        Ty::Int8 | Ty::Int16 | Ty::Int32
+        | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 => Some(ValType::I32),
+        Ty::Int64 | Ty::UInt64 => Some(ValType::I64),
+        Ty::Float32 => Some(ValType::F32),
+        Ty::Float64 => Some(ValType::F64),
         Ty::Bool => Some(ValType::I32),
         Ty::String => Some(ValType::I32), // pointer to [len:i32][data:u8...]
         Ty::Bytes => Some(ValType::I32),  // pointer to [len:i32][data:u8...]
@@ -24,6 +33,10 @@ pub fn byte_size(ty: &Ty) -> u32 {
     match ty {
         Ty::Int => 8,    // i64
         Ty::Float => 8,  // f64
+        Ty::Int8 | Ty::UInt8 => 1,
+        Ty::Int16 | Ty::UInt16 => 2,
+        Ty::Int32 | Ty::UInt32 | Ty::Float32 => 4,
+        Ty::Int64 | Ty::UInt64 | Ty::Float64 => 8,
         Ty::Bool => 4,   // i32
         Ty::String => 4, // i32 pointer
         Ty::Bytes => 4,  // i32 pointer

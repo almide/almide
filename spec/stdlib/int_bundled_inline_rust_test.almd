@@ -1,0 +1,52 @@
+// Regression guard: Stdlib Declarative Unification Stage 1
+// (@inline_rust dispatch override).
+//
+// int.to_string is declared in stdlib/int.almd with
+// @inline_rust("almide_rt_int_to_string({n})"). That bundled declaration
+// supersedes the stdlib/defs/int.toml entry on the Rust target: the
+// call must dispatch through the InlineRust IR node, which substitutes
+// {n} with the rendered call arg and emits the template verbatim. On
+// WASM, dispatch still falls through to the calls_int.rs intrinsic;
+// either path must produce the same runtime result.
+//
+// If this test fails:
+// - Output "42" wrong → codegen template substitution broke. Check
+//   walker/expressions.rs InlineRust rendering and
+//   pass_stdlib_lowering's InlineRust node construction.
+// - Compile error "duplicate definition almide_rt_int_to_string" →
+//   bundled int.to_string is being emitted as a Rust fn body. Check
+//   walker/mod.rs::render_function for the @inline_rust skip.
+// - Compile error "unresolved int::to_string" → bundled fn got pruned
+//   before the @inline_rust dispatch path saw it. Check
+//   src/main.rs retain logic.
+
+test "int.to_string via @inline_rust dispatch" {
+  assert_eq(int.to_string(42), "42")
+}
+
+test "int.to_string with negative" {
+  assert_eq(int.to_string(-7), "-7")
+}
+
+test "int.to_string with zero" {
+  assert_eq(int.to_string(0), "0")
+}
+
+test "int.to_string inside a let" {
+  let n = 100
+  let s = int.to_string(n)
+  assert_eq(s, "100")
+}
+
+test "int.to_string composed with string concat" {
+  let greeting = "n=" + int.to_string(42)
+  assert_eq(greeting, "n=42")
+}
+
+test "int.to_string alongside other int fns still going through TOML" {
+  // int.abs / int.max / int.parse still route through the TOML
+  // arg_transforms path — only to_string is migrated. Mixing them
+  // ensures the override is per-fn, not per-module.
+  assert_eq(int.to_string(int.abs(-9)), "9")
+  assert_eq(int.to_string(int.max(3, 8)), "8")
+}

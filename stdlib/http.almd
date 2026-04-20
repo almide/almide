@@ -1,0 +1,101 @@
+// http — bundled-Almide stdlib module.
+//
+// Migrated to `@intrinsic` + per-fn borrow overrides. `Request` /
+// `Response` are nominal types backed by Rust structs in
+// `runtime/rs/src/http.rs`.
+//
+// ABI split (drives the `@borrow_ref` / `@consume` sprinkling below):
+// - Accessors (`get_body` / `get_header` / `req_*` / `query_params`)
+//   take `&AlmideHttp{Response,Request}` + `&str` keys — plain
+//   `@intrinsic` resolves the `&str` via the default `String → RefStr`
+//   inference; the struct param needs `@borrow_ref`.
+// - Mutators (`set_status` / `set_header` / `set_cookie`) take the
+//   struct owned (`mut resp: AlmideHttpResponse`) — the default Ref
+//   would break, so `@consume(resp)`.
+// - HTTP client (`get`/`post`/...) take `&str` URLs and bodies —
+//   plain pass-through once `Map` heads get `@borrow_ref(headers)`.
+//
+// `serve` routes through `almide_rt_http_serve` (runtime wrapper) which
+// composes the user callback with `Ok(...)` internally so the bundled
+// `(Request) -> Response` signature lines up with the legacy
+// `Fn(...) -> Result<Response, String>` contract expected by the TCP
+// listener loop.
+
+@intrinsic("almide_rt_http_serve")
+effect fn serve(port: Int, f: (Request) -> Response) -> Unit = _
+
+// ── Response builders ──
+
+@intrinsic("almide_rt_http_response")
+fn response(status: Int, body: String) -> Response = _
+
+@intrinsic("almide_rt_http_json")
+fn json(status: Int, body: String) -> Response = _
+
+@intrinsic("almide_rt_http_with_headers")
+@borrow_ref(headers)
+fn with_headers(status: Int, body: String, headers: Map[String, String]) -> Response = _
+
+@intrinsic("almide_rt_http_redirect")
+fn redirect(url: String) -> Response = _
+
+// ── Response accessors/mutators ──
+
+@intrinsic("almide_http_set_status")
+@consume(resp)
+fn status(resp: Response, code: Int) -> Response = _
+
+@intrinsic("almide_http_get_body")
+@borrow_ref(resp)
+fn body(resp: Response) -> String = _
+
+@intrinsic("almide_http_set_header")
+@consume(resp)
+fn set_header(resp: Response, key: String, value: String) -> Response = _
+
+@intrinsic("almide_http_get_header")
+@borrow_ref(resp)
+fn get_header(resp: Response, key: String) -> Option[String] = _
+
+// ── Request accessors (pure) ──
+
+@intrinsic("almide_http_req_method")
+@borrow_ref(req)
+fn req_method(req: Request) -> String = _
+
+@intrinsic("almide_http_req_path")
+@borrow_ref(req)
+fn req_path(req: Request) -> String = _
+
+@intrinsic("almide_http_req_body")
+@borrow_ref(req)
+fn req_body(req: Request) -> String = _
+
+@intrinsic("almide_http_req_header")
+@borrow_ref(req)
+fn req_header(req: Request, key: String) -> Option[String] = _
+
+@intrinsic("almide_http_query_params")
+@borrow_ref(req)
+fn query_params(req: Request) -> Map[String, String] = _
+
+// ── HTTP client (effect) ──
+
+@intrinsic("almide_http_get")
+effect fn get(url: String) -> Result[String, String] = _
+
+@intrinsic("almide_http_post")
+effect fn post(url: String, body: String) -> Result[String, String] = _
+
+@intrinsic("almide_http_put")
+effect fn put(url: String, body: String) -> Result[String, String] = _
+
+@intrinsic("almide_http_patch")
+effect fn patch(url: String, body: String) -> Result[String, String] = _
+
+@intrinsic("almide_http_delete")
+effect fn delete(url: String) -> Result[String, String] = _
+
+@intrinsic("almide_http_request")
+@borrow_ref(headers)
+effect fn request(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = _

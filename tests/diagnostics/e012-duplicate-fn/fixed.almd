@@ -1,0 +1,2 @@
+fn foo() -> Int = 1
+fn bar() -> Int = 2

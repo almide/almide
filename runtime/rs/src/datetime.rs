@@ -5,6 +5,18 @@ pub fn almide_rt_datetime_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64
 }
 
+/// Monotonic nanosecond clock for benchmarking. Returns nanoseconds
+/// since an unspecified reference point; only differences are
+/// meaningful. Never goes backwards, unlike `now()` which follows
+/// wall-clock adjustments.
+pub fn almide_rt_datetime_monotonic_ns() -> i64 {
+    use std::time::Instant;
+    use std::sync::OnceLock;
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    let start = ORIGIN.get_or_init(Instant::now);
+    start.elapsed().as_nanos() as i64
+}
+
 pub fn almide_rt_datetime_year(ts: i64) -> i64 { civil_from_epoch(ts).0 }
 pub fn almide_rt_datetime_month(ts: i64) -> i64 { civil_from_epoch(ts).1 }
 pub fn almide_rt_datetime_day(ts: i64) -> i64 { civil_from_epoch(ts).2 }
@@ -30,7 +42,7 @@ pub fn almide_rt_datetime_to_iso(ts: i64) -> String {
     format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, h, mi, s)
 }
 
-pub fn almide_rt_datetime_parse_iso(s: String) -> Result<i64, String> {
+pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, String> {
     // Minimal ISO 8601: "2024-01-15T10:30:00Z"
     let s = s.trim().trim_end_matches('Z');
     let parts: Vec<&str> = s.split('T').collect();
@@ -41,7 +53,7 @@ pub fn almide_rt_datetime_parse_iso(s: String) -> Result<i64, String> {
     Ok(almide_rt_datetime_from_parts(date[0], date[1], date[2], time[0], time[1], time[2]))
 }
 
-pub fn almide_rt_datetime_format(ts: i64, pattern: String) -> String {
+pub fn almide_rt_datetime_format(ts: i64, pattern: &str) -> String {
     let (y, m, d) = civil_from_epoch(ts);
     let h = almide_rt_datetime_hour(ts);
     let mi = almide_rt_datetime_minute(ts);

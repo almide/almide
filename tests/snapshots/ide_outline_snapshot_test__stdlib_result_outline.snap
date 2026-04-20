@@ -4,13 +4,18 @@ expression: "run_outline(&[\"@stdlib/result\"])"
 ---
 fn result.collect[T, E](rs: List[Result[T, E]]) -> Result[List[T], List[E]]
 fn result.collect_map[T, U, E](xs: List[T], f: fn(T) -> Result[U, E]) -> Result[List[U], List[E]]
+fn result.filter[A, E](r: Result[A, E], pred: fn(A) -> Bool, err_val: E) -> Result[A, E]
 fn result.flat_map[A, B, E](r: Result[A, E], f: fn(A) -> Result[B, E]) -> Result[B, E]
+fn result.flatten[A, E](r: Result[Result[A, E], E]) -> Result[A, E]
 fn result.is_err[A, E](r: Result[A, E]) -> Bool
 fn result.is_ok[A, E](r: Result[A, E]) -> Bool
 fn result.map[A, B, E](r: Result[A, E], f: fn(A) -> B) -> Result[B, E]
 fn result.map_err[A, E, F](r: Result[A, E], f: fn(E) -> F) -> Result[A, F]
+fn result.or_else[A, E, F](r: Result[A, E], f: fn(E) -> Result[A, F]) -> Result[A, F]
 fn result.partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E])
 fn result.to_err_option[A, E](r: Result[A, E]) -> Option[E]
+fn result.to_list[A, E](r: Result[A, E]) -> List[A]
 fn result.to_option[A, E](r: Result[A, E]) -> Option[A]
 fn result.unwrap_or[A, E](r: Result[A, E], default: A) -> A
 fn result.unwrap_or_else[A, E](r: Result[A, E], f: fn(E) -> A) -> A
+fn result.zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]

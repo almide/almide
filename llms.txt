@@ -11,7 +11,11 @@ concise on purpose. Follow the link map for depth.
 ## Fast facts
 
 - Extension: `.almd`. Stdlib modules `string`, `int`, `float`, `list`,
-  `map`, `set`, `option`, `result`, `value`, `env` are auto-imported.
+  `map`, `set`, `option`, `result`, `value`, `env`, `error`, `math`,
+  `datetime` are auto-imported.
+  Sized-numeric conversion modules (`int8`, `int16`, `int32`, `uint8`,
+  `uint16`, `uint32`, `uint64`, `float32`) are also auto-imported for
+  UFCS — e.g. `x.to_int64()` on `x: Int32` resolves to `int32.to_int64(x)`.
   `json`, `fs`, `http`, `regex`, `datetime`, `bytes`, `matrix`, `process`,
   `testing`, `random`, `io` need explicit `import`.
 - Null is spelled `Option[T]`. Errors are spelled `Result[T, E]`. No
@@ -157,6 +161,8 @@ let root_i = float.to_int(root_f)    // truncating
 | E011 | Mutable var mutated inside closure in pure fn | Refactor with `list.fold` / `list.count` / etc, or mark fn `effect fn` |
 | E012 | Duplicate definition (fn / test) | Rename one side |
 | E013 | Field access on non-record / missing field | Check spelling; non-records don't have method syntax (see E002) |
+| E014 | Unreachable match arm | Drop the dead arm, or tighten the earlier arm so this one is reachable |
+| E015 | Possible stdlib reimplementation (warning) | Delegate via the `try:` shim, or rename if intentionally different |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates

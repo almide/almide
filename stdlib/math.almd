@@ -1,0 +1,70 @@
+// math — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2d).
+//
+// Migrated mechanically from the matching `stdlib/defs/*.toml`.
+// Signatures (including any generic type params) match the legacy
+// TOML definitions byte-for-byte; the Rust runtime in
+// `runtime/rs/src/math.rs` stays as the implementation target.
+// WASM dispatch continues through `emit_wasm/calls_math.rs`.
+
+@intrinsic("almide_rt_math_abs")
+fn abs(n: Int) -> Int = _
+
+@intrinsic("almide_rt_math_choose")
+fn choose(n: Int, k: Int) -> Int = _
+
+@intrinsic("almide_rt_math_cos")
+fn cos(x: Float) -> Float = _
+
+@intrinsic("almide_rt_math_e")
+fn e() -> Float = _
+
+@intrinsic("almide_rt_math_exp")
+fn exp(x: Float) -> Float = _
+
+@intrinsic("almide_rt_math_factorial")
+fn factorial(n: Int) -> Int = _
+
+@intrinsic("almide_rt_math_fmax")
+fn fmax(a: Float, b: Float) -> Float = _
+
+@intrinsic("almide_rt_math_fmin")
+fn fmin(a: Float, b: Float) -> Float = _
+
+@intrinsic("almide_rt_math_fpow")
+fn fpow(base: Float, exp: Float) -> Float = _
+
+@intrinsic("almide_rt_math_log")
+fn log(x: Float) -> Float = _
+
+@intrinsic("almide_rt_math_log10")
+fn log10(x: Float) -> Float = _
+
+@intrinsic("almide_rt_math_log2")
+fn log2(x: Float) -> Float = _
+
+@intrinsic("almide_rt_math_log_gamma")
+fn log_gamma(x: Float) -> Float = _
+
+@intrinsic("almide_rt_math_max")
+fn max(a: Int, b: Int) -> Int = _
+
+@intrinsic("almide_rt_math_min")
+fn min(a: Int, b: Int) -> Int = _
+
+@intrinsic("almide_rt_math_pi")
+fn pi() -> Float = _
+
+@intrinsic("almide_rt_math_pow")
+fn pow(base: Int, exp: Int) -> Int = _
+
+@intrinsic("almide_rt_math_sign")
+fn sign(n: Int) -> Int = _
+
+@intrinsic("almide_rt_math_sin")
+fn sin(x: Float) -> Float = _
+
+@intrinsic("almide_rt_math_sqrt")
+fn sqrt(x: Float) -> Float = _
+
+@intrinsic("almide_rt_math_tan")
+fn tan(x: Float) -> Float = _

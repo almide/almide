@@ -43,7 +43,10 @@ jobs:
         run: cargo build --release
 
       - name: Cargo tests
-        run: cargo test
+        # --test-threads=1: fix_test spawns `almide run` as a sub-process
+        # and relies on cargo's incremental build cache; parallel runs
+        # hit the known race and flake. Matches ci.yml.
+        run: cargo test -- --test-threads=1
 
       - name: Run exercises (Rust target)
         continue-on-error: true  # TODO: re-enable after stdlib reconnection

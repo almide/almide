@@ -144,6 +144,20 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
             m.functions.iter().enumerate().filter_map(move |(fi, f)| {
                 let gs = f.generics.as_ref()?;
                 if gs.is_empty() { return None; }
+                // `@inline_rust` / `@wasm_intrinsic` bundled fns are dispatch
+                // metadata: their body is `_` and the actual implementation
+                // is the per-target template (Rust runtime fn / hand-written
+                // WASM runtime). Templates are type-erased — `list.len[A]`
+                // expands to `almide_rt_list_len(&{xs})` regardless of `A`.
+                // Specializing them just produces bare-body clones whose
+                // names (`len__Int`) the WASM dispatcher's per-module match
+                // arms cannot recognise, which would trip the inline
+                // `panic!("[ICE] ...")` fallback each dispatcher carries.
+                // Skip them here so the call site stays `Module { list, len }`
+                // and the dispatcher sees the unsuffixed name.
+                let is_template_dispatch = f.attrs.iter().any(|a|
+                    matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"));
+                if is_template_dispatch { return None; }
                 let mut bounded = Vec::new();
                 for g in gs.iter() {
                     for (i, param) in f.params.iter().enumerate() {
@@ -172,6 +186,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         struct Discover<'a> {
             generics: &'a [ModuleGeneric],
             param_types: Vec<Vec<Ty>>,
+            module_names: &'a [String],
             out: Vec<(usize, usize, HashMap<String, Ty>, String)>, // (mi, fi, bindings, suffix)
         }
         impl<'a> IrMutVisitor for Discover<'a> {
@@ -182,9 +197,13 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                     let f = func.as_str();
                     for (gi, g) in self.generics.iter().enumerate() {
                         if g.name != f { continue; }
-                        // Cheap module guard: we can't easily query the module name
-                        // from a generic index without the program; rely on unique fn
-                        // names for now — guards below skip non-matching bindings.
+                        // Module guard: same fn name can live in multiple modules
+                        // (e.g. option.filter / list.filter / result.filter). Without
+                        // this, the first name-match wins and specialization is
+                        // registered under the wrong (mod, fn, suffix) key — the
+                        // rewriter (which DOES filter by module) then misses the
+                        // lookup and the call stays as unsuffixed `Module { m, f }`.
+                        if self.module_names[g.mi] != m { continue; }
                         let ptys = &self.param_types[gi];
                         let bindings = collect_mono_bindings(&g.bounds, args, ptys);
                         let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
@@ -215,8 +234,9 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         let param_types: Vec<Vec<Ty>> = generics.iter().map(|g| {
             program.modules[g.mi].functions[g.fi].params.iter().map(|p| p.ty.clone()).collect()
         }).collect();
+        let module_names: Vec<String> = program.modules.iter().map(|m| m.name.to_string()).collect();
 
-        let mut d = Discover { generics: &generics, param_types, out: Vec::new() };
+        let mut d = Discover { generics: &generics, param_types, module_names: &module_names, out: Vec::new() };
         for func in &mut program.functions {
             d.visit_expr_mut(&mut func.body);
         }
@@ -365,8 +385,25 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
     // post-ConcretizeTypes audit). The Rust target's later optimizer would
     // remove them anyway; the WASM emitter does not, so we prune here as
     // the canonical invariant: post-mono, no module fn carries TypeVars.
+    //
+    // Exception: bundled stdlib fns carrying `@inline_rust` or
+    // `@wasm_intrinsic` are dispatch *metadata*, not emitted code. Their
+    // generic signatures stay in the IR so `pass_stdlib_lowering` can
+    // locate them by (module, func) and render call sites as
+    // `IrExprKind::InlineRust`. Without this carve-out, every
+    // Stdlib-Unification bundled module (option, result, list, ...)
+    // loses its attribute table the moment mono runs.
     for module in &mut program.modules {
-        module.functions.retain(|f| !f.generics.as_ref().map_or(false, |g| !g.is_empty()));
+        module.functions.retain(|f| {
+            let is_generic = f.generics.as_ref().map_or(false, |g| !g.is_empty());
+            if !is_generic {
+                return true;
+            }
+            f.attrs.iter().any(|a| matches!(
+                a.name.as_str(),
+                "inline_rust" | "wasm_intrinsic"
+            ))
+        });
     }
 }
 

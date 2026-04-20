@@ -210,6 +210,13 @@ pub struct WasmEmitter {
     // Function index tracking
     next_func_idx: u32,
     pub func_map: HashMap<String, u32>,
+    /// Reverse lookup for `@intrinsic("almide_rt_<m>_<f>")` attributes:
+    /// mangled symbol → (stdlib module name, Almide fn name). Populated
+    /// once from bundled stdlib sources; used by the WASM `RuntimeCall`
+    /// fallback path so that dispatch routes to the correct
+    /// `emit_<m>_call` arm even when the runtime symbol name differs
+    /// from the Almide fn name (e.g. `map.map` → `almide_rt_map_map_values`).
+    pub intrinsic_symbol_to_fn: HashMap<String, (String, String)>,
     // func_idx → type_idx for defined (non-import) functions
     pub func_type_indices: HashMap<u32, u32>,
 
@@ -293,6 +300,7 @@ impl WasmEmitter {
             num_imports: 0,
             next_func_idx: 0,
             func_map: HashMap::new(),
+            intrinsic_symbol_to_fn: HashMap::new(),
             func_type_indices: HashMap::new(),
             compiled: Vec::new(),
             strings: HashMap::new(),
@@ -478,6 +486,29 @@ impl FuncCompiler<'_> {
 /// Emit a WASM binary from an IR program (WASI mode).
 pub fn emit(program: &IrProgram) -> Vec<u8> {
     let mut emitter = WasmEmitter::new();
+
+    // Phase 0: Collect `@intrinsic(symbol)` → (module, fn_name) from every
+    // bundled stdlib source so the `RuntimeCall` fallback path can route
+    // dispatch by the Almide fn name rather than by naively decoding the
+    // runtime symbol. Needed when the runtime symbol differs from the
+    // Almide fn name (e.g. `map.map` → `almide_rt_map_map_values`).
+    {
+        use almide_lang::ast::{AttrValue, Decl};
+        for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
+            let Some(parsed) = almide_lang::parse_cached(source) else { continue };
+            for decl in &parsed.decls {
+                let Decl::Fn { name, attrs, .. } = decl else { continue };
+                let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else { continue };
+                let Some(first) = attr.args.first() else { continue };
+                let AttrValue::String { value: symbol } = &first.value else { continue };
+                emitter.intrinsic_symbol_to_fn.insert(
+                    symbol.clone(),
+                    (mod_name.to_string(), name.to_string()),
+                );
+            }
+        }
+    }
 
     // Phase 1: Register types and function indices
     // Step 1a: WASI imports (must come first — all imports before any defined functions)
@@ -859,10 +890,14 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 almide_ir::IrExprKind::LitBool { value } => *value as i64,
                 _ => 0,
             };
-            // Module-local VarId may collide with main's; use name as the
-            // primary key. Skip the id-based map to avoid hijacking main vars.
-            let name = module.var_table.get(tl.var).name.to_string();
+            // Post-unification module top-lets reference the unified
+            // `program.var_table` (see `pass_unify_var_tables`). We
+            // keep the name-keyed map populated for compatibility with
+            // the synthetic Var branch below, but the VarId-keyed
+            // `top_let_globals` is also authoritative now.
+            let name = program.var_table.get(tl.var).name.to_string();
             emitter.top_let_globals_by_name.insert(name, (global_idx, vt));
+            emitter.top_let_globals.insert(tl.var.0, (global_idx, vt));
             emitter.top_let_init.push((global_idx, vt, const_bits));
         }
     }
@@ -909,17 +944,14 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         };
         let results = values::ret_type(&resolved_ret_ty);
         let type_idx = emitter.register_type(params, results);
-        // Use prefixed name for test functions to avoid colliding with user functions
-        let reg_name = if func.is_test {
-            format!("__test_{}", func.name)
-        } else {
-            func.name.to_string()
-        };
+        // Test blocks already carry `TEST_NAME_PREFIX` from lowering so
+        // they cannot collide with user fns — use the name as-is.
+        let reg_name = func.name.to_string();
         let func_idx = emitter.register_func(&reg_name, type_idx);
         user_meta.push(type_idx);
         user_func_indices.push(func_idx);
         if func.is_test {
-            test_func_indices.push((func_idx, func.name.to_string()));
+            test_func_indices.push((func_idx, func.display_name().to_string()));
         }
         if func.is_effect {
             emitter.effect_fns.insert(func.name.to_string());
@@ -945,14 +977,21 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             if func.is_test {
                 continue;
             }
+            // Stdlib Unification Stage 1: `@inline_rust` / `@wasm_intrinsic`
+            // bundled fns are dispatch-only declarations. On the WASM
+            // target, the call dispatch still goes through
+            // `calls_<module>.rs` (TOML-backed intrinsics); the bundled
+            // fn's body (typically `_` / Hole) is never needed and would
+            // fail to compile. Skip registration + emission.
+            if func.attrs.iter().any(|a|
+                matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic" | "intrinsic"))
+            {
+                continue;
+            }
             let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");
-            // Test functions use __test_ prefix so they don't collide with
-            // identically-named user functions (e.g. fn broadcast_add + test "broadcast_add").
-            let prefixed_name = if func.is_test {
-                format!("almide_rt_{}___test_{}", mod_ident, func_name_sanitized)
-            } else {
-                format!("almide_rt_{}_{}", mod_ident, func_name_sanitized)
-            };
+            // Test blocks carry `TEST_NAME_PREFIX` from lowering — no
+            // additional conditional prefix needed here.
+            let prefixed_name = format!("almide_rt_{}_{}", mod_ident, func_name_sanitized);
             let params: Vec<ValType> = func.params.iter()
                 .filter_map(|p| values::ty_to_valtype(&p.ty))
                 .collect();
@@ -1034,11 +1073,12 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         user_idx += 1;
     }
 
-    // Module functions (user packages)
+    // Module functions (user packages). VarIds already point into the
+    // unified `program.var_table` (see `pass_unify_var_tables`).
     for &(mi, fi, type_idx) in &module_func_meta {
         let module = &program.modules[mi];
         let func = &module.functions[fi];
-        let compiled = functions::compile_function(&mut emitter, func, &module.var_table, type_idx);
+        let compiled = functions::compile_function(&mut emitter, func, &program.var_table, type_idx);
         emitter.add_compiled(compiled);
     }
 
@@ -1308,13 +1348,17 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
             depth: 0,
             loop_stack: Vec::new(),
             scratch: scratch_alloc,
-            var_table: &module.var_table,
+            var_table: &program.var_table,
             stub_ret_ty: Ty::Unit,
         };
         for tl in &module.top_lets {
             mc.emit_expr(&tl.value);
-            let name = module.var_table.get(tl.var).name.as_str();
-            if let Some(&(global_idx, _)) = mc.emitter.top_let_globals_by_name.get(name) {
+            // Module top-let VarIds now index into `program.var_table`
+            // thanks to `UnifyVarTablesPass`, so the id-keyed map is
+            // the primary lookup; the name-keyed mirror is a backup.
+            if let Some(&(global_idx, _)) = mc.emitter.top_let_globals.get(&tl.var.0) {
+                mc.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
+            } else if let Some(&(global_idx, _)) = mc.emitter.top_let_globals_by_name.get(program.var_table.get(tl.var).name.as_str()) {
                 mc.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
             } else {
                 mc.func.instruction(&wasm_encoder::Instruction::Drop);

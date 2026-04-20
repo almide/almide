@@ -68,3 +68,27 @@ mod tests {
 pub fn almide_rt_int_to_u32(n: i64) -> i64 { (n as u32) as i64 }
 pub fn almide_rt_int_to_u8(n: i64) -> i64 { (n as u8) as i64 }
 pub fn almide_rt_int_bits_to_float(bits: i64) -> f64 { f64::from_bits(bits as u64) }
+
+// ── Sized conversions (for `@intrinsic` migration of `int.to_*`) ──
+
+pub fn almide_rt_int_to_int8(n: i64) -> i8 { n as i8 }
+pub fn almide_rt_int_to_int16(n: i64) -> i16 { n as i16 }
+pub fn almide_rt_int_to_int32(n: i64) -> i32 { n as i32 }
+pub fn almide_rt_int_to_int64(n: i64) -> i64 { n }
+pub fn almide_rt_int_to_uint8(n: i64) -> u8 { n as u8 }
+pub fn almide_rt_int_to_uint16(n: i64) -> u16 { n as u16 }
+pub fn almide_rt_int_to_uint32(n: i64) -> u32 { n as u32 }
+pub fn almide_rt_int_to_uint64(n: i64) -> u64 { n as u64 }
+pub fn almide_rt_int_to_float32(n: i64) -> f32 { n as f32 }
+pub fn almide_rt_int_to_float64(n: i64) -> f64 { n as f64 }
+
+// ── Widening conversions (sized → Int, for typed-bytes Endian dispatch) ──
+
+pub fn almide_rt_int_from_int8(n: i8) -> i64 { n as i64 }
+pub fn almide_rt_int_from_int16(n: i16) -> i64 { n as i64 }
+pub fn almide_rt_int_from_int32(n: i32) -> i64 { n as i64 }
+pub fn almide_rt_int_from_int64(n: i64) -> i64 { n }
+pub fn almide_rt_int_from_uint8(n: u8) -> i64 { n as i64 }
+pub fn almide_rt_int_from_uint16(n: u16) -> i64 { n as i64 }
+pub fn almide_rt_int_from_uint32(n: u32) -> i64 { n as i64 }
+pub fn almide_rt_int_from_uint64(n: u64) -> i64 { n as i64 }

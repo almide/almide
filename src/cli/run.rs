@@ -4,23 +4,29 @@ use super::{hash64, cargo_build_generated_with_native, cargo_build_test_with_nat
 
 /// Compile an .almd file to a native binary, returning the path to the executable.
 /// Uses incremental caching: if the generated Rust code hasn't changed, skips cargo build.
-pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool) -> Result<std::path::PathBuf, String> {
+pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: bool) -> Result<std::path::PathBuf, String> {
     let rs_code = try_compile(file, no_check).map_err(|_| "compile failed".to_string())?;
 
-    let project_dir = std::env::temp_dir().join("almide-run");
+    // Default shared scratch dir. Tests set `ALMIDE_RUN_PROJECT_DIR` to a
+    // unique path so parallel `cargo test --all` can't race on the shared
+    // `src/main.rs` / `target/debug/` inside it.
+    let project_dir = std::env::var_os("ALMIDE_RUN_PROJECT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("almide-run"));
     std::fs::create_dir_all(&project_dir)
         .map_err(|e| format!("Failed to create temp directory: {}", e))?;
 
     let use_test_harness = test_mode || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
 
-    let hash_input = format!("{}:test={}", &rs_code, use_test_harness);
+    let hash_input = format!("{}:test={}:release={}", &rs_code, use_test_harness, release);
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let cache = super::incremental_cache_dir();
     let hash_file = cache.join(format!("{}.hash", file.replace('/', "_").replace('.', "_")));
 
     // Per-file binary: use file hash as name to avoid collisions during parallel test runs
     let bin_name = format!("almide-{}", &code_hash[..12]);
-    let bin_path = project_dir.join("target").join("debug").join(&bin_name);
+    let profile_dir = if release { "release" } else { "debug" };
+    let bin_path = project_dir.join("target").join(profile_dir).join(&bin_name);
 
     let cache_hit = hash_file.exists()
         && bin_path.exists()
@@ -51,7 +57,7 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool) -> Result<
     let result = if use_test_harness {
         cargo_build_test_with_native(&rs_code, &project_dir, native_deps, source_root)
     } else {
-        cargo_build_generated_with_native(&rs_code, &project_dir, false, native_deps, source_root)
+        cargo_build_generated_with_native(&rs_code, &project_dir, release, native_deps, source_root)
     };
 
     match result {
@@ -76,8 +82,8 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
     status.code().unwrap_or(1)
 }
 
-pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool) -> i32 {
-    match compile_to_binary(file, no_check, test_mode) {
+pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool) -> i32 {
+    match compile_to_binary(file, no_check, test_mode, release) {
         Ok(bin) => run_binary(&bin, program_args),
         Err(e) => {
             eprintln!("Compile error:\n{}", e);
@@ -86,6 +92,6 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_m
     }
 }
 
-pub fn cmd_run(file: &str, program_args: &[String], no_check: bool) {
-    std::process::exit(cmd_run_inner(file, program_args, no_check, false));
+pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool) {
+    std::process::exit(cmd_run_inner(file, program_args, no_check, false, release));
 }

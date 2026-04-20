@@ -19,13 +19,32 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Literals ──
         IrExprKind::LitInt { value } => {
             let value_s = value.to_string();
-            ctx.templates.render_with("int_literal", None, &[], &[("value", value_s.as_str())])
-                .unwrap_or_else(|| value.to_string())
+            // Pick the Rust literal suffix from `expr.ty` so sized
+            // numeric types (Stage 1a/1b) emit the right width:
+            // `Ty::Int32` → `i32`, `Ty::UInt8` → `u8`, and the
+            // canonical `Ty::Int` keeps the legacy `i64`. Falls
+            // through to the `int_literal` template for backward
+            // compatibility when ty is Int / Unknown.
+            match &expr.ty {
+                Ty::Int8 => format!("{}i8", value_s),
+                Ty::Int16 => format!("{}i16", value_s),
+                Ty::Int32 => format!("{}i32", value_s),
+                Ty::UInt8 => format!("{}u8", value_s),
+                Ty::UInt16 => format!("{}u16", value_s),
+                Ty::UInt32 => format!("{}u32", value_s),
+                Ty::UInt64 => format!("{}u64", value_s),
+                _ => ctx.templates.render_with("int_literal", None, &[], &[("value", value_s.as_str())])
+                    .unwrap_or_else(|| value.to_string()),
+            }
         }
         IrExprKind::LitFloat { value } => {
             let value_s = format!("{}", value);
-            ctx.templates.render_with("float_literal", None, &[], &[("value", value_s.as_str())])
-                .unwrap_or_else(|| format!("{}", value))
+            if matches!(expr.ty, Ty::Float32) {
+                format!("{}f32", value_s)
+            } else {
+                ctx.templates.render_with("float_literal", None, &[], &[("value", value_s.as_str())])
+                    .unwrap_or_else(|| format!("{}", value))
+            }
         }
         IrExprKind::LitStr { value } => {
             let escaped = value.replace('\\', "\\\\").replace('"', "\\\"")
@@ -44,12 +63,19 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let name = ctx.var_name(*id).to_string();
             // Lazy vars need deref via template. Cross-module top_let synthetic
             // vars carry an `ALMIDE_RT_<MOD>_<NAME>` name and reference a static
-            // LazyLock — auto-deref them too.
-            let is_synthetic_lazy = name.starts_with("ALMIDE_RT_");
+            // LazyLock — auto-deref them too, BUT only if the target top_let's
+            // kind is Lazy. Scalar `Const` top_lets (plain `const NAME: i64 = 42;`)
+            // must NOT be dereferenced. The synthetic Var carries a fresh
+            // VarId so `lazy_vars` misses it; cross-reference by uppercased
+            // name against `lazy_top_let_names` instead.
+            let upper = name.to_uppercase();
+            let is_synthetic_lazy = name.starts_with("ALMIDE_RT_")
+                && ctx.ann.lazy_top_let_names.contains(&upper);
             if ctx.ann.lazy_vars.contains(id) || is_synthetic_lazy {
-                let upper = name.to_uppercase();
                 ctx.templates.render_with("deref_lazy", None, &[], &[("name", upper.as_str())])
-                    .unwrap_or_else(|| name.to_uppercase())
+                    .unwrap_or_else(|| upper.clone())
+            } else if name.starts_with("ALMIDE_RT_") {
+                upper
             } else {
                 name
             }
@@ -181,6 +207,30 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Codegen pre-rendered call ──
         IrExprKind::RenderedCall { code } => code.clone(),
+
+        // ── @inline_rust template dispatch (Stdlib Unification Stage 1) ──
+        // Produced by `pass_stdlib_lowering` for calls to bundled stdlib
+        // fns whose IrFunction carries an `@inline_rust("...")` attribute.
+        // Render each arg into the param-keyed placeholder.
+        IrExprKind::InlineRust { template, args } => {
+            let mut out = template.clone();
+            for (name, arg) in args {
+                let rendered = render_expr(ctx, arg);
+                let placeholder = format!("{{{}}}", name.as_str());
+                out = out.replace(&placeholder, &rendered);
+            }
+            out
+        }
+
+        // ── Pre-resolved runtime call (from @intrinsic) ──
+        IrExprKind::RuntimeCall { symbol, args } => {
+            // BorrowInsertion wraps args with Borrow / Clone IR nodes
+            // based on the `@intrinsic` fn's derived signature
+            // (`intrinsic_borrow_mode`). The walker just renders.
+            let args_str = args.iter().map(|a| render_expr(ctx, a))
+                .collect::<Vec<_>>().join(", ");
+            format!("{}({})", symbol.as_str(), args_str)
+        }
 
         // ── Calls ──
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
@@ -555,6 +605,29 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("(*{})", name_s))
         }
         IrExprKind::Borrow { expr: inner, as_str, mutable } => {
+            // If the borrowed operand is a Var referencing a fn param
+            // already emitted as a reference (`&T`, `&[T]`, `&str`),
+            // skip the outer `&` to avoid `&&T` double-borrow. The
+            // `&*` (deref-then-ref) decoration still renders because
+            // it rewraps via `Deref`.
+            if !*as_str && !*mutable {
+                if let IrExprKind::Var { id } = &inner.kind {
+                    if ctx.ref_params.contains(id) {
+                        return render_expr(ctx, inner);
+                    }
+                }
+            }
+            // Same idea for `&mut b` against a `b: &mut T` param:
+            // Rust auto-reborrows when you pass the naked var, so
+            // dropping the outer `&mut` here keeps the callee's
+            // `&mut T` slot filled without a `&mut &mut T` layer.
+            if *mutable {
+                if let IrExprKind::Var { id } = &inner.kind {
+                    if ctx.ref_mut_params.contains(id) {
+                        return render_expr(ctx, inner);
+                    }
+                }
+            }
             if *mutable {
                 format!("&mut {}", render_expr(ctx, inner))
             } else if *as_str {

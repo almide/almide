@@ -93,7 +93,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let mut compiled: Vec<(String, Result<std::path::PathBuf, String>)> = Vec::new();
     for test_file in &test_files {
         eprintln!("Compiling {}", test_file);
-        let result = super::run::compile_to_binary(test_file, no_check, true);
+        let result = super::run::compile_to_binary(test_file, no_check, true, false);
         compiled.push((test_file.clone(), result));
     }
 
@@ -249,12 +249,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mut mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-            if almide::stdlib::is_bundled_module(name) {
-                let toml_funcs: std::collections::HashSet<&'static str> =
-                    almide::stdlib::module_functions(name).into_iter().collect();
-                mod_ir_module.functions.retain(|f| !toml_funcs.contains(f.name.as_str()));
-            }
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
             checker.env.import_table = saved_table;
             checker.env.self_module_name = saved_self;
             ir_program.modules.push(mod_ir_module);
@@ -467,12 +462,7 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mut mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-            if almide::stdlib::is_bundled_module(name) {
-                let toml_funcs: std::collections::HashSet<&'static str> =
-                    almide::stdlib::module_functions(name).into_iter().collect();
-                mod_ir_module.functions.retain(|f| !toml_funcs.contains(f.name.as_str()));
-            }
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
             checker.env.import_table = saved_table;
             checker.env.self_module_name = saved_self;
             ir_program.modules.push(mod_ir_module);
@@ -578,7 +568,7 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
     }
 
     for test_file in &test_files {
-        let code = super::cmd_run_inner(test_file, &program_args, false, true);
+        let code = super::cmd_run_inner(test_file, &program_args, false, true, false);
         // Emit JSON per file
         let status = if code == 0 { "pass" } else { "fail" };
         println!(

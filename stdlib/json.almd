@@ -1,0 +1,115 @@
+// json — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4d).
+//
+// Migrated mechanically from `stdlib/defs/json.toml` (29 fns). Runtime
+// impls stay in `runtime/rs/src/json.rs`. `JsonPath` is the opaque
+// path-traversal nominal type — the bundled side only refers to it.
+//
+// Runtime ABI — `j: &Value`, `key: &str`, `path: &AlmideJsonPath`, etc.
+// `from_string` / `from_int` / `from_bool` / `from_float` / `array`
+// used `Value::Str({s})` constructor templates in TOML. The bundled
+// form forwards to the `almide_json_from_*` runtime helpers that
+// match the convention without leaking the `Value` enum name into
+// every template (cleaner + uses the already-exposed runtime fns).
+// The TOML also dispatched `object` directly to `Value::Object(...)`
+// — we route through `almide_json_object(...)`.
+// `null` reuses `almide_rt_value_null()` exactly as before.
+// `set_path`'s TOML had a trailing `?` which is stripped here: the
+// Almide-level signature returns `Result[Value, String]`, so callers
+// propagate via `!` / `?` / match.
+
+@intrinsic("almide_rt_json_parse")
+fn parse(text: String) -> Result[Value, String] = _
+
+@intrinsic("almide_rt_json_stringify")
+fn stringify(v: Value) -> String = _
+
+@intrinsic("almide_json_get")
+fn get(j: Value, key: String) -> Option[Value] = _
+
+@intrinsic("almide_json_keys")
+fn keys(j: Value) -> List[String] = _
+
+@intrinsic("almide_json_from_string")
+fn from_string(s: String) -> Value = _
+
+@intrinsic("almide_json_from_int")
+fn from_int(n: Int) -> Value = _
+
+@intrinsic("almide_json_from_bool")
+fn from_bool(b: Bool) -> Value = _
+
+@intrinsic("almide_rt_value_null")
+fn null() -> Value = _
+
+@intrinsic("almide_json_array")
+fn array(items: List[Value]) -> Value = _
+
+@intrinsic("almide_json_from_float")
+fn from_float(n: Float) -> Value = _
+
+@intrinsic("almide_json_stringify_pretty")
+fn stringify_pretty(j: Value) -> String = _
+
+@intrinsic("almide_json_object")
+fn object(entries: List[(String, Value)]) -> Value = _
+
+// ── key-based typed extraction ──
+
+@intrinsic("almide_json_get_string")
+fn get_string(j: Value, key: String) -> Option[String] = _
+
+@intrinsic("almide_json_get_int")
+fn get_int(j: Value, key: String) -> Option[Int] = _
+
+@intrinsic("almide_json_get_float")
+fn get_float(j: Value, key: String) -> Option[Float] = _
+
+@intrinsic("almide_json_get_bool")
+fn get_bool(j: Value, key: String) -> Option[Bool] = _
+
+@intrinsic("almide_json_get_array")
+fn get_array(j: Value, key: String) -> Option[List[Value]] = _
+
+// ── value extraction (keyless) ──
+
+@intrinsic("almide_json_to_string")
+fn as_string(j: Value) -> Option[String] = _
+
+@intrinsic("almide_json_to_int")
+fn as_int(j: Value) -> Option[Int] = _
+
+@intrinsic("almide_json_as_float")
+fn as_float(j: Value) -> Option[Float] = _
+
+@intrinsic("almide_json_as_bool")
+fn as_bool(j: Value) -> Option[Bool] = _
+
+@intrinsic("almide_json_as_array")
+fn as_array(j: Value) -> Option[List[Value]] = _
+
+// ── path API ──
+
+@intrinsic("almide_rt_json_root")
+fn root() -> JsonPath = _
+
+@intrinsic("almide_rt_json_field")
+fn field(path: JsonPath, name: String) -> JsonPath = _
+
+@intrinsic("almide_rt_json_index")
+fn index(path: JsonPath, i: Int) -> JsonPath = _
+
+@intrinsic("almide_json_get_path")
+@borrow_ref(path)
+fn get_path(j: Value, path: JsonPath) -> Option[Value] = _
+
+@intrinsic("almide_json_set_path")
+@borrow_ref(path)
+@consume(value)
+fn set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String] = _
+
+@intrinsic("almide_json_remove_path")
+@borrow_ref(path)
+fn remove_path(j: Value, path: JsonPath) -> Value = _
+
+@intrinsic("almide_json_to_map")
+fn to_map(j: Value) -> Option[Map[String, String]] = _

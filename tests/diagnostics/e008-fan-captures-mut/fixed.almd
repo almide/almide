@@ -1,0 +1,4 @@
+effect fn main() -> (Int, Int) = {
+  let counter = 0
+  fan { counter 42 }
+}

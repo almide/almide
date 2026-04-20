@@ -42,6 +42,19 @@ impl FuncCompiler<'_> {
         match ty {
             Ty::Int => { wasm!(self.func, { i64_eq; }); }
             Ty::Float => { wasm!(self.func, { f64_eq; }); }
+            // Sized Numeric Types (Stage 1c): narrow ints ride in i32
+            // at the WASM level, so equality uses `i32.eq`. `UInt64`
+            // stays i64. `Float32` uses `f32.eq` via the Instruction
+            // API (macro lacks an `f32_eq` rule).
+            Ty::Int8 | Ty::Int16 | Ty::Int32
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 => {
+                wasm!(self.func, { i32_eq; });
+            }
+            Ty::Int64 | Ty::UInt64 => { wasm!(self.func, { i64_eq; }); }
+            Ty::Float32 => {
+                self.func.instruction(&wasm_encoder::Instruction::F32Eq);
+            }
+            Ty::Float64 => { wasm!(self.func, { f64_eq; }); }
             Ty::Bool => { wasm!(self.func, { i32_eq; }); }
             Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
 
@@ -456,14 +469,43 @@ impl FuncCompiler<'_> {
 
     pub(super) fn emit_cmp_instruction(&mut self, ty: &Ty, kind: CmpKind) {
         match (ty, kind) {
-            (Ty::Int, CmpKind::Lt) => { wasm!(self.func, { i64_lt_s; }); }
-            (Ty::Int, CmpKind::Gt) => { wasm!(self.func, { i64_gt_s; }); }
-            (Ty::Int, CmpKind::Lte) => { wasm!(self.func, { i64_le_s; }); }
-            (Ty::Int, CmpKind::Gte) => { wasm!(self.func, { i64_ge_s; }); }
-            (Ty::Float, CmpKind::Lt) => { wasm!(self.func, { f64_lt; }); }
-            (Ty::Float, CmpKind::Gt) => { wasm!(self.func, { f64_gt; }); }
-            (Ty::Float, CmpKind::Lte) => { wasm!(self.func, { f64_le; }); }
-            (Ty::Float, CmpKind::Gte) => { wasm!(self.func, { f64_ge; }); }
+            (Ty::Int | Ty::Int64, CmpKind::Lt) => { wasm!(self.func, { i64_lt_s; }); }
+            (Ty::Int | Ty::Int64, CmpKind::Gt) => { wasm!(self.func, { i64_gt_s; }); }
+            (Ty::Int | Ty::Int64, CmpKind::Lte) => { wasm!(self.func, { i64_le_s; }); }
+            (Ty::Int | Ty::Int64, CmpKind::Gte) => { wasm!(self.func, { i64_ge_s; }); }
+            (Ty::UInt64, cmp_kind) => {
+                use wasm_encoder::Instruction;
+                self.func.instruction(&match cmp_kind {
+                    CmpKind::Lt => Instruction::I64LtU,
+                    CmpKind::Gt => Instruction::I64GtU,
+                    CmpKind::Lte => Instruction::I64LeU,
+                    CmpKind::Gte => Instruction::I64GeU,
+                });
+            }
+            // Narrow sized ints ride in WASM i32. Sign is preserved by
+            // the upstream `i32_load<N>_s/u`; at compare time, treat
+            // signed variants as signed and unsigned as unsigned.
+            (Ty::Int8 | Ty::Int16 | Ty::Int32, CmpKind::Lt) => { wasm!(self.func, { i32_lt_s; }); }
+            (Ty::Int8 | Ty::Int16 | Ty::Int32, CmpKind::Gt) => { wasm!(self.func, { i32_gt_s; }); }
+            (Ty::Int8 | Ty::Int16 | Ty::Int32, CmpKind::Lte) => { wasm!(self.func, { i32_le_s; }); }
+            (Ty::Int8 | Ty::Int16 | Ty::Int32, CmpKind::Gte) => { wasm!(self.func, { i32_ge_s; }); }
+            (Ty::UInt8 | Ty::UInt16 | Ty::UInt32, CmpKind::Lt) => { wasm!(self.func, { i32_lt_u; }); }
+            (Ty::UInt8 | Ty::UInt16 | Ty::UInt32, CmpKind::Gt) => { wasm!(self.func, { i32_gt_u; }); }
+            (Ty::UInt8 | Ty::UInt16 | Ty::UInt32, CmpKind::Lte) => { wasm!(self.func, { i32_le_u; }); }
+            (Ty::UInt8 | Ty::UInt16 | Ty::UInt32, CmpKind::Gte) => { wasm!(self.func, { i32_ge_u; }); }
+            (Ty::Float | Ty::Float64, CmpKind::Lt) => { wasm!(self.func, { f64_lt; }); }
+            (Ty::Float | Ty::Float64, CmpKind::Gt) => { wasm!(self.func, { f64_gt; }); }
+            (Ty::Float | Ty::Float64, CmpKind::Lte) => { wasm!(self.func, { f64_le; }); }
+            (Ty::Float | Ty::Float64, CmpKind::Gte) => { wasm!(self.func, { f64_ge; }); }
+            (Ty::Float32, cmp_kind) => {
+                use wasm_encoder::Instruction;
+                self.func.instruction(&match cmp_kind {
+                    CmpKind::Lt => Instruction::F32Lt,
+                    CmpKind::Gt => Instruction::F32Gt,
+                    CmpKind::Lte => Instruction::F32Le,
+                    CmpKind::Gte => Instruction::F32Ge,
+                });
+            }
             (Ty::String, CmpKind::Lt) => {
                 wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_lt_s; });
             }
@@ -510,34 +552,43 @@ impl FuncCompiler<'_> {
 
     /// Emit a store instruction for a value at base_ptr + offset.
     /// Assumes base_ptr is already on stack, followed by the value.
+    ///
+    /// Narrow Almide sized types (Int8/Int16/UInt8/UInt16) ride in the
+    /// WASM i32 bucket but occupy 1 or 2 bytes on the heap — we emit
+    /// the width-matching `i32.store8` / `i32.store16` so adjacent
+    /// fields don't overwrite. Same story for `i64.store8` / `_16` /
+    /// `_32` on Int64 narrow writes (future path).
     pub fn emit_store_at(&mut self, ty: &Ty, offset: u32) {
-        match values::ty_to_valtype(ty) {
-            Some(ValType::I64) => {
-                wasm!(self.func, { i64_store(offset); });
+        match ty {
+            Ty::Int8 | Ty::UInt8 => { wasm!(self.func, { i32_store8(offset); }); }
+            Ty::Int16 | Ty::UInt16 => { wasm!(self.func, { i32_store16(offset); }); }
+            _ => match values::ty_to_valtype(ty) {
+                Some(ValType::I64) => { wasm!(self.func, { i64_store(offset); }); }
+                Some(ValType::F64) => { wasm!(self.func, { f64_store(offset); }); }
+                Some(ValType::F32) => { wasm!(self.func, { f32_store(offset); }); }
+                Some(ValType::I32) => { wasm!(self.func, { i32_store(offset); }); }
+                _ => {}
             }
-            Some(ValType::F64) => {
-                wasm!(self.func, { f64_store(offset); });
-            }
-            Some(ValType::I32) => {
-                wasm!(self.func, { i32_store(offset); });
-            }
-            _ => {}
         }
     }
 
     /// Emit a load instruction from base_ptr (on stack) + offset.
+    /// Narrow sized-int loads use the signed / unsigned variant
+    /// matching the Almide type so the i32-bucket value carries the
+    /// correct sign-extension / zero-extension for subsequent ops.
     pub fn emit_load_at(&mut self, ty: &Ty, offset: u32) {
-        match values::ty_to_valtype(ty) {
-            Some(ValType::I64) => {
-                wasm!(self.func, { i64_load(offset); });
+        match ty {
+            Ty::Int8  => { wasm!(self.func, { i32_load8_s(offset); }); }
+            Ty::UInt8 => { wasm!(self.func, { i32_load8_u(offset); }); }
+            Ty::Int16 => { wasm!(self.func, { i32_load16_s(offset); }); }
+            Ty::UInt16 => { wasm!(self.func, { i32_load16_u(offset); }); }
+            _ => match values::ty_to_valtype(ty) {
+                Some(ValType::I64) => { wasm!(self.func, { i64_load(offset); }); }
+                Some(ValType::F64) => { wasm!(self.func, { f64_load(offset); }); }
+                Some(ValType::F32) => { wasm!(self.func, { f32_load(offset); }); }
+                Some(ValType::I32) => { wasm!(self.func, { i32_load(offset); }); }
+                _ => {}
             }
-            Some(ValType::F64) => {
-                wasm!(self.func, { f64_load(offset); });
-            }
-            Some(ValType::I32) => {
-                wasm!(self.func, { i32_load(offset); });
-            }
-            _ => {}
         }
     }
 

@@ -91,7 +91,10 @@ pub trait NanoPass: std::fmt::Debug {
     fn depends_on(&self) -> Vec<&'static str> { vec![] }
 
     /// Postconditions: structural invariants guaranteed after this pass runs.
-    /// Verified automatically in debug/CI builds (ALMIDE_CHECK_IR=1).
+    /// Verified on every build. Debug builds panic on violation; release
+    /// builds print a `[POSTCONDITION VIOLATION]` diagnostic and keep
+    /// running. Violations are compiler bugs — downstream passes may rely
+    /// on the invariants unconditionally.
     fn postconditions(&self) -> Vec<Postcondition> { vec![] }
 
     /// Run the pass. Takes ownership of the program, returns modified program
@@ -237,8 +240,14 @@ impl Pipeline {
             .filter(|s| *s != "all")
             .map(|s| s.split(',').map(str::trim).collect())
             .unwrap_or_default();
-        let check_ir = std::env::var("ALMIDE_CHECK_IR").is_ok()
-            || std::env::var("ALMIDE_VERIFY_IR").is_ok();
+        // Contract-level checks (IR verifier + pass postconditions) run on
+        // every build. Debug builds escalate violations to `panic!` so CI
+        // and local `cargo test` catch them; release builds print the same
+        // diagnostic and keep running so an end-user `almide build` does
+        // not crash on a compiler bug. `ALMIDE_CHECK_IR` /
+        // `ALMIDE_VERIFY_IR` used to gate this — removed in S2 flip
+        // (v0.14.7-phase3.2); `expr.ty` is now trustworthy by contract.
+        let hard_fail = cfg!(debug_assertions);
 
         for pass in &self.passes {
             // Skip passes not relevant to this target
@@ -276,26 +285,26 @@ impl Pipeline {
                 eprintln!("── end {} ──\n", pass_name);
             }
 
-            // Inter-pass IR verification (opt-in via ALMIDE_CHECK_IR=1 or ALMIDE_VERIFY_IR=1)
-            if check_ir {
-                let errors = almide_ir::verify_program(&program);
-                if !errors.is_empty() {
-                    eprintln!("[IR CHECK] {} error(s) after pass '{}':", errors.len(), pass_name);
-                    for e in &errors {
-                        eprintln!("  {}", e);
-                    }
+            // Inter-pass IR verification — always on.
+            let errors = almide_ir::verify_program(&program);
+            if !errors.is_empty() {
+                eprintln!("[IR CHECK] {} error(s) after pass '{}':", errors.len(), pass_name);
+                for e in &errors {
+                    eprintln!("  {}", e);
+                }
+                if hard_fail {
                     panic!("IR verification failed after pass '{}'", pass_name);
                 }
             }
 
-            // Postcondition verification (always on — these are structural invariants)
+            // Postcondition verification — always on.
             let postconds = pass.postconditions();
             if !postconds.is_empty() {
                 let violations = verify_postconditions(pass_name, &program, &postconds);
                 for v in &violations {
                     eprintln!("[POSTCONDITION VIOLATION] {}", v);
                 }
-                if !violations.is_empty() && check_ir {
+                if !violations.is_empty() && hard_fail {
                     panic!("Postcondition violation after pass '{}'", pass_name);
                 }
             }

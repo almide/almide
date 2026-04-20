@@ -349,19 +349,143 @@ fn fmt_pat(pat: &Pat) -> String {
     }
 }
 
+/// Paste-ready arm template for a witness pattern. Unlike `fmt_pat`
+/// (which emits `Node(_, _)` with wildcards), this produces
+/// `Node(arg1, arg2) => _` with positional binding placeholders so the
+/// LLM can copy the arm directly into the source. Field names are
+/// reconstructed from the variant's `VariantPayload::Record` when
+/// available, otherwise positional `argN`.
+///
+/// Nested witnesses (e.g. `Node(Node(_, _), Leaf)` on a recursive
+/// `Tree = Leaf | Node(Tree, Tree)`) preserve their full structure —
+/// the template recurses through inner constructors so the user sees
+/// `Node(Node(arg1, arg2), Leaf) => _` rather than the flat
+/// `Node(arg1, arg2) => _`. `argN` is a file-scope counter to keep
+/// bindings unique across the nesting.
+fn fmt_arm_template(pat: &Pat, subject_ty: &Ty, env: &TypeEnv) -> String {
+    let resolved = env.resolve_named(subject_ty);
+    let mut counter = 1usize;
+    let head = fmt_arm_head(pat, &resolved, env, &mut counter);
+    format!("{} => _", head)
+}
+
+fn fmt_arm_head(pat: &Pat, ty: &Ty, env: &TypeEnv, counter: &mut usize) -> String {
+    match pat {
+        Pat::Wild => {
+            let n = *counter;
+            *counter += 1;
+            format!("arg{}", n)
+        }
+        Pat::Ctor(ctor, args) => {
+            // Wildcard bindings cannot shadow anything at lint time, so
+            // positional names don't need to be unique across rows — the
+            // emitted arm is purely paste fodder.
+            let (name, is_tuple, is_prefix_call) = match ctor {
+                CtorId::Variant(s) => (s.to_string(), false, true),
+                CtorId::Some => ("some".into(), false, true),
+                CtorId::None => ("none".into(), false, false),
+                CtorId::Ok => ("ok".into(), false, true),
+                CtorId::Err => ("err".into(), false, true),
+                CtorId::True => ("true".into(), false, false),
+                CtorId::False => ("false".into(), false, false),
+                CtorId::Tuple => (String::new(), true, false),
+                CtorId::Lit(v) => (v.clone(), false, false),
+            };
+            if args.is_empty() {
+                return name;
+            }
+            let sub_types = field_types(ctor, ty, env);
+            let record_fields: Option<Vec<String>> = match ctor {
+                CtorId::Variant(vname) if is_record_payload(vname, ty, env) => {
+                    let resolved = env.resolve_named(ty);
+                    if let Ty::Variant { cases, .. } = &resolved {
+                        cases.iter().find(|c| c.name == *vname)
+                            .and_then(|c| match &c.payload {
+                                VariantPayload::Record(fields) =>
+                                    Some(fields.iter().map(|(n, _)| n.to_string()).collect()),
+                                _ => Option::None,
+                            })
+                    } else { Option::None }
+                }
+                _ => Option::None,
+            };
+            let parts: Vec<String> = args.iter().enumerate().map(|(i, arg)| {
+                let sub_ty = sub_types.get(i).cloned().unwrap_or(Ty::Unknown);
+                match arg {
+                    Pat::Wild => {
+                        // Conventional single-field bindings on
+                        // Option/Result so the paste-ready arm reads
+                        // like the idiom (`some(x)`, `err(e)`) instead
+                        // of a generic `arg1`.
+                        if matches!(ctor, CtorId::Some | CtorId::Ok) && args.len() == 1 {
+                            return "x".to_string();
+                        }
+                        if matches!(ctor, CtorId::Err) && args.len() == 1 {
+                            return "e".to_string();
+                        }
+                        if let Some(fnames) = &record_fields {
+                            if let Some(fname) = fnames.get(i) {
+                                return fname.clone();
+                            }
+                        }
+                        let n = *counter;
+                        *counter += 1;
+                        format!("arg{}", n)
+                    }
+                    Pat::Ctor(_, _) => fmt_arm_head(arg, &sub_ty, env, counter),
+                }
+            }).collect();
+            if is_tuple {
+                format!("({})", parts.join(", "))
+            } else if is_prefix_call {
+                if let CtorId::Variant(vname) = ctor {
+                    if is_record_payload(vname, ty, env) {
+                        return format!("{} {{ {} }}", name, parts.join(", "));
+                    }
+                }
+                format!("{}({})", name, parts.join(", "))
+            } else {
+                name
+            }
+        }
+    }
+}
+
+fn is_record_payload(vname: &Sym, ty: &Ty, env: &TypeEnv) -> bool {
+    let resolved = env.resolve_named(ty);
+    match &resolved {
+        Ty::Variant { cases, .. } => cases
+            .iter()
+            .find(|c| c.name == *vname)
+            .map_or(false, |c| matches!(c.payload, VariantPayload::Record(_))),
+        _ => false,
+    }
+}
+
 // ────────────────────────────────────────────────
 //  Public API
 // ────────────────────────────────────────────────
 
+/// Result of an exhaustiveness check for a single match.
+#[derive(Debug, Clone)]
+pub struct MissingArm {
+    /// Compact witness pattern, e.g. `Node(_, _)` — used in the
+    /// "missing: …" summary of the diagnostic.
+    pub pattern: String,
+    /// Paste-ready arm template, e.g. `Node(arg1, arg2) => _` — used in
+    /// the hint so LLMs / users can copy the arm directly.
+    pub arm_template: String,
+}
+
 /// Check if a match expression is exhaustive.
 ///
-/// Returns a list of formatted missing-pattern strings (empty = exhaustive).
-/// At most 3 witnesses are reported.
+/// Returns a list of missing-arm descriptors (empty = exhaustive). At
+/// most 3 witnesses are reported.
 pub fn check_exhaustiveness(
     subject_ty: &Ty,
     arms: &[ast::MatchArm],
     env: &TypeEnv,
-) -> Vec<String> {
+) -> Vec<MissingArm> {
     let resolved = env.resolve_named(subject_ty);
 
     // Skip unanalyzable types.
@@ -395,7 +519,124 @@ pub fn check_exhaustiveness(
         .iter()
         .map(|w| {
             debug_assert_eq!(w.len(), 1, "witness should have exactly 1 column");
-            fmt_pat(w.first().unwrap_or(&Pat::Wild))
+            let pat = w.first().unwrap_or(&Pat::Wild);
+            MissingArm {
+                pattern: fmt_pat(pat),
+                arm_template: fmt_arm_template(pat, subject_ty, env),
+            }
         })
         .collect()
+}
+
+// ────────────────────────────────────────────────
+//  Usefulness (reachability) — Maranget Sec. 3
+// ────────────────────────────────────────────────
+
+/// Report the indices of arms whose pattern is already covered by an
+/// earlier arm — i.e. the arm is unreachable / dead. Indices point into
+/// the original `arms` slice (not into the guard-filtered one).
+///
+/// Guarded arms are treated as non-contributing for coverage: they
+/// neither shadow later arms nor get shadowed (a guard can always fail
+/// at runtime). This matches the "guards as proof obligations" view in
+/// §4 of the roadmap and aligns with Rust's exhaustiveness rules.
+pub fn find_unreachable_arms(
+    subject_ty: &Ty,
+    arms: &[ast::MatchArm],
+    env: &TypeEnv,
+) -> Vec<usize> {
+    let resolved = env.resolve_named(subject_ty);
+    if matches!(ctor_set(&resolved, env), CtorSet::Opaque) {
+        return vec![];
+    }
+    let types = vec![resolved];
+    let mut matrix: Vec<Vec<Pat>> = Vec::with_capacity(arms.len());
+    let mut dead = Vec::new();
+    for (idx, arm) in arms.iter().enumerate() {
+        let row = vec![lower(&arm.pattern)];
+        if arm.guard.is_some() {
+            // Skip — guarded rows don't extend `matrix`. We don't
+            // examine their usefulness either: a guarded arm is always
+            // considered "potentially reachable" (the guard might let
+            // through a value earlier arms would have caught).
+            continue;
+        }
+        if !is_useful(&matrix, &row, &types, env) {
+            dead.push(idx);
+        } else {
+            matrix.push(row);
+        }
+    }
+    dead
+}
+
+/// Maranget §3: `U(P, q)` — is row `q` useful w.r.t. matrix `P`?
+/// "Useful" means ∃ a value that matches `q` and no row of `P`.
+///
+/// The recursion follows the structure of `q[0]`:
+/// - `Ctor(c, args)`: specialize both by `c`; recurse.
+/// - `Wild`: if `P`'s head is complete, recurse for each constructor;
+///   else use the default matrix and recurse on `q[1..]`.
+fn is_useful(matrix: &[Vec<Pat>], row: &[Pat], types: &[Ty], env: &TypeEnv) -> bool {
+    if types.is_empty() {
+        // Empty row. Useful iff no row of matrix is empty (= matrix has
+        // no rows at all — an empty matrix can't cover any value).
+        return matrix.iter().all(|r| !r.is_empty());
+    }
+    debug_assert_eq!(row.len(), types.len(), "row and types must align");
+    let ty = &types[0];
+    let rest_types = &types[1..];
+    match &row[0] {
+        Pat::Ctor(c, args) => {
+            let ar = arity(c, ty, env);
+            let mut sub_row: Vec<Pat> = args.iter().cloned().collect();
+            sub_row.resize(ar, Pat::Wild);
+            sub_row.extend_from_slice(&row[1..]);
+            let mut sub_types = field_types(c, ty, env);
+            sub_types.extend_from_slice(rest_types);
+            let sub_matrix = specialize(matrix, c, ar);
+            is_useful(&sub_matrix, &sub_row, &sub_types, env)
+        }
+        Pat::Wild => {
+            let head = head_ctors(matrix);
+            // For Opaque / Infinite constructor spaces (TypeVars, Int,
+            // Float, String) we can't enumerate. The only thing the
+            // wildcard adds is "values not covered by prior rows" —
+            // equivalent to asking whether the default matrix (rows
+            // starting with Wild, head column stripped) fails to
+            // cover `row[1..]`. Fall through to that branch rather
+            // than the ctor iteration, which would iterate an empty
+            // `all` list and wrongly report "not useful".
+            let enumerable = matches!(
+                ctor_set(ty, env),
+                CtorSet::Finite(_) | CtorSet::Single(_)
+            );
+            if enumerable && is_complete(&head, ty, env) {
+                // Cover every constructor; useful if any sub-problem is.
+                let all = match ctor_set(ty, env) {
+                    CtorSet::Finite(all) => all,
+                    CtorSet::Single(c) => vec![c],
+                    _ => return false,
+                };
+                for ctor in &all {
+                    let ar = arity(ctor, ty, env);
+                    let ftys = field_types(ctor, ty, env);
+                    let mut sub_row = vec![Pat::Wild; ar];
+                    sub_row.extend_from_slice(&row[1..]);
+                    let mut sub_types = ftys;
+                    sub_types.extend_from_slice(rest_types);
+                    let sub_matrix = specialize(matrix, ctor, ar);
+                    if is_useful(&sub_matrix, &sub_row, &sub_types, env) {
+                        return true;
+                    }
+                }
+                false
+            } else {
+                // Some constructor missing OR infinite/opaque domain —
+                // the wildcard can catch values no prior row does.
+                let def = default_matrix(matrix);
+                is_useful(&def, &row[1..], rest_types, env)
+            }
+        }
+    }
 }

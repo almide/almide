@@ -182,10 +182,15 @@ impl TypeConstructorRegistry {
             kind: Kind::Star,
             laws: vec![],
         });
+        // Matrix: * -> * — parametric dtype (Sized Numeric Types P4).
+        // Pre-arc: `Matrix` was non-parametric (kind *). Now `Matrix[T]`
+        // parses and resolves to `Applied(Matrix, [T])`; bare `Matrix`
+        // keeps compatibility via the `compatible(Ty::Matrix,
+        // Applied(Matrix, [Float]))` rule.
         self.register(TypeConstructorInfo {
             id: TypeConstructorId::Matrix,
             name: "Matrix".into(),
-            kind: Kind::Star,
+            kind: Kind::star_to_star(),
             laws: vec![],
         });
 

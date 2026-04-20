@@ -36,7 +36,25 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Variables ──
         ast::ExprKind::Ident { name, .. } => {
             if let Some(var_id) = ctx.lookup_var(name) {
-                ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
+                // The type checker fills `ty` from `expr_types`. Names bound
+                // by record / variant patterns can land here as `Unknown`
+                // because the checker doesn't propagate the variant case's
+                // field types into the binding occurrence (the pattern
+                // lowering puts the field type into VarTable, but the
+                // checker's `expr_types` for the bare identifier reference
+                // hasn't been re-resolved post-pattern). Promote to the
+                // VarTable type only when the checker truly has nothing
+                // (`Unknown`) and the VarTable has a fully concrete type —
+                // we never want to fold a `TypeVar` from a generic body's
+                // VarTable into a call-site IR expression, since that would
+                // confuse mono's binding discovery.
+                let resolved = if matches!(ty, Ty::Unknown) {
+                    let vt_ty = ctx.var_table.get(var_id).ty.clone();
+                    if !vt_ty.contains_unknown() && !vt_ty.contains_typevar() {
+                        vt_ty
+                    } else { ty }
+                } else { ty };
+                ctx.mk(IrExprKind::Var { id: var_id }, resolved, span)
             } else if let Ty::Fn { params: param_tys, ret } = &ty {
                 // Function/top-let used as a value → eta-expand to lambda
                 // so borrow insertion handles param types correctly (e.g. String → &str).
@@ -118,8 +136,20 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
         ast::ExprKind::EmptyMap => ctx.mk(IrExprKind::EmptyMap, ty, span),
         ast::ExprKind::Tuple { elements, .. } => {
-            let elems = elements.iter().map(|e| lower_expr(ctx, e)).collect();
-            ctx.mk(IrExprKind::Tuple { elements: elems }, ty, span)
+            let elems: Vec<IrExpr> = elements.iter().map(|e| lower_expr(ctx, e)).collect();
+            // Type-checker fills `ty` from `expr_types`; for a tuple whose
+            // element exprs depend on a pattern-bound name, that ty can be
+            // `Tuple([Unknown, ..])` even when the lowered elements now
+            // carry concrete types (see the same fix on `Ident`). Rebuild
+            // the tuple ty from the lowered elements when the checker's ty
+            // is unresolved so downstream `Some(tuple)` / `List[tuple]`
+            // chains get a clean propagation path.
+            let resolved_ty = if ty.has_unresolved_deep()
+                && elems.iter().all(|e| !e.ty.has_unresolved_deep())
+            {
+                Ty::Tuple(elems.iter().map(|e| e.ty.clone()).collect())
+            } else { ty };
+            ctx.mk(IrExprKind::Tuple { elements: elems }, resolved_ty, span)
         }
 
         // ── Records ──
@@ -135,8 +165,16 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
         // ── Operators ──
         ast::ExprKind::Binary { op, left, right, .. } => {
-            let l = lower_expr(ctx, left);
-            let r = lower_expr(ctx, right);
+            let mut l = lower_expr(ctx, left);
+            let mut r = lower_expr(ctx, right);
+            // Sized Numeric Types (Stage 1c): when one operand is a
+            // sized type and the other is a bare Int/Float literal,
+            // retype the literal so the resulting BinOp has matching
+            // operand widths. Mirrors the fn-arg and let-binding
+            // coercion rules — the same authoritative-context rule
+            // applies to any pairing where one side locks the width.
+            super::statements::coerce_literal_to_sized(&mut r, &l.ty);
+            super::statements::coerce_literal_to_sized(&mut l, &r.ty);
             // Resolve operand types: if expr.ty is Unknown, try VarTable lookup
             let left_ty = if l.ty == Ty::Unknown {
                 if let IrExprKind::Var { id } = &l.kind { ctx.var_table.get(*id).ty.clone() } else { l.ty.clone() }
@@ -168,13 +206,31 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 ("*", Ty::Matrix, Ty::Matrix) => BinOp::MulMatrix,
                 ("*", Ty::Matrix, Ty::Float) | ("*", Ty::Float, Ty::Matrix) => BinOp::ScaleMatrix,
                 ("*", Ty::Matrix, Ty::Int) | ("*", Ty::Int, Ty::Matrix) => BinOp::ScaleMatrix,
-                ("+", Ty::Float, _) | ("+", _, Ty::Float) => BinOp::AddFloat,
+                // Float dispatch covers canonical `Float` plus the sized
+                // `Float32`. Any other numeric type (Int / Int8 ... /
+                // UInt64) takes the Int path. The *width* of the
+                // arithmetic op (i32_add vs i64_add vs f32_add vs
+                // f64_add) is resolved at WASM emit time from the
+                // operand's valtype; Rust codegen emits plain `a + b`
+                // and lets rustc pick.
+                ("+", Ty::Float, _) | ("+", _, Ty::Float)
+                | ("+", Ty::Float32, _) | ("+", _, Ty::Float32) => BinOp::AddFloat,
                 ("+", _, _) => BinOp::AddInt,
-                ("-", Ty::Float, _) | ("-", _, Ty::Float) => BinOp::SubFloat, ("-", _, _) => BinOp::SubInt,
-                ("*", Ty::Float, _) | ("*", _, Ty::Float) => BinOp::MulFloat, ("*", _, _) => BinOp::MulInt,
-                ("/", Ty::Float, _) | ("/", _, Ty::Float) => BinOp::DivFloat, ("/", _, _) => BinOp::DivInt,
-                ("%", Ty::Float, _) | ("%", _, Ty::Float) => BinOp::ModFloat, ("%", _, _) => BinOp::ModInt,
-                ("^", Ty::Float, _) | ("^", _, Ty::Float) => BinOp::PowFloat, ("^", _, _) => BinOp::PowInt,
+                ("-", Ty::Float, _) | ("-", _, Ty::Float)
+                | ("-", Ty::Float32, _) | ("-", _, Ty::Float32) => BinOp::SubFloat,
+                ("-", _, _) => BinOp::SubInt,
+                ("*", Ty::Float, _) | ("*", _, Ty::Float)
+                | ("*", Ty::Float32, _) | ("*", _, Ty::Float32) => BinOp::MulFloat,
+                ("*", _, _) => BinOp::MulInt,
+                ("/", Ty::Float, _) | ("/", _, Ty::Float)
+                | ("/", Ty::Float32, _) | ("/", _, Ty::Float32) => BinOp::DivFloat,
+                ("/", _, _) => BinOp::DivInt,
+                ("%", Ty::Float, _) | ("%", _, Ty::Float)
+                | ("%", Ty::Float32, _) | ("%", _, Ty::Float32) => BinOp::ModFloat,
+                ("%", _, _) => BinOp::ModInt,
+                ("^", Ty::Float, _) | ("^", _, Ty::Float)
+                | ("^", Ty::Float32, _) | ("^", _, Ty::Float32) => BinOp::PowFloat,
+                ("^", _, _) => BinOp::PowInt,
                 ("==", _, _) => BinOp::Eq, ("!=", _, _) => BinOp::Neq,
                 ("<", _, _) => BinOp::Lt, (">", _, _) => BinOp::Gt,
                 ("<=", _, _) => BinOp::Lte, (">=", _, _) => BinOp::Gte,

@@ -1,0 +1,17 @@
+// hex — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2b).
+//
+// Hexadecimal encoding for binary data: 1 byte → 2 chars. Lowercase
+// by default; `encode_upper` for uppercase. Decoder accepts both cases
+// and rejects non-hex / odd-length inputs with `err`.
+//
+// Templates route the Rust target to `runtime/rs/src/hex.rs`; WASM
+// continues through `emit_wasm/calls_hex.rs` until a later arc.
+
+@intrinsic("almide_rt_hex_encode")
+fn encode(b: Bytes) -> String = _
+
+@intrinsic("almide_rt_hex_encode_upper")
+fn encode_upper(b: Bytes) -> String = _
+
+@intrinsic("almide_rt_hex_decode")
+fn decode(s: String) -> Result[Bytes, String] = _

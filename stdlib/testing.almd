@@ -1,0 +1,29 @@
+// testing — bundled-Almide stdlib module.
+//
+// Pure assertion helpers dispatched via `@intrinsic`. WASM routing
+// lives in `emit_wasm/calls.rs::dispatch_runtime_fallback` (routes
+// `testing.*` to the Named dispatcher, where the hardcoded
+// assert_contains / assert_approx / etc. implementations live).
+
+@intrinsic("almide_rt_test_assert_throws")
+fn assert_throws(f: () -> Unit, expected: String) -> Unit = _
+
+@intrinsic("almide_rt_test_assert_contains")
+fn assert_contains(haystack: String, needle: String) -> Unit = _
+
+@intrinsic("almide_rt_test_assert_approx")
+fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
+
+@intrinsic("almide_rt_test_assert_gt")
+fn assert_gt(a: Int, b: Int) -> Unit = _
+
+@intrinsic("almide_rt_test_assert_lt")
+fn assert_lt(a: Int, b: Int) -> Unit = _
+
+@intrinsic("almide_rt_test_assert_some")
+@borrow_ref(opt)
+fn assert_some[A](opt: Option[A]) -> Unit = _
+
+@intrinsic("almide_rt_test_assert_ok")
+@borrow_ref(result)
+fn assert_ok[A, B](result: Result[A, B]) -> Unit = _

@@ -9,7 +9,6 @@
 use std::collections::HashSet;
 use almide_base::intern::Sym;
 use almide_ir::*;
-use crate::generated::arg_transforms;
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -23,14 +22,15 @@ impl NanoPass for LICMPass {
         // Analyze user function purity (fixpoint computation)
         let pure_fns = analyze_pure_functions(&program);
         let mut changed = false;
-        for func in &mut program.functions {
-            if hoist_loops(&mut func.body, &mut program.var_table, &pure_fns) {
+        let IrProgram { functions, modules, var_table, .. } = &mut program;
+        for func in functions.iter_mut() {
+            if hoist_loops(&mut func.body, var_table, &pure_fns) {
                 changed = true;
             }
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                if hoist_loops(&mut func.body, &mut module.var_table, &pure_fns) {
+        for module in modules.iter_mut() {
+            for func in module.functions.iter_mut() {
+                if hoist_loops(&mut func.body, var_table, &pure_fns) {
                     changed = true;
                 }
             }
@@ -278,14 +278,16 @@ fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>) {
             for (v, _) in params { defined.insert(*v); }
             collect_defined_vars_expr(body, defined);
         }
-        // Mutating stdlib calls: first BorrowMut arg is the target variable
+        // Mutating stdlib calls: `&mut {name}` in the bundled
+        // `@inline_rust` template means the runtime mutates that
+        // param in place (`list.push`, `map.insert`, ...). Mark the
+        // caller-side Var as defined so LICM doesn't wrongly hoist
+        // something that depends on it.
         IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } => {
-            if let Some(info) = arg_transforms::lookup(module, func) {
-                for (i, arg) in args.iter().enumerate() {
-                    if info.args.get(i) == Some(&arg_transforms::ArgTransform::BorrowMut) {
-                        if let IrExprKind::Var { id } = &arg.kind {
-                            defined.insert(*id);
-                        }
+            for (i, arg) in args.iter().enumerate() {
+                if let IrExprKind::Var { id } = &arg.kind {
+                    if bundled_mutates_param_at(module.as_str(), func.as_str(), i) {
+                        defined.insert(*id);
                     }
                 }
             }
@@ -368,6 +370,11 @@ fn try_hoist_expr(
                 CallTarget::Computed { callee } => try_hoist_expr(callee, loop_defined, vt, hoisted, pure_fns),
                 _ => {}
             }
+            for arg in args {
+                try_hoist_expr(arg, loop_defined, vt, hoisted, pure_fns);
+            }
+        }
+        IrExprKind::RuntimeCall { args, .. } => {
             for arg in args {
                 try_hoist_expr(arg, loop_defined, vt, hoisted, pure_fns);
             }
@@ -482,6 +489,9 @@ fn has_control_flow(expr: &IrExpr) -> bool {
                 _ => false,
             };
             target_cf || args.iter().any(|a| has_control_flow(a))
+        }
+        IrExprKind::RuntimeCall { args, .. } => {
+            args.iter().any(|a| has_control_flow(a))
         }
         IrExprKind::If { cond, then, else_ } => {
             has_control_flow(cond) || has_control_flow(then) || has_control_flow(else_)
@@ -716,11 +726,56 @@ fn refs_are_outside_loop_stmt(stmt: &IrStmt, loop_defined: &HashSet<VarId>) -> b
     }
 }
 
-/// Derive purity of a stdlib call from its TOML-generated metadata.
-/// The `pure_` field is auto-derived at build time:
-/// pure = not effect, not impure, no BorrowMut args.
+/// Derive purity of a stdlib call from the bundled `.almd` source.
+/// A call is pure when the fn isn't marked `effect` / `async` and its
+/// `@inline_rust` template has no `&mut {name}` / `&mut *{name}`
+/// sigils. Post Stdlib Declarative Unification, every stdlib module
+/// lives in `stdlib/<m>.almd`, so this is the single source of
+/// truth.
 fn is_pure_stdlib_call(module: &str, func: &str) -> bool {
-    arg_transforms::lookup(module, func).is_some_and(|info| info.pure_)
+    use almide_lang::ast::{AttrValue, Decl};
+    let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
+        return false;
+    };
+    let Some(program) = almide_lang::parse_cached(source) else { return false; };
+    for decl in &program.decls {
+        let Decl::Fn { name, attrs, effect, r#async, .. } = decl else { continue };
+        if name.as_str() != func { continue; }
+        if effect.unwrap_or(false) || r#async.unwrap_or(false) { return false; }
+        let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "inline_rust") else {
+            return true;
+        };
+        let Some(first) = attr.args.first() else { return true; };
+        let AttrValue::String { value } = &first.value else { return true; };
+        return !value.contains("&mut ");
+    }
+    false
+}
+
+/// `true` if `module.func`'s bundled `@inline_rust` template marks
+/// the param at position `pos` as mutated (`&mut {name}` /
+/// `&mut *{name}`). Conservative: returns `false` for non-stdlib
+/// modules and for templates that don't match.
+fn bundled_mutates_param_at(module: &str, func: &str, pos: usize) -> bool {
+    use almide_lang::ast::{AttrValue, Decl};
+    let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
+        return false;
+    };
+    let Some(program) = almide_lang::parse_cached(source) else { return false; };
+    for decl in &program.decls {
+        let Decl::Fn { name, attrs, params, .. } = decl else { continue };
+        if name.as_str() != func { continue; }
+        let Some(pname) = params.get(pos).map(|p| p.name) else { return false; };
+        let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "inline_rust") else {
+            return false;
+        };
+        let Some(first) = attr.args.first() else { return false; };
+        let AttrValue::String { value } = &first.value else { return false; };
+        let sigil = format!("&mut {{{}}}", pname.as_str());
+        let deref_sigil = format!("&mut *{{{}}}", pname.as_str());
+        return value.contains(&sigil) || value.contains(&deref_sigil);
+    }
+    false
 }
 
 // ── User function purity analysis (fixpoint) ──────────────────

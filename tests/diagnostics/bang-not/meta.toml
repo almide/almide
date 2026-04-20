@@ -1,0 +1,2 @@
+expects_error = "'!' is not valid in Almide"
+hint_substring = "use 'not'"

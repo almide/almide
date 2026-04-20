@@ -102,4 +102,56 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
             is_effect: false,
         }],
     });
+
+    // Numeric: abstract interface for numeric primitive types. Methods
+    // match the `BinOp` dispatch pairs so `fn f[T: Numeric](x: T, y: T)
+    // = x + y` flows through without a separate hand-impl. Monomorph
+    // repairs the `BinOp` kind once `T` resolves to a concrete width.
+    env.protocols.insert("Numeric".into(), ProtocolDef {
+        name: "Numeric".into(),
+        generics: vec![],
+        methods: vec![
+            ProtocolMethodSig {
+                name: "add".into(),
+                params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
+                ret: self_ty.clone(),
+                is_effect: false,
+            },
+            ProtocolMethodSig {
+                name: "sub".into(),
+                params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
+                ret: self_ty.clone(),
+                is_effect: false,
+            },
+            ProtocolMethodSig {
+                name: "mul".into(),
+                params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
+                ret: self_ty.clone(),
+                is_effect: false,
+            },
+            ProtocolMethodSig {
+                name: "div".into(),
+                params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
+                ret: self_ty.clone(),
+                is_effect: false,
+            },
+        ],
+    });
+
+    // Register every numeric primitive type as implementing `Numeric`.
+    // Without this, `T: Numeric` bounds fail the
+    // `type '{}' does not implement protocol '{}'` check whenever a
+    // concrete primitive (Int / Int32 / Float / ...) substitutes `T`.
+    let numeric_primitives: &[&str] = &[
+        "Int", "Float",
+        "Int8", "Int16", "Int32",
+        "UInt8", "UInt16", "UInt32", "UInt64",
+        "Float32",
+    ];
+    for prim in numeric_primitives {
+        env.type_protocols
+            .entry(sym(prim))
+            .or_default()
+            .insert(sym("Numeric"));
+    }
 }

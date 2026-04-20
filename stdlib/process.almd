@@ -1,0 +1,48 @@
+// process — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4c).
+//
+// Migrated mechanically from `stdlib/defs/process.toml` (13 fns + the
+// `ProcessStatus` record). Runtime impls stay in
+// `runtime/rs/src/process.rs`; every runtime param is owned
+// (`String`, `Vec<String>`), so templates pass by value.
+
+type ProcessStatus = {
+  code: Int,
+  stdout: String,
+  stderr: String,
+}
+
+@intrinsic("almide_rt_process_exec")
+effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
+
+@intrinsic("almide_rt_process_exit")
+effect fn exit(code: Int) -> Never = _
+
+@intrinsic("almide_rt_process_args")
+fn args() -> List[String] = _
+
+@intrinsic("almide_rt_process_stdin_lines")
+effect fn stdin_lines() -> Result[List[String], String] = _
+
+@intrinsic("almide_rt_process_exec_in")
+effect fn exec_in(dir: String, cmd: String, args: List[String]) -> Result[String, String] = _
+
+@intrinsic("almide_rt_process_exec_with_stdin")
+effect fn exec_with_stdin(cmd: String, args: List[String], input: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_process_exec_status")
+effect fn exec_status(cmd: String, args: List[String]) -> Result[ProcessStatus, String] = _
+
+@intrinsic("almide_rt_process_pid")
+fn pid() -> Int = _
+
+@intrinsic("almide_rt_process_env")
+fn env(key: String) -> Option[String] = _
+
+@intrinsic("almide_rt_process_spawn")
+effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_process_kill")
+effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_process_is_alive")
+fn is_alive(pid: Int) -> Bool = _

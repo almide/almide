@@ -27,20 +27,20 @@ impl NanoPass for MatchLoweringPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Rewrite all functions
-        for func in &mut program.functions {
-            func.body = rewrite_expr(std::mem::take(&mut func.body), &mut program.var_table);
+        let IrProgram { functions, top_lets, modules, var_table, .. } = &mut program;
+        for func in functions.iter_mut() {
+            func.body = rewrite_expr(std::mem::take(&mut func.body), var_table);
         }
-        // Rewrite top-level lets
-        for tl in &mut program.top_lets {
-            tl.value = rewrite_expr(std::mem::take(&mut tl.value), &mut program.var_table);
+        for tl in top_lets.iter_mut() {
+            tl.value = rewrite_expr(std::mem::take(&mut tl.value), var_table);
         }
-        // Rewrite module functions and top_lets (each module has its own var_table)
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                func.body = rewrite_expr(std::mem::take(&mut func.body), &mut module.var_table);
+        // Module fns / top_lets index into the unified var_table too.
+        for module in modules.iter_mut() {
+            for func in module.functions.iter_mut() {
+                func.body = rewrite_expr(std::mem::take(&mut func.body), var_table);
             }
-            for tl in &mut module.top_lets {
-                tl.value = rewrite_expr(std::mem::take(&mut tl.value), &mut module.var_table);
+            for tl in module.top_lets.iter_mut() {
+                tl.value = rewrite_expr(std::mem::take(&mut tl.value), var_table);
             }
         }
         PassResult { program, changed: true }

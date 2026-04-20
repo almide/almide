@@ -1,0 +1,150 @@
+// string — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4a).
+//
+// Migrated mechanically from `stdlib/defs/string.toml` (45 fns). All
+// fns are pure — no effect, no closures. The runtime impls stay in
+// `runtime/rs/src/string.rs`; `@inline_rust` templates replace the
+// TOML glue.
+//
+// Note on `slice`: the TOML had an `optional = true` flag on `end`,
+// expanding to two dispatch arms (`Some({end})` vs `None`). The
+// bundled form uses Almide's native default-value syntax with an
+// `i64::MAX` sentinel — the runtime already clamps `end` to
+// `chars.len()` when it exceeds the string length, so
+// `Some(i64::MAX)` is observationally identical to `None` and the
+// existing 2-arg call sites (`string.slice(s, 3)`) keep working
+// without any API change.
+
+@intrinsic("almide_rt_string_trim")
+fn trim(s: String) -> String = _
+
+@intrinsic("almide_rt_string_split")
+fn split(s: String, sep: String) -> List[String] = _
+
+@intrinsic("almide_rt_string_join")
+fn join(list: List[String], sep: String) -> String = _
+
+@intrinsic("almide_rt_string_len")
+fn len(s: String) -> Int = _
+
+@intrinsic("almide_rt_string_contains")
+fn contains(s: String, sub: String) -> Bool = _
+
+@intrinsic("almide_rt_string_starts_with")
+fn starts_with(s: String, prefix: String) -> Bool = _
+
+@intrinsic("almide_rt_string_ends_with")
+fn ends_with(s: String, suffix: String) -> Bool = _
+
+@intrinsic("almide_rt_string_slice")
+fn slice(s: String, start: Int, end: Int = 9223372036854775807) -> String = _
+
+@intrinsic("almide_rt_string_pad_left")
+fn pad_start(s: String, n: Int, ch: String) -> String = _
+
+@intrinsic("almide_rt_string_to_bytes")
+fn to_bytes(s: String) -> List[Int] = _
+
+@intrinsic("almide_rt_string_capitalize")
+fn capitalize(s: String) -> String = _
+
+@intrinsic("almide_rt_string_to_upper")
+fn to_upper(s: String) -> String = _
+
+@intrinsic("almide_rt_string_to_lower")
+fn to_lower(s: String) -> String = _
+
+@intrinsic("almide_rt_string_replace")
+fn replace(s: String, from: String, to: String) -> String = _
+
+@intrinsic("almide_rt_string_char_at")
+fn get(s: String, i: Int) -> Option[String] = _
+
+@intrinsic("almide_rt_string_lines")
+fn lines(s: String) -> List[String] = _
+
+@intrinsic("almide_rt_string_chars")
+fn chars(s: String) -> List[String] = _
+
+@intrinsic("almide_rt_string_index_of")
+fn index_of(s: String, needle: String) -> Option[Int] = _
+
+@intrinsic("almide_rt_string_repeat")
+fn repeat(s: String, n: Int) -> String = _
+
+@intrinsic("almide_rt_string_from_bytes")
+fn from_bytes(bytes: List[Int]) -> String = _
+
+@intrinsic("almide_rt_string_is_digit")
+fn is_digit(s: String) -> Bool = _
+
+@intrinsic("almide_rt_string_is_alpha")
+fn is_alpha(s: String) -> Bool = _
+
+@intrinsic("almide_rt_string_is_alphanumeric")
+fn is_alphanumeric(s: String) -> Bool = _
+
+@intrinsic("almide_rt_string_is_whitespace")
+fn is_whitespace(s: String) -> Bool = _
+
+@intrinsic("almide_rt_string_is_upper")
+fn is_upper(s: String) -> Bool = _
+
+@intrinsic("almide_rt_string_is_lower")
+fn is_lower(s: String) -> Bool = _
+
+@intrinsic("almide_rt_string_codepoint")
+fn codepoint(s: String) -> Option[Int] = _
+
+@intrinsic("almide_rt_string_from_codepoint")
+fn from_codepoint(n: Int) -> String = _
+
+@intrinsic("almide_rt_string_pad_right")
+fn pad_end(s: String, n: Int, ch: String) -> String = _
+
+@intrinsic("almide_rt_string_trim_start")
+fn trim_start(s: String) -> String = _
+
+@intrinsic("almide_rt_string_trim_end")
+fn trim_end(s: String) -> String = _
+
+@intrinsic("almide_rt_string_count")
+fn count(s: String, sub: String) -> Int = _
+
+@intrinsic("almide_rt_string_is_empty")
+fn is_empty(s: String) -> Bool = _
+
+@intrinsic("almide_rt_string_reverse")
+fn reverse(s: String) -> String = _
+
+@intrinsic("almide_rt_string_strip_prefix")
+fn strip_prefix(s: String, prefix: String) -> Option[String] = _
+
+@intrinsic("almide_rt_string_strip_suffix")
+fn strip_suffix(s: String, suffix: String) -> Option[String] = _
+
+@intrinsic("almide_rt_string_replace_first")
+fn replace_first(s: String, from: String, to: String) -> String = _
+
+@intrinsic("almide_rt_string_last_index_of")
+fn last_index_of(s: String, needle: String) -> Option[Int] = _
+
+@intrinsic("almide_rt_string_first")
+fn first(s: String) -> Option[String] = _
+
+@intrinsic("almide_rt_string_last")
+fn last(s: String) -> Option[String] = _
+
+@intrinsic("almide_rt_string_take")
+fn take(s: String, n: Int) -> String = _
+
+@intrinsic("almide_rt_string_take_end")
+fn take_end(s: String, n: Int) -> String = _
+
+@intrinsic("almide_rt_string_drop")
+fn drop(s: String, n: Int) -> String = _
+
+@intrinsic("almide_rt_string_drop_end")
+fn drop_end(s: String, n: Int) -> String = _
+
+@intrinsic("almide_rt_string_run_length_encode")
+fn run_length_encode(s: String) -> List[(String, Int)] = _

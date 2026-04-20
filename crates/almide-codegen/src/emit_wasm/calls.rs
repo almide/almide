@@ -6,9 +6,72 @@ use wasm_encoder::ValType;
 
 use super::FuncCompiler;
 use super::values;
+
+/// Signed / unsigned / float kind for sized numeric WASM conversion
+/// dispatch. See `emit_sized_conv_call`.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum SizedKind { Int, UInt, Float }
+
+/// Map a sized numeric `Ty` to its module name (`int32`, `uint8`, ...).
+/// Mirrors `resolve_module_from_ty` / `builtin_module_for_type` so the
+/// WASM dispatcher can route a `CallTarget::Method` on a sized
+/// receiver into the same module dispatch path as `CallTarget::Module`.
+fn sized_ty_module(ty: &Ty) -> Option<&'static str> {
+    Some(match ty {
+        Ty::Int => "int",
+        Ty::Float => "float",
+        Ty::Int8 => "int8",
+        Ty::Int16 => "int16",
+        Ty::Int32 => "int32",
+        Ty::UInt8 => "uint8",
+        Ty::UInt16 => "uint16",
+        Ty::UInt32 => "uint32",
+        Ty::UInt64 => "uint64",
+        Ty::Float32 => "float32",
+        _ => return None,
+    })
+}
+
+/// Parse a sized-type module name into (kind, bit-width). Accepts the
+/// canonical `int` / `float` (treated as 64-bit) plus every sized
+/// variant. Returns `None` for anything else so the dispatcher falls
+/// through to legacy TOML / bundled routing.
+fn sized_type_info(name: &str) -> Option<(SizedKind, u32)> {
+    Some(match name {
+        "int" | "int64" => (SizedKind::Int, 64),
+        "int32" => (SizedKind::Int, 32),
+        "int16" => (SizedKind::Int, 16),
+        "int8" => (SizedKind::Int, 8),
+        "uint64" => (SizedKind::UInt, 64),
+        "uint32" => (SizedKind::UInt, 32),
+        "uint16" => (SizedKind::UInt, 16),
+        "uint8" => (SizedKind::UInt, 8),
+        "float" | "float64" => (SizedKind::Float, 64),
+        "float32" => (SizedKind::Float, 32),
+        _ => return None,
+    })
+}
 use super::wasm_macro::wasm;
 
 impl FuncCompiler<'_> {
+    /// Fallback for module dispatch: when `emit_<module>_call` has no arm
+    /// for `func` (often a mono-specialized `filter__Int_String`), try
+    /// `func_map["almide_rt_<module>_<func>"]` — the name ResolveCalls
+    /// would have produced had it rewritten the call. Returns `true` iff
+    /// the call was successfully emitted. Mirrors the fallback chain
+    /// already used by the unknown-module `_ =>` arm below, so inline
+    /// dispatchers and bundled specializations converge on the same
+    /// resolver instead of each module arm dying with an ICE.
+    fn try_named_dispatch_fallback(&mut self, module: &str, func: &str, args: &[IrExpr]) -> bool {
+        let prefixed = format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_"));
+        if let Some(&func_idx) = self.emitter.func_map.get(prefixed.as_str()) {
+            for arg in args { self.emit_expr(arg); }
+            wasm!(self.func, { call(func_idx); });
+            return true;
+        }
+        false
+    }
+
     pub(super) fn emit_call(&mut self, target: &CallTarget, args: &[IrExpr], _ret_ty: &Ty) {
         // Set return type context for stub calls
         self.stub_ret_ty = _ret_ty.clone();
@@ -294,34 +357,84 @@ impl FuncCompiler<'_> {
             }
 
             CallTarget::Module { module, func } => {
+                // Sized numeric conversion modules (`int8`, ..., `uint64`,
+                // `float32`) live in bundled `.almd` + `@inline_rust` only.
+                // On WASM they surface as `CallTarget::Module` here and get
+                // lowered to the matching WASM conversion instruction
+                // (`i64.extend_i32_s`, `f32.convert_i64_u`, ...) by
+                // `emit_sized_conv_call`. The canonical `int` / `float`
+                // modules also host `.to_intN()` / `.to_floatN()` methods
+                // via the same path, so we consult this dispatcher before
+                // their TOML-driven `emit_int_call` / `emit_float_call`.
+                if matches!(
+                    module.as_str(),
+                    "int" | "float" | "int8" | "int16" | "int32"
+                        | "uint8" | "uint16" | "uint32" | "uint64" | "float32"
+                ) {
+                    if self.emit_sized_conv_call(module.as_str(), func.as_str(), args) {
+                        return;
+                    }
+                }
                 match (module.as_str(), func.as_str()) {
                     _ if module == "int" => {
-                        if !self.emit_int_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        if !self.emit_int_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "float" => {
-                        if !self.emit_float_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        if !self.emit_float_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "string" => {
-                        if !self.emit_string_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        if !self.emit_string_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "option" => {
-                        if !self.emit_option_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        if !self.emit_option_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "result" => {
-                        if !self.emit_result_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        if !self.emit_result_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "list" => {
-                        if !self.emit_list_call(func, args) {
+                        if !self.emit_list_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             // Bundled-Almide fns inside list (e.g. list.split_at,
                             // list.iterate from stdlib/list.almd) are rewritten to
                             // CallTarget::Named { almide_rt_list_<f> } by
@@ -329,17 +442,33 @@ impl FuncCompiler<'_> {
                             // Anything that gets here is a TOML stdlib fn whose
                             // dispatch is missing in emit_list_call. Hard ICE so the
                             // gap is fixed at the source, not papered over.
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "bytes" => {
-                        if !self.emit_bytes_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        if !self.emit_bytes_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "matrix" => {
-                        if !self.emit_matrix_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        if !self.emit_matrix_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "base64" => {
@@ -353,8 +482,12 @@ impl FuncCompiler<'_> {
                         if let Some(rt) = rt_fn {
                             self.emit_expr(&args[0]);
                             wasm!(self.func, { call(rt); });
-                        } else {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        } else if !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args) {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "hex" => {
@@ -367,18 +500,34 @@ impl FuncCompiler<'_> {
                         if let Some(rt) = rt_fn {
                             self.emit_expr(&args[0]);
                             wasm!(self.func, { call(rt); });
-                        } else {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        } else if !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args) {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "map" => {
-                        if !self.emit_map_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        if !self.emit_map_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "math" => {
-                        if !self.emit_math_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        if !self.emit_math_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     ("error", "message") => {
@@ -464,8 +613,14 @@ impl FuncCompiler<'_> {
                         self.scratch.free_i32(s);
                     }
                     _ if module == "set" => {
-                        if !self.emit_set_call(func, args) {
-                            self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                        if !self.emit_set_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                         }
                     }
                     _ if module == "fan" => {
@@ -502,8 +657,18 @@ impl FuncCompiler<'_> {
                         self.emit_process_call(func, args);
                     }
                     _ if module == "testing" => {
-                        // Delegate to Named handler: testing.assert_gt → "assert_gt"
-                        let target = CallTarget::Named { name: (*func).into() };
+                        // Delegate to the hardcoded Named handler:
+                        // `testing.assert_gt` → `assert_gt`. After Stage 3a
+                        // the monomorphizer may specialize bundled generic
+                        // fns to `assert_some__String`, `assert_ok__Int_String`,
+                        // ... The hardcoded Named dispatch above keys on the
+                        // *base* name, so strip the mono suffix before
+                        // delegating — otherwise the call falls through to
+                        // the user-fn fallback and emits `unreachable` for
+                        // any typed caller.
+                        let fname = func.as_str();
+                        let base = fname.split_once("__").map(|(b, _)| b).unwrap_or(fname);
+                        let target = CallTarget::Named { name: almide_base::intern::sym(base) };
                         self.emit_call(&target, args, _ret_ty);
                     }
                     _ => {
@@ -527,7 +692,11 @@ impl FuncCompiler<'_> {
                                     for arg in args { self.emit_expr(arg); }
                                     wasm!(self.func, { call(func_idx); });
                                 } else {
-                                    self.emit_stub_call_named(module.as_str(), func.as_str(), args);
+                                    panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
+                                 add an arm in emit_{}_call or resolve upstream",
+                                module.as_str(), func.as_str(), module.as_str()
+                            );
                                 }
                             }
                         }
@@ -613,7 +782,12 @@ impl FuncCompiler<'_> {
                         fake_args.extend(args.iter().cloned());
                         let m = method.strip_prefix("option.").unwrap_or(method);
                         if !self.emit_option_call(m, &fake_args) {
-                            self.emit_stub_call(args);
+                            panic!(
+                                "[ICE] emit_wasm: no WASM dispatch for Option method \
+                                 `{}` (stripped: `{}`) — add an arm in emit_option_call \
+                                 or resolve upstream",
+                                method, m
+                            );
                         }
                     }
                     _ if matches!(&object.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)) => {
@@ -631,6 +805,27 @@ impl FuncCompiler<'_> {
                         if !self.emit_string_call(m, &fake_args) {
                             self.emit_ufcs_fallback(object, method, args);
                         }
+                    }
+                    // Sized numeric UFCS conversion on `Ty::Int` / `Ty::Float`
+                    // (e.g. `n.to_int32()` where `n: Int`). Must precede the
+                    // generic `Ty::Int` / `Ty::Float` dispatch below because
+                    // those arms route through `emit_int_call` /
+                    // `emit_float_call` which don't know about sized
+                    // conversion templates.
+                    _ if matches!(&object.ty, Ty::Int | Ty::Float)
+                        && {
+                            let m = method.split('.').last().unwrap_or(method);
+                            m.starts_with("to_int") || m.starts_with("to_uint") || m.starts_with("to_float")
+                        }
+                        => {
+                        let src_module = sized_ty_module(&object.ty).unwrap();
+                        let bare_method = method.split('.').last().unwrap_or(method);
+                        let fake_args = vec![(**object).clone()];
+                        let target = CallTarget::Module {
+                            module: almide_base::intern::sym(src_module),
+                            func: almide_base::intern::sym(bare_method),
+                        };
+                        self.emit_call(&target, &fake_args, _ret_ty);
                     }
                     _ if matches!(&object.ty, Ty::Int) => {
                         let mut fake_args = vec![(**object).clone()];
@@ -664,6 +859,25 @@ impl FuncCompiler<'_> {
                             self.emit_ufcs_fallback(object, method, args);
                         }
                     }
+                    _ if sized_ty_module(&object.ty).is_some()
+                        && {
+                            let m = method.split('.').last().unwrap_or(method);
+                            m.starts_with("to_int") || m.starts_with("to_uint") || m.starts_with("to_float")
+                        }
+                        => {
+                        // Sized numeric UFCS conversion (Stage 3 of the
+                        // sized-numeric-types arc). Route through the
+                        // Module dispatcher so `emit_sized_conv_call`
+                        // picks the right WASM conversion instruction.
+                        let src_module = sized_ty_module(&object.ty).unwrap();
+                        let bare_method = method.split('.').last().unwrap_or(method);
+                        let fake_args = vec![(**object).clone()];
+                        let target = CallTarget::Module {
+                            module: almide_base::intern::sym(src_module),
+                            func: almide_base::intern::sym(bare_method),
+                        };
+                        self.emit_call(&target, &fake_args, _ret_ty);
+                    }
                     _ => {
                         // Try to resolve as TypeName.method convention call
                         let type_name = match &object.ty {
@@ -688,12 +902,12 @@ impl FuncCompiler<'_> {
                             wasm!(self.func, { call(func_idx); });
                             return;
                         }
-                        // Fallback: stub
-                        self.emit_expr(object);
-                        if values::ty_to_valtype(&object.ty).is_some() {
-                            wasm!(self.func, { drop; });
-                        }
-                        self.emit_stub_call(args);
+                        panic!(
+                            "[ICE] emit_wasm: unresolved method call `.{}` on \
+                             object ty={:?} — expected TypeName.method or func_map \
+                             hit, but both lookups missed",
+                            method, object.ty
+                        );
                     }
                 }
             }
@@ -755,6 +969,84 @@ impl FuncCompiler<'_> {
 
     /// Emit a tail call (WASM `return_call` / `return_call_indirect`).
     /// Falls back to normal call for targets that don't resolve to a known function.
+    /// Hybrid fallback for `RuntimeCall` whose `symbol` is not registered
+    /// in `func_map`. Routes through the legacy `emit_<module>_call`
+    /// dispatcher so fns still lowered via inline i64 ops (e.g. `int.abs`)
+    /// keep working until their WASM runtime fn lands. Returns `true` on
+    /// successful dispatch, `false` otherwise.
+    pub(super) fn dispatch_runtime_fallback(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+        ret_ty: &Ty,
+    ) -> bool {
+        let _ = ret_ty;
+        // Sized numeric conversion: `int.to_uint8` / `float.to_int32` /
+        // `int64.to_float64` / ... flow through the name-driven
+        // `emit_sized_conv_call` that covers the full kind×width
+        // matrix. Before `@intrinsic` migration these rode the Module
+        // dispatcher at line ~356 of this file, but the post-migration
+        // `RuntimeCall` path lands here instead.
+        if (func.starts_with("to_") || func.starts_with("from_"))
+            && sized_type_info(module).is_some()
+        {
+            if self.emit_sized_conv_call(module, func, args) {
+                return true;
+            }
+        }
+        match module {
+            "int" => self.emit_int_call(func, args),
+            "float" => self.emit_float_call(func, args),
+            "math" => self.emit_math_call(func, args),
+            "string" => self.emit_string_call(func, args),
+            "list" => self.emit_list_call(func, args),
+            "map" => self.emit_map_call(func, args),
+            "set" => self.emit_set_call(func, args),
+            "option" => self.emit_option_call(func, args),
+            "result" => self.emit_result_call(func, args),
+            "bytes" => self.emit_bytes_call(func, args),
+            "matrix" => self.emit_matrix_call(func, args),
+            "io" => { self.emit_io_call(func, args); true }
+            "regex" => { self.emit_regex_call(func, args); true }
+            "value" => { self.emit_value_call(func, args); true }
+            "http" => { self.emit_http_call(func, args); true }
+            "datetime" => { self.emit_datetime_call(func, args); true }
+            "process" => { self.emit_process_call(func, args); true }
+            "random" => { self.emit_random_call(func, args); true }
+            "env" => { self.emit_env_call(func, args); true }
+            "fs" => { self.emit_fs_call(func, args); true }
+            "json" => { self.emit_json_call(func, args); true }
+            "testing" => {
+                // Route to Named dispatch: `testing.assert_contains`
+                // → `assert_contains` (handlers live under the
+                // hardcoded Named dispatch at calls.rs ~line 178).
+                // Mirror Module-dispatch's mono-suffix strip so
+                // specialized fns (e.g. `assert_some__String`) still
+                // route to the base handler.
+                let base = func.split_once("__").map(|(b, _)| b).unwrap_or(func);
+                let target = CallTarget::Named { name: almide_base::intern::sym(base) };
+                self.emit_call(&target, args, ret_ty);
+                true
+            }
+            "error" => {
+                // `error.message` / `error.context` have inline emit
+                // arms under the Module dispatcher but are reachable
+                // here via `@intrinsic` → `RuntimeCall` when no WASM
+                // runtime fn is registered. Re-dispatch through the
+                // Module path so the inline arms stay the single
+                // source of truth.
+                let target = CallTarget::Module {
+                    module: almide_base::intern::sym("error"),
+                    func: almide_base::intern::sym(func),
+                };
+                self.emit_call(&target, args, ret_ty);
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn emit_tail_call(&mut self, target: &CallTarget, args: &[IrExpr], ret_ty: &Ty) {
         match target {
             CallTarget::Named { name } => {
@@ -823,32 +1115,6 @@ impl FuncCompiler<'_> {
         }
     }
 
-    /// S3 (v0.14.7-phase3.2): the WASM dispatcher used to route unknown
-    /// stdlib calls to `emit_stub_call`, which deferred the failure to a
-    /// runtime `unreachable` trap. spec/ + nn (v0.14.6 stub-panic sweep)
-    /// proved every reachable code path resolves before reaching here, so
-    /// reaching the stub now is a compile-time ICE — there is no runtime
-    /// trap to debug. If you hit this panic, it means a `module.func` call
-    /// survived `pass_resolve_calls` without a TOML or bundled IR target;
-    /// add the missing dispatch arm or fix the resolver, do not relax this
-    /// panic.
-    pub(super) fn emit_stub_call_named(&mut self, module: &str, func: &str, _args: &[IrExpr]) -> ! {
-        panic!(
-            "[ICE] WASM emit reached emit_stub_call_named for `{}.{}`. \
-             No runtime stub remains; resolve the call (TOML / bundled IR) \
-             or add a dispatch arm in emit_wasm/calls_*.rs.",
-            module, func
-        );
-    }
-
-    pub(super) fn emit_stub_call(&mut self, _args: &[IrExpr]) -> ! {
-        panic!(
-            "[ICE] WASM emit reached emit_stub_call (no module/func context). \
-             A stdlib dispatcher returned false without going through \
-             emit_stub_call_named — fix the caller."
-        );
-    }
-
     /// Emit a safe default value for a given type.
     /// String → empty string, List → empty list, Option → none, Bool → false, etc.
     pub(super) fn emit_typed_default(&mut self, ty: &Ty) {
@@ -915,8 +1181,8 @@ impl FuncCompiler<'_> {
         }
     }
 
-    /// Emit assert_eq(left, right): compare values, trap if not equal.
-    /// UFCS fallback: try func_map lookup for user-defined functions before stubbing.
+    /// UFCS fallback: try func_map lookup for user-defined functions.
+    /// Panics on miss — a resolved call should never reach here unresolved.
     fn emit_ufcs_fallback(&mut self, object: &IrExpr, method: &str, args: &[IrExpr]) {
         // Try bare method name in func_map (user-defined function)
         let bare = method.split('.').last().unwrap_or(method);
@@ -933,12 +1199,160 @@ impl FuncCompiler<'_> {
             wasm!(self.func, { call(func_idx); });
             return;
         }
-        // Stub
-        self.emit_expr(object);
-        if values::ty_to_valtype(&object.ty).is_some() {
-            wasm!(self.func, { drop; });
+        panic!(
+            "[ICE] emit_wasm: UFCS fallback for `.{}` (object ty={:?}) found \
+             no entry in func_map — resolve upstream or register the function",
+            method, object.ty
+        );
+    }
+
+    /// Stage 3 of the sized-numeric-types arc: emit WASM conversion
+    /// instructions for the `to_intN` / `to_uintN` / `to_floatN`
+    /// UFCS methods on sized numeric modules. Returns `true` if the
+    /// (module, func) pair was handled.
+    ///
+    /// The scheme mirrors Rust's `as` semantics (wrapping on narrow
+    /// int downcasts, saturating trunc on float→int). WASM-native
+    /// opcodes cover every combination: `i32.wrap_i64`,
+    /// `i64.extend_i32_s/_u`, `f32.convert_i64_s/_u`,
+    /// `i32.trunc_sat_f64_s`, `f32.demote_f64`, `f64.promote_f32`,
+    /// and no-ops for same-width / same-kind conversions.
+    fn emit_sized_conv_call(&mut self, module: &str, func: &str, args: &[IrExpr]) -> bool {
+        use wasm_encoder::Instruction;
+        // All conversion fns take one positional arg (the source value).
+        if args.len() != 1 { return false; }
+        // Determine source / destination kind+width purely from names so
+        // this dispatcher is closed over the entire sized-type matrix
+        // regardless of which .almd module hosts the fn.
+        // `int.to_int32(n: Int)` / `float.to_uint16(n: Float)` style:
+        //   module names the SRC; `to_<T>` names the DST.
+        // `int.from_uint16(n: UInt16)` / `float.from_float32(n: Float32)` style:
+        //   module names the DST; `from_<T>` names the SRC.
+        let (src, dst) = if let Some(to_part) = func.strip_prefix("to_") {
+            (sized_type_info(module), sized_type_info(to_part))
+        } else if let Some(from_part) = func.strip_prefix("from_") {
+            (sized_type_info(from_part), sized_type_info(module))
+        } else {
+            return false;
+        };
+        let (Some((src_kind, src_bits)), Some((dst_kind, dst_bits))) = (src, dst) else {
+            return false;
+        };
+        // to_string is NOT handled here; its @inline_rust uses format!()
+        // which is Rust-only. On WASM we already have string dispatch via
+        // the respective int/float module, so fall through.
+        if func == "to_string" { return false; }
+
+        self.emit_expr(&args[0]);
+
+        let src_u = matches!(src_kind, SizedKind::UInt);
+        match (src_kind, dst_kind) {
+            (SizedKind::Int | SizedKind::UInt, SizedKind::Int | SizedKind::UInt) => {
+                // Integer → integer. WASM valtype buckets: narrow
+                // (<=32 bits) → i32; 64-bit → i64. Sign behavior at
+                // extend vs wrap:
+                //   src i32 bucket → dst i64 bucket: i64.extend_i32_s/_u
+                //   src i64 bucket → dst i32 bucket: i32.wrap_i64
+                //   same bucket: no-op for width ≥ dst; mask-to-width
+                //     for narrow dst so `256 as u8 == 0` matches Rust.
+                //
+                // Masking is applied on narrowing INTO any sized int
+                // less than 32 bits so the representation in the i32
+                // bucket is canonical (zero-extended for UInt, sign-
+                // extended for Int via extend_8_s / extend_16_s).
+                // This keeps subsequent `i64.extend_i32_{s,u}` correct.
+                let src_64 = src_bits == 64;
+                let dst_64 = dst_bits == 64;
+                if src_64 && !dst_64 {
+                    self.func.instruction(&Instruction::I32WrapI64);
+                } else if !src_64 && dst_64 {
+                    if src_u {
+                        self.func.instruction(&Instruction::I64ExtendI32U);
+                    } else {
+                        self.func.instruction(&Instruction::I64ExtendI32S);
+                    }
+                    // narrowing happens below when dst is <= 32 bits;
+                    // extend is only for reaching the i64 bucket.
+                }
+                // Normalize the narrow representation: UInt* zero-pads,
+                // Int* sign-extends from the stored width.
+                if dst_bits < 32 {
+                    let dst_u = matches!(dst_kind, SizedKind::UInt);
+                    if dst_u {
+                        let mask = ((1u64 << dst_bits) - 1) as i32;
+                        self.func.instruction(&Instruction::I32Const(mask));
+                        self.func.instruction(&Instruction::I32And);
+                    } else {
+                        let instr = if dst_bits == 8 { Instruction::I32Extend8S }
+                                    else { Instruction::I32Extend16S };
+                        self.func.instruction(&instr);
+                    }
+                }
+            }
+            (SizedKind::Int | SizedKind::UInt, SizedKind::Float) => {
+                let dst_f32 = dst_bits == 32;
+                let src_64 = src_bits == 64;
+                let instr = match (dst_f32, src_64, src_u) {
+                    (true, true, true) => Instruction::F32ConvertI64U,
+                    (true, true, false) => Instruction::F32ConvertI64S,
+                    (true, false, true) => Instruction::F32ConvertI32U,
+                    (true, false, false) => Instruction::F32ConvertI32S,
+                    (false, true, true) => Instruction::F64ConvertI64U,
+                    (false, true, false) => Instruction::F64ConvertI64S,
+                    (false, false, true) => Instruction::F64ConvertI32U,
+                    (false, false, false) => Instruction::F64ConvertI32S,
+                };
+                self.func.instruction(&instr);
+            }
+            (SizedKind::Float, SizedKind::Int | SizedKind::UInt) => {
+                // Float → int. `_sat_` variants mirror Rust's `as`
+                // semantics: NaN → 0, overflow saturates to the
+                // target's min/max. The signed/unsigned variant is
+                // picked from the DESTINATION kind because that's what
+                // determines the integer encoding.
+                let src_f32 = src_bits == 32;
+                let dst_64 = dst_bits == 64;
+                let dst_u = matches!(dst_kind, SizedKind::UInt);
+                let instr = match (dst_64, src_f32, dst_u) {
+                    (true, true, true) => Instruction::I64TruncSatF32U,
+                    (true, true, false) => Instruction::I64TruncSatF32S,
+                    (true, false, true) => Instruction::I64TruncSatF64U,
+                    (true, false, false) => Instruction::I64TruncSatF64S,
+                    (false, true, true) => Instruction::I32TruncSatF32U,
+                    (false, true, false) => Instruction::I32TruncSatF32S,
+                    (false, false, true) => Instruction::I32TruncSatF64U,
+                    (false, false, false) => Instruction::I32TruncSatF64S,
+                };
+                self.func.instruction(&instr);
+                // Narrow into the i32 bucket: saturating-trunc into a
+                // sub-32-bit target leaves the full 32-bit value on
+                // the stack, but the Almide semantics say the value
+                // is e.g. u16. Without masking, a downstream
+                // `int.from_uint16` widens 0xFFFFFFFF (saturated inf)
+                // to i64 as 4_294_967_295, not 65_535 — and
+                // assert-eq compares the wrong thing.
+                if dst_bits < 32 {
+                    if dst_u {
+                        let mask = ((1u64 << dst_bits) - 1) as i32;
+                        self.func.instruction(&Instruction::I32Const(mask));
+                        self.func.instruction(&Instruction::I32And);
+                    } else {
+                        let instr = if dst_bits == 8 { Instruction::I32Extend8S }
+                                    else { Instruction::I32Extend16S };
+                        self.func.instruction(&instr);
+                    }
+                }
+            }
+            (SizedKind::Float, SizedKind::Float) => {
+                if src_bits == 64 && dst_bits == 32 {
+                    self.func.instruction(&Instruction::F32DemoteF64);
+                } else if src_bits == 32 && dst_bits == 64 {
+                    self.func.instruction(&Instruction::F64PromoteF32);
+                }
+                // Same-width float: no-op.
+            }
         }
-        self.emit_stub_call(args);
+        true
     }
 
     pub(super) fn emit_assert_eq(&mut self, left: &IrExpr, right: &IrExpr) {
@@ -1171,9 +1585,11 @@ impl FuncCompiler<'_> {
                 }
                 self.scratch.free_i32(closure);
             }
-            _ => {
-                self.emit_stub_call(args);
-            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `fan.{}` — \
+                 add an arm in emit_fan_call or resolve upstream",
+                func
+            ),
         }
     }
 

@@ -1,0 +1,68 @@
+// option — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 3a).
+//
+// Migrated mechanically from `stdlib/defs/option.toml`. The runtime
+// impls in `runtime/rs/src/option.rs` stay as the Rust dispatch
+// targets; bundled `@inline_rust` templates replace the TOML glue.
+// Closure args (map / flat_map / filter / unwrap_or_else / or_else)
+// ride the generic lambda-prep in `pass_stdlib_lowering` — same
+// clone-binding logic as the TOML path's `ArgTransform::LambdaClone`.
+
+@intrinsic("almide_rt_option_map")
+fn map[A, B](o: Option[A], f: (A) -> B) -> Option[B] = _
+
+@intrinsic("almide_rt_option_and_then")
+fn flat_map[A, B](o: Option[A], f: (A) -> Option[B]) -> Option[B] = _
+
+@intrinsic("almide_rt_option_flatten")
+fn flatten[A](o: Option[Option[A]]) -> Option[A] = _
+
+@intrinsic("almide_rt_option_unwrap_or")
+fn unwrap_or[A](o: Option[A], default: A) -> A = _
+
+@intrinsic("almide_rt_option_unwrap_or_else")
+fn unwrap_or_else[A](o: Option[A], f: () -> A) -> A = _
+
+@intrinsic("almide_rt_option_is_some")
+fn is_some[A](o: Option[A]) -> Bool = _
+
+@intrinsic("almide_rt_option_is_none")
+fn is_none[A](o: Option[A]) -> Bool = _
+
+@intrinsic("almide_rt_option_to_result")
+fn to_result[A](o: Option[A], msg: String) -> Result[A, String] = _
+
+@intrinsic("almide_rt_option_filter")
+fn filter[A](o: Option[A], f: (A) -> Bool) -> Option[A] = _
+
+@intrinsic("almide_rt_option_zip")
+fn zip[A, B](a: Option[A], b: Option[B]) -> Option[(A, B)] = _
+
+@intrinsic("almide_rt_option_or_else")
+fn or_else[A](o: Option[A], f: () -> Option[A]) -> Option[A] = _
+
+@intrinsic("almide_rt_option_to_list")
+fn to_list[A](o: Option[A]) -> List[A] = _
+
+// ── Symmetry fills (mirrors result.collect / collect_map) ──
+//
+// Pure Almide bodies — short-circuit on the first `none` via
+// `list.fold` + nested match on the accumulator. Contract matches
+// Rust's `Vec<Option<T>>.into_iter().collect::<Option<Vec<T>>>()`.
+// The runtime wrappers in `runtime/rs/src/option.rs` remain for
+// the monomorphised callsites the walker emits; this layer is the
+// behavioural source of truth and works on both Rust and WASM
+// targets without per-target dispatch arms.
+
+fn collect[T](xs: List[Option[T]]) -> Option[List[T]] =
+  list.fold(xs, some([]), (acc, item) =>
+    match acc {
+      some(vals) => match item {
+        some(v) => some(vals + [v]),
+        none => none,
+      },
+      none => none,
+    }
+  )
+
+fn collect_map[T, U](xs: List[T], f: (T) -> Option[U]) -> Option[List[U]] =
+  option.collect(list.map(xs, f))

@@ -96,18 +96,68 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
 /// identical field shapes (Dog vs Cat, both `{name: String}`) collide at
 /// codegen because `collect_named_records` keys by sorted field names.
 fn override_record_literal_ty(ir_val: &mut IrExpr, declared: &Ty) {
-    if !matches!(declared, Ty::Named(_, _)) { return; }
-    match &mut ir_val.kind {
-        IrExprKind::Record { .. } => {
-            if matches!(ir_val.ty, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Unknown) {
-                ir_val.ty = declared.clone();
+    // Nominal record type override — keeps `Dog` / `Cat` distinct even
+    // when their structural shapes match.
+    if matches!(declared, Ty::Named(_, _)) {
+        match &mut ir_val.kind {
+            IrExprKind::Record { .. } => {
+                if matches!(ir_val.ty, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Unknown) {
+                    ir_val.ty = declared.clone();
+                }
             }
+            IrExprKind::Block { expr: Some(inner), .. } => {
+                override_record_literal_ty(inner, declared);
+                if matches!(ir_val.ty, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Unknown) {
+                    ir_val.ty = declared.clone();
+                }
+            }
+            _ => {}
         }
-        // The literal may be wrapped in a trivial block (e.g. `let x = { ... }`
-        // can lower as Block { expr: Some(Record) }). Recurse into the tail.
-        IrExprKind::Block { expr: Some(inner), .. } => {
-            override_record_literal_ty(inner, declared);
-            if matches!(ir_val.ty, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Unknown) {
+        return;
+    }
+
+    // Sized numeric literal coercion (Stage 1b). When the binding is
+    // annotated with a sized integer / float type (`Int32`, `UInt8`,
+    // `Float32`, ...) and the value is a bare Int/Float literal whose
+    // inferred type is the default `Ty::Int` / `Ty::Float`, rewrite
+    // the literal's IR type to the annotation. Codegen reads
+    // `expr.ty` for the literal suffix (`42i64` → `42i32`), so this
+    // is the single hook that makes `let x: Int32 = 42` emit correct
+    // Rust instead of an `i64` / `i32` mismatch.
+    coerce_literal_to_sized(ir_val, declared);
+}
+
+/// Whether `ty` is one of the sized numeric types the Stage 1a/1b
+/// literal coercion rule should retype bare literals into.
+pub(crate) fn is_sized_numeric(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Int8 | Ty::Int16 | Ty::Int32
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32
+    )
+}
+
+/// Retype a bare Int / Float literal IR node to the sized numeric
+/// `declared` type, so codegen emits the right Rust suffix
+/// (`42i32` / `3.14f32` / ...). Called from `override_record_literal_ty`
+/// (let / var bindings) and `coerce_call_arg_to_sized_param` (fn call
+/// sites). No-op when the value isn't a literal of compatible default
+/// type — which matches the Stage 1b rule that literals flow into
+/// sized slots but named-variable refs don't (they retype instead
+/// with an explicit conversion).
+pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty) {
+    if !is_sized_numeric(declared) { return; }
+    match &mut ir_val.kind {
+        IrExprKind::LitInt { .. } if ir_val.ty == Ty::Int => {
+            ir_val.ty = declared.clone();
+        }
+        IrExprKind::LitFloat { .. } if ir_val.ty == Ty::Float => {
+            ir_val.ty = declared.clone();
+        }
+        IrExprKind::UnOp { op: almide_ir::UnOp::NegInt, operand } => {
+            if matches!(&operand.kind, IrExprKind::LitInt { .. }) && operand.ty == Ty::Int {
+                operand.ty = declared.clone();
                 ir_val.ty = declared.clone();
             }
         }

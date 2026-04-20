@@ -1,0 +1,228 @@
+// int — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2).
+//
+// All int fns live here as pure-Almide declarations. Each routes the
+// Rust target to the existing `runtime/rs/src/int.rs` implementations
+// via `@inline_rust(template)`; `StdlibLoweringPass` substitutes
+// `{param_name}` placeholders with the rendered Rust expression for
+// each call argument and emits the template verbatim. The body `= _`
+// is a declarative hole — it is never emitted (see
+// `walker/mod.rs::render_function`'s `@inline_rust` skip) and exists
+// only so the signature type-checks.
+//
+// On WASM the bundled fns are skipped at register time; dispatch
+// continues through `emit_wasm/calls_int.rs` until a later arc adds
+// `@wasm_intrinsic` attributes.
+//
+// Deleting `stdlib/defs/int.toml`: the signatures and dispatch for
+// int are now authoritative here. The handwritten `almide_rt_int_*`
+// Rust fns in `runtime/rs/src/int.rs` remain — they are the actual
+// implementations referenced by the templates.
+
+// ── Conversions ──
+
+@intrinsic("almide_rt_int_to_string")
+fn to_string(n: Int) -> String = _
+
+@intrinsic("almide_rt_int_to_hex")
+fn to_hex(n: Int) -> String = _
+
+@intrinsic("almide_rt_int_parse")
+fn parse(s: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_int_parse_hex")
+fn from_hex(s: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_int_to_float")
+fn to_float(n: Int) -> Float = _
+
+@intrinsic("almide_rt_int_bits_to_float")
+fn bits_to_float(bits: Int) -> Float = _
+
+// ── Arithmetic ──
+
+@intrinsic("almide_rt_int_abs")
+fn abs(n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_min")
+fn min(a: Int, b: Int) -> Int = _
+
+@intrinsic("almide_rt_int_max")
+fn max(a: Int, b: Int) -> Int = _
+
+@intrinsic("almide_rt_int_clamp")
+fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
+
+// ── Bitwise ──
+
+@intrinsic("almide_rt_int_band")
+fn band(a: Int, b: Int) -> Int = _
+
+@intrinsic("almide_rt_int_bor")
+fn bor(a: Int, b: Int) -> Int = _
+
+@intrinsic("almide_rt_int_bxor")
+fn bxor(a: Int, b: Int) -> Int = _
+
+@intrinsic("almide_rt_int_bnot")
+fn bnot(a: Int) -> Int = _
+
+@intrinsic("almide_rt_int_bshl")
+fn bshl(a: Int, n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_bshr")
+fn bshr(a: Int, n: Int) -> Int = _
+
+// ── Wrapping / masking ──
+
+@intrinsic("almide_rt_int_wrap_add")
+fn wrap_add(a: Int, b: Int, bits: Int) -> Int = _
+
+@intrinsic("almide_rt_int_wrap_mul")
+fn wrap_mul(a: Int, b: Int, bits: Int) -> Int = _
+
+@intrinsic("almide_rt_int_rotate_right")
+fn rotate_right(a: Int, n: Int, bits: Int) -> Int = _
+
+@intrinsic("almide_rt_int_rotate_left")
+fn rotate_left(a: Int, n: Int, bits: Int) -> Int = _
+
+@intrinsic("almide_rt_int_to_u32")
+fn to_u32(a: Int) -> Int = _
+
+@intrinsic("almide_rt_int_to_u8")
+fn to_u8(a: Int) -> Int = _
+
+// ── Sized type conversions (Stage 3) ──
+@intrinsic("almide_rt_int_to_int8")
+fn to_int8(n: Int) -> Int8 = _
+
+@intrinsic("almide_rt_int_to_int16")
+fn to_int16(n: Int) -> Int16 = _
+
+@intrinsic("almide_rt_int_to_int32")
+fn to_int32(n: Int) -> Int32 = _
+
+@intrinsic("almide_rt_int_to_uint8")
+fn to_uint8(n: Int) -> UInt8 = _
+
+@intrinsic("almide_rt_int_to_uint16")
+fn to_uint16(n: Int) -> UInt16 = _
+
+@intrinsic("almide_rt_int_to_uint32")
+fn to_uint32(n: Int) -> UInt32 = _
+
+@intrinsic("almide_rt_int_to_uint64")
+fn to_uint64(n: Int) -> UInt64 = _
+
+@intrinsic("almide_rt_int_to_float32")
+fn to_float32(n: Int) -> Float32 = _
+
+@intrinsic("almide_rt_int_to_float64")
+fn to_float64(n: Int) -> Float64 = _
+
+@intrinsic("almide_rt_int_to_int64")
+fn to_int64(n: Int) -> Int64 = _
+
+// ── Widening: sized integer → Int ──
+@intrinsic("almide_rt_int_from_int8")
+fn from_int8(n: Int8) -> Int = _
+
+@intrinsic("almide_rt_int_from_int16")
+fn from_int16(n: Int16) -> Int = _
+
+@intrinsic("almide_rt_int_from_int32")
+fn from_int32(n: Int32) -> Int = _
+
+@intrinsic("almide_rt_int_from_int64")
+fn from_int64(n: Int64) -> Int = _
+
+@intrinsic("almide_rt_int_from_uint8")
+fn from_uint8(n: UInt8) -> Int = _
+
+@intrinsic("almide_rt_int_from_uint16")
+fn from_uint16(n: UInt16) -> Int = _
+
+@intrinsic("almide_rt_int_from_uint32")
+fn from_uint32(n: UInt32) -> Int = _
+
+@intrinsic("almide_rt_int_from_uint64")
+fn from_uint64(n: UInt64) -> Int = _
+
+// ── Safety variants: range-checked and saturating narrowing ──
+// `to_<T>()` above is truncating (Rust `as`-semantics on int→int). The
+// `_checked` variants return `None` on out-of-range so callers can
+// detect loss; the `_saturating` variants clamp to the target's min/max.
+// Widening sources (Int is Int64) are implicit here — e.g.
+// `to_int64_checked` is omitted because the identity conversion can't
+// fail.
+
+fn to_int8_checked(n: Int) -> Option[Int8] =
+  if n < -128 or n > 127 then None
+  else Some(int.to_int8(n))
+
+fn to_int16_checked(n: Int) -> Option[Int16] =
+  if n < -32768 or n > 32767 then None
+  else Some(int.to_int16(n))
+
+fn to_int32_checked(n: Int) -> Option[Int32] =
+  if n < -2147483648 or n > 2147483647 then None
+  else Some(int.to_int32(n))
+
+fn to_uint8_checked(n: Int) -> Option[UInt8] =
+  if n < 0 or n > 255 then None
+  else Some(int.to_uint8(n))
+
+fn to_uint16_checked(n: Int) -> Option[UInt16] =
+  if n < 0 or n > 65535 then None
+  else Some(int.to_uint16(n))
+
+fn to_uint32_checked(n: Int) -> Option[UInt32] =
+  if n < 0 or n > 4294967295 then None
+  else Some(int.to_uint32(n))
+
+// Only the sign bit can fail for `Int → UInt64` since `|Int64| ≤ UInt64::MAX`.
+fn to_uint64_checked(n: Int) -> Option[UInt64] =
+  if n < 0 then None
+  else Some(int.to_uint64(n))
+
+// `Int → Float32` loses precision for `|n| > 2^24`. Round-trip through
+// `Float32 → Int` to detect the loss.
+fn to_float32_checked(n: Int) -> Option[Float32] = {
+  let f: Float32 = int.to_float32(n)
+  if float.to_int(float.from_float32(f)) == n then Some(f)
+  else None
+}
+
+fn to_int8_saturating(n: Int) -> Int8 =
+  if n < -128 then int.to_int8(-128)
+  else if n > 127 then int.to_int8(127)
+  else int.to_int8(n)
+
+fn to_int16_saturating(n: Int) -> Int16 =
+  if n < -32768 then int.to_int16(-32768)
+  else if n > 32767 then int.to_int16(32767)
+  else int.to_int16(n)
+
+fn to_int32_saturating(n: Int) -> Int32 =
+  if n < -2147483648 then int.to_int32(-2147483648)
+  else if n > 2147483647 then int.to_int32(2147483647)
+  else int.to_int32(n)
+
+fn to_uint8_saturating(n: Int) -> UInt8 =
+  if n < 0 then int.to_uint8(0)
+  else if n > 255 then int.to_uint8(255)
+  else int.to_uint8(n)
+
+fn to_uint16_saturating(n: Int) -> UInt16 =
+  if n < 0 then int.to_uint16(0)
+  else if n > 65535 then int.to_uint16(65535)
+  else int.to_uint16(n)
+
+fn to_uint32_saturating(n: Int) -> UInt32 =
+  if n < 0 then int.to_uint32(0)
+  else if n > 4294967295 then int.to_uint32(4294967295)
+  else int.to_uint32(n)
+
+fn to_uint64_saturating(n: Int) -> UInt64 =
+  if n < 0 then int.to_uint64(0)
+  else int.to_uint64(n)

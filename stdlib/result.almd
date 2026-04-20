@@ -1,0 +1,99 @@
+// result — bundled-Almide stdlib module.
+//
+// Migrated from `@inline_rust("({r}).map({f})")`-style templates to
+// `@intrinsic` + `runtime/rs/src/result.rs` wrappers. Result-level
+// value mutators (`map` / `map_err` / `and_then` / `unwrap_or_else`
+// etc.) consume the Result; `is_ok` / `is_err` borrow it. List-taking
+// fns (`collect`, `partition`, `collect_map`) consume their List arg
+// to match the `Vec<T>`-taking runtime signature, same pattern as
+// list.fold / list.map.
+
+@intrinsic("almide_rt_result_map")
+@consume(r)
+fn map[A, B, E](r: Result[A, E], f: (A) -> B) -> Result[B, E] = _
+
+@intrinsic("almide_rt_result_map_err")
+@consume(r)
+fn map_err[A, E, F](r: Result[A, E], f: (E) -> F) -> Result[A, F] = _
+
+@intrinsic("almide_rt_result_flat_map")
+@consume(r)
+fn flat_map[A, B, E](r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E] = _
+
+@intrinsic("almide_rt_result_unwrap_or")
+@consume(r)
+fn unwrap_or[A, E](r: Result[A, E], default: A) -> A = _
+
+@intrinsic("almide_rt_result_unwrap_or_else")
+@consume(r)
+fn unwrap_or_else[A, E](r: Result[A, E], f: (E) -> A) -> A = _
+
+@intrinsic("almide_rt_result_is_ok")
+@borrow_ref(r)
+fn is_ok[A, E](r: Result[A, E]) -> Bool = _
+
+@intrinsic("almide_rt_result_is_err")
+@borrow_ref(r)
+fn is_err[A, E](r: Result[A, E]) -> Bool = _
+
+@intrinsic("almide_rt_result_to_option")
+@consume(r)
+fn to_option[A, E](r: Result[A, E]) -> Option[A] = _
+
+@intrinsic("almide_rt_result_to_err_option")
+@consume(r)
+fn to_err_option[A, E](r: Result[A, E]) -> Option[E] = _
+
+@intrinsic("almide_rt_result_collect")
+@consume(rs)
+fn collect[T, E](rs: List[Result[T, E]]) -> Result[List[T], List[E]] = _
+
+@intrinsic("almide_rt_result_partition")
+@consume(rs)
+fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = _
+
+@intrinsic("almide_rt_result_collect_map")
+@consume(xs)
+fn collect_map[T, U, E](xs: List[T], f: (T) -> Result[U, E]) -> Result[List[U], List[E]] = _
+
+// ── Symmetry fills (mirrors option.*) ──
+//
+// Pure Almide bodies — compose match + existing ok / err constructors
+// so the code generates on both Rust and WASM targets without a
+// per-target dispatch arm. The runtime wrappers in
+// `runtime/rs/src/result.rs` are retained for the monomorphised
+// callers that the walker emits, but this layer is the source of
+// truth for behaviour.
+
+fn flatten[A, E](r: Result[Result[A, E], E]) -> Result[A, E] =
+  match r {
+    ok(inner) => inner,
+    err(e) => err(e),
+  }
+
+fn to_list[A, E](r: Result[A, E]) -> List[A] =
+  match r {
+    ok(v) => [v],
+    err(_) => [],
+  }
+
+fn zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E] =
+  match a {
+    ok(va) => match b {
+      ok(vb) => ok((va, vb)),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  }
+
+fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] =
+  match r {
+    ok(v) => ok(v),
+    err(e) => f(e),
+  }
+
+fn filter[A, E](r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E] =
+  match r {
+    ok(v) => if pred(v) then ok(v) else err(err_val),
+    err(e) => err(e),
+  }

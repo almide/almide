@@ -27,6 +27,27 @@ impl NanoPass for ResultPropagationPass {
         // This ensures ! (unwrap) propagates errors consistently across Rust and WASM.
         let wrap_non_result = matches!(target, Target::Rust | Target::Wasm);
 
+        // `@inline_rust` / `@wasm_intrinsic` bundled fns dispatch through a
+        // per-target template whose actual runtime fn (Rust: `runtime/rs`,
+        // WASM: `emit_wasm/calls_*.rs`) returns the unwrapped type.
+        // Lifting their IR signature to `Result[T, String]` would tell the
+        // call-site rewriter to retype call exprs to Result while the
+        // emitter still pushes `T` on the stack (or substitutes the bare
+        // template), which collapses local widths and equality dispatch.
+        // Keep the IR consistent with what actually gets emitted.
+        let is_template_dispatch = |attrs: &[almide_lang::ast::Attribute]| -> bool {
+            // `@intrinsic(symbol)` fns are rewritten to `IrExprKind::RuntimeCall`
+            // by `pass_intrinsic_lowering` and emit a single call to the
+            // named runtime fn. Lifting their declared return type to
+            // `Result[T, String]` collapses WASM equality dispatch (the
+            // emitter routes `Option[String]` through `emit_result_eq_deep`
+            // instead of `emit_option_eq_deep`), and because `lifted_fns`
+            // is keyed by bare fn name, one `@intrinsic` effect fn named
+            // `get` silently retypes every other `get` call across modules.
+            attrs.iter().any(|a| matches!(a.name.as_str(),
+                "inline_rust" | "wasm_intrinsic" | "intrinsic"))
+        };
+
         // Phase 1a: Collect all effect fn names and lift return types.
         // Extern functions are excluded: their signatures are fixed by the host
         // environment and must not be wrapped in Result.
@@ -34,6 +55,7 @@ impl NanoPass for ResultPropagationPass {
         for func in &mut program.functions {
             if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
                 && func.extern_attrs.is_empty()
+                && !is_template_dispatch(&func.attrs)
             {
                 let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                 func.ret_ty = Ty::result(orig, Ty::String);
@@ -63,6 +85,7 @@ impl NanoPass for ResultPropagationPass {
             for func in &mut module.functions {
                 if func.is_effect && !func.is_test && wrap_non_result && !func.ret_ty.is_result()
                     && func.extern_attrs.is_empty()
+                    && !is_template_dispatch(&func.attrs)
                 {
                     let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);
                     func.ret_ty = Ty::result(orig, Ty::String);
@@ -229,6 +252,13 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
             let args = args.into_iter().map(|a| update_call_types(a, lifted)).collect();
             let final_ty = fn_name.as_ref().and_then(|n| lifted.get(n)).cloned().unwrap_or(ty);
             return IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty: final_ty, span };
+        }
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let args = args.into_iter().map(|a| update_call_types(a, lifted)).collect();
+            return IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol, args },
+                ty, span,
+            };
         }
         IrExprKind::Block { stmts, expr: e } => IrExprKind::Block {
             stmts: stmts.into_iter().map(|s| update_call_types_stmt(s, lifted)).collect(),
@@ -452,6 +482,10 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                     let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
                     IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty, span }
                 }
+                IrExprKind::RuntimeCall { symbol, args } => {
+                    let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
+                    IrExpr { kind: IrExprKind::RuntimeCall { symbol, args }, ty, span }
+                }
                 _ => unreachable!()
             }
         }
@@ -523,6 +557,10 @@ fn insert_try_for_lifted_no_unwrap(expr: IrExpr, lifted: &HashMap<String, Ty>) -
                 IrExprKind::Call { target, args, type_args } => {
                     let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
                     IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty, span }
+                }
+                IrExprKind::RuntimeCall { symbol, args } => {
+                    let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
+                    IrExpr { kind: IrExprKind::RuntimeCall { symbol, args }, ty, span }
                 }
                 _ => unreachable!()
             }

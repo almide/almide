@@ -1,0 +1,7 @@
+type Shape = | Circle | Square | Triangle
+
+fn area(s: Shape) -> Int =
+  match s {
+    Circle => 0,
+    Square => 1,
+  }

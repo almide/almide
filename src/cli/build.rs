@@ -212,12 +212,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
         let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mut mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-        if almide::stdlib::is_bundled_module(name) {
-            let toml_funcs: std::collections::HashSet<&'static str> =
-                almide::stdlib::module_functions(name).into_iter().collect();
-            mod_ir_module.functions.retain(|f| !toml_funcs.contains(f.name.as_str()));
-        }
+        let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
         checker.env.import_table = saved_table;
         checker.env.self_module_name = saved_self;
         ir_program.modules.push(mod_ir_module);
@@ -264,8 +259,20 @@ fn run_wasm_opt(path: &str) -> Result<usize, String> {
     // --enable-bulk-memory required: matrix runtime emits memory.fill for
     // result buffer zero-init. --enable-simd preserves f64x2 instructions
     // from matrix.scale / add / sub / div / fma / fma3.
+    // --enable-nontrapping-float-to-int: sized numeric conversions now
+    // emit `i32.trunc_sat_f64_s` etc. (post-Stdlib-Unification, all
+    // float→int routes through `emit_sized_conv_call`).
     let status = std::process::Command::new("wasm-opt")
-        .args(["-O3", "--enable-simd", "--enable-bulk-memory", path, "-o", path])
+        .args([
+            "-O3",
+            "--enable-simd",
+            "--enable-bulk-memory",
+            "--enable-nontrapping-float-to-int",
+            "--enable-tail-call",
+            path,
+            "-o",
+            path,
+        ])
         .status()
         .map_err(|e| format!("wasm-opt not available ({})", e))?;
     if !status.success() {
@@ -326,12 +333,7 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
         let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mut mod_ir_module = almide::lower::lower_module(name, &mod_prog, &checker.env, &checker.type_map, versioned);
-        if almide::stdlib::is_bundled_module(name) {
-            let toml_funcs: std::collections::HashSet<&'static str> =
-                almide::stdlib::module_functions(name).into_iter().collect();
-            mod_ir_module.functions.retain(|f| !toml_funcs.contains(f.name.as_str()));
-        }
+        let mod_ir_module = almide::lower::lower_module(name, &mod_prog, &checker.env, &checker.type_map, versioned);
         checker.env.import_table = saved_table;
         checker.env.self_module_name = saved_self;
         ir_program.modules.push(mod_ir_module);

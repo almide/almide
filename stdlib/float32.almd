@@ -1,0 +1,17 @@
+// float32 — bundled-Almide sized-numeric conversion module.
+//
+// Routed through canonical `float` (= f64). The `float.from_float32`
+// widen + `float.to_<dst>` down-cast is a no-op at the codegen level
+// (Rust collapses, WASM dispatches via `emit_sized_conv_call`). Same
+// `as`-semantics as the previous `@inline_rust` templates.
+
+fn to_int8(x: Float32) -> Int8 = float.to_int8(float.from_float32(x))
+fn to_int16(x: Float32) -> Int16 = float.to_int16(float.from_float32(x))
+fn to_int32(x: Float32) -> Int32 = float.to_int32(float.from_float32(x))
+fn to_int64(x: Float32) -> Int64 = float.to_int64(float.from_float32(x))
+fn to_uint8(x: Float32) -> UInt8 = float.to_uint8(float.from_float32(x))
+fn to_uint16(x: Float32) -> UInt16 = float.to_uint16(float.from_float32(x))
+fn to_uint32(x: Float32) -> UInt32 = float.to_uint32(float.from_float32(x))
+fn to_uint64(x: Float32) -> UInt64 = float.to_uint64(float.from_float32(x))
+fn to_float64(x: Float32) -> Float64 = float.from_float32(x)
+fn to_string(x: Float32) -> String = float.to_string(float.from_float32(x))

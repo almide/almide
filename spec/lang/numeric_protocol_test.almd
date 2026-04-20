@@ -1,0 +1,53 @@
+// Numeric protocol — P3 of the Matrix[T] dtype arc.
+//
+// Locks in:
+//   - `fn f[T: Numeric](x: T) -> T = x + x` type-checks, monomorphises,
+//     and produces correct output for every numeric primitive.
+//   - The `BinOp` re-dispatch in `mono/specialization.rs` flips
+//     `AddInt` → `AddFloat` when `T` resolves to a Float variant.
+//   - Non-numeric types (String, Bool, records) are rejected at the
+//     call site. (Negative paths live in Rust-side `tests/checker_test.rs`.)
+
+fn double[T: Numeric](x: T) -> T = x + x
+fn triple[T: Numeric](x: T) -> T = x + x + x
+fn quad_sum[T: Numeric](a: T, b: T, c: T, d: T) -> T = a + b + c + d
+fn scale2[T: Numeric](x: T, y: T) -> T = (x + y) * (x + y)
+
+test "double Int" { assert_eq(double(21), 42) }
+test "double Float" { assert_eq(double(1.5), 3.0) }
+test "triple Int" { assert_eq(triple(7), 21) }
+test "triple Float" { assert_eq(triple(2.5), 7.5) }
+test "quad_sum Int" { assert_eq(quad_sum(1, 2, 3, 4), 10) }
+test "quad_sum Float" { assert_eq(quad_sum(1.5, 2.5, 3.5, 4.5), 12.0) }
+test "scale2 Float" { assert_eq(scale2(2.0, 3.0), 25.0) }
+test "scale2 Int" { assert_eq(scale2(2, 3), 25) }
+
+test "Numeric on sized Int32" {
+  let x: Int32 = 10
+  let r: Int32 = double(x)
+  assert_eq(r.to_int64(), 20)
+}
+
+test "Numeric on sized UInt32" {
+  let x: UInt32 = 100.to_uint32()
+  let r: UInt32 = triple(x)
+  assert_eq(r.to_int64(), 300)
+}
+
+test "Numeric on sized Float32" {
+  let x: Float32 = 1.5.to_float32()
+  let r: Float32 = double(x)
+  assert_eq(r.to_float64(), 3.0)
+}
+
+// Matrix[T] + Numeric interop — sized dtype matrices flow through
+// bare `matrix.*` accessors under the compat rule, so a
+// `Matrix[Float32]` round-trips through polymorphic accessors that
+// still carry bare `Matrix` signatures.
+test "Matrix[Float32] accessors via compat" {
+  let m: Matrix[Float32] = matrix.ones_f32(3, 3)
+  let (r, c) = matrix.shape(m)
+  assert_eq(r, 3)
+  assert_eq(c, 3)
+  assert_eq(matrix.get(m, 0, 0), 1.0)
+}

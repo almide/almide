@@ -20,15 +20,16 @@ impl NanoPass for RustLoweringPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
-        for func in &mut program.functions {
-            if rewrite_stmts_in_expr(&mut func.body, &mut program.var_table) { changed = true; }
+        let IrProgram { functions, top_lets, modules, var_table, .. } = &mut program;
+        for func in functions.iter_mut() {
+            if rewrite_stmts_in_expr(&mut func.body, var_table) { changed = true; }
         }
-        for tl in &mut program.top_lets {
-            if rewrite_stmts_in_expr(&mut tl.value, &mut program.var_table) { changed = true; }
+        for tl in top_lets.iter_mut() {
+            if rewrite_stmts_in_expr(&mut tl.value, var_table) { changed = true; }
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                if rewrite_stmts_in_expr(&mut func.body, &mut module.var_table) { changed = true; }
+        for module in modules.iter_mut() {
+            for func in module.functions.iter_mut() {
+                if rewrite_stmts_in_expr(&mut func.body, var_table) { changed = true; }
             }
         }
         PassResult { program, changed }
@@ -249,6 +250,9 @@ fn expr_references_var(expr: &IrExpr, var: VarId) -> bool {
                 _ => false,
             };
             t || args.iter().any(|a| expr_references_var(a, var))
+        }
+        IrExprKind::RuntimeCall { args, .. } => {
+            args.iter().any(|a| expr_references_var(a, var))
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
             expr_references_var(object, var) || expr_references_var(index, var)

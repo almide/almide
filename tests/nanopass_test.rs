@@ -16,7 +16,7 @@ fn mk_fn(name: &str, params: Vec<IrParam>, ret_ty: Ty, body: IrExpr, is_effect: 
     IrFunction {
         name: sym(name), params, ret_ty, body,
         is_effect, is_async: false, is_test: false,
-        generics: None, extern_attrs: vec![], export_attrs: vec![], visibility: IrVisibility::Public,
+        generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
     }
 }
@@ -502,29 +502,43 @@ mod stdlib_lowering {
     use almide::codegen::pass_stdlib_lowering::StdlibLoweringPass;
 
     #[test]
-    fn module_call_becomes_named() {
-        // string.len(s) → almide_rt_string_len(s)
+    fn module_call_passes_through_stdlib_lowering() {
+        // Post Stdlib-Unification completion, every bundled stdlib fn
+        // routes through either `@intrinsic` (→ `IntrinsicLoweringPass`
+        // produces `RuntimeCall`) or a TOML-dispatcher. `StdlibLowering`
+        // now sees neither — any residual `CallTarget::Module` at this
+        // stage is a test-synthesized fragment with no pass-level
+        // rewriting to apply, so the pass leaves it untouched. This test
+        // pins that "left untouched" contract so a future regression
+        // that unintentionally re-introduces `@inline_rust` → InlineRust
+        // dispatch for stdlib shows up here.
         let mut vt = VarTable::new();
         let p = mk_param(&mut vt, "s", Ty::String);
         let var_id = p.var;
 
         let body = mk_expr(IrExprKind::Call {
-            target: CallTarget::Module { module: sym("string"), func: sym("len") },
-            args: vec![mk_expr(IrExprKind::Var { id: var_id }, Ty::String)],
+            target: CallTarget::Module { module: sym("string"), func: sym("slice") },
+            args: vec![
+                mk_expr(IrExprKind::Var { id: var_id }, Ty::String),
+                mk_expr(IrExprKind::LitInt { value: 0 }, Ty::Int),
+                mk_expr(IrExprKind::LitInt { value: 0 }, Ty::Int),
+            ],
             type_args: vec![],
-        }, Ty::Int);
+        }, Ty::String);
 
-        let func = mk_fn("test_len", vec![p], Ty::Int, body, false);
+        let func = mk_fn("test_slice", vec![p], Ty::String, body, false);
         let program = mk_program(vec![func], vt);
         let result = run_pass(&StdlibLoweringPass, program, Target::Rust);
 
-        // Module call should be lowered to Named call
+        // StdlibLowering leaves the Module call intact — the real
+        // lowering happens in IntrinsicLoweringPass which runs before it
+        // in the full pipeline.
         match &result.functions[0].body.kind {
-            IrExprKind::Call { target: CallTarget::Named { name }, .. } => {
-                assert!(name.as_str().contains("string") && name.as_str().contains("len"),
-                    "Expected lowered stdlib call, got {}", name);
+            IrExprKind::Call { target: CallTarget::Module { module, func }, .. } => {
+                assert_eq!(module.as_str(), "string");
+                assert_eq!(func.as_str(), "slice");
             }
-            other => panic!("Expected Named call, got {:?}", other),
+            other => panic!("Expected untouched Module call, got {:?}", other),
         }
     }
 }
@@ -654,27 +668,31 @@ mod licm {
     }
 }
 
-// ── StreamFusionPass ────────────────────────────────────────────
+// ── EggSaturationPass ───────────────────────────────────────────
+// Replaces the retired StreamFusionPass / MatrixFusionPass. The
+// equality-saturation driver doesn't see plain IntLit / empty
+// programs (is_saturation_target filters to list + matrix calls),
+// so the same smoke-level pass-identity tests apply.
 
-mod stream_fusion {
+mod egg_saturation {
     use super::*;
-    use almide::codegen::pass_stream_fusion::StreamFusionPass;
+    use almide::codegen::pass_egg_saturation::EggSaturationPass;
 
     #[test]
     fn empty_program_unchanged() {
         let program = mk_program(vec![], VarTable::new());
-        let result = run_pass(&StreamFusionPass, program, Target::Rust);
+        let result = run_pass(&EggSaturationPass, program, Target::Rust);
         assert!(result.functions.is_empty());
     }
 
     #[test]
     fn simple_function_unchanged() {
-        let mut vt = VarTable::new();
+        let vt = VarTable::new();
         let body = mk_expr(IrExprKind::LitInt { value: 1 }, Ty::Int);
         let func = mk_fn("simple", vec![], Ty::Int, body, false);
 
         let program = mk_program(vec![func], vt);
-        let result = run_pass(&StreamFusionPass, program, Target::Rust);
+        let result = run_pass(&EggSaturationPass, program, Target::Rust);
 
         assert_eq!(result.functions.len(), 1);
     }

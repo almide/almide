@@ -1,0 +1,18 @@
+// random — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4b).
+//
+// Migrated mechanically from `stdlib/defs/random.toml` (4 fns). All
+// are `effect` (non-deterministic); the runtime impls stay in
+// `runtime/rs/src/random.rs`.
+
+@intrinsic("almide_rt_random_int")
+effect fn int(min: Int, max: Int) -> Int = _
+
+@intrinsic("almide_rt_random_float")
+effect fn float() -> Float = _
+
+@intrinsic("almide_rt_random_choice")
+effect fn choice[T](xs: List[T]) -> Option[T] = _
+
+@intrinsic("almide_rt_random_shuffle")
+@consume(xs)
+effect fn shuffle[T](xs: List[T]) -> List[T] = _

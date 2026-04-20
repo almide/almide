@@ -905,3 +905,159 @@ fn exhaust_guard_not_counted() {
     );
     assert!(errs.iter().any(|e| e.contains("B")), "guarded B should not count, got: {:?}", errs);
 }
+
+// ── Sized Numeric Types Stage 1c: mixed-width arithmetic rejection ──
+
+#[test]
+fn sized_mixed_width_int8_int32_rejected() {
+    let errs = errors(
+        "fn f(a: Int8, b: Int32) -> Int32 = a + b"
+    );
+    assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "should reject Int8 + Int32, got: {:?}", errs);
+}
+
+#[test]
+fn sized_mixed_width_float32_int32_rejected() {
+    let errs = errors(
+        "fn f(a: Float32, b: Int32) -> Float32 = a + b"
+    );
+    assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "should reject Float32 + Int32, got: {:?}", errs);
+}
+
+#[test]
+fn sized_mixed_width_uint16_int16_rejected() {
+    let errs = errors(
+        "fn f(a: UInt16, b: Int16) -> Int16 = a * b"
+    );
+    assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "should reject UInt16 * Int16 (even same width, different signedness), got: {:?}", errs);
+}
+
+#[test]
+fn sized_same_width_arith_ok() {
+    has_no_errors("fn f(a: Int32, b: Int32) -> Int32 = a + b");
+    has_no_errors("fn f(a: UInt8, b: UInt8) -> UInt8 = a - b");
+    has_no_errors("fn f(a: Float32, b: Float32) -> Float32 = a * b");
+}
+
+#[test]
+fn sized_literal_coercion_ok() {
+    has_no_errors("fn f(a: Int32) -> Int32 = a + 5");
+    has_no_errors("fn f(a: Int32) -> Int32 = 10 + a");
+    has_no_errors("fn f(a: Float32) -> Float32 = a + 1.5");
+}
+
+#[test]
+fn sized_canonical_int_plus_sized_ok() {
+    // `Int` / `Float` canonical types stay permissive to preserve the
+    // literal-coercion story. `Int + Int32` is therefore accepted (the
+    // right-hand side collapses to the sized variant at emit time).
+    has_no_errors("fn f(a: Int, b: Int32) -> Int32 = a + b");
+}
+
+#[test]
+fn sized_mixed_all_ops_rejected() {
+    for op in ["-", "*", "/", "%", "^"] {
+        let src = format!("fn f(a: Int8, b: Int32) -> Int32 = a {} b", op);
+        let errs = errors(&src);
+        assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+            "operator '{}' should reject mixed sized types, got: {:?}", op, errs);
+    }
+}
+
+// ── Numeric protocol (P3 of Matrix[T] dtype arc) ──
+
+#[test]
+fn numeric_protocol_accepts_int() {
+    has_no_errors("fn double[T: Numeric](x: T) -> T = x + x\nfn use_it() -> Int = double(21)");
+}
+
+#[test]
+fn numeric_protocol_accepts_float() {
+    has_no_errors("fn double[T: Numeric](x: T) -> T = x + x\nfn use_it() -> Float = double(1.5)");
+}
+
+#[test]
+fn numeric_protocol_accepts_int32() {
+    has_no_errors("fn double[T: Numeric](x: T) -> T = x + x\nfn use_it(x: Int32) -> Int32 = double(x)");
+}
+
+#[test]
+fn numeric_protocol_rejects_string() {
+    let errs = errors(
+        "fn double[T: Numeric](x: T) -> T = x + x\nfn use_it() -> String = double(\"x\")"
+    );
+    assert!(errs.iter().any(|e| e.contains("does not implement protocol 'Numeric'")),
+        "should reject String, got: {:?}", errs);
+}
+
+#[test]
+fn numeric_protocol_rejects_bool() {
+    let errs = errors(
+        "fn double[T: Numeric](x: T) -> T = x + x\nfn use_it() -> Bool = double(true)"
+    );
+    assert!(errs.iter().any(|e| e.contains("does not implement protocol 'Numeric'")),
+        "should reject Bool, got: {:?}", errs);
+}
+
+#[test]
+fn sized_int64_explicit_vs_int32_rejected() {
+    let errs = errors(
+        "fn mix(a: Int32, b: Int64) -> Int32 = a + b"
+    );
+    assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "should reject Int32 + Int64, got: {:?}", errs);
+}
+
+#[test]
+fn sized_float64_explicit_vs_float32_rejected() {
+    let errs = errors(
+        "fn mix(a: Float32, b: Float64) -> Float64 = a + b"
+    );
+    assert!(errs.iter().any(|e| e.contains("mixes sized numeric")),
+        "should reject Float32 + Float64, got: {:?}", errs);
+}
+
+#[test]
+fn sized_int_and_int64_interop_ok() {
+    // Canonical `Int` stays the literal-coercion slot; it interops
+    // with `Int64` freely at the same width.
+    has_no_errors("fn f(a: Int, b: Int64) -> Int64 = b");
+    has_no_errors("fn f(a: Int64) -> Int = a");
+}
+
+// ── Strict Matrix[T] discrimination (post-C) ──
+
+#[test]
+fn strict_matrix_f32_rejects_bare_matrix() {
+    // A fn that asks for `Matrix[Float32]` MUST NOT accept a bare
+    // `Matrix` value — bare carries no f32 guarantee.
+    let errs = errors(
+        "fn needs_f32(m: Matrix[Float32]) -> Int = matrix.rows(m)\nfn use_bare() -> Int = needs_f32(matrix.zeros(3, 3))"
+    );
+    assert!(errs.iter().any(|e| e.contains("expects")),
+        "should reject bare Matrix passed to Matrix[Float32] param, got: {:?}", errs);
+}
+
+#[test]
+fn strict_matrix_bare_accepts_typed() {
+    // `matrix.shape(m: Matrix)` still accepts `Matrix[Float32]`
+    // (bare widens to typed downstream via the runtime tag).
+    has_no_errors(
+        "fn row_count_f32(m: Matrix[Float32]) -> Int = matrix.rows(m)"
+    );
+}
+
+#[test]
+fn strict_matrix_float_alias_interop() {
+    // `Matrix[Float]` is the legacy alias for bare `Matrix` — both
+    // directions stay compatible at the checker layer.
+    has_no_errors(
+        "fn f(m: Matrix[Float]) -> Int = matrix.rows(m)\nfn g() -> Int = f(matrix.zeros(3, 3))"
+    );
+    has_no_errors(
+        "fn f(m: Matrix) -> Int = matrix.rows(m)\nfn g() -> Int = {\n  let m: Matrix[Float] = matrix.zeros(3, 3)\n  f(m)\n}"
+    );
+}

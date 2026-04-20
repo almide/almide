@@ -1,0 +1,174 @@
+// Sized Numeric Types — Stage 1a / 1b regression guard.
+//
+// Locks in:
+//   - `Int8` / `Int16` / `Int32` / `UInt8` / `UInt16` / `UInt32` /
+//     `UInt64` / `Float32` parse as type names and resolve to distinct
+//     `Ty::*` variants.
+//   - `Int64` / `Float64` alias to the canonical `Int` / `Float`
+//     types.
+//   - Literal coercion: `let x: Int32 = 42` and `f(42)` where `f`
+//     takes `Int32` both emit the correct Rust width (`42i32` instead
+//     of `42i64`). Covers let-binding and fn-arg lowering paths.
+//
+// Deferred to Stage 1c (arithmetic on sized types) and Stage 3
+// (conversion UFCS): assertions that compare a sized-typed value
+// against an Int literal are kept out of this file until those
+// sub-phases land. We exercise compile success + same-type
+// round-trip for now.
+
+fn id_i32(x: Int32) -> Int32 = x
+fn id_i16(x: Int16) -> Int16 = x
+fn id_i8(x: Int8) -> Int8 = x
+fn id_u32(x: UInt32) -> UInt32 = x
+fn id_u16(x: UInt16) -> UInt16 = x
+fn id_u8(x: UInt8) -> UInt8 = x
+fn id_u64(x: UInt64) -> UInt64 = x
+fn id_f32(x: Float32) -> Float32 = x
+fn id_int64(x: Int64) -> Int64 = x
+fn id_float64(x: Float64) -> Float64 = x
+
+test "Int32 fn compiles and accepts literal" {
+  let _ = id_i32(42)
+  assert_eq(true, true)
+}
+
+test "Int16 negative literal" {
+  let _ = id_i16(-32768)
+  assert_eq(true, true)
+}
+
+test "Int8 boundary literal" {
+  let _ = id_i8(127)
+  assert_eq(true, true)
+}
+
+test "UInt32 literal in range" {
+  let _ = id_u32(1000000)
+  assert_eq(true, true)
+}
+
+test "UInt16 literal at max" {
+  let _ = id_u16(65535)
+  assert_eq(true, true)
+}
+
+test "UInt8 literal at max" {
+  let _ = id_u8(255)
+  assert_eq(true, true)
+}
+
+test "UInt64 hex literal" {
+  let _ = id_u64(0xff)
+  assert_eq(true, true)
+}
+
+test "Float32 literal" {
+  let _ = id_f32(3.14)
+  assert_eq(true, true)
+}
+
+test "Int64 and Int aliases compile identically" {
+  let a: Int = 10
+  let b: Int64 = a
+  assert_eq(a, b)
+}
+
+test "Float64 and Float aliases compile identically" {
+  let a: Float = 1.5
+  let b: Float64 = a
+  assert_eq(a, b)
+}
+
+test "Int64 fn" {
+  let r = id_int64(100)
+  assert_eq(r, 100)
+}
+
+test "Float64 fn" {
+  let r = id_float64(2.5)
+  assert_eq(r, 2.5)
+}
+
+// ── Stage 1c: same-type arithmetic ───────────────────────────────
+
+fn add_i32(a: Int32, b: Int32) -> Int32 = a + b
+fn sub_i32(a: Int32, b: Int32) -> Int32 = a - b
+fn mul_u8(a: UInt8, b: UInt8) -> UInt8 = a * b
+fn div_u32(a: UInt32, b: UInt32) -> UInt32 = a / b
+fn mod_i16(a: Int16, b: Int16) -> Int16 = a % b
+fn add_f32(a: Float32, b: Float32) -> Float32 = a + b
+fn sub_u64(a: UInt64, b: UInt64) -> UInt64 = a - b
+
+test "Int32 addition" { assert_eq(add_i32(10, 20), 30) }
+test "Int32 subtraction" { assert_eq(sub_i32(50, 20), 30) }
+test "UInt8 multiplication" { assert_eq(mul_u8(10, 5), 50) }
+test "UInt32 division (unsigned)" { assert_eq(div_u32(100, 4), 25) }
+test "Int16 modulo" { assert_eq(mod_i16(23, 5), 3) }
+test "Float32 addition" { assert_eq(add_f32(1.5, 2.5), 4.0) }
+test "UInt64 subtraction" { assert_eq(sub_u64(1000, 200), 800) }
+
+// Mixed-width arithmetic with explicit conversion — compiles and runs.
+// The negative path (unconverted mix is a compile error) is covered by
+// `tests/check_sized_numeric_mixed_width.rs` at the Rust-side checker
+// layer because `.almd` has no negative-test syntax.
+fn a32_plus_b8_via_i32(a: Int32, b: Int8) -> Int32 = a + b.to_int32()
+fn f32_plus_i32_via_float(a: Float32, b: Int32) -> Float32 = a + b.to_float32()
+
+test "Int32 + Int8 via .to_int32()" {
+  assert_eq(a32_plus_b8_via_i32(100, 5), 105)
+}
+test "Float32 + Int32 via .to_float32()" {
+  assert_eq(f32_plus_i32_via_float(1.5, 3), 4.5)
+}
+
+// ── Stage 3: UFCS conversion methods ─────────────────────────────
+
+test "Int32 to Int64" {
+  let x: Int32 = 42
+  let y: Int64 = x.to_int64()
+  assert_eq(y, 42)
+}
+
+test "Int to UInt8 with wrap (256 → 0)" {
+  let x: Int = 256
+  let y: UInt8 = x.to_uint8()
+  let z: Int64 = y.to_int64()
+  assert_eq(z, 0)
+}
+
+test "UInt8 max → Int64 preserves 255" {
+  let y = id_u8(255)
+  let z: Int64 = y.to_int64()
+  assert_eq(z, 255)
+}
+
+test "Float to Int32 truncates toward zero" {
+  let x: Float = 3.7
+  let y: Int32 = x.to_int32()
+  let z: Int64 = y.to_int64()
+  assert_eq(z, 3)
+}
+
+test "Int32 to Float32 round-trip" {
+  let x: Int32 = 100
+  let y: Float32 = x.to_float32()
+  let z: Int32 = y.to_int32()
+  assert_eq(z.to_int64(), 100)
+}
+
+test "Float64 to Float32 demotes precision" {
+  let x: Float = 3.14
+  let y: Float32 = x.to_float32()
+  let z: Float64 = y.to_float64()
+  // Rounded to f32 precision then back; approximation
+  assert_eq(z > 3.13, true)
+  assert_eq(z < 3.15, true)
+}
+
+test "Int8 sign extends to Int64" {
+  // -1 as i8 → sign extend → -1 as i64
+  let x: Int = -1
+  let y: Int8 = x.to_int8()
+  let z: Int64 = y.to_int64()
+  assert_eq(z, -1)
+}

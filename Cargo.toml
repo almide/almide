@@ -1,10 +1,10 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-tools"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-tools", "crates/almide-egg-lab"]
 resolver = "3"
 
 [package]
 name = "almide"
-version = "0.14.8"
+version = "0.15.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -27,4 +27,5 @@ lasso = { version = "0.7", features = ["multi-threaded"] }
 [dev-dependencies]
 proptest = "1"
 insta = "1"
+tempfile = "3"
 

@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'string.length'"
+hint_substring = "string.len"

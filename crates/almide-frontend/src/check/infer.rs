@@ -65,11 +65,25 @@ impl Checker {
                     };
                     let mut diag = super::err(format!("undefined variable '{}'", name), hint, format!("variable {}", name)).with_code("E003");
                     if let Some(fix) = fix {
-                        diag = if fix.starts_with("import ") {
-                            diag.with_try(fix)
+                        if let Some(stripped) = fix.strip_prefix("import ") {
+                            // Zero-width insert at the top of file — the
+                            // new `import <module>\n` line is prepended.
+                            // `apply_try_to` handles `end_col == col` as
+                            // an insertion point.
+                            diag = diag.with_try_replace(
+                                1, 1, 1,
+                                format!("import {}\n", stripped),
+                            );
+                        } else if let Some(span) = self.current_span {
+                            // Typo fuzzy suggestion: replace the
+                            // offending identifier with the suggested name.
+                            diag = diag.with_try_replace(
+                                span.line, span.col, span.end_col,
+                                fix,
+                            );
                         } else {
-                            diag.with_try(format!("// {}  →  {}\n{}", name, fix, fix))
-                        };
+                            diag = diag.with_try(format!("// {}  →  {}\n{}", name, fix, fix));
+                        }
                     }
                     self.emit(diag);
                     Ty::Unknown
@@ -144,6 +158,11 @@ impl Checker {
             }
 
             ExprKind::Member { object, field, .. } => {
+                // `infer_expr(object)` below overwrites `current_span`
+                // with the object's range, so capture the Member expr's
+                // own span now. E013 uses it to position the
+                // `try_replace` rewrite that covers `object.field`.
+                let member_span = self.current_span;
                 // Module function used as a first-class value: `string.len`,
                 // `list.map`, etc. Detect this BEFORE inferring the object
                 // (which would fail because `string` is not a variable) and
@@ -198,26 +217,33 @@ impl Checker {
                 // stdlib calls — intercept here so rustc never leaks
                 // `error[E0609]: no field 'head' on type 'Vec<i64>'`.
                 if matches!(field_ty, Ty::Unknown) {
-                    let module_and_subs: Option<(&str, Vec<(&str, String)>)> = match &concrete {
+                    // (field → (module_fn, args_template, display_suffix))
+                    // `args_template` is a tiny `("{0}", 1)`-style mini-
+                    // language: `{0}` is substituted with the object's
+                    // source slice; any trailing text goes verbatim.
+                    // `display_suffix` is comment-only info shown after
+                    // the mechanical replacement (e.g. the Option[T]
+                    // reminder for `head`).
+                    let module_and_subs: Option<(&str, Vec<(&str, &str, &str, &str)>)> = match &concrete {
                         Ty::Applied(TypeConstructorId::List, _) => Some(("list", vec![
-                            ("head", "list.first(xs)  // returns Option[T]".into()),
-                            ("tail", "list.drop(xs, 1)".into()),
-                            ("length", "list.len(xs)".into()),
-                            ("len", "list.len(xs)".into()),
-                            ("first", "list.first(xs)".into()),
-                            ("last", "list.last(xs)".into()),
-                            ("size", "list.len(xs)".into()),
+                            ("head",   "list.first", "({0})", "  // returns Option[T]"),
+                            ("tail",   "list.drop",  "({0}, 1)", ""),
+                            ("length", "list.len",   "({0})", ""),
+                            ("len",    "list.len",   "({0})", ""),
+                            ("first",  "list.first", "({0})", ""),
+                            ("last",   "list.last",  "({0})", ""),
+                            ("size",   "list.len",   "({0})", ""),
                         ])),
                         Ty::String => Some(("string", vec![
-                            ("length", "string.len(s)".into()),
-                            ("len", "string.len(s)".into()),
-                            ("size", "string.len(s)".into()),
-                            ("chars", "string.to_chars(s)".into()),
+                            ("length", "string.len",      "({0})", ""),
+                            ("len",    "string.len",      "({0})", ""),
+                            ("size",   "string.len",      "({0})", ""),
+                            ("chars",  "string.to_chars", "({0})", ""),
                         ])),
                         _ => None,
                     };
                     if let Some((module, subs)) = module_and_subs {
-                        let matched = subs.iter().find(|(n, _)| n == field).map(|(_, s)| s.clone());
+                        let matched = subs.iter().find(|(n, _, _, _)| n == field).cloned();
                         let hint = if matched.is_some() {
                             format!(
                                 "Almide values have no fields — use the `{m}` stdlib module. No method-call or field-access syntax is supported.",
@@ -234,8 +260,35 @@ impl Checker {
                             hint,
                             format!("field access .{}", field),
                         ).with_code("E013");
-                        if let Some(snippet) = matched {
-                            diag = diag.with_try(snippet);
+                        if let Some((_, fn_name, args_tpl, _display_suffix)) = matched {
+                            // Mechanical rewrite: substitute the object's
+                            // source text into `args_tpl`. `member_span`
+                            // now covers the full `object.field` (parser
+                            // upgrade from the E002 arc), so replacing
+                            // that range leaves the surrounding source
+                            // intact. Falls back to a display-only
+                            // snippet when source text isn't available.
+                            let rewrite = object.span
+                                .and_then(|s| self.source_slice(s))
+                                .and_then(|obj_src| {
+                                    let span = member_span?;
+                                    let args = args_tpl.replace("{0}", &obj_src);
+                                    Some((span, format!("{}{}", fn_name, args)))
+                                });
+                            if let Some((span, snippet)) = rewrite {
+                                diag = diag.with_try_replace(
+                                    span.line, span.col, span.end_col,
+                                    snippet,
+                                );
+                            } else {
+                                let display = format!(
+                                    "{}{}{}",
+                                    fn_name,
+                                    args_tpl.replace("{0}", "xs"),
+                                    _display_suffix,
+                                );
+                                diag = diag.with_try(display);
+                            }
                         }
                         self.emit(diag);
                     }
@@ -281,13 +334,41 @@ impl Checker {
                         if lc == Ty::Matrix || rc == Ty::Matrix {
                             Ty::Matrix
                         } else {
-                            let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
+                            // Sized Numeric Types (Stage 1c): same-width
+                            // arithmetic accepts every sized numeric variant.
+                            let is_numeric = |t: &Ty| matches!(
+                                t,
+                                Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_)
+                                    | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                                    | Ty::Float32 | Ty::Float64
+                            );
+                            let is_sized_scalar = |t: &Ty| matches!(
+                                t,
+                                Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                                    | Ty::Float32 | Ty::Float64
+                            );
                             if !is_numeric(&lc) || !is_numeric(&rc) {
                                 self.emit(super::err(
                                     format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
                                     "Use numeric types (Int or Float)", format!("operator {}", op)));
                             }
-                            if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
+                            // Stage 1c: reject mixed-sized-width arithmetic.
+                            // See `infer_plus_op` for rationale.
+                            if is_sized_scalar(&lc) && is_sized_scalar(&rc) && lc != rc {
+                                self.emit(super::err(
+                                    format!(
+                                        "operator '{}' mixes sized numeric types {} and {} — \
+                                         explicit conversion required (e.g. `.to_{}()`)",
+                                        op, lc.display(), rc.display(),
+                                        lc.display().to_lowercase()),
+                                    "Convert one side with `.to_intN()` / `.to_floatN()` before the op",
+                                    format!("operator {}", op)));
+                                lc
+                            } else if lc.compatible(&rc) && is_sized_scalar(&lc) {
+                                lc
+                            } else if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
                         }
                     }
                     "++" => {
@@ -426,7 +507,16 @@ impl Checker {
             }
 
             ExprKind::Call { callee, args, named_args, type_args, .. } => {
-                self.infer_call(callee, args, named_args, type_args)
+                // Publish the outer Call's span so UFCS / whole-expr
+                // rewrites (E002 method-UFCS, E013 no-field) can emit
+                // a `try_replace` range covering `callee(args)` in
+                // full, not just the callee reference. Nested calls
+                // save/restore the previous value.
+                let prev_call = self.call_span_hint.take();
+                self.call_span_hint = expr.span;
+                let ty = self.infer_call(callee, args, named_args, type_args);
+                self.call_span_hint = prev_call;
+                ty
             }
 
             ExprKind::Pipe { left, right, .. } => {
@@ -980,11 +1070,52 @@ impl Checker {
         if *lc == Ty::Matrix || *rc == Ty::Matrix {
             return Ty::Matrix;
         }
-        let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
+        // Sized Numeric Types (Stage 1c): arithmetic accepts canonical
+        // `Int` / `Float` plus every sized variant. Same-type pairing is
+        // enforced below; mixing widths is an explicit conversion.
+        let is_numeric = |t: &Ty| matches!(
+            t,
+            Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_)
+                | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                | Ty::Float32 | Ty::Float64
+        );
         if !is_numeric(lc) || !is_numeric(rc) {
             self.emit(super::err(
                 format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
                 "Use + with numeric types, String, or List", format!("operator +")));
+        }
+        // Result type resolution:
+        //   - Same sized type on both sides → that sized type.
+        //   - Canonical Float promotes Int mixes to Float (legacy rule).
+        //   - Mixed sized widths are rejected; the diagnostic is
+        //     emitted by `compatible` / `unify_infer` callers, so here
+        //     we just fall through with `lt` to avoid an extra error.
+        let is_sized_scalar = |t: &Ty| matches!(
+            t,
+            Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                | Ty::Float32 | Ty::Float64
+        );
+        // Sized Numeric Types (Stage 1c): both sides sized AND widths
+        // differ is a type error. The permissive `Ty::Int` / `Ty::Float`
+        // canonical pair stays (it carries the literal-coercion slot for
+        // `let x: Int32 = 42` style bindings). Mixing `Int32` and `Int16`
+        // has no such cover — it's always wrong, always needs explicit
+        // `.to_intN()`.
+        if is_sized_scalar(lc) && is_sized_scalar(rc) && lc != rc {
+            self.emit(super::err(
+                format!(
+                    "operator '+' mixes sized numeric types {} and {} — \
+                     explicit conversion required (e.g. `.to_{}()`)",
+                    lc.display(), rc.display(),
+                    lc.display().to_lowercase()),
+                "Convert one side with `.to_intN()` / `.to_floatN()` before the op",
+                format!("operator +")));
+            return lc.clone();
+        }
+        if lc.compatible(rc) && is_sized_scalar(lc) {
+            return lc.clone();
         }
         if *lc == Ty::Float || *rc == Ty::Float { Ty::Float } else { lt }
     }

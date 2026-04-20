@@ -53,6 +53,7 @@ fn string.trim_start(s: String) -> String
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]
+fn list.bundled_probe(n: Int) -> Int
 fn list.chunk[A](xs: List[A], n: Int) -> List[List[A]]
 fn list.clear[A](xs: List[A]) -> Unit
 fn list.contains[A](xs: List[A], x: A) -> Bool
@@ -77,6 +78,7 @@ fn list.index_of[A](xs: List[A], x: A) -> Option[Int]
 fn list.insert[A](xs: List[A], i: Int, val: A) -> List[A]
 fn list.intersperse[A](xs: List[A], sep: A) -> List[A]
 fn list.is_empty[A](xs: List[A]) -> Bool
+fn list.iterate[T](seed: T, f: fn(T) -> T, n: Int) -> List[T]
 fn list.join(xs: List[String], sep: String) -> String
 fn list.last[A](xs: List[A]) -> Option[A]
 fn list.len[A](xs: List[A]) -> Int
@@ -98,6 +100,7 @@ fn list.shuffle[A](xs: List[A]) -> List[A]
 fn list.slice[A](xs: List[A], start: Int, end: Int) -> List[A]
 fn list.sort[A](xs: List[A]) -> List[A]
 fn list.sort_by[A, B](xs: List[A], f: fn(A) -> B) -> List[A]
+fn list.split_at[T](xs: List[T], n: Int) -> (List[T], List[T])
 fn list.sum(xs: List[Int]) -> Int
 fn list.swap[A](xs: List[A], i: Int, j: Int) -> List[A]
 fn list.take[A](xs: List[A], n: Int) -> List[A]
@@ -122,20 +125,55 @@ fn int.bshr(a: Int, n: Int) -> Int
 fn int.bxor(a: Int, b: Int) -> Int
 fn int.clamp(n: Int, lo: Int, hi: Int) -> Int
 fn int.from_hex(s: String) -> Result[Int, String]
+fn int.from_int16(n: Int16) -> Int
+fn int.from_int32(n: Int32) -> Int
+fn int.from_int64(n: Int64) -> Int
+fn int.from_int8(n: Int8) -> Int
+fn int.from_uint16(n: UInt16) -> Int
+fn int.from_uint32(n: UInt32) -> Int
+fn int.from_uint64(n: UInt64) -> Int
+fn int.from_uint8(n: UInt8) -> Int
 fn int.max(a: Int, b: Int) -> Int
 fn int.min(a: Int, b: Int) -> Int
 fn int.parse(s: String) -> Result[Int, String]
 fn int.rotate_left(a: Int, n: Int, bits: Int) -> Int
 fn int.rotate_right(a: Int, n: Int, bits: Int) -> Int
 fn int.to_float(n: Int) -> Float
+fn int.to_float32(n: Int) -> Float32
+fn int.to_float32_checked(n: Int) -> Option[Float32]
+fn int.to_float64(n: Int) -> Float64
 fn int.to_hex(n: Int) -> String
+fn int.to_int16(n: Int) -> Int16
+fn int.to_int16_checked(n: Int) -> Option[Int16]
+fn int.to_int16_saturating(n: Int) -> Int16
+fn int.to_int32(n: Int) -> Int32
+fn int.to_int32_checked(n: Int) -> Option[Int32]
+fn int.to_int32_saturating(n: Int) -> Int32
+fn int.to_int64(n: Int) -> Int64
+fn int.to_int8(n: Int) -> Int8
+fn int.to_int8_checked(n: Int) -> Option[Int8]
+fn int.to_int8_saturating(n: Int) -> Int8
 fn int.to_string(n: Int) -> String
 fn int.to_u32(a: Int) -> Int
 fn int.to_u8(a: Int) -> Int
+fn int.to_uint16(n: Int) -> UInt16
+fn int.to_uint16_checked(n: Int) -> Option[UInt16]
+fn int.to_uint16_saturating(n: Int) -> UInt16
+fn int.to_uint32(n: Int) -> UInt32
+fn int.to_uint32_checked(n: Int) -> Option[UInt32]
+fn int.to_uint32_saturating(n: Int) -> UInt32
+fn int.to_uint64(n: Int) -> UInt64
+fn int.to_uint64_checked(n: Int) -> Option[UInt64]
+fn int.to_uint64_saturating(n: Int) -> UInt64
+fn int.to_uint8(n: Int) -> UInt8
+fn int.to_uint8_checked(n: Int) -> Option[UInt8]
+fn int.to_uint8_saturating(n: Int) -> UInt8
 fn int.wrap_add(a: Int, b: Int, bits: Int) -> Int
 fn int.wrap_mul(a: Int, b: Int, bits: Int) -> Int
 
 # @stdlib/option
+fn option.collect[T](xs: List[Option[T]]) -> Option[List[T]]
+fn option.collect_map[T, U](xs: List[T], f: fn(T) -> Option[U]) -> Option[List[U]]
 fn option.filter[A](o: Option[A], f: fn(A) -> Bool) -> Option[A]
 fn option.flat_map[A, B](o: Option[A], f: fn(A) -> Option[B]) -> Option[B]
 fn option.flatten[A](o: Option[Option[A]]) -> Option[A]
@@ -144,7 +182,7 @@ fn option.is_some[A](o: Option[A]) -> Bool
 fn option.map[A, B](o: Option[A], f: fn(A) -> B) -> Option[B]
 fn option.or_else[A](o: Option[A], f: fn() -> Option[A]) -> Option[A]
 fn option.to_list[A](o: Option[A]) -> List[A]
-fn option.to_result[A](o: Option[A], err: String) -> Result[A, String]
+fn option.to_result[A](o: Option[A], msg: String) -> Result[A, String]
 fn option.unwrap_or[A](o: Option[A], default: A) -> A
 fn option.unwrap_or_else[A](o: Option[A], f: fn() -> A) -> A
 fn option.zip[A, B](a: Option[A], b: Option[B]) -> Option[(A, B)]
@@ -152,16 +190,21 @@ fn option.zip[A, B](a: Option[A], b: Option[B]) -> Option[(A, B)]
 # @stdlib/result
 fn result.collect[T, E](rs: List[Result[T, E]]) -> Result[List[T], List[E]]
 fn result.collect_map[T, U, E](xs: List[T], f: fn(T) -> Result[U, E]) -> Result[List[U], List[E]]
+fn result.filter[A, E](r: Result[A, E], pred: fn(A) -> Bool, err_val: E) -> Result[A, E]
 fn result.flat_map[A, B, E](r: Result[A, E], f: fn(A) -> Result[B, E]) -> Result[B, E]
+fn result.flatten[A, E](r: Result[Result[A, E], E]) -> Result[A, E]
 fn result.is_err[A, E](r: Result[A, E]) -> Bool
 fn result.is_ok[A, E](r: Result[A, E]) -> Bool
 fn result.map[A, B, E](r: Result[A, E], f: fn(A) -> B) -> Result[B, E]
 fn result.map_err[A, E, F](r: Result[A, E], f: fn(E) -> F) -> Result[A, F]
+fn result.or_else[A, E, F](r: Result[A, E], f: fn(E) -> Result[A, F]) -> Result[A, F]
 fn result.partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E])
 fn result.to_err_option[A, E](r: Result[A, E]) -> Option[E]
+fn result.to_list[A, E](r: Result[A, E]) -> List[A]
 fn result.to_option[A, E](r: Result[A, E]) -> Option[A]
 fn result.unwrap_or[A, E](r: Result[A, E], default: A) -> A
 fn result.unwrap_or_else[A, E](r: Result[A, E], f: fn(E) -> A) -> A
+fn result.zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]
 
 # @stdlib/map
 fn map.all[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool

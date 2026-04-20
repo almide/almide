@@ -29,6 +29,11 @@ enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Build with optimisations (cargo --release). Required for any
+        /// performance-sensitive comparison; without it the generated
+        /// Rust runs in dev profile.
+        #[arg(long)]
+        release: bool,
         /// Arguments passed to the program
         #[arg(allow_hyphen_values = true)]
         program_args: Vec<String>,
@@ -283,6 +288,11 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         None
     };
 
+    if let Some(ref proj) = parsed_project {
+        project::check_compiler_version(proj)
+            .map_err(|e| { eprintln!("{}", e); e })?;
+    }
+
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if let Some(ref proj) = parsed_project {
         project_fetch::fetch_all_deps(proj)
             .map_err(|e| { eprintln!("{}", e); e.to_string() })?
@@ -359,17 +369,14 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
             let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-            let mut mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
-            // For bundled stdlib modules, drop fns whose name overlaps with the
-            // TOML-backed runtime: those callers go through the generated
-            // almide_rt_<m>_<f> dispatch, and emitting the bundled body would
-            // produce a duplicate definition. Bundled-only fns survive — those
-            // are what extend the module.
-            if almide::stdlib::is_bundled_module(name) {
-                let toml_funcs: std::collections::HashSet<&'static str> =
-                    almide::stdlib::module_functions(name).into_iter().collect();
-                mod_ir_module.functions.retain(|f| !toml_funcs.contains(f.name.as_str()));
-            }
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+            // Stdlib Declarative Unification arc complete: stdlib/defs/ is
+            // gone, every stdlib fn lives in `stdlib/<m>.almd`. Fns with
+            // `@inline_rust` / `@wasm_intrinsic` carry no real body (the
+            // Rust walker / WASM emitter skip them), but their attributes
+            // are consumed by `StdlibLoweringPass` to rewrite call sites
+            // into `IrExprKind::InlineRust`. Fns without those attrs
+            // (e.g. helpers like `split_at`) emit normally. No prune.
             let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
             checker.env.import_table = saved_table;
             checker.env.self_module_name = saved_self;
@@ -530,9 +537,9 @@ fn main() {
 fn dispatch(cli: Cli) {
     match cli.command {
         Commands::Init => cli::cmd_init(),
-        Commands::Run { file, no_check, program_args } => {
+        Commands::Run { file, no_check, release, program_args } => {
             let file = resolve_file(file);
-            cli::cmd_run(&file, &program_args, no_check);
+            cli::cmd_run(&file, &program_args, no_check, release);
         }
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib } => {
             let file = resolve_file(file);

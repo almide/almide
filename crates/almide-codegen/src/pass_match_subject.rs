@@ -58,6 +58,15 @@ fn rewrite_expr(expr: &mut IrExpr) {
             }
             for a in args { rewrite_expr(a); }
         }
+        IrExprKind::RuntimeCall { args, .. } | IrExprKind::TailCall { args, .. } => {
+            // Recurse into args so match subjects inside lambda bodies
+            // passed to intrinsic calls (e.g. `list.fold` → `RuntimeCall`)
+            // still get their `c: String` subject wrapped with `as_str()`.
+            for a in args { rewrite_expr(a); }
+        }
+        IrExprKind::InlineRust { args, .. } => {
+            for (_, a) in args { rewrite_expr(a); }
+        }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements }
         | IrExprKind::Fan { exprs: elements } => {
             for e in elements { rewrite_expr(e); }

@@ -1,0 +1,3 @@
+expects_code = "E009"
+expects_error = "cannot reassign immutable binding"
+hint_substring = "var"

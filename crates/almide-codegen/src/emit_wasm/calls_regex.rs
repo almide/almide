@@ -25,7 +25,11 @@ impl FuncCompiler<'_> {
             "replace_first" => self.emit_regex_replace_first(args),
             "split" => self.emit_regex_split(args),
             "captures" => self.emit_regex_captures(args),
-            _ => self.emit_stub_call(args),
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `regex.{}` — \
+                 add an arm in emit_regex_call or resolve upstream",
+                func
+            ),
         }
     }
 

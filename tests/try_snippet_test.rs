@@ -32,6 +32,10 @@ fn write_tmp(name: &str, body: &str) -> String {
 
 #[test]
 fn e002_stdlib_alias_emits_try_snippet() {
+    // Phase 3 migration: the alias `try` is now a bare replacement
+    // token (`string.to_upper`) instead of a multi-line comment
+    // snippet — this is the form `Diagnostic::apply_try_to` can
+    // mechanically rewrite using `try_replace_span`.
     let p = write_tmp("try_e002_alias.almd", r#"
 fn main() -> String = {
     string.to_uppercase("hi")
@@ -41,11 +45,12 @@ fn main() -> String = {
     assert!(!ok);
     assert!(out.contains("error[E002]"), "out:\n{}", out);
     assert!(out.contains("try:"), "missing try: section\n{}", out);
-    assert!(out.contains("string.to_upper(...)"), "try: body missing\n{}", out);
+    assert!(out.contains("string.to_upper"), "try: body missing\n{}", out);
 }
 
 #[test]
 fn e002_fuzzy_match_emits_try_snippet() {
+    // Phase 3 migration: clean name replacement, no comment header.
     let p = write_tmp("try_e002_fuzzy.almd", r#"
 fn main() -> List[Int] = {
     let xs = [1, 2, 3]
@@ -56,7 +61,7 @@ fn main() -> List[Int] = {
     assert!(!ok);
     assert!(out.contains("error[E002]"), "out:\n{}", out);
     assert!(out.contains("try:"), "missing try:\n{}", out);
-    assert!(out.contains("list.map(...)"), "try: body missing\n{}", out);
+    assert!(out.contains("list.map"), "try: body missing\n{}", out);
 }
 
 #[test]

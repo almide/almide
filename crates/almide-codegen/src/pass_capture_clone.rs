@@ -32,22 +32,36 @@ impl NanoPass for CaptureClonePass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
-        for func in &mut program.functions {
+        let IrProgram { functions, modules, var_table, .. } = &mut program;
+        for func in functions.iter_mut() {
             let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
-            if transform_expr(&mut func.body, &mut program.var_table, &param_vars) {
+            PARAM_BORROWS.with(|m| {
+                *m.borrow_mut() = func.params.iter().map(|p| (p.var, p.borrow)).collect();
+            });
+            if transform_expr(&mut func.body, var_table, &param_vars) {
                 changed = true;
             }
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
+        for module in modules.iter_mut() {
+            for func in module.functions.iter_mut() {
                 let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
-                if transform_expr(&mut func.body, &mut module.var_table, &param_vars) {
+                PARAM_BORROWS.with(|m| {
+                    *m.borrow_mut() = func.params.iter().map(|p| (p.var, p.borrow)).collect();
+                });
+                if transform_expr(&mut func.body, var_table, &param_vars) {
                     changed = true;
                 }
             }
         }
+        PARAM_BORROWS.with(|m| m.borrow_mut().clear());
         PassResult { program, changed }
     }
+}
+
+use std::cell::RefCell;
+thread_local! {
+    static PARAM_BORROWS: RefCell<std::collections::HashMap<VarId, ParamBorrow>> =
+        RefCell::new(std::collections::HashMap::new());
 }
 
 /// Collect all variables bound by a statement (Bind + BindDestructure).
@@ -126,6 +140,9 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
                 CallTarget::Computed { callee } => { if transform_expr(callee, vt, scope_vars) { changed = true; } }
                 _ => {}
             }
+            for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
+        }
+        IrExprKind::RuntimeCall { args, .. } => {
             for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
         }
         IrExprKind::BinOp { left, right, .. } => {
@@ -273,16 +290,39 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
         );
         renames.insert(var_id, cap_var);
 
+        // If the captured var is a fn param with a borrowed runtime
+        // representation (`&[T]` / `&str` / `&T`), the bare `Var` IR
+        // renders as the borrow — but `__cap_N: Vec<T>` / `String` / `T`
+        // (the Almide-level owned type) expects an owned value. Materialise
+        // the owned form explicitly so the `move |..|` closure can take it.
+        let borrow = PARAM_BORROWS.with(|m| m.borrow().get(&var_id).copied());
+        let bind_value = match borrow {
+            Some(ParamBorrow::RefSlice) => IrExpr {
+                kind: IrExprKind::ToVec {
+                    expr: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None }),
+                },
+                ty: ty.clone(), span: None,
+            },
+            Some(ParamBorrow::RefStr) => IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Method {
+                        object: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None }),
+                        method: almide_base::intern::sym("to_string"),
+                    },
+                    args: vec![],
+                    type_args: vec![],
+                },
+                ty: ty.clone(), span: None,
+            },
+            _ => IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None },
+        };
+
         stmts.push(IrStmt {
             kind: IrStmtKind::Bind {
                 var: cap_var,
                 mutability: Mutability::Let,
                 ty: ty.clone(),
-                value: IrExpr {
-                    kind: IrExprKind::Var { id: var_id },
-                    ty,
-                    span: None,
-                },
+                value: bind_value,
             },
             span: None,
         });
@@ -339,6 +379,9 @@ fn collect_free_vars(expr: &IrExpr, bound: &HashSet<VarId>, free: &mut HashSet<V
                 CallTarget::Computed { callee } => collect_free_vars(callee, bound, free),
                 _ => {}
             }
+            for a in args { collect_free_vars(a, bound, free); }
+        }
+        IrExprKind::RuntimeCall { args, .. } => {
             for a in args { collect_free_vars(a, bound, free); }
         }
         IrExprKind::BinOp { left, right, .. } => {
@@ -517,6 +560,9 @@ fn replace_vars(expr: &mut IrExpr, renames: &std::collections::HashMap<VarId, Va
                 CallTarget::Computed { callee } => replace_vars(callee, renames),
                 _ => {}
             }
+            for a in args { replace_vars(a, renames); }
+        }
+        IrExprKind::RuntimeCall { args, .. } => {
             for a in args { replace_vars(a, renames); }
         }
         IrExprKind::BinOp { left, right, .. } => {

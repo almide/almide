@@ -25,6 +25,7 @@ pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
 impl Checker {
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
         let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
+        let callee_span_snapshot = callee.span;
         match &mut callee.kind {
             ExprKind::Ident { name, .. } => {
                 let name = name.clone();
@@ -33,7 +34,7 @@ impl Checker {
                 if self.env.lookup_var(&name).is_some() {
                     let _ = self.infer_expr(callee);
                 }
-                self.check_named_call_with_type_args(&name, &arg_tys, type_args)
+                self.check_named_call_spanned(&name, &arg_tys, type_args, callee_span_snapshot)
             }
             ExprKind::TypeName { name, .. } => {
                 if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
@@ -67,7 +68,14 @@ impl Checker {
             // Module call: string.trim(s), list.map(xs, f), etc.
             ExprKind::Member { object, field, .. } => {
                 // Try static resolution: module.func, alias.func, TypeName.method, codec.encode
-                if let Some(result) = self.resolve_static_member(object, field, &arg_tys) {
+                // Thread the callee's span so `E002` can emit a
+                // mechanically-applicable `try_replace` when the stdlib
+                // alias map supplies a clean rename target.
+                let prev = self.callee_span_hint.take();
+                self.callee_span_hint = callee_span_snapshot;
+                let resolved = self.resolve_static_member(object, field, &arg_tys);
+                self.callee_span_hint = prev;
+                if let Some(result) = resolved {
                     return result;
                 }
                 // UFCS method: obj.method(args) -> module.method(obj, args)
@@ -136,7 +144,12 @@ impl Checker {
                 // If obj_ty maps to a stdlib module, suggest the module-call
                 // form (plus the closest existing name if there's a typo).
                 if let Some(module) = builtin_module {
-                    let module_funcs = crate::stdlib::module_functions(module);
+                    // Use the *full* surface (TOML + bundled `.almd`) so fns
+                    // migrated through the Stdlib Unification arc still power
+                    // the E002 suggestion. `module_functions` only sees TOML,
+                    // so after `stdlib/string.almd` replaced the TOML the
+                    // method-call try-snippet silently disappeared.
+                    let module_funcs = crate::stdlib::module_functions_all(module);
                     let suggestion = almide_base::diagnostic::suggest(&field, module_funcs.iter().copied());
                     let hint = if let Some(close) = &suggestion {
                         format!(
@@ -155,10 +168,28 @@ impl Checker {
                         format!("method call .{}()", field)
                     ).with_code("E002");
                     if let Some(close) = suggestion {
-                        diag = diag.with_try(format!(
-                            "// x.{field}()  →  {m}.{close}(x)\n{m}.{close}(x)",
-                            m = module, close = close, field = field
-                        ));
+                        // Mechanical rewrite path: if we have the object's
+                        // source text AND the full call span, substitute
+                        // `x.field()` → `module.close(x)` in place. Falls
+                        // back to the comment-headed display form when
+                        // the source isn't reachable (IDE / playground).
+                        let rewrite = object.span
+                            .and_then(|s| self.source_slice(s))
+                            .and_then(|obj_src| {
+                                let call_span = self.call_span_hint?;
+                                Some((call_span, format!("{}.{}({})", module, close, obj_src)))
+                            });
+                        if let Some((call_span, snippet)) = rewrite {
+                            diag = diag.with_try_replace(
+                                call_span.line, call_span.col, call_span.end_col,
+                                snippet,
+                            );
+                        } else {
+                            diag = diag.with_try(format!(
+                                "// x.{field}()  →  {m}.{close}(x)\n{m}.{close}(x)",
+                                m = module, close = close, field = field
+                            ));
+                        }
                     }
                     self.emit(diag);
                     return Ty::Unknown;
@@ -200,6 +231,25 @@ impl Checker {
                     (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| *name)
                 })
             }
+            // Numeric primitive types — canonicalised so `T: Numeric`
+            // bounds can look them up in `env.type_protocols` (the
+            // `register_builtin_protocols` pass seeds this table with
+            // the primitive ↔ `Numeric` links).
+            Ty::Int => Some(sym("Int")),
+            Ty::Float => Some(sym("Float")),
+            Ty::Int8 => Some(sym("Int8")),
+            Ty::Int16 => Some(sym("Int16")),
+            Ty::Int32 => Some(sym("Int32")),
+            Ty::UInt8 => Some(sym("UInt8")),
+            Ty::UInt16 => Some(sym("UInt16")),
+            Ty::UInt32 => Some(sym("UInt32")),
+            Ty::UInt64 => Some(sym("UInt64")),
+            Ty::Float32 => Some(sym("Float32")),
+            Ty::String => Some(sym("String")),
+            Ty::Bool => Some(sym("Bool")),
+            Ty::Bytes => Some(sym("Bytes")),
+            Ty::Matrix => Some(sym("Matrix")),
+            Ty::Unit => Some(sym("Unit")),
             // TypeVars and inference vars are not concrete — skip protocol checking
             Ty::TypeVar(_) | Ty::Unknown => None,
             _ => None,
@@ -208,6 +258,25 @@ impl Checker {
 
     pub(crate) fn check_named_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
         self.check_named_call_with_type_args(name, arg_tys, None)
+    }
+
+    /// Like `check_named_call_with_type_args`, but also records the
+    /// callee's source span so `E002` can emit a mechanically-applicable
+    /// `try_replace` range when a rename suggestion is available.
+    /// Prefer this over the plain variant from call sites that have the
+    /// callee AST node in hand (`check_call_with_type_args` etc.).
+    pub(crate) fn check_named_call_spanned(
+        &mut self,
+        name: &str,
+        arg_tys: &[Ty],
+        type_args: Option<&[Ty]>,
+        callee_span: Option<ast::Span>,
+    ) -> Ty {
+        let prev = self.callee_span_hint.take();
+        self.callee_span_hint = callee_span;
+        let ty = self.check_named_call_with_type_args(name, arg_tys, type_args);
+        self.callee_span_hint = prev;
+        ty
     }
 
     pub(crate) fn check_named_call_with_type_args(&mut self, name: &str, arg_tys: &[Ty], type_args: Option<&[Ty]>) -> Ty {
@@ -260,7 +329,10 @@ impl Checker {
                 // For module-qualified calls (e.g. "string.uppercase"), narrow candidates
                 // to the same module and compare only the function part for better suggestions.
                 if let Some((module, func)) = name.split_once('.') {
-                    let module_funcs = crate::stdlib::module_functions(module);
+                    // Use the *full* surface (TOML + bundled) so diagnostic
+                    // suggestions see fns migrated to `stdlib/<m>.almd` even
+                    // after their TOML entries have been deleted.
+                    let module_funcs = crate::stdlib::module_functions_all(module);
                     if !module_funcs.is_empty() {
                         // Check known alias map first (catches common hallucinations)
                         if let Some(alias) = crate::stdlib::suggest_alias(module, func) {
@@ -300,9 +372,23 @@ impl Checker {
                 return Ty::Unknown;
             }
             let mut diag = super::err(format!("undefined function '{}'", name), hint, format!("call to {}()", name)).with_code("E002");
+            // `try_replace` (Phase 3): when the hint is a clean rename
+            // and the callee's source span is available, emit both a
+            // concise `try` and the exact replacement range so
+            // `Diagnostic::apply_try_to` can rewrite the source.
+            // Rich multi-line snippets (conversion wrappers, operator
+            // suggestions) stay display-only via `with_try`.
             if let Some(rich) = rich_snippet {
                 diag = diag.with_try(rich.to_string());
-            } else if let Some(fix) = fix_name {
+            } else if let (Some(fix), Some(span)) = (&fix_name, self.callee_span_hint) {
+                // Almide `Span::end_col` is the column one past the last
+                // char (same convention as lexer emit — `end_col = col +
+                // token_len`). `apply_try_to` wants the exclusive upper
+                // bound, so use `end_col` directly.
+                diag = diag.with_try_replace(span.line, span.col, span.end_col, fix.clone());
+            } else if let Some(fix) = &fix_name {
+                // Fallback: no span available — fall back to the
+                // comment-headed display form.
                 diag = diag.with_try(format!("// {wrong}(...)  →  {right}(...)\n{right}(...)", wrong = name, right = fix));
             }
             self.emit(diag);
@@ -393,8 +479,22 @@ impl Checker {
         // This removes the implicit auto-unwrap and lets users choose: `!` to unwrap, or match on ok/err.
         // Only user-defined fns are wrapped — stdlib effect fns are not lifted by codegen,
         // so their runtime implementations return raw values (not Result).
+        //
+        // `env.functions.contains_key` covered the pre-bundled world where
+        // stdlib sigs lived in a parallel table. Once a stdlib module is
+        // migrated to `stdlib/<m>.almd` and loaded via `lower_module`,
+        // its fns also land in `env.functions` under `<module>.<fn>`
+        // keys — matching the check above and wrongly wrapping their
+        // return type in the test block. Gate the wrap by "not a bundled
+        // stdlib module": bundled stdlib fns generate runtime calls that
+        // return raw values (their `@inline_rust` templates carry their
+        // own `?` when the Rust runtime truly returns `Result`).
+        let is_bundled_stdlib_call = name.split_once('.')
+            .map(|(m, _)| almide_lang::stdlib_info::is_bundled_module(m))
+            .unwrap_or(false);
         if self.env.in_test_block && sig.is_effect && !ret.is_result()
             && self.env.functions.contains_key(&sym(name))
+            && !is_bundled_stdlib_call
         {
             return Ty::result(ret, Ty::String);
         }

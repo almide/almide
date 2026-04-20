@@ -231,3 +231,27 @@ fn level_eq() {
     assert_eq!(Level::Warning, Level::Warning);
     assert_ne!(Level::Error, Level::Warning);
 }
+
+// ---- Phase 3: try_replace round-trip ----
+
+#[test]
+fn with_try_replace_populates_both_fields() {
+    let d = Diagnostic::error("e", "h", "c").with_try_replace(2, 5, 13, "int.parse");
+    assert_eq!(d.try_snippet.as_deref(), Some("int.parse"));
+    assert_eq!(d.try_replace_span, Some((2, 5, 13)));
+}
+
+#[test]
+fn apply_try_to_round_trips_through_full_source() {
+    // Simulates the Phase 3 harness workflow: a diagnostic names the
+    // offending token span + the replacement; `apply_try_to` rewrites
+    // the source to the expected fixed form.
+    let broken = "fn parse(s: String) -> Result[Int, String] =\n    string.length(s) |> int.parse\n";
+    //                                                                   ^^^^^^^^^^^^^ line 2, cols 5..18 (exclusive)
+    let d = Diagnostic::error("e", "h", "c").with_try_replace(2, 5, 18, "string.len");
+    let rewritten = d.apply_try_to(broken).unwrap();
+    assert_eq!(
+        rewritten,
+        "fn parse(s: String) -> Result[Int, String] =\n    string.len(s) |> int.parse\n"
+    );
+}

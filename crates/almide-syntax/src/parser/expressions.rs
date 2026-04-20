@@ -181,20 +181,37 @@ impl Parser {
         let mut expr = self.parse_primary()?;
         loop {
             if self.check(TokenType::Dot) {
-                let span = Some(self.current_span());
+                let dot_span = self.current_span();
                 self.advance();
                 if self.check(TokenType::Int) {
                     let idx_str = self.current().value.clone();
                     self.advance();
                     let index = idx_str.parse::<usize>().map_err(|_| {
-                        format!("invalid tuple index '{}' at line {:?}", idx_str, span)
+                        format!("invalid tuple index '{}' at line {:?}", idx_str, dot_span)
                     })?;
-                    expr = Expr::new(self.next_id(), span, ExprKind::TupleIndex {
+                    expr = Expr::new(self.next_id(), Some(dot_span), ExprKind::TupleIndex {
                         object: Box::new(expr), index,
                     });
                 } else {
+                    // Capture the field's token span BEFORE `expect_any_name`
+                    // advances past it. The Member's span then covers the
+                    // full `object.field` — from the object's starting
+                    // column to the field token's end column (same-line
+                    // assumption: Almide's lexer never emits a Dot across
+                    // lines, since `.` before a newline is a syntax error).
+                    // This precise span powers E002's `try_replace` for
+                    // rename suggestions like `string.length` → `string.len`.
+                    let field_span = self.current_span();
                     let field = self.expect_any_name()?;
-                    expr = Expr::new(self.next_id(), span, ExprKind::Member {
+                    let full_span = match expr.span {
+                        Some(obj_span) if obj_span.line == field_span.line => Span {
+                            line: field_span.line,
+                            col: obj_span.col,
+                            end_col: field_span.end_col,
+                        },
+                        _ => field_span,
+                    };
+                    expr = Expr::new(self.next_id(), Some(full_span), ExprKind::Member {
                         object: Box::new(expr), field,
                     });
                 }
@@ -217,12 +234,25 @@ impl Parser {
                     object: Box::new(expr), index: Box::new(index),
                 });
             } else if self.check(TokenType::LParen) && !self.newline_before_current() {
-                let span = Some(self.current_span());
                 let open = self.current().clone();
+                let open_span = self.current_span();
                 self.advance();
                 let (args, named_args) = self.parse_call_args()?;
+                // Capture the closing `)` span BEFORE `expect_closing`
+                // so we can compute the full call range (callee-start ..
+                // `)`-end) even on single-line calls. Multi-line calls
+                // fall back to the `(`-span since `Span` is single-line.
+                let close_span = self.current_span();
                 self.expect_closing(TokenType::RParen, open.line, open.col, "function call")?;
-                expr = Expr::new(self.next_id(), span, ExprKind::Call {
+                let full_span = match (expr.span, close_span.line == open_span.line) {
+                    (Some(callee_span), true) if callee_span.line == open_span.line => Some(Span {
+                        line: callee_span.line,
+                        col: callee_span.col,
+                        end_col: close_span.end_col,
+                    }),
+                    _ => Some(open_span),
+                };
+                expr = Expr::new(self.next_id(), full_span, ExprKind::Call {
                     callee: Box::new(expr), args, named_args, type_args: None,
                 });
             } else if self.check(TokenType::Bang) && !self.newline_before_current() {

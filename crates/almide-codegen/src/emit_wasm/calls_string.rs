@@ -125,17 +125,40 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { i32_wrap_i64; call(self.emitter.rt.string.repeat); });
             }
             "slice" => {
+                // slice(s, start, end) — when `end` comes from the
+                // `end: Int = i64::MAX` default injection, wrapping to
+                // i32 produces 0xFFFFFFFF (-1) which the runtime
+                // interprets as a huge unsigned → trap. Cap `end` to
+                // the string's char length so the sentinel degrades
+                // to "to the end" without a trap.
+                let s_ptr = self.scratch.alloc_i32();
+                let end_wrapped = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(s_ptr); });
+                wasm!(self.func, { local_get(s_ptr); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { i32_wrap_i64; });
                 if args.len() > 2 {
                     self.emit_expr(&args[2]);
-                    wasm!(self.func, { i32_wrap_i64; });
+                    wasm!(self.func, {
+                        i32_wrap_i64;
+                        local_set(end_wrapped);
+                        // clamp: if end > len then len else end
+                        local_get(end_wrapped);
+                        local_get(s_ptr); i32_load(0);
+                        i32_gt_u;
+                        if_i32;
+                            local_get(s_ptr); i32_load(0);
+                        else_;
+                            local_get(end_wrapped);
+                        end;
+                    });
                 } else {
-                    self.emit_expr(&args[0]);
-                    wasm!(self.func, { i32_load(0); });
+                    wasm!(self.func, { local_get(s_ptr); i32_load(0); });
                 }
                 wasm!(self.func, { call(self.emitter.rt.string.slice); });
+                self.scratch.free_i32(s_ptr);
+                self.scratch.free_i32(end_wrapped);
             }
             "index_of" => {
                 let s64 = self.scratch.alloc_i64();

@@ -100,6 +100,10 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
             args: args.into_iter().map(|a| rewrite_expr(a, inside_fan)).collect(),
             type_args,
         },
+        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
+            symbol,
+            args: args.into_iter().map(|a| rewrite_expr(a, inside_fan)).collect(),
+        },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple,
             iterable: Box::new(rewrite_expr(*iterable, inside_fan)),

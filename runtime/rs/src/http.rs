@@ -39,24 +39,24 @@ pub fn almide_http_redirect(url: &str, code: i64) -> AlmideHttpResponse {
     AlmideHttpResponse { status: code, body: String::new(), headers: vec![("Location".into(), url.to_string())] }
 }
 
-pub fn almide_rt_http_not_found(body: String) -> AlmideHttpResponse {
-    AlmideHttpResponse::new(404, body)
+pub fn almide_rt_http_not_found(body: &str) -> AlmideHttpResponse {
+    AlmideHttpResponse::new(404, body.to_string())
 }
 
 pub fn almide_rt_http_redirect(url: &str) -> AlmideHttpResponse {
     almide_http_redirect(url, 302)
 }
 
-pub fn almide_rt_http_response(status: i64, body: String) -> AlmideHttpResponse {
-    AlmideHttpResponse::new(status, body)
+pub fn almide_rt_http_response(status: i64, body: &str) -> AlmideHttpResponse {
+    AlmideHttpResponse::new(status, body.to_string())
 }
 
-pub fn almide_rt_http_json(status: i64, body: String) -> AlmideHttpResponse {
-    AlmideHttpResponse::json(status, body)
+pub fn almide_rt_http_json(status: i64, body: &str) -> AlmideHttpResponse {
+    AlmideHttpResponse::json(status, body.to_string())
 }
 
-pub fn almide_rt_http_with_headers(status: i64, body: String, headers: &HashMap<String, String>) -> AlmideHttpResponse {
-    let mut resp = AlmideHttpResponse::new(status, body);
+pub fn almide_rt_http_with_headers(status: i64, body: &str, headers: &HashMap<String, String>) -> AlmideHttpResponse {
+    let mut resp = AlmideHttpResponse::new(status, body.to_string());
     for (k, v) in headers {
         resp.headers.retain(|(ek, _)| !ek.eq_ignore_ascii_case(k));
         resp.headers.push((k.clone(), v.clone()));
@@ -234,6 +234,17 @@ pub fn almide_http_serve(port: i64, handler: impl Fn(AlmideHttpRequest) -> Resul
         let _ = write_response(&mut stream, &resp);
     }
     Ok(())
+}
+
+// Handler-as-closure wrapper for `@intrinsic` migration of `http.serve`.
+// The Almide side passes a `(Request) -> Response` closure; this wrapper
+// composes it with `Ok(...)` so the inner `almide_http_serve` keeps its
+// `Result<Response, String>` contract (future error-in-handler support).
+pub fn almide_rt_http_serve(
+    port: i64,
+    handler: impl Fn(AlmideHttpRequest) -> AlmideHttpResponse,
+) -> Result<(), String> {
+    almide_http_serve(port, move |req| Ok(handler(req)))
 }
 
 // ── Helpers ──

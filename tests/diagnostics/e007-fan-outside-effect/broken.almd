@@ -1,0 +1,1 @@
+fn compute() -> (Int, Int, Int) = fan { 1 2 3 }

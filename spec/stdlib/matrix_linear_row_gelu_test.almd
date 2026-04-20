@@ -1,0 +1,70 @@
+// MatrixFusionPass: `gelu(linear_row(x, W, b))` → `linear_row_gelu(x, W, b)`.
+// Guards nested form, let-split form, and single-use safety.
+
+fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
+  let d = if a > b then a - b else b - a
+  d < tol
+}
+
+test "linear_row_gelu nested form matches unfused chain" {
+  let x = matrix.from_lists([
+    [1.0, 2.0, 3.0],
+    [0.0, 1.0, 0.0]
+  ])
+  let weight = matrix.from_lists([
+    [0.5, 0.5, 0.5],
+    [1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [0.1, 0.2, 0.3]
+  ])
+  let bias = [0.1, 0.0, 0.0, 0.0]
+
+  // Expected via unfused chain: y = x @ W^T + bias, then gelu(y).
+  let y = matrix.linear_row(x, weight, bias)
+  let expected = matrix.gelu(y)
+
+  // Fused chain — pass rewrites to linear_row_gelu.
+  let actual = matrix.gelu(matrix.linear_row(x, weight, bias))
+
+  // Check all elements match.
+  assert(approx_eq(matrix.get(expected, 0, 0), matrix.get(actual, 0, 0), 0.00001))
+  assert(approx_eq(matrix.get(expected, 0, 3), matrix.get(actual, 0, 3), 0.00001))
+  assert(approx_eq(matrix.get(expected, 1, 0), matrix.get(actual, 1, 0), 0.00001))
+}
+
+test "linear_row_gelu let-split form also fuses" {
+  let x = matrix.from_lists([
+    [1.0, 2.0, 3.0]
+  ])
+  let weight = matrix.from_lists([
+    [0.5, 0.5, 0.5],
+    [1.0, 0.0, 0.0]
+  ])
+  let bias = [0.0, 0.0]
+
+  let l = matrix.linear_row(x, weight, bias)
+  let y = matrix.gelu(l)
+
+  // linear_row output for x[0]: [0.5*1 + 0.5*2 + 0.5*3, 1*1 + 0*2 + 0*3]
+  //                           = [3.0, 1.0]
+  // gelu([3.0, 1.0]) ≈ [2.9964, 0.8412]
+  assert(approx_eq(matrix.get(y, 0, 0), 2.9964, 0.001))
+  assert(approx_eq(matrix.get(y, 0, 1), 0.8412, 0.001))
+}
+
+test "linear_row_gelu let-split skipped when l used elsewhere" {
+  let x = matrix.from_lists([[1.0, 1.0]])
+  let weight = matrix.from_lists([[1.0, 1.0], [2.0, 2.0]])
+  let bias = [0.0, 0.0]
+
+  let l = matrix.linear_row(x, weight, bias)
+  let y = matrix.gelu(l)
+
+  // Extra ref to `l` must block fusion.
+  let raw = matrix.get(l, 0, 0)
+  let out = matrix.get(y, 0, 1)
+
+  assert_eq(raw, 2.0)  // 1*1 + 1*1
+  // gelu(4.0) ≈ 3.9999
+  assert(approx_eq(out, 3.9999, 0.001))
+}

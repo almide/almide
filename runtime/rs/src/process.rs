@@ -1,7 +1,7 @@
 // process extern — Rust native implementations
 
-pub fn almide_rt_process_exec(cmd: String, args: Vec<String>) -> Result<String, String> {
-    match std::process::Command::new(&cmd).args(&args).output() {
+pub fn almide_rt_process_exec(cmd: &str, args: &Vec<String>) -> Result<String, String> {
+    match std::process::Command::new(cmd).args(args).output() {
         Ok(out) => {
             if out.status.success() {
                 Ok(String::from_utf8_lossy(&out.stdout).to_string())
@@ -35,8 +35,8 @@ pub fn almide_rt_process_stdin_lines() -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())
 }
 
-pub fn almide_rt_process_exec_in(dir: String, cmd: String, args: Vec<String>) -> Result<String, String> {
-    match std::process::Command::new(&cmd).args(&args).current_dir(&dir).output() {
+pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &Vec<String>) -> Result<String, String> {
+    match std::process::Command::new(cmd).args(args).current_dir(dir).output() {
         Ok(out) => {
             if out.status.success() {
                 Ok(String::from_utf8_lossy(&out.stdout).to_string())
@@ -48,10 +48,10 @@ pub fn almide_rt_process_exec_in(dir: String, cmd: String, args: Vec<String>) ->
     }
 }
 
-pub fn almide_rt_process_exec_with_stdin(cmd: String, args: Vec<String>, input: String) -> Result<String, String> {
+pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &Vec<String>, input: &str) -> Result<String, String> {
     use std::io::Write;
-    let mut child = std::process::Command::new(&cmd)
-        .args(&args)
+    let mut child = std::process::Command::new(cmd)
+        .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -74,14 +74,14 @@ mod tests {
 
     #[test]
     fn test_process_exec() {
-        let result = almide_rt_process_exec("echo".into(), vec!["hello".into()]);
+        let result = almide_rt_process_exec("echo", &vec!["hello".into()]);
         assert!(result.is_ok());
         assert!(result.unwrap().trim() == "hello");
     }
 }
 
-pub fn almide_rt_process_exec_status(cmd: String, args: Vec<String>) -> Result<ProcessStatus, String> {
-    match std::process::Command::new(&cmd).args(&args).output() {
+pub fn almide_rt_process_exec_status(cmd: &str, args: &Vec<String>) -> Result<ProcessStatus, String> {
+    match std::process::Command::new(cmd).args(args).output() {
         Ok(out) => {
             let code = out.status.code().unwrap_or(-1) as i64;
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -96,13 +96,13 @@ pub fn almide_rt_process_pid() -> i64 {
     std::process::id() as i64
 }
 
-pub fn almide_rt_process_env(key: String) -> Option<String> {
-    std::env::var(&key).ok()
+pub fn almide_rt_process_env(key: &str) -> Option<String> {
+    std::env::var(key).ok()
 }
 
-pub fn almide_rt_process_spawn(cmd: String, args: Vec<String>) -> Result<i64, String> {
-    std::process::Command::new(&cmd)
-        .args(&args)
+pub fn almide_rt_process_spawn(cmd: &str, args: &Vec<String>) -> Result<i64, String> {
+    std::process::Command::new(cmd)
+        .args(args)
         .stdin(std::process::Stdio::null())
         .spawn()
         .map(|child| child.id() as i64)

@@ -256,6 +256,12 @@ pub enum IrExprKind {
     /// Tail call: same as Call but emits `return_call` in WASM.
     /// Inserted by TailCallMarkPass for calls in tail position.
     TailCall { target: CallTarget, args: Vec<IrExpr> },
+    /// Fully resolved runtime-fn call. Emitted by `pass_intrinsic_lowering`
+    /// from `@intrinsic(symbol)`-annotated stdlib fns. Downstream emit
+    /// (Rust walker, WASM emitter) looks up `symbol` directly — borrow /
+    /// clone decoration is derived from each arg's `IrExpr.ty`. See
+    /// `docs/roadmap/active/dispatch-unification-plan.md` §Phase 1e-2.
+    RuntimeCall { symbol: Sym, args: Vec<IrExpr> },
 
     // ── Collections ──
     List { elements: Vec<IrExpr> },
@@ -314,6 +320,25 @@ pub enum IrExprKind {
     /// Pre-rendered code string (produced by StdlibLoweringPass).
     /// Walker outputs this verbatim — no further processing.
     RenderedCall { code: String },
+
+    /// Rust-target inline template dispatch, produced by
+    /// `StdlibLoweringPass` when a call target's IrFunction carries
+    /// an `@inline_rust("...")` attribute. The walker renders each
+    /// `args` element to its Rust source form, substitutes `{name}`
+    /// placeholders in `template` with the rendered string, and emits
+    /// the result verbatim.
+    ///
+    /// Unlike `RenderedCall`, the args are NOT pre-rendered at pass
+    /// time: they ride the IR through later passes (clone insertion,
+    /// borrow insertion, ...) and get rendered at the final walker
+    /// step.
+    InlineRust {
+        template: String,
+        /// Pairs of `(param_name, arg_expr)`. The order matches the
+        /// original call's positional argument order; `param_name` is
+        /// used for placeholder substitution in `template`.
+        args: Vec<(Sym, IrExpr)>,
+    },
 
     // ── Closure Conversion (inserted by ClosureConversionPass, WASM target) ──
     /// Create a closure object: lifted function + captured environment.
@@ -467,6 +492,10 @@ impl IrExpr {
                 };
                 IrExprKind::Call { target, args, type_args }
             }
+            IrExprKind::RuntimeCall { symbol, args } => {
+                let args = args.into_iter().map(|a| f(a)).collect();
+                IrExprKind::RuntimeCall { symbol, args }
+            }
             IrExprKind::TailCall { target, args } => {
                 let args = args.into_iter().map(|a| f(a)).collect();
                 let target = match target {
@@ -504,6 +533,9 @@ impl IrExpr {
             },
             IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
                 name, args: args.into_iter().map(|a| f(a)).collect(),
+            },
+            IrExprKind::InlineRust { template, args } => IrExprKind::InlineRust {
+                template, args: args.into_iter().map(|(n, a)| (n, f(a))).collect(),
             },
 
             // ── Strings ──
@@ -687,6 +719,8 @@ pub enum ParamBorrow {
     RefStr,
     /// Parameter can be borrowed as &[T] (for Vec<T> params)
     RefSlice,
+    /// Parameter is mutably borrowed as &mut T (for mutating intrinsics)
+    RefMut,
 }
 
 /// Info about an open record field (destructured from a record param).
@@ -733,6 +767,13 @@ pub struct IrFunction {
     pub extern_attrs: Vec<almide_lang::ast::ExternAttr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub export_attrs: Vec<almide_lang::ast::ExportAttr>,
+    /// Generic `@name(args)` attributes on the source fn. Preserved
+    /// verbatim from AST for downstream passes (Stdlib Unification:
+    /// `@inline_rust`, `@wasm_intrinsic`, `@pure`, `@schedule`,
+    /// `@rewrite`). `@extern` / `@export` still live in their typed
+    /// vecs above and are NOT duplicated here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attrs: Vec<almide_lang::ast::Attribute>,
     #[serde(default = "default_ir_visibility")]
     pub visibility: IrVisibility,
     /// Doc comment from source (`///` lines).
@@ -741,6 +782,25 @@ pub struct IrFunction {
     /// Number of blank lines before this declaration in source.
     #[serde(default)]
     pub blank_lines_before: u32,
+}
+
+/// Prefix applied to test function names in lowering to guarantee
+/// uniqueness against same-named user fns (`fn foo` + `test "foo"`).
+/// All downstream passes see a pre-normalized, unique `func.name`.
+pub const TEST_NAME_PREFIX: &str = "__test_almd_";
+
+impl IrFunction {
+    /// Source-visible name. For test blocks this strips the
+    /// `TEST_NAME_PREFIX` so reporters (test runner output, diagnostics)
+    /// show the user's original `test "name"` string.
+    pub fn display_name(&self) -> &str {
+        let n = self.name.as_str();
+        if self.is_test {
+            n.strip_prefix(TEST_NAME_PREFIX).unwrap_or(n)
+        } else {
+            n
+        }
+    }
 }
 
 /// Classification of top-level let bindings for codegen.

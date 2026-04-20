@@ -1,0 +1,96 @@
+// fs — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4c).
+//
+// Migrated mechanically from `stdlib/defs/fs.toml` (27 fns + the
+// `FileStat` record). Runtime impls stay in `runtime/rs/src/fs.rs`.
+//
+// Runtime ABI: every `path` / `content` / `src` / `dst` / `prefix` /
+// `dir` / `pattern` param on the runtime side takes owned `String`,
+// so the templates pass arguments by value. The TOML's `&*{path}`
+// looked like a borrow but was really an `ArgTransform::Direct`
+// signal (runtime string → owned); the bundled path writes the
+// owned form directly so no special-case stripping is needed.
+
+type FileStat = {
+  size: Int,
+  is_dir: Bool,
+  is_file: Bool,
+  modified: Int,
+}
+
+@intrinsic("almide_rt_fs_read_text")
+effect fn read_text(path: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_fs_read_bytes")
+effect fn read_bytes(path: String) -> Result[List[Int], String] = _
+
+@intrinsic("almide_rt_fs_write")
+effect fn write(path: String, content: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_write_bytes")
+effect fn write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_write_bytes_raw")
+effect fn write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_append")
+effect fn append(path: String, content: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_mkdir_p")
+effect fn mkdir_p(path: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_exists")
+effect fn exists(path: String) -> Bool = _
+
+@intrinsic("almide_rt_fs_read_lines")
+effect fn read_lines(path: String) -> Result[List[String], String] = _
+
+@intrinsic("almide_rt_fs_remove")
+effect fn remove(path: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_list_dir")
+effect fn list_dir(path: String) -> Result[List[String], String] = _
+
+@intrinsic("almide_rt_fs_is_dir")
+effect fn is_dir(path: String) -> Bool = _
+
+@intrinsic("almide_rt_fs_is_file")
+effect fn is_file(path: String) -> Bool = _
+
+@intrinsic("almide_rt_fs_copy")
+effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_rename")
+effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_walk")
+effect fn walk(dir: String) -> Result[List[String], String] = _
+
+@intrinsic("almide_rt_fs_remove_all")
+effect fn remove_all(path: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs_file_size")
+effect fn file_size(path: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_fs_temp_dir")
+fn temp_dir() -> String = _
+
+@intrinsic("almide_rt_fs_stat")
+effect fn stat(path: String) -> Result[FileStat, String] = _
+
+@intrinsic("almide_rt_fs_glob")
+effect fn glob(pattern: String) -> Result[List[String], String] = _
+
+@intrinsic("almide_rt_fs_create_temp_file")
+effect fn create_temp_file(prefix: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_fs_create_temp_dir")
+effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_fs_is_symlink")
+effect fn is_symlink(path: String) -> Bool = _
+
+@intrinsic("almide_rt_fs_modified_at")
+effect fn modified_at(path: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_fs_read_bytes_raw")
+effect fn read_bytes_raw(path: String) -> Result[Bytes, String] = _

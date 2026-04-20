@@ -1,15 +1,17 @@
 //! Call Resolution pass: verify-and-rewrite for every `CallTarget::Module`.
 //!
 //! Phase 1a (v0.14.5): user-module call verification.
-//! Phase 1b (v0.14.7-phase3.5, this revision): IR rewrite + stdlib coverage.
+//! Phase 1b (v0.14.7-phase3.5): IR rewrite + stdlib coverage.
 //! Phase 1c (v0.14.7-phase3.2): `emit_stub_call*` panic on reach.
+//! Phase 1d (v0.14.7-phase3.3): `emit_stub_call*` helpers deleted; each
+//! WASM dispatcher fallback is an inline `panic!("[ICE] ...")`.
 //!
 //! ## What this pass does
 //!
 //! Walks every `CallTarget::Module { module, func }` and either:
 //! - **Verifies**: a TOML-backed stdlib fn or a user-module fn exists; if
-//!   neither matches, emits a postcondition violation (compile-time ICE
-//!   under `ALMIDE_CHECK_IR=1`).
+//!   neither matches, emits a postcondition violation — a hard contract
+//!   (panic in debug, diagnostic in release; S2 flip).
 //! - **Rewrites**: a bundled-Almide stdlib fn (`(m, f)` not in TOML, but
 //!   present as `IrFunction` inside `program.modules[m]`) → rewrite the
 //!   call target to `CallTarget::Named { name: "almide_rt_<m>_<f>" }`,
@@ -39,7 +41,6 @@ use almide_ir::*;
 use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut};
 use almide_base::intern::sym;
 use super::pass::{NanoPass, PassResult, Postcondition, Target};
-use super::generated::arg_transforms;
 
 #[derive(Debug)]
 pub struct ResolveCallsPass;
@@ -84,9 +85,16 @@ impl NanoPass for ResolveCallsPass {
                         // versioned lookup. Rewriting to a non-versioned
                         // `almide_rt_<pkg>_<fn>` here would break the link.
                         let is_stdlib = almide_lang::stdlib_info::is_any_stdlib(m);
-                        let toml_has = arg_transforms::lookup(m, f).is_some();
                         let bundled_has = self.symbols.module_has_fn(m, f);
-                        if is_stdlib && !toml_has && bundled_has {
+                        // `@inline_rust` / `@wasm_intrinsic` bundled fns stay
+                        // as `CallTarget::Module` — the per-target lowering
+                        // pass intercepts them and emits a template. If we
+                        // rewrote them here, pass_stdlib_lowering would never
+                        // see the Module target and the template dispatch
+                        // would silently fall back to a Named call referring
+                        // to a symbol that nobody emits.
+                        let has_override = self.symbols.has_codegen_override(m, f);
+                        if is_stdlib && bundled_has && !has_override {
                             let mangled = format!(
                                 "almide_rt_{}_{}",
                                 m.replace('.', "_"),
@@ -151,12 +159,20 @@ fn verify_all_calls_resolved(program: &IrProgram) -> Vec<String> {
                     let f = func.as_str();
                     let is_stdlib = almide_lang::stdlib_info::is_any_stdlib(m);
                     let resolved = if is_stdlib {
-                        // stdlib (TOML or bundled IR fn). The rewriter above
-                        // moved bundled fns to Named, so by the time this
-                        // postcondition runs, any Module {stdlib, f} should
-                        // be TOML-backed.
-                        arg_transforms::lookup(m, f).is_some()
-                            || self.symbols.module_has_fn(m, f)
+                        // Post-unification every stdlib module lives in
+                        // `stdlib/<m>.almd`. When the user code imports it,
+                        // resolve.rs lowers the bundled module into
+                        // `program.modules` and the symbol table sees it.
+                        // When the call-site code uses a stdlib module
+                        // without importing it (e.g. `bytes.push` from a
+                        // file that already pulled in `bytes` via UFCS),
+                        // the per-target dispatcher (`emit_bytes_call` /
+                        // `pass_stdlib_lowering` template) still handles
+                        // the call — fall back to a parse of the bundled
+                        // source so the verify trusts the actual codegen
+                        // surface, not just whichever modules happened to
+                        // get loaded into the IR for this build.
+                        self.symbols.module_has_fn(m, f) || bundled_has_fn(m, f)
                     } else if self.symbols.has_user_module(m) {
                         self.symbols.module_has_fn(m, f)
                     } else {
@@ -215,20 +231,40 @@ fn verify_all_calls_resolved(program: &IrProgram) -> Vec<String> {
 struct SymbolTable {
     /// (module_name → set of function names declared in that module)
     user_modules: std::collections::HashMap<String, HashSet<String>>,
+    /// Subset of the above: `(module, fn)` pairs whose IrFunction
+    /// carries an `@inline_rust` or `@wasm_intrinsic` attribute. These
+    /// are dispatch-only declarations (Stdlib Declarative Unification
+    /// Stage 2+): their bodies are never emitted, and call sites must
+    /// stay as `CallTarget::Module` so the per-target lowering
+    /// (`StdlibLoweringPass` on Rust, `emit_int_call` etc. on WASM)
+    /// can intercept them with the right semantics. Rewriting them to
+    /// `CallTarget::Named { almide_rt_<m>_<f> }` would bypass the
+    /// template-substitution path entirely and route calls to a symbol
+    /// that `pass_stdlib_lowering` refuses to generate (because the
+    /// bundled fn's body is skipped at emit time).
+    codegen_override: HashSet<(String, String)>,
 }
 
 impl SymbolTable {
     fn build(program: &IrProgram) -> Self {
         let mut user_modules = std::collections::HashMap::new();
+        let mut codegen_override: HashSet<(String, String)> = HashSet::new();
         for module in &program.modules {
             let name = module.name.to_string();
             let funcs: HashSet<String> = module.functions.iter()
                 .filter(|f| !f.is_test)
                 .map(|f| f.name.to_string())
                 .collect();
+            for f in &module.functions {
+                if f.attrs.iter().any(|a|
+                    matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"))
+                {
+                    codegen_override.insert((name.clone(), f.name.to_string()));
+                }
+            }
             user_modules.insert(name, funcs);
         }
-        Self { user_modules }
+        Self { user_modules, codegen_override }
     }
 
     fn has_user_module(&self, name: &str) -> bool {
@@ -240,4 +276,27 @@ impl SymbolTable {
             .map(|fs| fs.contains(func))
             .unwrap_or(false)
     }
+
+    fn has_codegen_override(&self, module: &str, func: &str) -> bool {
+        self.codegen_override.contains(&(module.to_string(), func.to_string()))
+    }
+}
+
+/// Does `module.func` exist in the bundled `.almd` source for `module`?
+/// Used by the verify pass when a stdlib call site is reached without
+/// the corresponding bundled IR being loaded into `program.modules`
+/// (call sites that touch a stdlib module the user did not explicitly
+/// `import`). The per-target dispatcher renders these via
+/// `emit_<module>_call` / `pass_stdlib_lowering` template substitution,
+/// so the verify accepts them as long as the bundled source declares
+/// the fn.
+fn bundled_has_fn(module: &str, func: &str) -> bool {
+    use almide_lang::ast::Decl;
+    let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
+        return false;
+    };
+    let Some(program) = almide_lang::parse_cached(source) else { return false; };
+    program.decls.iter().any(|decl| {
+        matches!(decl, Decl::Fn { name, .. } if name.as_str() == func)
+    })
 }

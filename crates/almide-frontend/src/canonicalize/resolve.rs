@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use almide_lang::ast;
-use crate::types::{Ty, VariantCase, VariantPayload};
+use crate::types::{Ty, TypeConstructorId, VariantCase, VariantPayload};
 use almide_base::intern::{Sym, sym};
 
 /// Resolve an AST type expression to a Ty.
@@ -18,6 +18,21 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
         ast::TypeExpr::Simple { name } => match name.as_str() {
             "Int" => Ty::Int,
             "Float" => Ty::Float,
+            // Sized numeric types (Stage 1a of the sized-numeric-types arc).
+            // `Int64` / `Float64` alias to `Ty::Int` / `Ty::Float` — writing
+            // either form is indistinguishable at the type checker layer, so
+            // existing code that uses `Int` keeps compiling while new code
+            // can use the precise width name.
+            "Int64" => Ty::Int64,
+            "Float64" => Ty::Float64,
+            "Int8" => Ty::Int8,
+            "Int16" => Ty::Int16,
+            "Int32" => Ty::Int32,
+            "UInt8" => Ty::UInt8,
+            "UInt16" => Ty::UInt16,
+            "UInt32" => Ty::UInt32,
+            "UInt64" => Ty::UInt64,
+            "Float32" => Ty::Float32,
             "String" => Ty::String,
             "Bool" => Ty::Bool,
             "Unit" => Ty::Unit,
@@ -25,6 +40,12 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
             "Matrix" => Ty::Matrix,
             "RawPtr" => Ty::RawPtr,
             "Path" => Ty::String,
+            // `Never` is the bottom type — used by `process.exit` and
+            // similar diverging fns. The resolver has to surface it as
+            // `Ty::Never` (not `Ty::Named("Never", [])`); without this,
+            // bundled sigs that spell `-> Never` would be unifiable only
+            // with another nominal `Never` type, which doesn't exist.
+            "Never" => Ty::Never,
             other => {
                 // - Generic type parameters (T, U, Self, ...) resolve via
                 //   known_types as `Ty::TypeVar`.
@@ -76,6 +97,12 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
                 "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
                 "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
                 "Set" => Ty::set_of(ra.first().cloned().unwrap_or(Ty::Unknown)),
+                // Sized Numeric Types P4 kickoff: `Matrix[T]` resolves
+                // to `Applied(Matrix, [T])` so the checker can discriminate
+                // `Matrix[Float32]` / `Matrix[Float64]`. Bare `Matrix`
+                // (no args) stays as `Ty::Matrix` — the compat rule in
+                // `types/mod.rs` bridges bare `Matrix` ↔ `Matrix[Float]`.
+                "Matrix" => Ty::Applied(TypeConstructorId::Matrix, ra),
                 _ => {
                     let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
                     Ty::Named(resolved_name, ra)

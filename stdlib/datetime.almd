@@ -1,0 +1,73 @@
+// datetime — bundled-Almide stdlib module.
+//
+// Fully `@intrinsic`-backed. `runtime/rs/src/datetime.rs` carries the
+// arithmetic wrappers too (`add_days` / `diff_seconds` / `is_before`
+// ...), so there's no reason to keep inline `{ts} + {n} * 86400`
+// templates around. `from_unix` / `to_unix` are identity conversions
+// and stay as pure Almide bodies.
+
+@intrinsic("almide_rt_datetime_add_days")
+fn add_days(ts: Int, n: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_add_hours")
+fn add_hours(ts: Int, n: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_add_minutes")
+fn add_minutes(ts: Int, n: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_add_seconds")
+fn add_seconds(ts: Int, n: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_day")
+fn day(ts: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_diff_seconds")
+fn diff_seconds(a: Int, b: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_format")
+fn format(ts: Int, pattern: String) -> String = _
+
+@intrinsic("almide_rt_datetime_from_parts")
+fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_from_unix")
+fn from_unix(seconds: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_hour")
+fn hour(ts: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_is_after")
+fn is_after(a: Int, b: Int) -> Bool = _
+
+@intrinsic("almide_rt_datetime_is_before")
+fn is_before(a: Int, b: Int) -> Bool = _
+
+@intrinsic("almide_rt_datetime_minute")
+fn minute(ts: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_month")
+fn month(ts: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_now")
+fn now() -> Int = _
+
+@intrinsic("almide_rt_datetime_monotonic_ns")
+fn monotonic_ns() -> Int = _
+
+@intrinsic("almide_rt_datetime_parse_iso")
+fn parse_iso(s: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_datetime_second")
+fn second(ts: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_to_iso")
+fn to_iso(ts: Int) -> String = _
+
+@intrinsic("almide_rt_datetime_to_unix")
+fn to_unix(ts: Int) -> Int = _
+
+@intrinsic("almide_rt_datetime_weekday")
+fn weekday(ts: Int) -> String = _
+
+@intrinsic("almide_rt_datetime_year")
+fn year(ts: Int) -> Int = _

@@ -46,8 +46,26 @@ pub struct Checker {
     pub source_file: Option<String>,
     pub source_text: Option<String>,
     pub(crate) current_span: Option<crate::ast::Span>,
+    /// Span of the current call's callee expression (the identifier
+    /// / member reference). Set by `check_named_call_spanned` so E002
+    /// can emit a `try_replace` range pointing exactly at the name
+    /// token rather than the whole call. Cleared after each callee.
+    pub(crate) callee_span_hint: Option<crate::ast::Span>,
+    /// Span of the enclosing Call expression (covers callee + args +
+    /// parentheses). Set by `infer_call` before descending into
+    /// `check_call_with_type_args`, so diagnostics that need to
+    /// rewrite the whole call (UFCS `x.to_uppercase()` →
+    /// `string.to_upper(x)`) can target the full range.
+    pub(crate) call_span_hint: Option<crate::ast::Span>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
+    /// Module-name prefix active during `infer_module`. `None` for the
+    /// main program. Used by the `TopLet` inference branch to write
+    /// back inferred types under the prefixed `env.top_lets` key
+    /// (`util.ANON`) that `register_decls` seeded — otherwise module
+    /// top_lets without explicit ascription regress to `Ty::Unknown`
+    /// and codegen emits `LazyLock<_>`.
+    pub(crate) current_module_prefix: Option<String>,
 }
 
 impl Checker {
@@ -58,8 +76,47 @@ impl Checker {
             diagnostics: Vec::new(),
             source_file: None, source_text: None,
             current_span: None,
+            callee_span_hint: None,
+            call_span_hint: None,
             constraints: Vec::new(), uf: UnionFind::new(),
+            current_module_prefix: None,
         }
+    }
+
+    /// Extract the source substring covered by a single-line span. Returns
+    /// `None` when `source_text` is unset (IDE / playground contexts) or
+    /// the span is out-of-bounds. Used by Phase 3 diagnostics that need
+    /// to interpolate existing source (e.g. E002 method-UFCS rewrites
+    /// `x.to_uppercase()` to `string.to_upper(x)` — `x` comes from the
+    /// object's span).
+    pub(crate) fn source_slice(&self, span: crate::ast::Span) -> Option<String> {
+        let text = self.source_text.as_deref()?;
+        let mut line_start = 0usize;
+        let mut cur_line = 1usize;
+        for (i, b) in text.bytes().enumerate() {
+            if cur_line == span.line { break; }
+            if b == b'\n' {
+                cur_line += 1;
+                line_start = i + 1;
+            }
+        }
+        if cur_line != span.line { return None; }
+        let line_end = text[line_start..].find('\n').map(|i| line_start + i).unwrap_or(text.len());
+        let line_slice = &text[line_start..line_end];
+        let col_to_byte = |target: usize| -> Option<usize> {
+            match line_slice.char_indices().nth(target - 1) {
+                Some((b, _)) => Some(b),
+                None => {
+                    let n = line_slice.chars().count();
+                    if target == n + 1 { Some(line_slice.len()) } else { None }
+                }
+            }
+        };
+        let start = col_to_byte(span.col)?;
+        let end_col = if span.end_col > span.col { span.end_col } else { span.col + 1 };
+        let end = col_to_byte(end_col)?;
+        if end < start || end > line_slice.len() { return None; }
+        Some(line_slice[start..end].to_string())
     }
 
     /// Push a diagnostic, automatically attaching the current expression's span.
@@ -151,7 +208,106 @@ impl Checker {
                 format!("import at line {}", line),
             ));
         }
+        self.check_reimpl_lint(program);
         std::mem::take(&mut self.diagnostics)
+    }
+
+    /// Reimpl lint — detect top-level user fns whose name is close to a
+    /// stdlib fn AND whose signature matches exactly. Emits a Warning
+    /// with a `try:` delegation shim so LLM retries can converge on
+    /// the idiomatic one-liner. Opt-in strictness: a miss on any of
+    /// (name distance ≤ 2, param count, param types, return type)
+    /// suppresses the suggestion.
+    ///
+    /// Scope: top-level, non-monomorphized, non-derive, non-test fns.
+    /// Roadmap: `docs/roadmap/active/reimpl-lint.md`.
+    pub(crate) fn check_reimpl_lint(&mut self, program: &ast::Program) {
+        for decl in &program.decls {
+            let ast::Decl::Fn { name, params, return_type, span, .. } = decl else { continue };
+            let user_name = name.as_str();
+            if user_name.starts_with("__") { continue; }
+            if user_name.contains('.') { continue; } // convention method like `Type.encode`
+            let user_param_tys: Vec<Ty> = params.iter()
+                .map(|p| self.resolve_type_expr(&p.ty))
+                .collect();
+            let user_ret = self.resolve_type_expr(return_type);
+            if user_param_tys.iter().any(|t| matches!(t, Ty::Unknown)) { continue; }
+            if matches!(user_ret, Ty::Unknown) { continue; }
+            let Some((module, stdlib_fn)) = self.find_stdlib_reimpl(user_name, &user_param_tys, &user_ret)
+                else { continue };
+            let try_shim = format!(
+                "fn {name}({params}) -> {ret} =\n    {module}.{fn}({args})",
+                name = user_name,
+                params = params.iter()
+                    .map(|p| format!("{}: {}", p.name, self.resolve_type_expr(&p.ty).display()))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                ret = user_ret.display(),
+                module = module,
+                fn = stdlib_fn,
+                args = params.iter().map(|p| p.name.to_string()).collect::<Vec<_>>().join(", "),
+            );
+            let mut diag = Diagnostic::warning(
+                format!("fn '{}' has the same signature as stdlib `{}.{}`", user_name, module, stdlib_fn),
+                format!(
+                    "If this is the standard algorithm, delegate to stdlib. \
+                     Keep the local impl only if you need the specific behaviour that differs from `{}.{}`.",
+                    module, stdlib_fn
+                ),
+                format!("fn {}", user_name),
+            ).with_code("E015").with_try(try_shim);
+            if let Some(s) = span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+                if s.end_col > s.col {
+                    diag.end_col = Some(s.end_col);
+                }
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// Structural type-equality for reimpl-lint: `TypeVar` at the
+    /// stdlib side matches any concrete Ty at the user side (a
+    /// monomorphic `List[Int]` fn should match the generic
+    /// `list.binary_search[T]`). Nested `Applied` compares
+    /// element-wise, everything else is exact match.
+    fn find_stdlib_reimpl(
+        &self,
+        user_name: &str,
+        user_param_tys: &[Ty],
+        user_ret: &Ty,
+    ) -> Option<(&'static str, &'static str)> {
+        let user_lc = user_name.to_ascii_lowercase();
+        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            for fn_name in crate::stdlib::module_functions_all(module) {
+                // Name-similarity filter: coarse `≤ 2` Levenshtein
+                // gate (cheap), then a substring gate so that
+                // common-shape collisions like
+                // `fn add(Int, Int) -> Int` don't false-positive
+                // against `int.band`. Require one name to contain
+                // the other (case-insensitive) — catches typos
+                // (`maps` ⊃ `map`), qualified renames
+                // (`my_binary_search` ⊃ `binary_search`), and exact
+                // matches, while excluding short stdlib names with
+                // unrelated user fns.
+                if almide_base::diagnostic::levenshtein(user_name, fn_name) > 2 {
+                    continue;
+                }
+                let fn_lc = fn_name.to_ascii_lowercase();
+                if !(user_lc.contains(&fn_lc) || fn_lc.contains(&user_lc)) {
+                    continue;
+                }
+                let Some(sig) = crate::stdlib::lookup_sig(module, fn_name) else { continue };
+                if sig.params.len() != user_param_tys.len() { continue; }
+                if !sigs_match_structurally(&sig.params, &sig.ret, user_param_tys, user_ret) {
+                    continue;
+                }
+                return Some((module, fn_name));
+            }
+        }
+        Option::None
     }
 
     /// Type-check a module's declarations. Populates type_map for all expressions.
@@ -178,9 +334,14 @@ impl Checker {
         );
 
         // Infer + solve + resolve
+        let saved_prefix = std::mem::replace(
+            &mut self.current_module_prefix,
+            Some(module_name.to_string()),
+        );
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         resolve_type_map(&mut self.type_map, &self.uf);
+        self.current_module_prefix = saved_prefix;
 
         // Restore
         self.constraints = saved_constraints;
@@ -303,7 +464,18 @@ impl Checker {
             ast::Decl::TopLet { name, value, .. } => {
                 let ity = self.infer_expr(value);
                 let resolved = resolve_ty(&ity, &self.uf);
-                // Update env.top_lets with the fully inferred type
+                // Update env.top_lets with the fully inferred type.
+                // `register_decls` seeds module top_lets under the
+                // prefixed key (`util.ANON`), so without this we'd only
+                // refresh the unprefixed intra-module alias — lowering
+                // reads the prefixed key and gets `Ty::Unknown`.
+                let prefixed_key = self.current_module_prefix.as_ref()
+                    .map(|p| sym(&format!("{}.{}", p, name)));
+                if let Some(k) = prefixed_key {
+                    if matches!(self.env.top_lets.get(&k), Some(Ty::Unknown) | None) {
+                        self.env.top_lets.insert(k, resolved.clone());
+                    }
+                }
                 if matches!(self.env.top_lets.get(&sym(name)), Some(Ty::Unknown) | None) {
                     self.env.top_lets.insert(sym(name), resolved);
                 }
@@ -346,9 +518,14 @@ impl Checker {
     pub(crate) fn check_match_exhaustiveness(&mut self, subject_ty: &Ty, arms: &[ast::MatchArm]) {
         let missing = exhaustiveness::check_exhaustiveness(subject_ty, arms, &self.env);
         if !missing.is_empty() {
-            let list = missing.join(", ");
+            let list = missing
+                .iter()
+                .map(|m| m.pattern.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
             let resolved = self.env.resolve_named(subject_ty);
-            let hint = if missing.len() == 1 && missing[0] == "_" {
+            let has_guarded_arms = arms.iter().any(|a| a.guard.is_some());
+            let hint_base = if missing.len() == 1 && missing[0].pattern == "_" {
                 let ty_name = match &resolved {
                     Ty::Int => "Int",
                     Ty::Float => "Float",
@@ -357,13 +534,73 @@ impl Checker {
                 };
                 format!("match on {} requires a catch-all '_' pattern", ty_name)
             } else {
-                format!("Add arms for {}, or use '_'", list)
+                // Paste-ready arms: indent + join with newlines so the LLM
+                // (or user) can copy the block straight into the source.
+                // `_ => todo()` is appended as a fallback for incremental
+                // compilation, mirroring Rust's `unimplemented!()` idiom.
+                let arms_block = missing
+                    .iter()
+                    .map(|m| format!("  {}", m.arm_template))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!(
+                    "add arms for {}:\n{}\nOr use `_ => todo()` to compile incrementally.",
+                    list, arms_block
+                )
+            };
+            // §4: when guarded arms are present, exhaustiveness skips
+            // them — the user may read "missing X" and assume their
+            // `X if cond => ...` arm already covered X. Add a note
+            // explaining the rule so the fix is to either drop the
+            // guard or add `_ => ...`.
+            let hint = if has_guarded_arms {
+                format!(
+                    "{}\n\
+                     Note: guarded arms (`pat if cond =>`) do NOT count \
+                     toward exhaustiveness — the guard can fail at \
+                     runtime. Add an unguarded arm covering the pattern(s) \
+                     above (often `_ => ...`).",
+                    hint_base
+                )
+            } else {
+                hint_base
             };
             self.emit(Diagnostic::error(
                 format!("non-exhaustive match: missing {}", list),
                 hint,
                 "match",
             ).with_code("E010"));
+        }
+
+        // §2: unreachable arms are a hard error. A pattern already
+        // covered by earlier arms is almost always a generation mistake
+        // — the LLM mis-encoded an earlier condition. Reporting at
+        // error level (not warning) surfaces the problem on the first
+        // CI run rather than being lost in stdout noise.
+        // Code: E014 (E011 is the pre-existing "mutable var mutated
+        // inside closure" diagnostic in `infer.rs`).
+        let dead = exhaustiveness::find_unreachable_arms(subject_ty, arms, &self.env);
+        for idx in dead {
+            let arm = &arms[idx];
+            let mut diag = Diagnostic::error(
+                "unreachable match arm",
+                "This arm's pattern is already covered by an earlier arm. \
+                 Either delete it, or tighten the earlier arm so this one is reachable.",
+                "match",
+            ).with_code("E014");
+            // Patterns don't carry spans in the AST. The arm body's
+            // span is adjacent to the pattern (`pattern => body`), so
+            // the diagnostic lands on the right line — close enough
+            // for LLM / human navigation.
+            if let Some(span) = arm.body.span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(span.line);
+                diag.col = Some(span.col);
+                if span.end_col > span.col {
+                    diag.end_col = Some(span.end_col);
+                }
+            }
+            self.emit(diag);
         }
     }
 
@@ -431,5 +668,53 @@ fn trailing_let_name(expr: &ast::Expr) -> Option<String> {
     match stmts.last()? {
         ast::Stmt::Let { name, .. } | ast::Stmt::Var { name, .. } => Some(name.to_string()),
         _ => None,
+    }
+}
+
+/// Structural signature compare for `reimpl-lint`. Param names are
+/// ignored (stdlib uses `xs` / `n` etc., user may use anything);
+/// types are compared element-wise with TypeVar treated as a
+/// wildcard (the stdlib side may be generic, the user side usually
+/// monomorphic — still counts as a reimplementation).
+fn sigs_match_structurally(
+    stdlib_params: &[(almide_base::intern::Sym, Ty)],
+    stdlib_ret: &Ty,
+    user_params: &[Ty],
+    user_ret: &Ty,
+) -> bool {
+    if stdlib_params.len() != user_params.len() { return false; }
+    for ((_, sty), uty) in stdlib_params.iter().zip(user_params.iter()) {
+        if !ty_reimpl_eq(sty, uty) { return false; }
+    }
+    ty_reimpl_eq(stdlib_ret, user_ret)
+}
+
+/// Reimpl-lint type equality: structural on `Applied`, exact on
+/// primitives, `TypeVar` on the stdlib side matches any Ty on the
+/// user side. Asymmetric — user's `TypeVar` doesn't match stdlib
+/// concrete (we don't want a generic user fn to claim reimpl of a
+/// concrete stdlib one).
+fn ty_reimpl_eq(stdlib_ty: &Ty, user_ty: &Ty) -> bool {
+    match (stdlib_ty, user_ty) {
+        (Ty::TypeVar(_), _) => true,
+        (Ty::Applied(sid, sargs), Ty::Applied(uid, uargs)) => {
+            if sid != uid || sargs.len() != uargs.len() { return false; }
+            sargs.iter().zip(uargs.iter()).all(|(s, u)| ty_reimpl_eq(s, u))
+        }
+        (Ty::Tuple(stys), Ty::Tuple(utys)) => {
+            if stys.len() != utys.len() { return false; }
+            stys.iter().zip(utys.iter()).all(|(s, u)| ty_reimpl_eq(s, u))
+        }
+        (Ty::Fn { params: sp, ret: sr }, Ty::Fn { params: up, ret: ur }) => {
+            if sp.len() != up.len() { return false; }
+            sp.iter().zip(up.iter()).all(|(s, u)| ty_reimpl_eq(s, u))
+                && ty_reimpl_eq(sr, ur)
+        }
+        (Ty::Named(sn, sa), Ty::Named(un, ua)) => {
+            sn == un
+                && sa.len() == ua.len()
+                && sa.iter().zip(ua.iter()).all(|(s, u)| ty_reimpl_eq(s, u))
+        }
+        _ => stdlib_ty == user_ty,
     }
 }

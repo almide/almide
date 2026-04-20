@@ -59,20 +59,14 @@ impl NanoPass for AutoParallelPass {
         for tl in &mut program.top_lets {
             tl.value = rewrite_expr(tl.value.clone(), &effect_fns, &mutable_vars);
         }
+        // Post-unification every VarId lives in `program.var_table`;
+        // `mutable_vars` already covers module-local bindings too.
         for module in &mut program.modules {
-            // Each module has its own var_table for mutable var tracking
-            let mut mod_mutable = std::collections::HashSet::new();
-            for i in 0..module.var_table.len() {
-                let id = VarId(i as u32);
-                if module.var_table.get(id).mutability == Mutability::Var {
-                    mod_mutable.insert(id);
-                }
-            }
             for func in &mut module.functions {
-                func.body = rewrite_expr(func.body.clone(), &effect_fns, &mod_mutable);
+                func.body = rewrite_expr(func.body.clone(), &effect_fns, &mutable_vars);
             }
             for tl in &mut module.top_lets {
-                tl.value = rewrite_expr(tl.value.clone(), &effect_fns, &mod_mutable);
+                tl.value = rewrite_expr(tl.value.clone(), &effect_fns, &mutable_vars);
             }
         }
         PassResult { program, changed: true }
@@ -142,6 +136,20 @@ fn is_pure_expr(
                     }
                 }
                 _ => {}
+            }
+            args.iter().all(|a| is_pure_expr(a, local_vars, effect_fns, mutable_vars))
+        }
+
+        // Resolved runtime call: purity follows the same effect-module
+        // rules as Module calls. `almide_rt_fs_*` / `almide_rt_http_*` /
+        // etc. are effects and block parallelization.
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let name = symbol.as_str();
+            if let Some(rest) = name.strip_prefix("almide_rt_") {
+                let module = rest.split('_').next().unwrap_or("");
+                if matches!(module, "fs" | "http" | "env" | "process" | "time") {
+                    return false;
+                }
             }
             args.iter().all(|a| is_pure_expr(a, local_vars, effect_fns, mutable_vars))
         }
@@ -261,7 +269,7 @@ fn is_pure_expr(
         IrExprKind::FnRef { .. } => true,
 
         // Macro invocations and rendered calls: assume impure (conservative)
-        IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
+        IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. } => false,
 
         // Loops in a lambda body: could mutate, be conservative
         IrExprKind::ForIn { .. } | IrExprKind::While { .. } => false,
@@ -516,6 +524,10 @@ fn rewrite_expr(
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name,
             args: args.into_iter().map(|a| rewrite_expr(a, effect_fns, mutable_vars)).collect(),
+        },
+        IrExprKind::InlineRust { template, args } => IrExprKind::InlineRust {
+            template,
+            args: args.into_iter().map(|(n, a)| (n, rewrite_expr(a, effect_fns, mutable_vars))).collect(),
         },
         other => other,
     };

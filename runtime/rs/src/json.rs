@@ -3,9 +3,9 @@
 
 // ── Parse + Stringify ──
 
-pub fn almide_rt_json_stringify(v: Value) -> String { almide_rt_value_stringify(&v) }
+pub fn almide_rt_json_stringify(v: &Value) -> String { almide_rt_value_stringify(v) }
 
-pub fn almide_rt_json_parse(text: String) -> Result<Value, String> {
+pub fn almide_rt_json_parse(text: &str) -> Result<Value, String> {
     let chars: Vec<char> = text.chars().collect();
     let mut pos = 0;
     fn skip_ws(chars: &[char], pos: &mut usize) { while *pos < chars.len() && chars[*pos].is_whitespace() { *pos += 1; } }
@@ -117,11 +117,15 @@ pub fn almide_json_to_map(j: &Value) -> Option<HashMap<String, String>> {
     }
 }
 
-pub fn almide_json_object(entries: Vec<(String, Value)>) -> Value {
-    Value::Object(entries)
+pub fn almide_json_object(entries: &[(String, Value)]) -> Value {
+    Value::Object(entries.to_vec())
 }
 
 pub fn almide_json_from_float(n: f64) -> Value { Value::Float(n) }
+pub fn almide_json_from_string(s: &str) -> Value { Value::Str(s.to_string()) }
+pub fn almide_json_from_int(n: i64) -> Value { Value::Int(n) }
+pub fn almide_json_from_bool(b: bool) -> Value { Value::Bool(b) }
+pub fn almide_json_array(items: &[Value]) -> Value { Value::Array(items.to_vec()) }
 
 // ── Stringify pretty ──
 
@@ -174,7 +178,7 @@ impl std::fmt::Display for AlmideJsonPath {
 
 // Wrapper functions for stdlib codegen (json.root(), json.field(), json.index())
 pub fn almide_rt_json_root() -> AlmideJsonPath { AlmideJsonPath::JpRoot }
-pub fn almide_rt_json_field(path: AlmideJsonPath, name: String) -> AlmideJsonPath { AlmideJsonPath::JpField(Box::new(path), name) }
+pub fn almide_rt_json_field(path: AlmideJsonPath, name: &str) -> AlmideJsonPath { AlmideJsonPath::JpField(Box::new(path), name.to_string()) }
 pub fn almide_rt_json_index(path: AlmideJsonPath, i: i64) -> AlmideJsonPath { AlmideJsonPath::JpIndex(Box::new(path), i) }
 
 /// Resolve a JsonPath to a list of traversal steps, root-first.

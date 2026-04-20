@@ -210,9 +210,11 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(src);
             }
-            _ => {
-                self.emit_stub_call_named("random", func, args);
-            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `random.{}` — \
+                 add an arm in emit_random_call or resolve upstream",
+                func
+            ),
         }
     }
 

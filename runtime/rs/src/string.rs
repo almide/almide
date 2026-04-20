@@ -37,10 +37,10 @@ pub fn almide_rt_string_from_bytes(bytes: &Vec<i64>) -> String { bytes.iter().ma
 pub fn almide_rt_string_codepoint(s: &str) -> Option<i64> { s.chars().next().map(|c| c as i64) }
 pub fn almide_rt_string_from_codepoint(cp: i64) -> String { char::from_u32(cp as u32).map(|c| c.to_string()).unwrap_or_default() }
 
-pub fn almide_rt_string_slice(s: &str, start: i64, end: Option<i64>) -> String {
+pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> String {
     let chars: Vec<char> = s.chars().collect();
     let s = start.max(0) as usize;
-    let e = end.unwrap_or(chars.len() as i64).min(chars.len() as i64) as usize;
+    let e = end.min(chars.len() as i64) as usize;
     if s >= e { String::new() } else { chars[s..e].iter().collect() }
 }
 

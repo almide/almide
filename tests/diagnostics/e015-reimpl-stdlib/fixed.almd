@@ -1,0 +1,2 @@
+fn binary_search(xs: List[Int], target: Int) -> Option[Int] =
+  list.binary_search(xs, target)

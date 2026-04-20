@@ -70,6 +70,9 @@ fn fold_expr(expr: &mut IrExpr) {
         IrExprKind::RustMacro { args, .. } => {
             for a in args { fold_expr(a); }
         }
+        IrExprKind::InlineRust { args, .. } => {
+            for (_, a) in args { fold_expr(a); }
+        }
         IrExprKind::IterChain { source, steps, collector, .. } => {
             fold_expr(source);
             for step in steps {

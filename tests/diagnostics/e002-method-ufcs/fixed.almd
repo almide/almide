@@ -1,0 +1,1 @@
+fn shout(s: String) -> String = string.to_upper(s)

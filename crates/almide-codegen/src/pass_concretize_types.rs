@@ -60,16 +60,16 @@ impl NanoPass for ConcretizeTypesPass {
     }
 
     fn postconditions(&self) -> Vec<Postcondition> {
-        // S2 (v0.14.7-phase3.1): audit runs on every build; violations are
-        // printed by the harness as `[POSTCONDITION VIOLATION] ...` and
-        // escalate to a panic under `ALMIDE_CHECK_IR=1`. spec/ runs clean
-        // on Rust at default + ALMIDE_CHECK_IR=1. WASM target on
-        // ALMIDE_CHECK_IR=1 still trips on lifted-lambda TypeVar residue
-        // produced by ClosureConversion (the second `ConcretizeTypes`
-        // pass cannot fully recover the lambda param type from VarTable
-        // when the source generic was already specialized away). Closing
-        // that gap is part of S3 (pass_resolve_calls Phase 1b-c) — see
-        // codegen-ideal-form.md §Phase 3 Arc.
+        // S2 flip (v0.14.7-phase3.2): audit is a hard contract. Debug
+        // builds panic on violation so CI and local dev never ship a
+        // program with unresolved `IrExpr.ty`; release builds print the
+        // diagnostic and keep compiling. Downstream passes (closure
+        // conversion, WASM emit, stdlib dispatch) rely on non-Unknown
+        // `expr.ty` unconditionally and no longer carry defensive
+        // fallbacks. Residual WASM-target lifted-lambda TypeVars produced
+        // by ClosureConversion are tracked separately in S3
+        // (pass_resolve_calls Phase 1b-c) — see codegen-ideal-form.md
+        // §Phase 3 Arc.
         vec![Postcondition::Custom(audit_remaining_unresolved)]
     }
 
@@ -79,23 +79,31 @@ impl NanoPass for ConcretizeTypesPass {
         // return types without deferring to emit-time guessing.
         let symbols = build_symbol_table(&program);
 
+        // Take var_table out of program so we can mutate it while also
+        // mutating program.functions. Back-propagation (below) updates
+        // VarTable entries for lambda accumulator params and match-pattern
+        // bindings; downstream passes expect the updates to persist.
+        let mut prog_vt = std::mem::take(&mut program.var_table);
         for func in &mut program.functions {
-            let vt = program.var_table.clone();
-            concretize_expr(&mut func.body, &vt, &symbols);
+            let ret = func.ret_ty.clone();
+            concretize_expr(&mut func.body, &mut prog_vt, &symbols, &ret);
         }
         for tl in &mut program.top_lets {
-            let vt = program.var_table.clone();
-            concretize_expr(&mut tl.value, &vt, &symbols);
+            concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
         }
+        // Module functions / top_lets now index into the unified
+        // program-level VarTable (post `UnifyVarTablesPass`), so we
+        // keep it taken out while we touch them too.
         for module in &mut program.modules {
-            let vt = module.var_table.clone();
             for func in &mut module.functions {
-                concretize_expr(&mut func.body, &vt, &symbols);
+                let ret = func.ret_ty.clone();
+                concretize_expr(&mut func.body, &mut prog_vt, &symbols, &ret);
             }
             for tl in &mut module.top_lets {
-                concretize_expr(&mut tl.value, &vt, &symbols);
+                concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
             }
         }
+        program.var_table = prog_vt;
         PassResult { program, changed: true }
     }
 }
@@ -106,6 +114,11 @@ struct SymbolTable {
     /// (module_name, func_name) → return type
     /// "" as module means top-level (for CallTarget::Named).
     sigs: std::collections::HashMap<(String, String), Ty>,
+    /// Record and record-payload variant case field types.
+    /// Keyed by the record / case name (matches `IrExprKind::Record.name`).
+    /// Used to push an expected element / payload type down into empty
+    /// list / map literals whose own inference left them `Unknown`.
+    record_fields: std::collections::HashMap<String, Vec<(almide_base::intern::Sym, Ty)>>,
 }
 
 impl SymbolTable {
@@ -114,6 +127,10 @@ impl SymbolTable {
     }
     fn lookup_named(&self, func: &str) -> Option<&Ty> {
         self.sigs.get(&(String::new(), func.to_string()))
+    }
+    fn lookup_field(&self, record: &str, field: &str) -> Option<&Ty> {
+        let fs = self.record_fields.get(record)?;
+        fs.iter().find(|(n, _)| n.as_str() == field).map(|(_, t)| t)
     }
 }
 
@@ -135,23 +152,351 @@ fn build_symbol_table(program: &IrProgram) -> SymbolTable {
             }
         }
     }
-    SymbolTable { sigs }
+    let mut record_fields = std::collections::HashMap::new();
+    for decl in &program.type_decls {
+        match &decl.kind {
+            almide_ir::IrTypeDeclKind::Record { fields } => {
+                let fs: Vec<_> = fields.iter()
+                    .map(|f| (f.name, f.ty.clone()))
+                    .collect();
+                record_fields.insert(decl.name.to_string(), fs);
+            }
+            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+                for case in cases {
+                    if let almide_ir::IrVariantKind::Record { fields } = &case.kind {
+                        let v: Vec<_> = fields.iter()
+                            .map(|f| (f.name, f.ty.clone()))
+                            .collect();
+                        record_fields.insert(case.name.to_string(), v);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    SymbolTable { sigs, record_fields }
+}
+
+/// For `ResultErr(payload)` with `ty = Result[Unknown, E]` inside an
+/// effect fn whose ret_ty was lifted to `Result[T, String]`, fill the
+/// Unknown Ok slot with `T`. The err-channel type stays whatever the
+/// inner expression produced so `err("msg")` / `err(custom_err)` both
+/// work. Returns `None` when the enclosing fn isn't a lifted Result
+/// or the inner doesn't have an Err ty yet.
+fn infer_err_ty_from_enclosing(enclosing_ret: &Ty, inner_ty: &Ty) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let ok_ty = match enclosing_ret {
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2
+            && !args[0].has_unresolved_deep() =>
+        {
+            args[0].clone()
+        }
+        _ => return None,
+    };
+    // Pick the Err type: prefer the inner's concrete ty, fall back to
+    // the enclosing fn's Err type.
+    let err_ty = if !inner_ty.has_unresolved_deep() {
+        inner_ty.clone()
+    } else if let Ty::Applied(TypeConstructorId::Result, args) = enclosing_ret {
+        args[1].clone()
+    } else {
+        return None;
+    };
+    Some(Ty::Applied(TypeConstructorId::Result, vec![ok_ty, err_ty]))
+}
+
+/// Push an expected type into an expression whose own inference left it
+/// `Unknown`. Narrow by design: the target is `Applied(List, [Unknown])`
+/// (the empty-list literal case) and the expected type fills the element
+/// slot. Other shapes could be added as specific gaps surface, but kept
+/// out for now so the audit keeps teeth around shapes we don't fully
+/// understand.
+fn propagate_expected_ty(expr: &mut IrExpr, expected: &Ty) {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match (&expr.ty, expected) {
+        (Ty::Applied(TypeConstructorId::List, args),
+         Ty::Applied(TypeConstructorId::List, exp_args))
+            if args.len() == 1 && exp_args.len() == 1
+                && args[0].has_unresolved_deep()
+                && !exp_args[0].has_unresolved_deep() =>
+        {
+            expr.ty = expected.clone();
+            // Tighten the List literal's declared element type too so
+            // downstream consumers (e.g. `emit_wasm::values::byte_size`)
+            // see the resolved shape.
+            if let IrExprKind::List { elements } = &mut expr.kind {
+                if elements.is_empty() {
+                    // nothing to rewrite inside — ty was the only carrier
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── Generic back-propagation helpers ────────────────────────────────
+
+/// Shape-aware merge: returns the most concrete type when `a` and `b`
+/// share a shape but differ in `Unknown` slots. Returns `None` when the
+/// shapes disagree (can't safely merge). Leaves TypeVar alone since the
+/// pre-pass is already expected to have substituted generics.
+fn merge_more_concrete(a: &Ty, b: &Ty) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let _ = TypeConstructorId::List; // silence unused warning in some builds
+    match (a, b) {
+        (Ty::Unknown, other) | (other, Ty::Unknown) => Some(other.clone()),
+        (Ty::Applied(c1, a1), Ty::Applied(c2, a2)) if c1 == c2 && a1.len() == a2.len() => {
+            let merged: Option<Vec<Ty>> = a1.iter().zip(a2.iter())
+                .map(|(x, y)| merge_more_concrete(x, y))
+                .collect();
+            merged.map(|m| Ty::Applied(c1.clone(), m))
+        }
+        (Ty::Tuple(e1), Ty::Tuple(e2)) if e1.len() == e2.len() => {
+            let merged: Option<Vec<Ty>> = e1.iter().zip(e2.iter())
+                .map(|(x, y)| merge_more_concrete(x, y))
+                .collect();
+            merged.map(Ty::Tuple)
+        }
+        (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 })
+            if p1.len() == p2.len() =>
+        {
+            let merged_params: Option<Vec<Ty>> = p1.iter().zip(p2.iter())
+                .map(|(x, y)| merge_more_concrete(x, y))
+                .collect();
+            let merged_ret = merge_more_concrete(r1, r2);
+            match (merged_params, merged_ret) {
+                (Some(ps), Some(r)) => Some(Ty::Fn { params: ps, ret: Box::new(r) }),
+                _ => None,
+            }
+        }
+        (x, y) if x == y => Some(x.clone()),
+        _ => None,
+    }
+}
+
+/// Push `expected` down into `expr`, recursing into wrappers (OptionSome,
+/// Result*, List, Tuple). Updates expr.ty and any matching sub-expressions
+/// whose own types have unresolved slots compatible with `expected`.
+fn propagate_ty_down(expr: &mut IrExpr, expected: &Ty) {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    if let Some(merged) = merge_more_concrete(&expr.ty, expected) {
+        expr.ty = merged;
+    }
+    match (&mut expr.kind, expected) {
+        (IrExprKind::OptionSome { expr: inner }, Ty::Applied(TCI::Option, args))
+            if args.len() == 1 =>
+        {
+            propagate_ty_down(inner, &args[0]);
+        }
+        (IrExprKind::ResultOk { expr: inner }, Ty::Applied(TCI::Result, args))
+            if !args.is_empty() =>
+        {
+            propagate_ty_down(inner, &args[0]);
+        }
+        (IrExprKind::ResultErr { expr: inner }, Ty::Applied(TCI::Result, args))
+            if args.len() >= 2 =>
+        {
+            propagate_ty_down(inner, &args[1]);
+        }
+        (IrExprKind::List { elements }, Ty::Applied(TCI::List, args))
+            if args.len() == 1 =>
+        {
+            for e in elements.iter_mut() { propagate_ty_down(e, &args[0]); }
+        }
+        (IrExprKind::Tuple { elements }, Ty::Tuple(ts)) if elements.len() == ts.len() => {
+            for (e, t) in elements.iter_mut().zip(ts.iter()) {
+                propagate_ty_down(e, t);
+            }
+        }
+        (IrExprKind::If { then, else_, .. }, _) => {
+            propagate_ty_down(then, expected);
+            propagate_ty_down(else_, expected);
+        }
+        (IrExprKind::Block { expr: Some(tail), .. }, _) => {
+            propagate_ty_down(tail, expected);
+        }
+        (IrExprKind::Match { arms, .. }, _) => {
+            for arm in arms.iter_mut() {
+                propagate_ty_down(&mut arm.body, expected);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Propagate a subject type into a match pattern, updating `Bind` pattern
+/// ty + the matching VarTable entry. Supports Some/Ok/Err/Tuple destructuring
+/// (the shapes that actually surface in spec/).
+fn propagate_pattern_ty(pat: &mut IrPattern, subj_ty: &Ty, vt: &mut VarTable) {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    match (pat, subj_ty) {
+        (IrPattern::Bind { var, ty }, t) => {
+            if ty.has_unresolved_deep() && !t.has_unresolved_deep() {
+                *ty = t.clone();
+                if (var.0 as usize) < vt.len() {
+                    vt.entries[var.0 as usize].ty = t.clone();
+                }
+            }
+        }
+        (IrPattern::Some { inner }, Ty::Applied(TCI::Option, args)) if args.len() == 1 => {
+            propagate_pattern_ty(inner, &args[0], vt);
+        }
+        (IrPattern::Ok { inner }, Ty::Applied(TCI::Result, args)) if !args.is_empty() => {
+            propagate_pattern_ty(inner, &args[0], vt);
+        }
+        (IrPattern::Err { inner }, Ty::Applied(TCI::Result, args)) if args.len() >= 2 => {
+            propagate_pattern_ty(inner, &args[1], vt);
+        }
+        (IrPattern::Tuple { elements }, Ty::Tuple(ts)) if elements.len() == ts.len() => {
+            for (e, t) in elements.iter_mut().zip(ts.iter()) {
+                propagate_pattern_ty(e, t, vt);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_fold_like_call(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func }, .. } => {
+            module.as_str() == "list" && matches!(func.as_str(), "fold" | "scan")
+        }
+        _ => false,
+    }
+}
+
+/// For `list.fold(xs, init, f)` where `f: (acc, t) -> acc`: the accumulator
+/// type `A` has two sources — `init.ty` and `f.body.ty` — which must agree.
+/// Pick the most concrete form available, then push it back into the init
+/// sub-expression, the lambda's acc parameter (IR annotation + VarTable),
+/// the Ty::Fn wrapper, and the Call's own ty. Returns true when changes
+/// were made.
+fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
+    let args = match &mut expr.kind {
+        IrExprKind::Call { args, .. } => args,
+        _ => return false,
+    };
+    if args.len() < 3 { return false; }
+
+    let body_ty = match &args[2].kind {
+        IrExprKind::Lambda { body, .. } => body.ty.clone(),
+        _ => return false,
+    };
+    let init_ty = args[1].ty.clone();
+
+    // Accumulator type: merge init and body, picking the most concrete
+    // shape when both are known and compatible. Fall back to whichever is
+    // concrete when only one side has a type.
+    let acc_ty = if !init_ty.has_unresolved_deep() && !body_ty.has_unresolved_deep() {
+        merge_more_concrete(&init_ty, &body_ty)
+    } else if !init_ty.has_unresolved_deep() {
+        Some(init_ty.clone())
+    } else if !body_ty.has_unresolved_deep() {
+        Some(body_ty.clone())
+    } else {
+        None
+    };
+    let Some(acc_ty) = acc_ty else { return false; };
+
+    let mut changed = false;
+
+    // Push acc_ty into the init sub-expression when init has weaker shape
+    if init_ty != acc_ty {
+        propagate_ty_down(&mut args[1], &acc_ty);
+        changed = true;
+    }
+
+    // Update lambda's acc param (IR + VarTable) and the Ty::Fn wrapper
+    if let IrExprKind::Lambda { params, .. } = &mut args[2].kind {
+        if let Some((vid, pty)) = params.get_mut(0) {
+            if pty.has_unresolved_deep() {
+                *pty = acc_ty.clone();
+                if (vid.0 as usize) < vt.len() {
+                    vt.entries[vid.0 as usize].ty = acc_ty.clone();
+                }
+                changed = true;
+            }
+        }
+    }
+    if let Ty::Fn { params: ps, ret } = &mut args[2].ty {
+        if let Some(p0) = ps.get_mut(0) {
+            if p0.has_unresolved_deep() {
+                *p0 = acc_ty.clone();
+                changed = true;
+            }
+        }
+        if ret.has_unresolved_deep() {
+            **ret = acc_ty.clone();
+            changed = true;
+        }
+    }
+
+    // Update Call's own ty if it's still unresolved
+    if expr.ty.has_unresolved_deep() {
+        expr.ty = acc_ty;
+        changed = true;
+    }
+    changed
 }
 
 // ── Core walker ────────────────────────────────────────────────────
 
-fn concretize_expr(expr: &mut IrExpr, vt: &VarTable, symbols: &SymbolTable) {
-    let mut c = Concretizer { vt, symbols };
+fn concretize_expr(expr: &mut IrExpr, vt: &mut VarTable, symbols: &SymbolTable, enclosing_ret: &Ty) {
+    let mut c = Concretizer { vt, symbols, enclosing_ret };
     c.visit_expr_mut(expr);
 }
 
 struct Concretizer<'a> {
-    vt: &'a VarTable,
+    vt: &'a mut VarTable,
     symbols: &'a SymbolTable,
+    /// Return type of the enclosing IrFunction (post-`ResultPropagation`
+    /// lift when applicable). Used to fill in the `Ok` slot of a
+    /// `ResultErr` whose payload was written without the Ok type the
+    /// checker could infer (`guard x else err(...)!` style).
+    enclosing_ret: &'a Ty,
 }
 
 impl<'a> IrMutVisitor for Concretizer<'a> {
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        // Custom Match handling: propagate subject ty into pattern bindings
+        // (updating both the pattern's declared ty and the VarTable entry)
+        // BEFORE visiting arm bodies, so Var references to pattern-bound
+        // names pick up the refreshed ty during the bottom-up walk.
+        if let IrExprKind::Match { subject, arms } = &mut expr.kind {
+            self.visit_expr_mut(subject);
+            let sty = subject.ty.clone();
+            if !sty.has_unresolved_deep() {
+                for arm in arms.iter_mut() {
+                    propagate_pattern_ty(&mut arm.pattern, &sty, self.vt);
+                }
+            }
+            for arm in arms.iter_mut() {
+                if let Some(g) = &mut arm.guard { self.visit_expr_mut(g); }
+                self.visit_expr_mut(&mut arm.body);
+            }
+            // After arms are fully resolved, push any concrete arm body ty
+            // into sibling arms whose body is an unresolved shape wrapper
+            // (e.g. `none => none` has body ty Option[Unknown] but the
+            // sibling `some(...)` arm resolves to Option[List[String]]).
+            let concrete_arm_ty = arms.iter().find_map(|arm| {
+                if !arm.body.ty.has_unresolved_deep() { Some(arm.body.ty.clone()) } else { None }
+            });
+            if let Some(cty) = concrete_arm_ty {
+                for arm in arms.iter_mut() {
+                    if arm.body.ty.has_unresolved_deep() {
+                        propagate_ty_down(&mut arm.body, &cty);
+                    }
+                }
+            }
+            // Resolve the Match node itself
+            if expr.ty.has_unresolved_deep() {
+                if let Some(ty) = resolve_node_ty(expr, self.vt, self.symbols) {
+                    expr.ty = ty;
+                }
+            }
+            return;
+        }
+
         // Recurse into children FIRST (bottom-up) so nested types are
         // concrete before we use them here.
         walk_expr_mut(self, expr);
@@ -163,6 +508,60 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
         if let IrExprKind::BinOp { op, left, right } = &mut expr.kind {
             if let Some(new_op) = reconcile_binop(*op, &left.ty, &right.ty) {
                 *op = new_op;
+            }
+        }
+
+        // Effect-fn `guard` / `?` paths can leave a `ResultErr` with
+        // `Ok = Unknown` when the error value is the only thing the
+        // checker can pin down (`guard x else err("msg")!`). The Ok
+        // slot is the enclosing fn's return Ok type — after
+        // ResultPropagation has lifted it to `Result[T, String]`, we
+        // know `T` precisely.
+        if let IrExprKind::ResultErr { expr: inner } = &mut expr.kind {
+            if expr.ty.has_unresolved_deep() {
+                if let Some(fixed) = infer_err_ty_from_enclosing(self.enclosing_ret, &inner.ty) {
+                    expr.ty = fixed;
+                }
+            }
+        }
+        // Record literal construction: push the declared field types from
+        // the registered type down into field value expressions whose own
+        // inference left them unresolved (typically `Applied(List,
+        // [Unknown])` for a field defaulted to `[]`). The checker sees
+        // `items: []` and can only type it `List[Unknown]`; we know from
+        // the record decl that `items: List[Int]`, so substitute.
+        if let IrExprKind::Record { name: Some(name), fields } = &mut expr.kind {
+            let rname = name.to_string();
+            for (fname, fvalue) in fields.iter_mut() {
+                if fvalue.ty.has_unresolved_deep() {
+                    if let Some(expected) = self.symbols.lookup_field(&rname, fname.as_str()) {
+                        if !expected.has_unresolved_deep() {
+                            propagate_expected_ty(fvalue, expected);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Generic-accumulator back-propagation for `list.fold` / `list.scan`:
+        // both `init` arg and lambda `body.ty` represent the accumulator A.
+        // After the bottom-up walk, body.ty may be strictly more concrete
+        // than init.ty (because init started from a literal like `some([])`
+        // whose empty list has element type Unknown). Merge, push the
+        // merged shape back into init's sub-expressions, and update the
+        // lambda's acc param + VarTable so arm Var refs refresh on the
+        // re-visit below.
+        if is_fold_like_call(expr) {
+            if back_propagate_fold_acc(expr, self.vt) {
+                // Re-visit the lambda body so pattern bindings and Var
+                // references pick up the refreshed acc type.
+                if let IrExprKind::Call { args, .. } = &mut expr.kind {
+                    if let Some(lambda) = args.get_mut(2) {
+                        if let IrExprKind::Lambda { body, .. } = &mut lambda.kind {
+                            self.visit_expr_mut(body);
+                        }
+                    }
+                }
             }
         }
 
@@ -266,12 +665,33 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
             if elem_tys.iter().any(Ty::has_unresolved_deep) { None }
             else { Some(Ty::Tuple(elem_tys)) }
         }
+        IrExprKind::OptionSome { expr } => {
+            // `some(x)` has type `Option[x.ty]`; recover when the type
+            // checker left an `Option[Unknown]` placeholder (typical for
+            // payloads built from pattern-bound names).
+            if expr.ty.has_unresolved_deep() { None }
+            else {
+                Some(Ty::Applied(
+                    almide_lang::types::constructor::TypeConstructorId::Option,
+                    vec![expr.ty.clone()],
+                ))
+            }
+        }
         IrExprKind::LitInt { .. } => Some(Ty::Int),
         IrExprKind::LitFloat { .. } => Some(Ty::Float),
         IrExprKind::LitBool { .. } => Some(Ty::Bool),
         IrExprKind::LitStr { .. } => Some(Ty::String),
         IrExprKind::Unit => Some(Ty::Unit),
         IrExprKind::Call { target, args, .. } => resolve_call_ret_ty(target, args, vt, symbols),
+        IrExprKind::RuntimeCall { symbol, args } => {
+            // Post-IntrinsicLowering, the `Call { target: Module }` node
+            // has been rewritten to RuntimeCall. Rebuild a synthetic
+            // `Named { symbol }` target so the existing stdlib
+            // polymorphic logic (list.map / list.zip / ...) keeps
+            // firing for post-lowering shape.
+            let target = CallTarget::Named { name: *symbol };
+            resolve_call_ret_ty(&target, args, vt, symbols)
+        }
         _ => None,
     }
 }
@@ -309,26 +729,26 @@ fn resolve_call_ret_ty(
         _ => {}
     }
 
-    let (module, func) = match target {
-        CallTarget::Module { module, func } => (module.as_str(), func.as_str()),
+    // Decode (module, func) from every stdlib call-target shape:
+    //   - `Module { list, map }`                 — pre-lowering
+    //   - `Named { "almide_rt_list_map" }`       — post-ResolveCalls or
+    //                                              frontend mangling
+    let (module_owned, func_owned): (String, String) = match target {
+        CallTarget::Module { module, func } => (module.as_str().to_string(), func.as_str().to_string()),
+        CallTarget::Named { name } => {
+            let s = name.as_str();
+            if let Some(rest) = s.strip_prefix("almide_rt_") {
+                if let Some(under) = rest.find('_') {
+                    (rest[..under].to_string(), rest[under+1..].to_string())
+                } else { return None }
+            } else { return None }
+        }
         _ => return None,
     };
+    let module = module_owned.as_str();
+    let func = func_owned.as_str();
 
-    // 2. Generated stdlib signature lookup with TypeVar substitution.
-    //    This covers every stdlib function declared in stdlib/defs/*.toml
-    //    (int/float/string/list/map/set/option/result/bytes/value/... etc.)
-    //    and substitutes type variables (K, V, T, A, B, ...) from the
-    //    declared parameter types against the actual argument types.
-    if let Some(sig) = crate::generated::stdlib_ret_ty::lookup_stdlib_ret(module, func) {
-        let substituted = substitute_type_vars(&sig.ret_ty, sig.param_tys, args);
-        if !substituted.has_unresolved_deep() {
-            return Some(substituted);
-        }
-        // Fall through to list-specific helpers below if sig had TypeVars we
-        // couldn't substitute (e.g. lambda return types for list.map).
-    }
-
-    // 3. Stdlib polymorphic list operations with lambda return types.
+    // 2. Stdlib polymorphic list operations with lambda return types.
     //    These need the lambda argument's Fn::ret, which isn't expressible
     //    in the TOML template.
     if module != "list" { return None; }
@@ -417,122 +837,6 @@ fn resolve_call_ret_ty(
     }
 }
 
-/// Match a declared parameter type template (e.g. "Map[K, V]") against an
-/// actual argument type (e.g. `Applied(Map, [String, Int])`) and record
-/// the type-variable bindings (`K -> String, V -> Int`) into `bindings`.
-fn bind_type_vars(template: &str, actual: &Ty, bindings: &mut std::collections::HashMap<String, Ty>) {
-    use almide_lang::types::constructor::TypeConstructorId as TCI;
-    let t = template.trim();
-
-    // Type variable like K, V, T, A, B — single uppercase letter or short
-    fn is_type_var(s: &str) -> bool {
-        !s.is_empty()
-            && s.chars().next().unwrap().is_uppercase()
-            && s.len() <= 2
-            && s.chars().all(|c| c.is_uppercase() || c.is_ascii_digit())
-    }
-
-    if is_type_var(t) {
-        bindings.entry(t.to_string()).or_insert_with(|| actual.clone());
-        return;
-    }
-
-    // Parse `Head[arg1, arg2, ...]` against Applied(Head, [arg1, arg2, ...])
-    if let Some(idx) = t.find('[') {
-        if t.ends_with(']') {
-            let head = &t[..idx];
-            let inner = &t[idx+1..t.len()-1];
-            let parts = split_top_level_commas(inner);
-            let head_tci = match head {
-                "List"   => Some(TCI::List),
-                "Option" => Some(TCI::Option),
-                "Result" => Some(TCI::Result),
-                "Map"    => Some(TCI::Map),
-                "Set"    => Some(TCI::Set),
-                _ => None,
-            };
-            if let Some(tci) = head_tci {
-                if let Ty::Applied(act_tci, act_args) = actual {
-                    if std::mem::discriminant(act_tci) == std::mem::discriminant(&tci) {
-                        for (sub_template, sub_actual) in parts.iter().zip(act_args.iter()) {
-                            bind_type_vars(sub_template, sub_actual, bindings);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Tuple: `(T1, T2, ...)`
-    if t.starts_with('(') && t.ends_with(')') {
-        let inner = &t[1..t.len()-1];
-        let parts = split_top_level_commas(inner);
-        if let Ty::Tuple(act_elems) = actual {
-            for (sub_template, sub_actual) in parts.iter().zip(act_elems.iter()) {
-                bind_type_vars(sub_template, sub_actual, bindings);
-            }
-        }
-    }
-}
-
-/// Split a comma list respecting nested brackets.
-fn split_top_level_commas(s: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut depth = 0i32;
-    let mut cur = String::new();
-    for ch in s.chars() {
-        match ch {
-            '[' | '(' | '<' => { depth += 1; cur.push(ch); }
-            ']' | ')' | '>' => { depth -= 1; cur.push(ch); }
-            ',' if depth == 0 => {
-                out.push(cur.trim().to_string());
-                cur.clear();
-            }
-            c => cur.push(c),
-        }
-    }
-    if !cur.trim().is_empty() { out.push(cur.trim().to_string()); }
-    out
-}
-
-/// Apply the bindings from `bind_type_vars` to a template `Ty` (as stored
-/// in the generated signature table). Returns the substituted type.
-fn apply_bindings(ty: &Ty, bindings: &std::collections::HashMap<String, Ty>) -> Ty {
-    match ty {
-        Ty::TypeVar(name) => {
-            if let Some(bound) = bindings.get(name.as_str()) {
-                bound.clone()
-            } else {
-                ty.clone()
-            }
-        }
-        Ty::Applied(tci, args) => {
-            let new_args = args.iter().map(|a| apply_bindings(a, bindings)).collect();
-            Ty::Applied(tci.clone(), new_args)
-        }
-        Ty::Tuple(elems) => {
-            Ty::Tuple(elems.iter().map(|e| apply_bindings(e, bindings)).collect())
-        }
-        Ty::Fn { params, ret } => Ty::Fn {
-            params: params.iter().map(|p| apply_bindings(p, bindings)).collect(),
-            ret: Box::new(apply_bindings(ret, bindings)),
-        },
-        _ => ty.clone(),
-    }
-}
-
-/// Substitute TypeVars in `ret_template` using actual arg types matched
-/// against `param_templates`. Covers the common generic case:
-///   `map.get: (Map[K, V], K) -> Option[V]` with arg types
-///   `(Map[String, Int], String)` yields `Option[Int]`.
-fn substitute_type_vars(ret_template: &Ty, param_templates: &[&str], args: &[IrExpr]) -> Ty {
-    let mut bindings = std::collections::HashMap::new();
-    for (template, arg) in param_templates.iter().zip(args.iter()) {
-        bind_type_vars(template, &arg.ty, &mut bindings);
-    }
-    apply_bindings(ret_template, &bindings)
-}
-
 /// Get the effective type of an expression, preferring VarTable for Var/EnvLoad
 /// over the potentially-stale expr.ty.
 fn effective_ty(expr: &IrExpr, vt: &VarTable) -> Ty {
@@ -590,9 +894,11 @@ fn reconcile_binop(op: BinOp, lt: &Ty, rt: &Ty) -> Option<BinOp> {
 // ── Audit: count remaining unresolved types (diagnostic) ────────────
 
 /// Postcondition audit: report any reachable IrExpr with an unresolved
-/// type after this pass. Emitted only under ALMIDE_CHECK_IR=1. Treated
-/// as informational — some cases (Break/Continue, error recovery paths)
-/// legitimately have unresolved types.
+/// type after this pass. Runs on every build. Violations are the
+/// harness's responsibility (panic in debug, diagnostic in release).
+/// A few node shapes (Break/Continue, `err(_)!` guards, OpenRecord
+/// constraints) legitimately carry unresolved types at runtime and are
+/// skipped below.
 fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
     struct Auditor {
         location: String,
@@ -608,7 +914,53 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
                     | IrExprKind::Hole | IrExprKind::Todo { .. }
                     | IrExprKind::OptionNone
                     | IrExprKind::EmptyMap
-                );
+                )
+                // Empty list literal `[]` whose element type could not be
+                // pinned down by either upstream inference or
+                // `propagate_expected_ty`. The stored element count is
+                // zero, so every emit path — `Vec::<T>::new()` on Rust,
+                // the 4-byte `[len=0]` header on WASM — produces the same
+                // bytes regardless of `T`. Treating it as a violation
+                // would force the audit to stay soft just to cover
+                // `for _ in []` / `fan.map([], f)` style uses that have
+                // no bearing on runtime behavior.
+                || matches!(&expr.kind,
+                    IrExprKind::List { elements } if elements.is_empty())
+                // `Unwrap { ResultErr(...) }` in the `guard x else err(_)!`
+                // idiom: the inner expression is a compile-time-known `err`
+                // literal, so the "ok path" value the Unwrap would produce
+                // is unreachable. The checker leaves the Unwrap's ty
+                // `Unknown` for the same reason (`err()` doesn't fix the
+                // Ok type). Leaving the Unwrap's ty concrete would
+                // desynchronise the WASM emit — the "ok path" branch in
+                // `emit_wasm/expressions.rs::Unwrap` would try to
+                // `emit_load_at` an i64 value into a function whose sig
+                // returns i32 (the Result pointer), tripping the
+                // validator on otherwise-dead code. Accept the Unknown
+                // here as "harmless: ok branch unreachable".
+                || matches!(&expr.kind,
+                    IrExprKind::Unwrap { expr: inner }
+                        if matches!(inner.kind, IrExprKind::ResultErr { .. }))
+                // `Block` whose sole tail is the same skipped `Unwrap`
+                // pattern — the block is just the desugared `else
+                // { err(...)! }` wrapper that lowering emits for
+                // `guard` statements. `Block.ty` mirrors `tail.ty`, so
+                // marking only the Unwrap would leave the outer Block
+                // as a spurious violation.
+                || matches!(&expr.kind,
+                    IrExprKind::Block { stmts, expr: Some(tail) }
+                        if stmts.is_empty()
+                            && matches!(&tail.kind,
+                                IrExprKind::Unwrap { expr: inner }
+                                    if matches!(inner.kind, IrExprKind::ResultErr { .. })))
+                // OpenRecord-typed expressions: an open-record bound
+                // (`fn f(x: { name: String, .. })`) is a structural
+                // constraint, not an inference failure. The Var node
+                // for such a param trivially carries its declared
+                // OpenRecord ty through monomorphization's `__Unknown`
+                // fallback path. Emit handles OpenRecord via its
+                // structural dispatch — no Unknown slot to fill.
+                || matches!(&expr.ty, Ty::OpenRecord { .. });
                 if !skip {
                     self.remaining += 1;
                     if self.samples.len() < 5 {

@@ -46,11 +46,20 @@ pub struct RenderContext<'a> {
     pub minimal_generic_bounds: bool,
     /// Emit `#[repr(C)]` on structs/enums for stable C ABI layout.
     pub repr_c: bool,
+    /// VarIds of current fn params emitted as Rust references (`&T`,
+    /// `&[T]`, `&str`). Used by the Borrow walker to avoid
+    /// double-borrowing an already-reference binding.
+    pub ref_params: std::collections::HashSet<VarId>,
+    /// VarIds of current fn params emitted as `&mut T`. Used by the
+    /// Borrow walker to skip the outer `&mut` wrap when forwarding a
+    /// `RefMut` param into another `RefMut` callee slot (Rust
+    /// auto-reborrows).
+    pub ref_mut_params: std::collections::HashSet<VarId>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -89,6 +98,26 @@ impl<'a> RenderContext<'a> {
 // ── Function rendering ──
 
 pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
+    // Collect VarIds of fn params that will be emitted as references
+    // (`&T` / `&[T]` / `&str`). The Borrow walker uses this to skip
+    // outer `&` wrap on already-borrowed bindings.
+    let mut ref_params: std::collections::HashSet<VarId> =
+        std::collections::HashSet::new();
+    let mut ref_mut_params: std::collections::HashSet<VarId> =
+        std::collections::HashSet::new();
+    for p in &func.params {
+        use almide_ir::ParamBorrow;
+        match p.borrow {
+            ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr => {
+                ref_params.insert(p.var);
+            }
+            ParamBorrow::RefMut => {
+                ref_mut_params.insert(p.var);
+            }
+            _ => {}
+        }
+    }
+
     // Set effect fn context for auto-? insertion
     let fn_ctx = RenderContext {
         templates: ctx.templates,
@@ -102,7 +131,22 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         generic_types: ctx.generic_types.clone(),
         minimal_generic_bounds: ctx.minimal_generic_bounds,
         repr_c: ctx.repr_c,
+        ref_params,
+        ref_mut_params,
     };
+
+    // Stdlib Unification: fns declared with `@inline_rust(...)` or
+    // `@intrinsic("...")` are dispatch-only. Their body is never emitted
+    // as a Rust fn; the template / symbol is inlined at each call site
+    // by `pass_stdlib_lowering` / `pass_intrinsic_lowering`. Skipping
+    // emission here also avoids duplicate-definition clashes with the
+    // Rust runtime fn the template / symbol refers to.
+    if matches!(ctx.target, Target::Rust)
+        && func.attrs.iter().any(|a|
+            matches!(a.name.as_str(), "inline_rust" | "intrinsic"))
+    {
+        return String::new();
+    }
 
     // Extern fn: emit import/use via template (rs) or extern "C" block (c)
     if !func.extern_attrs.is_empty() {
@@ -157,6 +201,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             let type_s = match p.borrow {
                 ParamBorrow::Own => render_type_fn(&fn_ctx, &p.ty),
                 ParamBorrow::Ref => format!("&{}", render_type_fn(&fn_ctx, &p.ty)),
+                ParamBorrow::RefMut => format!("&mut {}", render_type_fn(&fn_ctx, &p.ty)),
                 ParamBorrow::RefStr => "&str".to_string(),
                 ParamBorrow::RefSlice => {
                     if let almide_lang::types::Ty::Applied(_, args) = &p.ty {
@@ -220,13 +265,10 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         String::new()
     };
 
-    // Sanitize function name: spaces/dots/hyphens → underscores
-    // Prefix test functions to avoid name collision with real functions
-    let raw_name = if func.is_test {
-        format!("__test_almd_{}", func.name)
-    } else {
-        func.name.to_string()
-    };
+    // Sanitize function name: spaces/dots/hyphens → underscores.
+    // Test blocks already carry `TEST_NAME_PREFIX` from lowering so they
+    // cannot collide with user fns here — no conditional prefixing needed.
+    let raw_name = func.name.to_string();
     let mut safe_name = raw_name.replace(' ', "_").replace('-', "_").replace('.', "_")
         .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
         .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
@@ -295,6 +337,29 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         .cloned()
         .collect();
     ann.eq_blocked_types = super::walker::declarations::compute_eq_blocked_types(&all_type_decls);
+    // Pre-index Lazy top_let names so the Var renderer can distinguish
+    // `const NAME: i64 = 42;` (scalar, no deref) from
+    // `static NAME: LazyLock<Rc<...>> = ...;` (deref via `(*NAME)`).
+    // Cross-module synthetic Vars carry the uppercased name but a
+    // fresh VarId — `lazy_vars` misses them, so we match by name.
+    for tl in &program.top_lets {
+        if matches!(tl.kind, TopLetKind::Lazy) {
+            ann.lazy_top_let_names.insert(
+                ctx.var_table.get(tl.var).name.to_uppercase()
+            );
+        }
+    }
+    for module in &program.modules {
+        for tl in &module.top_lets {
+            if matches!(tl.kind, TopLetKind::Lazy) {
+                // Post-`UnifyVarTablesPass`, module `tl.var` indexes into
+                // `program.var_table` — the per-module tables are empty.
+                ann.lazy_top_let_names.insert(
+                    ctx.var_table.get(tl.var).name.to_uppercase()
+                );
+            }
+        }
+    }
     let mut ctx = RenderContext {
         templates: ctx.templates,
         var_table: ctx.var_table,
@@ -307,6 +372,8 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         generic_types,
         minimal_generic_bounds: false,
         repr_c: ctx.repr_c,
+        ref_params: std::collections::HashSet::new(),
+        ref_mut_params: std::collections::HashSet::new(),
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
@@ -435,14 +502,13 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         // because their functions don't require PartialEq/PartialOrd/Debug.
         let is_bundled = almide_lang::stdlib_info::is_bundled_module(&module.name);
         let mut mod_ann = ctx.ann.clone();
-        // Each module has its own VarTable, so VarIds from the parent's
-        // lazy_vars would collide with module-local variables (parameters,
-        // match bindings) that share the same numeric id.
-        // Clear inherited lazy_vars; module-specific ones are added below.
+        // Post `UnifyVarTablesPass` every module function references
+        // `program.var_table`; we still clear the parent's lazy_vars
+        // because module top-lets' lazy bindings are appended below.
         mod_ann.lazy_vars.clear();
         let mut mod_ctx = RenderContext {
             templates: ctx.templates,
-            var_table: &module.var_table,
+            var_table: ctx.var_table,
             indent: ctx.indent,
             target: ctx.target,
             auto_unwrap: false,
@@ -452,6 +518,8 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             generic_types: ctx.generic_types.clone(),
             minimal_generic_bounds: is_bundled,
             repr_c: ctx.repr_c,
+            ref_params: std::collections::HashSet::new(),
+            ref_mut_params: std::collections::HashSet::new(),
         };
         // Module type decls — skip if already emitted by parent or another module
         for td in &module.type_decls {

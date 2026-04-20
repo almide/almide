@@ -80,6 +80,9 @@ pub fn walk_expr_mut<V: IrMutVisitor>(v: &mut V, expr: &mut IrExpr) {
             }
             for a in args { v.visit_expr_mut(a); }
         }
+        IrExprKind::RuntimeCall { args, .. } => {
+            for a in args { v.visit_expr_mut(a); }
+        }
 
         // ── Collections ──
         IrExprKind::List { elements } | IrExprKind::Tuple { elements }
@@ -144,6 +147,9 @@ pub fn walk_expr_mut<V: IrMutVisitor>(v: &mut V, expr: &mut IrExpr) {
         }
         IrExprKind::RustMacro { args, .. } => {
             for a in args { v.visit_expr_mut(a); }
+        }
+        IrExprKind::InlineRust { args, .. } => {
+            for (_, a) in args { v.visit_expr_mut(a); }
         }
         IrExprKind::IterChain { source, steps, collector, .. } => {
             v.visit_expr_mut(source);

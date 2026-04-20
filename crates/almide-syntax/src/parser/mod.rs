@@ -17,6 +17,7 @@ mod patterns;
 mod primary;
 mod recovery;
 mod statements;
+mod test_attributes;
 mod test_expr_precedence;
 mod types;
 

@@ -1,0 +1,30 @@
+// regex — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4b).
+//
+// Migrated mechanically from `stdlib/defs/regex.toml` (8 fns). All fns
+// are pure. Note the runtime prefix is `almide_regex_*` (not the
+// `almide_rt_*` used by most other modules) — this mirrors the
+// existing TOML templates verbatim.
+
+@intrinsic("almide_regex_is_match")
+fn is_match(pat: String, s: String) -> Bool = _
+
+@intrinsic("almide_regex_full_match")
+fn full_match(pat: String, s: String) -> Bool = _
+
+@intrinsic("almide_regex_find")
+fn find(pat: String, s: String) -> Option[String] = _
+
+@intrinsic("almide_regex_find_all")
+fn find_all(pat: String, s: String) -> List[String] = _
+
+@intrinsic("almide_regex_replace")
+fn replace(pat: String, s: String, rep: String) -> String = _
+
+@intrinsic("almide_regex_replace_first")
+fn replace_first(pat: String, s: String, rep: String) -> String = _
+
+@intrinsic("almide_regex_split")
+fn split(pat: String, s: String) -> List[String] = _
+
+@intrinsic("almide_regex_captures")
+fn captures(pat: String, s: String) -> Option[List[String]] = _

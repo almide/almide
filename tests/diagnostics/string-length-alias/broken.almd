@@ -1,0 +1,1 @@
+fn size(s: String) -> Int = string.length(s)

@@ -1519,9 +1519,37 @@ impl FuncCompiler<'_> {
                 let s = self.emitter.intern_string("/tmp");
                 wasm!(self.func, { i32_const(s as i32); });
             }
-            _ => {
-                self.emit_stub_call_named("fs", func, args);
+            "read_bytes_raw" => {
+                // fs.read_bytes_raw(path: String) -> Result[Bytes, String].
+                // WASI implementation would mirror `read_bytes` but emit a
+                // `Bytes` (i.e. `[len:i32][u8...]`) instead of a List[Int].
+                // Until that lands, emit a runtime `err("fs.read_bytes_raw
+                // not supported on WASM yet")` so compilation succeeds and
+                // any caller that exercises the path at runtime surfaces
+                // the limitation clearly rather than compile-time panic.
+                // Drop the path arg.
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { drop; });
+                let msg = self.emitter.intern_string("fs.read_bytes_raw not supported on WASM yet");
+                let msg_str = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    // Err payload: String pointer (already interned).
+                    i32_const(msg as i32); local_set(msg_str);
+                    // Result[Bytes, String] layout: [tag:i32=1 for err, payload:i32]
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                    local_get(result); i32_const(1); i32_store(0);
+                    local_get(result); local_get(msg_str); i32_store(4);
+                    local_get(result);
+                });
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(msg_str);
             }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `fs.{}` — \
+                 add an arm in emit_fs_call or resolve upstream",
+                func
+            ),
         }
     }
 

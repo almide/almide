@@ -52,9 +52,10 @@ impl NanoPass for TailCallOptPass {
         // functions need their Borrow wrappers stripped to match the new
         // signature — otherwise a &str arg is passed where String is expected.
         let mut reverted: HashMap<almide_base::intern::Sym, HashSet<usize>> = HashMap::new();
-        run_tco(&mut program.functions, &mut program.var_table, &mut reverted);
-        for module in &mut program.modules {
-            run_tco(&mut module.functions, &mut module.var_table, &mut reverted);
+        let IrProgram { functions, modules, var_table, .. } = &mut program;
+        run_tco(functions, var_table, &mut reverted);
+        for module in modules.iter_mut() {
+            run_tco(&mut module.functions, var_table, &mut reverted);
         }
         if !reverted.is_empty() {
             strip_borrows_at_tco_calls(&mut program, &reverted);

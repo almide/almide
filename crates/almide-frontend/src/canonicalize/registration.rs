@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
 use almide_base::intern::{Sym, sym};
+use almide_lang::types::TypeConstructorId;
 use crate::types::{Ty, TypeEnv, FnSig, ProtocolDef, ProtocolMethodSig};
 use super::resolve::resolve_type_expr;
 
@@ -21,6 +22,14 @@ fn resolve(env: &TypeEnv, te: &ast::TypeExpr) -> Ty {
 }
 
 /// Infer type from a literal expression (for top-level `let` without annotation).
+///
+/// Used at registration time — before the full checker runs — so module
+/// top_lets have a concrete `env.top_lets` entry the moment the main
+/// program's inference looks them up. A shallow scalar-only version
+/// regresses records / lists / maps to `Ty::Unknown`, which later surfaces
+/// as `LazyLock<_>` in generated Rust and `ConcretizeTypes` post-condition
+/// failures on WASM. Recurse structurally through record / list / tuple /
+/// map literals so the cross-module user sees the right type.
 pub fn infer_literal_type(expr: &ast::Expr) -> Ty {
     match &expr.kind {
         ast::ExprKind::Int { .. } => Ty::Int,
@@ -28,6 +37,41 @@ pub fn infer_literal_type(expr: &ast::Expr) -> Ty {
         ast::ExprKind::String { .. } => Ty::String,
         ast::ExprKind::Bool { .. } => Ty::Bool,
         ast::ExprKind::Unit => Ty::Unit,
+        ast::ExprKind::Paren { expr } => infer_literal_type(expr),
+        ast::ExprKind::Record { name: None, fields } => {
+            let mut fs: Vec<(Sym, Ty)> = fields.iter()
+                .map(|fi| (fi.name, infer_literal_type(&fi.value)))
+                .collect();
+            fs.sort_by_key(|(n, _)| *n);
+            Ty::Record { fields: fs }
+        }
+        ast::ExprKind::List { elements } => {
+            let elem = elements.first()
+                .map(|e| infer_literal_type(e))
+                .unwrap_or(Ty::Unknown);
+            Ty::Applied(TypeConstructorId::List, vec![elem])
+        }
+        ast::ExprKind::Tuple { elements } => {
+            Ty::Tuple(elements.iter().map(infer_literal_type).collect())
+        }
+        ast::ExprKind::MapLiteral { entries } => {
+            let (k, v) = entries.first()
+                .map(|(k, v)| (infer_literal_type(k), infer_literal_type(v)))
+                .unwrap_or((Ty::Unknown, Ty::Unknown));
+            Ty::Applied(TypeConstructorId::Map, vec![k, v])
+        }
+        ast::ExprKind::Some { expr } => {
+            Ty::Applied(TypeConstructorId::Option, vec![infer_literal_type(expr)])
+        }
+        ast::ExprKind::None => {
+            Ty::Applied(TypeConstructorId::Option, vec![Ty::Unknown])
+        }
+        ast::ExprKind::Ok { expr } => {
+            Ty::Applied(TypeConstructorId::Result, vec![infer_literal_type(expr), Ty::Unknown])
+        }
+        ast::ExprKind::Err { expr } => {
+            Ty::Applied(TypeConstructorId::Result, vec![Ty::Unknown, infer_literal_type(expr)])
+        }
         _ => Ty::Unknown,
     }
 }
@@ -212,7 +256,8 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
                 let fn_key = format!("{}.{}", type_name, method_sig.name);
                 if !env.functions.contains_key(&sym(&fn_key)) {
                     let is_builtin = matches!(proto_name.as_str(),
-                        "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode");
+                        "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode"
+                        | "Numeric");
                     if !is_builtin {
                         diagnostics.push(err(
                             format!("type '{}' declares protocol '{}' but missing method '{}'",

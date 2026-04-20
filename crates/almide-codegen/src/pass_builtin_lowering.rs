@@ -63,6 +63,20 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             let fmt = IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None };
                             return IrExpr { kind: IrExprKind::RustMacro { name: *name, args: vec![cond, fmt, msg] }, ty, span };
                         }
+                        // Sized Numeric Types (Stage 1c): `assert_eq(x,
+                        // 30)` where `x: Int32` needs the `30` literal
+                        // retyped to `Int32` so `rustc`'s `assert_eq!`
+                        // macro sees matching operand widths. The
+                        // assertion itself isn't a typed fn call, so
+                        // the usual arg-coercion in `lower_call` doesn't
+                        // reach here — patch at the macro build site.
+                        let mut args = args;
+                        if args.len() == 2 {
+                            let l_ty = args[0].ty.clone();
+                            let r_ty = args[1].ty.clone();
+                            coerce_macro_arg(&mut args[1], &l_ty);
+                            coerce_macro_arg(&mut args[0], &r_ty);
+                        }
                         return IrExpr { kind: IrExprKind::RustMacro { name: *name, args }, ty, span };
                     }
                     // assert_some → assert!(x.is_some())
@@ -182,11 +196,27 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
 
                     // Other Type.method patterns → Type_method standalone calls
                     if method.contains('.') {
+                        // Bundled-stdlib modules (lowercase heads like
+                        // `uint32.to_int64`) carry the `almide_rt_` prefix
+                        // at their definition site (see `walker/mod.rs`
+                        // rename of `fn <clean_name>` → `fn almide_rt_<m>_<clean>`).
+                        // Mirror that prefix at the call site so UFCS
+                        // dispatch resolves to the emitted symbol.
+                        // Convention methods (uppercase head — `List.encode`)
+                        // use the `Type_method` flat naming and stay as-is.
+                        let dot_pos = method.find('.').unwrap();
+                        let module_head = &method.as_str()[..dot_pos];
+                        let is_bundled = almide_lang::stdlib_info::is_any_stdlib(module_head);
                         let flat = method.replace('.', "_");
+                        let name = if is_bundled {
+                            format!("almide_rt_{}", flat)
+                        } else {
+                            flat
+                        };
                         let mut call_args = vec![*object];
                         call_args.extend(args);
                         return IrExpr { kind: IrExprKind::Call {
-                            target: CallTarget::Named { name: flat.into() },
+                            target: CallTarget::Named { name: name.into() },
                             args: call_args, type_args,
                         }, ty, span };
                     }
@@ -301,10 +331,62 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             steps: steps.into_iter().map(|s| s.map_exprs(&mut rewrite_expr)).collect(),
             collector: collector.map_exprs(&mut rewrite_expr),
         },
+        // Recurse into InlineRust args so `__`-prefixed runtime calls
+        // nested inside them (e.g. `__encode_option_string` inside a
+        // `value.object(pairs)` InlineRust produced by stdlib lowering)
+        // are reached by the `__` prefix transformer.
+        IrExprKind::InlineRust { template, args } => IrExprKind::InlineRust {
+            template,
+            args: args.into_iter().map(|(n, a)| (n, rewrite_expr(a))).collect(),
+        },
+        // Traverse RuntimeCall args so `panic(...)` / `assert_eq(...)` etc.
+        // nested inside a `@intrinsic` fn (e.g. `assert_throws(|| panic(...), msg)`)
+        // get lowered to their RustMacro form instead of staying as free fn calls.
+        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
+            symbol,
+            args: args.into_iter().map(rewrite_expr).collect(),
+        },
+        // Recurse through ownership wrappers inserted by BorrowInsertion /
+        // CloneInsertion so derive-generated `__encode_*` calls living
+        // inside a `Borrow { List { Tuple { __encode_* } } }` spine still
+        // get rewritten to `almide_rt_*`.
+        IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow {
+            expr: Box::new(rewrite_expr(*expr)), as_str, mutable,
+        },
+        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_expr(*expr)) },
         other => other,
     };
 
     IrExpr { kind, ty, span }
+}
+
+/// Retype a bare Int / Float literal whose IR type is `Ty::Int` /
+/// `Ty::Float` so it matches a sized-typed peer in the same macro
+/// call. See the `assert_eq` site above for the motivation.
+fn coerce_macro_arg(arg: &mut IrExpr, peer_ty: &Ty) {
+    let sized = matches!(
+        peer_ty,
+        Ty::Int8 | Ty::Int16 | Ty::Int32
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32
+    );
+    if !sized { return; }
+    match &mut arg.kind {
+        IrExprKind::LitInt { .. } if arg.ty == Ty::Int => {
+            arg.ty = peer_ty.clone();
+        }
+        IrExprKind::LitFloat { .. } if arg.ty == Ty::Float => {
+            arg.ty = peer_ty.clone();
+        }
+        IrExprKind::UnOp { op: UnOp::NegInt, operand } => {
+            if matches!(&operand.kind, IrExprKind::LitInt { .. }) && operand.ty == Ty::Int {
+                operand.ty = peer_ty.clone();
+                arg.ty = peer_ty.clone();
+            }
+        }
+        _ => {}
+    }
 }
 
 fn rewrite_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {

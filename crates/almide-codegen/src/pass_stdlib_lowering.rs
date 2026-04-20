@@ -1,20 +1,40 @@
-//! StdlibLoweringPass: transform Module calls into Named calls with IR-level arg decoration.
+//! StdlibLoweringPass: dispatch Module calls into per-target IR nodes.
 //!
-//! Uses build.rs-generated `arg_transforms::lookup()` table to know exactly
-//! how each argument should be decorated (BorrowStr, BorrowRef, ToVec, LambdaClone, Direct).
-//!
-//! NO string rendering. All decisions are structural IR transformations.
+//! Post Stdlib Declarative Unification, every stdlib module lives in
+//! `stdlib/<m>.almd` with `@inline_rust` / `@wasm_intrinsic` templates.
+//! This pass parses those attrs (once per run via the `INLINE_RUST`
+//! thread-local) and rewrites `CallTarget::Module { module, func }`
+//! into `IrExprKind::InlineRust { template, args }` for the Rust
+//! target. The WASM emitter keeps its own dispatch in
+//! `emit_wasm/calls_*.rs`; this pass skips WASM emission.
 
 use std::cell::RefCell;
 use std::collections::{HashSet, HashMap};
 use almide_base::intern::Sym;
 use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
-use crate::generated::arg_transforms::{self, ArgTransform};
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct StdlibLoweringPass;
+
+/// Decoded `@inline_rust(...)` metadata for a bundled stdlib fn.
+/// Populated once at the start of `StdlibLoweringPass::run` and
+/// consumed during `rewrite_expr` on every matching call site.
+#[derive(Debug, Clone)]
+struct InlineRustSpec {
+    /// The literal template string from `@inline_rust("...")`.
+    template: String,
+    /// Parameter names in order. Used to pair positional call args
+    /// with their `{name}` placeholders in `template`.
+    param_names: Vec<Sym>,
+    /// Per-param default value, if declared in the bundled source
+    /// (`fn slice(s: String, start: Int, end: Int = 9223372036854775807)`).
+    /// Used to fill positional args that the caller omitted — e.g.
+    /// `string.slice(s, 3)` binds `{end}` to the stored default so
+    /// the emitted template renders as a 3-arg runtime call.
+    defaults: Vec<Option<IrExpr>>,
+}
 
 thread_local! {
     /// (module, func) pairs that come from bundled .almd stdlib sources and
@@ -23,10 +43,165 @@ thread_local! {
     /// and the call stays as a `CallTarget::Module` so the walker emits a
     /// normal user-fn call.
     static BUNDLED_FNS: RefCell<HashSet<(Sym, Sym)>> = RefCell::new(HashSet::new());
+
+    /// (module, func) → `@inline_rust` metadata. Populated once at the
+    /// start of `run`; `rewrite_expr` intercepts matching module calls
+    /// and emits `IrExprKind::InlineRust` instead of the legacy
+    /// `arg_transforms`-backed `Named` call. This lets pure-Almide
+    /// stdlib modules override the per-TOML dispatch on a fn-by-fn
+    /// basis (Stage 1 of the Stdlib Declarative Unification arc).
+    static INLINE_RUST: RefCell<HashMap<(Sym, Sym), InlineRustSpec>> = RefCell::new(HashMap::new());
 }
 
 fn is_bundled_only(module: Sym, func: Sym) -> bool {
     BUNDLED_FNS.with(|s| s.borrow().contains(&(module, func)))
+}
+
+fn inline_rust_spec(module: Sym, func: Sym) -> Option<InlineRustSpec> {
+    INLINE_RUST.with(|s| s.borrow().get(&(module, func)).cloned())
+}
+
+/// Strip owning / borrowing / cloning decorations from an
+/// `@inline_rust` arg before it lands in an `InlineRust` node.
+///
+/// Upstream passes (`CloneInsertionPass`, `BorrowInsertionPass`, ...)
+/// wrap args in `Clone` / `Borrow` / `ToVec` / `RcWrap` / `BoxNew`
+/// based on the callee signature. But the `@inline_rust` template is
+/// authoritative for Rust-level reference semantics — when the user
+/// writes `&mut {b}`, they mean the VARIABLE `b`, not a clone.
+/// Passing `b.clone()` into the template produces `&mut b.clone()`
+/// which operates on a disposable temp and silently loses the
+/// mutation.
+///
+/// Stripping one layer of these wrappers aligns the rendered arg with
+/// the template's stated intent. Users who actually want a clone
+/// should spell it out (`.clone()`) inside the template string.
+fn strip_arg_decorations(expr: IrExpr) -> IrExpr {
+    match expr.kind {
+        IrExprKind::Clone { expr: inner } => *inner,
+        IrExprKind::Borrow { expr: inner, .. } => *inner,
+        IrExprKind::ToVec { expr: inner } => *inner,
+        IrExprKind::RcWrap { expr: inner, .. } => *inner,
+        IrExprKind::BoxNew { expr: inner } => *inner,
+        _ => expr,
+    }
+}
+
+/// Does the template reference `{name}` preceded by an explicit
+/// borrow sigil (`&`, `&*`, `&mut`, `&mut *`)? If so the template is
+/// declaring that the RENDERED arg is a place-expression, not a
+/// value-expression; we strip any Clone wrapper that upstream passes
+/// inserted so the mutation / borrow lands on the caller's variable
+/// instead of a disposable clone.
+fn template_wants_reference(template: &str, name: &str) -> bool {
+    let needle = format!("{{{}}}", name);
+    let Some(idx) = template.find(&needle) else { return false };
+    // Walk back over horizontal whitespace + the last sigil.
+    let prefix = &template[..idx];
+    let trimmed = prefix.trim_end();
+    // Borrow forms: `&`, `&mut`, `&*`, `&mut *`. Keyword `mut` may
+    // carry trailing whitespace (`&mut `), star may come right after
+    // ampersand with no space, and the `&` itself always closes the
+    // immediately-preceding token.
+    trimmed.ends_with('&')
+        || trimmed.ends_with("&mut")
+        || trimmed.ends_with("&*")
+        || trimmed.ends_with("&mut *")
+}
+
+/// Extract the `@inline_rust("...")` template from an IrFunction's
+/// attrs, if present. Returns None if the attribute is missing or
+/// malformed (no string first-arg).
+fn find_inline_rust_template(f: &IrFunction) -> Option<String> {
+    use almide_lang::ast::AttrValue;
+    let attr = f.attrs.iter().find(|a| a.name.as_str() == "inline_rust")?;
+    let first = attr.args.first()?;
+    match &first.value {
+        AttrValue::String { value } => Some(value.clone()),
+        _ => None,
+    }
+}
+
+/// Fallback entry point: pull every `@inline_rust` template from a
+/// bundled stdlib source. Needed when a consumer (notably the codegen
+/// snapshot tests in `tests/`) invokes codegen without going through
+/// `resolve.rs`, so `program.modules` never contains the bundled
+/// `IrModule`.
+///
+/// The parse is delegated to `almide_lang::parse_cached`, the shared
+/// process-wide AST cache used by `almide-frontend::bundled_sigs` to
+/// extract type signatures. Both views derive from a single parse so
+/// they cannot drift as bundled `.almd` sources evolve.
+fn parse_bundled_inline_rust(module: &str) -> Vec<(Sym, InlineRustSpec)> {
+    use almide_lang::ast::{AttrValue, Decl};
+    let Some(source) = almide_lang::stdlib_info::bundled_source(module) else {
+        return Vec::new();
+    };
+    let Some(program) = almide_lang::parse_cached(source) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for decl in &program.decls {
+        let Decl::Fn { name, params, attrs, .. } = decl else { continue };
+        let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "inline_rust") else {
+            continue;
+        };
+        let Some(first) = attr.args.first() else { continue };
+        let template = match &first.value {
+            AttrValue::String { value } => value.clone(),
+            _ => continue,
+        };
+        let param_names = params.iter().map(|p| p.name).collect();
+        let defaults = params.iter()
+            .map(|p| p.default.as_deref().and_then(ast_expr_to_ir_literal))
+            .collect();
+        out.push((*name, InlineRustSpec { template, param_names, defaults }));
+    }
+    out
+}
+
+/// Convert an AST literal default-value expression to an `IrExpr`.
+///
+/// Scope: simple literals only (int / float / string / bool / `none`)
+/// — the cases that show up as bundled-stdlib default parameters.
+/// Anything else returns `None` and the default effectively doesn't
+/// exist from this fallback path's point of view; the IR-population
+/// path (which runs through the full lowering pipeline) still carries
+/// the complete `IrExpr`, so the fallback only matters for tooling
+/// that bypasses resolve/lower (codegen snapshot tests, ...).
+fn ast_expr_to_ir_literal(expr: &almide_lang::ast::Expr) -> Option<IrExpr> {
+    use almide_lang::ast::ExprKind;
+    match &expr.kind {
+        ExprKind::Int { value, .. } => {
+            let n = value.as_i64()?;
+            Some(IrExpr {
+                kind: IrExprKind::LitInt { value: n },
+                ty: Ty::Int,
+                span: None,
+            })
+        }
+        ExprKind::Float { value } => Some(IrExpr {
+            kind: IrExprKind::LitFloat { value: *value },
+            ty: Ty::Float,
+            span: None,
+        }),
+        ExprKind::String { value } => Some(IrExpr {
+            kind: IrExprKind::LitStr { value: value.clone() },
+            ty: Ty::String,
+            span: None,
+        }),
+        ExprKind::Bool { value } => Some(IrExpr {
+            kind: IrExprKind::LitBool { value: *value },
+            ty: Ty::Bool,
+            span: None,
+        }),
+        ExprKind::Ident { name } if name.as_str() == "none" => Some(IrExpr {
+            kind: IrExprKind::OptionNone,
+            ty: Ty::option(Ty::Unknown),
+            span: None,
+        }),
+        _ => None,
+    }
 }
 
 impl NanoPass for StdlibLoweringPass {
@@ -34,23 +209,69 @@ impl NanoPass for StdlibLoweringPass {
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
     fn depends_on(&self) -> Vec<&'static str> { vec!["EffectInference"] }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        // Build the bundled-only fn registry: any fn defined in an IR module
-        // whose name matches a known bundled stdlib module AND has no TOML
-        // runtime entry. These need to bypass the rt_ rewrite below.
+        // Every fn in every bundled stdlib IR module is bundled-only
+        // now: the TOML-backed runtime table was retired with the
+        // Stdlib Declarative Unification arc, so no overlap check
+        // is needed.
         let bundled_fns: HashSet<(Sym, Sym)> = program.modules.iter()
             .filter(|m| almide_lang::stdlib_info::is_bundled_module(m.name.as_str()))
             .flat_map(|m| {
                 let mname = m.name;
-                m.functions.iter().filter_map(move |f| {
-                    if arg_transforms::lookup(mname.as_str(), f.name.as_str()).is_some() {
-                        None
-                    } else {
-                        Some((mname, f.name))
-                    }
-                })
+                m.functions.iter().map(move |f| (mname, f.name))
             })
             .collect();
         BUNDLED_FNS.with(|s| *s.borrow_mut() = bundled_fns);
+
+        // Build the @inline_rust dispatch table. Two sources feed it:
+        //
+        // 1. `program.modules` — the frontend-loaded bundled stdlib
+        //    modules (the normal compile path routes through
+        //    `resolve.rs` which parses + lowers each bundled `.almd`).
+        //    These land as full `IrModule` entries; we read the
+        //    `@inline_rust` attribute directly off `IrFunction.attrs`.
+        //
+        // 2. Bundled source fallback — code paths that bypass
+        //    `resolve.rs` (unit tests using `canonicalize_program` +
+        //    `lower_program` directly, e.g. the snapshot test suite)
+        //    never get bundled modules into `program.modules`. For
+        //    those, re-parse the embedded `stdlib/<m>.almd` source so
+        //    every @inline_rust fn is reachable. Skipping this would
+        //    make pass_stdlib_lowering silently fall back to the
+        //    legacy `arg_transforms::lookup` path for migrated fns,
+        //    which now returns `None` and emits invalid Rust.
+        //
+        // The merge policy is "IR wins" — if a bundled module is
+        // fully loaded, we take its IR-level signature (param names,
+        // attribute values). Source fallback only fills in modules
+        // that IR didn't provide.
+        let mut inline_rust: HashMap<(Sym, Sym), InlineRustSpec> = program.modules.iter()
+            .filter(|m| almide_lang::stdlib_info::is_bundled_module(m.name.as_str()))
+            .flat_map(|m| {
+                let mname = m.name;
+                m.functions.iter().filter_map(move |f| {
+                    find_inline_rust_template(f).map(|template| {
+                        let param_names = f.params.iter().map(|p| p.name).collect();
+                        let defaults = f.params.iter()
+                            .map(|p| p.default.as_ref().map(|d| (**d).clone()))
+                            .collect();
+                        ((mname, f.name), InlineRustSpec { template, param_names, defaults })
+                    })
+                })
+            })
+            .collect();
+        let loaded_bundled_modules: std::collections::HashSet<Sym> = program.modules.iter()
+            .map(|m| m.name)
+            .collect();
+        for name in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let mname = almide_base::intern::sym(name);
+            if loaded_bundled_modules.contains(&mname) {
+                continue;
+            }
+            for (fname, spec) in parse_bundled_inline_rust(name) {
+                inline_rust.entry((mname, fname)).or_insert(spec);
+            }
+        }
+        INLINE_RUST.with(|s| *s.borrow_mut() = inline_rust);
 
         for func in &mut program.functions {
             func.body = rewrite_expr(std::mem::take(&mut func.body));
@@ -126,6 +347,91 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
 
     let kind = match expr.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
+            // Stage 3c: list operations migrate to bundled `@inline_rust`
+            // like every other module, BUT the Rust target needs the
+            // fused-iterator lowering (`IterChain`) for isolated closure
+            // ops (`list.map(xs, f)` outside a pipe) to stay zero-copy.
+            // `StreamFusionPass` (runs earlier, pipeline-level) already
+            // handles pipe chains; `try_lower_to_iter_chain` is the
+            // fallback for single-call shape. Putting it BEFORE the
+            // `inline_rust_spec` intercept keeps the perf win — if it
+            // declines (non-closure ops like `len`, `push`), we fall
+            // through to the declarative bundled dispatch below.
+            if module.as_ref() == "list" {
+                let args_for_fusion: Vec<IrExpr> = args.iter().cloned()
+                    .map(|a| rewrite_expr(a))
+                    .collect();
+                if let Some(iter_expr) = try_lower_to_iter_chain(
+                    &func, args_for_fusion, &ty, span,
+                ) {
+                    return iter_expr;
+                }
+            }
+            // Stdlib Unification Stage 1: if a bundled stdlib fn
+            // declares `@inline_rust("template")`, produce an
+            // InlineRust IR node with the template + param-keyed args.
+            // Bundled wins over the legacy TOML/arg_transforms path.
+            if let Some(spec) = inline_rust_spec(module, func) {
+                let mut rewritten_args: Vec<IrExpr> = args.into_iter()
+                    .map(|a| rewrite_expr(a))
+                    .collect();
+                // Fill trailing positional args from declared defaults.
+                // Bundled fns like `string.slice(s, start, end = <sentinel>)`
+                // let the caller omit `end`; without this the template
+                // would render with an unreplaced `{end}` placeholder.
+                // The IR-population path carries full `IrExpr` defaults
+                // from the lowered bundled module; the source-parse
+                // fallback only supports simple literals — anything
+                // else is `None` and leaves the arg unfilled (the same
+                // failure mode as before this carve-out).
+                if rewritten_args.len() < spec.param_names.len() {
+                    for default in spec.defaults.iter().skip(rewritten_args.len()) {
+                        if let Some(d) = default {
+                            rewritten_args.push(d.clone());
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                // Pair each rewritten arg with the matching param name.
+                // Strip pre-inserted Clone / Borrow / ToVec / BoxNew /
+                // RcWrap wrappers ONLY when the template references
+                // the parameter with an explicit borrow sigil
+                // (`&{b}`, `&mut {b}`, `&*{b}`). In that case the
+                // template owns reference semantics and the wrapper
+                // would produce `&mut b.clone()` — mutation on a
+                // temp, silently dropped. Elsewhere (by-value params
+                // like `value.field(v, key)` that take `Value` owned
+                // and reuse `v` across several `?`-propagating calls
+                // after the codec derive), keep the wrappers so the
+                // clone-insertion pass's ownership plumbing works.
+                let paired: Vec<(Sym, IrExpr)> = spec.param_names.iter()
+                    .zip(rewritten_args.into_iter())
+                    .map(|(n, a)| {
+                        let a = if template_wants_reference(&spec.template, n.as_str()) {
+                            strip_arg_decorations(a)
+                        } else {
+                            a
+                        };
+                        // Stage 3: a literal Lambda arg to a bundled
+                        // stdlib fn needs the same clone-binding
+                        // treatment as the TOML path's `ArgTransform::
+                        // LambdaClone` — otherwise a captured var used
+                        // twice inside the lambda body produces a
+                        // move-after-move in the generated closure.
+                        // `prepare_lambda` is a no-op on non-Lambda
+                        // args, so this is safe for non-closure params.
+                        let a = prepare_lambda(a);
+                        (*n, a)
+                    })
+                    .collect();
+                return IrExpr {
+                    kind: IrExprKind::InlineRust { template: spec.template, args: paired },
+                    ty,
+                    span,
+                };
+            }
+
             // Non-stdlib modules (bundled .almd + user packages): leave as Module calls.
             // They are rendered by the walker directly, not converted to Named calls.
             // Bundled-only stdlib fns (defined in stdlib/<module>.almd with no TOML
@@ -160,44 +466,20 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                 return inlined;
             }
 
-            // Look up per-function transform table
-            let info = arg_transforms::lookup(&module, &func);
-            let rt_name = info.as_ref().map(|i| i.name.to_string())
-                .unwrap_or_else(|| format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_")));
-
-            // Fill missing optional args with OptionNone
-            let total_params = info.as_ref().map(|i| i.args.len()).unwrap_or(args.len());
-            let mut args = args;
-            while args.len() < total_params {
-                args.push(IrExpr {
-                    kind: IrExprKind::OptionNone,
-                    ty: Ty::option(Ty::Unknown),
-                    span: None,
-                });
-            }
-
-            // Decorate each arg based on the transform table
-            let decorated_args: Vec<IrExpr> = args.into_iter().enumerate().map(|(i, arg)| {
-                let transform = info.as_ref()
-                    .and_then(|info| info.args.get(i).copied())
-                    .unwrap_or(ArgTransform::Direct);
-
-                decorate_arg(arg, transform)
-            }).collect();
-
-            // Build the Named call
-            let call = IrExpr {
+            // Post Stdlib Declarative Unification every stdlib module
+            // flows through the `@inline_rust` dispatch above. Any
+            // Module call that reaches here is either a user module
+            // (already returned at the `is_bundled_only` branch) or a
+            // stale alias that should remain visible to the walker.
+            return IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Named { name: rt_name.into() },
-                    args: decorated_args,
+                    target: CallTarget::Module { module, func },
+                    args,
                     type_args,
                 },
-                ty: ty.clone(),
+                ty,
                 span,
             };
-
-            // auto-? is handled by ResultPropagationPass (runs after this pass)
-            return call;
         }
 
         // Recurse into all sub-expressions (same as before)
@@ -222,12 +504,21 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         }
                     }
                     // UFCS: "module.func" method → convert to Module call and process
-                    // Only if the module.func exists in stdlib (arg_transforms table)
+                    // Accept stdlib fns from two sources:
+                    //   1. TOML-backed `arg_transforms` table (legacy path)
+                    //   2. Bundled `@inline_rust` stdlib fns (Stdlib Declarative
+                    //      Unification Stage 2+) — the INLINE_RUST registry built
+                    //      at the top of `run`. Without this branch, deleting a
+                    //      fn's TOML entry after migrating it to bundled would
+                    //      drop UFCS dispatch (`42.to_string()`) back into the
+                    //      BuiltinLoweringPass Method fallback.
                     if method.contains('.') && !method.ends_with(".encode") && !method.ends_with(".decode") {
                         let dot_pos = method.find('.').unwrap();
                         let (mod_name, func_name) = (&method[..dot_pos], &method[dot_pos+1..]);
-                        // Check if this is a real stdlib function
-                        if arg_transforms::lookup(mod_name, func_name).is_none() {
+                        let mod_sym = almide_base::intern::sym(mod_name);
+                        let func_sym = almide_base::intern::sym(func_name);
+                        let is_bundled_inline_rust = INLINE_RUST.with(|s| s.borrow().contains_key(&(mod_sym, func_sym)));
+                        if !is_bundled_inline_rust {
                                 // Not a stdlib function — leave as Method call for BuiltinLoweringPass
                                 return IrExpr { kind: IrExprKind::Call {
                                     target: CallTarget::Method { object, method },
@@ -353,6 +644,15 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name, args: args.into_iter().map(|a| rewrite_expr(a)).collect(),
         },
+        // Phase 1e-2: traverse RuntimeCall args so inner `@inline_rust`
+        // calls (e.g. `almide_rt_int_to_string(list.len(xs))`) still get
+        // their template substitution. Without this, Module calls nested
+        // inside a RuntimeCall fall through `other => other` untouched
+        // and emit as bare Module calls, losing the `&{xs}` borrow.
+        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
+            symbol,
+            args: args.into_iter().map(|a| rewrite_expr(a)).collect(),
+        },
         other => other,
     };
 
@@ -371,6 +671,16 @@ fn resolve_module_from_ty(ty: &Ty, method: &str) -> Option<&'static str> {
         Ty::String => Some("string"),
         Ty::Int => Some("int"),
         Ty::Float => Some("float"),
+        // Sized numeric types (Stage 3 of the sized-numeric-types arc).
+        // Each hosts its own UFCS conversion / `.to_string()` module.
+        Ty::Int8 => Some("int8"),
+        Ty::Int16 => Some("int16"),
+        Ty::Int32 => Some("int32"),
+        Ty::UInt8 => Some("uint8"),
+        Ty::UInt16 => Some("uint16"),
+        Ty::UInt32 => Some("uint32"),
+        Ty::UInt64 => Some("uint64"),
+        Ty::Float32 => Some("float32"),
         Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
         Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
         _ => None,
@@ -488,10 +798,17 @@ fn resolve_ufcs_stmts(stmts: Vec<IrStmt>, siblings: &[String]) -> Vec<IrStmt> {
 fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
     let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span };
 
+    // NOTE: `float` entries that used to live here (sqrt/abs/floor/
+    // ceil/round/is_nan/is_infinite) have been deleted. The bundled
+    // `stdlib/float.almd` now owns those dispatches via `@inline_rust`
+    // templates that emit the same Method-call form — the intercept
+    // fires earlier in `rewrite_expr`, so this code would be dead even
+    // if left in place. Kept `math.*` entries because the `math`
+    // module has not been migrated to bundled yet.
     match (module, func) {
         // ── math.sqrt(x) → x.sqrt() via RenderedCall ──
         // These are the highest-impact: called in tight loops (nbody, spectralnorm)
-        ("math", "sqrt") | ("float", "sqrt") if args.len() >= 1 => {
+        ("math", "sqrt") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
@@ -501,7 +818,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
                 type_args: vec![],
             }))
         }
-        ("math", "abs") | ("float", "abs") if args.len() >= 1 => {
+        ("math", "abs") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
@@ -511,7 +828,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
                 type_args: vec![],
             }))
         }
-        ("math", "floor") | ("float", "floor") if args.len() >= 1 => {
+        ("math", "floor") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
@@ -521,7 +838,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
                 type_args: vec![],
             }))
         }
-        ("math", "ceil") | ("float", "ceil") if args.len() >= 1 => {
+        ("math", "ceil") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
@@ -531,7 +848,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
                 type_args: vec![],
             }))
         }
-        ("math", "round") | ("float", "round") if args.len() >= 1 => {
+        ("math", "round") if args.len() >= 1 => {
             Some(mk(IrExprKind::Call {
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
@@ -596,14 +913,8 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
         ("math", "pi") => Some(mk(IrExprKind::LitFloat { value: std::f64::consts::PI })),
         ("math", "e") => Some(mk(IrExprKind::LitFloat { value: std::f64::consts::E })),
         ("math", "inf") => Some(mk(IrExprKind::LitFloat { value: f64::INFINITY })),
-        ("float", "is_nan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
-            target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("is_nan") },
-            args: vec![], type_args: vec![],
-        })),
-        ("float", "is_infinite") if args.len() >= 1 => Some(mk(IrExprKind::Call {
-            target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("is_infinite") },
-            args: vec![], type_args: vec![],
-        })),
+        // `float.is_nan` / `float.is_infinite` deleted — owned by
+        // `stdlib/float.almd` via `@inline_rust`.
         ("math", "is_nan") if args.len() >= 1 => Some(mk(IrExprKind::Call {
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("is_nan") },
             args: vec![], type_args: vec![],
@@ -817,141 +1128,6 @@ fn prepare_lambda_borrowed(arg: IrExpr) -> IrExpr {
             }
         }
         _ => arg,
-    }
-}
-
-/// Decorate a single argument based on the per-function transform.
-fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
-    let ty = arg.ty.clone();
-    let span = arg.span;
-
-    match transform {
-        ArgTransform::Direct => arg,
-
-        ArgTransform::BorrowStr => {
-            // &*expr — strip Clone wrapper (borrow doesn't consume ownership)
-            let inner = match arg.kind {
-                IrExprKind::Clone { expr } => *expr,
-                _ => arg,
-            };
-            IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: true, mutable: false },
-                ty, span,
-            }
-        }
-
-        ArgTransform::BorrowRef => {
-            // &expr — strip Clone wrapper (borrow doesn't consume ownership)
-            let inner = match arg.kind {
-                IrExprKind::Clone { expr } => *expr,
-                _ => arg,
-            };
-            IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: false, mutable: false },
-                ty, span,
-            }
-        }
-
-        ArgTransform::BorrowMut => {
-            // &mut expr — strip Clone wrapper (mutable borrow doesn't clone)
-            let inner = match arg.kind {
-                IrExprKind::Clone { expr } => *expr,
-                _ => arg,
-            };
-            IrExpr {
-                kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: false, mutable: true },
-                ty, span,
-            }
-        }
-
-        ArgTransform::ToVec => {
-            // (expr).to_vec()
-            IrExpr {
-                kind: IrExprKind::ToVec { expr: Box::new(arg) },
-                ty, span,
-            }
-        }
-
-        ArgTransform::LambdaClone => {
-            // Lambda: add clone bindings only for params used more than once
-            match arg.kind {
-                IrExprKind::Lambda { params, body, lambda_id } => {
-                    let clone_stmts = build_clone_stmts_for_lambda(&params, &body);
-
-                    let wrapped_body = if clone_stmts.is_empty() {
-                        *body
-                    } else {
-                        let body_ty = body.ty.clone();
-                        let body_span = body.span;
-                        IrExpr {
-                            kind: IrExprKind::Block {
-                                stmts: clone_stmts,
-                                expr: Some(body),
-                            },
-                            ty: body_ty,
-                            span: body_span,
-                        }
-                    };
-
-                    IrExpr {
-                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
-                        ty, span,
-                    }
-                }
-                // FnRef: pass as-is (function reference, not a lambda)
-                _ => arg,
-            }
-        }
-
-        ArgTransform::WrapSome => {
-            // Some(expr) — but if arg is already OptionNone, pass as-is (optional param omitted)
-            if matches!(&arg.kind, IrExprKind::OptionNone) {
-                arg
-            } else {
-                IrExpr {
-                    kind: IrExprKind::OptionSome { expr: Box::new(arg) },
-                    ty: Ty::option(ty),
-                    span,
-                }
-            }
-        }
-
-        ArgTransform::LambdaResultWrap => {
-            // Lambda with Ok(body) wrapping: callback body gets wrapped in ResultOk
-            match arg.kind {
-                IrExprKind::Lambda { params, body, lambda_id } => {
-                    // Clone bindings (only for multi-use params)
-                    let clone_stmts = build_clone_stmts_for_lambda(&params, &body);
-
-                    // Wrap body in ResultOk
-                    let body_ty = body.ty.clone();
-                    let ok_body = IrExpr {
-                        kind: IrExprKind::ResultOk { expr: body },
-                        ty: Ty::result(body_ty.clone(), Ty::String),
-                        span: None,
-                    };
-
-                    let wrapped_body = if clone_stmts.is_empty() {
-                        ok_body
-                    } else {
-                        IrExpr {
-                            kind: IrExprKind::Block {
-                                stmts: clone_stmts,
-                                expr: Some(Box::new(ok_body)),
-                            },
-                            ty: Ty::result(body_ty, Ty::String),
-                            span: None,
-                        }
-                    };
-
-                    IrExpr {
-                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
-                        ty, span,
-                    }
-                }
-                _ => arg,
-            }
-        }
     }
 }
 

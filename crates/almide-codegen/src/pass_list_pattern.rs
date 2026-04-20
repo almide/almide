@@ -44,14 +44,15 @@ impl NanoPass for ListPatternLoweringPass {
             tl.value = val;
             changed |= c;
         }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                let (body, c) = rewrite_expr(std::mem::take(&mut func.body), &mut module.var_table);
+        let IrProgram { modules, var_table, .. } = &mut program;
+        for module in modules.iter_mut() {
+            for func in module.functions.iter_mut() {
+                let (body, c) = rewrite_expr(std::mem::take(&mut func.body), var_table);
                 func.body = body;
                 changed |= c;
             }
-            for tl in &mut module.top_lets {
-                let (val, c) = rewrite_expr(std::mem::take(&mut tl.value), &mut module.var_table);
+            for tl in module.top_lets.iter_mut() {
+                let (val, c) = rewrite_expr(std::mem::take(&mut tl.value), var_table);
                 tl.value = val;
                 changed |= c;
             }

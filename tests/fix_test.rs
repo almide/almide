@@ -16,6 +16,15 @@ fn write_tmp(name: &str, body: &str) -> String {
     path
 }
 
+/// Isolated `almide run` project dir. Parallel `cargo test --all` calls
+/// race inside the shared `/tmp/almide-run/src/main.rs` otherwise.
+fn run_cmd() -> (Command, tempfile::TempDir) {
+    let td = tempfile::TempDir::new().expect("tempdir");
+    let mut cmd = Command::new(almide());
+    cmd.env("ALMIDE_RUN_PROJECT_DIR", td.path());
+    (cmd, td)
+}
+
 #[test]
 fn fix_adds_missing_json_import() {
     let path = write_tmp("fix_adds_import.almd", r#"
@@ -121,7 +130,8 @@ effect fn main() -> Unit = {
     let after = std::fs::read_to_string(&path).unwrap();
     assert!(!after.contains("return "), "`return` not fully removed:\n{}", after);
 
-    let run = Command::new(almide()).args(["run", &path]).output().unwrap();
+    let (mut cmd, _td) = run_cmd();
+    let run = cmd.args(["run", &path]).output().unwrap();
     assert!(run.status.success());
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(stdout.contains("yes"), "expected 'yes', got:\n{}", stdout);
@@ -208,7 +218,8 @@ effect fn main() -> Unit = {
     let check = Command::new(almide()).args(["check", &path]).output().unwrap();
     assert!(check.status.success(),
         "check failed after fix:\n{}", String::from_utf8_lossy(&check.stderr));
-    let run = Command::new(almide()).args(["run", &path]).output().unwrap();
+    let (mut cmd, _td) = run_cmd();
+    let run = cmd.args(["run", &path]).output().unwrap();
     assert!(run.status.success());
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(stdout.contains("15"), "expected sum_digits(12345)=15, got:\n{}", stdout);
@@ -246,7 +257,8 @@ effect fn main() -> Unit = {
     assert!(!after.contains("int.gt"), "int.gt residue:\n{}", after);
 
     // File must now run.
-    let run = Command::new(almide()).args(["run", &path]).output().unwrap();
+    let (mut cmd, _td) = run_cmd();
+    let run = cmd.args(["run", &path]).output().unwrap();
     assert!(run.status.success());
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(stdout.contains("pos") && stdout.contains("even"),

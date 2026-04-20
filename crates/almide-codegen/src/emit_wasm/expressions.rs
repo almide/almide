@@ -23,10 +23,28 @@ impl FuncCompiler<'_> {
         match &expr.kind {
             // ── Literals ──
             IrExprKind::LitInt { value } => {
-                wasm!(self.func, { i64_const(*value); });
+                // Pick the WASM numeric instruction from the literal's
+                // ty (Sized Numeric Types Stage 1b). Narrow signed /
+                // unsigned ints ride in `i32_const`; `UInt64` uses
+                // `i64_const` like the canonical `Int`.
+                match &expr.ty {
+                    Ty::Int8 | Ty::Int16 | Ty::Int32
+                    | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 => {
+                        wasm!(self.func, { i32_const(*value as i32); });
+                    }
+                    _ => {
+                        wasm!(self.func, { i64_const(*value); });
+                    }
+                }
             }
             IrExprKind::LitFloat { value } => {
-                wasm!(self.func, { f64_const(*value); });
+                if matches!(expr.ty, Ty::Float32) {
+                    self.func.instruction(&wasm_encoder::Instruction::F32Const(
+                        (*value as f32).into(),
+                    ));
+                } else {
+                    wasm!(self.func, { f64_const(*value); });
+                }
             }
             IrExprKind::LitBool { value } => {
                 wasm!(self.func, { i32_const(*value as i32); });
@@ -239,6 +257,64 @@ impl FuncCompiler<'_> {
             }
             IrExprKind::TailCall { target, args } => {
                 self.emit_tail_call(target, args, &expr.ty);
+            }
+            IrExprKind::RuntimeCall { symbol, args } => {
+                // Resolved runtime call from @intrinsic. Preferred path:
+                // look up the mangled symbol in `func_map` and emit
+                // `call(idx)` after each arg. Fallback: the WASM runtime
+                // fn may not be registered yet (migration in progress).
+                // Decode the symbol back to (module, func) and route
+                // through the legacy `emit_<m>_call` dispatcher so the
+                // inline-emitted variant (`int.abs` as i64 ops, etc.)
+                // keeps working until the runtime fn lands.
+                let sym = symbol.as_str();
+                if let Some(&idx) = self.emitter.func_map.get(sym) {
+                    for a in args { self.emit_expr(a); }
+                    wasm!(self.func, { call(idx); });
+                } else if let Some((module, func)) = self.emitter.intrinsic_symbol_to_fn.get(sym).cloned() {
+                    // Preferred: use the Almide (module, fn) that declared
+                    // the `@intrinsic` — the symbol may rename the fn
+                    // (e.g. `map.map` → `almide_rt_map_map_values`).
+                    if !self.dispatch_runtime_fallback(&module, &func, args, &expr.ty) {
+                        panic!(
+                            "[ICE] emit_wasm: RuntimeCall `{}` declared by `{}.{}` \
+                             — no WASM runtime fn and no legacy dispatcher arm. \
+                             Register the runtime fn or add a dispatch arm.",
+                            sym, module, func
+                        );
+                    }
+                } else if let Some(rest) = sym.strip_prefix("almide_rt_") {
+                    // Legacy fallback: decode module/fn from the mangled
+                    // symbol name. Used when the runtime symbol matches the
+                    // Almide fn name 1:1 and the bundled `@intrinsic` map
+                    // hasn't claimed it.
+                    if let Some(underscore) = rest.find('_') {
+                        let module = &rest[..underscore];
+                        let func = &rest[underscore + 1..];
+                        if !self.dispatch_runtime_fallback(module, func, args, &expr.ty) {
+                            panic!(
+                                "[ICE] emit_wasm: RuntimeCall `{}` — no WASM \
+                                 runtime fn and no legacy dispatcher fallback. \
+                                 Register the runtime fn or add a dispatch arm \
+                                 for `{}.{}`.",
+                                sym, module, func
+                            );
+                        }
+                    } else {
+                        panic!(
+                            "[ICE] emit_wasm: RuntimeCall symbol `{}` has no \
+                             recoverable (module, func) prefix for fallback dispatch.",
+                            sym
+                        );
+                    }
+                } else {
+                    panic!(
+                        "[ICE] emit_wasm: RuntimeCall symbol `{}` lacks the \
+                         `almide_rt_` prefix — cannot look up in func_map or \
+                         derive fallback dispatch.",
+                        sym
+                    );
+                }
             }
 
             // ── String interpolation ──
@@ -764,52 +840,108 @@ impl FuncCompiler<'_> {
 
     pub(super) fn emit_binop(&mut self, op: BinOp, left: &IrExpr, right: &IrExpr) {
         // BinOp is already reconciled with operand types by ConcretizeTypes pass.
+        // Pick WASM arithmetic width from the operand's valtype. All
+        // sized integer variants (Int8/Int16/Int32/UInt8/UInt16/UInt32)
+        // lower to `i32`; `UInt64` and canonical `Int` stay `i64`. For
+        // unsigned div/mod the distinction matters (div_u vs div_s),
+        // tracked via `is_unsigned_int`.
+        let is_i32_int = matches!(
+            left.ty,
+            Ty::Int8 | Ty::Int16 | Ty::Int32
+                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32
+        );
+        let is_unsigned_int = matches!(
+            left.ty,
+            Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+        );
+        let is_f32 = matches!(left.ty, Ty::Float32);
+
         match op {
             // ── Arithmetic ──
             BinOp::AddInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { i64_add; });
+                if is_i32_int {
+                    wasm!(self.func, { i32_add; });
+                } else {
+                    wasm!(self.func, { i64_add; });
+                }
             }
             BinOp::SubInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { i64_sub; });
+                if is_i32_int {
+                    wasm!(self.func, { i32_sub; });
+                } else {
+                    wasm!(self.func, { i64_sub; });
+                }
             }
             BinOp::MulInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { i64_mul; });
+                if is_i32_int {
+                    wasm!(self.func, { i32_mul; });
+                } else {
+                    wasm!(self.func, { i64_mul; });
+                }
             }
             BinOp::DivInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { i64_div_s; });
+                let instr = match (is_i32_int, is_unsigned_int) {
+                    (true, true) => wasm_encoder::Instruction::I32DivU,
+                    (true, false) => wasm_encoder::Instruction::I32DivS,
+                    (false, true) => wasm_encoder::Instruction::I64DivU,
+                    (false, false) => wasm_encoder::Instruction::I64DivS,
+                };
+                self.func.instruction(&instr);
             }
             BinOp::ModInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { i64_rem_s; });
+                let instr = match (is_i32_int, is_unsigned_int) {
+                    (true, true) => wasm_encoder::Instruction::I32RemU,
+                    (true, false) => wasm_encoder::Instruction::I32RemS,
+                    (false, true) => wasm_encoder::Instruction::I64RemU,
+                    (false, false) => wasm_encoder::Instruction::I64RemS,
+                };
+                self.func.instruction(&instr);
             }
             BinOp::AddFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { f64_add; });
+                if is_f32 {
+                    self.func.instruction(&wasm_encoder::Instruction::F32Add);
+                } else {
+                    wasm!(self.func, { f64_add; });
+                }
             }
             BinOp::SubFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { f64_sub; });
+                if is_f32 {
+                    self.func.instruction(&wasm_encoder::Instruction::F32Sub);
+                } else {
+                    wasm!(self.func, { f64_sub; });
+                }
             }
             BinOp::MulFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { f64_mul; });
+                if is_f32 {
+                    self.func.instruction(&wasm_encoder::Instruction::F32Mul);
+                } else {
+                    wasm!(self.func, { f64_mul; });
+                }
             }
             BinOp::DivFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                wasm!(self.func, { f64_div; });
+                if is_f32 {
+                    self.func.instruction(&wasm_encoder::Instruction::F32Div);
+                } else {
+                    wasm!(self.func, { f64_div; });
+                }
             }
             BinOp::ModFloat => {
                 // WASM has no f64.rem; compute via: a - trunc(a/b) * b
