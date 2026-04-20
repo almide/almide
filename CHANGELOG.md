@@ -11,6 +11,116 @@ care about.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-04-20
+
+Cross-module `let` reaches Swift/TypeScript parity, WASM dispatch gaps
+are closed (both existing bugs and the last three matrix-op blockers),
+and a new CI gate prevents future dispatch drift. Changes are additive
+— no breaking API or surface removals — but the module-system surface
+change is large enough to cross a minor boundary.
+
+### Cross-module `let` now works for every type
+
+Module-scoped `let` bindings (`let FOO = ... ` in `util.almd`,
+`util.FOO` in `main.almd`) previously broke in several shapes:
+
+- Scalar consts (`let MAGIC: Int = 42`) compiled as
+  `(*ALMIDE_RT_UTIL_MAGIC)` where the generated Rust was
+  `const ALMIDE_RT_UTIL_MAGIC: i64 = 42i64;` — `i64` is not a reference,
+  rustc rejected the deref.
+- Compound references (`let RES: Result[Int, String] = ok(7)`) lost the
+  ascription during module lowering. The generated Rust became
+  `LazyLock<Result<i64, _>>`, which rustc rejects under `E0121`.
+  Even after ascription restoration, `*LAZY_VAR` moves out of the
+  deref; consuming callers (`result.unwrap_or((*LAZY_VAR), ...)`) hit
+  `E0507` because the clone-insertion pass missed the synthetic
+  cross-module Var.
+- Ascription-less literals (`let ANON = { a: 1, b: "hi" }` /
+  `let MAP = ["a": 1]`) type-checked to `Unknown` at the use site in
+  `main`, producing `LazyLock<_>` (rustc) or `ConcretizeTypes`
+  post-condition violation (WASM).
+
+Four independent fixes, landing in sequence:
+
+- `walker/expressions.rs` — the synthetic `ALMIDE_RT_<MOD>_<NAME>` Var
+  is no longer assumed to be `LazyLock`-backed. `CodegenAnnotations`
+  gains `lazy_top_let_names: HashSet<String>`, pre-indexed from every
+  module's `TopLetKind::Lazy` entries; scalar `Const` top_lets emit as
+  bare names.
+- `frontend/src/lower/mod.rs` — the `TopLet` branch's type lookup falls
+  back `{prefixed, unprefixed, expr_ty}` so module-scoped bindings find
+  their registration-seeded ascribed type instead of silently
+  re-inferring a generic-less `Result[Int, ?]`.
+- `pass_clone.rs::split_clone_ids` — names prefixed with `ALMIDE_RT_`
+  are now always-clone; synthetic cross-module Vars materialize via
+  `.clone()` and never move out of the LazyLock.
+- `canonicalize/registration.rs::infer_literal_type` now recurses
+  through `Record` / `List` / `Tuple` / `MapLiteral` / `Some` / `None`
+  / `Ok` / `Err` / `Paren`, returning concrete types at registration
+  time. `Checker` also gains `current_module_prefix`, which
+  `infer_module` sets so the `TopLet` write-back hits both prefixed
+  (`util.ANON`) and unprefixed (`ANON`) keys regardless of
+  module check order.
+
+All eleven tested categories work on both Rust and WASM: Int, Float,
+Bool, String, List, Map, Set, Tuple, Option, Result, nominal record,
+anonymous record, variant — with and without ascription.
+
+### WASM dispatch hardening
+
+- **Mono `Discover` module-name guard** — when the same fn name lived
+  in multiple modules (`option.filter[A]`, `list.filter[A]`,
+  `result.filter[A, E]`), the first name match silently stole the
+  specialization, registering it under the wrong `(module, fn, suffix)`
+  key. The `Rewriter` then missed its lookup and the call site stayed
+  as `Module { m, f }`, triggering a WASM ICE. `Discover` now filters
+  by module name the same way `Rewriter` does. `stdlib/result.almd`'s
+  `filter_with(r, pred, () -> E)` thunk workaround is reverted to the
+  spec-shape `filter[A, E](r, pred, err_val: E)`.
+- **`emit_<module>_call` Named dispatch fallback** — the Module arms in
+  `emit_wasm/calls.rs` now try `func_map["almide_rt_<m>_<f>"]` before
+  panicking. Mirrors the unknown-module `_ =>` arm's fallback chain.
+  Applied to `int / float / string / option / result / list / bytes /
+  matrix / base64 / hex / map / math / set` (12 modules).
+- **`error.message` / `error.context` ICE** — `dispatch_runtime_fallback`
+  gains an `"error"` arm that re-enters `emit_call` via
+  `CallTarget::Module`. The inline emit exists on the Module side;
+  the RuntimeCall path just needed a redirect.
+
+### Matrix WASM ops
+
+Three functions that were Rust-runtime-only and caused
+`[ICE] emit_wasm: RuntimeCall almide_rt_matrix_<op>` on the WASM
+target now have inline WASM emit arms:
+
+- `rms_norm_rows(m, gamma, eps)` — layer-norm variant without mean/beta.
+- `attention_weights(q, kt, scale)` — fused `softmax_rows(scale * q×kt)`.
+  Phase-1 scratch locals (`q`, `kt`, `scale`, `k`, `acc`, `inner`) are
+  freed between phases so Phase 2 (`row_off`, `maxv`, `sumv`, `v`)
+  reuses the same WASM local slots.
+- `swiglu_gate(x, w_gate, w_up)` — `out[i,j] = g · σ(g) · u` with both
+  dot products sharing the same `k` loop.
+
+The `ScratchAllocator` per-function i32 cap is raised from 32 → 48 so
+nested matrix pipelines (SDPA, Llama 1-block) fit.
+
+### New CI gate: WASM dispatch coverage
+
+`tests/wasm_dispatch_coverage_test.rs` drives
+`almide test spec/stdlib/ --target wasm`, parses the summary, and
+asserts `failed == 0 && skipped <= SKIP_BASELINE`. Baseline is 3 — only
+legitimate `// wasm:skip` files (native-only `process` APIs,
+`testing.assert_throws` which needs panic catching).
+
+### Numbers
+
+| Surface | Before | After |
+|---|---|---|
+| WASM spec | 214 passed / 7 skipped | **218 passed / 3 skipped** |
+| Rust spec | 221/221 | 221/221 (unchanged) |
+| Cross-module `let` | scalar-only, broken for refs | full parity with Swift/TS |
+| ICE hits in `stdlib/` WASM sweep | 4 | **0** |
+
 ### S2 flip — ConcretizeTypes postcondition is now a hard contract
 
 `expr.ty` is trustworthy by contract. The Pipeline harness
