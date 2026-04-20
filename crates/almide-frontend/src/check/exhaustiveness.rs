@@ -355,16 +355,28 @@ fn fmt_pat(pat: &Pat) -> String {
 /// LLM can copy the arm directly into the source. Field names are
 /// reconstructed from the variant's `VariantPayload::Record` when
 /// available, otherwise positional `argN`.
+///
+/// Nested witnesses (e.g. `Node(Node(_, _), Leaf)` on a recursive
+/// `Tree = Leaf | Node(Tree, Tree)`) preserve their full structure —
+/// the template recurses through inner constructors so the user sees
+/// `Node(Node(arg1, arg2), Leaf) => _` rather than the flat
+/// `Node(arg1, arg2) => _`. `argN` is a file-scope counter to keep
+/// bindings unique across the nesting.
 fn fmt_arm_template(pat: &Pat, subject_ty: &Ty, env: &TypeEnv) -> String {
     let resolved = env.resolve_named(subject_ty);
-    let head = fmt_arm_head(pat, &resolved, env);
+    let mut counter = 1usize;
+    let head = fmt_arm_head(pat, &resolved, env, &mut counter);
     format!("{} => _", head)
 }
 
-fn fmt_arm_head(pat: &Pat, ty: &Ty, env: &TypeEnv) -> String {
+fn fmt_arm_head(pat: &Pat, ty: &Ty, env: &TypeEnv, counter: &mut usize) -> String {
     match pat {
-        Pat::Wild => "_".into(),
-        Pat::Ctor(ctor, _args) => {
+        Pat::Wild => {
+            let n = *counter;
+            *counter += 1;
+            format!("arg{}", n)
+        }
+        Pat::Ctor(ctor, args) => {
             // Wildcard bindings cannot shadow anything at lint time, so
             // positional names don't need to be unique across rows — the
             // emitted arm is purely paste fodder.
@@ -379,54 +391,63 @@ fn fmt_arm_head(pat: &Pat, ty: &Ty, env: &TypeEnv) -> String {
                 CtorId::Tuple => (String::new(), true, false),
                 CtorId::Lit(v) => (v.clone(), false, false),
             };
-            let names = field_names(ctor, ty, env);
-            if names.is_empty() {
-                name
-            } else if is_tuple {
-                format!("({})", names.join(", "))
+            if args.is_empty() {
+                return name;
+            }
+            let sub_types = field_types(ctor, ty, env);
+            let record_fields: Option<Vec<String>> = match ctor {
+                CtorId::Variant(vname) if is_record_payload(vname, ty, env) => {
+                    let resolved = env.resolve_named(ty);
+                    if let Ty::Variant { cases, .. } = &resolved {
+                        cases.iter().find(|c| c.name == *vname)
+                            .and_then(|c| match &c.payload {
+                                VariantPayload::Record(fields) =>
+                                    Some(fields.iter().map(|(n, _)| n.to_string()).collect()),
+                                _ => Option::None,
+                            })
+                    } else { Option::None }
+                }
+                _ => Option::None,
+            };
+            let parts: Vec<String> = args.iter().enumerate().map(|(i, arg)| {
+                let sub_ty = sub_types.get(i).cloned().unwrap_or(Ty::Unknown);
+                match arg {
+                    Pat::Wild => {
+                        // Conventional single-field bindings on
+                        // Option/Result so the paste-ready arm reads
+                        // like the idiom (`some(x)`, `err(e)`) instead
+                        // of a generic `arg1`.
+                        if matches!(ctor, CtorId::Some | CtorId::Ok) && args.len() == 1 {
+                            return "x".to_string();
+                        }
+                        if matches!(ctor, CtorId::Err) && args.len() == 1 {
+                            return "e".to_string();
+                        }
+                        if let Some(fnames) = &record_fields {
+                            if let Some(fname) = fnames.get(i) {
+                                return fname.clone();
+                            }
+                        }
+                        let n = *counter;
+                        *counter += 1;
+                        format!("arg{}", n)
+                    }
+                    Pat::Ctor(_, _) => fmt_arm_head(arg, &sub_ty, env, counter),
+                }
+            }).collect();
+            if is_tuple {
+                format!("({})", parts.join(", "))
             } else if is_prefix_call {
-                // Record-payload variants render as `Name { f1, f2 }`
                 if let CtorId::Variant(vname) = ctor {
                     if is_record_payload(vname, ty, env) {
-                        return format!("{} {{ {} }}", name, names.join(", "));
+                        return format!("{} {{ {} }}", name, parts.join(", "));
                     }
                 }
-                format!("{}({})", name, names.join(", "))
+                format!("{}({})", name, parts.join(", "))
             } else {
                 name
             }
         }
-    }
-}
-
-/// Binding placeholder names for a ctor's fields. Record payloads reuse
-/// the variant's declared field names; tuple payloads get `arg1..N`.
-fn field_names(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> Vec<String> {
-    let resolved = env.resolve_named(ty);
-    match ctor {
-        CtorId::Variant(name) => match &resolved {
-            Ty::Variant { cases, .. } => cases
-                .iter()
-                .find(|c| c.name == *name)
-                .map_or(vec![], |c| match &c.payload {
-                    VariantPayload::Unit => vec![],
-                    VariantPayload::Tuple(tys) => (1..=tys.len())
-                        .map(|i| format!("arg{}", i))
-                        .collect(),
-                    VariantPayload::Record(fields) => fields
-                        .iter()
-                        .map(|(n, _)| n.to_string())
-                        .collect(),
-                }),
-            _ => vec![],
-        },
-        CtorId::Some | CtorId::Ok => vec!["x".into()],
-        CtorId::Err => vec!["e".into()],
-        CtorId::Tuple => match &resolved {
-            Ty::Tuple(tys) => (1..=tys.len()).map(|i| format!("arg{}", i)).collect(),
-            _ => vec![],
-        },
-        CtorId::None | CtorId::True | CtorId::False | CtorId::Lit(_) => vec![],
     }
 }
 

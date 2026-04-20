@@ -118,14 +118,38 @@ toward exhaustiveness — the guard can fail at runtime" when a
 guarded arm is present in the match. The message clarifies why the
 LLM's `X if cond => ...` arm didn't cover pattern X.
 
+### 2026-04-20 — §3 nested exhaustiveness (arm template)
+
+Detection of nested uncovered patterns already worked — Maranget's
+usefulness algorithm is recursive on sub-patterns. The gap was in
+the `fmt_arm_template` formatter: it used `field_names` which always
+produced positional `argN` names regardless of the inner ctor
+structure. Now `fmt_arm_head` recurses through each arg:
+
+- `Pat::Wild` → binding name (`argN` from a file-scope counter, or
+  the record field name / `x` for Option/Result single fields).
+- `Pat::Ctor(c, args)` → nested `c(...)` with a recursive call.
+
+Result on `type Tree = | Leaf | Node(Tree, Tree)` with only `Leaf`
+and `Node(Leaf, _) => ...` handled:
+
+```
+hint: add arms for Node(Node(_, _), Leaf), Node(Node(Leaf, Leaf), Node(_, _)), Node(Node(Node(_, _), Leaf), Node(_, _)):
+  Node(Node(arg1, arg2), Leaf) => _
+  Node(Node(Leaf, Leaf), Node(arg1, arg2)) => _
+  Node(Node(Node(arg1, arg2), Leaf), Node(arg3, arg4)) => _
+```
+
+The `argN` counter resets per arm template so bindings don't
+accidentally match across the paste; this is deliberate since each
+arm is independent.
+
 ### Still open
 
-- **§3 nested exhaustiveness** — e.g. `Node(Leaf(_), _)` shouldn't
-  claim coverage of `Node(Node(_,_), _)`. Currently the outer ctor
-  short-circuits.
 - **§5 Variant Codec auto-derive** — extend the existing
   `derive Codec` machinery to produce encode / decode for variants
-  by default.
+  by default. Requires touching the auto-derive codegen pipeline;
+  separate arc-sized effort.
 
 ## Dependencies
 
