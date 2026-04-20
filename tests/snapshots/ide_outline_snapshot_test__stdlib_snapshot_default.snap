@@ -1,6 +1,5 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
-assertion_line: 108
 expression: text
 ---
 # @stdlib/string
@@ -191,7 +190,7 @@ fn option.zip[A, B](a: Option[A], b: Option[B]) -> Option[(A, B)]
 # @stdlib/result
 fn result.collect[T, E](rs: List[Result[T, E]]) -> Result[List[T], List[E]]
 fn result.collect_map[T, U, E](xs: List[T], f: fn(T) -> Result[U, E]) -> Result[List[U], List[E]]
-fn result.filter_with[A, E](r: Result[A, E], pred: fn(A) -> Bool, on_reject: fn() -> E) -> Result[A, E]
+fn result.filter[A, E](r: Result[A, E], pred: fn(A) -> Bool, err_val: E) -> Result[A, E]
 fn result.flat_map[A, B, E](r: Result[A, E], f: fn(A) -> Result[B, E]) -> Result[B, E]
 fn result.flatten[A, E](r: Result[Result[A, E], E]) -> Result[A, E]
 fn result.is_err[A, E](r: Result[A, E]) -> Bool

@@ -60,19 +60,19 @@ test "result.or_else passes ok through" {
   assert_eq(result.unwrap_or(unchanged, -1), 5)
 }
 
-test "result.filter_with keeps matching ok" {
-  let r: Result[Int, String] = result.filter_with(ok(10), (v) => v > 0, () => "bad")
+test "result.filter keeps matching ok" {
+  let r: Result[Int, String] = result.filter(ok(10), (v) => v > 0, "bad")
   assert_eq(result.unwrap_or(r, -1), 10)
 }
 
-test "result.filter_with rejects non-matching ok with provided err" {
-  let r: Result[Int, String] = result.filter_with(ok(-5), (v) => v > 0, () => "not positive")
+test "result.filter rejects non-matching ok with provided err" {
+  let r: Result[Int, String] = result.filter(ok(-5), (v) => v > 0, "not positive")
   assert_eq(result.is_err(r), true)
 }
 
-test "result.filter_with passes err through" {
+test "result.filter passes err through" {
   let r: Result[Int, String] = err("original")
-  let f: Result[Int, String] = result.filter_with(r, (v) => v > 0, () => "unused")
+  let f: Result[Int, String] = result.filter(r, (v) => v > 0, "unused")
   assert_eq(result.is_err(f), true)
 }
 

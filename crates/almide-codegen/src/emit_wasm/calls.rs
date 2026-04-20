@@ -54,6 +54,24 @@ fn sized_type_info(name: &str) -> Option<(SizedKind, u32)> {
 use super::wasm_macro::wasm;
 
 impl FuncCompiler<'_> {
+    /// Fallback for module dispatch: when `emit_<module>_call` has no arm
+    /// for `func` (often a mono-specialized `filter__Int_String`), try
+    /// `func_map["almide_rt_<module>_<func>"]` — the name ResolveCalls
+    /// would have produced had it rewritten the call. Returns `true` iff
+    /// the call was successfully emitted. Mirrors the fallback chain
+    /// already used by the unknown-module `_ =>` arm below, so inline
+    /// dispatchers and bundled specializations converge on the same
+    /// resolver instead of each module arm dying with an ICE.
+    fn try_named_dispatch_fallback(&mut self, module: &str, func: &str, args: &[IrExpr]) -> bool {
+        let prefixed = format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_"));
+        if let Some(&func_idx) = self.emitter.func_map.get(prefixed.as_str()) {
+            for arg in args { self.emit_expr(arg); }
+            wasm!(self.func, { call(func_idx); });
+            return true;
+        }
+        false
+    }
+
     pub(super) fn emit_call(&mut self, target: &CallTarget, args: &[IrExpr], _ret_ty: &Ty) {
         // Set return type context for stub calls
         self.stub_ret_ty = _ret_ty.clone();
@@ -359,7 +377,9 @@ impl FuncCompiler<'_> {
                 }
                 match (module.as_str(), func.as_str()) {
                     _ if module == "int" => {
-                        if !self.emit_int_call(func, args) {
+                        if !self.emit_int_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -368,7 +388,9 @@ impl FuncCompiler<'_> {
                         }
                     }
                     _ if module == "float" => {
-                        if !self.emit_float_call(func, args) {
+                        if !self.emit_float_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -377,7 +399,9 @@ impl FuncCompiler<'_> {
                         }
                     }
                     _ if module == "string" => {
-                        if !self.emit_string_call(func, args) {
+                        if !self.emit_string_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -386,7 +410,9 @@ impl FuncCompiler<'_> {
                         }
                     }
                     _ if module == "option" => {
-                        if !self.emit_option_call(func, args) {
+                        if !self.emit_option_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -395,7 +421,9 @@ impl FuncCompiler<'_> {
                         }
                     }
                     _ if module == "result" => {
-                        if !self.emit_result_call(func, args) {
+                        if !self.emit_result_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -404,7 +432,9 @@ impl FuncCompiler<'_> {
                         }
                     }
                     _ if module == "list" => {
-                        if !self.emit_list_call(func, args) {
+                        if !self.emit_list_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             // Bundled-Almide fns inside list (e.g. list.split_at,
                             // list.iterate from stdlib/list.almd) are rewritten to
                             // CallTarget::Named { almide_rt_list_<f> } by
@@ -420,7 +450,9 @@ impl FuncCompiler<'_> {
                         }
                     }
                     _ if module == "bytes" => {
-                        if !self.emit_bytes_call(func, args) {
+                        if !self.emit_bytes_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -429,7 +461,9 @@ impl FuncCompiler<'_> {
                         }
                     }
                     _ if module == "matrix" => {
-                        if !self.emit_matrix_call(func, args) {
+                        if !self.emit_matrix_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -448,7 +482,7 @@ impl FuncCompiler<'_> {
                         if let Some(rt) = rt_fn {
                             self.emit_expr(&args[0]);
                             wasm!(self.func, { call(rt); });
-                        } else {
+                        } else if !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args) {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -466,7 +500,7 @@ impl FuncCompiler<'_> {
                         if let Some(rt) = rt_fn {
                             self.emit_expr(&args[0]);
                             wasm!(self.func, { call(rt); });
-                        } else {
+                        } else if !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args) {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -475,7 +509,9 @@ impl FuncCompiler<'_> {
                         }
                     }
                     _ if module == "map" => {
-                        if !self.emit_map_call(func, args) {
+                        if !self.emit_map_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -484,7 +520,9 @@ impl FuncCompiler<'_> {
                         }
                     }
                     _ if module == "math" => {
-                        if !self.emit_math_call(func, args) {
+                        if !self.emit_math_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -575,7 +613,9 @@ impl FuncCompiler<'_> {
                         self.scratch.free_i32(s);
                     }
                     _ if module == "set" => {
-                        if !self.emit_set_call(func, args) {
+                        if !self.emit_set_call(func, args)
+                            && !self.try_named_dispatch_fallback(module.as_str(), func.as_str(), args)
+                        {
                             panic!(
                                 "[ICE] emit_wasm: no WASM dispatch for `{}.{}` — \
                                  add an arm in emit_{}_call or resolve upstream",
@@ -986,6 +1026,20 @@ impl FuncCompiler<'_> {
                 // route to the base handler.
                 let base = func.split_once("__").map(|(b, _)| b).unwrap_or(func);
                 let target = CallTarget::Named { name: almide_base::intern::sym(base) };
+                self.emit_call(&target, args, ret_ty);
+                true
+            }
+            "error" => {
+                // `error.message` / `error.context` have inline emit
+                // arms under the Module dispatcher but are reachable
+                // here via `@intrinsic` → `RuntimeCall` when no WASM
+                // runtime fn is registered. Re-dispatch through the
+                // Module path so the inline arms stay the single
+                // source of truth.
+                let target = CallTarget::Module {
+                    module: almide_base::intern::sym("error"),
+                    func: almide_base::intern::sym(func),
+                };
                 self.emit_call(&target, args, ret_ty);
                 true
             }

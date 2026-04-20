@@ -92,13 +92,8 @@ fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] =
     err(e) => f(e),
   }
 
-// `filter_with` parallels `option.filter` — the `_with` suffix
-// sidesteps the short-name collision that `filter` (shared with
-// `list.filter` and `option.filter`) triggered in the mono rename
-// pass on the WASM side. The rejection err is a thunk `() -> E` so
-// the three-arg shape matches the closure pattern `or_else` uses.
-fn filter_with[A, E](r: Result[A, E], pred: (A) -> Bool, on_reject: () -> E) -> Result[A, E] =
+fn filter[A, E](r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E] =
   match r {
-    ok(v) => if pred(v) then ok(v) else err(on_reject()),
+    ok(v) => if pred(v) then ok(v) else err(err_val),
     err(e) => err(e),
   }

@@ -186,6 +186,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         struct Discover<'a> {
             generics: &'a [ModuleGeneric],
             param_types: Vec<Vec<Ty>>,
+            module_names: &'a [String],
             out: Vec<(usize, usize, HashMap<String, Ty>, String)>, // (mi, fi, bindings, suffix)
         }
         impl<'a> IrMutVisitor for Discover<'a> {
@@ -196,9 +197,13 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                     let f = func.as_str();
                     for (gi, g) in self.generics.iter().enumerate() {
                         if g.name != f { continue; }
-                        // Cheap module guard: we can't easily query the module name
-                        // from a generic index without the program; rely on unique fn
-                        // names for now — guards below skip non-matching bindings.
+                        // Module guard: same fn name can live in multiple modules
+                        // (e.g. option.filter / list.filter / result.filter). Without
+                        // this, the first name-match wins and specialization is
+                        // registered under the wrong (mod, fn, suffix) key — the
+                        // rewriter (which DOES filter by module) then misses the
+                        // lookup and the call stays as unsuffixed `Module { m, f }`.
+                        if self.module_names[g.mi] != m { continue; }
                         let ptys = &self.param_types[gi];
                         let bindings = collect_mono_bindings(&g.bounds, args, ptys);
                         let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
@@ -229,8 +234,9 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         let param_types: Vec<Vec<Ty>> = generics.iter().map(|g| {
             program.modules[g.mi].functions[g.fi].params.iter().map(|p| p.ty.clone()).collect()
         }).collect();
+        let module_names: Vec<String> = program.modules.iter().map(|m| m.name.to_string()).collect();
 
-        let mut d = Discover { generics: &generics, param_types, out: Vec::new() };
+        let mut d = Discover { generics: &generics, param_types, module_names: &module_names, out: Vec::new() };
         for func in &mut program.functions {
             d.visit_expr_mut(&mut func.body);
         }
