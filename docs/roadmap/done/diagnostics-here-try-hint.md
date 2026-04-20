@@ -1,5 +1,43 @@
 <!-- description: Standardize diagnostics to Here/Try/Hint three-part format with CI-verified hint correctness -->
+<!-- done: 2026-04-20 -->
 # Diagnostics: Here / Try / Hint Format
+
+## Completion status (2026-04-20) — arc closed
+
+All phases landed as compiler features + CI-gated invariants:
+
+- **Phase 1 — Here/Try/Hint renderer**: `here_snippet` /
+  `try_snippet` / `try_replace_span` on `Diagnostic`, three-part
+  output via `display_with_source`, JSON encoding.
+- **Phase 2 — Fixture harness**: `tests/diagnostic_harness_test.rs`
+  scans `tests/diagnostics/<case>/` triples and enforces: broken
+  produces expected diagnostic, fixed compiles cleanly.
+- **Phase 3 — Mechanical `Try:` application**: `with_try_replace` +
+  `apply_try_to` + `source_slice` helper. Five diagnostics migrated
+  (E002 rename + method-UFCS, E003 typo + missing-import, E013
+  no-field); the harness auto-applies their `try:` snippets and
+  diffs against `fixed.almd`.
+- **Phase 4 — Coverage gate (hard)**:
+  `tests/diagnostic_coverage_test.rs` scans every `with_code(...)`
+  site, asserts a matching fixture + doc exists, fails CI on gaps.
+  `FIXTURE_ALLOWLIST = ["E420"]` for the single multi-file case
+  the single-file harness can't express.
+- **Phase 5 — Doc registry**: `docs/diagnostics/E###.md` for every
+  emitted code. `almide check --explain E###` renders the doc from
+  the CLI.
+- **Phase 6 — Fixture backfill**: 15/16 codes fixture-covered.
+  Backfilled in 2026-04-20 pass: E001, E005, E006, E007, E008,
+  E009, E011, E012, E014, E015.
+
+## Deferred / residual
+
+- **E001 unit-leak** stays display-only — structural "add trailing
+  expression" doesn't fit span-replace. Documented in the
+  display-only classification table below.
+- **E015 reimpl-lint** is warning-level, not error. The harness
+  accepts both kinds.
+- **E420 visibility** stays allowlisted until the harness grows
+  multi-file fixture support (a distinct arc).
 
 ## Motivation
 

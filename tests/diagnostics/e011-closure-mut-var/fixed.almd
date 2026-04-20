@@ -1,0 +1,2 @@
+fn count_evens(xs: List[Int]) -> Int =
+  list.count(xs, (x) => x % 2 == 0)

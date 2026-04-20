@@ -1,0 +1,7 @@
+fn count_evens(xs: List[Int]) -> Int = {
+  var c = 0
+  list.each(xs, (x) => {
+    if x % 2 == 0 then c = c + 1 else c = c
+  })
+  c
+}

@@ -1,0 +1,3 @@
+expects_code = "E008"
+expects_error = "cannot capture mutable variable"
+hint_substring = "let"

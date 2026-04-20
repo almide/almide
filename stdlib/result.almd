@@ -58,27 +58,47 @@ fn collect_map[T, U, E](xs: List[T], f: (T) -> Result[U, E]) -> Result[List[U], 
 
 // ── Symmetry fills (mirrors option.*) ──
 //
-// `@intrinsic` + runtime wrappers in `runtime/rs/src/result.rs`,
-// matching the pattern of every other result fn above. Closes the
-// ergonomics gap where `Option` had `flatten` / `filter` / `zip` /
-// `or_else` / `to_list` but `Result` silently didn't.
+// Pure Almide bodies — compose match + existing ok / err constructors
+// so the code generates on both Rust and WASM targets without a
+// per-target dispatch arm. The runtime wrappers in
+// `runtime/rs/src/result.rs` are retained for the monomorphised
+// callers that the walker emits, but this layer is the source of
+// truth for behaviour.
 
-@intrinsic("almide_rt_result_flatten")
-@consume(r)
-fn flatten[A, E](r: Result[Result[A, E], E]) -> Result[A, E] = _
+fn flatten[A, E](r: Result[Result[A, E], E]) -> Result[A, E] =
+  match r {
+    ok(inner) => inner,
+    err(e) => err(e),
+  }
 
-@intrinsic("almide_rt_result_to_list")
-@consume(r)
-fn to_list[A, E](r: Result[A, E]) -> List[A] = _
+fn to_list[A, E](r: Result[A, E]) -> List[A] =
+  match r {
+    ok(v) => [v],
+    err(_) => [],
+  }
 
-@intrinsic("almide_rt_result_zip")
-@consume(a, b)
-fn zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E] = _
+fn zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E] =
+  match a {
+    ok(va) => match b {
+      ok(vb) => ok((va, vb)),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  }
 
-@intrinsic("almide_rt_result_or_else")
-@consume(r)
-fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] = _
+fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] =
+  match r {
+    ok(v) => ok(v),
+    err(e) => f(e),
+  }
 
-@intrinsic("almide_rt_result_filter")
-@consume(r)
-fn filter[A, E](r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E] = _
+// `filter_with` parallels `option.filter` — the `_with` suffix
+// sidesteps the short-name collision that `filter` (shared with
+// `list.filter` and `option.filter`) triggered in the mono rename
+// pass on the WASM side. The rejection err is a thunk `() -> E` so
+// the three-arg shape matches the closure pattern `or_else` uses.
+fn filter_with[A, E](r: Result[A, E], pred: (A) -> Bool, on_reject: () -> E) -> Result[A, E] =
+  match r {
+    ok(v) => if pred(v) then ok(v) else err(on_reject()),
+    err(e) => err(e),
+  }

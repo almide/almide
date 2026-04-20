@@ -271,9 +271,24 @@ impl Checker {
         user_param_tys: &[Ty],
         user_ret: &Ty,
     ) -> Option<(&'static str, &'static str)> {
+        let user_lc = user_name.to_ascii_lowercase();
         for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
             for fn_name in crate::stdlib::module_functions_all(module) {
+                // Name-similarity filter: coarse `≤ 2` Levenshtein
+                // gate (cheap), then a substring gate so that
+                // common-shape collisions like
+                // `fn add(Int, Int) -> Int` don't false-positive
+                // against `int.band`. Require one name to contain
+                // the other (case-insensitive) — catches typos
+                // (`maps` ⊃ `map`), qualified renames
+                // (`my_binary_search` ⊃ `binary_search`), and exact
+                // matches, while excluding short stdlib names with
+                // unrelated user fns.
                 if almide_base::diagnostic::levenshtein(user_name, fn_name) > 2 {
+                    continue;
+                }
+                let fn_lc = fn_name.to_ascii_lowercase();
+                if !(user_lc.contains(&fn_lc) || fn_lc.contains(&user_lc)) {
                     continue;
                 }
                 let Some(sig) = crate::stdlib::lookup_sig(module, fn_name) else { continue };

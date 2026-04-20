@@ -1,0 +1,3 @@
+expects_code = "E006"
+expects_error = "cannot call effect function"
+hint_substring = "effect fn"

@@ -1,0 +1,5 @@
+fn binary_search(xs: List[Int], target: Int) -> Option[Int] = {
+  let lo = 0
+  let hi = list.len(xs) - 1
+  none
+}

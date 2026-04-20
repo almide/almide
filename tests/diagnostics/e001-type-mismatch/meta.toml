@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "type mismatch"
+hint_substring = "expression type"

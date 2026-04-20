@@ -45,13 +45,24 @@ fn to_list[A](o: Option[A]) -> List[A] = _
 
 // ── Symmetry fills (mirrors result.collect / collect_map) ──
 //
-// Short-circuits on the first `none`; contract matches Rust's
-// `Vec<Option<T>>.into_iter().collect::<Option<Vec<T>>>()`.
+// Pure Almide bodies — short-circuit on the first `none` via
+// `list.fold` + nested match on the accumulator. Contract matches
+// Rust's `Vec<Option<T>>.into_iter().collect::<Option<Vec<T>>>()`.
+// The runtime wrappers in `runtime/rs/src/option.rs` remain for
+// the monomorphised callsites the walker emits; this layer is the
+// behavioural source of truth and works on both Rust and WASM
+// targets without per-target dispatch arms.
 
-@intrinsic("almide_rt_option_collect")
-@consume(xs)
-fn collect[T](xs: List[Option[T]]) -> Option[List[T]] = _
+fn collect[T](xs: List[Option[T]]) -> Option[List[T]] =
+  list.fold(xs, some([]), (acc, item) =>
+    match acc {
+      some(vals) => match item {
+        some(v) => some(vals + [v]),
+        none => none,
+      },
+      none => none,
+    }
+  )
 
-@intrinsic("almide_rt_option_collect_map")
-@consume(xs)
-fn collect_map[T, U](xs: List[T], f: (T) -> Option[U]) -> Option[List[U]] = _
+fn collect_map[T, U](xs: List[T], f: (T) -> Option[U]) -> Option[List[U]] =
+  option.collect(list.map(xs, f))

@@ -1,5 +1,39 @@
 <!-- description: Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) -->
+<!-- done: 2026-04-20 -->
 # `almide docs-gen` — llms.txt Auto-Generation
+
+## Completion status (2026-04-20) — `--check` MVP landed
+
+`almide docs-gen --check` enforces the drift guards listed in the
+original plan:
+
+- **Version drift**: `Cargo.toml`'s `package.version` must appear in
+  `llms.txt`. Catches stale version refs after a release bump.
+- **Diagnostic registry bijection**: every `with_code("EXXX")` in
+  source has a matching `docs/diagnostics/EXXX.md` and vice-versa.
+  Prevents the E010 / E011 class of drift (emission ↔ doc out of
+  sync).
+- **llms.txt diagnostic refs**: every `docs/diagnostics/EXXX.md` is
+  mentioned at least once in `llms.txt`.
+- **Auto-imported stdlib list**: every module in
+  `AUTO_IMPORT_BUNDLED` appears somewhere in `llms.txt`.
+
+`tests/docs_gen_test.rs` runs `almide docs-gen --check` on every CI
+run, so forgetting to update `llms.txt` after adding a code / module
+fails in the first feedback loop. Coverage added alongside the
+Phase 4 / Phase 5 work from `diagnostics-here-try-hint`.
+
+## Deferred to a future arc
+
+Full regeneration of `llms.txt` from sources (the "write, don't just
+check" mode) stays scoped out. The check gate catches every concrete
+drift the hand-maintenance was supposed to prevent; writing the file
+from scratch would add a significant surface area (CHEATSHEET
+section extraction, CLI reference parser, clap doc extraction) that
+isn't buying MSR at the moment. Revisit when the llms.txt manual-
+edit burden becomes measurable in the dojo log.
+
+## Original plan (retained for history)
 
 Trigger: implement next. `llms.txt` was hand-written in the Phase 3
 push; same information lives in `docs/CHEATSHEET.md`, `docs/DESIGN.md`,

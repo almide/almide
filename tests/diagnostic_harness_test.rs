@@ -118,8 +118,13 @@ fn broken_files_produce_expected_diagnostics() {
         let meta = parse_meta(&case.join("meta.toml"));
         let (success, stdout, stderr) = run_check(&broken);
         let combined = format!("{}{}", stdout, stderr);
+        // Warning-level diagnostics (E015 reimpl-lint etc.) don't fail
+        // compilation; `!success` is the common case but
+        // warning-emitting broken fixtures still produce the expected
+        // `warning[E...]` line. Accept either so the coverage gate can
+        // include warning codes without skipping.
         assert!(
-            !success || combined.contains("error"),
+            !success || combined.contains("error") || combined.contains("warning"),
             "broken.almd in {} unexpectedly passed:\nstdout: {}\nstderr: {}",
             case.display(), stdout, stderr
         );

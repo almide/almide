@@ -19,9 +19,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// When `true`, the test prints coverage gaps but passes. Flip to
-/// `false` to enforce full coverage at CI time.
-const SOFT_GATE: bool = true;
+/// When `true`, the test prints coverage gaps but passes. Flipped
+/// to `false` once fixture backfill reached the allowlist-only
+/// residual — the coverage gate now enforces at CI time.
+const SOFT_GATE: bool = false;
+
+/// Codes that intentionally skip the fixture requirement. Usually
+/// because the diagnostic needs a multi-file setup the single-file
+/// fixture harness can't express (E420 is cross-module visibility,
+/// which requires an `import` graph). Keep this list short — each
+/// entry is a gap the harness can't cover today.
+const FIXTURE_ALLOWLIST: &[&str] = &["E420"];
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -103,9 +111,16 @@ fn diagnostic_fixture_and_doc_coverage_report() {
     let docs = scan_doc_codes();
 
     let mut missing_fixture: Vec<&String> = Vec::new();
+    let mut allowlisted_fixture: Vec<&String> = Vec::new();
     let mut missing_doc: Vec<&String> = Vec::new();
     for code in &codes {
-        if !fixtures.contains_key(code) { missing_fixture.push(code); }
+        if !fixtures.contains_key(code) {
+            if FIXTURE_ALLOWLIST.contains(&code.as_str()) {
+                allowlisted_fixture.push(code);
+            } else {
+                missing_fixture.push(code);
+            }
+        }
         if !docs.contains(code)         { missing_doc.push(code); }
     }
 
@@ -113,11 +128,14 @@ fn diagnostic_fixture_and_doc_coverage_report() {
     eprintln!("── Diagnostic coverage report ───────────────────────────");
     eprintln!("  Codes in source    : {}", codes.len());
     eprintln!("  Fixture-covered    : {} ({})",
-        codes.len() - missing_fixture.len(),
+        codes.len() - missing_fixture.len() - allowlisted_fixture.len(),
         fixtures.values().map(|v| v.len()).sum::<usize>());
     eprintln!("  Doc-covered        : {}", codes.len() - missing_doc.len());
     if !missing_fixture.is_empty() {
         eprintln!("  Missing fixtures    : {}", missing_fixture.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", "));
+    }
+    if !allowlisted_fixture.is_empty() {
+        eprintln!("  Allowlisted         : {}", allowlisted_fixture.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", "));
     }
     if !missing_doc.is_empty() {
         eprintln!("  Missing docs        : {}", missing_doc.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", "));

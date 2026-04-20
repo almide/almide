@@ -15,12 +15,6 @@ pub fn almide_rt_option_to_list<T>(o: Option<T>) -> Vec<T> {
     match o { Some(v) => vec![v], None => vec![] }
 }
 
-// ── Symmetry fills (mirrors result.collect / collect_map) ──
-
-pub fn almide_rt_option_collect<T>(xs: Vec<Option<T>>) -> Option<Vec<T>> {
-    xs.into_iter().collect()
-}
-
-pub fn almide_rt_option_collect_map<T, U>(xs: Vec<T>, mut f: impl FnMut(T) -> Option<U>) -> Option<Vec<U>> {
-    xs.into_iter().map(f).collect()
-}
+// Note: `collect` / `collect_map` are bundled Almide bodies in
+// `stdlib/option.almd`. A Rust duplicate would collide with the
+// monomorphised forms the walker emits for the bundled body.

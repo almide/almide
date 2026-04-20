@@ -1,0 +1,3 @@
+expects_code = "E012"
+expects_error = "duplicate function"
+hint_substring = "Rename"
