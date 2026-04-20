@@ -234,12 +234,25 @@ impl Parser {
                     object: Box::new(expr), index: Box::new(index),
                 });
             } else if self.check(TokenType::LParen) && !self.newline_before_current() {
-                let span = Some(self.current_span());
                 let open = self.current().clone();
+                let open_span = self.current_span();
                 self.advance();
                 let (args, named_args) = self.parse_call_args()?;
+                // Capture the closing `)` span BEFORE `expect_closing`
+                // so we can compute the full call range (callee-start ..
+                // `)`-end) even on single-line calls. Multi-line calls
+                // fall back to the `(`-span since `Span` is single-line.
+                let close_span = self.current_span();
                 self.expect_closing(TokenType::RParen, open.line, open.col, "function call")?;
-                expr = Expr::new(self.next_id(), span, ExprKind::Call {
+                let full_span = match (expr.span, close_span.line == open_span.line) {
+                    (Some(callee_span), true) if callee_span.line == open_span.line => Some(Span {
+                        line: callee_span.line,
+                        col: callee_span.col,
+                        end_col: close_span.end_col,
+                    }),
+                    _ => Some(open_span),
+                };
+                expr = Expr::new(self.next_id(), full_span, ExprKind::Call {
                     callee: Box::new(expr), args, named_args, type_args: None,
                 });
             } else if self.check(TokenType::Bang) && !self.newline_before_current() {

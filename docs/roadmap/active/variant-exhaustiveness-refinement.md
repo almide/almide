@@ -85,18 +85,47 @@ Guard at line 17 is not total
 - Variant の Codec がデフォルトで自動導出される
 - 既存 snapshot テストが更新され、診断のゴールデンファイルが新形式に揃う
 
-## Progress (2026-04-19)
+## Progress
 
-- **§1 paste-ready missing arms landed** — `check_exhaustiveness` now
-  returns `Vec<MissingArm>` carrying both the compact witness pattern
-  (`Node(_, _, _)`) and a paste-ready arm template
-  (`Node(arg1, arg2, arg3) => _`). The E010 diagnostic hint uses the
-  latter; tuple variants get positional `argN` bindings, record
-  variants reuse declared field names, `some/ok/err` get `x` / `e`.
-  Tests in `tests/exhaustiveness_hint_test.rs` (4 cases: tuple
-  variant, Option missing-arm, unit variants, catch-all for Int).
-- **§2 unreachable → error**, **§3 nested**, **§4 guard totality**,
-  **§5 Variant Codec auto-derive** — still open.
+### 2026-04-19 — §1 paste-ready missing arms
+
+`check_exhaustiveness` now returns `Vec<MissingArm>` carrying both the
+compact witness pattern (`Node(_, _, _)`) and a paste-ready arm
+template (`Node(arg1, arg2, arg3) => _`). The E010 diagnostic hint
+uses the latter; tuple variants get positional `argN` bindings,
+record variants reuse declared field names, `some/ok/err` get `x` /
+`e`. Tests in `tests/exhaustiveness_hint_test.rs` (4 cases: tuple
+variant, Option missing-arm, unit variants, catch-all for Int).
+
+### 2026-04-20 — §2 unreachable → error
+
+`find_unreachable_arms` (Maranget §3 usefulness) detects arms whose
+pattern is fully covered by earlier arms. Each dead arm fires
+`E011 unreachable match arm` on its body's span with a tightening
+hint. Guarded arms are skipped for both shadowing directions — they
+don't cover later arms and don't get shadowed themselves.
+
+Opaque / Infinite column types (TypeVars, Int, Float, String) route
+through the default-matrix branch rather than the constructor-
+enumeration branch so generic fns like `map_option[A, B]` keep
+compiling; the ctor-enum branch would falsely report `some(v)` dead
+against an empty `[A]` ctor set.
+
+### 2026-04-20 — §4 guard totality note
+
+E010 now appends "guarded arms (`pat if cond =>`) do NOT count
+toward exhaustiveness — the guard can fail at runtime" when a
+guarded arm is present in the match. The message clarifies why the
+LLM's `X if cond => ...` arm didn't cover pattern X.
+
+### Still open
+
+- **§3 nested exhaustiveness** — e.g. `Node(Leaf(_), _)` shouldn't
+  claim coverage of `Node(Node(_,_), _)`. Currently the outer ctor
+  short-circuits.
+- **§5 Variant Codec auto-derive** — extend the existing
+  `derive Codec` machinery to produce encode / decode for variants
+  by default.
 
 ## Dependencies
 

@@ -506,3 +506,116 @@ pub fn check_exhaustiveness(
         })
         .collect()
 }
+
+// ────────────────────────────────────────────────
+//  Usefulness (reachability) — Maranget Sec. 3
+// ────────────────────────────────────────────────
+
+/// Report the indices of arms whose pattern is already covered by an
+/// earlier arm — i.e. the arm is unreachable / dead. Indices point into
+/// the original `arms` slice (not into the guard-filtered one).
+///
+/// Guarded arms are treated as non-contributing for coverage: they
+/// neither shadow later arms nor get shadowed (a guard can always fail
+/// at runtime). This matches the "guards as proof obligations" view in
+/// §4 of the roadmap and aligns with Rust's exhaustiveness rules.
+pub fn find_unreachable_arms(
+    subject_ty: &Ty,
+    arms: &[ast::MatchArm],
+    env: &TypeEnv,
+) -> Vec<usize> {
+    let resolved = env.resolve_named(subject_ty);
+    if matches!(ctor_set(&resolved, env), CtorSet::Opaque) {
+        return vec![];
+    }
+    let types = vec![resolved];
+    let mut matrix: Vec<Vec<Pat>> = Vec::with_capacity(arms.len());
+    let mut dead = Vec::new();
+    for (idx, arm) in arms.iter().enumerate() {
+        let row = vec![lower(&arm.pattern)];
+        if arm.guard.is_some() {
+            // Skip — guarded rows don't extend `matrix`. We don't
+            // examine their usefulness either: a guarded arm is always
+            // considered "potentially reachable" (the guard might let
+            // through a value earlier arms would have caught).
+            continue;
+        }
+        if !is_useful(&matrix, &row, &types, env) {
+            dead.push(idx);
+        } else {
+            matrix.push(row);
+        }
+    }
+    dead
+}
+
+/// Maranget §3: `U(P, q)` — is row `q` useful w.r.t. matrix `P`?
+/// "Useful" means ∃ a value that matches `q` and no row of `P`.
+///
+/// The recursion follows the structure of `q[0]`:
+/// - `Ctor(c, args)`: specialize both by `c`; recurse.
+/// - `Wild`: if `P`'s head is complete, recurse for each constructor;
+///   else use the default matrix and recurse on `q[1..]`.
+fn is_useful(matrix: &[Vec<Pat>], row: &[Pat], types: &[Ty], env: &TypeEnv) -> bool {
+    if types.is_empty() {
+        // Empty row. Useful iff no row of matrix is empty (= matrix has
+        // no rows at all — an empty matrix can't cover any value).
+        return matrix.iter().all(|r| !r.is_empty());
+    }
+    debug_assert_eq!(row.len(), types.len(), "row and types must align");
+    let ty = &types[0];
+    let rest_types = &types[1..];
+    match &row[0] {
+        Pat::Ctor(c, args) => {
+            let ar = arity(c, ty, env);
+            let mut sub_row: Vec<Pat> = args.iter().cloned().collect();
+            sub_row.resize(ar, Pat::Wild);
+            sub_row.extend_from_slice(&row[1..]);
+            let mut sub_types = field_types(c, ty, env);
+            sub_types.extend_from_slice(rest_types);
+            let sub_matrix = specialize(matrix, c, ar);
+            is_useful(&sub_matrix, &sub_row, &sub_types, env)
+        }
+        Pat::Wild => {
+            let head = head_ctors(matrix);
+            // For Opaque / Infinite constructor spaces (TypeVars, Int,
+            // Float, String) we can't enumerate. The only thing the
+            // wildcard adds is "values not covered by prior rows" —
+            // equivalent to asking whether the default matrix (rows
+            // starting with Wild, head column stripped) fails to
+            // cover `row[1..]`. Fall through to that branch rather
+            // than the ctor iteration, which would iterate an empty
+            // `all` list and wrongly report "not useful".
+            let enumerable = matches!(
+                ctor_set(ty, env),
+                CtorSet::Finite(_) | CtorSet::Single(_)
+            );
+            if enumerable && is_complete(&head, ty, env) {
+                // Cover every constructor; useful if any sub-problem is.
+                let all = match ctor_set(ty, env) {
+                    CtorSet::Finite(all) => all,
+                    CtorSet::Single(c) => vec![c],
+                    _ => return false,
+                };
+                for ctor in &all {
+                    let ar = arity(ctor, ty, env);
+                    let ftys = field_types(ctor, ty, env);
+                    let mut sub_row = vec![Pat::Wild; ar];
+                    sub_row.extend_from_slice(&row[1..]);
+                    let mut sub_types = ftys;
+                    sub_types.extend_from_slice(rest_types);
+                    let sub_matrix = specialize(matrix, ctor, ar);
+                    if is_useful(&sub_matrix, &sub_row, &sub_types, env) {
+                        return true;
+                    }
+                }
+                false
+            } else {
+                // Some constructor missing OR infinite/opaque domain —
+                // the wildcard can catch values no prior row does.
+                let def = default_matrix(matrix);
+                is_useful(&def, &row[1..], rest_types, env)
+            }
+        }
+    }
+}

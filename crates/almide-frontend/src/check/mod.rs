@@ -51,6 +51,12 @@ pub struct Checker {
     /// can emit a `try_replace` range pointing exactly at the name
     /// token rather than the whole call. Cleared after each callee.
     pub(crate) callee_span_hint: Option<crate::ast::Span>,
+    /// Span of the enclosing Call expression (covers callee + args +
+    /// parentheses). Set by `infer_call` before descending into
+    /// `check_call_with_type_args`, so diagnostics that need to
+    /// rewrite the whole call (UFCS `x.to_uppercase()` →
+    /// `string.to_upper(x)`) can target the full range.
+    pub(crate) call_span_hint: Option<crate::ast::Span>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
 }
@@ -64,8 +70,45 @@ impl Checker {
             source_file: None, source_text: None,
             current_span: None,
             callee_span_hint: None,
+            call_span_hint: None,
             constraints: Vec::new(), uf: UnionFind::new(),
         }
+    }
+
+    /// Extract the source substring covered by a single-line span. Returns
+    /// `None` when `source_text` is unset (IDE / playground contexts) or
+    /// the span is out-of-bounds. Used by Phase 3 diagnostics that need
+    /// to interpolate existing source (e.g. E002 method-UFCS rewrites
+    /// `x.to_uppercase()` to `string.to_upper(x)` — `x` comes from the
+    /// object's span).
+    pub(crate) fn source_slice(&self, span: crate::ast::Span) -> Option<String> {
+        let text = self.source_text.as_deref()?;
+        let mut line_start = 0usize;
+        let mut cur_line = 1usize;
+        for (i, b) in text.bytes().enumerate() {
+            if cur_line == span.line { break; }
+            if b == b'\n' {
+                cur_line += 1;
+                line_start = i + 1;
+            }
+        }
+        if cur_line != span.line { return None; }
+        let line_end = text[line_start..].find('\n').map(|i| line_start + i).unwrap_or(text.len());
+        let line_slice = &text[line_start..line_end];
+        let col_to_byte = |target: usize| -> Option<usize> {
+            match line_slice.char_indices().nth(target - 1) {
+                Some((b, _)) => Some(b),
+                None => {
+                    let n = line_slice.chars().count();
+                    if target == n + 1 { Some(line_slice.len()) } else { None }
+                }
+            }
+        };
+        let start = col_to_byte(span.col)?;
+        let end_col = if span.end_col > span.col { span.end_col } else { span.col + 1 };
+        let end = col_to_byte(end_col)?;
+        if end < start || end > line_slice.len() { return None; }
+        Some(line_slice[start..end].to_string())
     }
 
     /// Push a diagnostic, automatically attaching the current expression's span.
@@ -358,7 +401,8 @@ impl Checker {
                 .collect::<Vec<_>>()
                 .join(", ");
             let resolved = self.env.resolve_named(subject_ty);
-            let hint = if missing.len() == 1 && missing[0].pattern == "_" {
+            let has_guarded_arms = arms.iter().any(|a| a.guard.is_some());
+            let hint_base = if missing.len() == 1 && missing[0].pattern == "_" {
                 let ty_name = match &resolved {
                     Ty::Int => "Int",
                     Ty::Float => "Float",
@@ -381,11 +425,57 @@ impl Checker {
                     list, arms_block
                 )
             };
+            // §4: when guarded arms are present, exhaustiveness skips
+            // them — the user may read "missing X" and assume their
+            // `X if cond => ...` arm already covered X. Add a note
+            // explaining the rule so the fix is to either drop the
+            // guard or add `_ => ...`.
+            let hint = if has_guarded_arms {
+                format!(
+                    "{}\n\
+                     Note: guarded arms (`pat if cond =>`) do NOT count \
+                     toward exhaustiveness — the guard can fail at \
+                     runtime. Add an unguarded arm covering the pattern(s) \
+                     above (often `_ => ...`).",
+                    hint_base
+                )
+            } else {
+                hint_base
+            };
             self.emit(Diagnostic::error(
                 format!("non-exhaustive match: missing {}", list),
                 hint,
                 "match",
             ).with_code("E010"));
+        }
+
+        // §2: unreachable arms are a hard error. A pattern already
+        // covered by earlier arms is almost always a generation mistake
+        // — the LLM mis-encoded an earlier condition. Reporting at
+        // error level (not warning) surfaces the problem on the first
+        // CI run rather than being lost in stdout noise.
+        let dead = exhaustiveness::find_unreachable_arms(subject_ty, arms, &self.env);
+        for idx in dead {
+            let arm = &arms[idx];
+            let mut diag = Diagnostic::error(
+                "unreachable match arm",
+                "This arm's pattern is already covered by an earlier arm. \
+                 Either delete it, or tighten the earlier arm so this one is reachable.",
+                "match",
+            ).with_code("E011");
+            // Patterns don't carry spans in the AST. The arm body's
+            // span is adjacent to the pattern (`pattern => body`), so
+            // the diagnostic lands on the right line — close enough
+            // for LLM / human navigation.
+            if let Some(span) = arm.body.span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(span.line);
+                diag.col = Some(span.col);
+                if span.end_col > span.col {
+                    diag.end_col = Some(span.end_col);
+                }
+            }
+            self.emit(diag);
         }
     }
 

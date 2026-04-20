@@ -168,10 +168,28 @@ impl Checker {
                         format!("method call .{}()", field)
                     ).with_code("E002");
                     if let Some(close) = suggestion {
-                        diag = diag.with_try(format!(
-                            "// x.{field}()  →  {m}.{close}(x)\n{m}.{close}(x)",
-                            m = module, close = close, field = field
-                        ));
+                        // Mechanical rewrite path: if we have the object's
+                        // source text AND the full call span, substitute
+                        // `x.field()` → `module.close(x)` in place. Falls
+                        // back to the comment-headed display form when
+                        // the source isn't reachable (IDE / playground).
+                        let rewrite = object.span
+                            .and_then(|s| self.source_slice(s))
+                            .and_then(|obj_src| {
+                                let call_span = self.call_span_hint?;
+                                Some((call_span, format!("{}.{}({})", module, close, obj_src)))
+                            });
+                        if let Some((call_span, snippet)) = rewrite {
+                            diag = diag.with_try_replace(
+                                call_span.line, call_span.col, call_span.end_col,
+                                snippet,
+                            );
+                        } else {
+                            diag = diag.with_try(format!(
+                                "// x.{field}()  →  {m}.{close}(x)\n{m}.{close}(x)",
+                                m = module, close = close, field = field
+                            ));
+                        }
                     }
                     self.emit(diag);
                     return Ty::Unknown;

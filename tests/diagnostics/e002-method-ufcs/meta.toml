@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined method 'to_uppercase'"
+hint_substring = "string.to_upper"

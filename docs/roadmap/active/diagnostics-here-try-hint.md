@@ -170,6 +170,32 @@ E003 covers two shapes, both now mechanically-applicable:
   snippet `"import <module>\n"`. `apply_try_to` handles `end_col ==
   col` as an insertion point. Fixture `tests/diagnostics/e003-missing-import/`.
 
+### 2026-04-20 — Phase 3 third migration (E002 method-UFCS + E013 no-field)
+
+Both whole-expression rewrites now land mechanically thanks to a new
+`source_slice(span)` helper on `Checker` and full Call-expression
+spans from the parser.
+
+- **Parser**: `ExprKind::Call`'s span was the `(` token; now covers
+  `callee ( args )` (same-line, falls back to `(`-span across lines).
+- **Checker**: `call_span_hint` on `Checker` set by `infer_call`, used
+  alongside `callee_span_hint` / `current_span` depending on which
+  range the diagnostic wants to rewrite.
+- **source_slice helper**: char-indexed slice of `source_text` by a
+  `Span`. Returns `None` when source isn't reachable (IDE /
+  playground), in which case the diagnostic falls back to the
+  display-only snippet.
+- **E002 method-UFCS** (`x.to_uppercase()` → `string.to_upper(x)`):
+  reads object's source via `source_slice`, composes the replacement,
+  applies over the full Call span. Fixture:
+  `tests/diagnostics/e002-method-ufcs/`.
+- **E013 no-field** (`items.length` → `list.len(items)`): same
+  pattern over the Member's full span. Fixture:
+  `tests/diagnostics/e013-list-length/`. The `subs` table changed
+  shape from single-snippet strings to
+  `(field, fn_name, args_template, display_suffix)` so the mechanical
+  replacement and display form share one source.
+
 ### Remaining `with_try` sites (classified display-only)
 
 Audit of the 11 surviving call sites — why each stays on `with_try`
