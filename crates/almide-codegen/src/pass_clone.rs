@@ -233,7 +233,13 @@ fn split_clone_ids(
         let name = almide_base::intern::resolve(info.name);
         if top_let_vars.contains(&id) || matches!(&info.ty, Ty::Fn { .. } | Ty::TypeVar(_))
             || name.starts_with("__cap_") || name.starts_with("__licm")
+            || name.starts_with("ALMIDE_RT_")
         {
+            // `ALMIDE_RT_<MOD>_<NAME>` — synthetic cross-module Var whose
+            // target is a `LazyLock<T>`. `*lazy` attempts to move out of
+            // the deref; any consuming use must `.clone()` first. The
+            // fresh VarId misses the `top_let_vars` set, so match by
+            // name prefix.
             always.insert(id);
         } else {
             let syn = syntactic.get(&id).copied().unwrap_or(0);
