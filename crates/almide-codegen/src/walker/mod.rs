@@ -337,6 +337,29 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         .cloned()
         .collect();
     ann.eq_blocked_types = super::walker::declarations::compute_eq_blocked_types(&all_type_decls);
+    // Pre-index Lazy top_let names so the Var renderer can distinguish
+    // `const NAME: i64 = 42;` (scalar, no deref) from
+    // `static NAME: LazyLock<Rc<...>> = ...;` (deref via `(*NAME)`).
+    // Cross-module synthetic Vars carry the uppercased name but a
+    // fresh VarId — `lazy_vars` misses them, so we match by name.
+    for tl in &program.top_lets {
+        if matches!(tl.kind, TopLetKind::Lazy) {
+            ann.lazy_top_let_names.insert(
+                ctx.var_table.get(tl.var).name.to_uppercase()
+            );
+        }
+    }
+    for module in &program.modules {
+        for tl in &module.top_lets {
+            if matches!(tl.kind, TopLetKind::Lazy) {
+                // Post-`UnifyVarTablesPass`, module `tl.var` indexes into
+                // `program.var_table` — the per-module tables are empty.
+                ann.lazy_top_let_names.insert(
+                    ctx.var_table.get(tl.var).name.to_uppercase()
+                );
+            }
+        }
+    }
     let mut ctx = RenderContext {
         templates: ctx.templates,
         var_table: ctx.var_table,

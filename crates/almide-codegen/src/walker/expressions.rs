@@ -63,12 +63,19 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let name = ctx.var_name(*id).to_string();
             // Lazy vars need deref via template. Cross-module top_let synthetic
             // vars carry an `ALMIDE_RT_<MOD>_<NAME>` name and reference a static
-            // LazyLock — auto-deref them too.
-            let is_synthetic_lazy = name.starts_with("ALMIDE_RT_");
+            // LazyLock — auto-deref them too, BUT only if the target top_let's
+            // kind is Lazy. Scalar `Const` top_lets (plain `const NAME: i64 = 42;`)
+            // must NOT be dereferenced. The synthetic Var carries a fresh
+            // VarId so `lazy_vars` misses it; cross-reference by uppercased
+            // name against `lazy_top_let_names` instead.
+            let upper = name.to_uppercase();
+            let is_synthetic_lazy = name.starts_with("ALMIDE_RT_")
+                && ctx.ann.lazy_top_let_names.contains(&upper);
             if ctx.ann.lazy_vars.contains(id) || is_synthetic_lazy {
-                let upper = name.to_uppercase();
                 ctx.templates.render_with("deref_lazy", None, &[], &[("name", upper.as_str())])
-                    .unwrap_or_else(|| name.to_uppercase())
+                    .unwrap_or_else(|| upper.clone())
+            } else if name.starts_with("ALMIDE_RT_") {
+                upper
             } else {
                 name
             }

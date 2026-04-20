@@ -5,6 +5,13 @@ use crate::{VarId, IrExpr};
 #[derive(Debug, Clone, Default)]
 pub struct CodegenAnnotations {
     pub lazy_vars: HashSet<VarId>,
+    /// Uppercased names of module-level `top_lets` whose kind is `Lazy`
+    /// (e.g. `ALMIDE_RT_UTIL_CATEGORY_ORDER`). Synthetic cross-module
+    /// Vars reference these by name but carry a fresh VarId, so
+    /// `lazy_vars` misses them. The walker checks this set before
+    /// emitting `(*NAME)` — scalar `Const` top_lets (plain `const
+    /// NAME: i64 = 42;`) must NOT be dereferenced.
+    pub lazy_top_let_names: HashSet<String>,
     pub ctor_to_enum: HashMap<String, String>,
     pub anon_records: HashMap<Vec<String>, String>,
     pub named_records: HashMap<Vec<String>, String>,
