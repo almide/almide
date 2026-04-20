@@ -59,6 +59,13 @@ pub struct Checker {
     pub(crate) call_span_hint: Option<crate::ast::Span>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
+    /// Module-name prefix active during `infer_module`. `None` for the
+    /// main program. Used by the `TopLet` inference branch to write
+    /// back inferred types under the prefixed `env.top_lets` key
+    /// (`util.ANON`) that `register_decls` seeded — otherwise module
+    /// top_lets without explicit ascription regress to `Ty::Unknown`
+    /// and codegen emits `LazyLock<_>`.
+    pub(crate) current_module_prefix: Option<String>,
 }
 
 impl Checker {
@@ -72,6 +79,7 @@ impl Checker {
             callee_span_hint: None,
             call_span_hint: None,
             constraints: Vec::new(), uf: UnionFind::new(),
+            current_module_prefix: None,
         }
     }
 
@@ -326,9 +334,14 @@ impl Checker {
         );
 
         // Infer + solve + resolve
+        let saved_prefix = std::mem::replace(
+            &mut self.current_module_prefix,
+            Some(module_name.to_string()),
+        );
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         resolve_type_map(&mut self.type_map, &self.uf);
+        self.current_module_prefix = saved_prefix;
 
         // Restore
         self.constraints = saved_constraints;
@@ -451,7 +464,18 @@ impl Checker {
             ast::Decl::TopLet { name, value, .. } => {
                 let ity = self.infer_expr(value);
                 let resolved = resolve_ty(&ity, &self.uf);
-                // Update env.top_lets with the fully inferred type
+                // Update env.top_lets with the fully inferred type.
+                // `register_decls` seeds module top_lets under the
+                // prefixed key (`util.ANON`), so without this we'd only
+                // refresh the unprefixed intra-module alias — lowering
+                // reads the prefixed key and gets `Ty::Unknown`.
+                let prefixed_key = self.current_module_prefix.as_ref()
+                    .map(|p| sym(&format!("{}.{}", p, name)));
+                if let Some(k) = prefixed_key {
+                    if matches!(self.env.top_lets.get(&k), Some(Ty::Unknown) | None) {
+                        self.env.top_lets.insert(k, resolved.clone());
+                    }
+                }
                 if matches!(self.env.top_lets.get(&sym(name)), Some(Ty::Unknown) | None) {
                     self.env.top_lets.insert(sym(name), resolved);
                 }
