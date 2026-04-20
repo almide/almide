@@ -1270,6 +1270,24 @@ impl FuncCompiler<'_> {
                     (false, false, false) => Instruction::I32TruncSatF64S,
                 };
                 self.func.instruction(&instr);
+                // Narrow into the i32 bucket: saturating-trunc into a
+                // sub-32-bit target leaves the full 32-bit value on
+                // the stack, but the Almide semantics say the value
+                // is e.g. u16. Without masking, a downstream
+                // `int.from_uint16` widens 0xFFFFFFFF (saturated inf)
+                // to i64 as 4_294_967_295, not 65_535 — and
+                // assert-eq compares the wrong thing.
+                if dst_bits < 32 {
+                    if dst_u {
+                        let mask = ((1u64 << dst_bits) - 1) as i32;
+                        self.func.instruction(&Instruction::I32Const(mask));
+                        self.func.instruction(&Instruction::I32And);
+                    } else {
+                        let instr = if dst_bits == 8 { Instruction::I32Extend8S }
+                                    else { Instruction::I32Extend16S };
+                        self.func.instruction(&instr);
+                    }
+                }
             }
             (SizedKind::Float, SizedKind::Float) => {
                 if src_bits == 64 && dst_bits == 32 {
