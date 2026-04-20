@@ -24,11 +24,12 @@ fn almide() -> &'static str { env!("CARGO_BIN_EXE_almide") }
 
 fn repo_root() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")) }
 
-/// Matrix-family WASM ICE set that pre-dates this gate: `rms_norm_rows`
-/// + `attention_weights` aren't wired into the WASM dispatcher yet.
-/// Bumping this upward requires a roadmap entry — loosening the gate
-/// hides real dispatch regressions. Drop when the ICE is resolved.
-const SKIP_BASELINE: usize = 6;
+/// Pure `// wasm:skip` directives — files that legitimately cannot run
+/// on WASM (native-only `process` fns, `testing.assert_throws` which
+/// relies on panic catching). The 3 matrix ops (`rms_norm_rows`,
+/// `attention_weights`, `swiglu_gate`) are now implemented inline;
+/// bumping this upward requires a roadmap entry.
+const SKIP_BASELINE: usize = 3;
 
 #[test]
 fn stdlib_spec_compiles_and_runs_on_wasm() {

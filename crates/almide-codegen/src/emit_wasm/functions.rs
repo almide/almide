@@ -50,8 +50,10 @@ pub fn compile_function_with_init(
     }
 
     // ScratchAllocator locals — must be large enough for deepest nested call chain
-    // (e.g. sum(map(filter([...], λ), λ)) needs ~14 simultaneous i32 scratch)
-    let scratch_i32_cap = 32usize;
+    // (e.g. sum(map(filter([...], λ), λ)) needs ~14 simultaneous i32 scratch).
+    // `matrix.attention_weights` nested inside an outer matrix pipeline peaks
+    // at ~33 i32 slots — raise the ceiling so sdpa / llama-block compile.
+    let scratch_i32_cap = 48usize;
     let scratch_i64_cap = 16usize;
     let scratch_f64_cap = 16usize;
     let scratch_i32_base = param_count + local_decls.len() as u32;
