@@ -18,6 +18,7 @@ Use `almide explain <code>` to read these from the CLI.
 | [E011](E011.md) | Mutable var mutated inside closure in pure fn |
 | [E012](E012.md) | Duplicate definition (fn / test) |
 | [E013](E013.md) | Field access on non-record / missing field |
+| [E014](E014.md) | Unreachable match arm |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Codes in the 4-digit range (`E0001` and up) that leak into output

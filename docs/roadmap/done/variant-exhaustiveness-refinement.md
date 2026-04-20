@@ -1,5 +1,37 @@
 <!-- description: Non-exhaustive match suggests missing arm code; unreachable arms become hard errors -->
+<!-- done: 2026-04-20 -->
 # Variant Exhaustiveness Refinement
+
+## Completion status (2026-04-20)
+
+Arc landed across 4 sub-sections (§1–§4 as compiler features, §5 at
+documentation level):
+
+- **§1 paste-ready missing arms** (2026-04-19) — `MissingArm`
+  carries both the compact witness pattern (`Node(_, _)`) and a
+  paste-ready arm template; E010 hint renders the template block.
+- **§2 unreachable → error** (2026-04-20) — Maranget §3 usefulness
+  check via `find_unreachable_arms`; each dead arm fires E011.
+  Opaque/Infinite column types route through default-matrix so
+  generics don't false-positive.
+- **§3 nested exhaustiveness** (2026-04-20) — detection was already
+  correct (Maranget is recursive); `fmt_arm_head` became recursive
+  so nested witnesses render as `Node(Node(arg1, arg2), Leaf) => _`.
+- **§4 guard totality note** (2026-04-20) — when any arm has a
+  guard, E010 appends "guarded arms do NOT count toward
+  exhaustiveness — the guard can fail at runtime" so the user sees
+  the actual reason their `X if cond => ...` didn't cover X.
+- **§5 Variant Codec auto-derive** (2026-04-20) — scope closed at
+  documentation level: the convention is codified in
+  `docs/CHEATSHEET.md` ("variant serialization — recommended
+  pattern"). A compiler-level auto-default was deferred because the
+  cost (2 extra fns per variant type across stdlib + user code) and
+  blast radius (existing Codec decode paths still carry
+  `"payload decode not yet implemented"` stubs for non-trivial
+  payloads) outweigh the MSR benefit for LLMs that already learn
+  `deriving Codec` from one documented example. Re-scope as a
+  distinct arc if dojo MSR data shows LLM drift on the
+  explicit-derive form.
 
 ## Motivation
 

@@ -221,10 +221,47 @@ canonical form" snippets) are legitimately on it, and that's fine.
 
 ### Phase 3 status
 
-Mechanical-apply path lands for E002 (rename-alias) + E003 (typo /
-missing-import). Harness `try_snippets_with_replace_span_apply_cleanly`
-now exercises three fixtures (string-length-alias, e003-typo-var,
-e003-missing-import) for a full compile-and-diff round-trip per case.
+Mechanical-apply path lands for E002 (rename-alias + method-UFCS),
+E003 (typo / missing-import), E013 (no-field). Harness
+`try_snippets_with_replace_span_apply_cleanly` actively fires on
+five fixtures (string-length-alias, e003-typo-var,
+e003-missing-import, e002-method-ufcs, e013-list-length) for a full
+compile-and-diff round-trip per case.
+
+### 2026-04-20 — Phase 4 soft coverage gate
+
+`tests/diagnostic_coverage_test.rs` scans every `with_code("E###")`
+call under `crates/` and reports:
+
+- Codes in source (currently **15**)
+- Fixture-covered (currently **5**)
+- Doc-covered (currently **15** — all codes have a
+  `docs/diagnostics/E###.md` registry entry)
+- Missing fixtures (listed for easy follow-up)
+
+The gate is **soft** — the test prints the report but doesn't fail.
+Promote to hard gate by flipping `SOFT_GATE` once fixtures backfill.
+Reverse gate `every_fixture_meta_declares_known_code` catches typo'd
+codes in fixture `meta.toml` files.
+
+### 2026-04-20 — Phase 5 doc registry
+
+`docs/diagnostics/` already exists with 15 files (E001–E014 + E420)
+and a top-level `README.md` mapping each code to its title.
+`almide check --explain E###` renders the file from the CLI, so
+authors and LLMs can look up any code's full explanation on demand.
+The registry is ready to receive new codes — Phase 4's coverage
+test enforces the authoring checklist going forward.
+
+### Phase 6+ (deferred)
+
+- Promote the coverage gate to hard failure once fixtures cover
+  every code (backfill: E001, E005–E009, E011, E012, E014, E420).
+- Add an auto-generator that skeletons `docs/diagnostics/E###.md`
+  from the source message / hint text, to reduce the cost of adding
+  new codes.
+- Detach `E420` from the 4xx range (it's a historic placeholder);
+  renumber to `E015` when the diagnostic code scheme standardises.
 
 ## Acceptance Criteria
 

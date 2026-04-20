@@ -6,7 +6,7 @@
 
 ## Active
 
-20 items
+19 items
 
 | Item | Description |
 |------|-------------|
@@ -29,7 +29,6 @@
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](active/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
 | [Stdlib Symmetry Audit](active/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
-| [Variant Exhaustiveness Refinement](active/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
 
 ## On Hold
 
@@ -66,14 +65,15 @@
 
 ## Done
 
-219 items
+220 items
 
 <details>
-<summary>Show all 219 completed items</summary>
+<summary>Show all 220 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
 | 2026-04-20 | [Whisper in Pure Almide](done/whisper-almide.md) | Whisper speech recognition implemented entirely in Almide |
+| 2026-04-20 | [Variant Exhaustiveness Refinement](done/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
 | 2026-04-20 | [Stdlib Defs / Runtime Consistency Check](done/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | 2026-04-19 | [VarTable Unification](done/var-table-unification.md) | Unify program/module var_tables into a single program-level table |
 | 2026-04-19 | [Stdlib Declarative Unification — Toward a Single Source of Truth](done/stdlib-declarative-unification.md) | Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes |

@@ -42,6 +42,22 @@ type Handler = (String) -> String                    // function type alias
 type Color: Eq, Repr = Red | Green | Blue   // convention after type name with :
 ```
 
+**Variant serialization — recommended pattern.** When a variant type
+crosses a serialization boundary (JSON / file IO / dojo fixtures),
+use `deriving Codec` to auto-generate `Type.encode` / `Type.decode`
+instead of hand-writing `match` ladders. The auto-derived Codec emits
+tagged-JSON with the ctor name as the tag and payload fields under
+`value`:
+```
+type Event: Codec = | Click(Int, Int) | Scroll{dy: Int}
+// Event.encode(Click(10, 20)) → {"tag": "Click", "value": [10, 20]}
+// Event.encode(Scroll { dy: 5 }) → {"tag": "Scroll", "value": {"dy": 5}}
+```
+Skip the `deriving Codec` only for variants that never serialize
+(internal enums like `Endian` in `stdlib/bytes.almd`). Every other
+variant should opt in — the roundtrip code is LLM-error prone when
+hand-written.
+
 ### Built-in types
 - Primitives: `Int`, `Float`, `String`, `Bool`, `Unit`, `Path`
 - Collections: `List[T]`, `Map[K, V]`, `Set[T]`

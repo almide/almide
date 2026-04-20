@@ -454,6 +454,8 @@ impl Checker {
         // — the LLM mis-encoded an earlier condition. Reporting at
         // error level (not warning) surfaces the problem on the first
         // CI run rather than being lost in stdout noise.
+        // Code: E014 (E011 is the pre-existing "mutable var mutated
+        // inside closure" diagnostic in `infer.rs`).
         let dead = exhaustiveness::find_unreachable_arms(subject_ty, arms, &self.env);
         for idx in dead {
             let arm = &arms[idx];
@@ -462,7 +464,7 @@ impl Checker {
                 "This arm's pattern is already covered by an earlier arm. \
                  Either delete it, or tighten the earlier arm so this one is reachable.",
                 "match",
-            ).with_code("E011");
+            ).with_code("E014");
             // Patterns don't carry spans in the AST. The arm body's
             // span is adjacent to the pattern (`pattern => body`), so
             // the diagnostic lands on the right line — close enough
