@@ -122,7 +122,7 @@ pub fn resolve_imports_with_deps(
                 if loaded_names.contains(&dotted_name) {
                     continue;
                 }
-                load_submodule(pkg_name, sub_path, &dotted_name, base_dir, dep_paths, &mut loaded, &mut loaded_names)?;
+                load_submodule(pkg_name, sub_path, &dotted_name, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
             }
         }
     }
@@ -462,6 +462,7 @@ fn load_submodule(
     dep_paths: &[(project::PkgId, PathBuf)],
     loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
     loaded_names: &mut HashSet<String>,
+    loading: &mut HashSet<String>,
 ) -> Result<(), String> {
     if loaded_names.contains(mod_name) {
         return Ok(());
@@ -497,6 +498,26 @@ fn load_submodule(
         .map_err(|e| format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), e))?;
     if !parser.errors.is_empty() {
         return Err(format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
+    }
+
+    // Recursively resolve this sub-module's imports. Without this, bundled
+    // stdlib modules (fs, process, math, ...) that the sub-module imports
+    // never reach the caller's resolved.modules — their type_decls (e.g.
+    // fs.FileStat) fail to emit in codegen, producing invalid Rust that
+    // references the missing struct. Mirrors the recursion in load_module /
+    // load_self_module / load_bundled_module.
+    for import in &program.imports {
+        if let ast::Decl::Import { path, .. } = import {
+            let dep_name = &path[0];
+            if dep_name.as_str() == "self" { continue; }
+            if let Some(source) = stdlib::get_bundled_source(dep_name) {
+                if !loaded_names.contains(dep_name.as_str()) {
+                    load_bundled_module(dep_name, source, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                }
+            } else if !stdlib::is_stdlib_module(dep_name) {
+                load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
+            }
+        }
     }
 
     loaded_names.insert(mod_name.to_string());
