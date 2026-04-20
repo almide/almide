@@ -13,7 +13,7 @@ pub fn almide_rt_io_flush() {
     STDOUT_BUF.with(|buf| { let _ = buf.borrow_mut().flush(); });
 }
 
-pub fn almide_rt_io_print(s: String) { print!("{}", s); }
+pub fn almide_rt_io_print(s: &str) { print!("{}", s); }
 
 pub fn almide_rt_io_read_line() -> String {
     let mut buf = String::new();
