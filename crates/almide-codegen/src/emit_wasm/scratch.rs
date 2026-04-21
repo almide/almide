@@ -105,6 +105,11 @@ impl ScratchAllocator {
         self.v128.base = base;
     }
 
+    pub fn set_v128_base_with_capacity(&mut self, base: u32, capacity: usize) {
+        self.v128.base = base;
+        self.v128.capacity = capacity;
+    }
+
     // ── Alloc ──
 
     pub fn alloc_i32(&mut self) -> u32 { self.i32.alloc() }

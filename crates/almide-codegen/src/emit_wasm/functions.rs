@@ -56,17 +56,21 @@ pub fn compile_function_with_init(
     let scratch_i32_cap = 48usize;
     let scratch_i64_cap = 16usize;
     let scratch_f64_cap = 16usize;
+    let scratch_v128_cap = 8usize;
     let scratch_i32_base = param_count + local_decls.len() as u32;
     for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
     let scratch_i64_base = param_count + local_decls.len() as u32;
     for _ in 0..scratch_i64_cap { local_decls.push((1, ValType::I64)); }
     let scratch_f64_base = param_count + local_decls.len() as u32;
     for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); }
+    let scratch_v128_base = param_count + local_decls.len() as u32;
+    for _ in 0..scratch_v128_cap { local_decls.push((1, ValType::V128)); }
 
     let wasm_func = Function::new(local_decls);
 
     let mut scratch_alloc = super::scratch::ScratchAllocator::new();
     scratch_alloc.set_bases_with_capacity(scratch_i32_base, scratch_i32_cap, scratch_i64_base, scratch_i64_cap, scratch_f64_base, scratch_f64_cap);
+    scratch_alloc.set_v128_base_with_capacity(scratch_v128_base, scratch_v128_cap);
     let mut compiler = FuncCompiler {
         emitter,
         func: wasm_func,
