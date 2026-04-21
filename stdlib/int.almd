@@ -38,6 +38,13 @@ fn to_float(n: Int) -> Float = _
 @intrinsic("almide_rt_int_bits_to_float")
 fn bits_to_float(bits: Int) -> Float = _
 
+// Interpret the low 32 bits of `bits` as an IEEE-754 binary32 value and
+// return it widened to `Float` (f64). Counterpart to `bits_to_float`
+// which consumes 64 bits directly. Used for reading F32 tensors out of
+// GGUF/ggml files (and any other binary format that stores single-precision).
+@intrinsic("almide_rt_int_bits_to_f32")
+fn bits_to_f32(bits: Int) -> Float = _
+
 // ── Arithmetic ──
 
 @intrinsic("almide_rt_int_abs")

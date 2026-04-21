@@ -187,7 +187,23 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             } else {
                 ctx.var_name(*var).to_string()
             };
-            let iter = render_expr(ctx, iterable);
+            // Rust's `for i in 0..n` consumes a Range directly; the default
+            // `range_expr` template wraps ranges in `.collect::<Vec<_>>()`
+            // so they're usable as Vec values elsewhere, but that allocates
+            // a Vec every time a plain range appears as a ForIn iterable.
+            // A 2 M-weight inner loop inside a 16 k outer loop was paying
+            // ~16 MB/tensor of throwaway Vec allocations. Render Ranges
+            // that appear as a loop iterable with the bare `start..end`
+            // form to skip the alloc.
+            let iter = match &iterable.kind {
+                IrExprKind::Range { start, end, inclusive } => {
+                    let s = render_expr(ctx, start);
+                    let e = render_expr(ctx, end);
+                    let op = if *inclusive { "..=" } else { ".." };
+                    format!("{}{}{}", s, op, e)
+                }
+                _ => render_expr(ctx, iterable),
+            };
             let body_raw = render_stmts(ctx, body).join("\n");
             let body_str = indent_lines(&body_raw, 4);
             ctx.templates.render_with("for_loop", None, &[], &[("var", var_name.as_str()), ("iter", iter.as_str()), ("body", body_str.as_str())])

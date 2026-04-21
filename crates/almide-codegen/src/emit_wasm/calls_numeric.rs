@@ -359,6 +359,16 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { f64_reinterpret_i64; });
             }
+            "bits_to_f32" => {
+                // int.bits_to_f32(bits: Int) → Float:
+                //   take low 32 bits of i64, reinterpret as f32, promote to f64.
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    i32_wrap_i64;
+                    f32_reinterpret_i32;
+                    f64_promote_f32;
+                });
+            }
             "rotate_right" | "rotate_left" => {
                 // rotate_{left,right}(a, n, bits)
                 // mask = (1 << bits) - 1; v = a & mask
