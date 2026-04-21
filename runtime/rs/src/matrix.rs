@@ -805,6 +805,72 @@ pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &[i64]) -> Almide
 //   [row 0 : n_blocks × 18 B][row 1 : n_blocks × 18 B] ... ,
 // starting at `w_offset` within `w_bytes`. Each block = 2 B fp16 scale
 // + 16 B sign bits (LSB-first).
+// sign-byte → 8-lane ±1.0 lookup table. Precomputed so the hot kernel
+// can do a single 64-byte load instead of 8 branches per byte.
+static SIGN_LUT: [[f64; 8]; 256] = {
+    let mut t = [[0.0; 8]; 256];
+    let mut i = 0;
+    while i < 256 {
+        let mut j = 0;
+        while j < 8 {
+            t[i][j] = if (i >> j) & 1 == 1 { 1.0 } else { -1.0 };
+            j += 1;
+        }
+        i += 1;
+    }
+    t
+};
+
+// Block dot: Σ_k xi[k] * (±scale) over k ∈ [0, 128), reading 16 sign
+// bytes at `sign_bytes` and 128 f64 at `xi`. `scale` is applied once
+// at the end so the inner loop does only ±1 FMA.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+#[inline]
+unsafe fn q1_0_block_dot_neon(xi: *const f64, sign_bytes: *const u8, scale: f64) -> f64 {
+    use std::arch::aarch64::*;
+    let mut a0 = vdupq_n_f64(0.0);
+    let mut a1 = vdupq_n_f64(0.0);
+    let mut a2 = vdupq_n_f64(0.0);
+    let mut a3 = vdupq_n_f64(0.0);
+    for byte_idx in 0..16 {
+        let byte = *sign_bytes.add(byte_idx) as usize;
+        let sig = SIGN_LUT[byte].as_ptr();
+        let x = xi.add(byte_idx * 8);
+        a0 = vfmaq_f64(a0, vld1q_f64(x),        vld1q_f64(sig));
+        a1 = vfmaq_f64(a1, vld1q_f64(x.add(2)), vld1q_f64(sig.add(2)));
+        a2 = vfmaq_f64(a2, vld1q_f64(x.add(4)), vld1q_f64(sig.add(4)));
+        a3 = vfmaq_f64(a3, vld1q_f64(x.add(6)), vld1q_f64(sig.add(6)));
+    }
+    let acc = vaddq_f64(vaddq_f64(a0, a1), vaddq_f64(a2, a3));
+    scale * vaddvq_f64(acc)
+}
+
+#[inline]
+fn q1_0_block_dot_scalar(xi: &[f64], sign_bytes: &[u8], scale: f64) -> f64 {
+    let mut s = 0.0f64;
+    for byte_idx in 0..16 {
+        let byte = sign_bytes[byte_idx] as usize;
+        let sig = &SIGN_LUT[byte];
+        let off = byte_idx * 8;
+        for k in 0..8 {
+            s += xi[off + k] * sig[k];
+        }
+    }
+    scale * s
+}
+
+// Q1_0 direct matmul: `y[i, j] = Σ_k x[i, k] * W[j, k]` where W is a
+// packed Q1_0 tensor still sitting in its source GGUF byte buffer.
+// No intermediate decoded matrix is allocated, so per-layer memory
+// stays on the order of the activation matrices (kilobytes) instead of
+// the ~400 MB that full decode produces for a 2048×2048 weight.
+//
+// Layout assumption: W has shape (w_rows, w_cols) with `w_cols`
+// divisible by 128; blocks are stored row-major
+//   [row 0 : n_blocks × 18 B][row 1 : n_blocks × 18 B] ... ,
+// starting at `w_offset` within `w_bytes`. Each block = 2 B fp16 scale
+// + 16 B sign bits (LSB-first).
 pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
     x: &AlmideMatrix,
     w_bytes: &Vec<u8>,
@@ -832,14 +898,15 @@ pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
                 let scale_raw = (w_bytes[block_start] as u16)
                     | ((w_bytes[block_start + 1] as u16) << 8);
                 let scale = fp16_bits_to_f32(scale_raw) as f64;
-                let neg_scale = -scale;
-                let bits_start = block_start + 2;
-                for local_k in 0..128 {
-                    let byte = w_bytes[bits_start + (local_k >> 3)];
-                    let bit = (byte >> (local_k & 7)) & 1;
-                    let w_val = if bit == 1 { scale } else { neg_scale };
-                    sum += xi[b * 128 + local_k] * w_val;
-                }
+                let sign_bytes_slice = &w_bytes[block_start + 2..block_start + 18];
+                let xi_block = &xi[b * 128..b * 128 + 128];
+                #[cfg(target_arch = "aarch64")]
+                let contrib = unsafe {
+                    q1_0_block_dot_neon(xi_block.as_ptr(), sign_bytes_slice.as_ptr(), scale)
+                };
+                #[cfg(not(target_arch = "aarch64"))]
+                let contrib = q1_0_block_dot_scalar(xi_block, sign_bytes_slice, scale);
+                sum += contrib;
             }
             row[j] = sum;
         }
