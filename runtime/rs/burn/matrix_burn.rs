@@ -62,7 +62,14 @@ pub enum AlmideMatrix {
 fn dev() -> <B as burn::tensor::backend::Backend>::Device { Default::default() }
 
 fn is_small(rows: usize, cols: usize) -> bool {
-    rows <= SMALL_THRESHOLD && cols <= SMALL_THRESHOLD
+    // Gen-step single-row path: the whole (1, N) activation column fits in a
+    // Vec<f64> of at most ~100 KB (N up to ~12k for Qwen3 FFN), so staying on
+    // the Small variant lets to_vec_f64 collapse to a data.clone() instead of
+    // a Tensor → TensorData → Vec<f64> round-trip. For multi-row (prompt eval,
+    // training) we still hand off to burn once either dim exceeds
+    // SMALL_THRESHOLD.
+    (rows <= SMALL_THRESHOLD && cols <= SMALL_THRESHOLD)
+        || (rows == 1 && cols <= 16384)
 }
 
 fn mk(rows: usize, cols: usize, data: Vec<f64>) -> AlmideMatrix {
@@ -1963,6 +1970,59 @@ pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &[i64]) -> Almide
 // Q1_0 direct matmul — see runtime/rs/src/matrix.rs for the detailed
 // comment. The Burn variant flattens input once, runs the same loop,
 // and wraps via `mk()`.
+// sign-byte → 8-lane ±1.0 lookup table (burn-runtime mirror of the one in
+// `runtime/rs/src/matrix.rs`). Precomputed so the hot kernel can load a
+// vector of signs per byte instead of branching per bit.
+static SIGN_LUT_BURN: [[f64; 8]; 256] = {
+    let mut t = [[0.0; 8]; 256];
+    let mut i = 0;
+    while i < 256 {
+        let mut j = 0;
+        while j < 8 {
+            t[i][j] = if (i >> j) & 1 == 1 { 1.0 } else { -1.0 };
+            j += 1;
+        }
+        i += 1;
+    }
+    t
+};
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+#[inline]
+unsafe fn q1_0_block_dot_neon_burn(xi: *const f64, sign_bytes: *const u8, scale: f64) -> f64 {
+    use std::arch::aarch64::*;
+    let mut a0 = vdupq_n_f64(0.0);
+    let mut a1 = vdupq_n_f64(0.0);
+    let mut a2 = vdupq_n_f64(0.0);
+    let mut a3 = vdupq_n_f64(0.0);
+    for byte_idx in 0..16 {
+        let byte = *sign_bytes.add(byte_idx) as usize;
+        let sig = SIGN_LUT_BURN[byte].as_ptr();
+        let x = xi.add(byte_idx * 8);
+        a0 = vfmaq_f64(a0, vld1q_f64(x),        vld1q_f64(sig));
+        a1 = vfmaq_f64(a1, vld1q_f64(x.add(2)), vld1q_f64(sig.add(2)));
+        a2 = vfmaq_f64(a2, vld1q_f64(x.add(4)), vld1q_f64(sig.add(4)));
+        a3 = vfmaq_f64(a3, vld1q_f64(x.add(6)), vld1q_f64(sig.add(6)));
+    }
+    let acc = vaddq_f64(vaddq_f64(a0, a1), vaddq_f64(a2, a3));
+    scale * vaddvq_f64(acc)
+}
+
+#[inline]
+fn q1_0_block_dot_scalar_burn(xi: &[f64], sign_bytes: &[u8], scale: f64) -> f64 {
+    let mut s = 0.0f64;
+    for byte_idx in 0..16 {
+        let byte = sign_bytes[byte_idx] as usize;
+        let sig = &SIGN_LUT_BURN[byte];
+        let off = byte_idx * 8;
+        for k in 0..8 {
+            s += xi[off + k] * sig[k];
+        }
+    }
+    scale * s
+}
+
 pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
     x: &AlmideMatrix,
     w_bytes: &Vec<u8>,
@@ -1979,7 +2039,17 @@ pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
     }
     let off = w_offset.max(0) as usize;
     let n_blocks_per_row = n_in / 128;
-    let x_flat = x.to_vec_f64();
+    // Fast path: if x is already a Small (Vec<f64>) variant, borrow its data
+    // directly instead of paying a full Vec::clone for every call.
+    #[allow(unused_assignments)]
+    let mut owned_fallback: Vec<f64> = Vec::new();
+    let x_flat: &[f64] = match x {
+        AlmideMatrix::Small { data, .. } => data.as_slice(),
+        _ => {
+            owned_fallback = x.to_vec_f64();
+            owned_fallback.as_slice()
+        }
+    };
     let mut out_flat = vec![0.0f64; x_rows * out];
     for i in 0..x_rows {
         let x_off = i * n_in;
@@ -1991,14 +2061,15 @@ pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
                 let scale_raw = (w_bytes[block_start] as u16)
                     | ((w_bytes[block_start + 1] as u16) << 8);
                 let scale = fp16_bits_to_f32(scale_raw) as f64;
-                let neg_scale = -scale;
-                let bits_start = block_start + 2;
-                for local_k in 0..128 {
-                    let byte = w_bytes[bits_start + (local_k >> 3)];
-                    let bit = (byte >> (local_k & 7)) & 1;
-                    let w_val = if bit == 1 { scale } else { neg_scale };
-                    sum += x_flat[x_off + b * 128 + local_k] * w_val;
-                }
+                let sign_slice = &w_bytes[block_start + 2..block_start + 18];
+                let xi_block = &x_flat[x_off + b * 128..x_off + b * 128 + 128];
+                #[cfg(target_arch = "aarch64")]
+                let contrib = unsafe {
+                    q1_0_block_dot_neon_burn(xi_block.as_ptr(), sign_slice.as_ptr(), scale)
+                };
+                #[cfg(not(target_arch = "aarch64"))]
+                let contrib = q1_0_block_dot_scalar_burn(xi_block, sign_slice, scale);
+                sum += contrib;
             }
             out_flat[i * out + j] = sum;
         }
