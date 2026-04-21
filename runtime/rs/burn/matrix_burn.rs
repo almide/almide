@@ -1319,12 +1319,15 @@ fn almide_rt_matrix_mha_core_burn(q: &Tensor<B, 2>, k: &Tensor<B, 2>, v: &Tensor
     let k3t: Tensor<B, 3> = k3.swap_dims(1, 2);
     let mut scores: Tensor<B, 3> = q3.matmul(k3t).mul_scalar(scale);
 
-    if causal && sq == sk {
+    if causal {
+        // KV-cache aware causal mask: Q row i maps to absolute position
+        // (sk - sq) + i; attend to K rows j with j <= that position.
+        let prev = sk.saturating_sub(sq);
         let mut flat = vec![0.0f64; h * sq * sk];
         for hi in 0..h {
             for i in 0..sq {
                 for j in 0..sk {
-                    if j > i { flat[hi * sq * sk + i * sk + j] = -10000.0; }
+                    if j > prev + i { flat[hi * sq * sk + i * sk + j] = -10000.0; }
                 }
             }
         }
@@ -1883,11 +1886,22 @@ pub fn almide_rt_matrix_rope_rotate(
     head_dim: i64,
     theta_base: f64,
 ) -> AlmideMatrix {
+    almide_rt_matrix_rope_rotate_at(x, n_heads, head_dim, theta_base, 0)
+}
+
+pub fn almide_rt_matrix_rope_rotate_at(
+    x: &AlmideMatrix,
+    n_heads: i64,
+    head_dim: i64,
+    theta_base: f64,
+    start_pos: i64,
+) -> AlmideMatrix {
     let dims = x.dims2();
     let rows = dims[0];
     let cols = dims[1];
     let n_heads_u = n_heads.max(0) as usize;
     let head_dim_u = head_dim.max(0) as usize;
+    let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
     let mut inv_freqs = Vec::<f64>::with_capacity(half);
     for i in 0..half {
@@ -1897,7 +1911,7 @@ pub fn almide_rt_matrix_rope_rotate(
     let flat_in = x.to_vec_f64();
     let mut flat_out = vec![0.0f64; rows * cols];
     for p in 0..rows {
-        let pos_f = p as f64;
+        let pos_f = (start + p) as f64;
         let row_off = p * cols;
         for h in 0..n_heads_u {
             let head_start = row_off + h * head_dim_u;
@@ -1913,6 +1927,18 @@ pub fn almide_rt_matrix_rope_rotate(
         }
     }
     mk(rows, cols, flat_out)
+}
+
+pub fn almide_rt_matrix_append_rows(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
+    let da = a.dims2();
+    let db = b.dims2();
+    if da[0] == 0 { return b.clone(); }
+    if db[0] == 0 { return a.clone(); }
+    let cols = da[1].max(db[1]);
+    let mut flat = Vec::<f64>::with_capacity((da[0] + db[0]) * cols);
+    flat.extend(a.to_vec_f64());
+    flat.extend(b.to_vec_f64());
+    mk(da[0] + db[0], cols, flat)
 }
 
 pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &[i64]) -> AlmideMatrix {
