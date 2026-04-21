@@ -345,12 +345,18 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
         local_get(0);
         i32_add;
         global_set(emitter.heap_ptr_global);
-        // Grow memory if needed: while heap_ptr > memory.size * 64KB
+        // Grow memory if needed: while heap_ptr > memory.size * 64KB.
+        // Compare in i64 because `memory_size * 65536` overflows i32 once
+        // the heap goes past 2 GB — 2 GB is a realistic size for 1-bit
+        // LLM weights expanded to f64 (Bonsai's `token_embd.weight` alone
+        // is ~2.48 GB in matrix form) and was triggering `unreachable`
+        // instead of a legitimate memory.grow path. Swap operands and use
+        // `i64_ge_u` because the macro set lacks a direct `i64_le_u`.
         block_empty; loop_empty;
-          global_get(emitter.heap_ptr_global);
-          memory_size(0);
-          i32_const(65536); i32_mul;
-          i32_le_u;
+          memory_size(0); i64_extend_i32_u;
+          i64_const(65536); i64_mul;
+          global_get(emitter.heap_ptr_global); i64_extend_i32_u;
+          i64_ge_u;
           br_if(1);
           // Grow by 16 pages (1MB)
           i32_const(16);
