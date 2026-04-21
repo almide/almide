@@ -344,7 +344,13 @@ fn try_hoist_expr(
     // Check if the whole expression is hoistable
     if is_hoistable(expr, loop_defined, pure_fns) {
         let ty = expr.ty.clone();
-        let var = vt.alloc("__licm".into(), ty.clone(), Mutability::Let, None);
+        // Suffix each __licm with the next VarId so multiple hoists from the
+        // same loop (especially nested loops that emit several bindings at
+        // the same scope) don't shadow each other. Rust shadowing with
+        // differing types silently breaks later uses — tracked down while
+        // fixing the extract_q1_0_tensor inner loop regression.
+        let var_name = almide_base::intern::sym(&format!("__licm_{}", vt.len()));
+        let var = vt.alloc(var_name, ty.clone(), Mutability::Let, None);
         let original = std::mem::replace(expr, IrExpr {
             kind: IrExprKind::Var { id: var },
             ty: ty.clone(),
@@ -423,6 +429,36 @@ fn try_hoist_expr(
         IrExprKind::Range { start, end, .. } => {
             try_hoist_expr(start, loop_defined, vt, hoisted, pure_fns);
             try_hoist_expr(end, loop_defined, vt, hoisted, pure_fns);
+        }
+        // Nested loops: descend into the body so an expression that is
+        // invariant w.r.t. BOTH the outer and inner loops (e.g. a struct
+        // field read from a function parameter) can be hoisted all the
+        // way out to the outer pre-loop region. Without this, a 248 MB
+        // `file.clone().raw` sitting inside a doubly-nested decode loop
+        // is rebuilt on every inner iteration.
+        //
+        // `loop_defined` is extended with the nested loop's variables so
+        // we never hoist an expression that genuinely depends on the
+        // inner loop (e.g. `byte_idx = bits_start + i / 8`).
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+            try_hoist_expr(iterable, loop_defined, vt, hoisted, pure_fns);
+            let mut nested_defined = loop_defined.clone();
+            nested_defined.insert(*var);
+            if let Some(vars) = var_tuple {
+                for v in vars { nested_defined.insert(*v); }
+            }
+            collect_defined_vars_stmts(body, &mut nested_defined);
+            for stmt in body.iter_mut() {
+                extract_invariants_from_stmt(stmt, &nested_defined, vt, hoisted, pure_fns);
+            }
+        }
+        IrExprKind::While { cond, body } => {
+            try_hoist_expr(cond, loop_defined, vt, hoisted, pure_fns);
+            let mut nested_defined = loop_defined.clone();
+            collect_defined_vars_stmts(body, &mut nested_defined);
+            for stmt in body.iter_mut() {
+                extract_invariants_from_stmt(stmt, &nested_defined, vt, hoisted, pure_fns);
+            }
         }
         _ => {}
     }
