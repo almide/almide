@@ -9,11 +9,14 @@ use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::{Function, Instruction, ValType};
 
-/// Distinguishes the three element shapes supported by `emit_list_sort_generic`.
+/// Distinguishes the element shapes supported by `emit_list_sort_generic`.
 /// Each variant knows its element size, load/store width, and comparison strategy.
 enum SortKind {
     /// i64 elements, 8 bytes, inline `i64_le_s` comparison.
     Int,
+    /// f64 elements, 8 bytes, inline `f64_le` comparison. NaNs compare false
+    /// on any axis; insertion sort tolerates this by leaving them in place.
+    Float,
     /// i32 string-pointer elements, 4 bytes, `__str_cmp` call + `i32_le_s`.
     String,
     /// i32 List[String]-pointer elements, 4 bytes, `__list_list_str_cmp` call + `i32_le_s`.
@@ -22,17 +25,19 @@ enum SortKind {
 
 impl SortKind {
     fn elem_size(&self) -> u32 {
-        match self { SortKind::Int => 8, _ => 4 }
+        match self { SortKind::Int | SortKind::Float => 8, _ => 4 }
     }
     fn emit_load(&self, f: &mut Function) {
         match self {
             SortKind::Int => { f.instruction(&Instruction::I64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
+            SortKind::Float => { f.instruction(&Instruction::F64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
             _ => { f.instruction(&Instruction::I32Load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
         }
     }
     fn emit_store(&self, f: &mut Function) {
         match self {
             SortKind::Int => { f.instruction(&Instruction::I64Store(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
+            SortKind::Float => { f.instruction(&Instruction::F64Store(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
             _ => { f.instruction(&Instruction::I32Store(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
         }
     }
@@ -44,6 +49,7 @@ impl SortKind {
     fn emit_le_cmp(&self, f: &mut Function, emitter: &WasmEmitter) {
         match self {
             SortKind::Int => { f.instruction(&Instruction::I64LeS); }
+            SortKind::Float => { f.instruction(&Instruction::F64Le); }
             SortKind::String => {
                 f.instruction(&Instruction::Call(emitter.rt.string.cmp));
                 f.instruction(&Instruction::I32Const(0));
@@ -239,6 +245,7 @@ impl FuncCompiler<'_> {
         }
         match &elem_ty {
             Ty::Int => self.emit_list_sort_generic(args, SortKind::Int),
+            Ty::Float => self.emit_list_sort_generic(args, SortKind::Float),
             Ty::String => self.emit_list_sort_generic(args, SortKind::String),
             // `List[List[T]]` lex sort: when T is String or unresolved (the
             // common fold-accumulator case where type inference leaves `A`
@@ -265,7 +272,11 @@ impl FuncCompiler<'_> {
         let dst = self.scratch.alloc_i32();
         let i = self.scratch.alloc_i32();
         let j = self.scratch.alloc_i32();
-        let key = if matches!(kind, SortKind::Int) { self.scratch.alloc_i64() } else { self.scratch.alloc_i32() };
+        let key = match kind {
+            SortKind::Int => self.scratch.alloc_i64(),
+            SortKind::Float => self.scratch.alloc_f64(),
+            _ => self.scratch.alloc_i32(),
+        };
 
         // 1. Copy list header + payload.
         self.emit_expr(&args[0]);
@@ -333,7 +344,11 @@ impl FuncCompiler<'_> {
         });
 
         // 3. Free scratch.
-        if matches!(kind, SortKind::Int) { self.scratch.free_i64(key); } else { self.scratch.free_i32(key); }
+        match kind {
+            SortKind::Int => self.scratch.free_i64(key),
+            SortKind::Float => self.scratch.free_f64(key),
+            _ => self.scratch.free_i32(key),
+        }
         self.scratch.free_i32(j);
         self.scratch.free_i32(i);
         self.scratch.free_i32(dst);
