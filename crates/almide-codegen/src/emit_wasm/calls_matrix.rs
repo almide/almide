@@ -1876,6 +1876,14 @@ impl FuncCompiler<'_> {
             "linear_q1_0_row_no_bias" => {
                 // matrix.linear_q1_0_row_no_bias(x, w_bytes, w_offset, w_rows, w_cols) -> Matrix
                 // y[i, j] = Σ_k x[i, k] * W[j, k]; W packed Q1_0.
+                //
+                // SIMD inner loop: process 2 weights per iteration using
+                // f64x2. The 128-weight block is now 64 pair iterations,
+                // each packing {w0,w1} as a v128 from 2 sign-bits (same
+                // byte — pair_idx*2 aligns to even lane positions so the
+                // two bits always live within one byte). Accumulator is
+                // v128 across all blocks for (i,j), reduced to scalar once
+                // at the end.
                 let x = self.scratch.alloc_i32();
                 let w_bytes = self.scratch.alloc_i32();
                 let w_off = self.scratch.alloc_i32();
@@ -1888,7 +1896,7 @@ impl FuncCompiler<'_> {
                 let i = self.scratch.alloc_i32();
                 let j = self.scratch.alloc_i32();
                 let b = self.scratch.alloc_i32();
-                let k_local = self.scratch.alloc_i32();
+                let pair_idx = self.scratch.alloc_i32();
                 let block_start = self.scratch.alloc_i32();
                 let bits_start = self.scratch.alloc_i32();
                 let scale_raw = self.scratch.alloc_i32();
@@ -1897,10 +1905,17 @@ impl FuncCompiler<'_> {
                 let mant = self.scratch.alloc_i32();
                 let f32bits = self.scratch.alloc_i32();
                 let byte_idx = self.scratch.alloc_i32();
-                let bit = self.scratch.alloc_i32();
-                let sum = self.scratch.alloc_f64();
+                let byte_val = self.scratch.alloc_i32();
+                let bit_shift = self.scratch.alloc_i32();
+                let bit0 = self.scratch.alloc_i32();
+                let bit1 = self.scratch.alloc_i32();
                 let scale = self.scratch.alloc_f64();
                 let neg_scale = self.scratch.alloc_f64();
+                let w0 = self.scratch.alloc_f64();
+                let w1 = self.scratch.alloc_f64();
+                let sum_v = self.scratch.alloc_v128();
+                let w_v = self.scratch.alloc_v128();
+                let x_v = self.scratch.alloc_v128();
 
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(x); });
@@ -1936,7 +1951,9 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(j);
                       block_empty; loop_empty;
                         local_get(j); local_get(out); i32_ge_u; br_if(1);
-                        f64_const(0.0); local_set(sum);
+                        // sum_v = f64x2(0.0, 0.0)
+                        f64_const(0.0); f64x2_splat;
+                        local_set(sum_v);
                         // for b in 0..n_bpr
                         i32_const(0); local_set(b);
                         block_empty; loop_empty;
@@ -1976,50 +1993,71 @@ impl FuncCompiler<'_> {
                           local_set(scale);
                           f64_const(0.0); local_get(scale); f64_sub; local_set(neg_scale);
                           local_get(block_start); i32_const(2); i32_add; local_set(bits_start);
-                          // for local_k in 0..128
-                          i32_const(0); local_set(k_local);
+                          // for pair_idx in 0..64
+                          i32_const(0); local_set(pair_idx);
                           block_empty; loop_empty;
-                            local_get(k_local); i32_const(128); i32_ge_u; br_if(1);
-                            // byte_idx = bits_start + (local_k >> 3)
-                            local_get(bits_start);
-                            local_get(k_local); i32_const(3); i32_shr_u;
-                            i32_add;
+                            local_get(pair_idx); i32_const(64); i32_ge_u; br_if(1);
+                            // byte_idx = pair_idx >> 2  (each byte holds 4 pairs = 8 bits)
+                            local_get(pair_idx); i32_const(2); i32_shr_u;
                             local_set(byte_idx);
-                            local_get(byte_idx); i32_load8_u(0);
-                            local_get(k_local); i32_const(7); i32_and; i32_shr_u;
+                            // bit_shift = (pair_idx & 3) << 1
+                            local_get(pair_idx); i32_const(3); i32_and;
+                            i32_const(1); i32_shl;
+                            local_set(bit_shift);
+                            // byte_val = block[bits_start + byte_idx]
+                            local_get(bits_start); local_get(byte_idx); i32_add;
+                            i32_load8_u(0);
+                            local_set(byte_val);
+                            // bit0 = (byte_val >> bit_shift) & 1
+                            local_get(byte_val); local_get(bit_shift); i32_shr_u;
                             i32_const(1); i32_and;
-                            local_set(bit);
-                            // x_val = x[i, b*128 + local_k]
+                            local_set(bit0);
+                            // bit1 = (byte_val >> (bit_shift + 1)) & 1
+                            local_get(byte_val);
+                            local_get(bit_shift); i32_const(1); i32_add; i32_shr_u;
+                            i32_const(1); i32_and;
+                            local_set(bit1);
+                            // w0 = bit0 ? scale : neg_scale
+                            local_get(bit0);
+                            if_f64; local_get(scale); else_; local_get(neg_scale); end;
+                            local_set(w0);
+                            // w1 = bit1 ? scale : neg_scale
+                            local_get(bit1);
+                            if_f64; local_get(scale); else_; local_get(neg_scale); end;
+                            local_set(w1);
+                            // w_v = f64x2{w0, w1}
+                            local_get(w0); f64x2_splat;
+                            local_get(w1); f64x2_replace_lane(1);
+                            local_set(w_v);
+                            // x_addr = x + 8 + (i*n_in + b*128 + pair_idx*2) * 8
                             local_get(x); i32_const(8); i32_add;
                             local_get(i); local_get(n_in); i32_mul;
-                            local_get(b); i32_const(128); i32_mul;
-                            local_get(k_local);
-                            i32_add; i32_add;
+                            local_get(b); i32_const(128); i32_mul; i32_add;
+                            local_get(pair_idx); i32_const(1); i32_shl; i32_add;
                             i32_const(8); i32_mul;
                             i32_add;
-                            f64_load(0);
-                            // multiply by w_val = bit ? scale : neg_scale
-                            local_get(bit);
-                            if_f64;
-                              local_get(scale);
-                            else_;
-                              local_get(neg_scale);
-                            end;
-                            f64_mul;
-                            local_get(sum); f64_add; local_set(sum);
-                            local_get(k_local); i32_const(1); i32_add; local_set(k_local);
+                            v128_load(0);
+                            local_set(x_v);
+                            // sum_v = sum_v + x_v * w_v
+                            local_get(sum_v);
+                            local_get(x_v); local_get(w_v); f64x2_mul;
+                            f64x2_add;
+                            local_set(sum_v);
+                            local_get(pair_idx); i32_const(1); i32_add; local_set(pair_idx);
                             br(0);
                           end; end;
                           local_get(b); i32_const(1); i32_add; local_set(b);
                           br(0);
                         end; end;
-                        // dst[i, j] = sum
+                        // dst[i, j] = sum_v[0] + sum_v[1]
                         local_get(dst); i32_const(8); i32_add;
                         local_get(i); local_get(out); i32_mul;
                         local_get(j); i32_add;
                         i32_const(8); i32_mul;
                         i32_add;
-                        local_get(sum);
+                        local_get(sum_v); f64x2_extract_lane(0);
+                        local_get(sum_v); f64x2_extract_lane(1);
+                        f64_add;
                         f64_store(0);
                         local_get(j); i32_const(1); i32_add; local_set(j);
                         br(0);
@@ -2029,10 +2067,17 @@ impl FuncCompiler<'_> {
                     end; end;
                     local_get(dst);
                 });
+                self.scratch.free_v128(x_v);
+                self.scratch.free_v128(w_v);
+                self.scratch.free_v128(sum_v);
+                self.scratch.free_f64(w1);
+                self.scratch.free_f64(w0);
                 self.scratch.free_f64(neg_scale);
                 self.scratch.free_f64(scale);
-                self.scratch.free_f64(sum);
-                self.scratch.free_i32(bit);
+                self.scratch.free_i32(bit1);
+                self.scratch.free_i32(bit0);
+                self.scratch.free_i32(bit_shift);
+                self.scratch.free_i32(byte_val);
                 self.scratch.free_i32(byte_idx);
                 self.scratch.free_i32(f32bits);
                 self.scratch.free_i32(mant);
@@ -2041,7 +2086,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(scale_raw);
                 self.scratch.free_i32(bits_start);
                 self.scratch.free_i32(block_start);
-                self.scratch.free_i32(k_local);
+                self.scratch.free_i32(pair_idx);
                 self.scratch.free_i32(b);
                 self.scratch.free_i32(j);
                 self.scratch.free_i32(i);

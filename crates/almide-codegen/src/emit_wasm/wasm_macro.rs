@@ -590,6 +590,15 @@ macro_rules! wasm {
     (@emit $f:expr, f64x2_splat; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::F64x2Splat); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, f64x2_extract_lane($lane:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64x2ExtractLane($lane)); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64x2_replace_lane($lane:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64x2ReplaceLane($lane)); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64x2_neg; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64x2Neg); wasm!(@emit $f, $($rest)*)
+    };
 }
 
 pub(super) use wasm;
