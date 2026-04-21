@@ -2727,8 +2727,17 @@ impl FuncCompiler<'_> {
                 });
                 if causal {
                     wasm!(self.func, {
-                          // Add -1e9 if j > i
-                          local_get(j); local_get(i); i32_gt_u;
+                          // KV-cache-aware causal mask: query row i (one of
+                          // the sq new tokens) attends to key row j iff
+                          // j <= (sk - sq) + i. When sq == sk this reduces
+                          // to j <= i. When sq < sk (single-token gen step
+                          // with cached K of length sk - sq) the cached
+                          // prefix is always visible, and the new query
+                          // sees its own key plus everything before.
+                          local_get(j);
+                          local_get(sk); local_get(sq); i32_sub;
+                          local_get(i); i32_add;
+                          i32_gt_u;
                           if_f64; f64_const(-1.0e9); else_; f64_const(0.0); end;
                           local_get(acc); f64_add; local_set(acc);
                     });
