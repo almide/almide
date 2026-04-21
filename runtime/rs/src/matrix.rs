@@ -683,3 +683,132 @@ pub fn almide_rt_matrix_from_q1_0_bytes(
     }
     out
 }
+
+// RoPE (rotary positional embedding) — see comments in the burn variant.
+pub fn almide_rt_matrix_rope_rotate(
+    x: &AlmideMatrix,
+    n_heads: i64,
+    head_dim: i64,
+    theta_base: f64,
+) -> AlmideMatrix {
+    let rows = x.len();
+    let cols = if rows == 0 { 0 } else { x[0].len() };
+    let n_heads_u = n_heads.max(0) as usize;
+    let head_dim_u = head_dim.max(0) as usize;
+    let half = head_dim_u / 2;
+    let mut inv_freqs = Vec::<f64>::with_capacity(half);
+    for i in 0..half {
+        let exp = (2 * i) as f64 / head_dim_u as f64;
+        inv_freqs.push(1.0 / theta_base.powf(exp));
+    }
+    let mut out = Vec::<Vec<f64>>::with_capacity(rows);
+    for p in 0..rows {
+        let pos_f = p as f64;
+        let row = &x[p];
+        let mut new_row = vec![0.0f64; cols];
+        for h in 0..n_heads_u {
+            let head_start = h * head_dim_u;
+            for i in 0..half {
+                let j0 = head_start + 2 * i;
+                let x0 = row[j0];
+                let x1 = row[j0 + 1];
+                let angle = pos_f * inv_freqs[i];
+                let (s, c) = angle.sin_cos();
+                new_row[j0] = x0 * c - x1 * s;
+                new_row[j0 + 1] = x0 * s + x1 * c;
+            }
+        }
+        out.push(new_row);
+    }
+    out
+}
+
+// select_rows: gather a small number of rows from a big matrix into a
+// new matrix. Avoids the `to_lists` round-trip for the common case of
+// embedding lookups (LLM inference).
+pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &Vec<i64>) -> AlmideMatrix {
+    let cols = if m.is_empty() { 0 } else { m[0].len() };
+    let mut out = Vec::<Vec<f64>>::with_capacity(row_ids.len());
+    for &rid in row_ids {
+        let r = rid.max(0) as usize;
+        if r < m.len() { out.push(m[r].clone()); }
+        else { out.push(vec![0.0f64; cols]); }
+    }
+    out
+}
+
+// Q1_0 direct matmul: `y[i, j] = Σ_k x[i, k] * W[j, k]` where W is a
+// packed Q1_0 tensor still sitting in its source GGUF byte buffer.
+// No intermediate decoded matrix is allocated, so per-layer memory
+// stays on the order of the activation matrices (kilobytes) instead of
+// the ~400 MB that full decode produces for a 2048×2048 weight.
+//
+// Layout assumption: W has shape (w_rows, w_cols) with `w_cols`
+// divisible by 128; blocks are stored row-major
+//   [row 0 : n_blocks × 18 B][row 1 : n_blocks × 18 B] ... ,
+// starting at `w_offset` within `w_bytes`. Each block = 2 B fp16 scale
+// + 16 B sign bits (LSB-first).
+pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
+    x: &AlmideMatrix,
+    w_bytes: &Vec<u8>,
+    w_offset: i64,
+    w_rows: i64,
+    w_cols: i64,
+) -> AlmideMatrix {
+    let x_rows = x.len();
+    let n_in = w_cols.max(0) as usize;
+    let out = w_rows.max(0) as usize;
+    if x_rows == 0 || out == 0 || n_in == 0 {
+        return vec![vec![0.0f64; out]; x_rows];
+    }
+    let off = w_offset.max(0) as usize;
+    let n_blocks_per_row = n_in / 128;
+    let mut result = Vec::<Vec<f64>>::with_capacity(x_rows);
+    for i in 0..x_rows {
+        let xi = &x[i];
+        let mut row = vec![0.0f64; out];
+        for j in 0..out {
+            let mut sum = 0.0f64;
+            let row_off = off + j * n_blocks_per_row * 18;
+            for b in 0..n_blocks_per_row {
+                let block_start = row_off + b * 18;
+                let scale_raw = (w_bytes[block_start] as u16)
+                    | ((w_bytes[block_start + 1] as u16) << 8);
+                let scale = fp16_bits_to_f32(scale_raw) as f64;
+                let neg_scale = -scale;
+                let bits_start = block_start + 2;
+                for local_k in 0..128 {
+                    let byte = w_bytes[bits_start + (local_k >> 3)];
+                    let bit = (byte >> (local_k & 7)) & 1;
+                    let w_val = if bit == 1 { scale } else { neg_scale };
+                    sum += xi[b * 128 + local_k] * w_val;
+                }
+            }
+            row[j] = sum;
+        }
+        result.push(row);
+    }
+    result
+}
+
+// Elementwise: `y[i, j] = silu(a[i, j]) * b[i, j]` where silu(x) = x * σ(x).
+// Used to decompose `swiglu_gate` when we want to feed it through two
+// `linear_q1_0_row_no_bias` calls (one for gate, one for up) instead of
+// going through the full decoded weight matrices.
+pub fn almide_rt_matrix_silu_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
+    let rows = a.len();
+    let mut out = Vec::<Vec<f64>>::with_capacity(rows);
+    for i in 0..rows {
+        let ai = &a[i];
+        let bi = &b[i];
+        let cols = ai.len().min(bi.len());
+        let mut row = vec![0.0f64; cols];
+        for j in 0..cols {
+            let x = ai[j];
+            let sig = 1.0f64 / (1.0 + (-x).exp());
+            row[j] = x * sig * bi[j];
+        }
+        out.push(row);
+    }
+    out
+}

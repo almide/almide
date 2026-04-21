@@ -40,6 +40,34 @@ fn from_lists(rows: List[List[Float]]) -> Matrix = _
 @intrinsic("almide_rt_matrix_from_q1_0_bytes")
 fn from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
+// Gather a subset of rows from a matrix by index. Returns a new matrix
+// of shape (row_ids.len, original_cols). Avoids `to_lists` round-trips
+// for embedding lookups and other row-indexed slicing.
+@intrinsic("almide_rt_matrix_select_rows")
+fn select_rows(m: Matrix, row_ids: List[Int]) -> Matrix = _
+
+// Direct Q1_0 × float matmul: `y[i, j] = Σ_k x[i, k] * W[j, k]` where
+// W is still packed in its source GGUF bytes. No full decode allocation
+// happens — memory stays proportional to x + y, not the full decoded
+// weight matrix. Critical for keeping 28-layer transformer inference
+// under the 4 GB WASM address-space cap. Layout: blocks of 128 weights,
+// 18 bytes each (2 B fp16 scale + 16 B sign bits), row-major within
+// each output feature.
+@intrinsic("almide_rt_matrix_linear_q1_0_row_no_bias")
+fn linear_q1_0_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = _
+
+// Elementwise SwiGLU glue: silu(a) * b. Used with two
+// `linear_q1_0_row_no_bias` calls to run SwiGLU FFN without decoding
+// the w_gate / w_up matrices.
+@intrinsic("almide_rt_matrix_silu_mul")
+fn silu_mul(a: Matrix, b: Matrix) -> Matrix = _
+
+// Rotary positional embedding on a (seq_len, n_heads * head_dim) matrix.
+// Rotates each head's (x[2i], x[2i+1]) pair by `row_idx * inv_freq[i]`.
+// Standard transformer primitive — same level as rms_norm_rows / swiglu_gate.
+@intrinsic("almide_rt_matrix_rope_rotate")
+fn rope_rotate(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float) -> Matrix = _
+
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 

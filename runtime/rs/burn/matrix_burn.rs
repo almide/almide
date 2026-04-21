@@ -1870,3 +1870,127 @@ pub fn almide_rt_matrix_from_q1_0_bytes(
     }
     mk(rows_u, cols_u, flat)
 }
+
+// ── RoPE (rotary positional embedding) ──
+// Rotates (x[2i], x[2i+1]) pairs per head by `p * (1 / theta_base ^ (2i/head_dim))`
+// where p is the row index. Standard transformer primitive — equal footing with
+// rms_norm_rows / swiglu_gate. Adding as intrinsic keeps the 1 M-element rotation
+// loop out of Almide's list/flat_map machinery which, although correct, pays
+// heavy closure-allocation and list-concat costs per iteration.
+pub fn almide_rt_matrix_rope_rotate(
+    x: &AlmideMatrix,
+    n_heads: i64,
+    head_dim: i64,
+    theta_base: f64,
+) -> AlmideMatrix {
+    let dims = x.dims2();
+    let rows = dims[0];
+    let cols = dims[1];
+    let n_heads_u = n_heads.max(0) as usize;
+    let head_dim_u = head_dim.max(0) as usize;
+    let half = head_dim_u / 2;
+    let mut inv_freqs = Vec::<f64>::with_capacity(half);
+    for i in 0..half {
+        let exp = (2 * i) as f64 / head_dim_u as f64;
+        inv_freqs.push(1.0 / theta_base.powf(exp));
+    }
+    let flat_in = x.to_vec_f64();
+    let mut flat_out = vec![0.0f64; rows * cols];
+    for p in 0..rows {
+        let pos_f = p as f64;
+        let row_off = p * cols;
+        for h in 0..n_heads_u {
+            let head_start = row_off + h * head_dim_u;
+            for i in 0..half {
+                let j0 = head_start + 2 * i;
+                let x0 = flat_in[j0];
+                let x1 = flat_in[j0 + 1];
+                let angle = pos_f * inv_freqs[i];
+                let (s, c) = angle.sin_cos();
+                flat_out[j0] = x0 * c - x1 * s;
+                flat_out[j0 + 1] = x0 * s + x1 * c;
+            }
+        }
+    }
+    mk(rows, cols, flat_out)
+}
+
+pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &Vec<i64>) -> AlmideMatrix {
+    let dims = m.dims2();
+    let cols = dims[1];
+    let out_rows = row_ids.len();
+    let mut flat = Vec::<f64>::with_capacity(out_rows * cols);
+    let src = m.to_vec_f64();
+    for &rid in row_ids {
+        let r = rid.max(0) as usize;
+        let start = r * cols;
+        let end = start + cols;
+        if end <= src.len() {
+            flat.extend_from_slice(&src[start..end]);
+        } else {
+            flat.extend(std::iter::repeat(0.0f64).take(cols));
+        }
+    }
+    mk(out_rows, cols, flat)
+}
+
+// Q1_0 direct matmul — see runtime/rs/src/matrix.rs for the detailed
+// comment. The Burn variant flattens input once, runs the same loop,
+// and wraps via `mk()`.
+pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
+    x: &AlmideMatrix,
+    w_bytes: &Vec<u8>,
+    w_offset: i64,
+    w_rows: i64,
+    w_cols: i64,
+) -> AlmideMatrix {
+    let dims = x.dims2();
+    let x_rows = dims[0];
+    let n_in = w_cols.max(0) as usize;
+    let out = w_rows.max(0) as usize;
+    if x_rows == 0 || out == 0 || n_in == 0 {
+        return mk(x_rows, out, vec![0.0f64; x_rows * out]);
+    }
+    let off = w_offset.max(0) as usize;
+    let n_blocks_per_row = n_in / 128;
+    let x_flat = x.to_vec_f64();
+    let mut out_flat = vec![0.0f64; x_rows * out];
+    for i in 0..x_rows {
+        let x_off = i * n_in;
+        for j in 0..out {
+            let mut sum = 0.0f64;
+            let row_off = off + j * n_blocks_per_row * 18;
+            for b in 0..n_blocks_per_row {
+                let block_start = row_off + b * 18;
+                let scale_raw = (w_bytes[block_start] as u16)
+                    | ((w_bytes[block_start + 1] as u16) << 8);
+                let scale = fp16_bits_to_f32(scale_raw) as f64;
+                let neg_scale = -scale;
+                let bits_start = block_start + 2;
+                for local_k in 0..128 {
+                    let byte = w_bytes[bits_start + (local_k >> 3)];
+                    let bit = (byte >> (local_k & 7)) & 1;
+                    let w_val = if bit == 1 { scale } else { neg_scale };
+                    sum += x_flat[x_off + b * 128 + local_k] * w_val;
+                }
+            }
+            out_flat[i * out + j] = sum;
+        }
+    }
+    mk(x_rows, out, out_flat)
+}
+
+pub fn almide_rt_matrix_silu_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
+    let ad = a.dims2();
+    let rows = ad[0];
+    let cols = ad[1];
+    let af = a.to_vec_f64();
+    let bf = b.to_vec_f64();
+    let mut out = vec![0.0f64; rows * cols];
+    for i in 0..rows * cols {
+        let x = af[i];
+        let sig = 1.0f64 / (1.0 + (-x).exp());
+        out[i] = x * sig * bf[i];
+    }
+    mk(rows, cols, out)
+}
