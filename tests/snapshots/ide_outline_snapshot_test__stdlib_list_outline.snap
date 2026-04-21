@@ -1,6 +1,5 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
-assertion_line: 39
 expression: "run_outline(&[\"@stdlib/list\"])"
 ---
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
@@ -64,5 +63,6 @@ fn list.unique_by[A, K](xs: List[A], f: fn(A) -> K) -> List[A]
 fn list.update[A](xs: List[A], i: Int, f: fn(A) -> A) -> List[A]
 fn list.window[A](xs: List[A], n: Int) -> List[List[A]]
 fn list.windows[A](xs: List[A], n: Int) -> List[List[A]]
+fn list.with_capacity[A](cap: Int) -> List[A]
 fn list.zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)]
 fn list.zip_with[A, B, C](xs: List[A], ys: List[B], f: fn(A, B) -> C) -> List[C]

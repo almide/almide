@@ -111,12 +111,14 @@ fn list.unique_by[A, K](xs: List[A], f: fn(A) -> K) -> List[A]
 fn list.update[A](xs: List[A], i: Int, f: fn(A) -> A) -> List[A]
 fn list.window[A](xs: List[A], n: Int) -> List[List[A]]
 fn list.windows[A](xs: List[A], n: Int) -> List[List[A]]
+fn list.with_capacity[A](cap: Int) -> List[A]
 fn list.zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)]
 fn list.zip_with[A, B, C](xs: List[A], ys: List[B], f: fn(A, B) -> C) -> List[C]
 
 # @stdlib/int
 fn int.abs(n: Int) -> Int
 fn int.band(a: Int, b: Int) -> Int
+fn int.bits_to_f32(bits: Int) -> Float
 fn int.bits_to_float(bits: Int) -> Float
 fn int.bnot(a: Int) -> Int
 fn int.bor(a: Int, b: Int) -> Int
