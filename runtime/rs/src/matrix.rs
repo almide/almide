@@ -405,7 +405,12 @@ pub fn almide_rt_matrix_mha_core(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideM
                     s += q[i][kk] * k[j][kk];
                 }
                 scores[i][j] = s * scale;
-                if causal && j > i {
+                // causal mask: Q row i (new tokens) attends to K row j
+                // if j is at-or-before the i-th new token's absolute
+                // position. When sq == sk this reduces to j <= i; when
+                // sq < sk (KV-cache gen step), the sk - sq past rows are
+                // always visible.
+                if causal && j > (sk - sq) + i {
                     scores[i][j] += -1.0e9;
                 }
             }
@@ -719,10 +724,24 @@ pub fn almide_rt_matrix_rope_rotate(
     head_dim: i64,
     theta_base: f64,
 ) -> AlmideMatrix {
+    almide_rt_matrix_rope_rotate_at(x, n_heads, head_dim, theta_base, 0)
+}
+
+// KV-cache variant: row p is treated as absolute position `start_pos + p`,
+// so during gen steps (1 new token at a time) the cached K has already
+// seen positions 0..start_pos and the new row gets position start_pos.
+pub fn almide_rt_matrix_rope_rotate_at(
+    x: &AlmideMatrix,
+    n_heads: i64,
+    head_dim: i64,
+    theta_base: f64,
+    start_pos: i64,
+) -> AlmideMatrix {
     let rows = x.len();
     let cols = if rows == 0 { 0 } else { x[0].len() };
     let n_heads_u = n_heads.max(0) as usize;
     let head_dim_u = head_dim.max(0) as usize;
+    let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
     let mut inv_freqs = Vec::<f64>::with_capacity(half);
     for i in 0..half {
@@ -731,7 +750,7 @@ pub fn almide_rt_matrix_rope_rotate(
     }
     let mut out = Vec::<Vec<f64>>::with_capacity(rows);
     for p in 0..rows {
-        let pos_f = p as f64;
+        let pos_f = (start + p) as f64;
         let row = &x[p];
         let mut new_row = vec![0.0f64; cols];
         for h in 0..n_heads_u {
@@ -748,6 +767,16 @@ pub fn almide_rt_matrix_rope_rotate(
         }
         out.push(new_row);
     }
+    out
+}
+
+// append_rows: row-wise concat — used for KV-cache accumulation.
+pub fn almide_rt_matrix_append_rows(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
+    if a.is_empty() { return b.clone(); }
+    if b.is_empty() { return a.clone(); }
+    let mut out = Vec::<Vec<f64>>::with_capacity(a.len() + b.len());
+    out.extend(a.iter().cloned());
+    out.extend(b.iter().cloned());
     out
 }
 

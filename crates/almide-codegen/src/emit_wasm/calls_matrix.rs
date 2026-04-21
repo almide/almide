@@ -2130,21 +2130,20 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(ids);
                 self.scratch.free_i32(m);
             }
-            "rope_rotate" => {
-                // matrix.rope_rotate(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float) -> Matrix
+            "rope_rotate" | "rope_rotate_at" => {
+                // matrix.rope_rotate(x, n_heads, head_dim, theta_base) -> Matrix
+                // matrix.rope_rotate_at(x, n_heads, head_dim, theta_base, start_pos) -> Matrix
                 //
                 // Standard RoPE: pair each head's (x[2i], x[2i+1]) and rotate
-                // by `row_idx * inv_freq[i]` where `inv_freq[i] = theta_base ^ (-2i/head_dim)`.
-                //
-                // Uses math.log + math.exp to compute the per-pair inverse
-                // frequency (WASM has no direct `pow`), and math.sin / cos
-                // for the rotation. We pre-copy the input matrix bytes so
-                // any columns outside the rotated region (n_heads*head_dim
-                // < cols) keep their original values.
+                // by `(start_pos + row_idx) * inv_freq[i]`. `rope_rotate_at`
+                // is the KV-cache variant — cached rows sit at positions
+                // 0..start_pos, the one new row gets start_pos. Calling
+                // `rope_rotate` is equivalent to `rope_rotate_at(..., 0)`.
                 let x = self.scratch.alloc_i32();
                 let n_heads = self.scratch.alloc_i32();
                 let head_dim = self.scratch.alloc_i32();
                 let half = self.scratch.alloc_i32();
+                let start_pos = self.scratch.alloc_i32();
                 let theta = self.scratch.alloc_f64();
                 let log_theta = self.scratch.alloc_f64();
                 let head_dim_f = self.scratch.alloc_f64();
@@ -2174,6 +2173,12 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { i32_wrap_i64; local_set(head_dim); });
                 self.emit_expr(&args[3]);
                 wasm!(self.func, { local_set(theta); });
+                if method == "rope_rotate_at" {
+                    self.emit_expr(&args[4]);
+                    wasm!(self.func, { i32_wrap_i64; local_set(start_pos); });
+                } else {
+                    wasm!(self.func, { i32_const(0); local_set(start_pos); });
+                }
 
                 let math_log = self.emitter.rt.math_log;
                 let math_exp = self.emitter.rt.math_exp;
@@ -2195,7 +2200,8 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(p);
                     block_empty; loop_empty;
                       local_get(p); local_get(rows); i32_ge_u; br_if(1);
-                      local_get(p); f64_convert_i32_u; local_set(pos_f);
+                      local_get(p); local_get(start_pos); i32_add;
+                      f64_convert_i32_u; local_set(pos_f);
                       i32_const(0); local_set(h);
                       block_empty; loop_empty;
                         local_get(h); local_get(n_heads); i32_ge_u; br_if(1);
@@ -2273,10 +2279,71 @@ impl FuncCompiler<'_> {
                 self.scratch.free_f64(head_dim_f);
                 self.scratch.free_f64(log_theta);
                 self.scratch.free_f64(theta);
+                self.scratch.free_i32(start_pos);
                 self.scratch.free_i32(half);
                 self.scratch.free_i32(head_dim);
                 self.scratch.free_i32(n_heads);
                 self.scratch.free_i32(x);
+            }
+            "append_rows" => {
+                // matrix.append_rows(base: Matrix, extra: Matrix) -> Matrix
+                // Row-wise concat. base.cols is taken as the output cols
+                // (Almide already guarantees same-width matrices at the
+                // call-site — we don't need a runtime reshape).
+                let base = self.scratch.alloc_i32();
+                let extra = self.scratch.alloc_i32();
+                let r_base = self.scratch.alloc_i32();
+                let r_extra = self.scratch.alloc_i32();
+                let cols_l = self.scratch.alloc_i32();
+                let r_total = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
+                let row_bytes = self.scratch.alloc_i32();
+                let base_bytes = self.scratch.alloc_i32();
+                let extra_bytes = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(base); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { local_set(extra); });
+
+                wasm!(self.func, {
+                    local_get(base); i32_load(0); local_set(r_base);
+                    local_get(extra); i32_load(0); local_set(r_extra);
+                    local_get(base); i32_load(4); local_set(cols_l);
+                    local_get(r_base); local_get(r_extra); i32_add; local_set(r_total);
+                    // row_bytes = cols * 8
+                    local_get(cols_l); i32_const(8); i32_mul; local_set(row_bytes);
+                    local_get(r_base); local_get(row_bytes); i32_mul; local_set(base_bytes);
+                    local_get(r_extra); local_get(row_bytes); i32_mul; local_set(extra_bytes);
+                    // alloc = 8 + total rows * cols * 8
+                    local_get(r_total); local_get(row_bytes); i32_mul;
+                    i32_const(8); i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    local_get(dst); local_get(r_total); i32_store(0);
+                    local_get(dst); local_get(cols_l); i32_store(4);
+                    // memory.copy(dst+8, base+8, base_bytes)
+                    local_get(dst); i32_const(8); i32_add;
+                    local_get(base); i32_const(8); i32_add;
+                    local_get(base_bytes);
+                    memory_copy;
+                    // memory.copy(dst+8+base_bytes, extra+8, extra_bytes)
+                    local_get(dst); i32_const(8); i32_add; local_get(base_bytes); i32_add;
+                    local_get(extra); i32_const(8); i32_add;
+                    local_get(extra_bytes);
+                    memory_copy;
+                    local_get(dst);
+                });
+
+                self.scratch.free_i32(extra_bytes);
+                self.scratch.free_i32(base_bytes);
+                self.scratch.free_i32(row_bytes);
+                self.scratch.free_i32(dst);
+                self.scratch.free_i32(r_total);
+                self.scratch.free_i32(cols_l);
+                self.scratch.free_i32(r_extra);
+                self.scratch.free_i32(r_base);
+                self.scratch.free_i32(extra);
+                self.scratch.free_i32(base);
             }
             "from_q1_0_bytes" => {
                 // matrix.from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix

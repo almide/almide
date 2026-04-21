@@ -75,6 +75,17 @@ fn select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> 
 @intrinsic("almide_rt_matrix_rope_rotate")
 fn rope_rotate(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float) -> Matrix = _
 
+// KV-cache variant: row p of x is treated as absolute position
+// `start_pos + p`. During gen-step inference the cached K has already
+// rotated positions 0..start_pos and the new token gets start_pos.
+@intrinsic("almide_rt_matrix_rope_rotate_at")
+fn rope_rotate_at(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float, start_pos: Int) -> Matrix = _
+
+// Row-wise concat — used for KV-cache accumulation (append one new
+// K/V row per gen step to the running seq).
+@intrinsic("almide_rt_matrix_append_rows")
+fn append_rows(base: Matrix, extra: Matrix) -> Matrix = _
+
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 
