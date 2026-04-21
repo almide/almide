@@ -647,6 +647,34 @@ pub fn almide_rt_matrix_mul_f32_t_scaled(a: &AlmideMatrix, alpha: f64, b: &Almid
 // Vec<Vec<f64>> ready for subsequent matrix ops — same role as
 // `from_lists`: a format converter, not an algorithmic shortcut.
 
+// Inlined IEEE-754 half-precision → f32 conversion, so this file stays
+// self-contained (no `half` crate dep leaking into spec-test builds).
+fn fp16_bits_to_f32(raw: u16) -> f32 {
+    let sign = (raw >> 15) as u32;
+    let exp = ((raw >> 10) & 0x1F) as u32;
+    let mantissa = (raw & 0x3FF) as u32;
+    let bits = if exp == 0 {
+        if mantissa == 0 {
+            sign << 31
+        } else {
+            let mut m = mantissa;
+            let mut e = 1i32 - 15;
+            while m & 0x400 == 0 {
+                m <<= 1;
+                e -= 1;
+            }
+            let m = m & 0x3FF;
+            let exp_f32 = (e + 127) as u32;
+            (sign << 31) | (exp_f32 << 23) | (m << 13)
+        }
+    } else if exp == 31 {
+        (sign << 31) | (0xFFu32 << 23) | (mantissa << 13)
+    } else {
+        (sign << 31) | ((exp + 112) << 23) | (mantissa << 13)
+    };
+    f32::from_bits(bits)
+}
+
 pub fn almide_rt_matrix_from_q1_0_bytes(
     data: &Vec<u8>,
     offset: i64,
@@ -665,7 +693,7 @@ pub fn almide_rt_matrix_from_q1_0_bytes(
     for b in 0..num_blocks {
         let block_start = off + b * 18;
         let scale_raw = (data[block_start] as u16) | ((data[block_start + 1] as u16) << 8);
-        let scale = f32::from(half::f16::from_bits(scale_raw)) as f64;
+        let scale = fp16_bits_to_f32(scale_raw) as f64;
         let neg_scale = -scale;
         let bits_start = block_start + 2;
         for i in 0..128usize {
