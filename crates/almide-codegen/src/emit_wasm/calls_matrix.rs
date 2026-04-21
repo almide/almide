@@ -1655,6 +1655,161 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(ktc);
                 self.scratch.free_i32(dst);
             }
+            "select_rows_q1_0" => {
+                // matrix.select_rows_q1_0(data, offset, cols, row_ids) -> Matrix
+                // Extract the listed rows directly from a packed Q1_0 byte
+                // buffer. Eliminates the 2.5 GB full-matrix decode that
+                // embedding lookup would otherwise need every forward call.
+                let data = self.scratch.alloc_i32();
+                let off = self.scratch.alloc_i32();
+                let cols = self.scratch.alloc_i32();
+                let ids = self.scratch.alloc_i32();
+                let n_rows = self.scratch.alloc_i32();
+                let n_bpr = self.scratch.alloc_i32();
+                let data_base = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let rid = self.scratch.alloc_i32();
+                let b = self.scratch.alloc_i32();
+                let k_local = self.scratch.alloc_i32();
+                let row_src_off = self.scratch.alloc_i32();
+                let block_start = self.scratch.alloc_i32();
+                let bits_start = self.scratch.alloc_i32();
+                let scale_raw = self.scratch.alloc_i32();
+                let sign = self.scratch.alloc_i32();
+                let expv = self.scratch.alloc_i32();
+                let mant = self.scratch.alloc_i32();
+                let f32bits = self.scratch.alloc_i32();
+                let bit = self.scratch.alloc_i32();
+                let scale = self.scratch.alloc_f64();
+                let neg_scale = self.scratch.alloc_f64();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(data); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i32_wrap_i64; local_set(off); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, { i32_wrap_i64; local_set(cols); });
+                self.emit_expr(&args[3]);
+                wasm!(self.func, { local_set(ids); });
+
+                wasm!(self.func, {
+                    local_get(ids); i32_load(0); local_set(n_rows);
+                    local_get(cols); i32_const(7); i32_shr_u; local_set(n_bpr);
+                    local_get(data); i32_const(4); i32_add;
+                    local_get(off); i32_add;
+                    local_set(data_base);
+                    // dst = alloc(8 + n_rows*cols*8)
+                    local_get(n_rows); local_get(cols); i32_mul;
+                    i32_const(8); i32_mul;
+                    i32_const(8); i32_add;
+                    call(self.emitter.rt.alloc); local_set(dst);
+                    local_get(dst); local_get(n_rows); i32_store(0);
+                    local_get(dst); local_get(cols); i32_store(4);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(n_rows); i32_ge_u; br_if(1);
+                      // rid = row_ids[i] as i32
+                      local_get(ids); i32_const(4); i32_add;
+                      local_get(i); i32_const(8); i32_mul; i32_add;
+                      i64_load(0); i32_wrap_i64;
+                      local_set(rid);
+                      // row_src_off = rid * n_bpr * 18
+                      local_get(rid); local_get(n_bpr); i32_mul;
+                      i32_const(18); i32_mul;
+                      local_set(row_src_off);
+                      i32_const(0); local_set(b);
+                      block_empty; loop_empty;
+                        local_get(b); local_get(n_bpr); i32_ge_u; br_if(1);
+                        local_get(data_base);
+                        local_get(row_src_off); i32_add;
+                        local_get(b); i32_const(18); i32_mul;
+                        i32_add;
+                        local_set(block_start);
+                        local_get(block_start); i32_load8_u(0);
+                        local_get(block_start); i32_load8_u(1);
+                        i32_const(8); i32_shl;
+                        i32_or;
+                        local_set(scale_raw);
+                        local_get(scale_raw); i32_const(15); i32_shr_u; i32_const(1); i32_and;
+                        local_set(sign);
+                        local_get(scale_raw); i32_const(10); i32_shr_u; i32_const(31); i32_and;
+                        local_set(expv);
+                        local_get(scale_raw); i32_const(1023); i32_and;
+                        local_set(mant);
+                        local_get(sign); i32_const(31); i32_shl;
+                        local_get(expv); i32_const(112); i32_add; i32_const(23); i32_shl;
+                        i32_or;
+                        local_get(mant); i32_const(13); i32_shl;
+                        i32_or;
+                        local_set(f32bits);
+                        local_get(expv); i32_eqz;
+                        if_empty;
+                          local_get(sign); i32_const(31); i32_shl; local_set(f32bits);
+                        end;
+                        local_get(f32bits); f32_reinterpret_i32; f64_promote_f32;
+                        local_set(scale);
+                        f64_const(0.0); local_get(scale); f64_sub; local_set(neg_scale);
+                        local_get(block_start); i32_const(2); i32_add; local_set(bits_start);
+                        i32_const(0); local_set(k_local);
+                        block_empty; loop_empty;
+                          local_get(k_local); i32_const(128); i32_ge_u; br_if(1);
+                          local_get(bits_start);
+                          local_get(k_local); i32_const(3); i32_shr_u;
+                          i32_add;
+                          i32_load8_u(0);
+                          local_get(k_local); i32_const(7); i32_and; i32_shr_u;
+                          i32_const(1); i32_and;
+                          local_set(bit);
+                          // dst[8 + (i*cols + b*128 + k_local)*8] = bit? scale : neg_scale
+                          local_get(dst); i32_const(8); i32_add;
+                          local_get(i); local_get(cols); i32_mul;
+                          local_get(b); i32_const(128); i32_mul; i32_add;
+                          local_get(k_local); i32_add;
+                          i32_const(8); i32_mul;
+                          i32_add;
+                          local_get(bit);
+                          if_f64;
+                            local_get(scale);
+                          else_;
+                            local_get(neg_scale);
+                          end;
+                          f64_store(0);
+                          local_get(k_local); i32_const(1); i32_add; local_set(k_local);
+                          br(0);
+                        end; end;
+                        local_get(b); i32_const(1); i32_add; local_set(b);
+                        br(0);
+                      end; end;
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(dst);
+                });
+                self.scratch.free_f64(neg_scale);
+                self.scratch.free_f64(scale);
+                self.scratch.free_i32(bit);
+                self.scratch.free_i32(f32bits);
+                self.scratch.free_i32(mant);
+                self.scratch.free_i32(expv);
+                self.scratch.free_i32(sign);
+                self.scratch.free_i32(scale_raw);
+                self.scratch.free_i32(bits_start);
+                self.scratch.free_i32(block_start);
+                self.scratch.free_i32(row_src_off);
+                self.scratch.free_i32(k_local);
+                self.scratch.free_i32(b);
+                self.scratch.free_i32(rid);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(dst);
+                self.scratch.free_i32(data_base);
+                self.scratch.free_i32(n_bpr);
+                self.scratch.free_i32(n_rows);
+                self.scratch.free_i32(ids);
+                self.scratch.free_i32(cols);
+                self.scratch.free_i32(off);
+                self.scratch.free_i32(data);
+            }
             "silu_mul" => {
                 // matrix.silu_mul(a, b) -> Matrix: y[i, j] = silu(a[i,j]) * b[i,j]
                 // silu(x) = x / (1 + exp(-x))

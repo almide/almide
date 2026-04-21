@@ -1994,3 +1994,35 @@ pub fn almide_rt_matrix_silu_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMa
     }
     mk(rows, cols, out)
 }
+
+pub fn almide_rt_matrix_select_rows_q1_0(
+    data: &Vec<u8>,
+    offset: i64,
+    cols: i64,
+    row_ids: &Vec<i64>,
+) -> AlmideMatrix {
+    let cols_u = cols.max(0) as usize;
+    let n_blocks = cols_u / 128;
+    let off = offset.max(0) as usize;
+    let n_rows = row_ids.len();
+    let mut flat = vec![0.0f64; n_rows * cols_u];
+    for (i, &rid) in row_ids.iter().enumerate() {
+        let r = rid.max(0) as usize;
+        let row_off = off + r * n_blocks * 18;
+        let out_off = i * cols_u;
+        for b in 0..n_blocks {
+            let block_start = row_off + b * 18;
+            let scale_raw = (data[block_start] as u16)
+                | ((data[block_start + 1] as u16) << 8);
+            let scale = fp16_bits_to_f32(scale_raw) as f64;
+            let neg_scale = -scale;
+            let bits_start = block_start + 2;
+            for local_k in 0..128 {
+                let byte = data[bits_start + (local_k >> 3)];
+                let bit = (byte >> (local_k & 7)) & 1;
+                flat[out_off + b * 128 + local_k] = if bit == 1 { scale } else { neg_scale };
+            }
+        }
+    }
+    mk(n_rows, cols_u, flat)
+}

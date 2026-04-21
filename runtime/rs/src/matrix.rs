@@ -812,3 +812,39 @@ pub fn almide_rt_matrix_silu_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMa
     }
     out
 }
+
+// Per-row Q1_0 decoder: extract only the requested row ids directly
+// from the packed bytes, without ever materialising the full matrix.
+// For 5 prompt tokens this allocates ~80 KB instead of the 2.5 GB a
+// full `token_embd` decode needs.
+pub fn almide_rt_matrix_select_rows_q1_0(
+    data: &Vec<u8>,
+    offset: i64,
+    cols: i64,
+    row_ids: &Vec<i64>,
+) -> AlmideMatrix {
+    let cols_u = cols.max(0) as usize;
+    let n_blocks = cols_u / 128;
+    let off = offset.max(0) as usize;
+    let mut out = Vec::<Vec<f64>>::with_capacity(row_ids.len());
+    for &rid in row_ids {
+        let r = rid.max(0) as usize;
+        let row_off = off + r * n_blocks * 18;
+        let mut row = vec![0.0f64; cols_u];
+        for b in 0..n_blocks {
+            let block_start = row_off + b * 18;
+            let scale_raw = (data[block_start] as u16)
+                | ((data[block_start + 1] as u16) << 8);
+            let scale = fp16_bits_to_f32(scale_raw) as f64;
+            let neg_scale = -scale;
+            let bits_start = block_start + 2;
+            for local_k in 0..128 {
+                let byte = data[bits_start + (local_k >> 3)];
+                let bit = (byte >> (local_k & 7)) & 1;
+                row[b * 128 + local_k] = if bit == 1 { scale } else { neg_scale };
+            }
+        }
+        out.push(row);
+    }
+    out
+}

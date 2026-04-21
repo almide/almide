@@ -62,6 +62,13 @@ fn linear_q1_0_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int
 @intrinsic("almide_rt_matrix_silu_mul")
 fn silu_mul(a: Matrix, b: Matrix) -> Matrix = _
 
+// Decode specific rows of a Q1_0 matrix straight from the packed byte
+// buffer. Avoids materialising the full matrix — the 2.5 GB token_embd
+// decode per forward call was the main allocator pressure inside WASM.
+// Layout: each row occupies `cols / 128 * 18` bytes in row-major order.
+@intrinsic("almide_rt_matrix_select_rows_q1_0")
+fn select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix = _
+
 // Rotary positional embedding on a (seq_len, n_heads * head_dim) matrix.
 // Rotates each head's (x[2i], x[2i+1]) pair by `row_idx * inv_freq[i]`.
 // Standard transformer primitive — same level as rms_norm_rows / swiglu_gate.
