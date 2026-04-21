@@ -450,9 +450,27 @@ fn insert_clones_live(
         IrExprKind::Record { name, fields } => IrExprKind::Record {
             name, fields: fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, always, eligible, remaining, in_loop))).collect(),
         },
-        IrExprKind::Member { object, field } => IrExprKind::Member {
-            object: Box::new(insert_clones_live(*object, always, eligible, remaining, in_loop)), field,
-        },
+        // Member access mirrors IndexAccess/MapAccess: the container is
+        // borrowed (Record may be a `&T` after BorrowInference), and a
+        // heap-typed field can't be moved out through the reference.
+        // Wrap the access in Clone when the field itself needs cloning.
+        IrExprKind::Member { object, field } => {
+            let mut processed_object = insert_clones_live(*object, always, eligible, remaining, in_loop);
+            if let IrExprKind::Clone { expr } = processed_object.kind {
+                processed_object = *expr;
+            }
+            let access = IrExpr {
+                kind: IrExprKind::Member {
+                    object: Box::new(processed_object),
+                    field,
+                },
+                ty: ty.clone(), span,
+            };
+            if needs_clone(&ty) {
+                return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span };
+            }
+            return access;
+        }
         IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
             expr: Box::new(insert_clones_live(*expr, always, eligible, remaining, in_loop)), field,
         },

@@ -7,5 +7,5 @@ pub fn origin() -> Point {
 }
 
 pub fn translate(p: Point, dx: i64, dy: i64) -> Point {
-    Point { x: (p.clone().x + dx), y: (p.y + dy) }
+    Point { x: (p.x + dx), y: (p.y + dy) }
 }

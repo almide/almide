@@ -415,10 +415,19 @@ fn intrinsic_borrow_mode(ty: &Ty) -> ParamBorrow {
     }
 }
 
-/// Eligible types for borrow inference. Bytes is the key addition here —
-/// binary parsers clone the entire buffer on every read without it.
+/// Eligible types for borrow inference. The Record case is the key
+/// addition — without it, a `GGUFFile`-style record carried through a
+/// layer loop gets `.clone()` inserted on every iteration (observed on
+/// bonsai-almide at 72% inclusive time, cf.
+/// memory/feedback_almide_bytes_clone.md).
 fn is_heap_type(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::Bytes | Ty::Applied(TypeConstructorId::List, _))
+    matches!(ty,
+        Ty::String
+        | Ty::Bytes
+        | Ty::Applied(TypeConstructorId::List, _)
+        | Ty::Record { .. }
+        | Ty::OpenRecord { .. }
+    )
 }
 
 /// Check if a parameter variable needs ownership.
