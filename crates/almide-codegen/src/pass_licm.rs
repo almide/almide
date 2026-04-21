@@ -567,6 +567,10 @@ fn has_control_flow_stmt(stmt: &IrStmt) -> bool {
 /// Lambda is included because closures rely on call-site context for type
 /// inference in Rust — hoisting them to a standalone `let` binding strips
 /// that context and causes `rustc` type annotation errors.
+/// Range is included because a hoisted range becomes a `Vec::collect()`
+/// bound outside the loop and then `clone()`d per outer iteration when
+/// the inner for-loop consumes it; rendering the range inline lets
+/// `expressions.rs::render ForIn` emit the bare `start..end` form.
 fn is_trivial(expr: &IrExpr) -> bool {
     matches!(
         &expr.kind,
@@ -579,6 +583,7 @@ fn is_trivial(expr: &IrExpr) -> bool {
         | IrExprKind::OptionNone
         | IrExprKind::FnRef { .. }
         | IrExprKind::Lambda { .. }
+        | IrExprKind::Range { .. }
     )
 }
 /// Returns true if the expression is pure (no function calls, no I/O, no mutation).

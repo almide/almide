@@ -32,6 +32,14 @@ fn transpose(m: Matrix) -> Matrix = _
 @intrinsic("almide_rt_matrix_from_lists")
 fn from_lists(rows: List[List[Float]]) -> Matrix = _
 
+// Format converter: decode a Q1_0 (1-bit) packed-byte block directly
+// into a Matrix. Same primitive-role as `from_lists`. Used by
+// GGUF / Bonsai loaders; the pure-Almide inner loop paid ~5 s per
+// 2 M-weight tensor because release LLVM couldn't fully collapse the
+// chain of stdlib helper calls, so we lift it to a runtime primitive.
+@intrinsic("almide_rt_matrix_from_q1_0_bytes")
+fn from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 

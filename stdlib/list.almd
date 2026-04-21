@@ -227,6 +227,12 @@ fn binary_search(xs: List[Int], target: Int) -> Option[Int] = _
 @intrinsic("almide_rt_list_push")
 fn push[A](xs: List[A], x: A) -> Unit = _
 
+// Create an empty list with preallocated capacity. Subsequent `push`es
+// up to `cap` avoid the repeated Vec doublings that dominate tight
+// decode loops. Use when the final length is known ahead of time.
+@intrinsic("almide_rt_list_with_capacity")
+fn with_capacity[A](cap: Int) -> List[A] = _
+
 @intrinsic("almide_rt_list_pop")
 @mutating
 fn pop[A](xs: List[A]) -> Option[A] = _

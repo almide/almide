@@ -9,21 +9,21 @@ pub fn almide_rt_int_from_string(s: String) -> Result<i64, String> {
     s.trim().parse::<i64>().map_err(|e| format!("invalid integer: {}", e))
 }
 
-pub fn almide_rt_int_abs(n: i64) -> i64 { n.abs() }
-pub fn almide_rt_int_min(a: i64, b: i64) -> i64 { a.min(b) }
-pub fn almide_rt_int_max(a: i64, b: i64) -> i64 { a.max(b) }
-pub fn almide_rt_int_clamp(n: i64, lo: i64, hi: i64) -> i64 { n.clamp(lo, hi) }
-pub fn almide_rt_int_to_float(n: i64) -> f64 { n as f64 }
+#[inline(always)] pub fn almide_rt_int_abs(n: i64) -> i64 { n.abs() }
+#[inline(always)] pub fn almide_rt_int_min(a: i64, b: i64) -> i64 { a.min(b) }
+#[inline(always)] pub fn almide_rt_int_max(a: i64, b: i64) -> i64 { a.max(b) }
+#[inline(always)] pub fn almide_rt_int_clamp(n: i64, lo: i64, hi: i64) -> i64 { n.clamp(lo, hi) }
+#[inline(always)] pub fn almide_rt_int_to_float(n: i64) -> f64 { n as f64 }
 pub fn almide_rt_int_to_hex(n: i64) -> String { format!("{:x}", n) }
-pub fn almide_rt_int_to_u(n: i64) -> i64 { n.unsigned_abs() as i64 }
+#[inline(always)] pub fn almide_rt_int_to_u(n: i64) -> i64 { n.unsigned_abs() as i64 }
 pub fn almide_rt_int_parse(s: &str) -> Result<i64, String> { s.trim().parse::<i64>().map_err(|e| e.to_string()) }
 pub fn almide_rt_int_parse_hex(s: &str) -> Result<i64, String> { i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string()) }
-pub fn almide_rt_int_band(a: i64, b: i64) -> i64 { a & b }
-pub fn almide_rt_int_bor(a: i64, b: i64) -> i64 { a | b }
-pub fn almide_rt_int_bxor(a: i64, b: i64) -> i64 { a ^ b }
-pub fn almide_rt_int_bnot(n: i64) -> i64 { !n }
-pub fn almide_rt_int_bshl(n: i64, bits: i64) -> i64 { n << bits }
-pub fn almide_rt_int_bshr(n: i64, bits: i64) -> i64 { n >> bits }
+#[inline(always)] pub fn almide_rt_int_band(a: i64, b: i64) -> i64 { a & b }
+#[inline(always)] pub fn almide_rt_int_bor(a: i64, b: i64) -> i64 { a | b }
+#[inline(always)] pub fn almide_rt_int_bxor(a: i64, b: i64) -> i64 { a ^ b }
+#[inline(always)] pub fn almide_rt_int_bnot(n: i64) -> i64 { !n }
+#[inline(always)] pub fn almide_rt_int_bshl(n: i64, bits: i64) -> i64 { n << bits }
+#[inline(always)] pub fn almide_rt_int_bshr(n: i64, bits: i64) -> i64 { n >> bits }
 pub fn almide_rt_int_rotate_left(a: i64, n: i64, bits: i64) -> i64 {
     let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
     let v = (a as u64) & mask;
@@ -67,8 +67,8 @@ mod tests {
 
 pub fn almide_rt_int_to_u32(n: i64) -> i64 { (n as u32) as i64 }
 pub fn almide_rt_int_to_u8(n: i64) -> i64 { (n as u8) as i64 }
-pub fn almide_rt_int_bits_to_float(bits: i64) -> f64 { f64::from_bits(bits as u64) }
-pub fn almide_rt_int_bits_to_f32(bits: i64) -> f64 { f32::from_bits(bits as u32) as f64 }
+#[inline(always)] pub fn almide_rt_int_bits_to_float(bits: i64) -> f64 { f64::from_bits(bits as u64) }
+#[inline(always)] pub fn almide_rt_int_bits_to_f32(bits: i64) -> f64 { f32::from_bits(bits as u32) as f64 }
 
 // ── Sized conversions (for `@intrinsic` migration of `int.to_*`) ──
 

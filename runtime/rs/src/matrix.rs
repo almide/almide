@@ -634,3 +634,52 @@ pub fn almide_rt_matrix_mul_f32_t(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideM
 pub fn almide_rt_matrix_mul_f32_t_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
     almide_rt_matrix_scale(&almide_rt_matrix_mul_f32_t(a, b), alpha)
 }
+
+// ── Q1_0 (1-bit) direct decode ──
+//
+// Used by bonsai-almide / Qwen3 family GGUFs: 18 bytes per 128 weights,
+// first 2 bytes fp16 scale, next 16 bytes sign bits (0 → -scale, 1 →
+// +scale, LSB-first within each byte). The pure-Almide decode loop paid
+// ~5 s per 2 M-weight tensor because every weight round-tripped through
+// Option-returning stdlib helpers (`bytes.get`, `int.band`, `int.bshr`,
+// `list.push`) the LLVM backend couldn't fully constant-fold through.
+// This primitive takes the packed bytes directly and emits a
+// Vec<Vec<f64>> ready for subsequent matrix ops — same role as
+// `from_lists`: a format converter, not an algorithmic shortcut.
+
+pub fn almide_rt_matrix_from_q1_0_bytes(
+    data: &Vec<u8>,
+    offset: i64,
+    rows: i64,
+    cols: i64,
+) -> AlmideMatrix {
+    let rows_u = rows.max(0) as usize;
+    let cols_u = cols.max(0) as usize;
+    let total = rows_u * cols_u;
+    if total == 0 || data.is_empty() {
+        return vec![vec![0.0f64; cols_u]; rows_u];
+    }
+    let off = offset.max(0) as usize;
+    let mut flat = Vec::<f64>::with_capacity(total);
+    let num_blocks = total / 128;
+    for b in 0..num_blocks {
+        let block_start = off + b * 18;
+        let scale_raw = (data[block_start] as u16) | ((data[block_start + 1] as u16) << 8);
+        let scale = f32::from(half::f16::from_bits(scale_raw)) as f64;
+        let neg_scale = -scale;
+        let bits_start = block_start + 2;
+        for i in 0..128usize {
+            let byte = data[bits_start + (i >> 3)];
+            let bit = (byte >> (i & 7)) & 1;
+            flat.push(if bit == 1 { scale } else { neg_scale });
+        }
+    }
+    // Reshape flat → Vec<Vec<f64>> of shape (rows, cols).
+    let mut out = Vec::<Vec<f64>>::with_capacity(rows_u);
+    for r in 0..rows_u {
+        let start = r * cols_u;
+        let end = start + cols_u;
+        out.push(flat[start..end].to_vec());
+    }
+    out
+}
