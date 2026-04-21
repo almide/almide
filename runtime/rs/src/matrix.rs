@@ -726,7 +726,7 @@ pub fn almide_rt_matrix_rope_rotate(
 // select_rows: gather a small number of rows from a big matrix into a
 // new matrix. Avoids the `to_lists` round-trip for the common case of
 // embedding lookups (LLM inference).
-pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &Vec<i64>) -> AlmideMatrix {
+pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &[i64]) -> AlmideMatrix {
     let cols = if m.is_empty() { 0 } else { m[0].len() };
     let mut out = Vec::<Vec<f64>>::with_capacity(row_ids.len());
     for &rid in row_ids {
@@ -821,7 +821,7 @@ pub fn almide_rt_matrix_select_rows_q1_0(
     data: &Vec<u8>,
     offset: i64,
     cols: i64,
-    row_ids: &Vec<i64>,
+    row_ids: &[i64],
 ) -> AlmideMatrix {
     let cols_u = cols.max(0) as usize;
     let n_blocks = cols_u / 128;

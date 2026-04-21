@@ -1915,7 +1915,7 @@ pub fn almide_rt_matrix_rope_rotate(
     mk(rows, cols, flat_out)
 }
 
-pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &Vec<i64>) -> AlmideMatrix {
+pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &[i64]) -> AlmideMatrix {
     let dims = m.dims2();
     let cols = dims[1];
     let out_rows = row_ids.len();
@@ -1999,7 +1999,7 @@ pub fn almide_rt_matrix_select_rows_q1_0(
     data: &Vec<u8>,
     offset: i64,
     cols: i64,
-    row_ids: &Vec<i64>,
+    row_ids: &[i64],
 ) -> AlmideMatrix {
     let cols_u = cols.max(0) as usize;
     let n_blocks = cols_u / 128;
