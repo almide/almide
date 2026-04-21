@@ -86,6 +86,33 @@ fn rope_rotate_at(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float, sta
 @intrinsic("almide_rt_matrix_append_rows")
 fn append_rows(base: Matrix, extra: Matrix) -> Matrix = _
 
+// One decoder layer of Qwen3 / Bonsai — rms_norm → Q/K/V linear_q1_0 →
+// per-head rms_norm → rope_rotate_at → KV-cache append → repeat_kv →
+// masked_multi_head_attention → output linear_q1_0 → residual →
+// rms_norm → gate/up/down FFN (silu_mul) → residual. Fused because
+// Almide-level composition paid a Matrix alloc + ownership shuffle
+// between every step.
+//
+// `w`: packed GGUF byte buffer (the whole model, starting at data_offset).
+// `gamma_offs`: [attn_norm, q_norm, k_norm, ffn_norm] f32 offsets.
+// `weight_offs`: [q, k, v, o, gate, up, down] Q1_0 block offsets.
+@intrinsic("almide_rt_matrix_qwen3_block_q1_0_kv")
+fn qwen3_block_q1_0_kv(
+  h: Matrix,
+  k_cache: Matrix,
+  v_cache: Matrix,
+  w: Bytes,
+  gamma_offs: List[Int],
+  weight_offs: List[Int],
+  start_pos: Int,
+  n_q_heads: Int,
+  n_kv_heads: Int,
+  head_dim: Int,
+  ffn_hidden: Int,
+  rope_theta: Float,
+  eps: Float,
+) -> (Matrix, Matrix, Matrix) = _
+
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 

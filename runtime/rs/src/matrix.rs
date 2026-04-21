@@ -972,3 +972,140 @@ pub fn almide_rt_matrix_select_rows_q1_0(
     }
     out
 }
+
+// ── Qwen3 block super-intrinsic (Q1_0 + KV cache) ──
+//
+// One decoder layer of a Qwen3 / Bonsai-1.7B model, expressed as a
+// single Rust fn so the middle Matrix allocations that Almide-level
+// composition otherwise pays for disappear. Mirrors
+// `nn.qwen3.qwen3_block` but wires in the KV-cache accumulator
+// (append_rows) and accepts weights as raw bytes + offsets to keep the
+// caller's argument list manageable.
+
+// Load a packed f32 sub-range from w_bytes as f64, for gamma-style
+// 1-D tensors that don't go through a Matrix intrinsic.
+fn load_f32_to_f64(w: &[u8], offset: usize, len: usize) -> Vec<f64> {
+    let mut out = Vec::<f64>::with_capacity(len);
+    for i in 0..len {
+        let p = offset + i * 4;
+        let bits = u32::from_le_bytes([w[p], w[p + 1], w[p + 2], w[p + 3]]);
+        out.push(f32::from_bits(bits) as f64);
+    }
+    out
+}
+
+fn per_head_rms_norm(
+    x: &AlmideMatrix,
+    gamma: &[f64],
+    n_heads: i64,
+    eps: f64,
+) -> AlmideMatrix {
+    let n_heads = n_heads.max(1) as usize;
+    if x.is_empty() { return vec![]; }
+    let d = x[0].len();
+    let head_dim = d / n_heads;
+    let mut out = Vec::<Vec<f64>>::with_capacity(x.len());
+    for row in x.iter() {
+        let mut out_row = vec![0.0f64; d];
+        for h in 0..n_heads {
+            let start = h * head_dim;
+            let mut ss = 0.0f64;
+            for k in 0..head_dim {
+                let v = row[start + k];
+                ss += v * v;
+            }
+            let inv = 1.0f64 / (ss / head_dim as f64 + eps).sqrt();
+            for k in 0..head_dim {
+                out_row[start + k] = row[start + k] * inv * gamma[k];
+            }
+        }
+        out.push(out_row);
+    }
+    out
+}
+
+fn repeat_kv(kv: &AlmideMatrix, n_kv_heads: i64, n_rep: i64) -> AlmideMatrix {
+    if n_rep <= 1 { return kv.clone(); }
+    let n_kv = n_kv_heads.max(1) as usize;
+    let n_rep_u = n_rep as usize;
+    if kv.is_empty() { return vec![]; }
+    let d = kv[0].len();
+    let head_dim = d / n_kv;
+    let out_cols = d * n_rep_u;
+    let mut out = Vec::<Vec<f64>>::with_capacity(kv.len());
+    for row in kv.iter() {
+        let mut out_row = vec![0.0f64; out_cols];
+        for h in 0..n_kv {
+            let src = h * head_dim;
+            for r in 0..n_rep_u {
+                let dst = (h * n_rep_u + r) * head_dim;
+                out_row[dst..dst + head_dim].copy_from_slice(&row[src..src + head_dim]);
+            }
+        }
+        out.push(out_row);
+    }
+    out
+}
+
+pub fn almide_rt_matrix_qwen3_block_q1_0_kv(
+    h: &AlmideMatrix,
+    k_cache: &AlmideMatrix,
+    v_cache: &AlmideMatrix,
+    w: &Vec<u8>,
+    gamma_offs: &[i64],   // [attn_norm, q_norm, k_norm, ffn_norm]
+    weight_offs: &[i64],  // [q, k, v, o, gate, up, down]
+    start_pos: i64,
+    n_q_heads: i64,
+    n_kv_heads: i64,
+    head_dim: i64,
+    ffn_hidden: i64,
+    rope_theta: f64,
+    eps: f64,
+) -> (AlmideMatrix, AlmideMatrix, AlmideMatrix) {
+    let hidden = (n_q_heads * head_dim) as usize;
+    let kv_hidden = (n_kv_heads * head_dim) as usize;
+    let n_rep = n_q_heads / n_kv_heads;
+
+    let gamma_attn = load_f32_to_f64(w, gamma_offs[0].max(0) as usize, hidden);
+    let gamma_q = load_f32_to_f64(w, gamma_offs[1].max(0) as usize, head_dim.max(0) as usize);
+    let gamma_k = load_f32_to_f64(w, gamma_offs[2].max(0) as usize, head_dim.max(0) as usize);
+    let gamma_ffn = load_f32_to_f64(w, gamma_offs[3].max(0) as usize, hidden);
+
+    let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
+
+    let q_proj = almide_rt_matrix_linear_q1_0_row_no_bias(
+        &h_normed, w, weight_offs[0], hidden as i64, hidden as i64);
+    let k_proj = almide_rt_matrix_linear_q1_0_row_no_bias(
+        &h_normed, w, weight_offs[1], kv_hidden as i64, hidden as i64);
+    let v_proj = almide_rt_matrix_linear_q1_0_row_no_bias(
+        &h_normed, w, weight_offs[2], kv_hidden as i64, hidden as i64);
+
+    let q_normed = per_head_rms_norm(&q_proj, &gamma_q, n_q_heads, eps);
+    let k_normed = per_head_rms_norm(&k_proj, &gamma_k, n_kv_heads, eps);
+
+    let q_rot = almide_rt_matrix_rope_rotate_at(&q_normed, n_q_heads, head_dim, rope_theta, start_pos);
+    let k_rot = almide_rt_matrix_rope_rotate_at(&k_normed, n_kv_heads, head_dim, rope_theta, start_pos);
+
+    let k_full_kv = almide_rt_matrix_append_rows(k_cache, &k_rot);
+    let v_full_kv = almide_rt_matrix_append_rows(v_cache, &v_proj);
+
+    let k_full = repeat_kv(&k_full_kv, n_kv_heads, n_rep);
+    let v_full = repeat_kv(&v_full_kv, n_kv_heads, n_rep);
+
+    let attn_out = almide_rt_matrix_masked_multi_head_attention(&q_rot, &k_full, &v_full, n_q_heads);
+    let attn_proj = almide_rt_matrix_linear_q1_0_row_no_bias(
+        &attn_out, w, weight_offs[3], hidden as i64, hidden as i64);
+    let x_attn = almide_rt_matrix_add(h, &attn_proj);
+
+    let h2 = almide_rt_matrix_rms_norm_rows(&x_attn, &gamma_ffn, eps);
+    let gate = almide_rt_matrix_linear_q1_0_row_no_bias(
+        &h2, w, weight_offs[4], ffn_hidden, hidden as i64);
+    let up = almide_rt_matrix_linear_q1_0_row_no_bias(
+        &h2, w, weight_offs[5], ffn_hidden, hidden as i64);
+    let gated = almide_rt_matrix_silu_mul(&gate, &up);
+    let ffn_out = almide_rt_matrix_linear_q1_0_row_no_bias(
+        &gated, w, weight_offs[6], hidden as i64, ffn_hidden);
+
+    let h_out = almide_rt_matrix_add(&x_attn, &ffn_out);
+    (h_out, k_full_kv, v_full_kv)
+}
