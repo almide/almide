@@ -165,30 +165,30 @@ fn rewrite(program: &IrProgram, info: &BorrowInfo) -> IrProgram {
 ```mermaid
 flowchart LR
     subgraph Shared["Shared Passes"]
-        DCE["Dead Code\nElimination"]
-        IMPORT["Import\nResolution"]
+        DCE["Dead Code<br/>Elimination"]
+        IMPORT["Import<br/>Resolution"]
     end
 
     subgraph RustOnly["Rust-specific"]
-        BORROW["Borrow\nAnalysis"]
-        CLONE["Clone\nInsertion"]
-        BOX["Recursive Type\nBox Wrapping"]
-        ANON["AnonRecord\nStruct Gen"]
-        AUTOTRY["auto-?\nInsertion"]
-        LAZY["LazyLock\nConversion"]
-        ASSTR["match\n.as_str()"]
+        BORROW["Borrow<br/>Analysis"]
+        CLONE["Clone<br/>Insertion"]
+        BOX["Recursive Type<br/>Box Wrapping"]
+        ANON["AnonRecord<br/>Struct Gen"]
+        AUTOTRY["auto-?<br/>Insertion"]
+        LAZY["LazyLock<br/>Conversion"]
+        ASSTR["match<br/>.as_str()"]
     end
 
     subgraph TSOnly["TS-specific"]
-        OPTERASE["Option\nErasure"]
-        RESWRAP["Result\nWrapping"]
-        ASYNC["async/await\nConversion"]
+        OPTERASE["Option<br/>Erasure"]
+        RESWRAP["Result<br/>Wrapping"]
+        ASYNC["async/await<br/>Conversion"]
     end
 
     subgraph GoOnly["Go-specific (future)"]
-        ERRTUPLE["Result →\n(val, err)"]
-        GOROUTINE["fan →\ngoroutine"]
-        IFACE["generics →\ninterface"]
+        ERRTUPLE["Result →<br/>(val, err)"]
+        GOROUTINE["fan →<br/>goroutine"]
+        IFACE["generics →<br/>interface"]
     end
 
     DCE --> IMPORT
