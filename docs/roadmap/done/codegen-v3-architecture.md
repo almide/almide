@@ -13,7 +13,7 @@ flowchart TB
     subgraph BuildTime["Build Time (build.rs)"]
         TOML["stdlib/defs/*.toml"]
         BUILDRS["build.rs"]
-        ARGTX["arg_transforms.rs\n282 functions × ArgTransform"]
+        ARGTX["arg_transforms.rs<br/>282 functions × ArgTransform"]
         TOML --> BUILDRS --> ARGTX
     end
 
@@ -37,12 +37,12 @@ flowchart TB
         end
 
         subgraph Annotations["Annotations"]
-            ANN["clone_vars, deref_vars\nlazy_vars, ctor_to_enum\nboxed_fields, default_fields\nrecursive_enums"]
+            ANN["clone_vars, deref_vars<br/>lazy_vars, ctor_to_enum<br/>boxed_fields, default_fields<br/>recursive_enums"]
         end
 
         subgraph Walker["Layer 3: Template Walker (target-agnostic)"]
-            TMPL["TOML Templates\nrust.toml / typescript.toml"]
-            WALK["walker.rs\nis_rust() = 0\nctx.target branch = 0"]
+            TMPL["TOML Templates<br/>rust.toml / typescript.toml"]
+            WALK["walker.rs<br/>is_rust() = 0<br/>ctx.target branch = 0"]
             TMPL --> WALK
         end
     end
