@@ -129,8 +129,14 @@ impl NanoPass for ResultPropagationPass {
             for func in &mut module.functions {
                 if !lifted_fns.is_empty() {
                     func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
+                    // Auto-? insertion: module-level effect fns calling other
+                    // lifted effect fns need Try wrapping the same way the
+                    // top-level pipeline does for non-test fns. Without this,
+                    // Rust sees a let-binding type mismatch
+                    // (`expected T, found Result<T, String>`).
+                    let returns_result = func.ret_ty.is_result();
+                    func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
                 }
-                // Auto-? insertion disabled for modules too
             }
         }
 
