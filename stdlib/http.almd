@@ -121,3 +121,11 @@ effect fn request_stream(method: String, url: String, body: String, headers: Map
 // (or any caller) is expected to `json.parse` the result.
 @intrinsic("almide_sse_openai_chat")
 effect fn openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
+
+// Anthropic Messages API streaming. Same return shape as
+// `openai_streaming_call`; the runtime translates Anthropic's distinct
+// SSE event format (`event: content_block_delta` etc.) into the same
+// LLMResponse-shaped JSON ({content, model, usage, finish_reason,
+// tool_calls}).
+@intrinsic("almide_sse_anthropic_messages")
+effect fn anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
