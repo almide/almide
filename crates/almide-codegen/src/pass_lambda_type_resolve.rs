@@ -292,7 +292,8 @@ fn resolve_stmt(stmt: &mut IrStmt, vt: &mut VarTable) {
 // ── Call-site lambda param resolution ───────────────────────────────
 //
 // For `list.map(xs, (x) => ...)`, resolve `x` from the element type of `xs`.
-// Also handles list.zip, list.fold accumulator, etc.
+// Also handles list.zip, list.fold accumulator, option.{map,flat_map,filter},
+// result.{map,flat_map,filter,map_err,or_else,unwrap_or_else}, etc.
 
 /// List callback methods whose lambda's FIRST param is the element type.
 /// Form: `method(xs, f)` where `f: (elem) -> ?`.
@@ -301,6 +302,24 @@ const LIST_ELEM_FIRST_METHODS: &[&str] = &[
     "find", "any", "all", "each", "count", "partition",
     "sort_by", "group_by", "unique_by", "take_while", "drop_while",
     "min_by", "max_by", "chunk_by", "dedup_by",
+];
+
+/// Option callback methods whose lambda receives the inner type T.
+/// Form: `method(o: Option[T], f: (T) -> ?)`.
+const OPTION_INNER_METHODS: &[&str] = &[
+    "map", "flat_map", "filter",
+];
+
+/// Result callback methods whose lambda receives the OK type A.
+/// Form: `method(r: Result[A, E], f: (A) -> ?)`.
+const RESULT_OK_METHODS: &[&str] = &[
+    "map", "flat_map", "filter",
+];
+
+/// Result callback methods whose lambda receives the ERR type E.
+/// Form: `method(r: Result[A, E], f: (E) -> ?)`.
+const RESULT_ERR_METHODS: &[&str] = &[
+    "map_err", "or_else", "unwrap_or_else",
 ];
 
 /// List callback methods whose lambda's SECOND param is the element type.
@@ -313,37 +332,59 @@ const LIST_ELEM_SECOND_METHODS: &[&str] = &[
 const LIST_ELEM_BOTH_METHODS: &[&str] = &["reduce"];
 
 fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut VarTable) {
-    // Extract the stdlib method name from every call-target shape the
+    // Extract (module, method) from every call-target shape the
     // frontend / ResolveCalls / IntrinsicLowering produce:
     //   - `Method { method }`                    — UFCS, unresolved module
-    //   - `Module { list, func }`                — pre-ResolveCalls
-    //   - `Named { "almide_rt_list_<func>" }`    — post-ResolveCalls
-    //     or post-frontend-lowering
-    let method_name_owned: Option<String> = match target {
-        CallTarget::Method { method, .. } => Some(method.as_str().to_string()),
-        CallTarget::Module { module, func } if module.as_str() == "list" => Some(func.as_str().to_string()),
+    //   - `Module { <mod>, func }`               — pre-ResolveCalls
+    //   - `Named { "almide_rt_<mod>_<func>" }`   — post-ResolveCalls
+    let resolved: Option<(Option<&str>, String)> = match target {
+        CallTarget::Method { method, .. } => Some((None, method.as_str().to_string())),
+        CallTarget::Module { module, func } => {
+            let m = module.as_str();
+            if m == "list" || m == "option" || m == "result" {
+                Some((Some(m), func.as_str().to_string()))
+            } else {
+                None
+            }
+        }
         CallTarget::Named { name } => {
             let s = name.as_str();
-            s.strip_prefix("almide_rt_list_").map(|rest| rest.to_string())
+            if let Some(rest) = s.strip_prefix("almide_rt_list_") {
+                Some((Some("list"), rest.to_string()))
+            } else if let Some(rest) = s.strip_prefix("almide_rt_option_") {
+                Some((Some("option"), rest.to_string()))
+            } else if let Some(rest) = s.strip_prefix("almide_rt_result_") {
+                Some((Some("result"), rest.to_string()))
+            } else {
+                None
+            }
         }
         _ => None,
     };
-    let Some(name) = method_name_owned else { return };
+    let Some((module, name)) = resolved else { return };
     let name = name.as_str();
-    // Determine which param(s) of the lambda receive the element type
-    let elem_param_indices: &[usize] = if LIST_ELEM_FIRST_METHODS.iter().any(|m| *m == name) {
-        &[0]
-    } else if LIST_ELEM_SECOND_METHODS.iter().any(|m| *m == name) {
-        &[1]
-    } else if LIST_ELEM_BOTH_METHODS.iter().any(|m| *m == name) {
-        &[0, 1]
-    } else {
-        return;
+
+    // Decide (param-elem source, lambda-param indices) based on (module, method)
+    enum ElemSource { ListElem, OptionInner, ResultOk, ResultErr }
+    let (source, elem_param_indices): (ElemSource, &[usize]) = match module {
+        Some("option") if OPTION_INNER_METHODS.iter().any(|m| *m == name) => (ElemSource::OptionInner, &[0]),
+        Some("result") if RESULT_OK_METHODS.iter().any(|m| *m == name) => (ElemSource::ResultOk, &[0]),
+        Some("result") if RESULT_ERR_METHODS.iter().any(|m| *m == name) => (ElemSource::ResultErr, &[0]),
+        // list (or unresolved Method — fallback to list semantics, matching the original behavior)
+        _ if LIST_ELEM_FIRST_METHODS.iter().any(|m| *m == name) => (ElemSource::ListElem, &[0]),
+        _ if LIST_ELEM_SECOND_METHODS.iter().any(|m| *m == name) => (ElemSource::ListElem, &[1]),
+        _ if LIST_ELEM_BOTH_METHODS.iter().any(|m| *m == name) => (ElemSource::ListElem, &[0, 1]),
+        _ => return,
     };
 
-    // Resolve list element type from first arg
+    // Resolve callback param type from first arg
     let elem_ty = match args.first() {
-        Some(a) => resolve_list_elem_ty(a, vt),
+        Some(a) => match source {
+            ElemSource::ListElem    => resolve_list_elem_ty(a, vt),
+            ElemSource::OptionInner => resolve_option_inner_ty(a, vt),
+            ElemSource::ResultOk    => resolve_result_ok_ty(a, vt),
+            ElemSource::ResultErr   => resolve_result_err_ty(a, vt),
+        }
         None => None,
     };
     let Some(elem_ty) = elem_ty else { return };
@@ -380,6 +421,60 @@ fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut Va
                 }
             }
         }
+    }
+}
+
+/// Resolve the inner type of an Option expression.
+fn resolve_option_inner_ty(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
+    if let Some(inner) = extract_applied_arg(&expr.ty, 0) {
+        if !inner.has_unresolved_deep() { return Some(inner); }
+    }
+    if let IrExprKind::Var { id } = &expr.kind {
+        if (id.0 as usize) < vt.len() {
+            if let Some(inner) = extract_applied_arg(&vt.get(*id).ty, 0) {
+                if !inner.has_unresolved_deep() { return Some(inner); }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the OK type of a Result expression.
+fn resolve_result_ok_ty(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
+    if let Some(inner) = extract_applied_arg(&expr.ty, 0) {
+        if !inner.has_unresolved_deep() { return Some(inner); }
+    }
+    if let IrExprKind::Var { id } = &expr.kind {
+        if (id.0 as usize) < vt.len() {
+            if let Some(inner) = extract_applied_arg(&vt.get(*id).ty, 0) {
+                if !inner.has_unresolved_deep() { return Some(inner); }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the ERR type of a Result expression.
+fn resolve_result_err_ty(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
+    if let Some(inner) = extract_applied_arg(&expr.ty, 1) {
+        if !inner.has_unresolved_deep() { return Some(inner); }
+    }
+    if let IrExprKind::Var { id } = &expr.kind {
+        if (id.0 as usize) < vt.len() {
+            if let Some(inner) = extract_applied_arg(&vt.get(*id).ty, 1) {
+                if !inner.has_unresolved_deep() { return Some(inner); }
+            }
+        }
+    }
+    None
+}
+
+/// Extract the Nth type argument from a Ty::Applied (e.g. inner of Option/Result).
+fn extract_applied_arg(ty: &Ty, idx: usize) -> Option<Ty> {
+    if let Ty::Applied(_, args) = ty {
+        args.get(idx).cloned()
+    } else {
+        None
     }
 }
 
