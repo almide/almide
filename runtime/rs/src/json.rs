@@ -25,7 +25,39 @@ pub fn almide_rt_json_parse(text: &str) -> Result<Value, String> {
     fn parse_string(chars: &[char], pos: &mut usize) -> Result<String, String> {
         *pos += 1; let mut s = String::new();
         while *pos < chars.len() && chars[*pos] != '"' {
-            if chars[*pos] == '\\' { *pos += 1; match chars.get(*pos) { Some('n')=>s.push('\n'), Some('t')=>s.push('\t'), Some('"')=>s.push('"'), Some('\\')=>s.push('\\'), Some('/')=>s.push('/'), Some('u')=>{s.push('?');*pos+=4;} _=>{} } } else { s.push(chars[*pos]); }
+            if chars[*pos] == '\\' {
+                *pos += 1;
+                match chars.get(*pos) {
+                    Some('n') => s.push('\n'),
+                    Some('t') => s.push('\t'),
+                    Some('r') => s.push('\r'),
+                    Some('b') => s.push('\u{0008}'),
+                    Some('f') => s.push('\u{000c}'),
+                    Some('"') => s.push('"'),
+                    Some('\\') => s.push('\\'),
+                    Some('/') => s.push('/'),
+                    Some('u') => {
+                        // Parse 4 hex digits as a Unicode code point.
+                        // Handles BMP only (no surrogate pair pairing) — adequate
+                        // for the JSON values almide producers emit; advanced
+                        // surrogate pair joining can land in a follow-up.
+                        let hex: String = (1..=4)
+                            .filter_map(|i| chars.get(*pos + i).copied())
+                            .collect();
+                        *pos += 4;
+                        if hex.len() == 4 {
+                            if let Ok(cp) = u32::from_str_radix(&hex, 16) {
+                                if let Some(ch) = char::from_u32(cp) {
+                                    s.push(ch);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            } else {
+                s.push(chars[*pos]);
+            }
             *pos += 1;
         }
         if *pos < chars.len() { *pos += 1; } Ok(s)
