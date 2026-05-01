@@ -201,6 +201,186 @@ fn http_exchange(stream: &mut (impl Read + Write), method: &str, host: &str, pat
     }
 }
 
+// ── Streaming request ──
+//
+// Like almide_http_request but delivers the response body to a callback
+// in chunks as they arrive on the wire. Designed for Server-Sent Events
+// (text/event-stream) where a single HTTP response carries many small
+// "data: ..." records over time. Handles both `Transfer-Encoding: chunked`
+// (the common SSE shape) and plain bodies.
+//
+// The callback receives raw UTF-8 substrings of the body — it is the
+// caller's job to do SSE line splitting / parsing / event assembly.
+
+pub fn almide_http_request_stream(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: &HashMap<String, String>,
+    mut on_chunk: impl FnMut(String),
+) -> Result<(), String> {
+    let (is_https, host, port, path) = parse_url(url)?;
+    let stream = TcpStream::connect(format!("{}:{}", host, port))
+        .map_err(|e| format!("connection failed: {}", e))?;
+    // Long read timeout — SSE responses can be quiet between events.
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(120))).ok();
+
+    let mut wrap = |s: &str| on_chunk(s.to_string());
+    if is_https {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut tls = make_tls_stream(&host, stream)?;
+            http_exchange_stream(&mut tls, method, &host, &path, body, headers, &mut wrap)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err("HTTPS streaming not supported on WASM target".to_string())
+        }
+    } else {
+        let mut s = stream;
+        http_exchange_stream(&mut s, method, &host, &path, body, headers, &mut wrap)
+    }
+}
+
+fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
+    stream: &mut S,
+    method: &str,
+    host: &str,
+    path: &str,
+    body: &str,
+    headers: &HashMap<String, String>,
+    on_chunk: &mut F,
+) -> Result<(), String> {
+    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
+    if !body.is_empty() {
+        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
+        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
+            req.push_str("Content-Type: application/json\r\n");
+        }
+    }
+    for (k, v) in headers {
+        req.push_str(&format!("{}: {}\r\n", k, v));
+    }
+    req.push_str("\r\n");
+    req.push_str(body);
+    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
+
+    let mut buf = vec![0u8; 8192];
+    let mut acc: Vec<u8> = Vec::new();
+    let mut headers_done = false;
+    let mut chunked = false;
+    let mut chunk_remaining: usize = 0;
+    let mut awaiting_size = true;
+    let mut error_status: Option<String> = None;
+
+    loop {
+        let n = match stream.read(&mut buf) {
+            Ok(n) => n,
+            Err(e) => {
+                if acc.is_empty() && !headers_done {
+                    return Err(format!("read failed: {}", e));
+                }
+                break;
+            }
+        };
+        if n == 0 {
+            break;
+        }
+        acc.extend_from_slice(&buf[..n]);
+
+        if !headers_done {
+            if let Some(idx) = acc.windows(4).position(|w| w == b"\r\n\r\n") {
+                let header_section = String::from_utf8_lossy(&acc[..idx]).to_string();
+                let status_line = header_section.lines().next().unwrap_or("");
+                let code: i64 = status_line
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                if !(200..300).contains(&code) {
+                    error_status = Some(format!(
+                        "HTTP {}: {}",
+                        code,
+                        status_line.splitn(3, ' ').nth(2).unwrap_or("")
+                    ));
+                }
+                chunked = header_section
+                    .to_lowercase()
+                    .contains("transfer-encoding: chunked");
+                acc.drain(..idx + 4);
+                headers_done = true;
+            } else {
+                continue;
+            }
+        }
+
+        if let Some(ref msg) = error_status {
+            // Drain remaining body for error message context.
+            let body_text = String::from_utf8_lossy(&acc).to_string();
+            return Err(format!("{}: {}", msg, body_text.chars().take(500).collect::<String>()));
+        }
+
+        if chunked {
+            'outer: loop {
+                if awaiting_size {
+                    // Look for \r\n that terminates the size line.
+                    let mut nl = None;
+                    for i in 0..acc.len().saturating_sub(1) {
+                        if acc[i] == b'\r' && acc[i + 1] == b'\n' {
+                            nl = Some(i);
+                            break;
+                        }
+                    }
+                    let nl = match nl {
+                        Some(i) => i,
+                        None => break 'outer, // need more bytes
+                    };
+                    let size_line = String::from_utf8_lossy(&acc[..nl]);
+                    let size_str = size_line.split(';').next().unwrap_or("").trim();
+                    let size = usize::from_str_radix(size_str, 16).unwrap_or(0);
+                    acc.drain(..nl + 2);
+                    if size == 0 {
+                        return Ok(());
+                    }
+                    chunk_remaining = size;
+                    awaiting_size = false;
+                }
+                let take = chunk_remaining.min(acc.len());
+                if take > 0 {
+                    let drained: Vec<u8> = acc.drain(..take).collect();
+                    let s = String::from_utf8_lossy(&drained);
+                    on_chunk(&s);
+                    chunk_remaining -= take;
+                }
+                if chunk_remaining == 0 {
+                    if acc.len() < 2 {
+                        // Need the trailing CRLF; wait for more bytes.
+                        break 'outer;
+                    }
+                    if acc.starts_with(b"\r\n") {
+                        acc.drain(..2);
+                    }
+                    awaiting_size = true;
+                } else {
+                    break 'outer;
+                }
+            }
+        } else {
+            // Plain body — surface as-is.
+            if !acc.is_empty() {
+                let drained: Vec<u8> = acc.drain(..).collect();
+                let s = String::from_utf8_lossy(&drained);
+                on_chunk(&s);
+            }
+        }
+    }
+
+    if !headers_done {
+        return Err("connection closed before headers received".to_string());
+    }
+    Ok(())
+}
+
 // ── TLS ──
 
 #[cfg(not(target_arch = "wasm32"))]
