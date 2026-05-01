@@ -115,10 +115,21 @@ impl NanoPass for ResultPropagationPass {
         }
 
         // Phase 2: Update call-site types for lifted functions, then insert Try.
+        //
+        // Auto-? insertion: any non-test effect fn (top-level or module
+        // level) that calls another lifted effect fn needs Try wrapping
+        // at non-tail positions, otherwise Rust sees a let-binding /
+        // pattern type mismatch (`expected T, found Result<T, String>`).
+        // Test fns continue with insert_try_for_lifted + insert_try_in_fan
+        // (which use .unwrap() so failed assertions surface as panics).
         let mut retyped_vars: HashMap<u32, Ty> = HashMap::new();
         for func in &mut program.functions {
             if !lifted_fns.is_empty() {
                 func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
+                if !func.is_test {
+                    let returns_result = func.ret_ty.is_result();
+                    func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
+                }
             }
             // fan blocks in tests still need Try insertion for effect fn calls
             if func.is_test {
@@ -678,14 +689,23 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
             then: Box::new(insert_try(*then, false)),
             else_: Box::new(insert_try(*else_, false)),
         },
-        // Match: subject is NOT wrapped, but arm bodies ARE
-        IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(insert_try(*subject, true)), // don't wrap subject
-            arms: arms.into_iter().map(|arm| IrMatchArm {
-                pattern: arm.pattern,
-                guard: arm.guard.map(|g| insert_try(g, false)),
-                body: insert_try(arm.body, false),
-            }).collect(),
+        // Match: arm bodies are visited; subject handling depends on the
+        // arm patterns. If any arm uses Ok/Err patterns, the user is
+        // matching on the Result directly so leave subject alone.
+        // Otherwise the subject's lifted Result must be unwrapped via
+        // Try so the inner-type patterns (Some/None, plain values, etc.)
+        // can match.
+        IrExprKind::Match { subject, arms } => {
+            let arms_match_result = arms.iter().any(|a|
+                matches!(&a.pattern, IrPattern::Ok { .. } | IrPattern::Err { .. }));
+            IrExprKind::Match {
+                subject: Box::new(insert_try(*subject, arms_match_result)),
+                arms: arms.into_iter().map(|arm| IrMatchArm {
+                    pattern: arm.pattern,
+                    guard: arm.guard.map(|g| insert_try(g, false)),
+                    body: insert_try(arm.body, false),
+                }).collect(),
+            }
         },
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
             op,
@@ -803,7 +823,13 @@ fn insert_try_stmt(stmt: IrStmt) -> IrStmt {
             let mut new_value = insert_try(value, false);
             // If the value wasn't already wrapped by insert_try (e.g. ok()/err() which
             // are not Call nodes), wrap it here at the binding site.
-            if !matches!(&new_value.kind, IrExprKind::Try { .. }) && is_result_value(&new_value) {
+            // Skip when the binding's declared type is itself Result — the
+            // user wrote `let r: Result[T, E] = ...` deliberately and wants
+            // to keep it for explicit matching.
+            if !matches!(&new_value.kind, IrExprKind::Try { .. })
+                && is_result_value(&new_value)
+                && !ty.is_result()
+            {
                 let inner_ty = match &new_value.ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                     _ => new_value.ty.clone(),
