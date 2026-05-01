@@ -173,6 +173,12 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             }
             // Runtime dependency: json depends on value
             if needed.contains("json") { needed.insert("value"); }
+            // sse pulls in http (almide_http_request_stream) + value/json helpers
+            if needed.contains("sse") {
+                needed.insert("value");
+                needed.insert("json");
+                needed.insert("http");
+            }
             // Collect runtime modules, hoist top-level `use` to front and deduplicate
             let mut use_set = std::collections::HashSet::new();
             let mut use_lines = Vec::new();
