@@ -612,6 +612,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Codegen nodes (inserted by passes — walker just renders) ──
         IrExprKind::Clone { expr: inner } => {
             let expr_s = render_expr(ctx, inner);
+            // Special case: cloning a String-typed Var that's a fn param
+            // (so it's actually emitted as `&str` in Rust). `.clone()` on
+            // `&str` returns `&str`, not `String`. Use `.to_string()` so
+            // the surrounding context (which expects an owned `String`)
+            // type-checks.
+            let is_borrowed_string_param = matches!(ctx.target, super::super::pass::Target::Rust)
+                && matches!(inner.ty, Ty::String)
+                && match &inner.kind {
+                    IrExprKind::Var { id } => ctx.ref_params.contains(id),
+                    _ => false,
+                };
+            if is_borrowed_string_param {
+                return format!("{}.to_string()", expr_s);
+            }
             ctx.templates.render_with("clone_expr", None, &[], &[("expr", expr_s.as_str())])
                 .unwrap_or_else(|| format!("{}.clone()", expr_s))
         }
