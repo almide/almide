@@ -838,6 +838,26 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
         IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
             entries: entries.into_iter().map(|(k, v)| (insert_try(k, false), insert_try(v, false))).collect(),
         },
+        // Unwrap (`!`) / Try / ToOption / UnwrapOr already perform the
+        // result-handling for their inner expression — we mustn't wrap
+        // it again. But the inner expression's OWN args (e.g. nested
+        // effect calls inside `agent.run_turn(..., read_threshold(),
+        // ...)!`) still need Try insertion. Recurse "in match subject"
+        // mode: that suppresses the outer wrap on the immediate inner
+        // call but lets its args get processed normally.
+        IrExprKind::Unwrap { expr: inner } => IrExprKind::Unwrap {
+            expr: Box::new(insert_try(*inner, true)),
+        },
+        IrExprKind::Try { expr: inner } => IrExprKind::Try {
+            expr: Box::new(insert_try(*inner, true)),
+        },
+        IrExprKind::ToOption { expr: inner } => IrExprKind::ToOption {
+            expr: Box::new(insert_try(*inner, true)),
+        },
+        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(insert_try(*inner, true)),
+            fallback: Box::new(insert_try(*fallback, false)),
+        },
         // Leaf nodes — return as-is
         other => other,
     };
