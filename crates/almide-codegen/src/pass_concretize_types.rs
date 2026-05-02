@@ -575,10 +575,20 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
 
     fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
         walk_stmt_mut(self, stmt);
-        // Sync Bind { ty } with value.ty when we now know the value type
-        if let IrStmtKind::Bind { ty, value, .. } = &mut stmt.kind {
-            if ty.has_unresolved_deep() && !(value.ty).has_unresolved_deep() {
-                *ty = value.ty.clone();
+        // Sync Bind { ty } *and* the VarTable entry for the bound var with
+        // value.ty when we now know the value type. Without the VarTable
+        // sync, later Var references to the same binding (and the
+        // post-pass audit reading VarTable directly) keep seeing Unknown.
+        if let IrStmtKind::Bind { var, ty, value, .. } = &mut stmt.kind {
+            if !(value.ty).has_unresolved_deep() {
+                if ty.has_unresolved_deep() {
+                    *ty = value.ty.clone();
+                }
+                if (var.0 as usize) < self.vt.len()
+                    && self.vt.get(*var).ty.has_unresolved_deep()
+                {
+                    self.vt.entries[var.0 as usize].ty = value.ty.clone();
+                }
             }
         }
     }
@@ -900,12 +910,13 @@ fn reconcile_binop(op: BinOp, lt: &Ty, rt: &Ty) -> Option<BinOp> {
 /// constraints) legitimately carry unresolved types at runtime and are
 /// skipped below.
 fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
-    struct Auditor {
+    struct Auditor<'a> {
         location: String,
         remaining: usize,
         samples: Vec<String>,
+        var_table: &'a VarTable,
     }
-    impl IrVisitor for Auditor {
+    impl<'a> IrVisitor for Auditor<'a> {
         fn visit_expr(&mut self, expr: &IrExpr) {
             if (expr.ty).has_unresolved_deep() {
                 // Skip nodes that legitimately have no runtime representation
@@ -964,9 +975,22 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
                 if !skip {
                     self.remaining += 1;
                     if self.samples.len() < 5 {
-                        self.samples.push(format!("[{}] {:?} ty={:?}",
+                        let extra = match &expr.kind {
+                            IrExprKind::Var { id } => {
+                                if (id.0 as usize) < self.var_table.entries.len() {
+                                    let info = &self.var_table.entries[id.0 as usize];
+                                    format!(" var_id={} name={} stored_ty={:?}", id.0, info.name.as_str(), info.ty)
+                                } else {
+                                    format!(" var_id={}", id.0)
+                                }
+                            }
+                            IrExprKind::Member { field, .. } => format!(" member={}", field.as_str()),
+                            IrExprKind::Call { .. } => " (call)".to_string(),
+                            _ => String::new(),
+                        };
+                        self.samples.push(format!("[{}] {:?} ty={:?}{}",
                             self.location,
-                            kind_name(&expr.kind), expr.ty));
+                            kind_name(&expr.kind), expr.ty, extra));
                     }
                 }
             }
@@ -1011,7 +1035,7 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
             _ => "(other)",
         }
     }
-    let mut a = Auditor { location: String::new(), remaining: 0, samples: Vec::new() };
+    let mut a = Auditor { location: String::new(), remaining: 0, samples: Vec::new(), var_table: &program.var_table };
     for f in &program.functions {
         a.location = format!("fn {}", f.name);
         a.visit_expr(&f.body);
