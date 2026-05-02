@@ -466,9 +466,17 @@ impl Checker {
 
             ExprKind::Block { stmts, expr, .. } => {
                 self.env.push_scope();
+                // Pre-scan for vars used as match subjects with Ok/Err
+                // patterns — those bindings must keep their Result type.
+                let saved_skip = std::mem::take(&mut self.env.skip_auto_unwrap_for);
+                let result_match_vars = collect_block_result_match_vars(stmts, expr.as_deref());
+                for n in &result_match_vars {
+                    self.env.skip_auto_unwrap_for.insert(*n);
+                }
                 for stmt in stmts.iter_mut() { self.check_stmt(stmt); }
                 let ty = if let Some(e) = expr { self.infer_expr(e) } else { Ty::Unit };
                 self.env.pop_scope();
+                self.env.skip_auto_unwrap_for = saved_skip;
                 ty
             }
 
@@ -881,8 +889,11 @@ impl Checker {
                     declared
                 } else {
                     let t = resolve_ty(&val_ty, &self.uf);
-                    // Auto-unwrap Result in effect fns (but not in test blocks)
-                    if self.env.auto_unwrap {
+                    // Auto-unwrap Result in effect fns (but not in test blocks),
+                    // unless this binding is later used as a `match x { ok(_) =>
+                    // ..., err(_) => ... }` subject — in which case the user
+                    // wants to inspect the Result directly.
+                    if self.env.auto_unwrap && !self.env.skip_auto_unwrap_for.contains(&sym(name)) {
                         match t {
                             Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
                             other => other,
@@ -1033,9 +1044,21 @@ impl Checker {
                 };
                 for e in elements { self.bind_pattern(e, &elem_ty); }
             }
-            ast::Pattern::Some { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
-            ast::Pattern::Ok { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
-            ast::Pattern::Err { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
+            ast::Pattern::Some { inner } => {
+                let resolved = resolve_ty(ty, &self.uf);
+                let it = match &resolved { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown };
+                self.bind_pattern(inner, &it);
+            }
+            ast::Pattern::Ok { inner } => {
+                let resolved = resolve_ty(ty, &self.uf);
+                let it = match &resolved { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown };
+                self.bind_pattern(inner, &it);
+            }
+            ast::Pattern::Err { inner } => {
+                let resolved = resolve_ty(ty, &self.uf);
+                let it = match &resolved { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown };
+                self.bind_pattern(inner, &it);
+            }
             ast::Pattern::None | ast::Pattern::Literal { .. } => {}
         }
     }
@@ -1197,6 +1220,55 @@ impl Checker {
         ).with_code("E420"));
     }
 
+}
+
+/// Collect Ident names that appear as match subjects with Ok/Err
+/// patterns inside a block. Used to suppress auto-unwrap of Result on
+/// the corresponding `let` bindings — the user wants to inspect the
+/// Result, so the Bind must keep its Result type.
+pub(crate) fn collect_block_result_match_vars(stmts: &[ast::Stmt], tail: Option<&ast::Expr>) -> std::collections::HashSet<Sym> {
+    let mut out = std::collections::HashSet::new();
+    for s in stmts { collect_in_stmt(s, &mut out); }
+    if let Some(e) = tail { collect_in_expr(e, &mut out); }
+    out
+}
+
+fn collect_in_stmt(stmt: &ast::Stmt, out: &mut std::collections::HashSet<Sym>) {
+    match stmt {
+        ast::Stmt::Let { value, .. } | ast::Stmt::Var { value, .. } => collect_in_expr(value, out),
+        ast::Stmt::Expr { expr, .. } => collect_in_expr(expr, out),
+        ast::Stmt::Assign { value, .. } => collect_in_expr(value, out),
+        ast::Stmt::Guard { cond, else_, .. } => { collect_in_expr(cond, out); collect_in_expr(else_, out); }
+        _ => {}
+    }
+}
+
+fn collect_in_expr(expr: &ast::Expr, out: &mut std::collections::HashSet<Sym>) {
+    match &expr.kind {
+        ExprKind::Match { subject, arms, .. } => {
+            let arms_match_result = arms.iter().any(|a| matches!(
+                &a.pattern,
+                ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }
+            ));
+            if arms_match_result {
+                if let ExprKind::Ident { name, .. } = &subject.kind {
+                    out.insert(*name);
+                }
+            }
+            collect_in_expr(subject, out);
+            for arm in arms { collect_in_expr(&arm.body, out); }
+        }
+        ExprKind::Block { stmts, expr: tail, .. } => {
+            for s in stmts { collect_in_stmt(s, out); }
+            if let Some(t) = tail { collect_in_expr(t, out); }
+        }
+        ExprKind::If { cond, then, else_, .. } => {
+            collect_in_expr(cond, out);
+            collect_in_expr(then, out);
+            collect_in_expr(else_, out);
+        }
+        _ => {}
+    }
 }
 
 /// Collect all Ident names referenced in an expression (shallow, for var capture check).

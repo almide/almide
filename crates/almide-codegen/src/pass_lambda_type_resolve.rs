@@ -362,7 +362,11 @@ fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut Va
         _ => None,
     };
     let Some((module, name)) = resolved else { return };
-    let name = name.as_str();
+    // Monomorphization rewrites e.g. `fold` → `fold__String_CollapseAcc`.
+    // Strip the `__suffix` so all the lookups below operate on the bare
+    // method name.
+    let bare_name = name.split("__").next().unwrap_or(&name).to_string();
+    let name = bare_name.as_str();
 
     // Decide (param-elem source, lambda-param indices) based on (module, method)
     enum ElemSource { ListElem, OptionInner, ResultOk, ResultErr }
@@ -389,6 +393,26 @@ fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut Va
     };
     let Some(elem_ty) = elem_ty else { return };
 
+    // For fold(xs, init, f) and scan, the accumulator's type is whatever
+    // init resolves to — propagate that into lambda param 0 in addition
+    // to the elem-type propagation below.
+    let acc_ty: Option<Ty> = if module == Some("list")
+        && (name == "fold" || name == "scan")
+    {
+        args.get(1).and_then(|a| {
+            if !a.ty.has_unresolved_deep() {
+                Some(a.ty.clone())
+            } else if let IrExprKind::Var { id } = &a.kind {
+                if (id.0 as usize) < vt.len() {
+                    let t = &vt.get(*id).ty;
+                    if !t.has_unresolved_deep() { Some(t.clone()) } else { None }
+                } else { None }
+            } else { None }
+        })
+    } else {
+        None
+    };
+
     // Propagate to inline Lambda params
     for arg in args.iter_mut() {
         let is_lambda = matches!(&arg.kind, IrExprKind::Lambda { .. });
@@ -407,6 +431,17 @@ fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut Va
                     }
                 }
             }
+            // For fold/scan, the accumulator (param 0) takes init's type.
+            if let Some(ref a_ty) = acc_ty {
+                if let Some((vid, pty)) = params.get_mut(0) {
+                    if pty.has_unresolved_deep() {
+                        *pty = a_ty.clone();
+                        if (vid.0 as usize) < vt.len() && vt.get(*vid).ty.has_unresolved_deep() {
+                            vt.entries[vid.0 as usize].ty = a_ty.clone();
+                        }
+                    }
+                }
+            }
             // Infer return type from body + resolved params
             let body_ret = infer_body_result_ty(body, params);
             // Update Ty::Fn wrapper
@@ -415,6 +450,13 @@ fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut Va
                     if let Some(fp) = fparams.get_mut(pidx) {
                         if fp.has_unresolved_deep() { *fp = elem_ty.clone(); }
                     }
+                }
+                if let Some(ref a_ty) = acc_ty {
+                    if let Some(fp) = fparams.get_mut(0) {
+                        if fp.has_unresolved_deep() { *fp = a_ty.clone(); }
+                    }
+                    // The lambda's return is also the accumulator type.
+                    if ret.has_unresolved_deep() { **ret = a_ty.clone(); }
                 }
                 if ret.has_unresolved_deep() {
                     if let Some(r) = body_ret { **ret = r; }
