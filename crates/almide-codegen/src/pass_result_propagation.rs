@@ -608,11 +608,19 @@ fn insert_try_for_lifted_stmt(stmt: IrStmt, lifted: &HashMap<String, Ty>, skip_u
 }
 
 /// Insert Try in function body — skip final expression if fn returns Result.
+/// Also skip Try insertion for any binding whose var is later used as the
+/// subject of a match with Ok/Err patterns. The user wrote that match
+/// because they want to inspect the Result directly; auto-unwrapping
+/// would replace the Result with the inner T and then the match arms
+/// fail to type-check.
 fn insert_try_body(expr: IrExpr, fn_returns_result: bool) -> IrExpr {
     if fn_returns_result {
         match expr.kind {
             IrExprKind::Block { stmts, expr: Some(tail) } => {
-                let stmts = stmts.into_iter().map(insert_try_stmt).collect();
+                let skip_unwrap = collect_result_match_vars(&stmts, Some(&tail));
+                let stmts = stmts.into_iter()
+                    .map(|s| insert_try_stmt_with_skip(s, &skip_unwrap))
+                    .collect();
                 let tail = insert_try(*tail, false);
                 let tail = strip_tail_try(tail);
                 return IrExpr {
@@ -626,7 +634,43 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool) -> IrExpr {
             }
         }
     }
+    // Non-Result-returning fn: still need to skip unwrap on Result-match vars.
+    if let IrExprKind::Block { stmts, expr: tail } = expr.kind {
+        let skip_unwrap = collect_result_match_vars(&stmts, tail.as_deref());
+        let stmts = stmts.into_iter()
+            .map(|s| insert_try_stmt_with_skip(s, &skip_unwrap))
+            .collect();
+        let tail = tail.map(|e| Box::new(insert_try(*e, false)));
+        return IrExpr {
+            kind: IrExprKind::Block { stmts, expr: tail },
+            ty: expr.ty, span: expr.span,
+        };
+    }
     insert_try(expr, false)
+}
+
+/// insert_try_stmt variant that respects a skip-list of VarIds (those
+/// whose binding values must remain Result for downstream Ok/Err matches).
+fn insert_try_stmt_with_skip(stmt: IrStmt, skip: &HashSet<u32>) -> IrStmt {
+    if let IrStmtKind::Bind { var, .. } = &stmt.kind {
+        if skip.contains(&var.0) {
+            // Process the value but DON'T wrap it in Try at the binding site.
+            if let IrStmtKind::Bind { var, mutability, ty, value } = stmt.kind {
+                let new_value = insert_try(value, false);
+                // If insert_try added a Try (from a recursive Call wrap inside),
+                // strip the outer Try so the value remains Result-typed.
+                let unwrapped = match new_value.kind {
+                    IrExprKind::Try { expr: inner } if inner.ty.is_result() => *inner,
+                    _ => new_value,
+                };
+                return IrStmt {
+                    kind: IrStmtKind::Bind { var, mutability, ty, value: unwrapped },
+                    span: stmt.span,
+                };
+            }
+        }
+    }
+    insert_try_stmt(stmt)
 }
 
 /// Recursively strip Try from tail positions of a Result-returning expression.
