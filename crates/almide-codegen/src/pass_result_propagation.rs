@@ -115,10 +115,21 @@ impl NanoPass for ResultPropagationPass {
         }
 
         // Phase 2: Update call-site types for lifted functions, then insert Try.
+        //
+        // Auto-? insertion: any non-test effect fn (top-level or module
+        // level) that calls another lifted effect fn needs Try wrapping
+        // at non-tail positions, otherwise Rust sees a let-binding /
+        // pattern type mismatch (`expected T, found Result<T, String>`).
+        // Test fns continue with insert_try_for_lifted + insert_try_in_fan
+        // (which use .unwrap() so failed assertions surface as panics).
         let mut retyped_vars: HashMap<u32, Ty> = HashMap::new();
         for func in &mut program.functions {
             if !lifted_fns.is_empty() {
                 func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
+                if !func.is_test {
+                    let returns_result = func.ret_ty.is_result();
+                    func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
+                }
             }
             // fan blocks in tests still need Try insertion for effect fn calls
             if func.is_test {
@@ -129,8 +140,14 @@ impl NanoPass for ResultPropagationPass {
             for func in &mut module.functions {
                 if !lifted_fns.is_empty() {
                     func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
+                    // Auto-? insertion: module-level effect fns calling other
+                    // lifted effect fns need Try wrapping the same way the
+                    // top-level pipeline does for non-test fns. Without this,
+                    // Rust sees a let-binding type mismatch
+                    // (`expected T, found Result<T, String>`).
+                    let returns_result = func.ret_ty.is_result();
+                    func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
                 }
-                // Auto-? insertion disabled for modules too
             }
         }
 
@@ -591,11 +608,19 @@ fn insert_try_for_lifted_stmt(stmt: IrStmt, lifted: &HashMap<String, Ty>, skip_u
 }
 
 /// Insert Try in function body — skip final expression if fn returns Result.
+/// Also skip Try insertion for any binding whose var is later used as the
+/// subject of a match with Ok/Err patterns. The user wrote that match
+/// because they want to inspect the Result directly; auto-unwrapping
+/// would replace the Result with the inner T and then the match arms
+/// fail to type-check.
 fn insert_try_body(expr: IrExpr, fn_returns_result: bool) -> IrExpr {
     if fn_returns_result {
         match expr.kind {
             IrExprKind::Block { stmts, expr: Some(tail) } => {
-                let stmts = stmts.into_iter().map(insert_try_stmt).collect();
+                let skip_unwrap = collect_result_match_vars(&stmts, Some(&tail));
+                let stmts = stmts.into_iter()
+                    .map(|s| insert_try_stmt_with_skip(s, &skip_unwrap))
+                    .collect();
                 let tail = insert_try(*tail, false);
                 let tail = strip_tail_try(tail);
                 return IrExpr {
@@ -609,7 +634,43 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool) -> IrExpr {
             }
         }
     }
+    // Non-Result-returning fn: still need to skip unwrap on Result-match vars.
+    if let IrExprKind::Block { stmts, expr: tail } = expr.kind {
+        let skip_unwrap = collect_result_match_vars(&stmts, tail.as_deref());
+        let stmts = stmts.into_iter()
+            .map(|s| insert_try_stmt_with_skip(s, &skip_unwrap))
+            .collect();
+        let tail = tail.map(|e| Box::new(insert_try(*e, false)));
+        return IrExpr {
+            kind: IrExprKind::Block { stmts, expr: tail },
+            ty: expr.ty, span: expr.span,
+        };
+    }
     insert_try(expr, false)
+}
+
+/// insert_try_stmt variant that respects a skip-list of VarIds (those
+/// whose binding values must remain Result for downstream Ok/Err matches).
+fn insert_try_stmt_with_skip(stmt: IrStmt, skip: &HashSet<u32>) -> IrStmt {
+    if let IrStmtKind::Bind { var, .. } = &stmt.kind {
+        if skip.contains(&var.0) {
+            // Process the value but DON'T wrap it in Try at the binding site.
+            if let IrStmtKind::Bind { var, mutability, ty, value } = stmt.kind {
+                let new_value = insert_try(value, false);
+                // If insert_try added a Try (from a recursive Call wrap inside),
+                // strip the outer Try so the value remains Result-typed.
+                let unwrapped = match new_value.kind {
+                    IrExprKind::Try { expr: inner } if inner.ty.is_result() => *inner,
+                    _ => new_value,
+                };
+                return IrStmt {
+                    kind: IrStmtKind::Bind { var, mutability, ty, value: unwrapped },
+                    span: stmt.span,
+                };
+            }
+        }
+    }
+    insert_try_stmt(stmt)
 }
 
 /// Recursively strip Try from tail positions of a Result-returning expression.
@@ -672,14 +733,23 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
             then: Box::new(insert_try(*then, false)),
             else_: Box::new(insert_try(*else_, false)),
         },
-        // Match: subject is NOT wrapped, but arm bodies ARE
-        IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(insert_try(*subject, true)), // don't wrap subject
-            arms: arms.into_iter().map(|arm| IrMatchArm {
-                pattern: arm.pattern,
-                guard: arm.guard.map(|g| insert_try(g, false)),
-                body: insert_try(arm.body, false),
-            }).collect(),
+        // Match: arm bodies are visited; subject handling depends on the
+        // arm patterns. If any arm uses Ok/Err patterns, the user is
+        // matching on the Result directly so leave subject alone.
+        // Otherwise the subject's lifted Result must be unwrapped via
+        // Try so the inner-type patterns (Some/None, plain values, etc.)
+        // can match.
+        IrExprKind::Match { subject, arms } => {
+            let arms_match_result = arms.iter().any(|a|
+                matches!(&a.pattern, IrPattern::Ok { .. } | IrPattern::Err { .. }));
+            IrExprKind::Match {
+                subject: Box::new(insert_try(*subject, arms_match_result)),
+                arms: arms.into_iter().map(|arm| IrMatchArm {
+                    pattern: arm.pattern,
+                    guard: arm.guard.map(|g| insert_try(g, false)),
+                    body: insert_try(arm.body, false),
+                }).collect(),
+            }
         },
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
             op,
@@ -768,6 +838,26 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
         IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
             entries: entries.into_iter().map(|(k, v)| (insert_try(k, false), insert_try(v, false))).collect(),
         },
+        // Unwrap (`!`) / Try / ToOption / UnwrapOr already perform the
+        // result-handling for their inner expression — we mustn't wrap
+        // it again. But the inner expression's OWN args (e.g. nested
+        // effect calls inside `agent.run_turn(..., read_threshold(),
+        // ...)!`) still need Try insertion. Recurse "in match subject"
+        // mode: that suppresses the outer wrap on the immediate inner
+        // call but lets its args get processed normally.
+        IrExprKind::Unwrap { expr: inner } => IrExprKind::Unwrap {
+            expr: Box::new(insert_try(*inner, true)),
+        },
+        IrExprKind::Try { expr: inner } => IrExprKind::Try {
+            expr: Box::new(insert_try(*inner, true)),
+        },
+        IrExprKind::ToOption { expr: inner } => IrExprKind::ToOption {
+            expr: Box::new(insert_try(*inner, true)),
+        },
+        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(insert_try(*inner, true)),
+            fallback: Box::new(insert_try(*fallback, false)),
+        },
         // Leaf nodes — return as-is
         other => other,
     };
@@ -797,7 +887,13 @@ fn insert_try_stmt(stmt: IrStmt) -> IrStmt {
             let mut new_value = insert_try(value, false);
             // If the value wasn't already wrapped by insert_try (e.g. ok()/err() which
             // are not Call nodes), wrap it here at the binding site.
-            if !matches!(&new_value.kind, IrExprKind::Try { .. }) && is_result_value(&new_value) {
+            // Skip when the binding's declared type is itself Result — the
+            // user wrote `let r: Result[T, E] = ...` deliberately and wants
+            // to keep it for explicit matching.
+            if !matches!(&new_value.kind, IrExprKind::Try { .. })
+                && is_result_value(&new_value)
+                && !ty.is_result()
+            {
                 let inner_ty = match &new_value.ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                     _ => new_value.ty.clone(),

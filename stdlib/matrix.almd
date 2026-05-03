@@ -32,6 +32,87 @@ fn transpose(m: Matrix) -> Matrix = _
 @intrinsic("almide_rt_matrix_from_lists")
 fn from_lists(rows: List[List[Float]]) -> Matrix = _
 
+// Format converter: decode a Q1_0 (1-bit) packed-byte block directly
+// into a Matrix. Same primitive-role as `from_lists`. Used by
+// GGUF / Bonsai loaders; the pure-Almide inner loop paid ~5 s per
+// 2 M-weight tensor because release LLVM couldn't fully collapse the
+// chain of stdlib helper calls, so we lift it to a runtime primitive.
+@intrinsic("almide_rt_matrix_from_q1_0_bytes")
+fn from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+
+// Gather a subset of rows from a matrix by index. Returns a new matrix
+// of shape (row_ids.len, original_cols). Avoids `to_lists` round-trips
+// for embedding lookups and other row-indexed slicing.
+@intrinsic("almide_rt_matrix_select_rows")
+fn select_rows(m: Matrix, row_ids: List[Int]) -> Matrix = _
+
+// Direct Q1_0 × float matmul: `y[i, j] = Σ_k x[i, k] * W[j, k]` where
+// W is still packed in its source GGUF bytes. No full decode allocation
+// happens — memory stays proportional to x + y, not the full decoded
+// weight matrix. Critical for keeping 28-layer transformer inference
+// under the 4 GB WASM address-space cap. Layout: blocks of 128 weights,
+// 18 bytes each (2 B fp16 scale + 16 B sign bits), row-major within
+// each output feature.
+@intrinsic("almide_rt_matrix_linear_q1_0_row_no_bias")
+fn linear_q1_0_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = _
+
+// Elementwise SwiGLU glue: silu(a) * b. Used with two
+// `linear_q1_0_row_no_bias` calls to run SwiGLU FFN without decoding
+// the w_gate / w_up matrices.
+@intrinsic("almide_rt_matrix_silu_mul")
+fn silu_mul(a: Matrix, b: Matrix) -> Matrix = _
+
+// Decode specific rows of a Q1_0 matrix straight from the packed byte
+// buffer. Avoids materialising the full matrix — the 2.5 GB token_embd
+// decode per forward call was the main allocator pressure inside WASM.
+// Layout: each row occupies `cols / 128 * 18` bytes in row-major order.
+@intrinsic("almide_rt_matrix_select_rows_q1_0")
+fn select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix = _
+
+// Rotary positional embedding on a (seq_len, n_heads * head_dim) matrix.
+// Rotates each head's (x[2i], x[2i+1]) pair by `row_idx * inv_freq[i]`.
+// Standard transformer primitive — same level as rms_norm_rows / swiglu_gate.
+@intrinsic("almide_rt_matrix_rope_rotate")
+fn rope_rotate(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float) -> Matrix = _
+
+// KV-cache variant: row p of x is treated as absolute position
+// `start_pos + p`. During gen-step inference the cached K has already
+// rotated positions 0..start_pos and the new token gets start_pos.
+@intrinsic("almide_rt_matrix_rope_rotate_at")
+fn rope_rotate_at(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float, start_pos: Int) -> Matrix = _
+
+// Row-wise concat — used for KV-cache accumulation (append one new
+// K/V row per gen step to the running seq).
+@intrinsic("almide_rt_matrix_append_rows")
+fn append_rows(base: Matrix, extra: Matrix) -> Matrix = _
+
+// One decoder layer of Qwen3 / Bonsai — rms_norm → Q/K/V linear_q1_0 →
+// per-head rms_norm → rope_rotate_at → KV-cache append → repeat_kv →
+// masked_multi_head_attention → output linear_q1_0 → residual →
+// rms_norm → gate/up/down FFN (silu_mul) → residual. Fused because
+// Almide-level composition paid a Matrix alloc + ownership shuffle
+// between every step.
+//
+// `w`: packed GGUF byte buffer (the whole model, starting at data_offset).
+// `gamma_offs`: [attn_norm, q_norm, k_norm, ffn_norm] f32 offsets.
+// `weight_offs`: [q, k, v, o, gate, up, down] Q1_0 block offsets.
+@intrinsic("almide_rt_matrix_qwen3_block_q1_0_kv")
+fn qwen3_block_q1_0_kv(
+  h: Matrix,
+  k_cache: Matrix,
+  v_cache: Matrix,
+  w: Bytes,
+  gamma_offs: List[Int],
+  weight_offs: List[Int],
+  start_pos: Int,
+  n_q_heads: Int,
+  n_kv_heads: Int,
+  head_dim: Int,
+  ffn_hidden: Int,
+  rope_theta: Float,
+  eps: Float,
+) -> (Matrix, Matrix, Matrix) = _
+
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 

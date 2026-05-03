@@ -45,6 +45,11 @@ pub struct TypeEnv {
     pub local_symbols: std::collections::HashSet<Sym>,
     /// Temporarily suppress auto-unwrap of Result (for match on ok/err)
     pub skip_auto_unwrap: bool,
+    /// Variable names whose `let` binding should NOT auto-unwrap Result
+    /// because they're later used as the subject of a `match x { ok(_) =>
+    /// ..., err(_) => ... }`. Pre-computed at block entry (see Block
+    /// inference in check/infer.rs).
+    pub skip_auto_unwrap_for: std::collections::HashSet<Sym>,
     /// Variables declared with `var` (mutable). Parameters and `let` are immutable.
     pub mutable_vars: std::collections::HashSet<Sym>,
     /// Escape analysis: current lambda nesting depth (0 = not in lambda).
@@ -100,6 +105,7 @@ impl TypeEnv {
             used_vars: std::collections::HashSet::new(),
             local_symbols: std::collections::HashSet::new(),
             skip_auto_unwrap: false,
+            skip_auto_unwrap_for: std::collections::HashSet::new(),
             mutable_vars: std::collections::HashSet::new(),
             lambda_depth: 0,
             var_lambda_depth: std::collections::HashMap::new(),

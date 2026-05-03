@@ -133,7 +133,7 @@ impl ImportTable {
 pub fn build_import_table(
     prog: &ast::Program,
     module_name: Option<&str>,
-    _user_modules: &HashSet<Sym>,
+    user_modules: &HashSet<Sym>,
 ) -> (ImportTable, Vec<Diagnostic>) {
     let mut table = ImportTable::new();
     let mut diagnostics = Vec::new();
@@ -154,12 +154,13 @@ pub fn build_import_table(
 
         // 2. Resolve self → module name as registered by resolve
         //
-        // The resolver registers modules under these names:
-        //   import self           → package name (from alias or almide.toml)
-        //   import self.sub       → last segment ("sub")
-        //   import self.a.b       → last segment ("b")
-        // Functions are registered as "module_name.fn_name" via register_module.
-        // The canonical name here MUST match what the resolver used.
+        // Resolver registration is asymmetric:
+        //   - Project's own self-loaded modules → leaf names ("openai")
+        //   - Dependency packages' submodules  → FQN ("almai.providers.openai")
+        //
+        // Prefer FQN when registered (dep context), fall back to leaf
+        // for the project's own self-loaded modules. This keeps both
+        // working without requiring callers to know which context applies.
         if is_self {
             if path.len() == 1 {
                 // import self → package root name
@@ -167,8 +168,19 @@ pub fn build_import_table(
                     canonical = mod_name.to_string();
                 }
             } else {
-                // import self.xxx → last segment (matches resolver's registration)
-                canonical = path.last().unwrap().to_string();
+                // import self.a.b → prefer "<module>.a.b" if registered, else "b"
+                let leaf = path.last().unwrap().to_string();
+                let fqn = if let Some(mod_name) = module_name {
+                    let suffix = path[1..].iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+                    format!("{}.{}", mod_name, suffix)
+                } else {
+                    leaf.clone()
+                };
+                canonical = if user_modules.contains(&sym(&fqn)) {
+                    fqn
+                } else {
+                    leaf
+                };
             }
         }
 

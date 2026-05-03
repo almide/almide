@@ -1,6 +1,5 @@
 ---
 source: tests/codegen_snapshot_test.rs
-assertion_line: 185
 expression: code
 ---
 pub fn almide_rt_list_len<T>(xs: &[T]) -> i64 { xs.len() as i64 }
@@ -209,7 +208,15 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone>(xs: &[A], f: impl Fn(A) ->
 
 // ── Mutable operations ──
 
-pub fn almide_rt_list_push<A>(xs: &mut Vec<A>, x: A) { xs.push(x); }
+#[inline(always)] pub fn almide_rt_list_push<A>(xs: &mut Vec<A>, x: A) { xs.push(x); }
+
+// Pre-allocate a List with the given capacity. Start-empty (len=0) but
+// skips all reallocations up to `cap` pushes. Useful when the caller
+// knows the final size up front (Q1_0 tensor decode, fixed-size bulk
+// transforms).
+#[inline(always)] pub fn almide_rt_list_with_capacity<A>(cap: i64) -> Vec<A> {
+    Vec::with_capacity(cap.max(0) as usize)
+}
 pub fn almide_rt_list_pop<A>(xs: &mut Vec<A>) -> Option<A> { xs.pop() }
 pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }
 

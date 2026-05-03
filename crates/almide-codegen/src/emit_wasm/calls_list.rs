@@ -957,6 +957,30 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(list_ptr);
             }
+            "with_capacity" => {
+                // list.with_capacity(cap: Int) -> List[A]
+                //
+                // The WASM list layout is `[len:i32][data...]` with no
+                // separate capacity field — each push reallocates to exact
+                // size. So for the WASM target `with_capacity` is
+                // semantically equivalent to `[]`: return a freshly-allocated
+                // 4-byte header with len=0. The Rust target gets the real
+                // pre-allocation benefit; WASM keeps correctness.
+                let new_ptr = self.scratch.alloc_i32();
+                // Discard the requested capacity argument (no-op here).
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { drop; });
+                wasm!(self.func, {
+                    i32_const(4);
+                    call(self.emitter.rt.alloc);
+                    local_set(new_ptr);
+                    local_get(new_ptr);
+                    i32_const(0);
+                    i32_store(0);
+                    local_get(new_ptr);
+                });
+                self.scratch.free_i32(new_ptr);
+            }
             "push" => {
                 // push(xs, v) → Unit. Mutates xs in place by reallocating.
                 // args[0] = xs (var), args[1] = value

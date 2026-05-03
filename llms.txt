@@ -207,7 +207,7 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.15.0. Cross-module `let` at Swift/TS parity; full
+- Current stable: v0.15.1. Cross-module `let` at Swift/TS parity; full
   WASM matrix op coverage (SDPA, Llama 1-block); mono dispatch hardening.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.

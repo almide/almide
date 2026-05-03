@@ -1,10 +1,10 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
-assertion_line: 44
 expression: "run_outline(&[\"@stdlib/int\"])"
 ---
 fn int.abs(n: Int) -> Int
 fn int.band(a: Int, b: Int) -> Int
+fn int.bits_to_f32(bits: Int) -> Float
 fn int.bits_to_float(bits: Int) -> Float
 fn int.bnot(a: Int) -> Int
 fn int.bor(a: Int, b: Int) -> Int

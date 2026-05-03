@@ -68,8 +68,11 @@ impl NanoPass for BoxDerefPass {
             })
             .collect();
 
-        // Build default_fields: for each variant/record constructor with default field values
+        // Build default_fields: for each variant/record constructor with default field values.
+        // Chain module type_decls so types declared in submodules also fill defaults at
+        // construction sites in cross-module callers.
         program.codegen_annotations.default_fields = program.type_decls.iter()
+            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
             .flat_map(|td| match &td.kind {
                 IrTypeDeclKind::Variant { cases, .. } => cases.iter()
                     .filter_map(|c| match &c.kind {
