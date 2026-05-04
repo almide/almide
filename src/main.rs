@@ -151,6 +151,29 @@ enum Commands {
         /// Dependency name (as declared in almide.toml)
         name: String,
     },
+    /// Install an Almide CLI from a git repo into ~/.local/bin (or
+    /// $ALMIDE_INSTALL). Like `go install`: clone, build --release,
+    /// drop the binary on PATH.
+    Install {
+        /// Package spec: `github.com/<owner>/<repo>`, a full git URL,
+        /// or a local path
+        spec: String,
+        /// Git tag to install (default: latest commit on the default branch)
+        #[arg(long)]
+        tag: Option<String>,
+        /// Git branch
+        #[arg(long)]
+        branch: Option<String>,
+        /// Override the binary name (default: [package].name from almide.toml)
+        #[arg(long)]
+        name: Option<String>,
+        /// Override the install directory (default: $ALMIDE_INSTALL or ~/.local/bin)
+        #[arg(long = "bin-dir")]
+        bin_dir: Option<std::path::PathBuf>,
+        /// Build target (default: native)
+        #[arg(long)]
+        target: Option<String>,
+    },
     /// Update almide to the latest version
     #[command(name = "self-update")]
     SelfUpdate {
@@ -670,6 +693,16 @@ fn dispatch(cli: Cli) {
                     std::process::exit(1);
                 }
             }
+        }
+        Commands::Install { spec, tag, branch, name, bin_dir, target } => {
+            cli::cmd_install(
+                &spec,
+                tag.as_deref(),
+                branch.as_deref(),
+                name.as_deref(),
+                bin_dir.as_deref(),
+                target.as_deref(),
+            );
         }
         Commands::SelfUpdate { version } => {
             cli::cmd_self_update(version.as_deref());
