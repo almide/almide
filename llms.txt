@@ -207,7 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.15.2. `almide install <repo>` for clone-and-build CLI installs (go-install style); cross-module `let` at Swift/TS parity; full
-  WASM matrix op coverage (SDPA, Llama 1-block); mono dispatch hardening.
+- Current stable: v0.15.3. Parser fix: leading `-N` (attached, no space) on a new line in a block is now correctly parsed as a unary statement instead of binary subtraction continuing the previous line.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.

@@ -544,6 +544,47 @@ fn parse_unary_negation() {
     }
 }
 
+#[test]
+fn parse_block_attached_minus_is_unary_new_stmt() {
+    // `{ stmt; -N }` where `-N` is on its own line and attached to its operand
+    // (no space between `-` and the literal/ident) must parse as a new
+    // expression statement, not as binary subtraction continuing the previous
+    // line. Regression for codegen-time `block { effect_call; -1 }` mismatch.
+    let prog = parse(
+        "effect fn f() -> Int = {\n  io.print(\"hi\")\n  -1\n}",
+    );
+    let Decl::Fn { body, .. } = &prog.decls[0] else { panic!("expected fn") };
+    let body = body.as_ref().expect("fn body");
+    let ExprKind::Block { stmts, expr } = &body.kind else {
+        panic!("expected block body, got {:?}", body.kind);
+    };
+    // First stmt: io.print call (Stmt::Expr wrapping Call/Pipe-style)
+    assert_eq!(stmts.len(), 1, "expected 1 lead stmt, got {:?}", stmts);
+    // Tail expression: unary `-` applied to `1`, NOT a binary subtraction.
+    let tail = expr.as_ref().expect("expected tail expr").as_ref();
+    match &tail.kind {
+        ExprKind::Unary { op, .. } => assert_eq!(op, "-"),
+        other => panic!("expected unary `-` tail, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_block_spaced_minus_still_continues() {
+    // `a\n  - b` (with space after `-`) keeps multi-line binary continuation.
+    let expr = parse_expr("10\n  - 3");
+    match &expr.kind {
+        ExprKind::Binary { op, .. } => assert_eq!(op, "-"),
+        other => panic!("expected binary subtraction, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_block_leading_plus_continues() {
+    // Leading `+` continuation (no unary `+` exists) still works.
+    let expr = parse_expr("xs\n  + [1]\n  + ys");
+    assert!(matches!(expr.kind, ExprKind::Binary { .. }));
+}
+
 // ---- Expressions: not ----
 
 #[test]
