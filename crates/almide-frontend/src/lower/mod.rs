@@ -206,6 +206,23 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     let mut top_lets = Vec::new();
     let mut type_decls = Vec::new();
 
+    // Pre-pass: register every top-level `let` binding in the root scope so that
+    // forward references from earlier function bodies resolve to the correct
+    // VarId. Without this, the lookup misses, the resolver falls back to the
+    // error-recovery `VarId(0)`, and the reference silently aliases the first
+    // variable allocated globally (typically a local in the first lowered fn).
+    for decl in &prog.decls {
+        if let ast::Decl::TopLet { name, value, .. } = decl {
+            let prefixed_key = module_prefix
+                .map(|p| almide_base::intern::sym(&format!("{}.{}", p, name.as_str())));
+            let val_ty = prefixed_key
+                .and_then(|k| ctx.env.top_lets.get(&k).cloned())
+                .or_else(|| ctx.env.top_lets.get(name).cloned())
+                .unwrap_or_else(|| ctx.expr_ty(value));
+            ctx.define_var(name, val_ty, Mutability::Let, None);
+        }
+    }
+
     for (decl_idx, decl) in prog.decls.iter().enumerate() {
         let doc = prog.doc_map.get(decl_idx).cloned().flatten();
         let blank_lines = prog.blank_lines_map.get(decl_idx).copied().unwrap_or(0);
@@ -241,20 +258,13 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                 type_decls.push(td);
             }
             ast::Decl::TopLet { name, ty: _, value, .. } => {
-                // `env.top_lets` keys are prefixed (`util.RES` for a module-
-                // scoped `let RES`). Checker registration writes the
-                // ascription-resolved type under the prefixed key; the
-                // unprefixed lookup misses it in module lowering and the
-                // ascription gets dropped (a `Result[Int, String]`
-                // top_let would regress to `Result<i64, _>` in generated
-                // Rust). Try prefixed first, then unprefixed, then infer.
-                let prefixed_key = module_prefix
-                    .map(|p| almide_base::intern::sym(&format!("{}.{}", p, name.as_str())));
-                let val_ty = prefixed_key
-                    .and_then(|k| ctx.env.top_lets.get(&k).cloned())
-                    .or_else(|| ctx.env.top_lets.get(name).cloned())
-                    .unwrap_or_else(|| ctx.expr_ty(value));
-                let var = ctx.define_var(name, val_ty.clone(), Mutability::Let, None);
+                // VarId was pre-allocated above. Reuse it so any forward
+                // reference earlier in the file (already lowered to point at
+                // this VarId) lines up with the actual definition emitted
+                // here. Type comes from the same priority chain: prefixed
+                // env entry, unprefixed env entry, otherwise inferred.
+                let var = ctx.lookup_var(name).expect("top-level let pre-registered");
+                let val_ty = ctx.var_table.get(var).ty.clone();
                 let ir_value = lower_expr(&mut ctx, value);
                 let kind = classify_top_let_kind(&ir_value);
                 top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, doc, blank_lines_before: blank_lines });
