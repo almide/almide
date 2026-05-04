@@ -532,6 +532,43 @@ fn lower_multiple_top_lets() {
     assert_eq!(ir.top_lets.len(), 2);
 }
 
+#[test]
+fn lower_top_let_forward_ref_resolves_correctly() {
+    // Regression: a top-level `let X` declared *after* a fn that references
+    // it must resolve to the same VarId as the let binding, not fall back to
+    // VarId(0) (which would alias the first variable allocated globally —
+    // typically a local in the first lowered fn).
+    let src = "\
+fn rate(s: String) -> Int = if s == \"q\" then Q_QUIT else 0
+fn outer(q: Int) -> Int = if q == Q_QUIT then Q_QUIT else q
+let Q_QUIT: Int = -2";
+    let ir = lower(src);
+    let top_let_var = ir.top_lets.iter().find(|tl| ir.var_table.get(tl.var).name == "Q_QUIT")
+        .expect("Q_QUIT top_let exists").var;
+
+    // Walk both fn bodies; every Var referencing the name `Q_QUIT` must
+    // share the same VarId as the top_let definition.
+    struct VarCollector { ids: Vec<VarId> }
+    impl almide::ir::visit::IrVisitor for VarCollector {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Var { id } = &e.kind { self.ids.push(*id); }
+            almide::ir::visit::walk_expr(self, e);
+        }
+    }
+    for f in &ir.functions {
+        let mut vc = VarCollector { ids: Vec::new() };
+        almide::ir::visit::IrVisitor::visit_expr(&mut vc, &f.body);
+        for id in vc.ids {
+            let info = ir.var_table.get(id);
+            if info.name == "Q_QUIT" {
+                assert_eq!(id, top_let_var,
+                    "Q_QUIT reference in fn `{}` resolves to VarId({}) instead of top_let VarId({})",
+                    f.name.as_str(), id.0, top_let_var.0);
+            }
+        }
+    }
+}
+
 // ---- Float operators ----
 
 #[test]
