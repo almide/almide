@@ -60,7 +60,18 @@ impl Parser {
 
         loop {
             // Allow operators on next line for multiline expressions
+            let saved_before_skip = self.pos;
             self.skip_newlines_if_followed_by_any(Self::INFIX_TOKENS);
+            // Disambiguate: a leading `-` on a new line that is attached to its
+            // operand (no whitespace, e.g. `-1`, `-x`) is a unary on a new
+            // statement, not binary continuation. `a\n  - b` (with spaces) still
+            // continues as binary subtraction.
+            if self.pos != saved_before_skip
+                && self.check(TokenType::Minus)
+                && self.minus_attached_to_operand()
+            {
+                self.pos = saved_before_skip;
+            }
 
             // Error hints for invalid operators
             if self.check(TokenType::PipePipe) {
@@ -148,6 +159,17 @@ impl Parser {
         }
 
         Ok(left)
+    }
+
+    /// Whether the current `Minus` token is immediately followed by its operand
+    /// with no whitespace (e.g. `-1`, `-x`). Used to disambiguate a leading `-`
+    /// on a new line: attached → unary on a new statement; spaced → binary
+    /// continuation of the previous expression.
+    fn minus_attached_to_operand(&self) -> bool {
+        if !self.check(TokenType::Minus) { return false; }
+        let cur = self.current();
+        let Some(next) = self.peek_at(1) else { return false; };
+        next.line == cur.line && next.col == cur.end_col
     }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
