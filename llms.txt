@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.15.5. Codegen fix: removed the unsound `value_*` name-prefix rewrite in BuiltinLoweringPass that mangled user functions whose names happened to start with `value_` into non-existent runtime symbols. Added `NormalizeRuntimeCallsPass` at the pipeline tail that collapses any leftover `Named { "almide_rt_*" }` into `RuntimeCall { symbol }`, plus a walker assertion that `Named.name` cannot carry the runtime prefix. The IR now keeps `Named` (user calls) and `RuntimeCall` (runtime helpers) structurally disjoint at the walker boundary.
+- Current stable: v0.15.6. Frontend inference fixes: (1) `TupleIndex` on an unresolved object (e.g. `p.1` on a fresh lambda param) now defers via a fresh inference var and resolves once the union-find binds the object — so `xs |> list.map((p) => p.1) |> list.fold(0.0, (a, b) => a + b)` infers cleanly without `(a: Float, b: Float)` annotations. (2) User-defined effect fn calls inside lambda bodies surface as `Result[T, String]` (matching the test-block treatment), turning the previously cryptic codegen error into an actionable type-checker E001 at the call site.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.
