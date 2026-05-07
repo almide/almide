@@ -475,24 +475,28 @@ impl Checker {
             }
         }
         let ret = if final_bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &final_bindings) };
-        // In test blocks, user-defined effect fn calls that return non-Result T are reported as Result[T, String].
-        // This removes the implicit auto-unwrap and lets users choose: `!` to unwrap, or match on ok/err.
-        // Only user-defined fns are wrapped — stdlib effect fns are not lifted by codegen,
-        // so their runtime implementations return raw values (not Result).
-        //
-        // `env.functions.contains_key` covered the pre-bundled world where
-        // stdlib sigs lived in a parallel table. Once a stdlib module is
-        // migrated to `stdlib/<m>.almd` and loaded via `lower_module`,
-        // its fns also land in `env.functions` under `<module>.<fn>`
-        // keys — matching the check above and wrongly wrapping their
-        // return type in the test block. Gate the wrap by "not a bundled
-        // stdlib module": bundled stdlib fns generate runtime calls that
-        // return raw values (their `@inline_rust` templates carry their
-        // own `?` when the Rust runtime truly returns `Result`).
+        // User-defined effect fn calls that return non-Result T are reported
+        // as Result[T, String] in two contexts:
+        //   1. test blocks — there's no enclosing effect fn to auto-`?`
+        //      against, so the test sees the raw lifted Result.
+        //   2. lambda bodies — codegen's ResultPropagation lifts the callee's
+        //      return type but doesn't recurse into lambdas (closures can't
+        //      `?`-propagate to the enclosing fn). Letting the lambda body's
+        //      type stay `T` here means a `(n) => worker(n)` passes
+        //      type-checking against `list.map`'s `(A) -> B` slot, only to
+        //      blow up at codegen with `expected Vec<i64>, found
+        //      Vec<Result<i64, String>>`. Surfacing the Result at the call
+        //      site instead steers the user toward `match worker(n)
+        //      { ok(v) => v, err(_) => ... }` — a real type error, not an
+        //      "Almide bug" diagnostic.
+        // Bundled stdlib effect fns are excluded — their `@inline_rust` /
+        // `@intrinsic` templates carry their own propagation and never get
+        // lifted by ResultPropagation, so their callers see raw `T`.
         let is_bundled_stdlib_call = name.split_once('.')
             .map(|(m, _)| almide_lang::stdlib_info::is_bundled_module(m))
             .unwrap_or(false);
-        if self.env.in_test_block && sig.is_effect && !ret.is_result()
+        let in_lifting_context = self.env.in_test_block || self.env.lambda_depth > 0;
+        if in_lifting_context && sig.is_effect && !ret.is_result()
             && self.env.functions.contains_key(&sym(name))
             && !is_bundled_stdlib_call
         {

@@ -1,0 +1,32 @@
+// Regression: a user-defined effect fn (whose return type is lifted to
+// Result by codegen) called inside a lambda body must surface as
+// `Result[T, String]` at the frontend type level. Without this, a
+// `(n) => worker(n)` lambda passes type-checking against `list.map`'s
+// `(A) -> B` slot but blows up at codegen with `expected Vec<i64>,
+// found Vec<Result<i64, String>>` — a "codegen produced invalid Rust"
+// failure that violates Almide's "every error has a clean diagnostic"
+// promise. Surfacing the Result lets the user choose `match`, `?`, or
+// a recursive helper.
+
+effect fn worker(n: Int) -> Int = n * 2
+
+test "lambda body sees user effect fn return as Result" {
+  let xs: List[Int] = [1, 2, 3];
+  // The lambda's body type is Result<Int, String>; matching on it
+  // produces an Int that flows back into list.map's element slot.
+  let ys: List[Int] = xs |> list.map((n) => match worker(n) {
+    ok(v)  => v,
+    err(_) => 0,
+  });
+  assert_eq(ys, [2, 4, 6])
+}
+
+test "list.fold over user effect fn requires unwrapping" {
+  let xs: List[Int] = [1, 2, 3];
+  // Same shape inside fold's accumulator-element callback.
+  let total = xs |> list.fold(0, (acc, n) => match worker(n) {
+    ok(v)  => acc + v,
+    err(_) => acc,
+  });
+  assert_eq(total, 12)
+}
