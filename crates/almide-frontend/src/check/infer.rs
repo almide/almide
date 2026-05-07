@@ -298,12 +298,28 @@ impl Checker {
 
             ExprKind::TupleIndex { object, index, .. } => {
                 let obj_ty = self.infer_expr(object);
-                match &obj_ty {
+                if let Ty::Tuple(elems) = &obj_ty {
+                    if *index < elems.len() { return elems[*index].clone(); }
+                }
+                let concrete = resolve_ty(&obj_ty, &self.uf);
+                match &concrete {
                     Ty::Tuple(elems) if *index < elems.len() => elems[*index].clone(),
-                    _ => {
-                        let concrete = resolve_ty(&obj_ty, &self.uf);
-                        match &concrete { Ty::Tuple(elems) if *index < elems.len() => elems[*index].clone(), _ => Ty::Unknown }
+                    // Object's type is still an open inference var (e.g. a
+                    // fresh lambda param yet to be bound by its call site).
+                    // Park a fresh result var and resolve it once the
+                    // union-find binds the object to a concrete `Tuple`
+                    // (see `Checker::resolve_deferred_tuple_indices`).
+                    // Without this deferral the body type freezes to
+                    // `Unknown` here and propagates outward — breaking
+                    // chains like `xs |> list.map((p) => p.1) |>
+                    // list.fold(0.0, (a, b) => a + b)` where the fold's
+                    // element-typed lambda param gets no constraint.
+                    Ty::TypeVar(name) if name.starts_with('?') => {
+                        let result = self.fresh_var();
+                        self.deferred_tuple_indices.push((obj_ty, *index, result.clone()));
+                        result
                     }
+                    _ => Ty::Unknown,
                 }
             }
 

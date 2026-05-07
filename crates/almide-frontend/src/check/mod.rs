@@ -66,6 +66,13 @@ pub struct Checker {
     /// top_lets without explicit ascription regress to `Ty::Unknown`
     /// and codegen emits `LazyLock<_>`.
     pub(crate) current_module_prefix: Option<String>,
+    /// Deferred resolution targets for expressions whose types depend on
+    /// a yet-unbound TypeVar's structure (e.g. `p.1` on a fresh lambda
+    /// param). Each entry is `(object_ty, index, result_var)`: once
+    /// `object_ty` resolves to a `Tuple`, `result_var` is unified with
+    /// `elems[index]`. Drained iteratively after `solve_constraints`
+    /// to give the union-find a chance to propagate before resolution.
+    pub(crate) deferred_tuple_indices: Vec<(Ty, usize, Ty)>,
 }
 
 impl Checker {
@@ -80,6 +87,7 @@ impl Checker {
             call_span_hint: None,
             constraints: Vec::new(), uf: UnionFind::new(),
             current_module_prefix: None,
+            deferred_tuple_indices: Vec::new(),
         }
     }
 
@@ -180,6 +188,35 @@ impl Checker {
 
     pub fn set_source(&mut self, file: &str, text: &str) { self.source_file = Some(file.into()); self.source_text = Some(text.into()); }
 
+    /// Drain pending TupleIndex deferrals to a fixed point. A deferral
+    /// is registered when `obj.N` is inferred while `obj` is a fresh
+    /// inference var — there's no Tuple to index into yet, so the
+    /// result is bound to a fresh var and the resolution is parked.
+    /// Once the union-find binds `obj_ty` to a concrete `Tuple`, we
+    /// unify the parked result with the indexed element. We loop
+    /// because a successful unify may unblock another deferral whose
+    /// `obj_ty` was itself the parked result of an earlier one.
+    pub(crate) fn resolve_deferred_tuple_indices(&mut self) {
+        loop {
+            let pending = std::mem::take(&mut self.deferred_tuple_indices);
+            if pending.is_empty() { break; }
+            let mut still_pending = Vec::new();
+            let mut progressed = false;
+            for (obj_ty, index, result_ty) in pending {
+                let resolved = resolve_ty(&obj_ty, &self.uf);
+                match &resolved {
+                    Ty::Tuple(elems) if index < elems.len() => {
+                        self.unify_infer(&result_ty, &elems[index]);
+                        progressed = true;
+                    }
+                    _ => still_pending.push((obj_ty, index, result_ty)),
+                }
+            }
+            self.deferred_tuple_indices = still_pending;
+            if !progressed { break; }
+        }
+    }
+
     // ── Main entry point ──
 
     /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
@@ -187,6 +224,7 @@ impl Checker {
     pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
+        self.resolve_deferred_tuple_indices();
         resolve_type_map(&mut self.type_map, &self.uf);
         // Unused import warnings
         for imp in &program.imports {
@@ -340,6 +378,7 @@ impl Checker {
         );
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
+        self.resolve_deferred_tuple_indices();
         resolve_type_map(&mut self.type_map, &self.uf);
         self.current_module_prefix = saved_prefix;
 
