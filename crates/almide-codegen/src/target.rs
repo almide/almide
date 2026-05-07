@@ -19,6 +19,7 @@ use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_result_propagation::ResultPropagationPass;
 use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
+use super::pass_normalize_runtime_calls::NormalizeRuntimeCallsPass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::pass_match_subject::MatchSubjectPass;
 use super::pass_effect_inference::EffectInferencePass;
@@ -136,6 +137,10 @@ fn build_pipeline(target: Target) -> Pipeline {
                 .add(RustLoweringPass)
                 // Shared passes
                 .add(FanLoweringPass)
+                // Final normalization: collapse legacy `Named { "almide_rt_*" }`
+                // into `RuntimeCall { symbol }`. Establishes the walker
+                // invariant `Named.name does NOT start with "almide_rt_"`.
+                .add(NormalizeRuntimeCallsPass)
         }
 
         Target::TypeScript => Pipeline::new(), // TS codegen removed — use --target wasm for JS runtimes

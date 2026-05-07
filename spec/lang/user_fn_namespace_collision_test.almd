@@ -1,0 +1,35 @@
+// User-defined functions whose names happen to start with a stdlib
+// module prefix (e.g. `value_*`, `string_*`, `int_*`) must not be
+// rewritten into runtime intrinsics. The codegen pipeline must
+// distinguish actual stdlib intrinsic dispatch (driven by the
+// `@intrinsic(...)` annotation in `stdlib/<module>.almd`) from
+// regular user calls.
+//
+// Regression: BuiltinLoweringPass previously rewrote any call to a
+// `value_*`-named function into `almide_rt_value_*`, which collided
+// with user code and produced a non-existent runtime symbol such as
+// `almide_rt_value_to_float`.
+
+fn value_to_float(n: Int) -> Float = int.to_float(n) + 0.5
+
+fn value_helper(s: String) -> String = s + "!"
+
+fn int_double(n: Int) -> Int = n * 2
+
+fn string_shout(s: String) -> String = string.to_upper(s)
+
+test "user fn `value_to_float` is not redirected to runtime" {
+  assert_eq(value_to_float(2), 2.5)
+}
+
+test "user fn `value_helper` is not redirected to runtime" {
+  assert_eq(value_helper("ok"), "ok!")
+}
+
+test "user fn `int_double` keeps user binding even with stdlib head" {
+  assert_eq(int_double(3), 6)
+}
+
+test "user fn `string_shout` keeps user binding even with stdlib head" {
+  assert_eq(string_shout("hi"), "HI")
+}
