@@ -1,0 +1,30 @@
+// Regression: list.fold's accumulator-element lambda params must be
+// inferred end-to-end across pipe chains, even when the upstream
+// list.map's lambda body is initially unresolved (e.g. tuple
+// indexing on a yet-unbound param).
+
+test "fold over mapped tuple-index pipe" {
+  let pairs: List[(Bool, Float)] = [(true, 1.0), (true, 2.0), (true, 3.0)];
+  let sum = pairs |> list.map((p) => p.1) |> list.fold(0.0, (a, b) => a + b);
+  assert_eq(sum, 6.0)
+}
+
+test "fold over mapped tuple-index without pipe" {
+  let pairs: List[(Bool, Float)] = [(true, 1.0), (true, 2.0), (true, 3.0)];
+  let nums = list.map(pairs, (p) => p.1);
+  let sum = list.fold(nums, 0.0, (a, b) => a + b);
+  assert_eq(sum, 6.0)
+}
+
+test "fold over mapped tuple-index intermediate let" {
+  let pairs: List[(Bool, Float)] = [(true, 1.0), (true, 2.0), (true, 3.0)];
+  let nums = pairs |> list.map((p) => p.1);
+  let sum = nums |> list.fold(0.0, (a, b) => a + b);
+  assert_eq(sum, 6.0)
+}
+
+test "fold accumulator drives second lambda param" {
+  let xs: List[Float] = [1.0, 2.0, 3.0];
+  let sum = xs |> list.fold(0.0, (a, b) => a + b);
+  assert_eq(sum, 6.0)
+}
