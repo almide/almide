@@ -8,10 +8,17 @@
 //! - assert_ne(a, b) → RustMacro { "assert_ne", [a, b] }
 //! - assert_some(x) → RustMacro { "assert", [x.is_some()] }
 //! - println(x) → RustMacro { "println", ["{}", x] }
-//! - value_*(x) → Named { "almide_rt_value_*" }
 //! - __encode_list_T / __decode_list_T → appropriate runtime call
 //! - Type.method(x) → Named { "Type_method" }
 //! - Method { "encode"/"decode" } → Named { "Type_encode"/"Type_decode" }
+//!
+//! NOTE: stdlib intrinsic dispatch (e.g. `value.as_float(v)` →
+//! `almide_rt_value_as_float`) is the responsibility of the
+//! `@intrinsic`-driven `IntrinsicLoweringPass`. This pass MUST NOT
+//! rewrite calls based purely on a name prefix like `value_*`,
+//! because user-defined functions can legitimately use such names
+//! (`fn value_to_float(...)`) and the prefix carries no information
+//! about whether the call resolves to a real runtime symbol.
 
 use almide_ir::*;
 use almide_lang::types::Ty;
@@ -108,13 +115,6 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         let mut macro_args = vec![IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None }];
                         macro_args.extend(args);
                         return IrExpr { kind: IrExprKind::RustMacro { name: name.clone(), args: macro_args }, ty, span };
-                    }
-                    // value_* → almide_rt_value_*
-                    if name.starts_with("value_") {
-                        return IrExpr { kind: IrExprKind::Call {
-                            target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
-                            args, type_args,
-                        }, ty, span };
                     }
                     // __encode_list_T / __decode_list_T
                     if name.starts_with("__encode_list_") || name.starts_with("__decode_list_") {
