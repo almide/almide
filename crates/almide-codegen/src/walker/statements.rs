@@ -78,7 +78,14 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             } else {
                 render_expr(ctx, value)
             };
+            let needs_mut = matches!(mutability, Mutability::Let) && {
+                let ty_str = type_s.as_str();
+                ty_str == "Vec<u8>"
+                    || ty_str.starts_with("Vec<")
+                    || ty_str.starts_with("HashMap<")
+            };
             let construct = match mutability {
+                Mutability::Let if needs_mut => "var_binding",
                 Mutability::Let => "let_binding",
                 Mutability::Var => "var_binding",
             };
@@ -241,7 +248,11 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
 
 pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm) -> String {
     let pattern = render_pattern(ctx, &arm.pattern);
-    let body = render_expr(ctx, &arm.body);
+    let body = if matches!(&arm.body.kind, IrExprKind::ResultErr { .. }) {
+        format!("return {}", render_expr(ctx, &arm.body))
+    } else {
+        render_expr(ctx, &arm.body)
+    };
     // Append guard to pattern if present
     let full_pattern = if let Some(ref guard) = arm.guard {
         let guard_str = render_expr(ctx, guard);

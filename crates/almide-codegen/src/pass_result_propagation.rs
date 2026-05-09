@@ -162,6 +162,20 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
     let span = expr.span;
     match expr.kind {
         IrExprKind::Block { stmts, expr: Some(tail) } => {
+            // Wrap guard-else expressions in Ok() so early returns produce Result
+            let stmts = stmts.into_iter().map(|stmt| {
+                let span = stmt.span;
+                match stmt.kind {
+                    IrStmtKind::Guard { cond, else_ } => IrStmt {
+                        kind: IrStmtKind::Guard {
+                            cond,
+                            else_: wrap_tail_in_ok(else_, lifted),
+                        },
+                        span,
+                    },
+                    other => IrStmt { kind: other, span },
+                }
+            }).collect();
             let wrapped = wrap_tail_in_ok(*tail, lifted);
             IrExpr {
                 kind: IrExprKind::Block { stmts, expr: Some(Box::new(wrapped)) },
