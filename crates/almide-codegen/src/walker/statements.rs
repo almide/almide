@@ -78,18 +78,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             } else {
                 render_expr(ctx, value)
             };
-            // Promote let → let mut for types that are commonly mutated
-            // (Bytes, Vec/List, HashMap/Map) to avoid borrow errors in
-            // generated Rust when push/append/insert methods are called.
-            let needs_mut = matches!(mutability, Mutability::Let) && {
-                let ty_str = type_s.as_str();
-                ty_str == "Vec<u8>"
-                    || ty_str.starts_with("Vec<")
-                    || ty_str.starts_with("HashMap<")
-                    || ctx.ann.mut_promoted_vars.contains(var)
-            };
             let construct = match mutability {
-                Mutability::Let if needs_mut => "var_binding",
                 Mutability::Let => "let_binding",
                 Mutability::Var => "var_binding",
             };

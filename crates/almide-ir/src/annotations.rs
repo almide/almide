@@ -26,7 +26,4 @@ pub struct CodegenAnnotations {
     /// derive `PartialEq` (a field transitively blocks equality — e.g.
     /// contains a Matrix or a function pointer).
     pub eq_blocked_types: HashSet<String>,
-    /// Variables bound with `let` that need `let mut` in Rust because
-    /// they are passed to mutating methods (bytes.push, list.push, etc.)
-    pub mut_promoted_vars: HashSet<VarId>,
 }

@@ -465,6 +465,13 @@ impl Checker {
                     self.bind_pattern(&arm.pattern, &sub_c);
                     if let Some(ref mut guard) = arm.guard { self.infer_expr(guard); }
                     let arm_ty = self.infer_expr(&mut arm.body);
+                    // err() in a match arm acts as early return — treat as Never
+                    // so it unifies with any other arm type
+                    let arm_ty = if matches!(&arm.body.kind, ExprKind::Err { .. }) {
+                        Ty::Never
+                    } else {
+                        arm_ty
+                    };
                     arm_types.push(arm_ty);
                     self.env.pop_scope();
                 }
