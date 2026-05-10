@@ -11,16 +11,24 @@ care about.
 
 ## [Unreleased]
 
-## [0.15.7] — 2026-05-10
+## [0.15.8] — 2026-05-10
 
-Bug-fix patch. Four codegen / runtime issues fixed.
+Bug-fix patch. ResultPropagation rewrite + WASM guard-else fix.
 
 ### Fixed
 
-- `err()` in match arm was treated as early return instead of arm value
+- `err()` in match arm: early return when match type is not Result, value otherwise
 - Cross-module record literal (`module.Type { ... }`) failed to resolve
-- `FileStat` struct missing from Rust runtime; `guard-else` in effect fns did not wrap return in `Ok`
+- `FileStat` struct auto-emitted when `fs` runtime is included
+- `guard ... else { println(...); () }` in effect fns now wraps in `Ok(())`
+- `guard ... else { err("msg")! }` in WASM: peel Block/Unwrap/Try wrappers
 - `Bytes`, `Vec`, `HashMap` bindings not promoted to `let mut` when mutated
+
+### Changed
+
+- ResultPropagation pass rewritten: 700 lines dead code removed, `resolve_err_types` added
+- ConcretizeTypes `kind_name()`: all IrExprKind variants listed (was hiding 26 under `(other)`)
+- ConcretizeTypes `infer_err_ty_from_enclosing`: works for pre-lift `enclosing_ret`
 
 ## [0.15.0] — 2026-04-20
 
