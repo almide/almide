@@ -180,6 +180,15 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
                 needed.insert("json");
                 needed.insert("http");
             }
+            // Auto-emit struct definitions required by runtime functions.
+            // Runtime functions reference these types but codegen only emits them
+            // when the user's code explicitly uses the corresponding stdlib function.
+            // When the runtime module is needed but the struct isn't in user_code,
+            // inject it so rustc finds the definition.
+            if needed.contains("fs") && !user_code.contains("struct FileStat") {
+                output.push_str("#[derive(Clone, Debug, PartialEq)]\npub struct FileStat {\n    pub size: i64,\n    pub is_dir: bool,\n    pub is_file: bool,\n    pub modified: i64,\n}\n\n");
+            }
+
             // Collect runtime modules, hoist top-level `use` to front and deduplicate
             let mut use_set = std::collections::HashSet::new();
             let mut use_lines = Vec::new();
