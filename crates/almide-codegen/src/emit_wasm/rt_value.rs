@@ -426,6 +426,80 @@ fn compile_json_parse_at(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
+/// Parse optional JSON exponent (e/E followed by optional +/- and digits).
+/// Pushes f64 multiplier onto the stack: 10^exp (or 1.0 if no exponent).
+/// Uses locals: 0=str_ptr, 1=pos, 3=str_len, 4=ch, 7=tmp, 12=num_val(i64), 13=divisor(f64)
+fn emit_parse_exponent(f: &mut Function) {
+    // Default multiplier = 1.0 (no exponent)
+    wasm!(f, { f64_const(1.0); local_set(13); });
+
+    // Check if we have e/E
+    wasm!(f, {
+        local_get(1); local_get(3); i32_lt_u;
+        if_empty;
+          local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+          i32_load8_u(0); local_set(4);
+          local_get(4); i32_const(101); i32_eq; // 'e'
+          local_get(4); i32_const(69); i32_eq;  // 'E'
+          i32_or;
+          if_empty;
+            local_get(1); i32_const(1); i32_add; local_set(1);
+            // exp_sign: check +/-
+            i32_const(1); local_set(7); // exp_sign = 1 (positive)
+            local_get(1); local_get(3); i32_lt_u;
+            if_empty;
+              local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+              i32_load8_u(0); local_set(4);
+              local_get(4); i32_const(45); i32_eq; // '-'
+              if_empty;
+                i32_const(-1); local_set(7);
+                local_get(1); i32_const(1); i32_add; local_set(1);
+              else_;
+                local_get(4); i32_const(43); i32_eq; // '+'
+                if_empty;
+                  local_get(1); i32_const(1); i32_add; local_set(1);
+                end;
+              end;
+            end;
+            // Parse exponent digits
+            i64_const(0); local_set(12);
+    });
+    wasm!(f, {
+            block_empty; loop_empty;
+              local_get(1); local_get(3); i32_ge_u; br_if(1);
+              local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+              i32_load8_u(0); local_set(4);
+              local_get(4); i32_const(48); i32_lt_u; br_if(1);
+              local_get(4); i32_const(57); i32_gt_u; br_if(1);
+              local_get(12); i64_const(10); i64_mul;
+              local_get(4); i32_const(48); i32_sub; i64_extend_i32_u;
+              i64_add; local_set(12);
+              local_get(1); i32_const(1); i32_add; local_set(1);
+              br(0);
+            end; end;
+    });
+    // Compute multiplier = 10^exp via loop, store in local 13
+    wasm!(f, {
+            f64_const(1.0); local_set(13);
+            block_empty; loop_empty;
+              local_get(12); i64_eqz; br_if(1);
+              local_get(7); i32_const(0); i32_lt_s;
+              if_empty;
+                local_get(13); f64_const(0.1); f64_mul; local_set(13);
+              else_;
+                local_get(13); f64_const(10.0); f64_mul; local_set(13);
+              end;
+              local_get(12); i64_const(1); i64_sub; local_set(12);
+              br(0);
+            end; end;
+          end; // if e/E
+        end; // if pos < len
+    });
+
+    // Push multiplier onto stack
+    wasm!(f, { local_get(13); });
+}
+
 /// Emit whitespace-skipping loop.
 /// Uses locals: 0=str_ptr, 1=pos, 3=str_len, 4=ch
 fn emit_skip_ws(f: &mut Function) {
@@ -590,14 +664,21 @@ fn emit_parse_number(f: &mut Function, alloc: u32) {
                 br(0);
               end; end;
     });
-    // Build float Value
+    // Build float Value (with optional exponent)
     wasm!(f, {
-              i32_const(12); call(alloc); local_set(6);
-              local_get(6); i32_const(3); i32_store(0);
-              local_get(6);
+              // Compute base float: sign * digits / divisor
               local_get(11); i64_extend_i32_s; local_get(12); i64_mul;
               f64_convert_i64_s; local_get(13); f64_div;
-              f64_store(4);
+    });
+    // Handle exponent (e/E) for float
+    emit_parse_exponent(f);
+    wasm!(f, {
+              // Store float Value
+              f64_mul; // base * 10^exp (exponent pushed by emit_parse_exponent)
+              local_set(13); // reuse local 13 for final float
+              i32_const(12); call(alloc); local_set(6);
+              local_get(6); i32_const(3); i32_store(0);
+              local_get(6); local_get(13); f64_store(4);
               local_get(2); local_get(6); i32_store(0);
               local_get(2); local_get(1); i32_store(4);
               local_get(2); i32_const(0); i32_store(8);
@@ -605,7 +686,36 @@ fn emit_parse_number(f: &mut Function, alloc: u32) {
             end;
           end;
     });
-    // Build int Value
+    // Integer path: check for exponent → becomes float
+    wasm!(f, {
+          // Check for e/E after integer
+          local_get(1); local_get(3); i32_lt_u;
+          if_empty;
+            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            i32_load8_u(0); local_set(4);
+            local_get(4); i32_const(101); i32_eq; // 'e'
+            local_get(4); i32_const(69); i32_eq;  // 'E'
+            i32_or;
+            if_empty;
+              // Has exponent: convert to float
+              local_get(11); i64_extend_i32_s; local_get(12); i64_mul;
+              f64_convert_i64_s;
+    });
+    emit_parse_exponent(f);
+    wasm!(f, {
+              f64_mul;
+              local_set(13);
+              i32_const(12); call(alloc); local_set(6);
+              local_get(6); i32_const(3); i32_store(0);
+              local_get(6); local_get(13); f64_store(4);
+              local_get(2); local_get(6); i32_store(0);
+              local_get(2); local_get(1); i32_store(4);
+              local_get(2); i32_const(0); i32_store(8);
+              local_get(2); return_;
+            end;
+          end;
+    });
+    // Build int Value (no exponent)
     wasm!(f, {
           i32_const(12); call(alloc); local_set(6);
           local_get(6); i32_const(2); i32_store(0);

@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.15.9. Bug-fix patch: (1) `err()` in match arm no longer treated as early return. (2) Cross-module record literal (`module.Type { ... }`) resolves correctly. (3) `FileStat` struct added to Rust runtime; `guard-else` in effect fns wraps return in `Ok`. (4) `Bytes`/`Vec`/`HashMap` bindings promoted to `let mut` when mutated.
+- Current stable: v0.15.10. Bug-fix patch: (1) `err()` in match arm no longer treated as early return. (2) Cross-module record literal (`module.Type { ... }`) resolves correctly. (3) `FileStat` struct added to Rust runtime; `guard-else` in effect fns wraps return in `Ok`. (4) `Bytes`/`Vec`/`HashMap` bindings promoted to `let mut` when mutated.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.
