@@ -4,6 +4,14 @@ use std::path::Path;
 
 fn io_err(e: impl std::fmt::Display) -> String { format!("{}", e) }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileStat {
+    pub size: i64,
+    pub is_dir: bool,
+    pub is_file: bool,
+    pub modified: i64,
+}
+
 // Read
 pub fn almide_rt_fs_read_text(path: &str) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(io_err)
