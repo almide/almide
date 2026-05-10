@@ -741,6 +741,7 @@ impl Checker {
                     let kt = self.infer_expr(&mut entries[0].0);
                     let vt = self.infer_expr(&mut entries[0].1);
                     for entry in entries.iter_mut().skip(1) { self.infer_expr(&mut entry.0); self.infer_expr(&mut entry.1); }
+                    self.deferred_map_key_checks.push((kt.clone(), self.current_span));
                     Ty::map_of(kt, vt)
                 }
             }

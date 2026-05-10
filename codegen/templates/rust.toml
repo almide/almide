@@ -301,6 +301,10 @@ when_attr = "has_non_eq_fields"
 template = "#[derive(Clone, Debug)]\npub struct {name} {{\n{fields}\n}}"
 
 [[struct_decl]]
+when_attr = "has_hash"
+template = "#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
 when_attr = "repr_c"
 template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq)]\npub struct {name} {{\n{fields}\n}}"
 
@@ -309,6 +313,10 @@ template = "#[derive(Clone, Debug, PartialEq)]\npub struct {name} {{\n{fields}\n
 
 [struct_field]
 template = "    pub {name}: {type},"
+
+[[enum_decl]]
+when_attr = "has_hash"
+template = "#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub enum {name} {{\n{variants}\n}}"
 
 [[enum_decl]]
 when_attr = "repr_c"

@@ -97,3 +97,81 @@ test "int.clamp at boundaries" {
   assert_eq(int.clamp(0, 0, 10), 0);
   assert_eq(int.clamp(10, 0, 10), 10)
 }
+
+// ── Bit introspection ──
+
+test "int.count_leading_zeros" {
+  assert_eq(int.count_leading_zeros(0), 64);
+  assert_eq(int.count_leading_zeros(1), 63);
+  assert_eq(int.count_leading_zeros(256), 55)
+}
+
+test "int.count_trailing_zeros" {
+  assert_eq(int.count_trailing_zeros(1), 0);
+  assert_eq(int.count_trailing_zeros(8), 3);
+  assert_eq(int.count_trailing_zeros(256), 8)
+}
+
+test "int.pop_count" {
+  assert_eq(int.pop_count(0), 0);
+  assert_eq(int.pop_count(1), 1);
+  assert_eq(int.pop_count(7), 3);
+  assert_eq(int.pop_count(255), 8)
+}
+
+test "int.bit_reverse" {
+  assert_eq(int.bit_reverse(0), 0);
+  // 1 reversed in 64 bits = 1 << 63
+  assert_eq(int.bit_reverse(1), int.bshl(1, 63))
+}
+
+test "int.byte_swap" {
+  assert_eq(int.byte_swap(0), 0);
+  // 0x0102030405060708 → 0x0807060504030201
+  assert_eq(int.byte_swap(int.byte_swap(42)), 42)
+}
+
+test "int.bit_width" {
+  assert_eq(int.bit_width(0), 0);
+  assert_eq(int.bit_width(1), 1);
+  assert_eq(int.bit_width(2), 2);
+  assert_eq(int.bit_width(3), 2);
+  assert_eq(int.bit_width(255), 8);
+  assert_eq(int.bit_width(256), 9)
+}
+
+test "int.log2_floor" {
+  assert_eq(int.log2_floor(0), -1);
+  assert_eq(int.log2_floor(1), 0);
+  assert_eq(int.log2_floor(2), 1);
+  assert_eq(int.log2_floor(3), 1);
+  assert_eq(int.log2_floor(8), 3);
+  assert_eq(int.log2_floor(9), 3)
+}
+
+test "int.log2_ceil" {
+  assert_eq(int.log2_ceil(0), 0);
+  assert_eq(int.log2_ceil(1), 0);
+  assert_eq(int.log2_ceil(2), 1);
+  assert_eq(int.log2_ceil(3), 2);
+  assert_eq(int.log2_ceil(8), 3);
+  assert_eq(int.log2_ceil(9), 4)
+}
+
+test "int.next_power_of_two" {
+  assert_eq(int.next_power_of_two(0), 1);
+  assert_eq(int.next_power_of_two(1), 1);
+  assert_eq(int.next_power_of_two(2), 2);
+  assert_eq(int.next_power_of_two(3), 4);
+  assert_eq(int.next_power_of_two(5), 8);
+  assert_eq(int.next_power_of_two(1024), 1024)
+}
+
+test "int.prev_power_of_two" {
+  assert_eq(int.prev_power_of_two(0), 0);
+  assert_eq(int.prev_power_of_two(1), 1);
+  assert_eq(int.prev_power_of_two(2), 2);
+  assert_eq(int.prev_power_of_two(3), 2);
+  assert_eq(int.prev_power_of_two(5), 4);
+  assert_eq(int.prev_power_of_two(1024), 1024)
+}
