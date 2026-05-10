@@ -902,15 +902,22 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }
     }
 
-    // Register ALL function signatures (including test functions)
+    // Register function signatures.
+    // Library mode (no main): skip test functions so the WASM module
+    // can be loaded without a _start entry point.
     let mut user_meta: Vec<u32> = Vec::new();
     let mut user_func_indices: Vec<u32> = Vec::new();
-    let mut test_func_indices: Vec<(u32, String)> = Vec::new(); // (func_idx, test_name)
+    let mut test_func_indices: Vec<(u32, String)> = Vec::new();
     let has_main = program.functions.iter().any(|f| f.name == "main" && !f.is_test);
+    let library_mode = !has_main;
 
     for (func_enum_idx, func) in program.functions.iter().enumerate() {
         // Skip @extern(wasm) — already registered as imports above
         if extern_wasm_set.contains(&func_enum_idx) {
+            continue;
+        }
+        // Library mode: skip test functions entirely
+        if library_mode && func.is_test {
             continue;
         }
         // Resolve param and ret types: Unknown/TypeVar can leak through from
@@ -1062,6 +1069,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     let mut user_idx = 0;
     for (func_enum_idx, func) in program.functions.iter().enumerate() {
         if extern_wasm_set.contains(&func_enum_idx) {
+            continue;
+        }
+        if library_mode && func.is_test {
             continue;
         }
         let type_idx = user_meta[user_idx];
