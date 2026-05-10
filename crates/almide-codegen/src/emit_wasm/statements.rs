@@ -138,20 +138,44 @@ impl FuncCompiler<'_> {
                 });
                 let _g = self.depth_push();
 
-                match &else_.kind {
+                // Peel through Block / Unwrap / Try to find the inner
+                // ResultOk/ResultErr. Covers:
+                //   err("msg")!           → Unwrap { ResultErr }
+                //   { err("msg")! }       → Block { Unwrap { ResultErr } }
+                //   guard ... else err()! → Try { ResultErr }
+                let guard_body = {
+                    let mut e = else_;
+                    // Peel Block { stmts: [], expr: Some(tail) }
+                    if let almide_ir::IrExprKind::Block { stmts, expr: Some(tail) } = &e.kind {
+                        if stmts.is_empty() { e = tail; }
+                    }
+                    // Peel Unwrap/Try
+                    if let almide_ir::IrExprKind::Unwrap { expr: inner }
+                        | almide_ir::IrExprKind::Try { expr: inner } = &e.kind
+                    {
+                        if matches!(&inner.kind,
+                            almide_ir::IrExprKind::ResultErr { .. }
+                            | almide_ir::IrExprKind::ResultOk { .. })
+                        {
+                            e = inner;
+                        }
+                    }
+                    e
+                };
+
+                match &guard_body.kind {
                     // Break/Continue: emit directly (they generate the right br)
                     almide_ir::IrExprKind::Break | almide_ir::IrExprKind::Continue => {
-                        self.emit_expr(else_);
+                        self.emit_expr(guard_body);
                     }
-                    // ResultOk/ResultErr in guard
+                    // ResultOk/ResultErr in guard (bare or inside Unwrap/Try/Block)
                     almide_ir::IrExprKind::ResultOk { expr: inner } | almide_ir::IrExprKind::ResultErr { expr: inner } => {
                         // ok(()) inside loop → break out of loop (not function return)
-                        let is_unit_ok = matches!(&else_.kind, almide_ir::IrExprKind::ResultOk { .. })
+                        let is_unit_ok = matches!(&guard_body.kind, almide_ir::IrExprKind::ResultOk { .. })
                             && matches!(&inner.ty, almide_lang::types::Ty::Unit);
                         if is_unit_ok && self.loop_stack.last().is_some() {
-                            // Emit the ok(()) but then break out of the loop
-                            self.emit_expr(else_);
-                            if super::values::ty_to_valtype(&else_.ty).is_some() {
+                            self.emit_expr(guard_body);
+                            if super::values::ty_to_valtype(&guard_body.ty).is_some() {
                                 wasm!(self.func, { drop; });
                             }
                             let labels = self.loop_stack.last().unwrap();
@@ -159,7 +183,7 @@ impl FuncCompiler<'_> {
                             wasm!(self.func, { br(relative); });
                         } else {
                             // Non-unit ok/err → return from function
-                            self.emit_expr(else_);
+                            self.emit_expr(guard_body);
                             wasm!(self.func, { return_; });
                         }
                     }

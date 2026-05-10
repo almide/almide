@@ -11,6 +11,17 @@ care about.
 
 ## [Unreleased]
 
+## [0.15.7] — 2026-05-10
+
+Bug-fix patch. Four codegen / runtime issues fixed.
+
+### Fixed
+
+- `err()` in match arm was treated as early return instead of arm value
+- Cross-module record literal (`module.Type { ... }`) failed to resolve
+- `FileStat` struct missing from Rust runtime; `guard-else` in effect fns did not wrap return in `Ok`
+- `Bytes`, `Vec`, `HashMap` bindings not promoted to `let mut` when mutated
+
 ## [0.15.0] — 2026-04-20
 
 Cross-module `let` reaches Swift/TypeScript parity, WASM dispatch gaps

@@ -185,24 +185,30 @@ fn build_symbol_table(program: &IrProgram) -> SymbolTable {
 /// or the inner doesn't have an Err ty yet.
 fn infer_err_ty_from_enclosing(enclosing_ret: &Ty, inner_ty: &Ty) -> Option<Ty> {
     use almide_lang::types::constructor::TypeConstructorId;
-    let ok_ty = match enclosing_ret {
-        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2
-            && !args[0].has_unresolved_deep() =>
-        {
-            args[0].clone()
+    // Case 1: enclosing fn already returns Result[T, E] (post-ResultPropagation lift)
+    if let Ty::Applied(TypeConstructorId::Result, args) = enclosing_ret {
+        if args.len() == 2 && !args[0].has_unresolved_deep() {
+            let ok_ty = args[0].clone();
+            let err_ty = if !inner_ty.has_unresolved_deep() {
+                inner_ty.clone()
+            } else {
+                args[1].clone()
+            };
+            return Some(Ty::Applied(TypeConstructorId::Result, vec![ok_ty, err_ty]));
         }
-        _ => return None,
-    };
-    // Pick the Err type: prefer the inner's concrete ty, fall back to
-    // the enclosing fn's Err type.
-    let err_ty = if !inner_ty.has_unresolved_deep() {
-        inner_ty.clone()
-    } else if let Ty::Applied(TypeConstructorId::Result, args) = enclosing_ret {
-        args[1].clone()
-    } else {
-        return None;
-    };
-    Some(Ty::Applied(TypeConstructorId::Result, vec![ok_ty, err_ty]))
+    }
+    // Case 2: enclosing fn returns T (pre-lift, e.g. effect fn safe_div -> Int).
+    // The Ok slot of err() should be T, and Err slot is String (effect fn convention).
+    if !enclosing_ret.has_unresolved_deep() && *enclosing_ret != Ty::Unit {
+        let ok_ty = enclosing_ret.clone();
+        let err_ty = if !inner_ty.has_unresolved_deep() {
+            inner_ty.clone()
+        } else {
+            Ty::String
+        };
+        return Some(Ty::Applied(TypeConstructorId::Result, vec![ok_ty, err_ty]));
+    }
+    None
 }
 
 /// Push an expected type into an expression whose own inference left it
@@ -1032,7 +1038,34 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
             IrExprKind::Lambda { .. } => "Lambda",
             IrExprKind::ClosureCreate { .. } => "ClosureCreate",
             IrExprKind::EnvLoad { .. } => "EnvLoad",
-            _ => "(other)",
+            IrExprKind::ResultOk { .. } => "ResultOk",
+            IrExprKind::ResultErr { .. } => "ResultErr",
+            IrExprKind::Try { .. } => "Try",
+            IrExprKind::Unwrap { .. } => "Unwrap",
+            IrExprKind::UnwrapOr { .. } => "UnwrapOr",
+            IrExprKind::ToOption { .. } => "ToOption",
+            IrExprKind::OptionalChain { .. } => "OptionalChain",
+            IrExprKind::OptionSome { .. } => "OptionSome",
+            IrExprKind::OptionNone => "OptionNone",
+            IrExprKind::Break => "Break",
+            IrExprKind::Continue => "Continue",
+            IrExprKind::StringInterp { .. } => "StringInterp",
+            IrExprKind::RenderedCall { .. } => "RenderedCall",
+            IrExprKind::RuntimeCall { .. } => "RuntimeCall",
+            IrExprKind::InlineRust { .. } => "InlineRust",
+            IrExprKind::RustMacro { .. } => "RustMacro",
+            IrExprKind::Clone { .. } => "Clone",
+            IrExprKind::Deref { .. } => "Deref",
+            IrExprKind::Borrow { .. } => "Borrow",
+            IrExprKind::BoxNew { .. } => "BoxNew",
+            IrExprKind::RcWrap { .. } => "RcWrap",
+            IrExprKind::ToVec { .. } => "ToVec",
+            IrExprKind::Await { .. } => "Await",
+            IrExprKind::Todo { .. } => "Todo",
+            IrExprKind::Hole => "Hole",
+            IrExprKind::IterChain { .. } => "IterChain",
+            IrExprKind::EmptyMap => "EmptyMap",
+            _ => "(unknown-variant)",
         }
     }
     let mut a = Auditor { location: String::new(), remaining: 0, samples: Vec::new(), var_table: &program.var_table };

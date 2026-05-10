@@ -342,7 +342,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let fields_str = field_strs.join(", ");
             // Resolve type name: explicit name, or from expr.ty
             // For record literals, use bare struct name (no generics — Rust infers them)
-            let mut type_name = name.map(|n| n.to_string()).unwrap_or_else(|| {
+            // Strip module qualifier from names like "module.TypeName" → "TypeName"
+            // since all modules are flattened into one file in generated Rust.
+            let mut type_name = name.map(|n| {
+                let s = n.as_str();
+                s.rsplit('.').next().unwrap_or(s).to_string()
+            }).unwrap_or_else(|| {
                 match &expr.ty {
                     Ty::Named(n, _) => n.to_string(),
                     Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {

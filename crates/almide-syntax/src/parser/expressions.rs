@@ -233,9 +233,66 @@ impl Parser {
                         },
                         _ => field_span,
                     };
-                    expr = Expr::new(self.next_id(), Some(full_span), ExprKind::Member {
-                        object: Box::new(expr), field,
-                    });
+                    // Module-qualified record literal: module.TypeName { field: value }
+                    // Detected when: the object is an Ident, the field starts with
+                    // uppercase, and the next token is { followed by ident: (record pattern)
+                    let is_qualified_record = field.as_str().starts_with(char::is_uppercase)
+                        && matches!(&expr.kind, ExprKind::Ident { .. })
+                        && self.peek_named_record();
+                    if is_qualified_record {
+                        // Compose the qualified name: "module.TypeName"
+                        let module_name = match &expr.kind {
+                            ExprKind::Ident { name } => name.as_str().to_string(),
+                            _ => String::new(),
+                        };
+                        let qualified = sym(&format!("{}.{}", module_name, field));
+                        let open_rec = self.current().clone();
+                        self.advance(); // skip {
+                        self.skip_newlines();
+                        if self.check(TokenType::DotDotDot) {
+                            self.advance();
+                            let base = self.parse_expr()?;
+                            let mut fields = Vec::new();
+                            while self.check(TokenType::Comma) {
+                                self.advance(); self.skip_newlines();
+                                if self.check(TokenType::RBrace) { break; }
+                                let fname = self.expect_ident()?;
+                                self.expect(TokenType::Colon)?;
+                                self.skip_newlines();
+                                let fval = self.parse_expr()?;
+                                fields.push(FieldInit { name: fname, value: fval });
+                            }
+                            self.skip_newlines();
+                            self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "spread record")?;
+                            expr = Expr::new(self.next_id(), Some(full_span), ExprKind::SpreadRecord {
+                                base: Box::new(base), fields,
+                            });
+                        } else {
+                            let mut fields = Vec::new();
+                            while !self.check(TokenType::RBrace) {
+                                self.skip_newlines();
+                                let fname = self.expect_any_name()?;
+                                if self.check(TokenType::Colon) {
+                                    self.advance(); self.skip_newlines();
+                                    let fval = self.parse_expr()?;
+                                    fields.push(FieldInit { name: fname, value: fval });
+                                } else {
+                                    fields.push(FieldInit {
+                                        name: fname.clone(),
+                                        value: Expr::new(self.next_id(), None, ExprKind::Ident { name: fname }),
+                                    });
+                                }
+                                self.skip_newlines();
+                                if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
+                            }
+                            self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "record construction")?;
+                            expr = Expr::new(self.next_id(), Some(full_span), ExprKind::Record { name: Some(qualified), fields });
+                        }
+                    } else {
+                        expr = Expr::new(self.next_id(), Some(full_span), ExprKind::Member {
+                            object: Box::new(expr), field,
+                        });
+                    }
                 }
             } else if self.check(TokenType::LBracket) && self.peek_type_args_call() {
                 let span = Some(self.current_span());

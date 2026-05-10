@@ -75,10 +75,14 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                 if ctx.generic_types.contains(name) {
                     return "_".to_string();
                 }
-                name.to_string()
+                // Strip module qualifier: module.Type → Type
+                // (all modules flatten into one file in generated Rust)
+                let bare = name.rsplit('.').next().unwrap_or(name);
+                bare.to_string()
             } else {
                 let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
-                format!("{}<{}>", name, args_str)
+                let bare = name.rsplit('.').next().unwrap_or(name);
+                format!("{}<{}>", bare, args_str)
             }
         }
         Ty::Record { fields } | Ty::OpenRecord { fields } => {
