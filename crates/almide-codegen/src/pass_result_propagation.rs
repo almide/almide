@@ -200,6 +200,21 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
     let span = expr.span;
     match expr.kind {
         IrExprKind::Block { stmts, expr: Some(tail) } => {
+            // Wrap non-divergent guard-else bodies in Ok().
+            // Divergent bodies (err(...)!, break, continue) are left as-is.
+            let stmts = stmts.into_iter().map(|stmt| {
+                let span = stmt.span;
+                match stmt.kind {
+                    IrStmtKind::Guard { cond, else_ } if !is_divergent(&else_) => IrStmt {
+                        kind: IrStmtKind::Guard {
+                            cond,
+                            else_: wrap_tail_in_ok(else_, lifted),
+                        },
+                        span,
+                    },
+                    other => IrStmt { kind: other, span },
+                }
+            }).collect();
             let wrapped = wrap_tail_in_ok(*tail, lifted);
             IrExpr {
                 kind: IrExprKind::Block { stmts, expr: Some(Box::new(wrapped)) },
@@ -281,6 +296,22 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                 ty: result_ty, span,
             }
         }
+    }
+}
+
+/// Check if an expression is divergent (never produces a value).
+/// Used to decide whether guard-else bodies need Ok() wrapping.
+fn is_divergent(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Break | IrExprKind::Continue => true,
+        // err(...)! — error propagation, always diverges
+        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } =>
+            matches!(&inner.kind, IrExprKind::ResultErr { .. }),
+        // Block wrapping a divergent tail
+        IrExprKind::Block { expr: Some(tail), .. } => is_divergent(tail),
+        // ResultErr alone is a value, not divergent. But ResultErr
+        // followed by ! (Try/Unwrap) IS divergent (handled above).
+        _ => false,
     }
 }
 
