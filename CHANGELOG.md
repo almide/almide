@@ -11,6 +11,12 @@ care about.
 
 ## [Unreleased]
 
+## [0.15.9] — 2026-05-10
+
+### Fixed
+
+- WASM library mode: `almide build --target wasm` without `main` now skips test functions and omits `_start` export, producing a clean library module for browser/JS embedding
+
 ## [0.15.8] — 2026-05-10
 
 Bug-fix patch. ResultPropagation rewrite + WASM guard-else fix.
