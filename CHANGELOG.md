@@ -11,6 +11,12 @@ care about.
 
 ## [Unreleased]
 
+## [0.15.10] — 2026-05-10
+
+### Fixed
+
+- WASM JSON parser: scientific notation (`1.5e-7`, `2E10`) now parsed correctly
+
 ## [0.15.9] — 2026-05-10
 
 ### Fixed
