@@ -26,6 +26,7 @@ version = "0.16.0"
 dependencies = [
  "almide-base",
  "almide-codegen",
+ "almide-dialect",
  "almide-frontend",
  "almide-ir",
  "almide-lang",

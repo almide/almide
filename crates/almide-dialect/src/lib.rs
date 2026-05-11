@@ -13,6 +13,7 @@ pub mod types;
 pub mod ops;
 pub mod lower;
 pub mod verify;
+pub mod dump;
 
 use almide_base::intern::Sym;
 
