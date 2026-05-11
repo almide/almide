@@ -73,7 +73,25 @@ pub mod codegen {
             values: std::collections::HashMap::new(),
             functions: std::collections::HashMap::new(),
             allocas: std::collections::HashMap::new(),
+            struct_types: std::collections::HashMap::new(),
+            struct_fields: std::collections::HashMap::new(),
         };
+
+        // Register struct types from type declarations
+        for td in &module.type_decls {
+            if let crate::ops::TypeDeclKind::Record { fields } = &td.kind {
+                let field_types: Vec<inkwell::types::BasicTypeEnum> = fields.iter()
+                    .filter_map(|(_, ty)| compiler.dialect_to_basic_type(ty))
+                    .collect();
+                let struct_ty = context.opaque_struct_type(td.name.as_str());
+                struct_ty.set_body(&field_types, false);
+                compiler.struct_types.insert(td.name.as_str().to_string(), struct_ty);
+                compiler.struct_fields.insert(
+                    td.name.as_str().to_string(),
+                    fields.iter().map(|(n, _)| n.as_str().to_string()).collect(),
+                );
+            }
+        }
 
         compiler.declare_printf();
         for f in &module.functions {
@@ -94,9 +112,11 @@ pub mod codegen {
         builder: &'a Builder<'ctx>,
         values: std::collections::HashMap<ValueId, BasicValueEnum<'ctx>>,
         functions: std::collections::HashMap<String, FunctionValue<'ctx>>,
-        /// Alloca pointers for mutable variables (while loop vars).
-        /// ValueId → alloca pointer. Used with store/load for SSA mutation.
         allocas: std::collections::HashMap<ValueId, inkwell::values::PointerValue<'ctx>>,
+        /// Named type → LLVM struct type mapping.
+        struct_types: std::collections::HashMap<String, inkwell::types::StructType<'ctx>>,
+        /// Named type → field names (ordered).
+        struct_fields: std::collections::HashMap<String, Vec<String>>,
     }
 
     impl<'a, 'ctx: 'a> LLVMCompiler<'a, 'ctx> {
@@ -143,6 +163,14 @@ pub mod codegen {
                 DialectType::I32 => Some(self.context.i32_type().into()),
                 DialectType::I8 => Some(self.context.i8_type().into()),
                 DialectType::String => Some(self.context.ptr_type(inkwell::AddressSpace::default()).into()),
+                DialectType::Named(name) => {
+                    // Records passed as pointer to struct
+                    if self.struct_types.contains_key(name.as_str()) {
+                        Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             }
         }
@@ -155,6 +183,13 @@ pub mod codegen {
                 DialectType::I32 => Some(self.context.i32_type().into()),
                 DialectType::I8 => Some(self.context.i8_type().into()),
                 DialectType::String => Some(self.context.ptr_type(inkwell::AddressSpace::default()).into()),
+                DialectType::Named(name) => {
+                    if self.struct_types.contains_key(name.as_str()) {
+                        Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             }
         }
@@ -456,6 +491,55 @@ pub mod codegen {
                             let phi = self.builder.build_phi(tv.get_type(), "ifval").unwrap();
                             phi.add_incoming(&[(&tv, then_end), (&ev, else_end)]);
                             self.values.insert(result_id, phi.as_basic_value());
+                        }
+                    }
+                }
+
+                OpKind::RecordOp { name, fields } => {
+                    if let Some(type_name) = name {
+                        if let Some(struct_ty) = self.struct_types.get(type_name.as_str()).copied() {
+                            // Allocate struct on heap
+                            let size = struct_ty.size_of().unwrap();
+                            let malloc = self.functions.get("malloc").copied().unwrap();
+                            let ptr = self.builder.build_call(malloc, &[size.into()], "record_ptr").unwrap();
+                            if let inkwell::values::ValueKind::Basic(ptr_val) = ptr.try_as_basic_value() {
+                                let ptr_val = ptr_val.into_pointer_value();
+                                // Store each field
+                                if let Some(field_names) = self.struct_fields.get(type_name.as_str()) {
+                                    for (fname, fval_id) in fields {
+                                        if let Some(idx) = field_names.iter().position(|n| n == fname.as_str()) {
+                                            if let Some(fval) = self.values.get(fval_id) {
+                                                let field_ptr = self.builder.build_struct_gep(struct_ty, ptr_val, idx as u32, &format!("field_{}", fname)).unwrap();
+                                                self.builder.build_store(field_ptr, *fval).unwrap();
+                                            }
+                                        }
+                                    }
+                                }
+                                self.values.insert(result_id, ptr_val.into());
+                            }
+                        }
+                    }
+                }
+                OpKind::MemberOp { object, field } => {
+                    // Field access on a record pointer
+                    if let Some(obj_val) = self.values.get(object).cloned() {
+                        let ptr = obj_val.into_pointer_value();
+                        // Find struct type from the object's type info
+                        // We need to find which struct this pointer points to.
+                        // Look through all struct types for a matching field.
+                        let mut found = false;
+                        for (type_name, fields) in &self.struct_fields {
+                            if let Some(idx) = fields.iter().position(|n| n == field.as_str()) {
+                                if let Some(struct_ty) = self.struct_types.get(type_name.as_str()).copied() {
+                                    let field_ptr = self.builder.build_struct_gep(struct_ty, ptr, idx as u32, &format!("get_{}", field)).unwrap();
+                                    // Determine field type
+                                    let field_ty = struct_ty.get_field_type_at_index(idx as u32).unwrap();
+                                    let loaded = self.builder.build_load(field_ty, field_ptr, &format!("load_{}", field)).unwrap();
+                                    self.values.insert(result_id, loaded);
+                                    found = true;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
