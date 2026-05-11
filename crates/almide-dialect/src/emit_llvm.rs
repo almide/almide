@@ -146,11 +146,13 @@ pub mod codegen {
 
         compiler.declare_printf();
         for f in &module.functions {
-            if f.name.as_str().contains('.') { continue; }
+            // Skip convention methods (Type.method) but keep test functions (__test_almd_*)
+            if f.name.as_str().contains('.') && !f.name.as_str().starts_with("__test_almd_") { continue; }
             compiler.declare_function(f);
         }
         for f in &module.functions {
-            if f.name.as_str().contains('.') { continue; }
+            // Skip convention methods (Type.method) but keep test functions (__test_almd_*)
+            if f.name.as_str().contains('.') && !f.name.as_str().starts_with("__test_almd_") { continue; }
             compiler.compile_function(f);
         }
 
@@ -502,10 +504,11 @@ pub mod codegen {
                 }
                 "math.sqrt" => {
                     if let Some(val) = args.first() {
-                        // Declare sqrt from libm
                         let f64_type = self.context.f64_type();
-                        let sqrt_ty = f64_type.fn_type(&[f64_type.into()], false);
-                        let sqrt_fn = self.module.add_function("sqrt", sqrt_ty, None);
+                        let sqrt_fn = if let Some(f) = self.module.get_function("sqrt") { f } else {
+                            let sqrt_ty = f64_type.fn_type(&[f64_type.into()], false);
+                            self.module.add_function("sqrt", sqrt_ty, None)
+                        };
                         let result = self.builder.build_call(sqrt_fn, &[(*val).into()], "sqrt").unwrap();
                         if let inkwell::values::ValueKind::Basic(v) = result.try_as_basic_value() {
                             self.values.insert(result_id, v);
@@ -521,7 +524,6 @@ pub mod codegen {
                     }
                 }
                 "string.to_upper" => {
-                    // toupper each char: malloc + loop
                     if let Some(str_val) = args.first() {
                         let src = str_val.into_pointer_value();
                         let strlen_fn = *self.functions.get("strlen").unwrap();
@@ -532,10 +534,11 @@ pub mod codegen {
                         let buf_call = self.builder.build_call(malloc, &[len_plus_1.into()], "upper_buf").unwrap();
                         let buf = if let inkwell::values::ValueKind::Basic(v) = buf_call.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
 
-                        // Declare toupper
                         let i32_type = self.context.i32_type();
-                        let toupper_ty = i32_type.fn_type(&[i32_type.into()], false);
-                        let toupper = self.module.add_function("toupper", toupper_ty, None);
+                        let toupper = if let Some(f) = self.module.get_function("toupper") { f } else {
+                            let toupper_ty = i32_type.fn_type(&[i32_type.into()], false);
+                            self.module.add_function("toupper", toupper_ty, None)
+                        };
 
                         let idx_alloca = self.builder.build_alloca(i64_type, "up_i").unwrap();
                         self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
@@ -681,7 +684,9 @@ pub mod codegen {
                 self.context.void_type().fn_type(&params, false)
             };
 
-            let function = self.module.add_function(f.name.as_str(), fn_type, None);
+            // Sanitize function name for LLVM (replace spaces/dots with underscores)
+            let llvm_name = f.name.as_str().replace(' ', "_").replace('.', "_");
+            let function = self.module.add_function(&llvm_name, fn_type, None);
             self.functions.insert(f.name.as_str().to_string(), function);
         }
 
