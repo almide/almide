@@ -164,6 +164,62 @@ pub mod codegen {
     }
 
     impl<'a, 'ctx: 'a> LLVMCompiler<'a, 'ctx> {
+        /// Emit or retrieve the __almide_float_to_string helper function.
+        /// Matches Rust behavior: if no '.', append ".0".
+        fn get_or_emit_float_to_string(&mut self) -> FunctionValue<'ctx> {
+            if let Some(f) = self.functions.get("__almide_fts") {
+                return *f;
+            }
+            let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+            let f64_type = self.context.f64_type();
+            let fn_type = ptr_type.fn_type(&[f64_type.into()], false);
+            let func = self.module.add_function("__almide_fts", fn_type, None);
+
+            let saved_bb = self.builder.get_insert_block();
+            let entry = self.context.append_basic_block(func, "entry");
+            let has_dot = self.context.append_basic_block(func, "has_dot");
+            let no_dot = self.context.append_basic_block(func, "no_dot");
+
+            self.builder.position_at_end(entry);
+            let val = func.get_nth_param(0).unwrap().into_float_value();
+            let i64_type = self.context.i64_type();
+
+            let malloc = *self.functions.get("malloc").unwrap();
+            let snprintf = *self.functions.get("snprintf").unwrap();
+            let strcat = *self.functions.get("strcat").unwrap();
+            let buf_call = self.builder.build_call(malloc, &[i64_type.const_int(64, false).into()], "buf").unwrap();
+            let buf = if let inkwell::values::ValueKind::Basic(v) = buf_call.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
+            // %.15g gives precision close to Rust's Display for f64
+            let fmt = self.builder.build_global_string_ptr("%.15g", "fts_fmt").unwrap();
+            self.builder.build_call(snprintf, &[buf.into(), i64_type.const_int(64, false).into(), fmt.as_pointer_value().into(), val.into()], "").unwrap();
+
+            // Check if buf contains '.' using strchr
+            // Declare strchr
+            let strchr_ty = ptr_type.fn_type(&[ptr_type.into(), self.context.i32_type().into()], false);
+            let strchr = self.module.add_function("strchr", strchr_ty, None);
+            let dot_result = self.builder.build_call(strchr, &[buf.into(), self.context.i32_type().const_int('.' as u64, false).into()], "dot_check").unwrap();
+            let dot_ptr = if let inkwell::values::ValueKind::Basic(v) = dot_result.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
+            let is_null = self.builder.build_is_null(dot_ptr, "is_null").unwrap();
+            self.builder.build_conditional_branch(is_null, no_dot, has_dot).unwrap();
+
+            // no_dot: strcat(buf, ".0"), return buf
+            self.builder.position_at_end(no_dot);
+            let suffix = self.builder.build_global_string_ptr(".0", "dot_zero").unwrap();
+            // strcat already copied above
+            self.builder.build_call(strcat, &[buf.into(), suffix.as_pointer_value().into()], "").unwrap();
+            self.builder.build_return(Some(&buf)).unwrap();
+
+            // has_dot: return buf as-is
+            self.builder.position_at_end(has_dot);
+            self.builder.build_return(Some(&buf)).unwrap();
+
+            if let Some(bb) = saved_bb {
+                self.builder.position_at_end(bb);
+            }
+            self.functions.insert("__almide_fts".to_string(), func);
+            func
+        }
+
         fn declare_printf(&mut self) {
             let i32_type = self.context.i32_type();
             let i64_type = self.context.i64_type();
@@ -518,10 +574,19 @@ pub mod codegen {
                                 self.values.insert(result_id, ptr.into());
                             }
                         }
-                    } else if callee_str == "int.to_string" || callee_str == "float.to_string" {
-                        // Pass through: the value stays as Int/Float, println handles formatting
+                    } else if callee_str == "int.to_string" {
+                        // Int → pass through to printf %lld
                         if let Some(val) = args.first().and_then(|a| self.values.get(a)) {
                             self.values.insert(result_id, *val);
+                        }
+                    } else if callee_str == "float.to_string" {
+                        let fval = args.first().and_then(|a| self.values.get(a)).cloned();
+                        if let Some(val) = fval {
+                            let helper = self.get_or_emit_float_to_string();
+                            let call = self.builder.build_call(helper, &[val.into()], "fts").unwrap();
+                            if let inkwell::values::ValueKind::Basic(bv) = call.try_as_basic_value() {
+                                self.values.insert(result_id, bv);
+                            }
                         }
                     } else if let Some(func) = self.functions.get(callee_str).copied() {
                         let arg_vals: Vec<BasicMetadataValueEnum> = args.iter()
