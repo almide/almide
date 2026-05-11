@@ -829,35 +829,40 @@ pub mod codegen {
                                 set_fast_math(inst);
                                 Some(inst.into())
                             }
-                            almide_ir::BinOp::Eq => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_int_compare(IntPredicate::EQ, lv, rv, "eq").unwrap().into())
-                            }
-                            almide_ir::BinOp::Lt => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_int_compare(IntPredicate::SLT, lv, rv, "lt").unwrap().into())
-                            }
-                            almide_ir::BinOp::Gt => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_int_compare(IntPredicate::SGT, lv, rv, "gt").unwrap().into())
-                            }
-                            almide_ir::BinOp::Lte => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_int_compare(IntPredicate::SLE, lv, rv, "lte").unwrap().into())
-                            }
-                            almide_ir::BinOp::Gte => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_int_compare(IntPredicate::SGE, lv, rv, "gte").unwrap().into())
-                            }
-                            almide_ir::BinOp::Neq => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_int_compare(IntPredicate::NE, lv, rv, "neq").unwrap().into())
+                            almide_ir::BinOp::Eq | almide_ir::BinOp::Neq
+                            | almide_ir::BinOp::Lt | almide_ir::BinOp::Gt
+                            | almide_ir::BinOp::Lte | almide_ir::BinOp::Gte => {
+                                let pred = match op {
+                                    almide_ir::BinOp::Eq => IntPredicate::EQ,
+                                    almide_ir::BinOp::Neq => IntPredicate::NE,
+                                    almide_ir::BinOp::Lt => IntPredicate::SLT,
+                                    almide_ir::BinOp::Gt => IntPredicate::SGT,
+                                    almide_ir::BinOp::Lte => IntPredicate::SLE,
+                                    almide_ir::BinOp::Gte => IntPredicate::SGE,
+                                    _ => unreachable!(),
+                                };
+                                match (l, r) {
+                                    (BasicValueEnum::IntValue(lv), BasicValueEnum::IntValue(rv)) => {
+                                        Some(self.builder.build_int_compare(pred, lv, rv, "cmp").unwrap().into())
+                                    }
+                                    (BasicValueEnum::FloatValue(lv), BasicValueEnum::FloatValue(rv)) => {
+                                        let fpred = match op {
+                                            almide_ir::BinOp::Eq => inkwell::FloatPredicate::OEQ,
+                                            almide_ir::BinOp::Neq => inkwell::FloatPredicate::ONE,
+                                            almide_ir::BinOp::Lt => inkwell::FloatPredicate::OLT,
+                                            almide_ir::BinOp::Gt => inkwell::FloatPredicate::OGT,
+                                            almide_ir::BinOp::Lte => inkwell::FloatPredicate::OLE,
+                                            almide_ir::BinOp::Gte => inkwell::FloatPredicate::OGE,
+                                            _ => unreachable!(),
+                                        };
+                                        Some(self.builder.build_float_compare(fpred, lv, rv, "fcmp").unwrap().into())
+                                    }
+                                    (BasicValueEnum::PointerValue(lv), BasicValueEnum::PointerValue(rv)) => {
+                                        // Pointer comparison (strings, records) — compare addresses
+                                        Some(self.builder.build_int_compare(pred, lv, rv, "pcmp").unwrap().into())
+                                    }
+                                    _ => None,
+                                }
                             }
                             almide_ir::BinOp::ConcatStr => {
                                 // String concatenation: malloc(strlen(a) + strlen(b) + 1), strcpy, strcat
@@ -1162,8 +1167,10 @@ pub mod codegen {
                     }
                 }
                 OpKind::MemberOp { object, field } => {
-                    // Field access on a record pointer
                     if let Some(obj_val) = self.values.get(object).cloned() {
+                        if !obj_val.is_pointer_value() {
+                            // Not a pointer (e.g. struct value) — skip
+                        } else {
                         let ptr = obj_val.into_pointer_value();
                         // Find struct type from the object's type info
                         // We need to find which struct this pointer points to.
@@ -1182,6 +1189,7 @@ pub mod codegen {
                                 }
                             }
                         }
+                        } // end else (is_pointer_value)
                     }
                 }
 
@@ -1229,8 +1237,12 @@ pub mod codegen {
                             } else {
                                 self.context.i32_type().const_int(0, false)
                             }
-                        } else {
+                        } else if subj_val.is_int_value() {
                             subj_val.into_int_value()
+                        } else {
+                            // Non-int, non-variant match (e.g. String) — skip
+                            // TODO: implement string comparison match
+                            self.context.i64_type().const_int(0, false)
                         };
 
                         let mut cases: Vec<(inkwell::values::IntValue<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)> = Vec::new();
