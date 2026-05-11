@@ -102,10 +102,37 @@ pub mod codegen {
     impl<'a, 'ctx: 'a> LLVMCompiler<'a, 'ctx> {
         fn declare_printf(&mut self) {
             let i32_type = self.context.i32_type();
+            let i64_type = self.context.i64_type();
             let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+
             let printf_type = i32_type.fn_type(&[ptr_type.into()], true);
-            let printf = self.module.add_function("printf", printf_type, None);
-            self.functions.insert("printf".into(), printf);
+            self.module.add_function("printf", printf_type, None);
+            self.functions.insert("printf".into(), self.module.get_function("printf").unwrap());
+
+            // malloc for heap string allocation
+            let malloc_type = ptr_type.fn_type(&[i64_type.into()], false);
+            self.module.add_function("malloc", malloc_type, None);
+            self.functions.insert("malloc".into(), self.module.get_function("malloc").unwrap());
+
+            // strlen
+            let strlen_type = i64_type.fn_type(&[ptr_type.into()], false);
+            self.module.add_function("strlen", strlen_type, None);
+            self.functions.insert("strlen".into(), self.module.get_function("strlen").unwrap());
+
+            // snprintf
+            let snprintf_type = i32_type.fn_type(&[ptr_type.into(), i64_type.into(), ptr_type.into()], true);
+            self.module.add_function("snprintf", snprintf_type, None);
+            self.functions.insert("snprintf".into(), self.module.get_function("snprintf").unwrap());
+
+            // strcpy
+            let strcpy_type = ptr_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
+            self.module.add_function("strcpy", strcpy_type, None);
+            self.functions.insert("strcpy".into(), self.module.get_function("strcpy").unwrap());
+
+            // strcat
+            let strcat_type = ptr_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
+            self.module.add_function("strcat", strcat_type, None);
+            self.functions.insert("strcat".into(), self.module.get_function("strcat").unwrap());
         }
 
         fn dialect_to_llvm_type(&self, ty: &DialectType) -> Option<BasicMetadataTypeEnum<'ctx>> {
@@ -115,7 +142,8 @@ pub mod codegen {
                 DialectType::Bool => Some(self.context.bool_type().into()),
                 DialectType::I32 => Some(self.context.i32_type().into()),
                 DialectType::I8 => Some(self.context.i8_type().into()),
-                _ => None, // String, List, etc. need heap — future work
+                DialectType::String => Some(self.context.ptr_type(inkwell::AddressSpace::default()).into()),
+                _ => None,
             }
         }
 
@@ -126,6 +154,7 @@ pub mod codegen {
                 DialectType::Bool => Some(self.context.bool_type().into()),
                 DialectType::I32 => Some(self.context.i32_type().into()),
                 DialectType::I8 => Some(self.context.i8_type().into()),
+                DialectType::String => Some(self.context.ptr_type(inkwell::AddressSpace::default()).into()),
                 _ => None,
             }
         }
@@ -223,6 +252,10 @@ pub mod codegen {
                     let val = self.context.bool_type().const_int(*v as u64, false);
                     self.values.insert(result_id, val.into());
                 }
+                OpKind::ConstString(s) => {
+                    let global = self.builder.build_global_string_ptr(s, &format!("str_{}", result_id.0)).unwrap();
+                    self.values.insert(result_id, global.as_pointer_value().into());
+                }
                 OpKind::ConstUnit => {
                     // Unit is void — no value to store
                 }
@@ -306,6 +339,28 @@ pub mod codegen {
                                 let lv = l.into_int_value();
                                 let rv = r.into_int_value();
                                 Some(self.builder.build_int_compare(IntPredicate::NE, lv, rv, "neq").unwrap().into())
+                            }
+                            almide_ir::BinOp::ConcatStr => {
+                                // String concatenation: malloc(strlen(a) + strlen(b) + 1), strcpy, strcat
+                                let strlen = self.functions.get("strlen").copied().unwrap();
+                                let malloc = self.functions.get("malloc").copied().unwrap();
+                                let strcpy = self.functions.get("strcpy").copied().unwrap();
+                                let strcat = self.functions.get("strcat").copied().unwrap();
+
+                                let len_a = self.builder.build_call(strlen, &[l.into()], "len_a").unwrap();
+                                let len_b = self.builder.build_call(strlen, &[r.into()], "len_b").unwrap();
+                                let la = if let inkwell::values::ValueKind::Basic(v) = len_a.try_as_basic_value() { v.into_int_value() } else { self.context.i64_type().const_int(0, false) };
+                                let lb = if let inkwell::values::ValueKind::Basic(v) = len_b.try_as_basic_value() { v.into_int_value() } else { self.context.i64_type().const_int(0, false) };
+                                let total = self.builder.build_int_add(la, lb, "total_len").unwrap();
+                                let total_plus_1 = self.builder.build_int_add(total, self.context.i64_type().const_int(1, false), "total_plus_1").unwrap();
+
+                                let buf = self.builder.build_call(malloc, &[total_plus_1.into()], "buf").unwrap();
+                                let buf_ptr = if let inkwell::values::ValueKind::Basic(v) = buf.try_as_basic_value() { v } else { l }; // fallback
+
+                                self.builder.build_call(strcpy, &[buf_ptr.into(), l.into()], "").unwrap();
+                                self.builder.build_call(strcat, &[buf_ptr.into(), r.into()], "").unwrap();
+
+                                Some(buf_ptr)
                             }
                             almide_ir::BinOp::And => {
                                 let lv = l.into_int_value();
