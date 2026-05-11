@@ -67,6 +67,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-dialect"
+version = "0.16.0"
+dependencies = [
+ "almide-base",
+ "almide-ir",
+ "almide-lang",
+]
+
+[[package]]
 name = "almide-egg-lab"
 version = "0.1.0"
 dependencies = [
