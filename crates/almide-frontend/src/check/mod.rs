@@ -399,15 +399,25 @@ impl Checker {
 
     /// Push generic type vars, structural bounds, and protocol bounds into the environment.
     fn enter_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) {
+        use crate::canonicalize::registration::SCALAR_TYPE_NAMES;
         let gs = match generics { Some(gs) => gs, None => return };
         for g in gs.iter() {
-            self.env.types.insert(sym(&g.name), Ty::TypeVar(sym(&g.name)));
+            // Check if this is a const param (single scalar type bound)
+            let is_const = g.bounds.as_ref().map_or(false, |bs| {
+                bs.len() == 1 && SCALAR_TYPE_NAMES.contains(&bs[0].as_str())
+            });
+            if is_const {
+                let ty = self.resolve_type_expr(&ast::TypeExpr::Simple { name: sym(&g.bounds.as_ref().unwrap()[0]) });
+                self.env.types.insert(sym(&g.name), Ty::ConstParam { name: sym(&g.name), ty: Box::new(ty) });
+            } else {
+                self.env.types.insert(sym(&g.name), Ty::TypeVar(sym(&g.name)));
+            }
             if let Some(bte) = &g.structural_bound {
                 let bt = self.resolve_type_expr(bte);
                 self.env.structural_bounds.insert(sym(&g.name), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
             }
             if let Some(bounds) = &g.bounds {
-                if !bounds.is_empty() {
+                if !bounds.is_empty() && !is_const {
                     self.env.generic_protocol_bounds.insert(sym(&g.name), bounds.iter().map(|b| sym(b)).collect());
                 }
             }

@@ -40,6 +40,10 @@ impl Checker {
                 self.env.used_vars.insert(sym(name));
                 if let Some(ty) = self.env.lookup_var(name).cloned() { self.instantiate_ty(&ty) }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { self.instantiate_ty(&ty) }
+                // Const param: `N: Int` in generic params resolves to its underlying type
+                else if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
+                    *ty
+                }
                 else if let Some(sig) = self.env.functions.get(&sym(name)).cloned() {
                     Ty::Fn {
                         params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
@@ -91,6 +95,10 @@ impl Checker {
             }
 
             ExprKind::TypeName { name, .. } => {
+                // Const param reference: `N` where `N: Int` is a compile-time value param
+                if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
+                    return *ty;
+                }
                 if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
                     match &case.payload {
                         VariantPayload::Tuple(tys) if !tys.is_empty() => {

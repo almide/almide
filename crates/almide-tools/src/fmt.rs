@@ -416,6 +416,9 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
                 fmt_type(out, m, depth);
             }
         }
+        TypeExpr::ConstLit { value } => {
+            out.push_str(&value.to_string());
+        }
         TypeExpr::Variant { cases } => {
             for (i, case) in cases.iter().enumerate() {
                 if i > 0 { out.push_str(" | "); } else { out.push_str("| "); }

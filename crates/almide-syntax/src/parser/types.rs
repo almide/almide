@@ -10,6 +10,12 @@ impl Parser {
         result
     }
     fn parse_type_expr_inner(&mut self) -> Result<TypeExpr, String> {
+        // Compile-time literal value in type position (e.g., Array[Float, 128])
+        if self.check(TokenType::Int) {
+            let value = self.current().value.parse::<i64>().unwrap_or(0);
+            self.advance();
+            return Ok(TypeExpr::ConstLit { value });
+        }
         if self.check(TokenType::Pipe) { return self.parse_variant_type(); }
         if self.check(TokenType::LBrace) { return self.parse_record_type(); }
         if self.check(TokenType::Fn) { return self.parse_fn_type(); }

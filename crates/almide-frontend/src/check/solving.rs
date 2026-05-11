@@ -117,6 +117,14 @@ impl Checker {
                 let resolved = self.env.resolve_named(b);
                 if resolved != *b { self.unify_infer(a, &resolved) } else { a.compatible(b) }
             }
+            // ConstParam unifies with its underlying type
+            (Ty::ConstParam { ty, .. }, other) | (other, Ty::ConstParam { ty, .. }) => {
+                self.unify_infer(ty, other)
+            }
+            // ConstValue unifies with its underlying type
+            (Ty::ConstValue { ty, .. }, other) | (other, Ty::ConstValue { ty, .. }) => {
+                self.unify_infer(ty, other)
+            }
             _ => a.compatible(b),
         }
     }

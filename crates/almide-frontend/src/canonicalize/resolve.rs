@@ -125,6 +125,7 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
         ast::TypeExpr::Union { members } => Ty::union(
             members.iter().map(|m| resolve_type_expr(m, known_types)).collect(),
         ),
+        ast::TypeExpr::ConstLit { value } => Ty::ConstValue { ty: Box::new(Ty::Int), value: *value },
         ast::TypeExpr::Variant { cases } => {
             let cs = cases.iter().map(|c| match c {
                 ast::VariantCase::Unit { name } => VariantCase {

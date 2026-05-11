@@ -56,6 +56,8 @@ pub enum TypeExpr {
     Tuple { elements: Vec<TypeExpr> },
     Variant { cases: Vec<VariantCase> },
     Union { members: Vec<TypeExpr> },
+    /// Compile-time literal value in type argument position (e.g., `Array[Float, 128]`).
+    ConstLit { value: i64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
