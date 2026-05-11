@@ -4,6 +4,8 @@ expression: "run_outline(&[\"@stdlib/int\"])"
 ---
 fn int.abs(n: Int) -> Int
 fn int.band(a: Int, b: Int) -> Int
+fn int.bit_reverse(n: Int) -> Int
+fn int.bit_width(n: Int) -> Int
 fn int.bits_to_f32(bits: Int) -> Float
 fn int.bits_to_float(bits: Int) -> Float
 fn int.bnot(a: Int) -> Int
@@ -11,7 +13,10 @@ fn int.bor(a: Int, b: Int) -> Int
 fn int.bshl(a: Int, n: Int) -> Int
 fn int.bshr(a: Int, n: Int) -> Int
 fn int.bxor(a: Int, b: Int) -> Int
+fn int.byte_swap(n: Int) -> Int
 fn int.clamp(n: Int, lo: Int, hi: Int) -> Int
+fn int.count_leading_zeros(n: Int) -> Int
+fn int.count_trailing_zeros(n: Int) -> Int
 fn int.from_hex(s: String) -> Result[Int, String]
 fn int.from_int16(n: Int16) -> Int
 fn int.from_int32(n: Int32) -> Int
@@ -21,9 +26,14 @@ fn int.from_uint16(n: UInt16) -> Int
 fn int.from_uint32(n: UInt32) -> Int
 fn int.from_uint64(n: UInt64) -> Int
 fn int.from_uint8(n: UInt8) -> Int
+fn int.log2_ceil(n: Int) -> Int
+fn int.log2_floor(n: Int) -> Int
 fn int.max(a: Int, b: Int) -> Int
 fn int.min(a: Int, b: Int) -> Int
+fn int.next_power_of_two(n: Int) -> Int
 fn int.parse(s: String) -> Result[Int, String]
+fn int.pop_count(n: Int) -> Int
+fn int.prev_power_of_two(n: Int) -> Int
 fn int.rotate_left(a: Int, n: Int, bits: Int) -> Int
 fn int.rotate_right(a: Int, n: Int, bits: Int) -> Int
 fn int.to_float(n: Int) -> Float
