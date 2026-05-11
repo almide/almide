@@ -405,6 +405,61 @@ pub mod codegen {
                     }
                 }
 
+                OpKind::MatchOp { subject, arms } => {
+                    if let Some(subj_val) = self.values.get(subject).cloned() {
+                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                        let merge_bb = self.context.append_basic_block(function, "match.merge");
+
+                        // Pre-create all arm blocks
+                        let arm_bbs: Vec<_> = arms.iter().enumerate()
+                            .map(|(i, _)| self.context.append_basic_block(function, &format!("match.arm{}", i)))
+                            .collect();
+
+                        // Build switch: literal patterns → case blocks, wildcard → default
+                        let mut cases: Vec<(inkwell::values::IntValue<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)> = Vec::new();
+                        let mut default_bb = merge_bb;
+                        for (i, arm) in arms.iter().enumerate() {
+                            match &arm.pattern {
+                                crate::ops::MatchPattern::LitInt(v) => {
+                                    cases.push((self.context.i64_type().const_int(*v as u64, true), arm_bbs[i]));
+                                }
+                                crate::ops::MatchPattern::Wildcard | crate::ops::MatchPattern::Binding(_) => {
+                                    default_bb = arm_bbs[i];
+                                }
+                                _ => { default_bb = arm_bbs[i]; }
+                            }
+                        }
+                        self.builder.build_switch(subj_val.into_int_value(), default_bb, &cases).unwrap();
+
+                        // Compile each arm body
+                        let mut arm_results: Vec<(BasicValueEnum<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)> = Vec::new();
+                        for (i, arm) in arms.iter().enumerate() {
+                            self.builder.position_at_end(arm_bbs[i]);
+                            let mut arm_val = None;
+                            for block in &arm.body {
+                                for op in &block.ops { self.compile_op(op); }
+                                if let Terminator::Yield(v) = &block.terminator {
+                                    arm_val = self.values.get(v).cloned();
+                                }
+                            }
+                            self.builder.build_unconditional_branch(merge_bb).unwrap();
+                            if let Some(val) = arm_val {
+                                arm_results.push((val, self.builder.get_insert_block().unwrap()));
+                            }
+                        }
+
+                        // Phi at merge
+                        self.builder.position_at_end(merge_bb);
+                        if !arm_results.is_empty() {
+                            let phi = self.builder.build_phi(arm_results[0].0.get_type(), "match_val").unwrap();
+                            let incoming: Vec<(&dyn inkwell::values::BasicValue, inkwell::basic_block::BasicBlock)> =
+                                arm_results.iter().map(|(v, bb)| (v as &dyn inkwell::values::BasicValue, *bb)).collect();
+                            phi.add_incoming(&incoming);
+                            self.values.insert(result_id, phi.as_basic_value());
+                        }
+                    }
+                }
+
                 OpKind::AllocVar { init, ty } => {
                     if let Some(llvm_ty) = self.dialect_to_basic_type(ty) {
                         let alloca = self.builder.build_alloca(llvm_ty, &format!("var_{}", result_id.0)).unwrap();
