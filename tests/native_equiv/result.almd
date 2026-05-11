@@ -1,0 +1,14 @@
+fn safe_div(a: Int, b: Int) -> Result[Int, String] =
+  if b == 0 then err("division by zero")
+  else ok(a / b)
+
+fn main() -> Unit = {
+  match safe_div(10, 3) {
+    Ok(v) => println(int.to_string(v)),
+    Err(e) => println(e),
+  }
+  match safe_div(10, 0) {
+    Ok(v) => println(int.to_string(v)),
+    Err(e) => println(e),
+  }
+}

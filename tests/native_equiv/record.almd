@@ -1,0 +1,8 @@
+type Point = { x: Int, y: Int }
+
+fn distance_sq(p: Point) -> Int = p.x * p.x + p.y * p.y
+
+fn main() -> Unit = {
+  let p = Point { x: 3, y: 4 }
+  println(int.to_string(distance_sq(p)))
+}
