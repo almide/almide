@@ -24,9 +24,10 @@ pub mod codegen {
         ir
     }
 
-    /// Compile a dialect Module to a native object file.
+    /// Compile a dialect Module to a native object file with LLVM optimizations.
     pub fn emit_object(module: &Module, output_path: &str) -> Result<(), String> {
         use inkwell::targets::*;
+        use inkwell::passes::PassBuilderOptions;
 
         Target::initialize_native(&InitializationConfig::default())
             .map_err(|e| format!("Failed to initialize native target: {}", e))?;
@@ -36,16 +37,22 @@ pub mod codegen {
         build_functions(&context, &llvm_module, module);
 
         let triple = TargetMachine::get_default_triple();
+        let cpu = TargetMachine::get_host_cpu_features();
         let target = Target::from_triple(&triple)
             .map_err(|e| format!("Failed to get target: {}", e))?;
         let machine = target.create_target_machine(
             &triple,
-            "generic",
-            "",
-            inkwell::OptimizationLevel::Default,
+            TargetMachine::get_host_cpu_name().to_str().unwrap_or("generic"),
+            cpu.to_str().unwrap_or(""),
+            inkwell::OptimizationLevel::Aggressive,
             RelocMode::Default,
             CodeModel::Default,
         ).ok_or_else(|| "Failed to create target machine".to_string())?;
+
+        // Run LLVM optimization passes: O2 pipeline with vectorization
+        let opts = PassBuilderOptions::create();
+        llvm_module.run_passes("default<O2>", &machine, opts)
+            .map_err(|e| format!("LLVM pass error: {}", e))?;
 
         machine.write_to_file(&llvm_module, FileType::Object, std::path::Path::new(output_path))
             .map_err(|e| format!("Failed to write object file: {}", e))
