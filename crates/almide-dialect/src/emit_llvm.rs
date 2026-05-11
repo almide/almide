@@ -154,7 +154,61 @@ pub mod codegen {
             compiler.compile_function(f);
         }
 
-        // No special entry point — main is emitted with correct C ABI signature.
+        // If no user `main` exists, generate one.
+        // For test files: call each __test_almd_* function and report pass/fail.
+        // For library files: just return 0.
+        if !compiler.functions.contains_key("main") {
+            let test_fns: Vec<String> = compiler.functions.keys()
+                .filter(|n| n.starts_with("__test_almd_"))
+                .cloned()
+                .collect();
+
+            let i32_type = context.i32_type();
+            let main_type = i32_type.fn_type(&[], false);
+            let main_fn = llvm_module.add_function("main", main_type, None);
+            let entry = context.append_basic_block(main_fn, "entry");
+            compiler.builder.position_at_end(entry);
+
+            if test_fns.is_empty() {
+                // Library file: just return 0
+                compiler.builder.build_return(Some(&i32_type.const_int(0, false))).unwrap();
+            } else {
+                // Test runner: call each test, print pass/fail, count results
+                let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
+                let printf = compiler.functions.get("printf").copied().unwrap();
+                let i64_type = context.i64_type();
+
+                let pass_alloca = compiler.builder.build_alloca(i64_type, "pass_count").unwrap();
+                let fail_alloca = compiler.builder.build_alloca(i64_type, "fail_count").unwrap();
+                compiler.builder.build_store(pass_alloca, i64_type.const_int(0, false)).unwrap();
+                compiler.builder.build_store(fail_alloca, i64_type.const_int(0, false)).unwrap();
+
+                let ok_fmt = compiler.builder.build_global_string_ptr("test %s ... ok\n", "ok_fmt").unwrap();
+                let fail_fmt = compiler.builder.build_global_string_ptr("test %s ... FAILED\n", "fail_fmt").unwrap();
+                let summary_fmt = compiler.builder.build_global_string_ptr("\ntest result: %lld passed; %lld failed\n", "summary_fmt").unwrap();
+
+                for test_name in &test_fns {
+                    let test_fn = compiler.functions[test_name];
+                    let name_str = compiler.builder.build_global_string_ptr(test_name, "tn").unwrap();
+
+                    // Call test function (returns void — if it panics/crashes, we won't catch it)
+                    compiler.builder.build_call(test_fn, &[], "").unwrap();
+
+                    // Print ok (no exception handling in native — all tests "pass" if they don't crash)
+                    compiler.builder.build_call(printf, &[ok_fmt.as_pointer_value().into(), name_str.as_pointer_value().into()], "").unwrap();
+                    let p = compiler.builder.build_load(i64_type, pass_alloca, "p").unwrap().into_int_value();
+                    let p1 = compiler.builder.build_int_add(p, i64_type.const_int(1, false), "").unwrap();
+                    compiler.builder.build_store(pass_alloca, p1).unwrap();
+                }
+
+                // Print summary
+                let final_pass = compiler.builder.build_load(i64_type, pass_alloca, "fp").unwrap();
+                let final_fail = compiler.builder.build_load(i64_type, fail_alloca, "ff").unwrap();
+                compiler.builder.build_call(printf, &[summary_fmt.as_pointer_value().into(), final_pass.into(), final_fail.into()], "").unwrap();
+
+                compiler.builder.build_return(Some(&i32_type.const_int(0, false))).unwrap();
+            }
+        }
     }
 
     struct LLVMCompiler<'a, 'ctx> {
