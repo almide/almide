@@ -217,6 +217,11 @@ pub mod codegen {
                 DialectType::Result(_, _) | DialectType::Option(_) => {
                     Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
                 }
+                DialectType::Fn { .. } | DialectType::Closure { .. } => {
+                    // Closure: { ptr fn_ptr, ptr env_ptr }
+                    let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+                    Some(self.context.struct_type(&[ptr_type.into(), ptr_type.into()], false).into())
+                }
                 _ => None,
             }
         }
@@ -238,6 +243,10 @@ pub mod codegen {
                 }
                 DialectType::Result(_, _) | DialectType::Option(_) => {
                     Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
+                }
+                DialectType::Fn { .. } | DialectType::Closure { .. } => {
+                    let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+                    Some(self.context.struct_type(&[ptr_type.into(), ptr_type.into()], false).into())
                 }
                 _ => None,
             }
@@ -837,7 +846,189 @@ pub mod codegen {
                     self.builder.position_at_end(exit_bb);
                 }
 
-                _ => {} // TODO: match, lambda, collections, etc.
+                OpKind::LambdaOp { params, body } => {
+                    // Lift lambda to a global function.
+                    // Closure representation: { fn_ptr, env_ptr }
+                    // For non-capturing lambdas, env_ptr is null.
+                    let lambda_name = format!("__lambda_{}", result_id.0);
+                    let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+
+                    // Build lambda function type: (ptr env, params...) -> ret
+                    let mut param_types: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_type.into()]; // env ptr
+                    for (_, dty) in params {
+                        if let Some(ty) = self.dialect_to_llvm_type(dty) {
+                            param_types.push(ty);
+                        }
+                    }
+
+                    let ret_ty = if let Some(block) = body.first() {
+                        // Infer return type from body's result type
+                        block.ops.last().map(|op| self.dialect_to_basic_type(&op.result_ty)).flatten()
+                    } else {
+                        None
+                    };
+
+                    let fn_type = if let Some(ret) = ret_ty {
+                        ret.fn_type(&param_types, false)
+                    } else {
+                        self.context.void_type().fn_type(&param_types, false)
+                    };
+
+                    let lambda_fn = self.module.add_function(&lambda_name, fn_type, None);
+                    let lambda_entry = self.context.append_basic_block(lambda_fn, "entry");
+
+                    // Detect captured variables: ValueIds used in body but not defined in body or params
+                    let param_ids: std::collections::HashSet<ValueId> = params.iter().map(|(v, _)| *v).collect();
+                    let mut body_defined: std::collections::HashSet<ValueId> = std::collections::HashSet::new();
+                    let mut body_used: Vec<ValueId> = Vec::new();
+                    for block in body {
+                        for bop in &block.ops {
+                            if let Some(r) = bop.result { body_defined.insert(r); }
+                            // Collect used ValueIds from each op kind
+                            match &bop.kind {
+                                OpKind::BinOp { lhs, rhs, .. } => { body_used.push(*lhs); body_used.push(*rhs); }
+                                OpKind::UnOp { operand, .. } => { body_used.push(*operand); }
+                                OpKind::CallOp { args, .. } | OpKind::IntrinsicCallOp { args, .. } | OpKind::ComputedCallOp { args, .. } => {
+                                    body_used.extend(args);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    let captures: Vec<(ValueId, BasicValueEnum<'ctx>)> = body_used.iter()
+                        .filter(|v| !param_ids.contains(v) && !body_defined.contains(v))
+                        .filter_map(|v| self.values.get(v).map(|val| (*v, *val)))
+                        .collect::<Vec<_>>();
+                    // Deduplicate
+                    let mut seen_captures = std::collections::HashSet::new();
+                    let captures: Vec<(ValueId, BasicValueEnum<'ctx>)> = captures.into_iter()
+                        .filter(|(v, _)| seen_captures.insert(*v))
+                        .collect();
+
+                    // Save state
+                    let saved_block = self.builder.get_insert_block();
+                    let saved_values = self.values.clone();
+
+                    self.builder.position_at_end(lambda_entry);
+
+                    // Map params
+                    for (i, (val_id, _)) in params.iter().enumerate() {
+                        if let Some(param) = lambda_fn.get_nth_param((i + 1) as u32) {
+                            self.values.insert(*val_id, param);
+                        }
+                    }
+
+                    // Unpack captures from env
+                    if !captures.is_empty() {
+                        let env_ptr = lambda_fn.get_nth_param(0).unwrap().into_pointer_value();
+                        for (i, (cap_id, cap_val)) in captures.iter().enumerate() {
+                            let offset = (i * 8) as u64;
+                            let field_ptr = unsafe {
+                                self.builder.build_gep(self.context.i8_type(), env_ptr, &[self.context.i64_type().const_int(offset, false)], &format!("cap_{}", i)).unwrap()
+                            };
+                            let loaded = self.builder.build_load(cap_val.get_type(), field_ptr, &format!("cap_load_{}", i)).unwrap();
+                            self.values.insert(*cap_id, loaded);
+                        }
+                    }
+
+                    // Compile body
+                    let mut last_val = None;
+                    for block in body {
+                        for bop in &block.ops { self.compile_op(bop); }
+                        if let Terminator::Yield(v) | Terminator::Return(v) = &block.terminator {
+                            last_val = self.values.get(v).cloned();
+                        }
+                    }
+                    if let Some(val) = last_val {
+                        self.builder.build_return(Some(&val)).unwrap();
+                    } else {
+                        self.builder.build_return(None).unwrap();
+                    }
+
+                    // Restore state
+                    self.values = saved_values;
+                    if let Some(bb) = saved_block {
+                        self.builder.position_at_end(bb);
+                    }
+
+                    // Create env struct on heap (if captures exist)
+                    let env_ptr_val = if captures.is_empty() {
+                        ptr_type.const_null()
+                    } else {
+                        let env_size = (captures.len() * 8) as u64;
+                        let malloc = self.functions.get("malloc").copied().unwrap();
+                        let env_call = self.builder.build_call(malloc, &[self.context.i64_type().const_int(env_size, false).into()], "env_alloc").unwrap();
+                        let env_ptr = if let inkwell::values::ValueKind::Basic(v) = env_call.try_as_basic_value() {
+                            v.into_pointer_value()
+                        } else {
+                            ptr_type.const_null()
+                        };
+                        // Store captures
+                        for (i, (_, cap_val)) in captures.iter().enumerate() {
+                            let offset = (i * 8) as u64;
+                            let field_ptr = unsafe {
+                                self.builder.build_gep(self.context.i8_type(), env_ptr, &[self.context.i64_type().const_int(offset, false)], &format!("env_store_{}", i)).unwrap()
+                            };
+                            self.builder.build_store(field_ptr, *cap_val).unwrap();
+                        }
+                        env_ptr
+                    };
+
+                    // Create closure struct: { fn_ptr, env_ptr }
+                    let closure_ty = self.context.struct_type(&[ptr_type.into(), ptr_type.into()], false);
+                    let closure_alloca = self.builder.build_alloca(closure_ty, "closure").unwrap();
+                    let fn_ptr = lambda_fn.as_global_value().as_pointer_value();
+                    let fn_field = self.builder.build_struct_gep(closure_ty, closure_alloca, 0, "fn_ptr").unwrap();
+                    self.builder.build_store(fn_field, fn_ptr).unwrap();
+                    let env_field = self.builder.build_struct_gep(closure_ty, closure_alloca, 1, "env_ptr").unwrap();
+                    self.builder.build_store(env_field, env_ptr_val).unwrap();
+
+                    let closure_val = self.builder.build_load(closure_ty, closure_alloca, "closure_val").unwrap();
+                    self.values.insert(result_id, closure_val);
+                }
+
+                OpKind::ComputedCallOp { callee, args } => {
+                    // Call a closure: extract fn_ptr and env_ptr, call fn_ptr(env_ptr, args...)
+                    if let Some(closure_val) = self.values.get(callee).cloned() {
+                        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+                        let closure_ty = self.context.struct_type(&[ptr_type.into(), ptr_type.into()], false);
+
+                        // Extract fn_ptr and env_ptr
+                        let fn_ptr = self.builder.build_extract_value(closure_val.into_struct_value(), 0, "fn_ptr").unwrap();
+                        let env_ptr = self.builder.build_extract_value(closure_val.into_struct_value(), 1, "env_ptr").unwrap();
+
+                        // Build call: fn_ptr(env_ptr, args...)
+                        let mut call_args: Vec<BasicMetadataValueEnum> = vec![env_ptr.into()];
+                        for a in args {
+                            if let Some(v) = self.values.get(a) {
+                                call_args.push((*v).into());
+                            }
+                        }
+
+                        // Build function type from argument types
+                        let arg_types: Vec<BasicMetadataTypeEnum> = call_args.iter().map(|a| {
+                            match a {
+                                BasicMetadataValueEnum::IntValue(v) => v.get_type().into(),
+                                BasicMetadataValueEnum::FloatValue(v) => v.get_type().into(),
+                                BasicMetadataValueEnum::PointerValue(v) => v.get_type().into(),
+                                _ => self.context.i64_type().into(),
+                            }
+                        }).collect();
+                        let ret_basic = self.dialect_to_basic_type(&op.result_ty);
+                        let fn_type = if let Some(ret) = ret_basic {
+                            ret.fn_type(&arg_types, false)
+                        } else {
+                            self.context.void_type().fn_type(&arg_types, false)
+                        };
+
+                        let call = self.builder.build_indirect_call(fn_type, fn_ptr.into_pointer_value(), &call_args, "closure_call").unwrap();
+                        if let inkwell::values::ValueKind::Basic(bv) = call.try_as_basic_value() {
+                            self.values.insert(result_id, bv);
+                        }
+                    }
+                }
+
+                _ => {} // TODO: for, collections, etc.
             }
         }
     }
