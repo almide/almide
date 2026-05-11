@@ -11,6 +11,13 @@ care about.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-05-11
+
+### Added
+
+- **Bit introspection**: 10 new `int` stdlib functions — `count_leading_zeros`, `count_trailing_zeros`, `pop_count`, `bit_reverse`, `byte_swap`, `bit_width`, `log2_floor`, `log2_ceil`, `next_power_of_two`, `prev_power_of_two`. Rust runtime + native WASM codegen (`i64.clz`/`i64.ctz`/`i64.popcnt`)
+- **Hashable protocol**: Map key types validated at compile time — `Map[Float, V]` and `Map[Fn, V]` are now errors. Built-in types (Int, String, Bool, sized integers) auto-registered as Hash-conformant. User types with `deriving Hash` emit `#[derive(Eq, Hash)]` and can be used as Map keys
+
 ## [0.15.10] — 2026-05-10
 
 ### Fixed

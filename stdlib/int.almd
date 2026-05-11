@@ -79,6 +79,38 @@ fn bshl(a: Int, n: Int) -> Int = _
 @intrinsic("almide_rt_int_bshr")
 fn bshr(a: Int, n: Int) -> Int = _
 
+// ── Bit introspection ──
+
+@intrinsic("almide_rt_int_count_leading_zeros")
+fn count_leading_zeros(n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_count_trailing_zeros")
+fn count_trailing_zeros(n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_pop_count")
+fn pop_count(n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_bit_reverse")
+fn bit_reverse(n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_byte_swap")
+fn byte_swap(n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_bit_width")
+fn bit_width(n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_log2_floor")
+fn log2_floor(n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_log2_ceil")
+fn log2_ceil(n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_next_power_of_two")
+fn next_power_of_two(n: Int) -> Int = _
+
+@intrinsic("almide_rt_int_prev_power_of_two")
+fn prev_power_of_two(n: Int) -> Int = _
+
 // ── Wrapping / masking ──
 
 @intrinsic("almide_rt_int_wrap_add")

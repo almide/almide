@@ -21,3 +21,23 @@ test "option keys work" {
   m2["x"] = 10;
   assert_eq(m2["x"], some(10))
 }
+
+// ── User types with deriving Hash ──
+
+type Color: Eq, Hash = { r: Int, g: Int, b: Int }
+type Direction: Eq, Hash = | North | South | East | West
+
+test "user record as Map key" {
+  let m: Map[Color, String] = [Color { r: 255, g: 0, b: 0 }: "red"]
+  assert_eq(map.get(m, Color { r: 255, g: 0, b: 0 }) ?? "miss", "red")
+}
+
+test "user record Map lookup miss" {
+  let m: Map[Color, String] = [Color { r: 255, g: 0, b: 0 }: "red"]
+  assert_eq(map.get(m, Color { r: 0, g: 0, b: 0 }) ?? "miss", "miss")
+}
+
+test "user variant as Map key" {
+  let m: Map[Direction, Int] = [North: 0, South: 180, East: 90, West: 270]
+  assert_eq(map.get(m, East) ?? -1, 90)
+}

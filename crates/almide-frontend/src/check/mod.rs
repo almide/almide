@@ -73,6 +73,9 @@ pub struct Checker {
     /// `elems[index]`. Drained iteratively after `solve_constraints`
     /// to give the union-find a chance to propagate before resolution.
     pub(crate) deferred_tuple_indices: Vec<(Ty, usize, Ty)>,
+    /// Map literal key types to validate after constraint solving.
+    /// Each entry: (key_type, span) — checked via `is_hash()` once types are resolved.
+    pub(crate) deferred_map_key_checks: Vec<(Ty, Option<crate::ast::Span>)>,
 }
 
 impl Checker {
@@ -88,6 +91,7 @@ impl Checker {
             constraints: Vec::new(), uf: UnionFind::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),
+            deferred_map_key_checks: Vec::new(),
         }
     }
 
@@ -226,6 +230,7 @@ impl Checker {
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
         resolve_type_map(&mut self.type_map, &self.uf);
+        self.validate_map_key_types();
         // Unused import warnings
         for imp in &program.imports {
             let (path, alias, span) = match imp {
@@ -380,6 +385,7 @@ impl Checker {
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
         resolve_type_map(&mut self.type_map, &self.uf);
+        self.validate_map_key_types();
         self.current_module_prefix = saved_prefix;
 
         // Restore
@@ -685,6 +691,52 @@ impl Checker {
                 }
             }
             _ => Ty::Unknown,
+        }
+    }
+}
+
+impl Checker {
+    /// Validate that all Map literal key types are hashable (post-solve).
+    fn validate_map_key_types(&mut self) {
+        let checks = std::mem::take(&mut self.deferred_map_key_checks);
+        for (key_ty, span) in checks {
+            let resolved = resolve_ty(&key_ty, &self.uf);
+            if !self.env.is_hash(&resolved) {
+                let ty_name = Self::type_display_name(&resolved);
+                let mut diag = err(
+                    format!("type '{}' is not hashable — cannot be used as a Map key", ty_name),
+                    "Map keys must be hashable. Use String, Int, Bool, or a record/variant with only hashable fields.".to_string(),
+                    "map literal".to_string(),
+                );
+                if let Some(s) = span {
+                    diag.line = Some(s.line);
+                    diag.col = Some(s.col);
+                }
+                self.diagnostics.push(diag);
+            }
+        }
+    }
+
+    /// Human-readable type name for diagnostics.
+    fn type_display_name(ty: &Ty) -> String {
+        match ty {
+            Ty::Int => "Int".into(),
+            Ty::Float => "Float".into(),
+            Ty::String => "String".into(),
+            Ty::Bool => "Bool".into(),
+            Ty::Unit => "Unit".into(),
+            Ty::Bytes => "Bytes".into(),
+            Ty::Named(name, _) => name.as_str().to_string(),
+            Ty::Fn { .. } => "Fn".into(),
+            Ty::Applied(crate::types::TypeConstructorId::Map, _) => "Map".into(),
+            Ty::Applied(crate::types::TypeConstructorId::List, args) => {
+                if let Some(inner) = args.first() {
+                    format!("List[{}]", Self::type_display_name(inner))
+                } else {
+                    "List".into()
+                }
+            }
+            _ => format!("{:?}", ty),
         }
     }
 }

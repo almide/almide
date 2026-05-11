@@ -65,6 +65,32 @@ mod tests {
     }
 }
 
+// ── Bit introspection ──
+
+#[inline(always)] pub fn almide_rt_int_count_leading_zeros(n: i64) -> i64 { (n as u64).leading_zeros() as i64 }
+#[inline(always)] pub fn almide_rt_int_count_trailing_zeros(n: i64) -> i64 { (n as u64).trailing_zeros() as i64 }
+#[inline(always)] pub fn almide_rt_int_pop_count(n: i64) -> i64 { (n as u64).count_ones() as i64 }
+#[inline(always)] pub fn almide_rt_int_bit_reverse(n: i64) -> i64 { (n as u64).reverse_bits() as i64 }
+#[inline(always)] pub fn almide_rt_int_byte_swap(n: i64) -> i64 { (n as u64).swap_bytes() as i64 }
+#[inline(always)] pub fn almide_rt_int_bit_width(n: i64) -> i64 {
+    if n == 0 { 0 } else { 64 - (n as u64).leading_zeros() as i64 }
+}
+#[inline(always)] pub fn almide_rt_int_log2_floor(n: i64) -> i64 {
+    if n <= 0 { -1 } else { 63 - (n as u64).leading_zeros() as i64 }
+}
+#[inline(always)] pub fn almide_rt_int_log2_ceil(n: i64) -> i64 {
+    if n <= 0 { 0 }
+    else if n == 1 { 0 }
+    else { 64 - ((n as u64 - 1).leading_zeros()) as i64 }
+}
+#[inline(always)] pub fn almide_rt_int_next_power_of_two(n: i64) -> i64 {
+    if n <= 1 { 1 } else { (n as u64).next_power_of_two() as i64 }
+}
+#[inline(always)] pub fn almide_rt_int_prev_power_of_two(n: i64) -> i64 {
+    if n <= 0 { 0 }
+    else { 1i64 << (63 - (n as u64).leading_zeros() as i64) }
+}
+
 pub fn almide_rt_int_to_u32(n: i64) -> i64 { (n as u32) as i64 }
 pub fn almide_rt_int_to_u8(n: i64) -> i64 { (n as u8) as i64 }
 #[inline(always)] pub fn almide_rt_int_bits_to_float(bits: i64) -> f64 { f64::from_bits(bits as u64) }

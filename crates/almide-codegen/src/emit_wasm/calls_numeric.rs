@@ -250,6 +250,155 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { i64_const(0xFF); i64_and; });
             }
+            "count_leading_zeros" => {
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i64_clz; });
+            }
+            "count_trailing_zeros" => {
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i64_ctz; });
+            }
+            "pop_count" => {
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i64_popcnt; });
+            }
+            "bit_reverse" => {
+                // No WASM instruction; use loop: reverse 64 bits
+                let src = self.scratch.alloc_i64();
+                let dst = self.scratch.alloc_i64();
+                let i = self.scratch.alloc_i64();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(src);
+                    i64_const(0); local_set(dst);
+                    i64_const(0); local_set(i);
+                    block_empty; loop_empty;
+                        local_get(i); i64_const(64); i64_ge_s; br_if(1);
+                        // dst = (dst << 1) | (src & 1)
+                        local_get(dst); i64_const(1); i64_shl;
+                        local_get(src); i64_const(1); i64_and;
+                        i64_or; local_set(dst);
+                        // src >>= 1
+                        local_get(src); i64_const(1); i64_shr_u; local_set(src);
+                        local_get(i); i64_const(1); i64_add; local_set(i);
+                        br(0);
+                    end; end;
+                    local_get(dst);
+                });
+                self.scratch.free_i64(i);
+                self.scratch.free_i64(dst);
+                self.scratch.free_i64(src);
+            }
+            "byte_swap" => {
+                // Swap bytes of i64: reverse 8 bytes
+                let src = self.scratch.alloc_i64();
+                let dst = self.scratch.alloc_i64();
+                let i = self.scratch.alloc_i64();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(src);
+                    i64_const(0); local_set(dst);
+                    i64_const(0); local_set(i);
+                    block_empty; loop_empty;
+                        local_get(i); i64_const(8); i64_ge_s; br_if(1);
+                        // dst = (dst << 8) | (src & 0xFF)
+                        local_get(dst); i64_const(8); i64_shl;
+                        local_get(src); i64_const(0xFF); i64_and;
+                        i64_or; local_set(dst);
+                        // src >>= 8
+                        local_get(src); i64_const(8); i64_shr_u; local_set(src);
+                        local_get(i); i64_const(1); i64_add; local_set(i);
+                        br(0);
+                    end; end;
+                    local_get(dst);
+                });
+                self.scratch.free_i64(i);
+                self.scratch.free_i64(dst);
+                self.scratch.free_i64(src);
+            }
+            "bit_width" => {
+                // bit_width(n) = if n == 0 then 0 else 64 - clz(n)
+                self.emit_expr(&args[0]);
+                let n = self.scratch.alloc_i64();
+                wasm!(self.func, {
+                    local_set(n);
+                    local_get(n); i64_eqz;
+                    if_i64;
+                        i64_const(0);
+                    else_;
+                        i64_const(64); local_get(n); i64_clz; i64_sub;
+                    end;
+                });
+                self.scratch.free_i64(n);
+            }
+            "log2_floor" => {
+                // log2_floor(n) = if n <= 0 then -1 else 63 - clz(n)
+                self.emit_expr(&args[0]);
+                let n = self.scratch.alloc_i64();
+                wasm!(self.func, {
+                    local_set(n);
+                    local_get(n); i64_const(0); i64_le_s;
+                    if_i64;
+                        i64_const(-1);
+                    else_;
+                        i64_const(63); local_get(n); i64_clz; i64_sub;
+                    end;
+                });
+                self.scratch.free_i64(n);
+            }
+            "log2_ceil" => {
+                // log2_ceil(n) = if n <= 0 then 0 else if n == 1 then 0 else 64 - clz(n-1)
+                self.emit_expr(&args[0]);
+                let n = self.scratch.alloc_i64();
+                wasm!(self.func, {
+                    local_set(n);
+                    local_get(n); i64_const(1); i64_le_s;
+                    if_i64;
+                        i64_const(0);
+                    else_;
+                        i64_const(64);
+                        local_get(n); i64_const(1); i64_sub; i64_clz;
+                        i64_sub;
+                    end;
+                });
+                self.scratch.free_i64(n);
+            }
+            "next_power_of_two" => {
+                // next_power_of_two(n) = if n <= 1 then 1 else 1 << (64 - clz(n-1))
+                self.emit_expr(&args[0]);
+                let n = self.scratch.alloc_i64();
+                wasm!(self.func, {
+                    local_set(n);
+                    local_get(n); i64_const(1); i64_le_s;
+                    if_i64;
+                        i64_const(1);
+                    else_;
+                        i64_const(1);
+                        i64_const(64);
+                        local_get(n); i64_const(1); i64_sub; i64_clz;
+                        i64_sub;
+                        i64_shl;
+                    end;
+                });
+                self.scratch.free_i64(n);
+            }
+            "prev_power_of_two" => {
+                // prev_power_of_two(n) = if n <= 0 then 0 else 1 << (63 - clz(n))
+                self.emit_expr(&args[0]);
+                let n = self.scratch.alloc_i64();
+                wasm!(self.func, {
+                    local_set(n);
+                    local_get(n); i64_const(0); i64_le_s;
+                    if_i64;
+                        i64_const(0);
+                    else_;
+                        i64_const(1);
+                        i64_const(63); local_get(n); i64_clz; i64_sub;
+                        i64_shl;
+                    end;
+                });
+                self.scratch.free_i64(n);
+            }
             "wrap_add" => {
                 // wrap_add(a, b, bits)
                 let bits = self.scratch.alloc_i64();

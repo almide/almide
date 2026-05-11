@@ -528,6 +528,17 @@ macro_rules! wasm {
     (@emit $f:expr, nop; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::Nop); wasm!(@emit $f, $($rest)*)
     };
+    // ── Bit introspection (i64) ──
+    (@emit $f:expr, i64_clz; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Clz); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_ctz; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Ctz); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_popcnt; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Popcnt); wasm!(@emit $f, $($rest)*)
+    };
+
     // ── Bitwise (i64) ──
     (@emit $f:expr, i64_shl; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I64Shl); wasm!(@emit $f, $($rest)*)

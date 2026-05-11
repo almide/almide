@@ -47,9 +47,11 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .collect::<Vec<_>>()
                 .join("\n");
             let full_name = format!("{}{}", td.name, generics_str);
+            let has_hash = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Hash"));
             let mut attrs = decl_attrs.clone();
             if has_fn_fields { attrs.push("has_fn_fields"); }
             if has_non_eq_fields { attrs.push("has_non_eq_fields"); }
+            if has_hash && !has_fn_fields && !has_non_eq_fields { attrs.push("has_hash"); }
             let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
             let fallback = if has_fn_fields {
                 format!("#[derive(Clone)]\npub struct {} {{\n{}\n}}", full_name, &fields_str)
@@ -112,9 +114,12 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             let sep = template_or(ctx, "enum_variant_sep", &[], ",\n");
             let variants_str = variants_parts.join(&sep);
             let full_name = format!("{}{}", td.name, generics_str);
+            let has_hash = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Hash"));
+            let mut enum_attrs = decl_attrs.clone();
+            if has_hash { enum_attrs.push("has_hash"); }
             let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
             let fallback = format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str);
-            ctx.templates.render_with("enum_decl", None, &decl_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
+            ctx.templates.render_with("enum_decl", None, &enum_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
                 .unwrap_or(fallback)
         }
         IrTypeDeclKind::Alias { target } => {

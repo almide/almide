@@ -154,4 +154,18 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
             .or_default()
             .insert(sym("Numeric"));
     }
+
+    // Register hashable primitive types as implementing `Hash`.
+    // Float, Fn, and Map are excluded (NaN, identity, and nested mutability).
+    let hashable_primitives: &[&str] = &[
+        "Int", "String", "Bool", "Unit",
+        "Int8", "Int16", "Int32",
+        "UInt8", "UInt16", "UInt32", "UInt64",
+    ];
+    for prim in hashable_primitives {
+        env.type_protocols
+            .entry(sym(prim))
+            .or_default()
+            .insert(sym("Hash"));
+    }
 }
