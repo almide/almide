@@ -72,6 +72,7 @@ pub mod codegen {
             builder: &builder,
             values: std::collections::HashMap::new(),
             functions: std::collections::HashMap::new(),
+            allocas: std::collections::HashMap::new(),
         };
 
         compiler.declare_printf();
@@ -93,6 +94,9 @@ pub mod codegen {
         builder: &'a Builder<'ctx>,
         values: std::collections::HashMap<ValueId, BasicValueEnum<'ctx>>,
         functions: std::collections::HashMap<String, FunctionValue<'ctx>>,
+        /// Alloca pointers for mutable variables (while loop vars).
+        /// ValueId → alloca pointer. Used with store/load for SSA mutation.
+        allocas: std::collections::HashMap<ValueId, inkwell::values::PointerValue<'ctx>>,
     }
 
     impl<'a, 'ctx: 'a> LLVMCompiler<'a, 'ctx> {
@@ -155,6 +159,7 @@ pub mod codegen {
             let entry = self.context.append_basic_block(function, "entry");
             self.builder.position_at_end(entry);
             self.values.clear();
+            self.allocas.clear();
 
             // Map params to ValueIds
             if let Some(block) = f.body.first() {
@@ -398,6 +403,40 @@ pub mod codegen {
                             self.values.insert(result_id, phi.as_basic_value());
                         }
                     }
+                }
+
+                OpKind::WhileOp { cond_region, body } => {
+                    let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                    let cond_bb = self.context.append_basic_block(function, "while.cond");
+                    let body_bb = self.context.append_basic_block(function, "while.body");
+                    let exit_bb = self.context.append_basic_block(function, "while.exit");
+
+                    self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                    // Condition
+                    self.builder.position_at_end(cond_bb);
+                    let mut cond_val = None;
+                    for block in cond_region {
+                        for op in &block.ops { self.compile_op(op); }
+                        if let Terminator::Yield(v) = &block.terminator {
+                            cond_val = self.values.get(v).cloned();
+                        }
+                    }
+                    if let Some(cv) = cond_val {
+                        self.builder.build_conditional_branch(cv.into_int_value(), body_bb, exit_bb).unwrap();
+                    } else {
+                        self.builder.build_unconditional_branch(exit_bb).unwrap();
+                    }
+
+                    // Body
+                    self.builder.position_at_end(body_bb);
+                    for block in body {
+                        for op in &block.ops { self.compile_op(op); }
+                    }
+                    self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                    // Continue after loop
+                    self.builder.position_at_end(exit_bb);
                 }
 
                 _ => {} // TODO: match, lambda, collections, etc.
