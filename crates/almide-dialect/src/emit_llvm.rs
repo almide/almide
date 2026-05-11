@@ -437,6 +437,26 @@ pub mod codegen {
                         self.values.insert(result_id, result);
                     }
                 }
+                "math.sqrt" => {
+                    if let Some(val) = args.first() {
+                        // Declare sqrt from libm
+                        let f64_type = self.context.f64_type();
+                        let sqrt_ty = f64_type.fn_type(&[f64_type.into()], false);
+                        let sqrt_fn = self.module.add_function("sqrt", sqrt_ty, None);
+                        let result = self.builder.build_call(sqrt_fn, &[(*val).into()], "sqrt").unwrap();
+                        if let inkwell::values::ValueKind::Basic(v) = result.try_as_basic_value() {
+                            self.values.insert(result_id, v);
+                        }
+                    }
+                }
+                "map.len" => {
+                    // Map layout: [i64 len][entries...]
+                    // Same as list for the header
+                    if let Some(map_ptr) = args.first() {
+                        let len = self.builder.build_load(i64_type, map_ptr.into_pointer_value(), "map_len").unwrap();
+                        self.values.insert(result_id, len);
+                    }
+                }
                 "string.to_upper" => {
                     // toupper each char: malloc + loop
                     if let Some(str_val) = args.first() {
@@ -862,7 +882,7 @@ pub mod codegen {
                                 self.values.insert(result_id, bv);
                             }
                         }
-                    } else if callee_str.starts_with("list.") || callee_str.starts_with("string.") {
+                    } else if callee_str.starts_with("list.") || callee_str.starts_with("string.") || callee_str.starts_with("map.") || callee_str.starts_with("math.") {
                         // Stdlib call — emit inline LLVM for list/string operations
                         let func_name = callee_str.split("__").next().unwrap_or(callee_str); // strip monomorph
                         let arg_vals: Vec<BasicValueEnum<'ctx>> = args.iter()
@@ -998,6 +1018,35 @@ pub mod codegen {
                                     self.builder.build_gep(self.context.i8_type(), ptr, &[i64_type.const_int(offset, false)], &format!("elem_{}", i)).unwrap()
                                 };
                                 self.builder.build_store(elem_ptr, *elem_val).unwrap();
+                            }
+                        }
+                        self.values.insert(result_id, ptr.into());
+                    }
+                }
+
+                OpKind::MapOp { .. } | OpKind::EmptyMapOp => {
+                    // Map layout: [i64 len][pairs...] - for now just store length
+                    let i64_type = self.context.i64_type();
+                    let malloc = self.functions.get("malloc").copied().unwrap();
+                    let n = if let OpKind::MapOp { entries } = &op.kind { entries.len() } else { 0 };
+                    let total_bytes = 8 + n * 16; // 8 for len + 16 per entry (key ptr + val i64)
+                    let buf_call = self.builder.build_call(malloc, &[i64_type.const_int(total_bytes as u64, false).into()], "map_ptr").unwrap();
+                    if let inkwell::values::ValueKind::Basic(ptr_val) = buf_call.try_as_basic_value() {
+                        let ptr = ptr_val.into_pointer_value();
+                        self.builder.build_store(ptr, i64_type.const_int(n as u64, false)).unwrap();
+                        // Store entries (key-value pairs) for future use
+                        if let OpKind::MapOp { entries } = &op.kind {
+                            for (i, (k, v)) in entries.iter().enumerate() {
+                                let offset_k = (8 + i * 16) as u64;
+                                let offset_v = (8 + i * 16 + 8) as u64;
+                                if let Some(kv) = self.values.get(k) {
+                                    let kp = unsafe { self.builder.build_gep(self.context.i8_type(), ptr, &[i64_type.const_int(offset_k, false)], "mk").unwrap() };
+                                    self.builder.build_store(kp, *kv).unwrap();
+                                }
+                                if let Some(vv) = self.values.get(v) {
+                                    let vp = unsafe { self.builder.build_gep(self.context.i8_type(), ptr, &[i64_type.const_int(offset_v, false)], "mv").unwrap() };
+                                    self.builder.build_store(vp, *vv).unwrap();
+                                }
                             }
                         }
                         self.values.insert(result_id, ptr.into());
