@@ -54,7 +54,7 @@ pub mod codegen {
             TargetMachine::get_host_cpu_name().to_str().unwrap_or("generic"),
             cpu.to_str().unwrap_or(""),
             inkwell::OptimizationLevel::Aggressive,
-            RelocMode::Default,
+            RelocMode::PIC,
             CodeModel::Default,
         ).ok_or_else(|| "Failed to create target machine".to_string())?;
 
