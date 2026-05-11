@@ -89,6 +89,9 @@ pub fn compute_use_counts(module: &Module) -> std::collections::HashMap<ValueId,
             ResultOkOp { value } | ResultErrOp { value } | OptionSomeOp { value }
             | TryOp { value } | UnwrapOp { value } => { *counts.entry(*value).or_default() += 1; }
             UnwrapOrOp { value, fallback } => { *counts.entry(*value).or_default() += 1; *counts.entry(*fallback).or_default() += 1; }
+            AllocVar { init, .. } => { *counts.entry(*init).or_default() += 1; }
+            LoadVar { slot } => { *counts.entry(*slot).or_default() += 1; }
+            StoreVar { slot, value } => { *counts.entry(*slot).or_default() += 1; *counts.entry(*value).or_default() += 1; }
             LambdaOp { body, .. } => { count_in_blocks(body, counts); }
             FanOp { regions } => { for r in regions { count_in_blocks(r, counts); } }
             ForOp { iterable, body, .. } => { *counts.entry(*iterable).or_default() += 1; count_in_blocks(body, counts); }

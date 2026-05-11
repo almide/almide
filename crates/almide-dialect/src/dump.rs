@@ -131,6 +131,15 @@ fn dump_op(out: &mut String, op: &Operation, level: usize) {
             let args_str: Vec<_> = args.iter().map(|a| fmt_val(*a)).collect();
             out.push_str(&format!("almide.call @{}({})", callee, args_str.join(", ")));
         }
+        OpKind::AllocVar { init, ty } => {
+            out.push_str(&format!("almide.alloc_var {} : {}", fmt_val(*init), fmt_type(ty)));
+        }
+        OpKind::LoadVar { slot } => {
+            out.push_str(&format!("almide.load_var {}", fmt_val(*slot)));
+        }
+        OpKind::StoreVar { slot, value } => {
+            out.push_str(&format!("almide.store_var {}, {}", fmt_val(*slot), fmt_val(*value)));
+        }
         OpKind::ComputedCallOp { callee, args } => {
             let args_str: Vec<_> = args.iter().map(|a| fmt_val(*a)).collect();
             out.push_str(&format!("almide.computed_call {}({})", fmt_val(*callee), args_str.join(", ")));

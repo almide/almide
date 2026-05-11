@@ -104,6 +104,14 @@ pub enum OpKind {
     /// Fan (structured concurrency)
     FanOp { regions: Vec<Vec<Block>> },
 
+    // ── Mutable variables (for while loops) ──
+    /// Allocate a mutable slot. Result is a "pointer" ValueId.
+    AllocVar { init: ValueId, ty: DialectType },
+    /// Load from a mutable slot.
+    LoadVar { slot: ValueId },
+    /// Store to a mutable slot. No result value.
+    StoreVar { slot: ValueId, value: ValueId },
+
     // ── Loops ──
     ForOp {
         var: ValueId,

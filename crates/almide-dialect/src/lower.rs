@@ -41,6 +41,10 @@ struct LowerCtx<'a> {
     /// Maps IR VarId → SSA ValueId (current binding).
     var_map: std::collections::HashMap<VarId, ValueId>,
     var_table: &'a VarTable,
+    /// Mutable variables: VarId → alloca slot ValueId.
+    /// When a var is mutable (Bind with mutability=Var), we emit AllocVar
+    /// and track the slot. Reads become LoadVar, writes become StoreVar.
+    mutable_slots: std::collections::HashMap<VarId, ValueId>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -49,6 +53,7 @@ impl<'a> LowerCtx<'a> {
             ids: IdGen::default(),
             var_map: std::collections::HashMap::new(),
             var_table,
+            mutable_slots: std::collections::HashMap::new(),
         }
     }
 
@@ -111,7 +116,12 @@ impl<'a> LowerCtx<'a> {
 
             // ── Variables ──
             IrExprKind::Var { id } => {
-                *self.var_map.get(id).unwrap_or(&ValueId(0))
+                if let Some(slot) = self.mutable_slots.get(id).copied() {
+                    // Mutable variable: emit LoadVar
+                    self.emit(ops, result_ty, OpKind::LoadVar { slot })
+                } else {
+                    *self.var_map.get(id).unwrap_or(&ValueId(0))
+                }
             }
             IrExprKind::FnRef { name } => {
                 // Function references become a callable constant
@@ -347,13 +357,26 @@ impl<'a> LowerCtx<'a> {
 
     fn lower_stmt(&mut self, stmt: &IrStmt, ops: &mut Vec<Operation>) {
         match &stmt.kind {
-            IrStmtKind::Bind { var, value, .. } => {
+            IrStmtKind::Bind { var, mutability, value, .. } => {
                 let val = self.lower_expr_into(value, ops);
-                self.var_map.insert(*var, val);
+                if *mutability == almide_ir::Mutability::Var {
+                    // Mutable variable: emit AllocVar + StoreVar
+                    let dty = types::from_ty(&value.ty);
+                    let slot = self.emit(ops, dty.clone(), OpKind::AllocVar { init: val, ty: dty });
+                    self.mutable_slots.insert(*var, slot);
+                    self.var_map.insert(*var, slot); // slot is the "latest" reference
+                } else {
+                    self.var_map.insert(*var, val);
+                }
             }
             IrStmtKind::Assign { var, value, .. } => {
                 let val = self.lower_expr_into(value, ops);
-                self.var_map.insert(*var, val);
+                if let Some(slot) = self.mutable_slots.get(var).copied() {
+                    // Mutable: store to existing slot
+                    self.emit(ops, DialectType::Unit, OpKind::StoreVar { slot, value: val });
+                } else {
+                    self.var_map.insert(*var, val);
+                }
             }
             IrStmtKind::Expr { expr } => {
                 self.lower_expr_into(expr, ops);

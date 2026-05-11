@@ -405,6 +405,31 @@ pub mod codegen {
                     }
                 }
 
+                OpKind::AllocVar { init, ty } => {
+                    if let Some(llvm_ty) = self.dialect_to_basic_type(ty) {
+                        let alloca = self.builder.build_alloca(llvm_ty, &format!("var_{}", result_id.0)).unwrap();
+                        if let Some(init_val) = self.values.get(init) {
+                            self.builder.build_store(alloca, *init_val).unwrap();
+                        }
+                        // Store the alloca pointer as the value for this slot
+                        self.allocas.insert(result_id, alloca);
+                        self.values.insert(result_id, alloca.into());
+                    }
+                }
+                OpKind::LoadVar { slot } => {
+                    if let Some(alloca) = self.allocas.get(slot).copied() {
+                        let ty = alloca.get_type();
+                        let pointee = self.context.i64_type(); // TODO: infer from DialectType
+                        let loaded = self.builder.build_load(pointee, alloca, &format!("load_{}", result_id.0)).unwrap();
+                        self.values.insert(result_id, loaded);
+                    }
+                }
+                OpKind::StoreVar { slot, value } => {
+                    if let (Some(alloca), Some(val)) = (self.allocas.get(slot).copied(), self.values.get(value)) {
+                        self.builder.build_store(alloca, *val).unwrap();
+                    }
+                }
+
                 OpKind::WhileOp { cond_region, body } => {
                     let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
                     let cond_bb = self.context.append_basic_block(function, "while.cond");

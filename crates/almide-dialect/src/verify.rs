@@ -67,7 +67,8 @@ fn verify_block(
 
         // Recursively verify nested regions
         match &op.kind {
-            OpKind::ComputedCallOp { .. } => {}
+            OpKind::ComputedCallOp { .. } | OpKind::AllocVar { .. }
+            | OpKind::LoadVar { .. } | OpKind::StoreVar { .. } => {}
             OpKind::IfOp { then_region, else_region, .. } => {
                 for b in then_region { verify_block(b, ctx, defined, errors); }
                 for b in else_region { verify_block(b, ctx, defined, errors); }

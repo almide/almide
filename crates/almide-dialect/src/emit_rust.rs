@@ -364,6 +364,16 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
             out.push_str(&format!("{}let {} = None;\n", pad, result_name));
         }
 
+        OpKind::AllocVar { init, .. } => {
+            out.push_str(&format!("{}let mut {} = {};\n", pad, result_name, names.get(*init)));
+        }
+        OpKind::LoadVar { slot } => {
+            out.push_str(&format!("{}let {} = {}.clone();\n", pad, result_name, names.get(*slot)));
+        }
+        OpKind::StoreVar { slot, value } => {
+            out.push_str(&format!("{}{} = {};\n", pad, names.get(*slot), names.get(*value)));
+        }
+
         OpKind::MatchOp { subject, arms } => {
             out.push_str(&format!("{}let {} = match {} {{\n", pad, result_name, names.get(*subject)));
             for arm in arms {
