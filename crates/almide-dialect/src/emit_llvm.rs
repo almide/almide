@@ -298,9 +298,8 @@ pub mod codegen {
                     }
                 }
                 "list.sum" => {
-                    // Sum all i64 elements: loop from 0 to len, accumulate
-                    if let Some(list_ptr) = args.first() {
-                        let lp = list_ptr.into_pointer_value();
+                    if let Some(BasicValueEnum::PointerValue(lp)) = args.first().cloned() {
+                        let lp = lp;
                         let len = self.builder.build_load(i64_type, lp, "len").unwrap().into_int_value();
 
                         // Alloca for accumulator and index
@@ -990,8 +989,8 @@ pub mod codegen {
                 }
 
                 OpKind::IfOp { cond, then_region, else_region } => {
-                    if let Some(cond_val) = self.values.get(cond) {
-                        let cond_int = cond_val.into_int_value();
+                    if let Some(cond_val) = self.values.get(cond).cloned() {
+                        let cond_int = if cond_val.is_int_value() { cond_val.into_int_value() } else { self.context.bool_type().const_int(0, false) };
                         let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
                         let then_bb = self.context.append_basic_block(function, "then");
                         let else_bb = self.context.append_basic_block(function, "else");
@@ -1154,8 +1153,9 @@ pub mod codegen {
                                     for (fname, fval_id) in fields {
                                         if let Some(idx) = field_names.iter().position(|n| n == fname.as_str()) {
                                             if let Some(fval) = self.values.get(fval_id) {
-                                                let field_ptr = self.builder.build_struct_gep(struct_ty, ptr_val, idx as u32, &format!("field_{}", fname)).unwrap();
-                                                self.builder.build_store(field_ptr, *fval).unwrap();
+                                                if let Ok(field_ptr) = self.builder.build_struct_gep(struct_ty, ptr_val, idx as u32, &format!("field_{}", fname)) {
+                                                    let _ = self.builder.build_store(field_ptr, *fval);
+                                                }
                                             }
                                         }
                                     }
