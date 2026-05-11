@@ -220,6 +220,280 @@ pub mod codegen {
             func
         }
 
+        /// Emit inline LLVM for stdlib operations (list.*, string.*).
+        fn emit_stdlib_call(&mut self, result_id: ValueId, func: &str, args: &[BasicValueEnum<'ctx>], result_ty: &DialectType) {
+            let i64_type = self.context.i64_type();
+            let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+
+            match func {
+                "list.len" => {
+                    // Load length from list ptr (first i64)
+                    if let Some(list_ptr) = args.first() {
+                        let len = self.builder.build_load(i64_type, list_ptr.into_pointer_value(), "list_len").unwrap();
+                        self.values.insert(result_id, len);
+                    }
+                }
+                "list.sum" => {
+                    // Sum all i64 elements: loop from 0 to len, accumulate
+                    if let Some(list_ptr) = args.first() {
+                        let lp = list_ptr.into_pointer_value();
+                        let len = self.builder.build_load(i64_type, lp, "len").unwrap().into_int_value();
+
+                        // Alloca for accumulator and index
+                        let acc_alloca = self.builder.build_alloca(i64_type, "sum_acc").unwrap();
+                        let idx_alloca = self.builder.build_alloca(i64_type, "sum_idx").unwrap();
+                        self.builder.build_store(acc_alloca, i64_type.const_int(0, false)).unwrap();
+                        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
+
+                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                        let cond_bb = self.context.append_basic_block(function, "sum_cond");
+                        let body_bb = self.context.append_basic_block(function, "sum_body");
+                        let exit_bb = self.context.append_basic_block(function, "sum_exit");
+
+                        self.builder.build_unconditional_branch(cond_bb).unwrap();
+                        self.builder.position_at_end(cond_bb);
+                        let idx = self.builder.build_load(i64_type, idx_alloca, "i").unwrap().into_int_value();
+                        let cmp = self.builder.build_int_compare(IntPredicate::SLT, idx, len, "cmp").unwrap();
+                        self.builder.build_conditional_branch(cmp, body_bb, exit_bb).unwrap();
+
+                        self.builder.position_at_end(body_bb);
+                        let offset = self.builder.build_int_add(self.builder.build_int_mul(idx, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "off").unwrap();
+                        let elem_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), lp, &[offset], "ep").unwrap() };
+                        let elem = self.builder.build_load(i64_type, elem_ptr, "elem").unwrap().into_int_value();
+                        let acc = self.builder.build_load(i64_type, acc_alloca, "acc").unwrap().into_int_value();
+                        let new_acc = self.builder.build_int_add(acc, elem, "new_acc").unwrap();
+                        self.builder.build_store(acc_alloca, new_acc).unwrap();
+                        let new_idx = self.builder.build_int_add(idx, i64_type.const_int(1, false), "new_i").unwrap();
+                        self.builder.build_store(idx_alloca, new_idx).unwrap();
+                        self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                        self.builder.position_at_end(exit_bb);
+                        let result = self.builder.build_load(i64_type, acc_alloca, "sum_result").unwrap();
+                        self.values.insert(result_id, result);
+                    }
+                }
+                "list.map" => {
+                    // map(list, closure) → new list with closure applied to each element
+                    if args.len() >= 2 {
+                        let lp = args[0].into_pointer_value();
+                        let closure = args[1].into_struct_value();
+                        let fn_ptr = self.builder.build_extract_value(closure, 0, "map_fn").unwrap().into_pointer_value();
+                        let env_ptr = self.builder.build_extract_value(closure, 1, "map_env").unwrap();
+
+                        let len = self.builder.build_load(i64_type, lp, "len").unwrap().into_int_value();
+                        let malloc = *self.functions.get("malloc").unwrap();
+
+                        // Allocate result list
+                        let total = self.builder.build_int_add(self.builder.build_int_mul(len, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "total").unwrap();
+                        let res_call = self.builder.build_call(malloc, &[total.into()], "map_res").unwrap();
+                        let res_ptr = if let inkwell::values::ValueKind::Basic(v) = res_call.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
+                        self.builder.build_store(res_ptr, len).unwrap();
+
+                        // Loop
+                        let idx_alloca = self.builder.build_alloca(i64_type, "map_i").unwrap();
+                        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
+                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                        let cond_bb = self.context.append_basic_block(function, "map_cond");
+                        let body_bb = self.context.append_basic_block(function, "map_body");
+                        let exit_bb = self.context.append_basic_block(function, "map_exit");
+
+                        self.builder.build_unconditional_branch(cond_bb).unwrap();
+                        self.builder.position_at_end(cond_bb);
+                        let idx = self.builder.build_load(i64_type, idx_alloca, "i").unwrap().into_int_value();
+                        let cmp = self.builder.build_int_compare(IntPredicate::SLT, idx, len, "cmp").unwrap();
+                        self.builder.build_conditional_branch(cmp, body_bb, exit_bb).unwrap();
+
+                        self.builder.position_at_end(body_bb);
+                        let offset = self.builder.build_int_add(self.builder.build_int_mul(idx, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "off").unwrap();
+                        let src_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), lp, &[offset], "sp").unwrap() };
+                        let elem = self.builder.build_load(i64_type, src_ptr, "elem").unwrap();
+
+                        // Call closure: fn_ptr(env_ptr, elem)
+                        let call_ty = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+                        let mapped = self.builder.build_indirect_call(call_ty, fn_ptr, &[env_ptr.into(), elem.into()], "mapped").unwrap();
+                        let mapped_val = if let inkwell::values::ValueKind::Basic(v) = mapped.try_as_basic_value() { v } else { i64_type.const_int(0, false).into() };
+
+                        let dst_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), res_ptr, &[offset], "dp").unwrap() };
+                        self.builder.build_store(dst_ptr, mapped_val).unwrap();
+
+                        let new_idx = self.builder.build_int_add(idx, i64_type.const_int(1, false), "").unwrap();
+                        self.builder.build_store(idx_alloca, new_idx).unwrap();
+                        self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                        self.builder.position_at_end(exit_bb);
+                        self.values.insert(result_id, res_ptr.into());
+                    }
+                }
+                "list.filter" => {
+                    // filter(list, closure) → new list with elements where closure returns true
+                    if args.len() >= 2 {
+                        let lp = args[0].into_pointer_value();
+                        let closure = args[1].into_struct_value();
+                        let fn_ptr = self.builder.build_extract_value(closure, 0, "filt_fn").unwrap().into_pointer_value();
+                        let env_ptr = self.builder.build_extract_value(closure, 1, "filt_env").unwrap();
+
+                        let len = self.builder.build_load(i64_type, lp, "len").unwrap().into_int_value();
+                        let malloc = *self.functions.get("malloc").unwrap();
+
+                        // Allocate max-size result list
+                        let total = self.builder.build_int_add(self.builder.build_int_mul(len, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "total").unwrap();
+                        let res_call = self.builder.build_call(malloc, &[total.into()], "filt_res").unwrap();
+                        let res_ptr = if let inkwell::values::ValueKind::Basic(v) = res_call.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
+
+                        let idx_alloca = self.builder.build_alloca(i64_type, "filt_i").unwrap();
+                        let out_idx_alloca = self.builder.build_alloca(i64_type, "filt_out").unwrap();
+                        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
+                        self.builder.build_store(out_idx_alloca, i64_type.const_int(0, false)).unwrap();
+
+                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                        let cond_bb = self.context.append_basic_block(function, "filt_cond");
+                        let body_bb = self.context.append_basic_block(function, "filt_body");
+                        let keep_bb = self.context.append_basic_block(function, "filt_keep");
+                        let next_bb = self.context.append_basic_block(function, "filt_next");
+                        let exit_bb = self.context.append_basic_block(function, "filt_exit");
+
+                        self.builder.build_unconditional_branch(cond_bb).unwrap();
+                        self.builder.position_at_end(cond_bb);
+                        let idx = self.builder.build_load(i64_type, idx_alloca, "i").unwrap().into_int_value();
+                        let cmp = self.builder.build_int_compare(IntPredicate::SLT, idx, len, "cmp").unwrap();
+                        self.builder.build_conditional_branch(cmp, body_bb, exit_bb).unwrap();
+
+                        self.builder.position_at_end(body_bb);
+                        let offset = self.builder.build_int_add(self.builder.build_int_mul(idx, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "off").unwrap();
+                        let src_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), lp, &[offset], "sp").unwrap() };
+                        let elem = self.builder.build_load(i64_type, src_ptr, "elem").unwrap();
+
+                        // Call predicate: fn_ptr(env_ptr, elem) → bool (i1)
+                        let bool_type = self.context.bool_type();
+                        let pred_ty = bool_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+                        let pred_result = self.builder.build_indirect_call(pred_ty, fn_ptr, &[env_ptr.into(), elem.into()], "pred").unwrap();
+                        let keep = if let inkwell::values::ValueKind::Basic(v) = pred_result.try_as_basic_value() { v.into_int_value() } else { bool_type.const_int(0, false) };
+                        self.builder.build_conditional_branch(keep, keep_bb, next_bb).unwrap();
+
+                        self.builder.position_at_end(keep_bb);
+                        let out_idx = self.builder.build_load(i64_type, out_idx_alloca, "out_i").unwrap().into_int_value();
+                        let out_offset = self.builder.build_int_add(self.builder.build_int_mul(out_idx, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "out_off").unwrap();
+                        let dst_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), res_ptr, &[out_offset], "dp").unwrap() };
+                        self.builder.build_store(dst_ptr, elem).unwrap();
+                        let new_out = self.builder.build_int_add(out_idx, i64_type.const_int(1, false), "").unwrap();
+                        self.builder.build_store(out_idx_alloca, new_out).unwrap();
+                        self.builder.build_unconditional_branch(next_bb).unwrap();
+
+                        self.builder.position_at_end(next_bb);
+                        let new_idx = self.builder.build_int_add(idx, i64_type.const_int(1, false), "").unwrap();
+                        self.builder.build_store(idx_alloca, new_idx).unwrap();
+                        self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                        self.builder.position_at_end(exit_bb);
+                        let final_len = self.builder.build_load(i64_type, out_idx_alloca, "final_len").unwrap();
+                        self.builder.build_store(res_ptr, final_len).unwrap();
+                        self.values.insert(result_id, res_ptr.into());
+                    }
+                }
+                "list.fold" => {
+                    // fold(list, init, closure) → accumulator
+                    if args.len() >= 3 {
+                        let lp = args[0].into_pointer_value();
+                        let init = args[1];
+                        let closure = args[2].into_struct_value();
+                        let fn_ptr = self.builder.build_extract_value(closure, 0, "fold_fn").unwrap().into_pointer_value();
+                        let env_ptr = self.builder.build_extract_value(closure, 1, "fold_env").unwrap();
+
+                        let len = self.builder.build_load(i64_type, lp, "len").unwrap().into_int_value();
+                        let acc_alloca = self.builder.build_alloca(i64_type, "fold_acc").unwrap();
+                        let idx_alloca = self.builder.build_alloca(i64_type, "fold_i").unwrap();
+                        self.builder.build_store(acc_alloca, init).unwrap();
+                        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
+
+                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                        let cond_bb = self.context.append_basic_block(function, "fold_cond");
+                        let body_bb = self.context.append_basic_block(function, "fold_body");
+                        let exit_bb = self.context.append_basic_block(function, "fold_exit");
+
+                        self.builder.build_unconditional_branch(cond_bb).unwrap();
+                        self.builder.position_at_end(cond_bb);
+                        let idx = self.builder.build_load(i64_type, idx_alloca, "i").unwrap().into_int_value();
+                        let cmp = self.builder.build_int_compare(IntPredicate::SLT, idx, len, "cmp").unwrap();
+                        self.builder.build_conditional_branch(cmp, body_bb, exit_bb).unwrap();
+
+                        self.builder.position_at_end(body_bb);
+                        let offset = self.builder.build_int_add(self.builder.build_int_mul(idx, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "off").unwrap();
+                        let src_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), lp, &[offset], "sp").unwrap() };
+                        let elem = self.builder.build_load(i64_type, src_ptr, "elem").unwrap();
+                        let acc = self.builder.build_load(i64_type, acc_alloca, "acc").unwrap();
+
+                        // Call closure: fn_ptr(env_ptr, acc, elem)
+                        let fold_ty = i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
+                        let folded = self.builder.build_indirect_call(fold_ty, fn_ptr, &[env_ptr.into(), acc.into(), elem.into()], "folded").unwrap();
+                        let new_acc = if let inkwell::values::ValueKind::Basic(v) = folded.try_as_basic_value() { v } else { i64_type.const_int(0, false).into() };
+                        self.builder.build_store(acc_alloca, new_acc).unwrap();
+
+                        let new_idx = self.builder.build_int_add(idx, i64_type.const_int(1, false), "").unwrap();
+                        self.builder.build_store(idx_alloca, new_idx).unwrap();
+                        self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                        self.builder.position_at_end(exit_bb);
+                        let result = self.builder.build_load(i64_type, acc_alloca, "fold_result").unwrap();
+                        self.values.insert(result_id, result);
+                    }
+                }
+                "string.to_upper" => {
+                    // toupper each char: malloc + loop
+                    if let Some(str_val) = args.first() {
+                        let src = str_val.into_pointer_value();
+                        let strlen_fn = *self.functions.get("strlen").unwrap();
+                        let malloc = *self.functions.get("malloc").unwrap();
+                        let len_call = self.builder.build_call(strlen_fn, &[src.into()], "slen").unwrap();
+                        let len = if let inkwell::values::ValueKind::Basic(v) = len_call.try_as_basic_value() { v.into_int_value() } else { i64_type.const_int(0, false) };
+                        let len_plus_1 = self.builder.build_int_add(len, i64_type.const_int(1, false), "").unwrap();
+                        let buf_call = self.builder.build_call(malloc, &[len_plus_1.into()], "upper_buf").unwrap();
+                        let buf = if let inkwell::values::ValueKind::Basic(v) = buf_call.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
+
+                        // Declare toupper
+                        let i32_type = self.context.i32_type();
+                        let toupper_ty = i32_type.fn_type(&[i32_type.into()], false);
+                        let toupper = self.module.add_function("toupper", toupper_ty, None);
+
+                        let idx_alloca = self.builder.build_alloca(i64_type, "up_i").unwrap();
+                        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
+
+                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                        let cond_bb = self.context.append_basic_block(function, "up_cond");
+                        let body_bb = self.context.append_basic_block(function, "up_body");
+                        let exit_bb = self.context.append_basic_block(function, "up_exit");
+
+                        self.builder.build_unconditional_branch(cond_bb).unwrap();
+                        self.builder.position_at_end(cond_bb);
+                        let idx = self.builder.build_load(i64_type, idx_alloca, "i").unwrap().into_int_value();
+                        let cmp = self.builder.build_int_compare(IntPredicate::SLT, idx, len, "cmp").unwrap();
+                        self.builder.build_conditional_branch(cmp, body_bb, exit_bb).unwrap();
+
+                        self.builder.position_at_end(body_bb);
+                        let src_byte_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), src, &[idx], "sbp").unwrap() };
+                        let byte = self.builder.build_load(self.context.i8_type(), src_byte_ptr, "byte").unwrap();
+                        let byte_i32 = self.builder.build_int_z_extend(byte.into_int_value(), i32_type, "ext").unwrap();
+                        let upper_call = self.builder.build_call(toupper, &[byte_i32.into()], "upper").unwrap();
+                        let upper_byte = if let inkwell::values::ValueKind::Basic(v) = upper_call.try_as_basic_value() { v.into_int_value() } else { i32_type.const_int(0, false) };
+                        let upper_i8 = self.builder.build_int_truncate(upper_byte, self.context.i8_type(), "trunc").unwrap();
+                        let dst_byte_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), buf, &[idx], "dbp").unwrap() };
+                        self.builder.build_store(dst_byte_ptr, upper_i8).unwrap();
+                        let new_idx = self.builder.build_int_add(idx, i64_type.const_int(1, false), "").unwrap();
+                        self.builder.build_store(idx_alloca, new_idx).unwrap();
+                        self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                        self.builder.position_at_end(exit_bb);
+                        // Null-terminate
+                        let end_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), buf, &[len], "end").unwrap() };
+                        self.builder.build_store(end_ptr, self.context.i8_type().const_int(0, false)).unwrap();
+                        self.values.insert(result_id, buf.into());
+                    }
+                }
+                _ => {
+                    // Unknown stdlib call — skip
+                }
+            }
+        }
+
         fn declare_printf(&mut self) {
             let i32_type = self.context.i32_type();
             let i64_type = self.context.i64_type();
@@ -270,7 +544,7 @@ pub mod codegen {
                         None
                     }
                 }
-                DialectType::Result(_, _) | DialectType::Option(_) => {
+                DialectType::Result(_, _) | DialectType::Option(_) | DialectType::List(_) => {
                     Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
                 }
                 DialectType::Fn { .. } | DialectType::Closure { .. } => {
@@ -297,7 +571,7 @@ pub mod codegen {
                         None
                     }
                 }
-                DialectType::Result(_, _) | DialectType::Option(_) => {
+                DialectType::Result(_, _) | DialectType::Option(_) | DialectType::List(_) => {
                     Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
                 }
                 DialectType::Fn { .. } | DialectType::Closure { .. } => {
@@ -588,6 +862,13 @@ pub mod codegen {
                                 self.values.insert(result_id, bv);
                             }
                         }
+                    } else if callee_str.starts_with("list.") || callee_str.starts_with("string.") {
+                        // Stdlib call — emit inline LLVM for list/string operations
+                        let func_name = callee_str.split("__").next().unwrap_or(callee_str); // strip monomorph
+                        let arg_vals: Vec<BasicValueEnum<'ctx>> = args.iter()
+                            .filter_map(|a| self.values.get(a).cloned())
+                            .collect();
+                        self.emit_stdlib_call(result_id, func_name, &arg_vals, &op.result_ty);
                     } else if let Some(func) = self.functions.get(callee_str).copied() {
                         let arg_vals: Vec<BasicMetadataValueEnum> = args.iter()
                             .filter_map(|a| self.values.get(a).map(|v| (*v).into()))
@@ -695,6 +976,31 @@ pub mod codegen {
                             self.builder.build_store(tag_ptr, self.context.i32_type().const_int(1, false)).unwrap();
                             self.values.insert(result_id, ptr.into());
                         }
+                    }
+                }
+
+                OpKind::ListOp { elements } => {
+                    // List layout: [i64 len][i64 elem0][i64 elem1]...
+                    let i64_type = self.context.i64_type();
+                    let malloc = self.functions.get("malloc").copied().unwrap();
+                    let n = elements.len() as u64;
+                    let total_bytes = 8 + n * 8; // 8 for len + 8 per element
+                    let buf_call = self.builder.build_call(malloc, &[i64_type.const_int(total_bytes, false).into()], "list_ptr").unwrap();
+                    if let inkwell::values::ValueKind::Basic(ptr_val) = buf_call.try_as_basic_value() {
+                        let ptr = ptr_val.into_pointer_value();
+                        // Store length
+                        self.builder.build_store(ptr, i64_type.const_int(n, false)).unwrap();
+                        // Store elements
+                        for (i, elem_id) in elements.iter().enumerate() {
+                            if let Some(elem_val) = self.values.get(elem_id) {
+                                let offset = (8 + i * 8) as u64;
+                                let elem_ptr = unsafe {
+                                    self.builder.build_gep(self.context.i8_type(), ptr, &[i64_type.const_int(offset, false)], &format!("elem_{}", i)).unwrap()
+                                };
+                                self.builder.build_store(elem_ptr, *elem_val).unwrap();
+                            }
+                        }
+                        self.values.insert(result_id, ptr.into());
                     }
                 }
 
