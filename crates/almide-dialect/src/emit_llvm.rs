@@ -75,6 +75,7 @@ pub mod codegen {
             allocas: std::collections::HashMap::new(),
             struct_types: std::collections::HashMap::new(),
             struct_fields: std::collections::HashMap::new(),
+            variant_cases: std::collections::HashMap::new(),
         };
 
         // Register struct types from type declarations
@@ -90,6 +91,29 @@ pub mod codegen {
                     td.name.as_str().to_string(),
                     fields.iter().map(|(n, _)| n.as_str().to_string()).collect(),
                 );
+            }
+        }
+
+        // Register variant types
+        for td in &module.type_decls {
+            if let crate::ops::TypeDeclKind::Variant { cases } = &td.kind {
+                // Compute max payload size (in bytes, assuming 8 bytes per field)
+                let max_payload = cases.iter().map(|c| c.payload.len() * 8).max().unwrap_or(0);
+                // Variant struct: { i32 tag, [max_payload x i8] }
+                let i32_ty = context.i32_type();
+                let payload_ty = context.i8_type().array_type(max_payload as u32);
+                let variant_ty = context.opaque_struct_type(td.name.as_str());
+                variant_ty.set_body(&[i32_ty.into(), payload_ty.into()], false);
+                compiler.struct_types.insert(td.name.as_str().to_string(), variant_ty);
+                // Store case names → tag indices + payload types
+                let case_names: Vec<String> = cases.iter().map(|c| c.name.as_str().to_string()).collect();
+                compiler.struct_fields.insert(td.name.as_str().to_string(), case_names);
+                for (i, case) in cases.iter().enumerate() {
+                    compiler.variant_cases.insert(
+                        case.name.as_str().to_string(),
+                        (td.name.as_str().to_string(), i as u32, case.payload.clone()),
+                    );
+                }
             }
         }
 
@@ -115,8 +139,10 @@ pub mod codegen {
         allocas: std::collections::HashMap<ValueId, inkwell::values::PointerValue<'ctx>>,
         /// Named type → LLVM struct type mapping.
         struct_types: std::collections::HashMap<String, inkwell::types::StructType<'ctx>>,
-        /// Named type → field names (ordered).
+        /// Named type → field names (ordered). For records: field names. For variants: case names.
         struct_fields: std::collections::HashMap<String, Vec<String>>,
+        /// Variant case name → (parent type name, tag index, payload types)
+        variant_cases: std::collections::HashMap<String, (String, u32, Vec<DialectType>)>,
     }
 
     impl<'a, 'ctx: 'a> LLVMCompiler<'a, 'ctx> {
@@ -422,7 +448,7 @@ pub mod codegen {
                         if let Some(arg) = args.first().and_then(|a| self.values.get(a)) {
                             let fmt = match arg {
                                 BasicValueEnum::IntValue(_) => self.builder.build_global_string_ptr("%lld\n", "fmt_int").unwrap(),
-                                BasicValueEnum::FloatValue(_) => self.builder.build_global_string_ptr("%.17g\n", "fmt_float").unwrap(),
+                                BasicValueEnum::FloatValue(_) => self.builder.build_global_string_ptr("%.15g\n", "fmt_float").unwrap(),
                                 _ => self.builder.build_global_string_ptr("%s\n", "fmt_str").unwrap(),
                             };
                             if let Some(printf) = self.functions.get("printf") {
@@ -431,6 +457,33 @@ pub mod codegen {
                                     &[fmt.as_pointer_value().into(), (*arg).into()],
                                     "printf_call",
                                 ).unwrap();
+                            }
+                        }
+                    } else if let Some((parent, tag, payload_tys)) = self.variant_cases.get(callee_str).cloned() {
+                        // Variant constructor: malloc struct, set tag, store payload fields
+                        if let Some(struct_ty) = self.struct_types.get(&parent).copied() {
+                            let size = struct_ty.size_of().unwrap();
+                            let malloc = self.functions.get("malloc").copied().unwrap();
+                            let ptr_call = self.builder.build_call(malloc, &[size.into()], "variant_ptr").unwrap();
+                            if let inkwell::values::ValueKind::Basic(ptr_val) = ptr_call.try_as_basic_value() {
+                                let ptr = ptr_val.into_pointer_value();
+                                // Store tag
+                                let tag_ptr = self.builder.build_struct_gep(struct_ty, ptr, 0, "tag_ptr").unwrap();
+                                self.builder.build_store(tag_ptr, self.context.i32_type().const_int(tag as u64, false)).unwrap();
+                                // Store payload fields into the payload area
+                                if !payload_tys.is_empty() {
+                                    let payload_ptr = self.builder.build_struct_gep(struct_ty, ptr, 1, "payload_ptr").unwrap();
+                                    for (i, arg_id) in args.iter().enumerate() {
+                                        if let Some(arg_val) = self.values.get(arg_id) {
+                                            let offset = (i * 8) as u64;
+                                            let field_ptr = unsafe {
+                                                self.builder.build_gep(self.context.i8_type(), payload_ptr, &[self.context.i64_type().const_int(offset, false)], &format!("pay_{}", i)).unwrap()
+                                            };
+                                            self.builder.build_store(field_ptr, *arg_val).unwrap();
+                                        }
+                                    }
+                                }
+                                self.values.insert(result_id, ptr.into());
                             }
                         }
                     } else if callee_str == "int.to_string" || callee_str == "float.to_string" {
@@ -554,26 +607,76 @@ pub mod codegen {
                             .map(|(i, _)| self.context.append_basic_block(function, &format!("match.arm{}", i)))
                             .collect();
 
-                        // Build switch: literal patterns → case blocks, wildcard → default
+                        // Determine if this is a variant match (subject is ptr to tagged union)
+                        // or an integer match.
+                        let is_variant_match = arms.iter().any(|a| matches!(&a.pattern, crate::ops::MatchPattern::Variant { .. }));
+
+                        let switch_val = if is_variant_match {
+                            // Load tag from variant struct: GEP + load i32
+                            let ptr = subj_val.into_pointer_value();
+                            // Find the variant type
+                            let variant_ty = self.struct_types.values().next().copied(); // TODO: track per-value type
+                            if let Some(sty) = variant_ty {
+                                let tag_ptr = self.builder.build_struct_gep(sty, ptr, 0, "match_tag_ptr").unwrap();
+                                self.builder.build_load(self.context.i32_type(), tag_ptr, "match_tag").unwrap().into_int_value()
+                            } else {
+                                self.context.i32_type().const_int(0, false)
+                            }
+                        } else {
+                            subj_val.into_int_value()
+                        };
+
                         let mut cases: Vec<(inkwell::values::IntValue<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)> = Vec::new();
-                        let mut default_bb = merge_bb;
+                        // Last arm is always default (wildcard or last variant)
+                        let default_bb = *arm_bbs.last().unwrap_or(&merge_bb);
                         for (i, arm) in arms.iter().enumerate() {
+                            // Skip the default arm (last one) — it's the switch default target
+                            if arm_bbs[i] == default_bb && !matches!(&arm.pattern, crate::ops::MatchPattern::LitInt(_) | crate::ops::MatchPattern::Variant { .. }) {
+                                continue;
+                            }
                             match &arm.pattern {
                                 crate::ops::MatchPattern::LitInt(v) => {
-                                    cases.push((self.context.i64_type().const_int(*v as u64, true), arm_bbs[i]));
+                                    let const_ty = if is_variant_match { self.context.i32_type() } else { self.context.i64_type() };
+                                    cases.push((const_ty.const_int(*v as u64, true), arm_bbs[i]));
                                 }
-                                crate::ops::MatchPattern::Wildcard | crate::ops::MatchPattern::Binding(_) => {
-                                    default_bb = arm_bbs[i];
+                                crate::ops::MatchPattern::Variant { tag, .. } => {
+                                    if let Some((_, tag_idx, _)) = self.variant_cases.get(tag.as_str()) {
+                                        cases.push((self.context.i32_type().const_int(*tag_idx as u64, false), arm_bbs[i]));
+                                    }
                                 }
-                                _ => { default_bb = arm_bbs[i]; }
+                                _ => {} // wildcard/binding handled as default
                             }
                         }
-                        self.builder.build_switch(subj_val.into_int_value(), default_bb, &cases).unwrap();
+                        self.builder.build_switch(switch_val, default_bb, &cases).unwrap();
 
                         // Compile each arm body
                         let mut arm_results: Vec<(BasicValueEnum<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)> = Vec::new();
                         for (i, arm) in arms.iter().enumerate() {
                             self.builder.position_at_end(arm_bbs[i]);
+
+                            // For variant patterns, extract payload bindings
+                            if let crate::ops::MatchPattern::Variant { tag, bindings } = &arm.pattern {
+                                if let Some((parent, _, payload_tys)) = self.variant_cases.get(tag.as_str()).cloned() {
+                                    if let Some(sty) = self.struct_types.get(&parent).copied() {
+                                        let ptr = subj_val.into_pointer_value();
+                                        let payload_ptr = self.builder.build_struct_gep(sty, ptr, 1, "arm_payload").unwrap();
+                                        for (j, binding_id) in bindings.iter().enumerate() {
+                                            let offset = (j * 8) as u64;
+                                            let field_ptr = unsafe {
+                                                self.builder.build_gep(self.context.i8_type(), payload_ptr, &[self.context.i64_type().const_int(offset, false)], &format!("bind_{}", j)).unwrap()
+                                            };
+                                            let field_ty = if j < payload_tys.len() {
+                                                self.dialect_to_basic_type(&payload_tys[j]).unwrap_or(self.context.i64_type().into())
+                                            } else {
+                                                self.context.i64_type().into()
+                                            };
+                                            let loaded = self.builder.build_load(field_ty, field_ptr, &format!("payload_{}", j)).unwrap();
+                                            self.values.insert(*binding_id, loaded);
+                                        }
+                                    }
+                                }
+                            }
+
                             let mut arm_val = None;
                             for block in &arm.body {
                                 for op in &block.ops { self.compile_op(op); }
