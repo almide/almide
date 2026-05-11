@@ -155,6 +155,7 @@ jobs:
 
       - name: Native equiv tests
         run: |
+          set +e
           ALMIDE=./target/release/almide
           pass=0; fail=0
           for f in tests/native_equiv/*.almd; do
