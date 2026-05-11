@@ -115,16 +115,24 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
             .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
         println!("{}", json);
     } else {
-        let t = match target {
-            "rust" | "rs" => codegen::pass::Target::Rust,
-            "ts" | "typescript" => codegen::pass::Target::TypeScript,
-            other => { eprintln!("Unknown target: {}. Use rust, ts.", other); std::process::exit(1); }
-        };
         let ir = ir_program.as_mut().expect("IR required for codegen");
-        let opts = codegen::CodegenOptions { repr_c };
-        match codegen::codegen_with(ir, t, &opts) {
-            codegen::CodegenOutput::Source(code) => print!("{}", code),
-            codegen::CodegenOutput::Binary(_) => unreachable!(),
+        if target == "dialect" {
+            // Dialect pipeline: IR → nanopass → dialect → Rust with runtime
+            match codegen::codegen_dialect(ir) {
+                codegen::CodegenOutput::Source(code) => print!("{}", code),
+                codegen::CodegenOutput::Binary(_) => unreachable!(),
+            }
+        } else {
+            let t = match target {
+                "rust" | "rs" => codegen::pass::Target::Rust,
+                "ts" | "typescript" => codegen::pass::Target::TypeScript,
+                other => { eprintln!("Unknown target: {}. Use rust, ts, dialect.", other); std::process::exit(1); }
+            };
+            let opts = codegen::CodegenOptions { repr_c };
+            match codegen::codegen_with(ir, t, &opts) {
+                codegen::CodegenOutput::Source(code) => print!("{}", code),
+                codegen::CodegenOutput::Binary(_) => unreachable!(),
+            }
         }
     }
 }

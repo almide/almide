@@ -33,9 +33,9 @@ impl NameMap {
 pub fn emit_module(module: &Module) -> String {
     let mut out = String::new();
 
-    // Prelude
-    out.push_str("#![allow(unused_variables, unused_mut, dead_code, unused_imports)]\n");
-    out.push_str("use std::collections::HashMap;\n\n");
+    // No prelude — runtime preamble is added by embed_rust_runtime() in codegen.
+    // When used standalone (--emit-dialect --target rust), the output won't compile
+    // without manually adding runtime. Use `--target dialect` for full output.
 
     // Type declarations
     for td in &module.type_decls {
