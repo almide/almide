@@ -101,13 +101,58 @@ pub fn collect_structural_bounds(env: &TypeEnv, generics: &Option<Vec<ast::Gener
     sb
 }
 
+/// Scalar type names that indicate a compile-time value parameter (not a protocol bound).
+pub const SCALAR_TYPE_NAMES: &[&str] = &[
+    "Int", "Float", "Bool", "String",
+    "Int8", "Int16", "Int32", "Int64",
+    "UInt8", "UInt16", "UInt32", "UInt64",
+    "Float32", "Float64",
+];
+
+/// Identify const (value) parameters in generic params.
+/// A param `N: Int` where `Int` is a scalar type (not a protocol) becomes a const param.
+/// Returns: param name → scalar Ty.
+pub fn collect_const_params(generics: &Option<Vec<ast::GenericParam>>) -> HashMap<Sym, Ty> {
+    let mut cp = HashMap::new();
+    let gs = match generics { Some(gs) => gs, None => return cp };
+    for g in gs {
+        if let Some(bounds) = &g.bounds {
+            // Single bound that is a scalar type name → const param
+            if bounds.len() == 1 && SCALAR_TYPE_NAMES.contains(&bounds[0].as_str()) {
+                let ty = match bounds[0].as_str() {
+                    "Int" | "Int64" => Ty::Int,
+                    "Float" | "Float64" => Ty::Float,
+                    "Bool" => Ty::Bool,
+                    "String" => Ty::String,
+                    "Int8" => Ty::Int8,
+                    "Int16" => Ty::Int16,
+                    "Int32" => Ty::Int32,
+                    "UInt8" => Ty::UInt8,
+                    "UInt16" => Ty::UInt16,
+                    "UInt32" => Ty::UInt32,
+                    "UInt64" => Ty::UInt64,
+                    "Float32" => Ty::Float32,
+                    _ => continue,
+                };
+                cp.insert(sym(&g.name), ty);
+            }
+        }
+    }
+    cp
+}
+
 /// Collect protocol bounds from generic params: TypeVar name → list of protocol names.
+/// Excludes const params (scalar type bounds like `N: Int`).
 pub fn collect_protocol_bounds(generics: &Option<Vec<ast::GenericParam>>) -> HashMap<Sym, Vec<Sym>> {
     let mut pb = HashMap::new();
     let gs = match generics { Some(gs) => gs, None => return pb };
     for g in gs {
         if let Some(bounds) = &g.bounds {
             if !bounds.is_empty() {
+                // Skip if this is a const param (single scalar type bound)
+                if bounds.len() == 1 && SCALAR_TYPE_NAMES.contains(&bounds[0].as_str()) {
+                    continue;
+                }
                 pb.insert(sym(&g.name), bounds.iter().map(|b| sym(b)).collect());
             }
         }
@@ -125,7 +170,14 @@ pub fn register_fn_sig(
     let gnames: Vec<Sym> = generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default();
     let sb = collect_structural_bounds(env, generics);
     let pb = collect_protocol_bounds(generics);
-    for gn in &gnames { env.types.insert(*gn, Ty::TypeVar(*gn)); }
+    let const_params = collect_const_params(generics);
+    for gn in &gnames {
+        if let Some(scalar_ty) = const_params.get(gn) {
+            env.types.insert(*gn, Ty::ConstParam { name: *gn, ty: Box::new(scalar_ty.clone()) });
+        } else {
+            env.types.insert(*gn, Ty::TypeVar(*gn));
+        }
+    }
     let ptys: Vec<(Sym, Ty)> = params.iter().map(|p| (sym(&p.name), resolve(env, &p.ty))).collect();
     let ret = resolve(env, return_type);
     for gn in &gnames { env.types.remove(gn); }

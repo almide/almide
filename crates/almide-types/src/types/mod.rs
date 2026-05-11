@@ -68,6 +68,12 @@ pub enum Ty {
     /// Bottom type — returned by functions that never return (process.exit, panic).
     /// Unifies with any type (subtype of all types).
     Never,
+    /// Compile-time constant value parameter (e.g., `N` in `Array[T, N]` where `N: Int`).
+    /// Carries both the value type and the concrete value (if resolved).
+    /// Before monomorphization: `ConstParam { name, ty }` (unresolved).
+    /// After monomorphization: `ConstValue { ty, value }` (resolved).
+    ConstParam { name: Sym, ty: Box<Ty> },
+    ConstValue { ty: Box<Ty>, value: i64 },
     /// Error recovery — unifies with everything to prevent cascade errors
     Unknown,
 }
@@ -214,6 +220,8 @@ impl Ty {
                 ms.join(" | ")
             }
             Ty::TypeVar(n) => n.to_string(),
+            Ty::ConstParam { name, ty } => format!("const {} : {}", name, ty.display()),
+            Ty::ConstValue { ty, value } => format!("{} (= {})", ty.display(), value),
             Ty::Never => "Never".into(),
             Ty::Unknown => "Unknown".into(),
         }
@@ -474,7 +482,9 @@ impl Ty {
             | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
             | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
             | Ty::Float32 | Ty::Float64
-            | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => vec![],
+            | Ty::TypeVar(_) | Ty::Never | Ty::Unknown
+            | Ty::ConstValue { .. } => vec![],
+            Ty::ConstParam { ty, .. } => vec![ty.as_ref()],
 
             // Parameterized types (List, Option, Result, Map, user-defined)
             Ty::Applied(_, args) => args.iter().collect(),
@@ -522,7 +532,8 @@ impl Ty {
         match self {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
             | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64
-            | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => self.clone(),
+            | Ty::TypeVar(_) | Ty::Never | Ty::Unknown | Ty::ConstValue { .. } => self.clone(),
+            Ty::ConstParam { name, ty } => Ty::ConstParam { name: *name, ty: Box::new(f(ty)) },
 
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
 
@@ -569,7 +580,8 @@ impl Ty {
         match self {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr
             | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64
-            | Ty::TypeVar(_) | Ty::Never | Ty::Unknown => self.clone(),
+            | Ty::TypeVar(_) | Ty::Never | Ty::Unknown | Ty::ConstValue { .. } => self.clone(),
+            Ty::ConstParam { name, ty } => Ty::ConstParam { name: *name, ty: Box::new(f(ty)) },
 
             Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
 

@@ -11,6 +11,15 @@ care about.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-05-11
+
+### Added
+
+- **LLVM native backend**: `almide build --target native` produces standalone executables via Inkwell + LLVM 22. C-equivalent performance (fib(40) 0.26s), 33KB binaries. Supports Int, Float, String, List, Map, Record, Variant, Result/Option, closures with capture, match (switch+phi), while+var (alloca+mem2reg), recursion (TCO), HOF. LLVM O2 optimization + host CPU targeting + fast-math flags.
+- **almide-dialect crate**: Pure-Rust MLIR dialect schema with SSA lowering, dump, Rust emitter, LLVM emitter, verifier. Dialect pipeline passes 7/7 equivalence tests against existing Rust codegen.
+- **Compile-time value parameters**: Mojo-style `fn f[N: Int]()` — scalar type bounds auto-detected as const params. Works end-to-end: `zeros[5]()`, `dot[3](a, b)`.
+- **Mojo parity assessment**: 16-axis weighted scoring at `docs/roadmap/active/mojo-parity-assessment.md`. Score: 38 → 47 (+24%).
+
 ## [0.16.0] — 2026-05-11
 
 ### Added

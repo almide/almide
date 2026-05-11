@@ -1,6 +1,6 @@
 use crate::{parse_file, canonicalize, codegen, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool, repr_c: bool) {
+pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_dialect: bool, no_check: bool, repr_c: bool) {
     let (mut program, source_text, _parse_errors) = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -21,7 +21,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     // Run checker if needed (always for emit_ir, otherwise when !no_check && !emit_ast)
-    let run_check = emit_ir || (!no_check && !emit_ast);
+    let run_check = emit_ir || emit_dialect || (!no_check && !emit_ast);
     let mut checker_opt: Option<check::Checker> = None;
     if run_check {
         let canon = canonicalize::canonicalize_program(
@@ -89,6 +89,27 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         almide::mono::monomorphize(ir);
     }
 
+    if emit_dialect {
+        let ir = ir_program.as_ref().expect("checker must have run for emit_dialect");
+        let module = almide_dialect::lower::lower_program(ir);
+        let errors = almide_dialect::verify::verify_module(&module);
+        if !errors.is_empty() {
+            for e in &errors {
+                eprintln!("dialect verify: {} (in {})", e.message, e.context);
+            }
+        }
+        if target == "rust" || target == "rs" {
+            print!("{}", almide_dialect::emit_rust::emit_module(&module));
+        } else if target == "llvm" {
+            #[cfg(feature = "llvm")]
+            { print!("{}", almide_dialect::emit_llvm::codegen::emit_llvm_ir(&module)); }
+            #[cfg(not(feature = "llvm"))]
+            { eprintln!("LLVM backend not enabled. Rebuild with: cargo build --features llvm"); std::process::exit(1); }
+        } else {
+            print!("{}", almide_dialect::dump::dump_module(&module));
+        }
+        return;
+    }
     if emit_ir {
         let ir = ir_program.expect("checker must have run for emit_ir");
         let json = serde_json::to_string_pretty(&ir)
@@ -99,16 +120,24 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
             .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
         println!("{}", json);
     } else {
-        let t = match target {
-            "rust" | "rs" => codegen::pass::Target::Rust,
-            "ts" | "typescript" => codegen::pass::Target::TypeScript,
-            other => { eprintln!("Unknown target: {}. Use rust, ts.", other); std::process::exit(1); }
-        };
         let ir = ir_program.as_mut().expect("IR required for codegen");
-        let opts = codegen::CodegenOptions { repr_c };
-        match codegen::codegen_with(ir, t, &opts) {
-            codegen::CodegenOutput::Source(code) => print!("{}", code),
-            codegen::CodegenOutput::Binary(_) => unreachable!(),
+        if target == "dialect" {
+            // Dialect pipeline: IR → nanopass → dialect → Rust with runtime
+            match codegen::codegen_dialect(ir) {
+                codegen::CodegenOutput::Source(code) => print!("{}", code),
+                codegen::CodegenOutput::Binary(_) => unreachable!(),
+            }
+        } else {
+            let t = match target {
+                "rust" | "rs" => codegen::pass::Target::Rust,
+                "ts" | "typescript" => codegen::pass::Target::TypeScript,
+                other => { eprintln!("Unknown target: {}. Use rust, ts, dialect.", other); std::process::exit(1); }
+            };
+            let opts = codegen::CodegenOptions { repr_c };
+            match codegen::codegen_with(ir, t, &opts) {
+                codegen::CodegenOutput::Source(code) => print!("{}", code),
+                codegen::CodegenOutput::Binary(_) => unreachable!(),
+            }
         }
     }
 }

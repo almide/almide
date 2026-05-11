@@ -47,8 +47,21 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
     }
 
 
-    let mut ir_args: Vec<IrExpr> = args.iter().map(|a| lower_expr(ctx, a)).collect();
-    let ta = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
+    let mut ir_args: Vec<IrExpr> = Vec::new();
+    let ta_raw: Vec<Ty> = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
+
+    // Extract const value type args and prepend them as positional arguments.
+    // E.g., `make_list[3]("hello")` → `make_list(3, "hello")` at IR level.
+    let mut ta = Vec::new();
+    for t in &ta_raw {
+        if let Ty::ConstValue { value, ty: vty } = t {
+            ir_args.push(ctx.mk(IrExprKind::LitInt { value: *value }, *vty.clone(), span));
+        } else {
+            ta.push(t.clone());
+        }
+    }
+
+    ir_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
     let target = lower_call_target(ctx, callee);
 
     // Named args: resolve to positional order using function signature
