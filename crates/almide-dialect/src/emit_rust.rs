@@ -17,21 +17,61 @@ use crate::types::DialectType;
 /// SSA temps use `v{id}`.
 struct NameMap {
     names: std::collections::HashMap<ValueId, String>,
+    /// variant case name → parent enum name (for qualified references)
+    variants: std::collections::HashMap<String, String>,
+    /// How many times each ValueId is referenced. Values used >1 times get .clone().
+    use_counts: std::collections::HashMap<ValueId, usize>,
+    /// Track remaining uses to know when to clone vs move.
+    remaining: std::collections::HashMap<ValueId, usize>,
 }
 
 impl NameMap {
-    fn new() -> Self { NameMap { names: std::collections::HashMap::new() } }
+    fn new(variants: std::collections::HashMap<String, String>, use_counts: std::collections::HashMap<ValueId, usize>) -> Self {
+        let remaining = use_counts.clone();
+        NameMap { names: std::collections::HashMap::new(), variants, use_counts, remaining }
+    }
 
     fn set(&mut self, id: ValueId, name: String) { self.names.insert(id, name); }
 
-    fn get(&self, id: ValueId) -> String {
+    /// Get the variable name. If the value is used more than once and this isn't
+    /// the last use, append `.clone()`. Scalars (i64, f64, bool) are Copy so
+    /// they never need clone.
+    fn get(&mut self, id: ValueId) -> String {
+        let name = self.names.get(&id).cloned().unwrap_or_else(|| format!("v{}", id.0));
+        let total = self.use_counts.get(&id).copied().unwrap_or(1);
+        let rem = self.remaining.entry(id).or_insert(total);
+        *rem = rem.saturating_sub(1);
+        if total > 1 && *rem > 0 {
+            format!("{}.clone()", name)
+        } else {
+            name
+        }
+    }
+
+    /// Get without consuming a use (for pattern positions, etc.)
+    fn get_ref(&self, id: ValueId) -> String {
         self.names.get(&id).cloned().unwrap_or_else(|| format!("v{}", id.0))
     }
+}
+
+/// Collect all variant case names → parent enum name for qualified references.
+fn build_variant_map(module: &Module) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    for td in &module.type_decls {
+        if let TypeDeclKind::Variant { cases } = &td.kind {
+            for case in cases {
+                map.insert(case.name.as_str().to_string(), td.name.as_str().to_string());
+            }
+        }
+    }
+    map
 }
 
 /// Emit a complete Rust source file from a dialect Module.
 pub fn emit_module(module: &Module) -> String {
     let mut out = String::new();
+    let variant_map = build_variant_map(module);
+    let use_counts = crate::compute_use_counts(module);
 
     // No prelude — runtime preamble is added by embed_rust_runtime() in codegen.
     // When used standalone (--emit-dialect --target rust), the output won't compile
@@ -50,7 +90,7 @@ pub fn emit_module(module: &Module) -> String {
     // Functions
     for f in &module.functions {
         if f.name.as_str().contains('.') { continue; } // skip convention methods for now
-        emit_func(&mut out, f);
+        emit_func(&mut out, f, &variant_map, &use_counts);
     }
 
     out
@@ -133,8 +173,8 @@ fn emit_global(out: &mut String, g: &GlobalOp) {
     out.push_str(&format!("// global: {}\n", g.name));
 }
 
-fn emit_func(out: &mut String, f: &FuncOp) {
-    let mut names = NameMap::new();
+fn emit_func(out: &mut String, f: &FuncOp, variant_map: &std::collections::HashMap<String, String>, use_counts: &std::collections::HashMap<ValueId, usize>) {
+    let mut names = NameMap::new(variant_map.clone(), use_counts.clone());
 
     let params: Vec<_> = f.params.iter()
         .map(|(name, ty)| format!("{}: {}", name, emit_rust_type(ty)))
@@ -246,6 +286,17 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
 
         OpKind::CallOp { callee, args } => {
             let callee_str = callee.as_str();
+            // Check if callee is a variant constructor
+            let variant_parent = names.variants.get(callee_str).cloned();
+            if let Some(parent) = variant_parent {
+                let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
+                if args_str.is_empty() {
+                    out.push_str(&format!("{}let {} = {}::{};\n", pad, result_name, parent, callee_str));
+                } else {
+                    out.push_str(&format!("{}let {} = {}::{}({});\n", pad, result_name, parent, callee_str, args_str.join(", ")));
+                }
+                return;
+            }
             if callee_str == "println" {
                 let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
                 out.push_str(&format!("{}println!(\"{{}}\", {});\n", pad, args_str.join(", ")));
@@ -257,16 +308,17 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
                     let name = names.get(*a);
                     if resolved.borrow_args.contains(&i) {
                         format!("&{}", name)
-                    } else if is_user_fn {
-                        // User function calls: clone all args conservatively
-                        // to avoid move-after-use errors (e.g. dot(v, v)).
-                        format!("{}.clone()", name)
                     } else {
                         name
                     }
                 }).collect();
                 out.push_str(&format!("{}let {} = {}({});\n", pad, result_name, resolved.rust_name, args_str.join(", ")));
             }
+        }
+        OpKind::ComputedCallOp { callee, args } => {
+            let callee_name = names.get(*callee);
+            let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
+            out.push_str(&format!("{}let {} = {}({});\n", pad, result_name, callee_name, args_str.join(", ")));
         }
         OpKind::IntrinsicCallOp { symbol, args } => {
             let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
@@ -331,7 +383,7 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
                 names.set(*v, name.clone());
                 format!("{}: {}", name, emit_rust_type(ty))
             }).collect();
-            out.push_str(&format!("{}let {} = |{}| {{\n", pad, result_name, ps.join(", ")));
+            out.push_str(&format!("{}let {} = move |{}| {{\n", pad, result_name, ps.join(", ")));
             for b in body { emit_block(out, b, indent + 1, names); }
             out.push_str(&format!("{}}};\n", pad));
         }
@@ -472,15 +524,19 @@ fn emit_pattern(pattern: &MatchPattern, names: &mut NameMap) -> String {
             name
         }
         MatchPattern::Variant { tag, bindings } => {
+            let tag_str = tag.as_str();
+            let qualified = names.variants.get(tag_str)
+                .map(|parent| format!("{}::{}", parent, tag_str))
+                .unwrap_or_else(|| tag_str.to_string());
             if bindings.is_empty() {
-                tag.as_str().to_string()
+                qualified
             } else {
                 let bs: Vec<_> = bindings.iter().map(|v| {
                     let name = format!("v{}", v.0);
                     names.set(*v, name.clone());
                     name
                 }).collect();
-                format!("{}({})", tag, bs.join(", "))
+                format!("{}({})", qualified, bs.join(", "))
             }
         }
         MatchPattern::Record { fields } => {

@@ -58,6 +58,11 @@ pub enum OpKind {
         callee: Sym,
         args: Vec<ValueId>,
     },
+    /// Computed call (closure / fn variable)
+    ComputedCallOp {
+        callee: ValueId,
+        args: Vec<ValueId>,
+    },
     /// Runtime intrinsic call (stdlib)
     IntrinsicCallOp {
         symbol: Sym,

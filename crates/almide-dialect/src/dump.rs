@@ -131,6 +131,10 @@ fn dump_op(out: &mut String, op: &Operation, level: usize) {
             let args_str: Vec<_> = args.iter().map(|a| fmt_val(*a)).collect();
             out.push_str(&format!("almide.call @{}({})", callee, args_str.join(", ")));
         }
+        OpKind::ComputedCallOp { callee, args } => {
+            let args_str: Vec<_> = args.iter().map(|a| fmt_val(*a)).collect();
+            out.push_str(&format!("almide.computed_call {}({})", fmt_val(*callee), args_str.join(", ")));
+        }
         OpKind::IntrinsicCallOp { symbol, args } => {
             let args_str: Vec<_> = args.iter().map(|a| fmt_val(*a)).collect();
             out.push_str(&format!("almide.intrinsic @{}({})", symbol, args_str.join(", ")));

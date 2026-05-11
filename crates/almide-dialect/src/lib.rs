@@ -44,6 +44,66 @@ pub struct Block {
     pub terminator: ops::Terminator,
 }
 
+/// Collect use-counts for all ValueIds in a Module.
+pub fn compute_use_counts(module: &Module) -> std::collections::HashMap<ValueId, usize> {
+    let mut counts: std::collections::HashMap<ValueId, usize> = std::collections::HashMap::new();
+
+    fn count_in_blocks(blocks: &[Block], counts: &mut std::collections::HashMap<ValueId, usize>) {
+        for block in blocks {
+            for op in &block.ops {
+                count_in_op(&op.kind, counts);
+            }
+            match &block.terminator {
+                ops::Terminator::Yield(v) | ops::Terminator::Return(v) => { *counts.entry(*v).or_default() += 1; }
+                ops::Terminator::CondBranch { cond, .. } => { *counts.entry(*cond).or_default() += 1; }
+                ops::Terminator::Branch(_, args) => { for a in args { *counts.entry(*a).or_default() += 1; } }
+                _ => {}
+            }
+        }
+    }
+
+    fn count_in_op(kind: &ops::OpKind, counts: &mut std::collections::HashMap<ValueId, usize>) {
+        use ops::OpKind::*;
+        match kind {
+            BinOp { lhs, rhs, .. } => { *counts.entry(*lhs).or_default() += 1; *counts.entry(*rhs).or_default() += 1; }
+            UnOp { operand, .. } => { *counts.entry(*operand).or_default() += 1; }
+            CallOp { args, .. } | IntrinsicCallOp { args, .. } => { for a in args { *counts.entry(*a).or_default() += 1; } }
+            IfOp { cond, then_region, else_region } => {
+                *counts.entry(*cond).or_default() += 1;
+                count_in_blocks(then_region, counts);
+                count_in_blocks(else_region, counts);
+            }
+            MatchOp { subject, arms } => {
+                *counts.entry(*subject).or_default() += 1;
+                for arm in arms { count_in_blocks(&arm.body, counts); }
+            }
+            ListOp { elements } | TupleOp { elements } => { for e in elements { *counts.entry(*e).or_default() += 1; } }
+            MapOp { entries } => { for (k, v) in entries { *counts.entry(*k).or_default() += 1; *counts.entry(*v).or_default() += 1; } }
+            RecordOp { fields, .. } => { for (_, v) in fields { *counts.entry(*v).or_default() += 1; } }
+            MemberOp { object, .. } | TupleIndexOp { object, .. } => { *counts.entry(*object).or_default() += 1; }
+            IndexOp { object, index } | MapAccessOp { object, key: index } => {
+                *counts.entry(*object).or_default() += 1; *counts.entry(*index).or_default() += 1;
+            }
+            ResultOkOp { value } | ResultErrOp { value } | OptionSomeOp { value }
+            | TryOp { value } | UnwrapOp { value } => { *counts.entry(*value).or_default() += 1; }
+            UnwrapOrOp { value, fallback } => { *counts.entry(*value).or_default() += 1; *counts.entry(*fallback).or_default() += 1; }
+            LambdaOp { body, .. } => { count_in_blocks(body, counts); }
+            FanOp { regions } => { for r in regions { count_in_blocks(r, counts); } }
+            ForOp { iterable, body, .. } => { *counts.entry(*iterable).or_default() += 1; count_in_blocks(body, counts); }
+            WhileOp { cond_region, body } => { count_in_blocks(cond_region, counts); count_in_blocks(body, counts); }
+            _ => {}
+        }
+    }
+
+    for f in &module.functions {
+        count_in_blocks(&f.body, &mut counts);
+    }
+    for g in &module.globals {
+        count_in_blocks(&g.init, &mut counts);
+    }
+    counts
+}
+
 /// Generator for fresh ValueIds and BlockIds.
 #[derive(Debug, Default)]
 pub struct IdGen {

@@ -180,8 +180,9 @@ impl<'a> LowerCtx<'a> {
                     CallTarget::Method { method, .. } => {
                         self.emit(ops, result_ty, OpKind::CallOp { callee: *method, args: arg_vals })
                     }
-                    CallTarget::Computed { .. } => {
-                        self.emit(ops, result_ty, OpKind::ConstUnit) // TODO: computed calls
+                    CallTarget::Computed { callee } => {
+                        let callee_val = self.lower_expr_into(callee, ops);
+                        self.emit(ops, result_ty, OpKind::ComputedCallOp { callee: callee_val, args: arg_vals })
                     }
                 }
             }
@@ -408,7 +409,30 @@ impl<'a> LowerCtx<'a> {
             IrPattern::Tuple { elements, .. } => {
                 MatchPattern::Tuple(elements.iter().map(|p| self.lower_pattern(p)).collect())
             }
-            _ => MatchPattern::Wildcard, // Record, List, Some, None, Ok, Err — TODO
+            IrPattern::Ok { inner } | IrPattern::Some { inner } => {
+                let tag_name = if matches!(pattern, IrPattern::Ok { .. }) { "Ok" } else { "Some" };
+                let tag = almide_base::intern::sym(tag_name);
+                let inner_pat = self.lower_pattern(inner);
+                let binding = match inner_pat {
+                    MatchPattern::Binding(v) => v,
+                    _ => self.ids.fresh_value(),
+                };
+                MatchPattern::Variant { tag, bindings: vec![binding] }
+            }
+            IrPattern::Err { inner } => {
+                let tag = almide_base::intern::sym("Err");
+                let inner_pat = self.lower_pattern(inner);
+                let binding = match inner_pat {
+                    MatchPattern::Binding(v) => v,
+                    _ => self.ids.fresh_value(),
+                };
+                MatchPattern::Variant { tag, bindings: vec![binding] }
+            }
+            IrPattern::None => {
+                let tag = almide_base::intern::sym("None");
+                MatchPattern::Variant { tag, bindings: vec![] }
+            }
+            _ => MatchPattern::Wildcard, // Record, List — TODO
         }
     }
 
