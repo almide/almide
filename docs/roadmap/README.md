@@ -6,7 +6,7 @@
 
 ## Active
 
-14 items
+15 items
 
 | Item | Description |
 |------|-------------|
@@ -22,6 +22,7 @@
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [lumen — Pure Graphics Math](active/lumen-graphics-math.md) | lumen — pure graphics math library (vec3, mat4, color), used by webgl/canvas/obsid |
 | [MLIR Backend + Egg Rewrite Engine](active/mlir-backend-adoption.md) | MLIR backend + egg e-graph rewriter for pure-Almide optimal lowering |
+| [Almide vs Mojo: Capability Parity Assessment](active/mojo-parity-assessment.md) | Almide vs Mojo capability parity assessment (Mojo = 100) |
 | [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 
@@ -67,23 +68,23 @@
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-04-20 | [`almide docs-gen` — llms.txt Auto-Generation](done/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | 2026-04-20 | [Whisper in Pure Almide](done/whisper-almide.md) | Whisper speech recognition implemented entirely in Almide |
 | 2026-04-20 | [Variant Exhaustiveness Refinement](done/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |
 | 2026-04-20 | [Unify Diagnostic Emission with Docs](done/diagnostic-emit-doc-unification.md) | Unify diagnostic emission sites with their docs/diagnostics/*.md files |
 | 2026-04-20 | [Stdlib Symmetry Audit](done/stdlib-symmetry-audit.md) | Symmetry audit and lint for stdlib Option/Result/List/Set/Map to remove naming drift |
 | 2026-04-20 | [Stdlib Defs / Runtime Consistency Check](done/stdlib-defs-runtime-consistency.md) | CI check that stdlib/defs/*.toml declared types match runtime/rs/src/*.rs signatures |
 | 2026-04-20 | [Reimpl Lint: Signature-Match Detection of Stdlib Reimplementations](done/reimpl-lint.md) | Detect user fns whose signature matches a stdlib fn, suggest delegation |
-| 2026-04-20 | [DX & Codegen Papercuts](done/dx-codegen-papercuts.md) | Codegen bugs (effect fn unification) + DX papercuts — A/C landed, B spun off |
 | 2026-04-20 | [Diagnostics: Here / Try / Hint Format](done/diagnostics-here-try-hint.md) | Standardize diagnostics to Here/Try/Hint three-part format with CI-verified hint correctness |
-| 2026-04-20 | [`almide docs-gen` — llms.txt Auto-Generation](done/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
+| 2026-04-20 | [DX & Codegen Papercuts](done/dx-codegen-papercuts.md) | Codegen bugs (effect fn unification) + DX papercuts — A/C landed, B spun off |
+| 2026-04-19 | [bytes: unify bounds-check semantics](done/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
+| 2026-04-19 | [`cargo test --all` Cache Race](done/cargo-test-cache-race.md) | Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures |
 | 2026-04-19 | [VarTable Unification](done/var-table-unification.md) | Unify program/module var_tables into a single program-level table |
 | 2026-04-19 | [Stdlib Declarative Unification — Toward a Single Source of Truth](done/stdlib-declarative-unification.md) | Drive stdlib toward a single source-of-truth: `.almd` + multi-target ABI attributes |
 | 2026-04-19 | [Sized Numeric Types](done/sized-numeric-types.md) | Swift-style Int8/Int32/UInt32/Float32 scalar types; unblocks bytes redesign + Matrix[T] dtype |
 | 2026-04-19 | [Dispatch Unification Plan (S3 Phase 1e)](done/dispatch-unification-plan.md) | Unify Rust + WASM stdlib dispatch via IR-level RuntimeCall; attributes become sugar |
 | 2026-04-19 | [Compiler Version Pin](done/compiler-version-pin.md) | minimum compiler version pinning in almide.toml (Cargo rust-version style) |
 | 2026-04-19 | [Codegen Ideal Form](done/codegen-ideal-form.md) | WASM codegen redesign toward declarative dispatch and explicit symbol resolution |
-| 2026-04-19 | [bytes: unify bounds-check semantics](done/bytes-bounds-check.md) | Unify bounds checking across bytes accessors with Option/Result returns |
-| 2026-04-19 | [`cargo test --all` Cache Race](done/cargo-test-cache-race.md) | Fix parallel-cargo-test cache race in fix_test/run_test that masks real failures |
 | 2026-04-17 | [Option/Result Bundled `.almd` — Not Cosmetic After All](done/option-result-bundled-cleanup.md) | Bundled option/result are signature-override layer; pick a path to consolidate |
 | 2026-04-17 | [Bundled-Almide Stdlib — Ideal Form](done/bundled-almide-ideal-form.md) | Ideal form for bundled-Almide stdlib: one dispatch path, no patch-layer special cases |
 | 2026-04-16 | [Cut v0.14.6 Release](done/release-0.14.6.md) | Cut v0.14.6 release from llm-first-phase2 branch |
@@ -105,11 +106,11 @@
 | 2026-04-03 | [Type Inference Unification for Generic Functions](done/type-inference-unification.md) | Unify inference variables with named TypeVars in generic function bodies |
 | 2026-04-03 | [Test Block Result Semantics](done/test-block-result-semantics.md) | Remove auto-unwrap of effect fn results in test blocks |
 | 2026-04-03 | [Flexible Error Types](done/flexible-error-types.md) | User-defined error types in Result, and test block Result visibility |
+| 2026-04-02 | [`import self` in Dependency Packages Bug](done/import-self-in-dependency-bug.md) | Fix import self resolution in dependency packages (blocks almide-lander) |
 | 2026-04-02 | [Versioned Module Codegen Bug](done/versioned-module-codegen-bug.md) | Fix versioned module name mismatch in codegen for package dependencies |
 | 2026-04-02 | [UFCS Resolution in Dependency Modules](done/ufcs-in-dependency-modules.md) | UFCS method calls fail type resolution in dependency module context |
 | 2026-04-02 | [Pipe Operator Precedence Redesign](done/pipe-operator-precedence.md) | Pipe |> precedence conflicts with + (list concat) and .. (range) |
 | 2026-04-02 | [Almide Native cdylib — Scaffold in Almide, Not Rust](done/almide-native-cdylib.md) | Build .so/.dylib from pure Almide, eliminating Rust scaffolding from lander |
-| 2026-04-02 | [`import self` in Dependency Packages Bug](done/import-self-in-dependency-bug.md) | Fix import self resolution in dependency packages (blocks almide-lander) |
 | 2026-04-01 | [WASM Remaining FS Operations](done/wasm-remaining-fs.md) | Implement remaining filesystem operations for the WASM target |
 | 2026-04-01 | [Typed AST Cache](done/typed-ast-cache.md) | Cache type annotations on AST nodes to eliminate re-inference in lowering |
 | 2026-04-01 | [Type Expressiveness: Business Scenario Comparison](done/type-expressiveness-scenarios.md) | Business scenario comparison of type expressiveness across languages |
@@ -155,14 +156,14 @@
 | 2026-03-20 | [Stdlib Additions — Complete](done/stdlib-additions.md) | Stdlib module additions (set expanded to 20 functions) |
 | 2026-03-20 | [HKT Foundation — Complete](done/hkt-foundation.md) | Higher-kinded type foundation - all phases complete |
 | 2026-03-20 | [Compiler Bugs and Gaps — Status](done/compiler-bugs.md) | Codegen bugs and runtime gaps found while writing 400+ test blocks |
+| 2026-03-19 | [fan.map Concurrency Limit](done/fan-map-limit.md) | Add concurrency limit parameter to fan.map |
 | 2026-03-19 | [Test Architecture Redesign](done/test-architecture-redesign.md) | Separate effect permission from Result auto-unwrap in test infra |
 | 2026-03-19 | [Streaming — WebSocket, SSE, Stream](done/streaming.md) | WebSocket, SSE, and streaming data support |
 | 2026-03-19 | [HKT Foundation — Phase 1-4 + Stream Fusion (All 6 Laws)](done/hkt-foundation-phase1.md) | HKT foundation phases 1-4 with type constructors and algebraic laws |
-| 2026-03-19 | [fan.map Concurrency Limit](done/fan-map-limit.md) | Add concurrency limit parameter to fan.map |
 | 2026-03-19 | [Effect System — Phase 1-2](done/effect-system-phase1-2.md) | Effect inference engine with 7 categories and checker integration |
 | 2026-03-18 | [UFCS for External Libraries](done/ufcs-external.md) | Extend UFCS resolution to external library functions |
-| 2026-03-18 | [TS Edge-Native Deployment](done/ts-edge-native.md) | Native TS output for edge runtimes (Workers, Deno Deploy, Vercel) |
 | 2026-03-18 | [Tooling [ON HOLD — items split to active]](done/tooling.md) | Tooling roadmap (LSP, REPL, doc gen, bench) split to active |
+| 2026-03-18 | [TS Edge-Native Deployment](done/ts-edge-native.md) | Native TS output for edge runtimes (Workers, Deno Deploy, Vercel) |
 | 2026-03-18 | [Stdlib Strategy](done/stdlib-strategy.md) | Stdlib expansion strategy via Rust ecosystem wrapping |
 | 2026-03-18 | [Stdlib Architecture: 3-Layer Design](done/stdlib-architecture-3-layer-design.md) | Three-layer stdlib design (core/platform/external) for WASM parity |
 | 2026-03-18 | [Stdlib API Surface Reform](done/stdlib-verb-system.md) | Unified verb system across all stdlib container types |
@@ -194,6 +195,7 @@
 | 2026-03-18 | [Built-in Protocols](done/trait-impl.md) | Built-in protocols (Eq, Hash, Repr, From) with automatic derivation |
 | 2026-03-18 | [Anonymous Record Codegen Fix](done/anon-record-codegen.md) | Fix Rust codegen emitting invalid type for anonymous records |
 | 2026-03-18 | [Almide Runtime](done/almide-runtime.md) | Runtime design targeting best-in-class compiler performance |
+| 2026-03-17 | [almide.lock [DONE — 1.0 Phase III]](done/lockfile.md) | Dependency lockfile with git-based resolution and reproducible builds |
 | 2026-03-17 | [Stdlib Runtime Architecture Reform](done/stdlib-self-hosted-redesign.md) | Self-hosted stdlib with .almd-first design and @extern for host deps |
 | 2026-03-17 | [Stability Contract [DONE — 1.0 Phase II]](done/stability-contract.md) | Backward compatibility policy, edition system, and API freeze |
 | 2026-03-17 | [Runtime Layout Unification](done/runtime-layout.md) | Unify Rust and TS runtime file layout and management |
@@ -205,7 +207,6 @@
 | 2026-03-17 | [Effect Isolation (Security Layer 1)](done/effect-isolation.md) | Static verification that pure functions cannot perform I/O |
 | 2026-03-17 | [CLI-First](done/cli-first.md) | Enable comfortable CLI tool authoring with run, build, and WASM targets |
 | 2026-03-17 | [Borrow/Clone Gaps](done/borrow-clone-gaps.md) | Fix cases where Rust codegen fails to insert necessary clones |
-| 2026-03-17 | [almide.lock [DONE — 1.0 Phase III]](done/lockfile.md) | Dependency lockfile with git-based resolution and reproducible builds |
 | 2026-03-17 | [2026 Ergonomics Roadmap](done/2026-ergonomics.md) | Ergonomics issues found via self-tooling, evaluated against design principles |
 | 2026-03-16 | [Type System Theory Upgrade — HM Integration Plan](done/type-system-theory-upgrade.md) | Hindley-Milner integration plan (type schemes, let-polymorphism) |
 | 2026-03-16 | [TS Target: Result Maintenance (Erasure to Object)](done/ts-result-maintenance.md) | Replace TS Result erasure (throw/catch) with Result objects |
@@ -217,8 +218,8 @@
 | 2026-03-15 | [Unused Variable Warnings](done/unused-variable-warnings.md) | Warn on unused variables and imports, suppressible with _ prefix |
 | 2026-03-15 | [Type System Soundness](done/type-system-soundness.md) | Type system soundness fixes (Unknown propagation, unification, occurs) |
 | 2026-03-15 | [Type System Extensions](done/type-system.md) | Type system extensions (generics migration, inference improvements) |
-| 2026-03-15 | [TS/JS Codegen Rewrite](done/ts-codegen-rewrite.md) | Rewrite TS codegen to two-stage pipeline (IR to TsIR to String) |
 | 2026-03-15 | [Tail Call Optimization](done/tail-call-optimization.md) | Self-recursive tail call to labeled loop transformation |
+| 2026-03-15 | [TS/JS Codegen Rewrite](done/ts-codegen-rewrite.md) | Rewrite TS codegen to two-stage pipeline (IR to TsIR to String) |
 | 2026-03-15 | [Syntax Sugar](done/syntax-sugar.md) | Syntax sugar (ranges, exhaustiveness check, lambda shorthand) |
 | 2026-03-15 | [RustIR: Rust Codegen Intermediate Representation](done/rust-ir.md) | Two-stage Rust codegen pipeline via RustIR intermediate repr |
 | 2026-03-15 | [Pattern Exhaustiveness Check](done/pattern-exhaustiveness-check.md) | Static exhaustiveness checking for match expressions |
@@ -243,6 +244,7 @@
 | 2026-03-15 | [Clone Reduction Phase 4](done/clone-reduction.md) | Phase 4 clone reduction targeting field-level borrow analysis |
 | 2026-03-15 | [Architecture Hardening](done/architecture-hardening.md) | Fix structural weaknesses in compiler architecture |
 | 2026-03-15 | [--emit-ir: IR JSON Export](done/emit-ir.md) | Export typed IR as JSON via --emit-ir flag |
+| 2026-03-14 | [almide scaffold & Module Proliferation Pipeline [MERGED]](done/scaffold-and-proliferation.md) | Scaffold command and LLM module proliferation pipeline |
 | 2026-03-14 | [UFCS Type Resolution for Ambiguous Methods](done/ufcs-type-resolution.md) | Fix UFCS resolution for ambiguous methods on complex expressions |
 | 2026-03-14 | [Trailing Lambda / Builder DSL [WON'T DO]](done/trailing-lambda-builder.md) | Trailing lambda / builder DSL exploration (rejected) |
 | 2026-03-14 | [Structured Concurrency](done/structured-concurrency.md) | Async model with async fn, await, and async let constructs |
@@ -252,13 +254,12 @@
 | 2026-03-14 | [Codegen Optimization [IN PROGRESS]](done/codegen-optimization.md) | Reduce clone overhead for heap types without exposing ownership |
 | 2026-03-14 | [Codegen IR Redesign](done/ir-redesign.md) | Self-contained typed IR so codegen never references AST |
 | 2026-03-14 | [Bidirectional Type Inference for Lambda Parameters](done/lambda-type-inference.md) | Bidirectional type inference for lambda parameters via two-pass checker |
-| 2026-03-14 | [almide scaffold & Module Proliferation Pipeline [MERGED]](done/scaffold-and-proliferation.md) | Scaffold command and LLM module proliferation pipeline |
+| 2026-03-13 | [`import self` — Package Entry Point Access](done/import-self-entry.md) | Allow main.almd to access pub functions from same-package mod.almd |
 | 2026-03-13 | [Module System v2](done/module-system-v2.md) | File-based module system with visibility controls and mod.almd |
 | 2026-03-13 | [Map Literal Syntax](done/map-literal.md) | Map literal syntax with Swift-style [:] empty map notation |
 | 2026-03-13 | [Hint System Architecture [P0]](done/hint-system.md) | Decouple hint generation from parser into a dedicated system |
 | 2026-03-13 | [Error Recovery](done/error-recovery.md) | Report all errors at once instead of stopping at the first one |
 | 2026-03-13 | [Eq Protocol](done/eq-protocol.md) | Automatic deep equality for all value types without deriving |
-| 2026-03-13 | [`import self` — Package Entry Point Access](done/import-self-entry.md) | Allow main.almd to access pub functions from same-package mod.almd |
 | 2026-03-12 | [While Loop](done/while-loop.md) | Dedicated while loop syntax replacing do-block guard pattern |
 | 2026-03-12 | [Variant Record Fields](done/variant-record-fields.md) | Named fields for enum variants (like Rust struct variants) |
 | 2026-03-12 | [Typed IR](done/typed-ir.md) | Typed intermediate representation between checker and emitters |
@@ -270,19 +271,19 @@
 | 2026-03-12 | [Language Test Coverage (`almide test`)](done/test-coverage.md) | Almide language-level test coverage targets (1500+ cases) |
 | 2026-03-12 | [Default Field Values](done/default-field-values.md) | Default values for record fields to eliminate sentinel value patterns |
 | 2026-03-12 | [Compiler Bugs Found by Test Expansion](done/compiler-bugs-from-tests.md) | Seven compiler bugs discovered during test coverage expansion |
+| 2026-03-11 | [stdin / Interactive I/O](done/stdin-io.md) | stdin reading and interactive I/O via io module |
+| 2026-03-11 | [npm Package Target](done/npm-package-target-target-npm.md) | Compile Almide to publish-ready npm packages via --target npm |
 | 2026-03-11 | [Tuple & Record](done/tuple-record.md) | Named record construction and tuple index access |
 | 2026-03-11 | [String Handling](done/string-handling.md) | Heredoc multi-line strings and raw string literals |
 | 2026-03-11 | [Stdlib Self-Hosting](done/stdlib-self-hosting.md) | Write stdlib in Almide for automatic multi-target support |
 | 2026-03-11 | [Stdlib Gaps](done/stdlib-gaps.md) | Reduce AI-generated boilerplate via new stdlib functions |
 | 2026-03-11 | [Stdlib Completeness](done/stdlib-completeness.md) | Fill stdlib gaps in int, string, list, and map modules |
-| 2026-03-11 | [stdin / Interactive I/O](done/stdin-io.md) | stdin reading and interactive I/O via io module |
 | 2026-03-11 | [Proliferation Blockers](done/proliferation-blockers.md) | Compiler bugs that blocked LLM module generation (all resolved) |
 | 2026-03-11 | [Playground Repair Turn](done/playground-repair.md) | Playground AI-powered error repair and type checker integration |
-| 2026-03-11 | [npm Package Target](done/npm-package-target-target-npm.md) | Compile Almide to publish-ready npm packages via --target npm |
-| 2026-03-11 | [LLM and Immutable Data Structures](done/llm-immutable-patterns.md) | Mitigations for LLM failures with immutable data patterns |
 | 2026-03-11 | [Literal Syntax Gaps](done/literal-syntax-gaps.md) | Cross-language comparison of numeric and collection literal syntax |
 | 2026-03-11 | [List Stdlib Gaps](done/list-stdlib-gaps.md) | Cross-language comparison of missing list module operations |
 | 2026-03-11 | [Language Test Suite](done/language-test-suite.md) | Systematic language feature test suite for regression detection |
+| 2026-03-11 | [LLM and Immutable Data Structures](done/llm-immutable-patterns.md) | Mitigations for LLM failures with immutable data patterns |
 | 2026-03-11 | [HTTP Module](done/http.md) | HTTP server and client module with multithreading support |
 | 2026-03-11 | [Generics](done/generics.md) | Generic functions, records, variants, and recursive generics |
 | 2026-03-11 | [Error Diagnostics](done/error-diagnostics.md) | LLM-critical diagnostics including lost mutation and type mismatch |
