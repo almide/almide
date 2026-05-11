@@ -162,7 +162,7 @@ jobs:
             [ -f "$f" ] || continue
             name=$(basename "$f" .almd)
             existing=$($ALMIDE run "$f" 2>&1)
-            $ALMIDE build "$f" --target native -o "/tmp/n_${name}" 2>/dev/null
+            $ALMIDE build "$f" --target native -o "/tmp/n_${name}"
             if [ $? -ne 0 ]; then
               echo "BUILD FAIL: $name"
               fail=$((fail+1))
