@@ -100,6 +100,8 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
         }
         if target == "rust" || target == "rs" {
             print!("{}", almide_dialect::emit_rust::emit_module(&module));
+        } else if target == "llvm" {
+            print!("{}", almide_dialect::emit_llvm::codegen::emit_llvm_ir(&module));
         } else {
             print!("{}", almide_dialect::dump::dump_module(&module));
         }
