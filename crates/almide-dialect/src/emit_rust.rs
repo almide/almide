@@ -251,7 +251,9 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
                 out.push_str(&format!("{}println!(\"{{}}\", {});\n", pad, args_str.join(", ")));
                 out.push_str(&format!("{}let {} = ();\n", pad, result_name));
             } else {
-                out.push_str(&format!("{}let {} = {}({});\n", pad, result_name, callee_str, args_str.join(", ")));
+                // Sanitize callee: replace `.` and monomorph suffixes for valid Rust
+                let rust_callee = sanitize_callee(callee_str);
+                out.push_str(&format!("{}let {} = {}({});\n", pad, result_name, rust_callee, args_str.join(", ")));
             }
         }
         OpKind::IntrinsicCallOp { symbol, args } => {
@@ -298,8 +300,153 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
             out.push_str(&format!("{}let {} = None;\n", pad, result_name));
         }
 
+        OpKind::MatchOp { subject, arms } => {
+            out.push_str(&format!("{}let {} = match {} {{\n", pad, result_name, names.get(*subject)));
+            for arm in arms {
+                let pat = emit_pattern(&arm.pattern, names);
+                indent_str(out, indent + 1);
+                out.push_str(&format!("{} => {{\n", pat));
+                for b in &arm.body { emit_block(out, b, indent + 2, names); }
+                indent_str(out, indent + 1);
+                out.push_str("},\n");
+            }
+            out.push_str(&format!("{}}};\n", pad));
+        }
+
+        OpKind::LambdaOp { params, body } => {
+            let ps: Vec<_> = params.iter().map(|(v, ty)| {
+                let name = format!("v{}", v.0);
+                names.set(*v, name.clone());
+                format!("{}: {}", name, emit_rust_type(ty))
+            }).collect();
+            out.push_str(&format!("{}let {} = |{}| {{\n", pad, result_name, ps.join(", ")));
+            for b in body { emit_block(out, b, indent + 1, names); }
+            out.push_str(&format!("{}}};\n", pad));
+        }
+
+        OpKind::ForOp { var, iterable, body } => {
+            let var_name = format!("v{}", var.0);
+            names.set(*var, var_name.clone());
+            out.push_str(&format!("{}for {} in {} {{\n", pad, var_name, names.get(*iterable)));
+            for b in body { emit_block(out, b, indent + 1, names); }
+            out.push_str(&format!("{}}}\n", pad));
+            out.push_str(&format!("{}let {} = ();\n", pad, result_name));
+        }
+
+        OpKind::WhileOp { cond_region, body } => {
+            out.push_str(&format!("{}while {{\n", pad));
+            // Emit cond as block that yields bool
+            for b in cond_region { emit_block(out, b, indent + 1, names); }
+            out.push_str(&format!("{}}} {{\n", pad));
+            for b in body { emit_block(out, b, indent + 1, names); }
+            out.push_str(&format!("{}}}\n", pad));
+            out.push_str(&format!("{}let {} = ();\n", pad, result_name));
+        }
+
+        OpKind::FanOp { regions } => {
+            // Fan: emit each region sequentially (TODO: actual concurrency)
+            for region in regions {
+                for b in region { emit_block(out, b, indent, names); }
+            }
+            out.push_str(&format!("{}let {} = ();\n", pad, result_name));
+        }
+
+        OpKind::UnwrapOp { value } => {
+            out.push_str(&format!("{}let {} = {}.unwrap();\n", pad, result_name, names.get(*value)));
+        }
+        OpKind::UnwrapOrOp { value, fallback } => {
+            out.push_str(&format!("{}let {} = {}.unwrap_or({});\n", pad, result_name, names.get(*value), names.get(*fallback)));
+        }
+        OpKind::TryOp { value } => {
+            out.push_str(&format!("{}let {} = {}?;\n", pad, result_name, names.get(*value)));
+        }
+
+        OpKind::MapOp { entries } => {
+            out.push_str(&format!("{}let {} = HashMap::from([", pad, result_name));
+            for (i, (k, v)) in entries.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                out.push_str(&format!("({}, {})", names.get(*k), names.get(*v)));
+            }
+            out.push_str("]);\n");
+        }
+        OpKind::EmptyMapOp => {
+            out.push_str(&format!("{}let {} = HashMap::new();\n", pad, result_name));
+        }
+
+        OpKind::IndexOp { object, index } => {
+            out.push_str(&format!("{}let {} = {}[{} as usize].clone();\n", pad, result_name, names.get(*object), names.get(*index)));
+        }
+        OpKind::MapAccessOp { object, key } => {
+            out.push_str(&format!("{}let {} = {}.get(&{}).cloned();\n", pad, result_name, names.get(*object), names.get(*key)));
+        }
+        OpKind::TupleIndexOp { object, index } => {
+            out.push_str(&format!("{}let {} = {}.{}.clone();\n", pad, result_name, names.get(*object), index));
+        }
+
         _ => {
             out.push_str(&format!("{}let {} = (); // TODO: {:?}\n", pad, result_name, std::mem::discriminant(&op.kind)));
+        }
+    }
+}
+
+/// Convert almide-style callee names to valid Rust identifiers.
+/// `list.map__Int_Int` → `almide_rt_list_map` (strip monomorph suffix, use runtime prefix)
+/// `int.to_string` → `almide_rt_int_to_string`
+/// `add` → `add` (user function, no change)
+fn sanitize_callee(callee: &str) -> String {
+    if let Some(dot_pos) = callee.find('.') {
+        let module = &callee[..dot_pos];
+        let func_part = &callee[dot_pos + 1..];
+        // Strip monomorphization suffix (__Int_Int, etc.)
+        let func = if let Some(mono_pos) = func_part.find("__") {
+            &func_part[..mono_pos]
+        } else {
+            func_part
+        };
+        format!("almide_rt_{}_{}", module, func)
+    } else {
+        callee.to_string()
+    }
+}
+
+fn indent_str(out: &mut String, level: usize) {
+    for _ in 0..level { out.push_str("    "); }
+}
+
+fn emit_pattern(pattern: &MatchPattern, names: &mut NameMap) -> String {
+    match pattern {
+        MatchPattern::Wildcard => "_".into(),
+        MatchPattern::LitInt(v) => format!("{}", v),
+        MatchPattern::LitStr(v) => format!("\"{}\"", v.escape_default()),
+        MatchPattern::LitBool(v) => format!("{}", v),
+        MatchPattern::Binding(v) => {
+            let name = format!("v{}", v.0);
+            names.set(*v, name.clone());
+            name
+        }
+        MatchPattern::Variant { tag, bindings } => {
+            if bindings.is_empty() {
+                tag.as_str().to_string()
+            } else {
+                let bs: Vec<_> = bindings.iter().map(|v| {
+                    let name = format!("v{}", v.0);
+                    names.set(*v, name.clone());
+                    name
+                }).collect();
+                format!("{}({})", tag, bs.join(", "))
+            }
+        }
+        MatchPattern::Record { fields } => {
+            let fs: Vec<_> = fields.iter().map(|(n, v)| {
+                let name = format!("v{}", v.0);
+                names.set(*v, name.clone());
+                format!("{}: {}", n, name)
+            }).collect();
+            format!("{{ {} }}", fs.join(", "))
+        }
+        MatchPattern::Tuple(elems) => {
+            let ps: Vec<_> = elems.iter().map(|p| emit_pattern(p, names)).collect();
+            format!("({})", ps.join(", "))
         }
     }
 }

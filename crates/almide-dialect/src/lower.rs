@@ -398,9 +398,12 @@ impl<'a> LowerCtx<'a> {
                 MatchPattern::Variant { tag, bindings }
             }
             IrPattern::Literal { expr } => {
-                let mut dummy_ops = Vec::new();
-                let val = self.lower_expr_into(expr, &mut dummy_ops);
-                MatchPattern::Literal(val)
+                match &expr.kind {
+                    IrExprKind::LitInt { value } => MatchPattern::LitInt(*value),
+                    IrExprKind::LitStr { value } => MatchPattern::LitStr(value.clone()),
+                    IrExprKind::LitBool { value } => MatchPattern::LitBool(*value),
+                    _ => MatchPattern::Wildcard, // non-literal patterns
+                }
             }
             IrPattern::Tuple { elements, .. } => {
                 MatchPattern::Tuple(elements.iter().map(|p| self.lower_pattern(p)).collect())

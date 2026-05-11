@@ -123,7 +123,10 @@ pub struct MatchArm {
 #[derive(Debug, Clone)]
 pub enum MatchPattern {
     Wildcard,
-    Literal(ValueId),
+    /// Literal value in pattern position (not a ValueId reference).
+    LitInt(i64),
+    LitStr(String),
+    LitBool(bool),
     Binding(ValueId),
     Variant { tag: Sym, bindings: Vec<ValueId> },
     Record { fields: Vec<(Sym, ValueId)> },
