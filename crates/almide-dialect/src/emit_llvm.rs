@@ -117,6 +117,24 @@ pub mod codegen {
             }
         }
 
+        // Register built-in tagged union types (Result, Option)
+        {
+            let i32_ty = context.i32_type();
+            let payload_ty = context.i8_type().array_type(16); // 16 bytes covers i64 or ptr
+            let result_ty = context.opaque_struct_type("Result");
+            result_ty.set_body(&[i32_ty.into(), payload_ty.into()], false);
+            compiler.struct_types.insert("Result".to_string(), result_ty);
+            // Ok = tag 0, Err = tag 1
+            compiler.variant_cases.insert("Ok".to_string(), ("Result".to_string(), 0, vec![DialectType::I64]));
+            compiler.variant_cases.insert("Err".to_string(), ("Result".to_string(), 1, vec![DialectType::String]));
+
+            let option_ty = context.opaque_struct_type("Option");
+            option_ty.set_body(&[i32_ty.into(), payload_ty.into()], false);
+            compiler.struct_types.insert("Option".to_string(), option_ty);
+            compiler.variant_cases.insert("Some".to_string(), ("Option".to_string(), 0, vec![DialectType::I64]));
+            compiler.variant_cases.insert("None".to_string(), ("Option".to_string(), 1, vec![]));
+        }
+
         compiler.declare_printf();
         for f in &module.functions {
             if f.name.as_str().contains('.') { continue; }
@@ -190,12 +208,14 @@ pub mod codegen {
                 DialectType::I8 => Some(self.context.i8_type().into()),
                 DialectType::String => Some(self.context.ptr_type(inkwell::AddressSpace::default()).into()),
                 DialectType::Named(name) => {
-                    // Records passed as pointer to struct
                     if self.struct_types.contains_key(name.as_str()) {
                         Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
                     } else {
                         None
                     }
+                }
+                DialectType::Result(_, _) | DialectType::Option(_) => {
+                    Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
                 }
                 _ => None,
             }
@@ -215,6 +235,9 @@ pub mod codegen {
                     } else {
                         None
                     }
+                }
+                DialectType::Result(_, _) | DialectType::Option(_) => {
+                    Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
                 }
                 _ => None,
             }
@@ -544,6 +567,59 @@ pub mod codegen {
                             let phi = self.builder.build_phi(tv.get_type(), "ifval").unwrap();
                             phi.add_incoming(&[(&tv, then_end), (&ev, else_end)]);
                             self.values.insert(result_id, phi.as_basic_value());
+                        }
+                    }
+                }
+
+                OpKind::ResultOkOp { value } | OpKind::OptionSomeOp { value } => {
+                    let (type_name, tag) = if matches!(&op.kind, OpKind::ResultOkOp { .. }) {
+                        ("Result", 0u32)
+                    } else {
+                        ("Option", 0u32)
+                    };
+                    if let Some(struct_ty) = self.struct_types.get(type_name).copied() {
+                        let size = struct_ty.size_of().unwrap();
+                        let malloc = self.functions.get("malloc").copied().unwrap();
+                        let ptr_call = self.builder.build_call(malloc, &[size.into()], "ok_ptr").unwrap();
+                        if let inkwell::values::ValueKind::Basic(ptr_val) = ptr_call.try_as_basic_value() {
+                            let ptr = ptr_val.into_pointer_value();
+                            let tag_ptr = self.builder.build_struct_gep(struct_ty, ptr, 0, "ok_tag").unwrap();
+                            self.builder.build_store(tag_ptr, self.context.i32_type().const_int(tag as u64, false)).unwrap();
+                            if let Some(val) = self.values.get(value) {
+                                let payload_ptr = self.builder.build_struct_gep(struct_ty, ptr, 1, "ok_payload").unwrap();
+                                self.builder.build_store(payload_ptr, *val).unwrap();
+                            }
+                            self.values.insert(result_id, ptr.into());
+                        }
+                    }
+                }
+                OpKind::ResultErrOp { value } => {
+                    if let Some(struct_ty) = self.struct_types.get("Result").copied() {
+                        let size = struct_ty.size_of().unwrap();
+                        let malloc = self.functions.get("malloc").copied().unwrap();
+                        let ptr_call = self.builder.build_call(malloc, &[size.into()], "err_ptr").unwrap();
+                        if let inkwell::values::ValueKind::Basic(ptr_val) = ptr_call.try_as_basic_value() {
+                            let ptr = ptr_val.into_pointer_value();
+                            let tag_ptr = self.builder.build_struct_gep(struct_ty, ptr, 0, "err_tag").unwrap();
+                            self.builder.build_store(tag_ptr, self.context.i32_type().const_int(1, false)).unwrap();
+                            if let Some(val) = self.values.get(value) {
+                                let payload_ptr = self.builder.build_struct_gep(struct_ty, ptr, 1, "err_payload").unwrap();
+                                self.builder.build_store(payload_ptr, *val).unwrap();
+                            }
+                            self.values.insert(result_id, ptr.into());
+                        }
+                    }
+                }
+                OpKind::OptionNoneOp => {
+                    if let Some(struct_ty) = self.struct_types.get("Option").copied() {
+                        let size = struct_ty.size_of().unwrap();
+                        let malloc = self.functions.get("malloc").copied().unwrap();
+                        let ptr_call = self.builder.build_call(malloc, &[size.into()], "none_ptr").unwrap();
+                        if let inkwell::values::ValueKind::Basic(ptr_val) = ptr_call.try_as_basic_value() {
+                            let ptr = ptr_val.into_pointer_value();
+                            let tag_ptr = self.builder.build_struct_gep(struct_ty, ptr, 0, "none_tag").unwrap();
+                            self.builder.build_store(tag_ptr, self.context.i32_type().const_int(1, false)).unwrap();
+                            self.values.insert(result_id, ptr.into());
                         }
                     }
                 }
