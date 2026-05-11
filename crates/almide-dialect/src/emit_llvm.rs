@@ -292,9 +292,8 @@ pub mod codegen {
 
             match func {
                 "list.len" => {
-                    // Load length from list ptr (first i64)
-                    if let Some(list_ptr) = args.first() {
-                        let len = self.builder.build_load(i64_type, list_ptr.into_pointer_value(), "list_len").unwrap();
+                    if let Some(BasicValueEnum::PointerValue(list_ptr)) = args.first() {
+                        let len = self.builder.build_load(i64_type, *list_ptr, "list_len").unwrap();
                         self.values.insert(result_id, len);
                     }
                 }
@@ -1226,8 +1225,7 @@ pub mod codegen {
                         // or an integer match.
                         let is_variant_match = arms.iter().any(|a| matches!(&a.pattern, crate::ops::MatchPattern::Variant { .. }));
 
-                        let switch_val = if is_variant_match {
-                            // Load tag from variant struct: GEP + load i32
+                        let switch_val = if is_variant_match && subj_val.is_pointer_value() {
                             let ptr = subj_val.into_pointer_value();
                             // Find the variant type
                             let variant_ty = self.struct_types.values().next().copied(); // TODO: track per-value type
@@ -1275,6 +1273,7 @@ pub mod codegen {
 
                             // For variant patterns, extract payload bindings
                             if let crate::ops::MatchPattern::Variant { tag, bindings } = &arm.pattern {
+                                if subj_val.is_pointer_value() {
                                 if let Some((parent, _, payload_tys)) = self.variant_cases.get(tag.as_str()).cloned() {
                                     if let Some(sty) = self.struct_types.get(&parent).copied() {
                                         let ptr = subj_val.into_pointer_value();
@@ -1295,6 +1294,7 @@ pub mod codegen {
                                     }
                                 }
                             }
+                            } // is_pointer_value guard
 
                             let mut arm_val = None;
                             for block in &arm.body {
