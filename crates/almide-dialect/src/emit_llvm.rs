@@ -76,6 +76,8 @@ pub mod codegen {
             if f.name.as_str().contains('.') { continue; }
             compiler.compile_function(f);
         }
+
+        // No special entry point — main is emitted with correct C ABI signature.
     }
 
     struct LLVMCompiler<'a, 'ctx> {
@@ -122,16 +124,16 @@ pub mod codegen {
                 .filter_map(|(_, ty)| self.dialect_to_llvm_type(ty))
                 .collect();
 
-            let fn_type = if matches!(f.ret_ty, DialectType::Unit) {
+            let fn_type = if f.name.as_str() == "main" {
+                // C ABI: main returns i32
+                self.context.i32_type().fn_type(&params, false)
+            } else if matches!(f.ret_ty, DialectType::Unit) {
                 self.context.void_type().fn_type(&params, false)
             } else if let Some(ret) = self.dialect_to_basic_type(&f.ret_ty) {
                 ret.fn_type(&params, false)
             } else {
                 self.context.void_type().fn_type(&params, false)
             };
-
-            // Workaround: BasicTypeEnum::fn_type() might not exist in some inkwell versions.
-            // Use specific type's fn_type() instead — already handled above via match.
 
             let function = self.module.add_function(f.name.as_str(), fn_type, None);
             self.functions.insert(f.name.as_str().to_string(), function);
@@ -164,7 +166,11 @@ pub mod codegen {
                 // Terminator
                 match &block.terminator {
                     Terminator::Return(v) => {
-                        if matches!(f.ret_ty, DialectType::Unit) {
+                        if f.name.as_str() == "main" {
+                            // C ABI: return 0
+                            let zero = self.context.i32_type().const_int(0, false);
+                            self.builder.build_return(Some(&zero)).unwrap();
+                        } else if matches!(f.ret_ty, DialectType::Unit) {
                             self.builder.build_return(None).unwrap();
                         } else if let Some(val) = self.values.get(v) {
                             self.builder.build_return(Some(val)).unwrap();
@@ -174,7 +180,12 @@ pub mod codegen {
                     }
                     _ => {
                         if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
-                            self.builder.build_return(None).unwrap();
+                            if f.name.as_str() == "main" {
+                                let zero = self.context.i32_type().const_int(0, false);
+                                self.builder.build_return(Some(&zero)).unwrap();
+                            } else {
+                                self.builder.build_return(None).unwrap();
+                            }
                         }
                     }
                 }
@@ -269,6 +280,31 @@ pub mod codegen {
                                 let rv = r.into_int_value();
                                 Some(self.builder.build_int_compare(IntPredicate::SGT, lv, rv, "gt").unwrap().into())
                             }
+                            almide_ir::BinOp::Lte => {
+                                let lv = l.into_int_value();
+                                let rv = r.into_int_value();
+                                Some(self.builder.build_int_compare(IntPredicate::SLE, lv, rv, "lte").unwrap().into())
+                            }
+                            almide_ir::BinOp::Gte => {
+                                let lv = l.into_int_value();
+                                let rv = r.into_int_value();
+                                Some(self.builder.build_int_compare(IntPredicate::SGE, lv, rv, "gte").unwrap().into())
+                            }
+                            almide_ir::BinOp::Neq => {
+                                let lv = l.into_int_value();
+                                let rv = r.into_int_value();
+                                Some(self.builder.build_int_compare(IntPredicate::NE, lv, rv, "neq").unwrap().into())
+                            }
+                            almide_ir::BinOp::And => {
+                                let lv = l.into_int_value();
+                                let rv = r.into_int_value();
+                                Some(self.builder.build_and(lv, rv, "and").unwrap().into())
+                            }
+                            almide_ir::BinOp::Or => {
+                                let lv = l.into_int_value();
+                                let rv = r.into_int_value();
+                                Some(self.builder.build_or(lv, rv, "or").unwrap().into())
+                            }
                             _ => None,
                         };
                         if let Some(val) = result {
@@ -284,7 +320,7 @@ pub mod codegen {
                         if let Some(arg) = args.first().and_then(|a| self.values.get(a)) {
                             let fmt = match arg {
                                 BasicValueEnum::IntValue(_) => self.builder.build_global_string_ptr("%lld\n", "fmt_int").unwrap(),
-                                BasicValueEnum::FloatValue(_) => self.builder.build_global_string_ptr("%f\n", "fmt_float").unwrap(),
+                                BasicValueEnum::FloatValue(_) => self.builder.build_global_string_ptr("%.17g\n", "fmt_float").unwrap(),
                                 _ => self.builder.build_global_string_ptr("%s\n", "fmt_str").unwrap(),
                             };
                             if let Some(printf) = self.functions.get("printf") {
@@ -294,6 +330,11 @@ pub mod codegen {
                                     "printf_call",
                                 ).unwrap();
                             }
+                        }
+                    } else if callee_str == "int.to_string" || callee_str == "float.to_string" {
+                        // Pass through: the value stays as Int/Float, println handles formatting
+                        if let Some(val) = args.first().and_then(|a| self.values.get(a)) {
+                            self.values.insert(result_id, *val);
                         }
                     } else if let Some(func) = self.functions.get(callee_str).copied() {
                         let arg_vals: Vec<BasicMetadataValueEnum> = args.iter()
