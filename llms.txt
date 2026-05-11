@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.16.0. Bit introspection (10 new int stdlib functions), Hashable protocol (Map key validation, `deriving Hash`), MLIR dialect schema (almide-dialect crate), and experimental LLVM IR backend via Inkwell.
+- Current stable: v0.17.0. LLVM native backend (`almide build --target native`, C-equivalent performance, 33KB binaries), almide-dialect crate (SSA, MLIR-like), compile-time value parameters (`fn f[N: Int]()`), Mojo parity 47/100.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.
