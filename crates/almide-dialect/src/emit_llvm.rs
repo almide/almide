@@ -6,7 +6,16 @@
 
 #[cfg(feature = "llvm")]
 pub mod codegen {
+    use inkwell::values::AsValueRef;
     use inkwell::context::Context;
+
+    /// Set fast-math flags on a float instruction for auto-vectorization.
+    fn set_fast_math(val: inkwell::values::FloatValue) {
+        unsafe {
+            let flags = llvm_sys::LLVMFastMathAllowReassoc | llvm_sys::LLVMFastMathNoNaNs | llvm_sys::LLVMFastMathNoInfs;
+            llvm_sys::core::LLVMSetFastMathFlags(val.as_value_ref(), flags);
+        }
+    }
     use inkwell::module::Module as LLVMModule;
     use inkwell::builder::Builder;
     use inkwell::values::{BasicValueEnum, FunctionValue, BasicMetadataValueEnum};
@@ -736,22 +745,30 @@ pub mod codegen {
                             almide_ir::BinOp::AddFloat => {
                                 let lv = l.into_float_value();
                                 let rv = r.into_float_value();
-                                Some(self.builder.build_float_add(lv, rv, "fadd").unwrap().into())
+                                let inst = self.builder.build_float_add(lv, rv, "fadd").unwrap();
+                                set_fast_math(inst);
+                                Some(inst.into())
                             }
                             almide_ir::BinOp::SubFloat => {
                                 let lv = l.into_float_value();
                                 let rv = r.into_float_value();
-                                Some(self.builder.build_float_sub(lv, rv, "fsub").unwrap().into())
+                                let inst = self.builder.build_float_sub(lv, rv, "fsub").unwrap();
+                                set_fast_math(inst);
+                                Some(inst.into())
                             }
                             almide_ir::BinOp::MulFloat => {
                                 let lv = l.into_float_value();
                                 let rv = r.into_float_value();
-                                Some(self.builder.build_float_mul(lv, rv, "fmul").unwrap().into())
+                                let inst = self.builder.build_float_mul(lv, rv, "fmul").unwrap();
+                                set_fast_math(inst);
+                                Some(inst.into())
                             }
                             almide_ir::BinOp::DivFloat => {
                                 let lv = l.into_float_value();
                                 let rv = r.into_float_value();
-                                Some(self.builder.build_float_div(lv, rv, "fdiv").unwrap().into())
+                                let inst = self.builder.build_float_div(lv, rv, "fdiv").unwrap();
+                                set_fast_math(inst);
+                                Some(inst.into())
                             }
                             almide_ir::BinOp::Eq => {
                                 let lv = l.into_int_value();
@@ -867,6 +884,13 @@ pub mod codegen {
                                 }
                                 self.values.insert(result_id, ptr.into());
                             }
+                        }
+                    } else if callee_str == "int.to_float" {
+                        // int → float conversion
+                        if let Some(val) = args.first().and_then(|a| self.values.get(a).cloned()) {
+                            let f64_val = self.builder.build_signed_int_to_float(
+                                val.into_int_value(), self.context.f64_type(), "itof").unwrap();
+                            self.values.insert(result_id, f64_val.into());
                         }
                     } else if callee_str == "int.to_string" {
                         // Int → pass through to printf %lld
@@ -1102,6 +1126,25 @@ pub mod codegen {
                     }
                 }
 
+                OpKind::IndexOp { object, index } => {
+                    // List indexing: list_ptr + 8 + index * 8
+                    if let (Some(list_val), Some(idx_val)) = (self.values.get(object).cloned(), self.values.get(index).cloned()) {
+                        let i64_type = self.context.i64_type();
+                        let lp = list_val.into_pointer_value();
+                        let idx = idx_val.into_int_value();
+                        let offset = self.builder.build_int_add(
+                            self.builder.build_int_mul(idx, i64_type.const_int(8, false), "").unwrap(),
+                            i64_type.const_int(8, false), "off").unwrap();
+                        let elem_ptr = unsafe {
+                            self.builder.build_gep(self.context.i8_type(), lp, &[offset], "idx_ptr").unwrap()
+                        };
+                        // Determine element type from result_ty
+                        let load_ty = self.dialect_to_basic_type(&op.result_ty).unwrap_or(i64_type.into());
+                        let loaded = self.builder.build_load(load_ty, elem_ptr, "idx_val").unwrap();
+                        self.values.insert(result_id, loaded);
+                    }
+                }
+
                 OpKind::MatchOp { subject, arms } => {
                     if let Some(subj_val) = self.values.get(subject).cloned() {
                         let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
@@ -1220,8 +1263,8 @@ pub mod codegen {
                 }
                 OpKind::LoadVar { slot } => {
                     if let Some(alloca) = self.allocas.get(slot).copied() {
-                        let ty = alloca.get_type();
-                        let pointee = self.context.i64_type(); // TODO: infer from DialectType
+                        let pointee = self.dialect_to_basic_type(&op.result_ty)
+                            .unwrap_or(self.context.i64_type().into());
                         let loaded = self.builder.build_load(pointee, alloca, &format!("load_{}", result_id.0)).unwrap();
                         self.values.insert(result_id, loaded);
                     }
