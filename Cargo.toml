@@ -16,7 +16,7 @@ almide-codegen = { path = "crates/almide-codegen" }
 almide-tools = { path = "crates/almide-tools" }
 almide-optimize = { path = "crates/almide-optimize" }
 almide-frontend = { path = "crates/almide-frontend" }
-almide-dialect = { path = "crates/almide-dialect", features = ["llvm"] }
+almide-dialect = { path = "crates/almide-dialect" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -24,6 +24,10 @@ semver = "1"
 toml = "0.8"
 wasm-encoder = "0.225"
 lasso = { version = "0.7", features = ["multi-threaded"] }
+
+[features]
+default = []
+llvm = ["almide-dialect/llvm"]
 
 [dev-dependencies]
 proptest = "1"
