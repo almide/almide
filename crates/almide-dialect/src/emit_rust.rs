@@ -245,15 +245,27 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
         }
 
         OpKind::CallOp { callee, args } => {
-            let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
             let callee_str = callee.as_str();
             if callee_str == "println" {
+                let args_str: Vec<_> = args.iter().map(|a| names.get(*a)).collect();
                 out.push_str(&format!("{}println!(\"{{}}\", {});\n", pad, args_str.join(", ")));
                 out.push_str(&format!("{}let {} = ();\n", pad, result_name));
             } else {
-                // Sanitize callee: replace `.` and monomorph suffixes for valid Rust
-                let rust_callee = sanitize_callee(callee_str);
-                out.push_str(&format!("{}let {} = {}({});\n", pad, result_name, rust_callee, args_str.join(", ")));
+                let resolved = resolve_call(callee_str);
+                let is_user_fn = !callee_str.contains('.');
+                let args_str: Vec<_> = args.iter().enumerate().map(|(i, a)| {
+                    let name = names.get(*a);
+                    if resolved.borrow_args.contains(&i) {
+                        format!("&{}", name)
+                    } else if is_user_fn {
+                        // User function calls: clone all args conservatively
+                        // to avoid move-after-use errors (e.g. dot(v, v)).
+                        format!("{}.clone()", name)
+                    } else {
+                        name
+                    }
+                }).collect();
+                out.push_str(&format!("{}let {} = {}({});\n", pad, result_name, resolved.rust_name, args_str.join(", ")));
             }
         }
         OpKind::IntrinsicCallOp { symbol, args } => {
@@ -389,23 +401,58 @@ fn emit_op(out: &mut String, op: &Operation, indent: usize, names: &mut NameMap)
     }
 }
 
-/// Convert almide-style callee names to valid Rust identifiers.
-/// `list.map__Int_Int` → `almide_rt_list_map` (strip monomorph suffix, use runtime prefix)
-/// `int.to_string` → `almide_rt_int_to_string`
-/// `add` → `add` (user function, no change)
-fn sanitize_callee(callee: &str) -> String {
+/// Resolved stdlib call info.
+struct ResolvedCall {
+    rust_name: String,
+    /// Which argument indices need `&` borrow.
+    borrow_args: Vec<usize>,
+}
+
+/// Convert almide-style callee names to valid Rust identifiers and determine borrow needs.
+fn resolve_call(callee: &str) -> ResolvedCall {
     if let Some(dot_pos) = callee.find('.') {
         let module = &callee[..dot_pos];
         let func_part = &callee[dot_pos + 1..];
-        // Strip monomorphization suffix (__Int_Int, etc.)
         let func = if let Some(mono_pos) = func_part.find("__") {
             &func_part[..mono_pos]
         } else {
             func_part
         };
-        format!("almide_rt_{}_{}", module, func)
+        let rust_name = format!("almide_rt_{}_{}", module, func);
+
+        // Determine which args need borrow based on module + function.
+        // List: read-only fns take &[T] (first arg), consuming fns take Vec<T>.
+        // String: most fns take &str (first arg).
+        // Map: read-only fns take &HashMap (first arg).
+        // Int/Float: all by value.
+        let borrow_args = match module {
+            "list" => {
+                // Consuming: map, filter, fold, find, flat_map, filter_map, take, drop,
+                // enumerate, zip, zip_with, flatten, take_while, drop_while, partition,
+                // group_by, find_index, update, scan, unique_by, slice, insert, remove_at,
+                // intersperse, take_end, drop_end, shuffle, window, reduce
+                let consuming = [
+                    "map", "filter", "fold", "find", "flat_map", "filter_map",
+                    "take", "drop", "enumerate", "zip", "zip_with", "flatten",
+                    "take_while", "drop_while", "partition", "group_by", "find_index",
+                    "update", "scan", "unique_by", "slice", "insert", "remove_at",
+                    "intersperse", "take_end", "drop_end", "shuffle", "window", "reduce",
+                    "sort_by", "any", "all", "count", "push", "pop", "clear",
+                ];
+                if consuming.contains(&func) { vec![] } else { vec![0] }
+            }
+            "string" => vec![0], // All string fns take &str
+            "map" => {
+                // get, len, keys, values, contains_key, is_empty take &HashMap
+                let read_only = ["get", "len", "keys", "values", "contains_key", "is_empty"];
+                if read_only.contains(&func) { vec![0] } else { vec![] }
+            }
+            _ => vec![], // int, float, math, etc. — by value
+        };
+
+        ResolvedCall { rust_name, borrow_args }
     } else {
-        callee.to_string()
+        ResolvedCall { rust_name: callee.to_string(), borrow_args: vec![] }
     }
 }
 
