@@ -44,6 +44,8 @@ pub struct LowerCtx<'a> {
     type_conventions: HashMap<Sym, std::collections::HashSet<Sym>>,
     protocol_bounds: HashMap<Sym, Vec<Sym>>,
     lambda_id_counter: u32,
+    /// Maps const param name → VarId for value parameter lowering.
+    pub const_param_vars: HashMap<Sym, VarId>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -57,6 +59,7 @@ impl<'a> LowerCtx<'a> {
             type_conventions: HashMap::new(),
             protocol_bounds: HashMap::new(),
             lambda_id_counter: 0,
+            const_param_vars: HashMap::new(),
         }
     }
 
@@ -461,19 +464,45 @@ fn lower_fn(
 ) -> IrFunction {
     ctx.push_scope();
 
-    // Set up protocol bounds for this function's generics
+    // Set up protocol bounds and const params for this function's generics
     let saved_pb = std::mem::take(&mut ctx.protocol_bounds);
+    let saved_cp = std::mem::take(&mut ctx.const_param_vars);
     if let Some(gs) = generics {
         for g in gs {
             if let Some(bounds) = &g.bounds {
                 if !bounds.is_empty() {
-                    ctx.protocol_bounds.insert(g.name, bounds.clone());
+                    // Check if this is a const param (scalar type bound)
+                    let is_const = bounds.len() == 1
+                        && crate::canonicalize::registration::SCALAR_TYPE_NAMES.contains(&bounds[0].as_str());
+                    if !is_const {
+                        ctx.protocol_bounds.insert(g.name, bounds.clone());
+                    }
                 }
             }
         }
     }
 
     let mut ir_params = Vec::new();
+
+    // Add const params as implicit leading parameters
+    if let Some(gs) = generics {
+        for g in gs {
+            if let Some(bounds) = &g.bounds {
+                let is_const = bounds.len() == 1
+                    && crate::canonicalize::registration::SCALAR_TYPE_NAMES.contains(&bounds[0].as_str());
+                if is_const {
+                    let param_ty = resolve_type_expr(&ast::TypeExpr::Simple { name: sym(&bounds[0]) });
+                    let var = ctx.define_var(&g.name, param_ty.clone(), Mutability::Let, span.clone());
+                    ctx.const_param_vars.insert(sym(&g.name), var);
+                    ir_params.push(IrParam {
+                        var, ty: param_ty, name: g.name,
+                        borrow: ParamBorrow::Own, open_record: None, default: None,
+                    });
+                }
+            }
+        }
+    }
+
     for p in params {
         let ty = resolve_type_expr(&p.ty);
         let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, span.clone());
@@ -500,6 +529,7 @@ fn lower_fn(
 
     let ir_body = lower_expr(ctx, body);
     ctx.protocol_bounds = saved_pb;
+    ctx.const_param_vars = saved_cp;
     ctx.pop_scope();
 
     let is_effect = effect.unwrap_or(false);
@@ -510,10 +540,21 @@ fn lower_fn(
         ast::Visibility::Local => IrVisibility::Private,
     };
 
+    // Strip const params from generics (they became runtime params above).
+    // If only const params remain, generics becomes None (non-generic function).
+    let stripped_generics = generics.as_ref().map(|gs| {
+        let remaining: Vec<_> = gs.iter().filter(|g| {
+            !g.bounds.as_ref().map_or(false, |bs| {
+                bs.len() == 1 && crate::canonicalize::registration::SCALAR_TYPE_NAMES.contains(&bs[0].as_str())
+            })
+        }).cloned().collect();
+        if remaining.is_empty() { None } else { Some(remaining) }
+    }).flatten();
+
     IrFunction {
         name: sym(name), params: ir_params, ret_ty, body: ir_body,
         is_effect, is_async, is_test: false,
-        generics: generics.clone(), extern_attrs: extern_attrs.to_vec(),
+        generics: stripped_generics, extern_attrs: extern_attrs.to_vec(),
         export_attrs: export_attrs.to_vec(),
         attrs: attrs.to_vec(),
         visibility: vis,

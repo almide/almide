@@ -120,6 +120,17 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 }, ty, span)
             } else if let Some(var_id) = ctx.lookup_var(name) {
                 ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
+            } else if let Some(Ty::ConstParam { name: pname, ty: param_ty }) = ctx.env.types.get(&sym(name)).cloned() {
+                // Const param reference: look up existing VarId or allocate one.
+                // The const param is treated as an implicit function parameter at runtime.
+                let var_id = if let Some(vid) = ctx.const_param_vars.get(&pname) {
+                    *vid
+                } else {
+                    let vid = ctx.var_table.alloc(pname, *param_ty.clone(), Mutability::Let, None);
+                    ctx.const_param_vars.insert(pname, vid);
+                    vid
+                };
+                ctx.mk(IrExprKind::Var { id: var_id }, *param_ty, span)
             } else {
                 ctx.mk(IrExprKind::Var { id: VarId(0) }, ty, span)
             }
