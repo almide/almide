@@ -98,7 +98,11 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
                 eprintln!("dialect verify: {} (in {})", e.message, e.context);
             }
         }
-        print!("{}", almide_dialect::dump::dump_module(&module));
+        if target == "rust" || target == "rs" {
+            print!("{}", almide_dialect::emit_rust::emit_module(&module));
+        } else {
+            print!("{}", almide_dialect::dump::dump_module(&module));
+        }
         return;
     }
     if emit_ir {

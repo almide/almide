@@ -14,6 +14,7 @@ pub mod ops;
 pub mod lower;
 pub mod verify;
 pub mod dump;
+pub mod emit_rust;
 
 use almide_base::intern::Sym;
 
