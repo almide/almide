@@ -10,12 +10,12 @@
 |------|------|--------|-----|-------|
 | **Type system** | 100 | 55 | -45 | Generics + protocols + **const generics** (`fn f[N: Int]()`). No HKT syntax, dependent types |
 | **Compile-time computation** | 100 | 35 | -65 | **Value parameters work end-to-end** (`zeros[5]()`, `dot[3](a,b)`). No comptime eval yet |
-| **Memory model** | 100 | 35 | -65 | Mojo has ownership+borrowing; almide delegates to Rust/WASM runtimes |
-| **SIMD / Vectorization** | 100 | 5 | -95 | Mojo: first-class SIMD; almide: WASM SIMD128 in matrix only |
+| **Memory model** | 100 | 40 | -60 | LLVM alloca/store/load for mutable vars; no user-facing ownership |
+| **SIMD / Vectorization** | 100 | 20 | -80 | LLVM O2 auto-vectorization enabled; no explicit SIMD types yet |
 | **GPU** | 100 | 0 | -100 | Mojo: GPU kernels ship today; almide: nothing |
-| **Optimizer** | 100 | 58 | -42 | egg rewriter + 30 nanopass + **dialect SSA layer**; no MLIR lowering yet |
-| **Backend maturity** | 100 | 50 | -50 | 3 backends: Rust (mature) + WASM (mature) + **LLVM IR (PoC via Inkwell)** + dialect pipeline |
-| **Stdlib** | 100 | 62 | -38 | 746 fns / 35 modules; **+10 bit introspection**, Hashable protocol |
+| **Optimizer** | 100 | 68 | -32 | egg + 30 nanopass + dialect SSA + **LLVM O2 pipeline** (inline, vectorize, mem2reg) |
+| **Backend maturity** | 100 | 70 | -30 | 3 backends: Rust + WASM + **LLVM native** (7/7 equiv tests, C-perf, 33KB) |
+| **Stdlib** | 100 | 62 | -38 | 746 fns / 35 modules; bit introspection, Hashable protocol |
 | **Concurrency** | 100 | 50 | -50 | `fan` structured concurrency is clean but limited; no GPU parallelism |
 | **Effect system** | 100 | 80 | -20 | Almide is stronger here — `effect fn` / `fn` separation is principled |
 | **Tooling** | 100 | 45 | -55 | formatter + test + pkg manager; no debugger/profiler/LSP complete |
@@ -24,7 +24,7 @@
 | **Documentation** | 100 | 55 | -45 | Good internal docs, CHEATSHEET, ARCHITECTURE; no user tutorial/book |
 | **LLM code generation** | 50 | 100 | +50 | Almide's unique axis — MSR-driven design, almide-dojo |
 | **Multi-target** | 70 | 75 | +5 | Almide: Rust + WASM + LLVM; Mojo: CPU + GPU (no WASM) |
-| **Weighted total** | **100** | **42** | | See methodology below. Previous: 38 (2026-05-11 AM) |
+| **Weighted total** | **100** | **47** | | Previous: 38→42→47 (2026-05-11) |
 
 ### Weighted Score Methodology
 
