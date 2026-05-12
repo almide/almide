@@ -1166,13 +1166,19 @@ pub mod codegen {
 
             let arm_bbs: Vec<_> = arms.iter().enumerate()
                 .map(|(i, _)| self.ctx.append_basic_block(func, &format!("a{}", i))).collect();
-            let default_bb = *arm_bbs.last().unwrap_or(&merge_bb);
 
+            // Find default arm (wildcard/binding). If none, use merge_bb.
+            let default_idx = arms.iter().position(|a| matches!(&a.pattern, MatchPattern::Wildcard | MatchPattern::Binding(_)));
+            let default_bb = default_idx.map(|i| arm_bbs[i]).unwrap_or(merge_bb);
+
+            let switch_ty = switch_val.get_type();
             let mut cases = Vec::new();
             for (i, arm) in arms.iter().enumerate() {
+                // Skip default arm (already the switch default target)
+                if Some(i) == default_idx { continue; }
                 match &arm.pattern {
                     MatchPattern::LitInt(v) => {
-                        let cv = if switch_val.get_type() == self.ctx.i32_type().into() {
+                        let cv = if switch_ty == self.ctx.i32_type().into() {
                             self.ctx.i32_type().const_int(*v as u64, true)
                         } else {
                             self.ctx.i64_type().const_int(*v as u64, true)
@@ -1181,10 +1187,16 @@ pub mod codegen {
                     }
                     MatchPattern::Variant { tag, .. } => {
                         if let Some((_, tag_idx, _)) = self.variant_cases.get(tag.as_str()) {
-                            cases.push((self.ctx.i32_type().const_int(*tag_idx as u64, false), arm_bbs[i]));
+                            // Match switch type for variant tags
+                            let cv = if switch_ty == self.ctx.i64_type().into() {
+                                self.ctx.i64_type().const_int(*tag_idx as u64, false)
+                            } else {
+                                self.ctx.i32_type().const_int(*tag_idx as u64, false)
+                            };
+                            cases.push((cv, arm_bbs[i]));
                         }
                     }
-                    _ => {} // wildcard/binding → default
+                    _ => {}
                 }
             }
             self.builder.build_switch(switch_val, default_bb, &cases).unwrap();
@@ -1219,7 +1231,12 @@ pub mod codegen {
                 let av = self.compile_region(&arm.body, scope);
                 self.builder.build_unconditional_branch(merge_bb).unwrap();
                 let end = self.builder.get_insert_block().unwrap();
-                if let Some(v) = av { arm_results.push((v.val, end)); }
+                // Always add to arm_results (use default value if None)
+                if let Some(v) = av {
+                    arm_results.push((v.val, end));
+                } else if let Some(dv) = self.default_value(rty) {
+                    arm_results.push((dv, end));
+                }
             }
 
             self.builder.position_at_end(merge_bb);
