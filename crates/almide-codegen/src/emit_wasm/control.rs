@@ -230,6 +230,38 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Emit a match arm body, wrapping in Ok() if the arm returns a naked value
+    /// but the match result type is Result.
+    fn emit_match_arm_body(&mut self, body: &IrExpr, result_ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let result_is_result = matches!(result_ty, Ty::Applied(TypeConstructorId::Result, _));
+        let body_is_result = matches!(&body.ty, Ty::Applied(TypeConstructorId::Result, _));
+        let body_is_err = matches!(&body.kind, IrExprKind::ResultErr { .. });
+
+        // Also check: if any sibling arm returns Result but result_ty says Int,
+        // wrap this arm in Ok() too (type checker sometimes infers Int instead of Result).
+        let needs_wrap = if result_is_result && !body_is_result && !body_is_err {
+            true
+        } else if !result_is_result && !body_is_result && body_is_err {
+            // err() in arm but result_ty is not Result — shouldn't happen, but guard
+            false
+        } else {
+            false
+        };
+
+        if needs_wrap {
+            // Naked value in Result-typed match arm → wrap in Ok()
+            let wrapped = IrExpr {
+                kind: IrExprKind::ResultOk { expr: Box::new(body.clone()) },
+                ty: result_ty.clone(),
+                span: body.span,
+            };
+            self.emit_expr(&wrapped);
+        } else {
+            self.emit_expr(body);
+        }
+    }
+
     /// Emit a match expression as a chain of if-else checks.
     ///
     /// Strategy: store subject in a scratch local, then for each arm:
@@ -242,10 +274,23 @@ impl FuncCompiler<'_> {
         // Resolve result_ty: trust arm body types over expr.ty when they disagree.
         // Checker's Union-Find can contaminate match result vars (e.g., binding to Int
         // when the actual result is Either[String, Int] = i32 pointer).
-        let resolved_result = if !arms.is_empty() {
+        // If any arm returns ResultErr/ResultOk, the match result must be Result (i32 pointer).
+        // The type checker sometimes infers the non-Result arm type (e.g., Int) instead.
+        let has_result_arm = arms.iter().any(|a| matches!(&a.body.ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)));
+        let has_result_err = arms.iter().any(|a| matches!(&a.body.kind,
+            IrExprKind::ResultErr { .. }));
+
+        let resolved_result = if (has_result_arm || has_result_err) && !matches!(result_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)) {
+            // Promote to Result type from the arm that has it
+            arms.iter()
+                .find(|a| matches!(&a.body.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)))
+                .map(|a| a.body.ty.clone())
+                .unwrap_or_else(|| result_ty.clone())
+        } else if !arms.is_empty() {
             let arm_vts: Vec<Option<ValType>> = arms.iter().map(|a| values::ty_to_valtype(&a.body.ty)).collect();
             let result_vt = values::ty_to_valtype(result_ty);
-            // If all arm bodies agree on a WASM type and it differs from result_ty, use arm type
             if let Some(first_vt) = arm_vts[0] {
                 if arm_vts.iter().all(|vt| *vt == Some(first_vt)) && result_vt != Some(first_vt) {
                     arms[0].body.ty.clone()
@@ -326,7 +371,7 @@ impl FuncCompiler<'_> {
                     let bt = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt));
                     let _g = self.depth_push();
-                    self.emit_expr(&arm.body);
+                    self.emit_match_arm_body(&arm.body, result_ty);
                     wasm!(self.func, { else_; });
                     if is_last {
                         wasm!(self.func, { unreachable; });
@@ -336,7 +381,7 @@ impl FuncCompiler<'_> {
                     self.depth_pop(_g);
                     wasm!(self.func, { end; });
                 } else {
-                    self.emit_expr(&arm.body);
+                    self.emit_match_arm_body(&arm.body, result_ty);
                 }
             }
 
@@ -360,7 +405,7 @@ impl FuncCompiler<'_> {
                     let bt = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt));
                     let _g = self.depth_push();
-                    self.emit_expr(&arm.body);
+                    self.emit_match_arm_body(&arm.body, result_ty);
                     wasm!(self.func, { else_; });
                     if is_last {
                         wasm!(self.func, { unreachable; });
@@ -370,7 +415,7 @@ impl FuncCompiler<'_> {
                     self.depth_pop(_g);
                     wasm!(self.func, { end; });
                 } else {
-                    self.emit_expr(&arm.body);
+                    self.emit_match_arm_body(&arm.body, result_ty);
                 }
             }
 
@@ -395,7 +440,7 @@ impl FuncCompiler<'_> {
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 let _g = self.depth_push();
-                self.emit_expr(&arm.body);
+                self.emit_match_arm_body(&arm.body, result_ty);
                 wasm!(self.func, { else_; });
 
                 if is_last {
@@ -517,14 +562,14 @@ impl FuncCompiler<'_> {
                         let bt2 = values::block_type(result_ty);
                         self.func.instruction(&Instruction::If(bt2));
                         let guard_g = self.depth_push();
-                        self.emit_expr(&arm.body);
+                        self.emit_match_arm_body(&arm.body, result_ty);
                         wasm!(self.func, { else_; });
                         if is_last { wasm!(self.func, { unreachable; }); }
                         else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
                         self.depth_pop(guard_g);
                         wasm!(self.func, { end; });
                     } else {
-                        self.emit_expr(&arm.body);
+                        self.emit_match_arm_body(&arm.body, result_ty);
                     }
 
                     // Close literal guard if present
@@ -544,7 +589,7 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { end; });
                 } else {
                     if is_last {
-                        self.emit_expr(&arm.body);
+                        self.emit_match_arm_body(&arm.body, result_ty);
                     } else {
                         wasm!(self.func, { unreachable; });
                     }
@@ -596,7 +641,7 @@ impl FuncCompiler<'_> {
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 let none_guard = self.depth_push();
-                self.emit_expr(&arm.body);
+                self.emit_match_arm_body(&arm.body, result_ty);
                 wasm!(self.func, { else_; });
                 if is_last {
                     wasm!(self.func, { unreachable; });
@@ -644,7 +689,7 @@ impl FuncCompiler<'_> {
                         }
                     }
 
-                    self.emit_expr(&arm.body);
+                    self.emit_match_arm_body(&arm.body, result_ty);
                     wasm!(self.func, { else_; });
 
                     if is_last {
@@ -745,7 +790,7 @@ impl FuncCompiler<'_> {
 
             // List pattern: [a, b] => ... — pass through (list matching not yet implemented in WASM)
             IrPattern::List { .. } => {
-                self.emit_expr(&arm.body);
+                self.emit_match_arm_body(&arm.body, result_ty);
             }
 
             // Tuple pattern: (a, b) => ...
@@ -856,7 +901,7 @@ impl FuncCompiler<'_> {
                             offset2 += values::byte_size(&ft);
                         }
 
-                        self.emit_expr(&arm.body);
+                        self.emit_match_arm_body(&arm.body, result_ty);
 
                         wasm!(self.func, { else_; });
                         self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
@@ -883,7 +928,7 @@ impl FuncCompiler<'_> {
                         offset += values::byte_size(&ft);
                     }
 
-                    self.emit_expr(&arm.body);
+                    self.emit_match_arm_body(&arm.body, result_ty);
 
                     if let Some(tg) = tuple_guard {
                         wasm!(self.func, { else_; });
@@ -894,7 +939,7 @@ impl FuncCompiler<'_> {
                         return; // Don't fall through to normal next-arm processing
                     }
                 } else {
-                    self.emit_expr(&arm.body);
+                    self.emit_match_arm_body(&arm.body, result_ty);
                 }
             }
         }
@@ -916,14 +961,14 @@ impl FuncCompiler<'_> {
             let bt2 = values::block_type(result_ty);
             self.func.instruction(&Instruction::If(bt2));
             let guard_g = self.depth_push();
-            self.emit_expr(&arm.body);
+            self.emit_match_arm_body(&arm.body, result_ty);
             wasm!(self.func, { else_; });
             if is_last { wasm!(self.func, { unreachable; }); }
             else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
             self.depth_pop(guard_g);
             wasm!(self.func, { end; });
         } else {
-            self.emit_expr(&arm.body);
+            self.emit_match_arm_body(&arm.body, result_ty);
         }
     }
 
@@ -1103,7 +1148,7 @@ impl FuncCompiler<'_> {
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 let none_guard = self.depth_push();
-                self.emit_expr(&arm.body);
+                self.emit_match_arm_body(&arm.body, result_ty);
                 wasm!(self.func, { else_; });
                 if is_last { wasm!(self.func, { unreachable; }); }
                 else { self.emit_match_arms(arms, outer_scratch, subject_ty, result_ty, idx + 1); }
