@@ -269,6 +269,15 @@ pub struct ExportAttr {
     pub symbol: Sym,     // e.g., "bridge_add"
 }
 
+/// @native("target", "module", "function") — target-conditional external binding.
+/// Multiple @native attrs on one fn enable Gleam-style multi-target dispatch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NativeAttr {
+    pub target: Sym,     // "rust" or "wasm"
+    pub module: Sym,     // native module name
+    pub function: Sym,   // function name in that module
+}
+
 /// Generic `@name(args)` attribute on a declaration.
 ///
 /// Hosts the stdlib unification attributes (`@inline_rust`,
