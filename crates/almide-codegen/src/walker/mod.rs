@@ -163,7 +163,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         for attr in &func.extern_attrs {
             // @native("rust"/"wasm", ...) — target-conditional native binding
             if attr.target == native_target {
-                return render_native_call(func, attr);
+                return render_native_call(ctx, func, attr);
             }
             if attr.target == target_str {
                 return ctx.templates.render_with("extern_fn", None, &[], &[("module", attr.module.as_str()), ("function", attr.function.as_str()), ("name", func.name.as_str())])
@@ -587,43 +587,34 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 ///
 /// Type mapping (Almide → C extern → safe wrapper):
 /// Render @native("target", "module", "function") — delegates to module::function().
-fn render_native_call(func: &IrFunction, attr: &almide_lang::ast::ExternAttr) -> String {
+/// Parameters use reference types (&str, &[T]) matching native Rust conventions.
+fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr) -> String {
+    use types::render_type;
+    use almide_lang::types::{Ty, TypeConstructorId};
     let mod_name = attr.module.as_str();
     let fn_name = attr.function.as_str();
-    let params: Vec<String> = func.params.iter().map(|p| {
-        format!("{}: {}", p.name, native_type(&p.ty))
-    }).collect();
-    let args: Vec<String> = func.params.iter().map(|p| {
-        let n = p.name.to_string();
-        match &p.ty {
-            almide_lang::types::Ty::Named(s, _) if s.as_str() == "String" => format!("&{n}"),
-            almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::List, _) => format!("&{n}"),
-            _ => n,
-        }
-    }).collect();
-    format!("fn {}({}) -> {} {{\n    {}::{}({})\n}}",
-        func.name, params.join(", "), native_type(&func.ret_ty),
-        mod_name, fn_name, args.join(", "))
-}
 
-fn native_type(ty: &almide_lang::types::Ty) -> String {
-    use almide_lang::types::{Ty, TypeConstructorId};
-    match ty {
-        Ty::Named(s, _) if s.as_str() == "String" => "String".into(),
-        Ty::Named(s, _) if s.as_str() == "Int" => "i64".into(),
-        Ty::Named(s, _) if s.as_str() == "Float" => "f64".into(),
-        Ty::Named(s, _) if s.as_str() == "Bool" => "bool".into(),
-        Ty::Named(s, _) if s.as_str() == "Unit" => "()".into(),
-        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 =>
-            format!("Result<{}, {}>", native_type(&a[0]), native_type(&a[1])),
-        Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 =>
-            format!("Option<{}>", native_type(&a[0])),
-        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 =>
-            format!("Vec<{}>", native_type(&a[0])),
-        Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 =>
-            format!("std::collections::HashMap<{}, {}>", native_type(&a[0]), native_type(&a[1])),
-        _ => "i64".into(),
-    }
+    // Wrapper params: use reference types for String/List to match native Rust conventions
+    let params: Vec<String> = func.params.iter().map(|p| {
+        let ty = match &p.ty {
+            Ty::String => "&str".to_string(),
+            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+                format!("&[{}]", render_type(ctx, &args[0]))
+            }
+            _ => render_type(ctx, &p.ty),
+        };
+        format!("{}: {}", p.name, ty)
+    }).collect();
+
+    // Call args: pass through directly (wrapper already uses reference types)
+    let args: Vec<String> = func.params.iter().map(|p| {
+        p.name.to_string()
+    }).collect();
+
+    let ret = render_type(ctx, &func.ret_ty);
+    format!("fn {}({}) -> {} {{\n    {}::{}({})\n}}",
+        func.name, params.join(", "), ret,
+        mod_name, fn_name, args.join(", "))
 }
 
 ///   Int     → i32 in extern, i64 in wrapper (cast)
