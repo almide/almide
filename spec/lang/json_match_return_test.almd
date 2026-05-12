@@ -1,0 +1,30 @@
+import json
+
+fn parse_and_count(data: String) -> Int = {
+  match json.parse(data) {
+    err(_) => -1,
+    ok(v) => {
+      let n = match json.get_array(v, "items") {
+        some(arr) => list.len(arr),
+        none => 0,
+      }
+      if n == 0 then 0
+      else {
+        var count = 0
+        var i = 0
+        while i < n {
+          count = count + 1
+          i = i + 1
+        }
+        count
+      }
+    },
+  }
+}
+
+test "parse and count" {
+  assert_eq(parse_and_count("invalid"), -1)
+  assert_eq(parse_and_count("{\"items\":[]}"), 0)
+  assert_eq(parse_and_count("{\"items\":[1,2,3]}"), 3)
+  assert_eq(parse_and_count("{\"items\":[1,2,3,4,5]}"), 5)
+}

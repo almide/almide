@@ -1,0 +1,35 @@
+import bytes
+
+test "heap_save and heap_restore free allocations" {
+  let cp = bytes.heap_save()
+  let b1 = bytes.new(1024)
+  bytes.set_f32_le(b1, 0, 42.0)
+  assert(bytes.read_f32_le(b1, 0) == 42.0)
+  bytes.heap_restore(cp)
+  // After restore, b1 is freed. New alloc should reuse the space.
+  let b2 = bytes.new(1024)
+  // b2 should be at same address as b1 was (bump allocator reset)
+  assert(bytes.len(b2) == 1024)
+}
+
+test "heap_save and restore are callable" {
+  // On Rust target: no-op (returns 0). On WASM: returns heap pointer.
+  let cp1 = bytes.heap_save()
+  let _spacer = bytes.new(100)
+  let cp2 = bytes.heap_save()
+  // cp2 >= cp1 (equal on Rust no-op, greater on WASM)
+  assert(cp2 >= cp1)
+  bytes.heap_restore(cp1)
+}
+
+test "nested heap_save/restore" {
+  let outer = bytes.heap_save()
+  let b1 = bytes.new(256)
+  bytes.set_i32_le(b1, 0, 99)
+  let inner = bytes.heap_save()
+  let _b2 = bytes.new(256)
+  bytes.heap_restore(inner) // free _b2 only
+  // b1 should still be valid
+  assert(bytes.read_i32_le(b1, 0) == 99)
+  bytes.heap_restore(outer) // free b1 too
+}
