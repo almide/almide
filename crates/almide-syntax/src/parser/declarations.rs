@@ -63,27 +63,6 @@ fn extract_export_attr(attr: &Attribute) -> Result<ExportAttr, String> {
     Ok(ExportAttr { target, symbol })
 }
 
-/// Convert @native("target", "module", "function") into NativeAttr.
-fn extract_native_attr(attr: &Attribute) -> Result<NativeAttr, String> {
-    let args = &attr.args;
-    if args.len() != 3 {
-        return Err(format!("@native expects 3 string arguments (\"target\", \"module\", \"function\"); got {}", args.len()));
-    }
-    let target = match &args[0] {
-        AttrArg { name: None, value: AttrValue::String { value } } => sym(value),
-        _ => return Err("@native first argument must be a string literal target (\"rust\" or \"wasm\")".into()),
-    };
-    let module = match &args[1] {
-        AttrArg { name: None, value: AttrValue::String { value } } => sym(value),
-        _ => return Err("@native second argument must be a string literal module".into()),
-    };
-    let function = match &args[2] {
-        AttrArg { name: None, value: AttrValue::String { value } } => sym(value),
-        _ => return Err("@native third argument must be a string literal function".into()),
-    };
-    Ok(NativeAttr { target, module, function })
-}
-
 impl Parser {
     // ── Module & Import ───────────────────────────────────────────
 
@@ -237,16 +216,6 @@ impl Parser {
             match attr.name.as_str() {
                 "extern" => extern_attrs.push(extract_extern_attr(&attr)?),
                 "export" => export_attrs.push(extract_export_attr(&attr)?),
-                "native" => {
-                    // @native flows through as ExternAttr — codegen distinguishes
-                    // by target value ("rust"/"wasm" vs "rs"/"c").
-                    let na = extract_native_attr(&attr)?;
-                    extern_attrs.push(ExternAttr {
-                        target: na.target,
-                        module: na.module,
-                        function: na.function,
-                    });
-                }
                 _ => attrs.push(attr),
             }
             self.skip_newlines();

@@ -148,8 +148,11 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         return String::new();
     }
 
-    // Extern fn: emit import/use via template (rs) or extern "C" block (c)
-    // Also handles @native("rust"/"wasm", "module", "function")
+    // Extern fn dispatch:
+    //   @extern(rust, "mod", "fn") → native module call (render_native_call)
+    //   @extern(wasm, "env", "fn") → WASM host import (future)
+    //   @extern(rs, "mod", "fn")   → template-based rendering (legacy)
+    //   @extern(c, "lib", "fn")    → C FFI with extern "C" block
     if !func.extern_attrs.is_empty() {
         let target_str = match ctx.target {
             Target::Rust => "rs",
@@ -161,7 +164,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             _ => "wasm",
         };
         for attr in &func.extern_attrs {
-            // @native("rust"/"wasm", ...) — target-conditional native binding
+            // @extern(rust, ...) / @extern(wasm, ...) — native module binding
             if attr.target == native_target {
                 return render_native_call(ctx, func, attr);
             }
