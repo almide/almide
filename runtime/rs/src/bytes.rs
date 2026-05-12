@@ -730,6 +730,10 @@ pub fn almide_rt_bytes_read_length_prefixed_strings_le(b: &Vec<u8>, pos: i64, co
     out
 }
 
+// Arena memory management — no-op on native (only meaningful in WASM bump allocator).
+pub fn almide_rt_bytes_heap_save() -> i64 { 0 }
+pub fn almide_rt_bytes_heap_restore(_checkpoint: i64) {}
+
 pub fn almide_rt_bytes_append_f64_le(b: &mut Vec<u8>, val: f64) {
     b.extend_from_slice(&val.to_le_bytes());
 }

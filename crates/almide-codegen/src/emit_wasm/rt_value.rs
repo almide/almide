@@ -290,10 +290,12 @@ fn compile_json_parse_at(emitter: &mut WasmEmitter) {
     // 2=result_ptr, 3=str_len, 4=ch, 5=start, 6=value_ptr, 7=tmp
     // 8=list_ptr, 9=count, 10=sub_result, 11=sign
     // 12=num_val(i64), 13=divisor(f64)
+    // 14=capacity, 15=old_buf_save (for growable array/object parsing)
     let mut f = Function::new([
         (10, ValType::I32),
         (1, ValType::I64),
         (1, ValType::F64),
+        (2, ValType::I32), // local 14 = capacity, local 15 = old_buf_save
     ]);
 
     // Allocate result struct (12 bytes)
@@ -772,10 +774,11 @@ fn emit_parse_array(f: &mut Function, alloc: u32, parse_at_fn: u32) {
             end;
           end;
     });
-    // Parse elements
+    // Parse elements — growable buffer (local 14 = capacity)
     wasm!(f, {
-          i32_const(260); call(alloc); local_set(8);
-          i32_const(0); local_set(9);
+          i32_const(64); local_set(14); // initial capacity
+          i32_const(260); call(alloc); local_set(8); // 4 + 64*4
+          i32_const(0); local_set(9); // count = 0
           block_empty; loop_empty;
             local_get(0); local_get(1);
             call(parse_at_fn); local_set(10);
@@ -785,6 +788,19 @@ fn emit_parse_array(f: &mut Function, alloc: u32, parse_at_fn: u32) {
               local_get(2); i32_const(0); i32_store(4);
               local_get(2); i32_const(1); i32_store(8);
               local_get(2); return_;
+            end;
+    });
+    // Grow buffer if count >= capacity (uses only locals 14, 15)
+    wasm!(f, {
+            local_get(9); local_get(14); i32_ge_u;
+            if_empty;
+              local_get(8); local_set(15); // save old buf
+              local_get(14); i32_const(1); i32_shl; local_set(14); // cap *= 2
+              i32_const(4); local_get(14); i32_const(4); i32_mul; i32_add;
+              call(alloc); local_set(8); // new buf → local 8
+              local_get(8); local_get(15);
+              i32_const(4); local_get(9); i32_const(4); i32_mul; i32_add;
+              memory_copy;
             end;
     });
     wasm!(f, {
@@ -882,9 +898,10 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
             end;
           end;
     });
-    // Parse key-value pairs
+    // Parse key-value pairs — growable buffer (local 14 = capacity)
     wasm!(f, {
-          i32_const(260); call(alloc); local_set(8);
+          i32_const(64); local_set(14); // initial capacity
+          i32_const(260); call(alloc); local_set(8); // 4 + 64*4
           i32_const(0); local_set(9);
           block_empty; loop_empty;
     });
@@ -943,6 +960,19 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
               local_get(2); i32_const(0); i32_store(4);
               local_get(2); i32_const(1); i32_store(8);
               local_get(2); return_;
+            end;
+    });
+    // Grow object list buffer if count >= capacity (uses only locals 14, 15)
+    wasm!(f, {
+            local_get(9); local_get(14); i32_ge_u;
+            if_empty;
+              local_get(8); local_set(15); // save old buf
+              local_get(14); i32_const(1); i32_shl; local_set(14); // cap *= 2
+              i32_const(4); local_get(14); i32_const(4); i32_mul; i32_add;
+              call(alloc); local_set(8); // new buf
+              local_get(8); local_get(15);
+              i32_const(4); local_get(9); i32_const(4); i32_mul; i32_add;
+              memory_copy;
             end;
     });
     // Allocate tuple (key_str_ptr, value_ptr) and store pointer in list
