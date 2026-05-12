@@ -185,7 +185,6 @@ pub fn register_fn_sig(
     let key = prefixed_key(prefix, name);
     if prefix.is_none() && is_effect { env.effect_fns.insert(sym(name)); }
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
-    // Debug removed
     env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb });
     // Record visibility so `resolve_module_call` can reject cross-module access
     // to `mod fn` / `local fn`. Only non-Public entries need to be stored — the
