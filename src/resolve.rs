@@ -552,32 +552,34 @@ fn find_package_src_dir(
 }
 
 fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, PathBuf)]) -> Result<(PathBuf, Option<project::PkgId>), String> {
-    // 1. Check local files
-    let local_candidates = [
-        base_dir.join(format!("{}.almd", name)),
-        base_dir.join(name).join("mod.almd"),
-        base_dir.join(name).join("src").join("mod.almd"),    // package with src/ layout
-        base_dir.join(name).join("src").join("lib.almd"),    // package with src/ layout (legacy)
-    ];
-    for path in &local_candidates {
-        if path.exists() {
-            return Ok((path.clone(), None));
-        }
-    }
-
-    // 2. Check dependency paths (match by pkg_id.name)
+    // 1. Check explicit dependency paths FIRST (almide.toml [dependencies])
+    // These take priority over local filesystem matches to prevent stale
+    // clones or unrelated directories from shadowing cached dependencies.
     for (pkg_id, dep_dir) in dep_paths {
         if pkg_id.name == name {
             let dep_candidates = [
-                dep_dir.join(format!("{}.almd", name)),
-                dep_dir.join("lib.almd"),
                 dep_dir.join("mod.almd"),
+                dep_dir.join("lib.almd"),
+                dep_dir.join(format!("{}.almd", name)),
             ];
             for path in &dep_candidates {
                 if path.exists() {
                     return Ok((path.clone(), Some(pkg_id.clone())));
                 }
             }
+        }
+    }
+
+    // 2. Check local files (same directory, sibling packages)
+    let local_candidates = [
+        base_dir.join(format!("{}.almd", name)),
+        base_dir.join(name).join("mod.almd"),
+        base_dir.join(name).join("src").join("mod.almd"),
+        base_dir.join(name).join("src").join("lib.almd"),
+    ];
+    for path in &local_candidates {
+        if path.exists() {
+            return Ok((path.clone(), None));
         }
     }
 
