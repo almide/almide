@@ -148,14 +148,26 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         return String::new();
     }
 
-    // Extern fn: emit import/use via template (rs) or extern "C" block (c)
+    // Extern fn dispatch:
+    //   @extern(rust, "mod", "fn") → native module call (render_native_call)
+    //   @extern(wasm, "env", "fn") → WASM host import (future)
+    //   @extern(rs, "mod", "fn")   → template-based rendering (legacy)
+    //   @extern(c, "lib", "fn")    → C FFI with extern "C" block
     if !func.extern_attrs.is_empty() {
         let target_str = match ctx.target {
             Target::Rust => "rs",
             Target::TypeScript => "ts",
             _ => "",
         };
+        let native_target = match ctx.target {
+            Target::Rust => "rust",
+            _ => "wasm",
+        };
         for attr in &func.extern_attrs {
+            // @extern(rust, ...) / @extern(wasm, ...) — native module binding
+            if attr.target == native_target {
+                return render_native_call(ctx, func, attr);
+            }
             if attr.target == target_str {
                 return ctx.templates.render_with("extern_fn", None, &[], &[("module", attr.module.as_str()), ("function", attr.function.as_str()), ("name", func.name.as_str())])
                     .unwrap_or_else(|| format!("// extern: {}.{}", attr.module, attr.function));
@@ -577,6 +589,37 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 /// Render @extern(c, "lib", "func") as: extern "C" block + safe Almide wrapper.
 ///
 /// Type mapping (Almide → C extern → safe wrapper):
+/// Render @native("target", "module", "function") — delegates to module::function().
+/// Parameters use reference types (&str, &[T]) matching native Rust conventions.
+fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr) -> String {
+    use types::render_type;
+    use almide_lang::types::{Ty, TypeConstructorId};
+    let mod_name = attr.module.as_str();
+    let fn_name = attr.function.as_str();
+
+    // Wrapper params: use reference types for String/List to match native Rust conventions
+    let params: Vec<String> = func.params.iter().map(|p| {
+        let ty = match &p.ty {
+            Ty::String => "&str".to_string(),
+            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+                format!("&[{}]", render_type(ctx, &args[0]))
+            }
+            _ => render_type(ctx, &p.ty),
+        };
+        format!("{}: {}", p.name, ty)
+    }).collect();
+
+    // Call args: pass through directly (wrapper already uses reference types)
+    let args: Vec<String> = func.params.iter().map(|p| {
+        p.name.to_string()
+    }).collect();
+
+    let ret = render_type(ctx, &func.ret_ty);
+    format!("fn {}({}) -> {} {{\n    {}::{}({})\n}}",
+        func.name, params.join(", "), ret,
+        mod_name, fn_name, args.join(", "))
+}
+
 ///   Int     → i32 in extern, i64 in wrapper (cast)
 ///   Float   → f64 (same)
 ///   Bool    → i32 in extern, bool in wrapper (cast)

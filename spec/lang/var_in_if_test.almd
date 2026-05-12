@@ -1,0 +1,71 @@
+import bytes
+
+fn mg(m: Bytes, off: Int) -> Float = bytes.read_f32_le(m, off)
+
+effect fn main() -> Unit = {
+  let jm = bytes.new(64)
+  bytes.set_f32_le(jm, 0, 1.0)
+  bytes.set_f32_le(jm, 20, 1.0)
+  bytes.set_f32_le(jm, 40, 1.0)
+  bytes.set_f32_le(jm, 60, 1.0)
+
+  let verts = bytes.new(44)
+  bytes.set_f32_le(verts, 0, 3.0)   // px
+  bytes.set_f32_le(verts, 4, 4.0)   // py
+  bytes.set_f32_le(verts, 8, 5.0)   // pz
+  bytes.set_f32_le(verts, 12, 0.0)  // nx
+  bytes.set_f32_le(verts, 16, 1.0)  // ny
+  bytes.set_f32_le(verts, 20, 0.0)  // nz
+
+  var i = 0
+  while i < 1 {
+    let dst = i * 44
+    let px = bytes.read_f32_le(verts, dst)
+    let py = bytes.read_f32_le(verts, dst + 4)
+    let pz = bytes.read_f32_le(verts, dst + 8)
+    let nx = bytes.read_f32_le(verts, dst + 12)
+    let ny = bytes.read_f32_le(verts, dst + 16)
+    let nz = bytes.read_f32_le(verts, dst + 20)
+
+    let w0 = 0.6
+    let w1 = 0.4
+    let j0 = 0
+    let mo = j0 * 64
+
+    var sx = 0.0
+    var sy = 0.0
+    var sz = 0.0
+    var snx = 0.0
+    var sny = 0.0
+    var snz = 0.0
+
+    if w0 > 0.0 then {
+      sx = sx + w0 * (mg(jm, mo) * px + mg(jm, mo + 16) * py + mg(jm, mo + 32) * pz + mg(jm, mo + 48))
+      sy = sy + w0 * (mg(jm, mo + 4) * px + mg(jm, mo + 20) * py + mg(jm, mo + 36) * pz + mg(jm, mo + 52))
+      sz = sz + w0 * (mg(jm, mo + 8) * px + mg(jm, mo + 24) * py + mg(jm, mo + 40) * pz + mg(jm, mo + 56))
+      snx = snx + w0 * (mg(jm, mo) * nx + mg(jm, mo + 16) * ny + mg(jm, mo + 32) * nz)
+      sny = sny + w0 * (mg(jm, mo + 4) * nx + mg(jm, mo + 20) * ny + mg(jm, mo + 36) * nz)
+      snz = snz + w0 * (mg(jm, mo + 8) * nx + mg(jm, mo + 24) * ny + mg(jm, mo + 40) * nz)
+    } else {}
+
+    if w1 > 0.0 then {
+      sx = sx + w1 * (mg(jm, mo) * px + mg(jm, mo + 16) * py + mg(jm, mo + 32) * pz + mg(jm, mo + 48))
+      sy = sy + w1 * (mg(jm, mo + 4) * px + mg(jm, mo + 20) * py + mg(jm, mo + 36) * pz + mg(jm, mo + 52))
+      sz = sz + w1 * (mg(jm, mo + 8) * px + mg(jm, mo + 24) * py + mg(jm, mo + 40) * pz + mg(jm, mo + 56))
+      snx = snx + w1 * (mg(jm, mo) * nx + mg(jm, mo + 16) * ny + mg(jm, mo + 32) * nz)
+      sny = sny + w1 * (mg(jm, mo + 4) * nx + mg(jm, mo + 20) * ny + mg(jm, mo + 36) * nz)
+      snz = snz + w1 * (mg(jm, mo + 8) * nx + mg(jm, mo + 24) * ny + mg(jm, mo + 40) * nz)
+    } else {}
+
+    bytes.set_f32_le(verts, dst, sx)
+    bytes.set_f32_le(verts, dst + 4, sy)
+    bytes.set_f32_le(verts, dst + 8, sz)
+
+    i = i + 1
+  }
+
+  let rx = bytes.read_f32_le(verts, 0)
+  let ry = bytes.read_f32_le(verts, 4)
+  let rz = bytes.read_f32_le(verts, 8)
+  println("x=" + float.to_string(rx) + " y=" + float.to_string(ry) + " z=" + float.to_string(rz))
+}

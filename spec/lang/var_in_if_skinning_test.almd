@@ -1,0 +1,104 @@
+import bytes
+
+fn read_val(b: Bytes, off: Int) -> Float = bytes.read_f32_le(b, off)
+
+// Simulate skin.apply_skinning: function with many params and vars
+fn blend(verts: Bytes, vert_count: Int, stride: Int, jm: Bytes, data: Bytes, offset: Int) -> Unit = {
+  var i = 0
+  while i < vert_count {
+    let dst = i * stride
+    let px = bytes.read_f32_le(verts, dst)
+    let py = bytes.read_f32_le(verts, dst + 4)
+    let pz = bytes.read_f32_le(verts, dst + 8)
+    let nx = bytes.read_f32_le(verts, dst + 12)
+    let ny = bytes.read_f32_le(verts, dst + 16)
+    let nz = bytes.read_f32_le(verts, dst + 20)
+
+    let jo = offset + i * 4
+    let j0 = bytes.get_or(data, jo, 0)
+    let j1 = bytes.get_or(data, jo + 1, 0)
+
+    let wo = offset + 100 + i * 16
+    let w0 = bytes.read_f32_le(data, wo)
+    let w1 = bytes.read_f32_le(data, wo + 4)
+    let w2 = bytes.read_f32_le(data, wo + 8)
+    let w3 = bytes.read_f32_le(data, wo + 12)
+
+    var sx = 0.0
+    var sy = 0.0
+    var sz = 0.0
+    var snx = 0.0
+    var sny = 0.0
+    var snz = 0.0
+
+    if w0 > 0.0 then {
+      let mo = j0 * 64
+      sx = sx + w0 * (read_val(jm, mo) * px + read_val(jm, mo + 16) * py + read_val(jm, mo + 32) * pz + read_val(jm, mo + 48))
+      sy = sy + w0 * (read_val(jm, mo + 4) * px + read_val(jm, mo + 20) * py + read_val(jm, mo + 36) * pz + read_val(jm, mo + 52))
+      sz = sz + w0 * (read_val(jm, mo + 8) * px + read_val(jm, mo + 24) * py + read_val(jm, mo + 40) * pz + read_val(jm, mo + 56))
+      snx = snx + w0 * (read_val(jm, mo) * nx + read_val(jm, mo + 16) * ny + read_val(jm, mo + 32) * nz)
+      sny = sny + w0 * (read_val(jm, mo + 4) * nx + read_val(jm, mo + 20) * ny + read_val(jm, mo + 36) * nz)
+      snz = snz + w0 * (read_val(jm, mo + 8) * nx + read_val(jm, mo + 24) * ny + read_val(jm, mo + 40) * nz)
+    } else {}
+
+    if w1 > 0.0 then {
+      let mo = j1 * 64
+      sx = sx + w1 * (read_val(jm, mo) * px + read_val(jm, mo + 16) * py + read_val(jm, mo + 32) * pz + read_val(jm, mo + 48))
+      sy = sy + w1 * (read_val(jm, mo + 4) * px + read_val(jm, mo + 20) * py + read_val(jm, mo + 36) * pz + read_val(jm, mo + 52))
+      sz = sz + w1 * (read_val(jm, mo + 8) * px + read_val(jm, mo + 24) * py + read_val(jm, mo + 40) * pz + read_val(jm, mo + 56))
+      snx = snx + w1 * (read_val(jm, mo) * nx + read_val(jm, mo + 16) * ny + read_val(jm, mo + 32) * nz)
+      sny = sny + w1 * (read_val(jm, mo + 4) * nx + read_val(jm, mo + 20) * ny + read_val(jm, mo + 36) * nz)
+      snz = snz + w1 * (read_val(jm, mo + 8) * nx + read_val(jm, mo + 24) * ny + read_val(jm, mo + 40) * nz)
+    } else {}
+
+    bytes.set_f32_le(verts, dst, sx)
+    bytes.set_f32_le(verts, dst + 4, sy)
+    bytes.set_f32_le(verts, dst + 8, sz)
+    bytes.set_f32_le(verts, dst + 12, snx)
+    bytes.set_f32_le(verts, dst + 16, sny)
+    bytes.set_f32_le(verts, dst + 20, snz)
+
+    i = i + 1
+  }
+}
+
+effect fn main() -> Unit = {
+  // Identity matrix
+  let jm = bytes.new(128)
+  bytes.set_f32_le(jm, 0, 1.0)
+  bytes.set_f32_le(jm, 20, 1.0)
+  bytes.set_f32_le(jm, 40, 1.0)
+  bytes.set_f32_le(jm, 60, 1.0)
+  bytes.set_f32_le(jm, 64, 1.0)
+  bytes.set_f32_le(jm, 84, 1.0)
+  bytes.set_f32_le(jm, 104, 1.0)
+  bytes.set_f32_le(jm, 124, 1.0)
+
+  // Vertex: pos=(3,4,5), norm=(0,1,0)
+  let verts = bytes.new(44)
+  bytes.set_f32_le(verts, 0, 3.0)
+  bytes.set_f32_le(verts, 4, 4.0)
+  bytes.set_f32_le(verts, 8, 5.0)
+  bytes.set_f32_le(verts, 12, 0.0)
+  bytes.set_f32_le(verts, 16, 1.0)
+  bytes.set_f32_le(verts, 20, 0.0)
+
+  // Skin data: joints=[0,0], weights=[0.6,0.4,0,0]
+  let data = bytes.new(200)
+  bytes.set_u8(data, 0, 0) // j0
+  bytes.set_u8(data, 1, 0) // j1
+  bytes.set_f32_le(data, 100, 0.6)  // w0
+  bytes.set_f32_le(data, 104, 0.4)  // w1
+  bytes.set_f32_le(data, 108, 0.0)  // w2
+  bytes.set_f32_le(data, 112, 0.0)  // w3
+
+  blend(verts, 1, 44, jm, data, 0)
+
+  let rx = bytes.read_f32_le(verts, 0)
+  let ry = bytes.read_f32_le(verts, 4)
+  let rz = bytes.read_f32_le(verts, 8)
+  // Expected: (0.6+0.4)*3=3, (0.6+0.4)*4=4, (0.6+0.4)*5=5
+  println("x=" + float.to_string(rx) + " y=" + float.to_string(ry) + " z=" + float.to_string(rz))
+  let pass = float.abs(rx - 3.0) < 0.01 and float.abs(ry - 4.0) < 0.01 and float.abs(rz - 5.0) < 0.01
+  println(if pass then "PASS" else "FAIL")
+}

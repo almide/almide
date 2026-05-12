@@ -741,10 +741,15 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                     name: attr.function.as_str().to_string(),
                     type_idx,
                 });
-                // Register by both prefixed and bare name for call dispatch
+                // Register by prefixed, qualified, and bare name for call dispatch
                 let func_name_sanitized = func.name.to_string().replace(' ', "_").replace('-', "_").replace('.', "_");
                 let prefixed_name = format!("almide_rt_{}_{}", mod_ident, func_name_sanitized);
                 emitter.func_map.insert(prefixed_name, func_idx);
+                // Qualified name: "{module}.{func}" — preferred for disambiguation
+                let module_name = module.name.to_string();
+                let qualified_name = format!("{}.{}", module_name, func.name);
+                emitter.func_map.insert(qualified_name, func_idx);
+                // Bare name: only if no collision
                 let bare_name = func.name.to_string();
                 if !emitter.func_map.contains_key(&bare_name) {
                     emitter.func_map.insert(bare_name, func_idx);

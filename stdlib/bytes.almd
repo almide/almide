@@ -406,6 +406,14 @@ fn write_u8(b: Bytes, val: Int) -> Unit = _
 @intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _
 
+// Arena memory management (WASM only — no-op on Rust target).
+// heap_save returns a checkpoint; heap_restore frees all allocations above it.
+@intrinsic("almide_rt_bytes_heap_save")
+fn heap_save() -> Int = _
+
+@intrinsic("almide_rt_bytes_heap_restore")
+fn heap_restore(checkpoint: Int) -> Unit = _
+
 // ── Typed byte IO (Stage 4a, Sized Numeric Types integration) ──
 //
 // The new preferred surface: one function per (operation × width × kind),

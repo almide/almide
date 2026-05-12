@@ -453,6 +453,15 @@ impl FuncCompiler<'_> {
             "append_i64_le" => self.emit_bytes_append_i(args, 8),
             "map_each" => self.emit_bytes_map_each(args),
             "xor" => self.emit_bytes_xor(args),
+            "heap_save" => {
+                // bytes.heap_save() -> Int: call __heap_save, extend i32→i64
+                wasm!(self.func, { call(self.emitter.rt.heap_save); i64_extend_i32_u; });
+            }
+            "heap_restore" => {
+                // bytes.heap_restore(checkpoint: Int): wrap i64→i32, call __heap_restore
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_wrap_i64; call(self.emitter.rt.heap_restore); });
+            }
             "pad_left" => self.emit_bytes_pad(args, /*left=*/true),
             "pad_right" => self.emit_bytes_pad(args, /*left=*/false),
             "copy_from" => self.emit_bytes_copy_from(args),
