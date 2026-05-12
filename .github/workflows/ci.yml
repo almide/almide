@@ -120,69 +120,6 @@ jobs:
           $ALMIDE test spec/ --target wasm
 
   # ═══════════════════════════════════════════════
-  # LLVM Native — builds with --features llvm and runs equiv tests
-  # ═══════════════════════════════════════════════
-
-  test-native:
-    name: Test Native (LLVM)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-
-      - name: Install LLVM 22
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/llvm.asc
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm-22.list
-          sudo apt-get update
-          sudo apt-get install -y llvm-22-dev libpolly-22-dev
-          echo "LLVM_SYS_221_PREFIX=/usr/lib/llvm-22" >> $GITHUB_ENV
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: linux-llvm-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: linux-llvm-cargo-${{ env.RUST_TOOLCHAIN }}-
-
-      - name: Build with LLVM
-        run: cargo build --release --features llvm
-
-      - name: Native equiv tests
-        run: |
-          set +e
-          ALMIDE=./target/release/almide
-          pass=0; fail=0
-          for f in tests/native_equiv/*.almd; do
-            [ -f "$f" ] || continue
-            name=$(basename "$f" .almd)
-            existing=$($ALMIDE run "$f" 2>&1)
-            $ALMIDE build "$f" --target native -o "/tmp/n_${name}"
-            if [ $? -ne 0 ]; then
-              echo "BUILD FAIL: $name"
-              fail=$((fail+1))
-            else
-              native=$("/tmp/n_${name}" 2>&1)
-              if [ "$existing" = "$native" ]; then
-                echo "PASS: $name"
-                pass=$((pass+1))
-              else
-                echo "MISMATCH: $name"
-                echo "  expected: $(echo "$existing" | head -3)"
-                echo "  got:      $(echo "$native" | head -3)"
-                fail=$((fail+1))
-              fi
-            fi
-          done
-          echo "Results: $pass passed, $fail failed"
-          [ $fail -eq 0 ] || exit 1
-
-  # ═══════════════════════════════════════════════
   # Checks
   # ═══════════════════════════════════════════════
 

@@ -573,12 +573,7 @@ fn dispatch(cli: Cli) {
         }
         Commands::Test { file, run, no_check, json, target } => {
             let file_str = file.as_deref().unwrap_or("");
-            if matches!(target.as_deref(), Some("native" | "llvm")) {
-                #[cfg(feature = "llvm")]
-                cli::cmd_test_native(file_str, run.as_deref());
-                #[cfg(not(feature = "llvm"))]
-                { eprintln!("LLVM backend not enabled. Rebuild with: cargo build --features llvm"); std::process::exit(1); }
-            } else if target.as_deref() == Some("wasm") {
+            if target.as_deref() == Some("wasm") {
                 cli::cmd_test_wasm(file_str, run.as_deref());
             } else if matches!(target.as_deref(), Some("ts" | "typescript")) {
                 cli::cmd_test_ts(file_str, run.as_deref());

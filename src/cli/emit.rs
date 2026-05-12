@@ -100,11 +100,6 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
         }
         if target == "rust" || target == "rs" {
             print!("{}", almide_dialect::emit_rust::emit_module(&module));
-        } else if target == "llvm" {
-            #[cfg(feature = "llvm")]
-            { print!("{}", almide_dialect::emit_llvm::codegen::emit_llvm_ir(&module)); }
-            #[cfg(not(feature = "llvm"))]
-            { eprintln!("LLVM backend not enabled. Rebuild with: cargo build --features llvm"); std::process::exit(1); }
         } else {
             print!("{}", almide_dialect::dump::dump_module(&module));
         }
@@ -121,17 +116,11 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
         println!("{}", json);
     } else {
         let ir = ir_program.as_mut().expect("IR required for codegen");
-        if target == "dialect" {
-            // Dialect pipeline: IR → nanopass → dialect → Rust with runtime
-            match codegen::codegen_dialect(ir) {
-                codegen::CodegenOutput::Source(code) => print!("{}", code),
-                codegen::CodegenOutput::Binary(_) => unreachable!(),
-            }
-        } else {
+        {
             let t = match target {
                 "rust" | "rs" => codegen::pass::Target::Rust,
                 "ts" | "typescript" => codegen::pass::Target::TypeScript,
-                other => { eprintln!("Unknown target: {}. Use rust, ts, dialect.", other); std::process::exit(1); }
+                other => { eprintln!("Unknown target: {}. Use rust, ts.", other); std::process::exit(1); }
             };
             let opts = codegen::CodegenOptions { repr_c };
             match codegen::codegen_with(ir, t, &opts) {

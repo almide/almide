@@ -25,9 +25,6 @@ toml = "0.8"
 wasm-encoder = "0.225"
 lasso = { version = "0.7", features = ["multi-threaded"] }
 
-[features]
-default = []
-llvm = ["almide-dialect/llvm"]
 
 [dev-dependencies]
 proptest = "1"
