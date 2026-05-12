@@ -186,7 +186,9 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(ConstFoldPass)
             .add(EffectInferencePass)
             // StreamFusion not included: WASM emitter has its own lowering paths
-            .add(ResultPropagationPass)
+            // ResultPropagation NOT included: WASM effect fns return values directly,
+            // not wrapped in Result (unlike Rust target). The WASM emitter handles
+            // effect semantics without Result wrapping.
         // Peephole: swap/reverse/rotate/copy → specialized IR nodes
         .add(PeepholePass)
         // Concretize types: sync every IrExpr.ty with VarTable / parent context,
