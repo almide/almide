@@ -73,6 +73,33 @@ pub mod codegen {
         llvm_module.print_to_string().to_string()
     }
 
+    /// JIT execute a dialect Module's main function. Returns exit code.
+    /// Returns Err if the module fails LLVM verification (skip instead of crash).
+    pub fn jit_execute(module: &Module) -> Result<i32, String> {
+        use inkwell::targets::*;
+        Target::initialize_native(&InitializationConfig::default()).ok();
+
+        let context = Context::create();
+        let llvm_module = context.create_module("almide_jit");
+        build_functions(&context, &llvm_module, module);
+
+        // Verify LLVM module before JIT — invalid IR would segfault
+        if let Err(msg) = llvm_module.verify() {
+            return Err(format!("LLVM verify: {}", msg));
+        }
+
+        let engine = llvm_module.create_jit_execution_engine(inkwell::OptimizationLevel::Default)
+            .map_err(|e| format!("JIT engine: {}", e))?;
+
+        unsafe {
+            let main_fn = engine.get_function::<unsafe extern "C" fn() -> i32>("main");
+            match main_fn {
+                Ok(f) => Ok(f.call()),
+                Err(_) => Err("No main function found".into()),
+            }
+        }
+    }
+
     fn build_functions<'a, 'ctx: 'a>(context: &'ctx Context, llvm_module: &'a LLVMModule<'ctx>, module: &Module) {
         let builder = context.create_builder();
         let mut compiler = LLVMCompiler {
