@@ -1,1623 +1,1405 @@
-//! Dialect Module → LLVM IR via Inkwell.
+//! Dialect Module → LLVM IR v2.
 //!
-//! This is the third backend: dialect → native binary, bypassing Rust entirely.
-//! Starts with a minimal subset (i64 arithmetic, function calls, control flow)
-//! and grows incrementally.
+//! Design: every value carries its DialectType. Each function gets an
+//! isolated FnScope. Comparisons, returns, stores are type-dispatched.
+//! Closure capture is explicit. Stdlib is table-driven.
 
 #[cfg(feature = "llvm")]
 pub mod codegen {
-    use inkwell::values::AsValueRef;
     use inkwell::context::Context;
-
-    /// Set fast-math flags on a float instruction for auto-vectorization.
-    fn set_fast_math(val: inkwell::values::FloatValue) {
-        unsafe {
-            let flags = llvm_sys::LLVMFastMathAllowReassoc | llvm_sys::LLVMFastMathNoNaNs | llvm_sys::LLVMFastMathNoInfs;
-            llvm_sys::core::LLVMSetFastMathFlags(val.as_value_ref(), flags);
-        }
-    }
     use inkwell::module::Module as LLVMModule;
     use inkwell::builder::Builder;
-    use inkwell::values::{BasicValueEnum, FunctionValue, BasicMetadataValueEnum};
+    use inkwell::values::{BasicValueEnum, BasicMetadataValueEnum, FunctionValue, PointerValue, IntValue};
     use inkwell::types::{BasicMetadataTypeEnum, BasicType};
-    use inkwell::IntPredicate;
+    use inkwell::{IntPredicate, FloatPredicate};
+    use inkwell::values::AsValueRef;
 
-    use crate::{Module, ValueId};
+    use crate::{Module, Block, ValueId};
     use crate::ops::*;
     use crate::types::DialectType;
 
-    /// Compile a dialect Module to LLVM IR and return the IR as a string.
+    // ═══════════════════════════════════════════════════════════
+    // Public API (unchanged from v1)
+    // ═══════════════════════════════════════════════════════════
+
     pub fn emit_llvm_ir(module: &Module) -> String {
         let context = Context::create();
-        let ir = compile_to_module(&context, module);
-        ir
+        let llvm_module = context.create_module("almide");
+        Compiler::new(&context, &llvm_module).compile(module);
+        llvm_module.print_to_string().to_string()
     }
 
-    /// Compile a dialect Module to a native object file with LLVM optimizations.
     pub fn emit_object(module: &Module, output_path: &str) -> Result<(), String> {
         use inkwell::targets::*;
         use inkwell::passes::PassBuilderOptions;
 
         Target::initialize_native(&InitializationConfig::default())
-            .map_err(|e| format!("Failed to initialize native target: {}", e))?;
+            .map_err(|e| format!("Failed to init native target: {}", e))?;
 
         let context = Context::create();
         let llvm_module = context.create_module("almide");
-        build_functions(&context, &llvm_module, module);
+        Compiler::new(&context, &llvm_module).compile(module);
 
         let triple = TargetMachine::get_default_triple();
-        let cpu = TargetMachine::get_host_cpu_features();
-        let target = Target::from_triple(&triple)
-            .map_err(|e| format!("Failed to get target: {}", e))?;
+        let target = Target::from_triple(&triple).map_err(|e| format!("{}", e))?;
         let machine = target.create_target_machine(
             &triple,
             TargetMachine::get_host_cpu_name().to_str().unwrap_or("generic"),
-            cpu.to_str().unwrap_or(""),
+            TargetMachine::get_host_cpu_features().to_str().unwrap_or(""),
             inkwell::OptimizationLevel::Aggressive,
             RelocMode::PIC,
             CodeModel::Default,
-        ).ok_or_else(|| "Failed to create target machine".to_string())?;
+        ).ok_or("Failed to create target machine")?;
 
-        // Run LLVM optimization passes: O2 pipeline with vectorization
         let opts = PassBuilderOptions::create();
         llvm_module.run_passes("default<O2>", &machine, opts)
             .map_err(|e| format!("LLVM pass error: {}", e))?;
 
         machine.write_to_file(&llvm_module, FileType::Object, std::path::Path::new(output_path))
-            .map_err(|e| format!("Failed to write object file: {}", e))
+            .map_err(|e| format!("{}", e))
     }
 
-    fn compile_to_module(context: &Context, module: &Module) -> String {
-        let llvm_module = context.create_module("almide");
-        build_functions(context, &llvm_module, module);
-        llvm_module.print_to_string().to_string()
-    }
-
-    /// JIT execute a dialect Module's main function. Returns exit code.
-    /// Returns Err if the module fails LLVM verification (skip instead of crash).
     pub fn jit_execute(module: &Module) -> Result<i32, String> {
         use inkwell::targets::*;
         Target::initialize_native(&InitializationConfig::default()).ok();
 
         let context = Context::create();
         let llvm_module = context.create_module("almide_jit");
-        build_functions(&context, &llvm_module, module);
+        Compiler::new(&context, &llvm_module).compile(module);
 
-        // Verify LLVM module before JIT — invalid IR would segfault
         if let Err(msg) = llvm_module.verify() {
             return Err(format!("LLVM verify: {}", msg));
         }
 
         let engine = llvm_module.create_jit_execution_engine(inkwell::OptimizationLevel::Default)
-            .map_err(|e| format!("JIT engine: {}", e))?;
+            .map_err(|e| format!("JIT: {}", e))?;
 
         unsafe {
-            let main_fn = engine.get_function::<unsafe extern "C" fn() -> i32>("main");
-            match main_fn {
+            match engine.get_function::<unsafe extern "C" fn() -> i32>("main") {
                 Ok(f) => Ok(f.call()),
-                Err(_) => Err("No main function found".into()),
+                Err(_) => Err("No main function".into()),
             }
         }
     }
 
-    fn build_functions<'a, 'ctx: 'a>(context: &'ctx Context, llvm_module: &'a LLVMModule<'ctx>, module: &Module) {
-        let builder = context.create_builder();
-        let mut compiler = LLVMCompiler {
-            context,
-            module: llvm_module,
-            builder: &builder,
-            values: std::collections::HashMap::new(),
-            functions: std::collections::HashMap::new(),
-            allocas: std::collections::HashMap::new(),
-            struct_types: std::collections::HashMap::new(),
-            struct_fields: std::collections::HashMap::new(),
-            variant_cases: std::collections::HashMap::new(),
-        };
+    // ═══════════════════════════════════════════════════════════
+    // Typed value: every SSA value carries its dialect type
+    // ═══════════════════════════════════════════════════════════
 
-        // Register struct types from type declarations
-        for td in &module.type_decls {
-            if let crate::ops::TypeDeclKind::Record { fields } = &td.kind {
-                let field_types: Vec<inkwell::types::BasicTypeEnum> = fields.iter()
-                    .filter_map(|(_, ty)| compiler.dialect_to_basic_type(ty))
-                    .collect();
-                let struct_ty = context.opaque_struct_type(td.name.as_str());
-                struct_ty.set_body(&field_types, false);
-                compiler.struct_types.insert(td.name.as_str().to_string(), struct_ty);
-                compiler.struct_fields.insert(
-                    td.name.as_str().to_string(),
-                    fields.iter().map(|(n, _)| n.as_str().to_string()).collect(),
-                );
-            }
-        }
-
-        // Register variant types
-        for td in &module.type_decls {
-            if let crate::ops::TypeDeclKind::Variant { cases } = &td.kind {
-                // Compute max payload size (in bytes, assuming 8 bytes per field)
-                let max_payload = cases.iter().map(|c| c.payload.len() * 8).max().unwrap_or(0);
-                // Variant struct: { i32 tag, [max_payload x i8] }
-                let i32_ty = context.i32_type();
-                let payload_ty = context.i8_type().array_type(max_payload as u32);
-                let variant_ty = context.opaque_struct_type(td.name.as_str());
-                variant_ty.set_body(&[i32_ty.into(), payload_ty.into()], false);
-                compiler.struct_types.insert(td.name.as_str().to_string(), variant_ty);
-                // Store case names → tag indices + payload types
-                let case_names: Vec<String> = cases.iter().map(|c| c.name.as_str().to_string()).collect();
-                compiler.struct_fields.insert(td.name.as_str().to_string(), case_names);
-                for (i, case) in cases.iter().enumerate() {
-                    compiler.variant_cases.insert(
-                        case.name.as_str().to_string(),
-                        (td.name.as_str().to_string(), i as u32, case.payload.clone()),
-                    );
-                }
-            }
-        }
-
-        // Register built-in tagged union types (Result, Option)
-        {
-            let i32_ty = context.i32_type();
-            let payload_ty = context.i8_type().array_type(16); // 16 bytes covers i64 or ptr
-            let result_ty = context.opaque_struct_type("Result");
-            result_ty.set_body(&[i32_ty.into(), payload_ty.into()], false);
-            compiler.struct_types.insert("Result".to_string(), result_ty);
-            // Ok = tag 0, Err = tag 1
-            compiler.variant_cases.insert("Ok".to_string(), ("Result".to_string(), 0, vec![DialectType::I64]));
-            compiler.variant_cases.insert("Err".to_string(), ("Result".to_string(), 1, vec![DialectType::String]));
-
-            let option_ty = context.opaque_struct_type("Option");
-            option_ty.set_body(&[i32_ty.into(), payload_ty.into()], false);
-            compiler.struct_types.insert("Option".to_string(), option_ty);
-            compiler.variant_cases.insert("Some".to_string(), ("Option".to_string(), 0, vec![DialectType::I64]));
-            compiler.variant_cases.insert("None".to_string(), ("Option".to_string(), 1, vec![]));
-        }
-
-        compiler.declare_printf();
-        for f in &module.functions {
-            // Skip convention methods (Type.method) but keep test functions (__test_almd_*)
-            if f.name.as_str().contains('.') && !f.name.as_str().starts_with("__test_almd_") { continue; }
-            compiler.declare_function(f);
-        }
-        for f in &module.functions {
-            // Skip convention methods (Type.method) but keep test functions (__test_almd_*)
-            if f.name.as_str().contains('.') && !f.name.as_str().starts_with("__test_almd_") { continue; }
-            compiler.compile_function(f);
-        }
-
-        // If no user `main` exists, generate one.
-        // For test files: call each __test_almd_* function and report pass/fail.
-        // For library files: just return 0.
-        if !compiler.functions.contains_key("main") {
-            let test_fns: Vec<String> = compiler.functions.keys()
-                .filter(|n| n.starts_with("__test_almd_"))
-                .cloned()
-                .collect();
-
-            let i32_type = context.i32_type();
-            let main_type = i32_type.fn_type(&[], false);
-            let main_fn = llvm_module.add_function("main", main_type, None);
-            let entry = context.append_basic_block(main_fn, "entry");
-            compiler.builder.position_at_end(entry);
-
-            if test_fns.is_empty() {
-                // Library file: just return 0
-                compiler.builder.build_return(Some(&i32_type.const_int(0, false))).unwrap();
-            } else {
-                // Test runner: call each test, print pass/fail, count results
-                let ptr_type = context.ptr_type(inkwell::AddressSpace::default());
-                let printf = compiler.functions.get("printf").copied().unwrap();
-                let i64_type = context.i64_type();
-
-                let pass_alloca = compiler.builder.build_alloca(i64_type, "pass_count").unwrap();
-                let fail_alloca = compiler.builder.build_alloca(i64_type, "fail_count").unwrap();
-                compiler.builder.build_store(pass_alloca, i64_type.const_int(0, false)).unwrap();
-                compiler.builder.build_store(fail_alloca, i64_type.const_int(0, false)).unwrap();
-
-                let ok_fmt = compiler.builder.build_global_string_ptr("test %s ... ok\n", "ok_fmt").unwrap();
-                let fail_fmt = compiler.builder.build_global_string_ptr("test %s ... FAILED\n", "fail_fmt").unwrap();
-                let summary_fmt = compiler.builder.build_global_string_ptr("\ntest result: %lld passed; %lld failed\n", "summary_fmt").unwrap();
-
-                for test_name in &test_fns {
-                    let test_fn = compiler.functions[test_name];
-                    let name_str = compiler.builder.build_global_string_ptr(test_name, "tn").unwrap();
-
-                    // Call test function (returns void — if it panics/crashes, we won't catch it)
-                    compiler.builder.build_call(test_fn, &[], "").unwrap();
-
-                    // Print ok (no exception handling in native — all tests "pass" if they don't crash)
-                    compiler.builder.build_call(printf, &[ok_fmt.as_pointer_value().into(), name_str.as_pointer_value().into()], "").unwrap();
-                    let p = compiler.builder.build_load(i64_type, pass_alloca, "p").unwrap().into_int_value();
-                    let p1 = compiler.builder.build_int_add(p, i64_type.const_int(1, false), "").unwrap();
-                    compiler.builder.build_store(pass_alloca, p1).unwrap();
-                }
-
-                // Print summary
-                let final_pass = compiler.builder.build_load(i64_type, pass_alloca, "fp").unwrap();
-                let final_fail = compiler.builder.build_load(i64_type, fail_alloca, "ff").unwrap();
-                compiler.builder.build_call(printf, &[summary_fmt.as_pointer_value().into(), final_pass.into(), final_fail.into()], "").unwrap();
-
-                compiler.builder.build_return(Some(&i32_type.const_int(0, false))).unwrap();
-            }
-        }
+    #[derive(Clone)]
+    struct TV<'ctx> {
+        val: BasicValueEnum<'ctx>,
+        ty: DialectType,
     }
 
-    struct LLVMCompiler<'a, 'ctx> {
-        context: &'ctx Context,
+    // ═══════════════════════════════════════════════════════════
+    // Per-function scope: isolated value map
+    // ═══════════════════════════════════════════════════════════
+
+    struct FnScope<'ctx> {
+        values: std::collections::HashMap<ValueId, TV<'ctx>>,
+        allocas: std::collections::HashMap<ValueId, (PointerValue<'ctx>, DialectType)>,
+    }
+
+    impl<'ctx> FnScope<'ctx> {
+        fn new() -> Self { FnScope { values: std::collections::HashMap::new(), allocas: std::collections::HashMap::new() } }
+        fn set(&mut self, id: ValueId, val: BasicValueEnum<'ctx>, ty: DialectType) { self.values.insert(id, TV { val, ty }); }
+        fn get(&self, id: &ValueId) -> Option<TV<'ctx>> { self.values.get(id).cloned() }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // Compiler: module-level state
+    // ═══════════════════════════════════════════════════════════
+
+    struct Compiler<'a, 'ctx> {
+        ctx: &'ctx Context,
         module: &'a LLVMModule<'ctx>,
-        builder: &'a Builder<'ctx>,
-        values: std::collections::HashMap<ValueId, BasicValueEnum<'ctx>>,
+        builder: Builder<'ctx>,
         functions: std::collections::HashMap<String, FunctionValue<'ctx>>,
-        allocas: std::collections::HashMap<ValueId, inkwell::values::PointerValue<'ctx>>,
-        /// Named type → LLVM struct type mapping.
         struct_types: std::collections::HashMap<String, inkwell::types::StructType<'ctx>>,
-        /// Named type → field names (ordered). For records: field names. For variants: case names.
         struct_fields: std::collections::HashMap<String, Vec<String>>,
-        /// Variant case name → (parent type name, tag index, payload types)
         variant_cases: std::collections::HashMap<String, (String, u32, Vec<DialectType>)>,
     }
 
-    impl<'a, 'ctx: 'a> LLVMCompiler<'a, 'ctx> {
-        /// Emit or retrieve the __almide_float_to_string helper function.
-        /// Matches Rust behavior: if no '.', append ".0".
-        fn get_or_emit_float_to_string(&mut self) -> FunctionValue<'ctx> {
-            if let Some(f) = self.functions.get("__almide_fts") {
-                return *f;
+    impl<'a, 'ctx> Compiler<'a, 'ctx> {
+        fn new(ctx: &'ctx Context, module: &'a LLVMModule<'ctx>) -> Self {
+            Compiler {
+                ctx,
+                module,
+                builder: ctx.create_builder(),
+                functions: std::collections::HashMap::new(),
+                struct_types: std::collections::HashMap::new(),
+                struct_fields: std::collections::HashMap::new(),
+                variant_cases: std::collections::HashMap::new(),
             }
-            let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-            let f64_type = self.context.f64_type();
-            let fn_type = ptr_type.fn_type(&[f64_type.into()], false);
-            let func = self.module.add_function("__almide_fts", fn_type, None);
-
-            let saved_bb = self.builder.get_insert_block();
-            let entry = self.context.append_basic_block(func, "entry");
-            let has_dot = self.context.append_basic_block(func, "has_dot");
-            let no_dot = self.context.append_basic_block(func, "no_dot");
-
-            self.builder.position_at_end(entry);
-            let val = func.get_nth_param(0).unwrap().into_float_value();
-            let i64_type = self.context.i64_type();
-
-            let malloc = *self.functions.get("malloc").unwrap();
-            let snprintf = *self.functions.get("snprintf").unwrap();
-            let strcat = *self.functions.get("strcat").unwrap();
-            let buf_call = self.builder.build_call(malloc, &[i64_type.const_int(64, false).into()], "buf").unwrap();
-            let buf = if let inkwell::values::ValueKind::Basic(v) = buf_call.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
-            // %.15g gives precision close to Rust's Display for f64
-            let fmt = self.builder.build_global_string_ptr("%.15g", "fts_fmt").unwrap();
-            self.builder.build_call(snprintf, &[buf.into(), i64_type.const_int(64, false).into(), fmt.as_pointer_value().into(), val.into()], "").unwrap();
-
-            // Check if buf contains '.' using strchr
-            // Declare strchr
-            let strchr_ty = ptr_type.fn_type(&[ptr_type.into(), self.context.i32_type().into()], false);
-            let strchr = self.module.add_function("strchr", strchr_ty, None);
-            let dot_result = self.builder.build_call(strchr, &[buf.into(), self.context.i32_type().const_int('.' as u64, false).into()], "dot_check").unwrap();
-            let dot_ptr = if let inkwell::values::ValueKind::Basic(v) = dot_result.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
-            let is_null = self.builder.build_is_null(dot_ptr, "is_null").unwrap();
-            self.builder.build_conditional_branch(is_null, no_dot, has_dot).unwrap();
-
-            // no_dot: strcat(buf, ".0"), return buf
-            self.builder.position_at_end(no_dot);
-            let suffix = self.builder.build_global_string_ptr(".0", "dot_zero").unwrap();
-            // strcat already copied above
-            self.builder.build_call(strcat, &[buf.into(), suffix.as_pointer_value().into()], "").unwrap();
-            self.builder.build_return(Some(&buf)).unwrap();
-
-            // has_dot: return buf as-is
-            self.builder.position_at_end(has_dot);
-            self.builder.build_return(Some(&buf)).unwrap();
-
-            if let Some(bb) = saved_bb {
-                self.builder.position_at_end(bb);
-            }
-            self.functions.insert("__almide_fts".to_string(), func);
-            func
         }
 
-        /// Emit inline LLVM for stdlib operations (list.*, string.*).
-        fn emit_stdlib_call(&mut self, result_id: ValueId, func: &str, args: &[BasicValueEnum<'ctx>], result_ty: &DialectType) {
-            let i64_type = self.context.i64_type();
-            let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        // ── Type conversion ──
 
-            match func {
-                "list.len" => {
-                    if let Some(BasicValueEnum::PointerValue(list_ptr)) = args.first() {
-                        let len = self.builder.build_load(i64_type, *list_ptr, "list_len").unwrap();
-                        self.values.insert(result_id, len);
-                    }
+        fn llvm_type(&self, ty: &DialectType) -> Option<inkwell::types::BasicTypeEnum<'ctx>> {
+            let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            match ty {
+                DialectType::I64 => Some(self.ctx.i64_type().into()),
+                DialectType::F64 => Some(self.ctx.f64_type().into()),
+                DialectType::Bool => Some(self.ctx.bool_type().into()),
+                DialectType::I32 => Some(self.ctx.i32_type().into()),
+                DialectType::I8 => Some(self.ctx.i8_type().into()),
+                DialectType::String | DialectType::Bytes
+                | DialectType::List(_) | DialectType::Map(_, _)
+                | DialectType::Result(_, _) | DialectType::Option(_)
+                | DialectType::Matrix | DialectType::RawPtr => Some(ptr.into()),
+                DialectType::Named(n) => {
+                    if self.struct_types.contains_key(n.as_str()) { Some(ptr.into()) } else { None }
                 }
-                "list.sum" => {
-                    if let Some(BasicValueEnum::PointerValue(lp)) = args.first().cloned() {
-                        let lp = lp;
-                        let len = self.builder.build_load(i64_type, lp, "len").unwrap().into_int_value();
-
-                        // Alloca for accumulator and index
-                        let acc_alloca = self.builder.build_alloca(i64_type, "sum_acc").unwrap();
-                        let idx_alloca = self.builder.build_alloca(i64_type, "sum_idx").unwrap();
-                        self.builder.build_store(acc_alloca, i64_type.const_int(0, false)).unwrap();
-                        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
-
-                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
-                        let cond_bb = self.context.append_basic_block(function, "sum_cond");
-                        let body_bb = self.context.append_basic_block(function, "sum_body");
-                        let exit_bb = self.context.append_basic_block(function, "sum_exit");
-
-                        self.builder.build_unconditional_branch(cond_bb).unwrap();
-                        self.builder.position_at_end(cond_bb);
-                        let idx = self.builder.build_load(i64_type, idx_alloca, "i").unwrap().into_int_value();
-                        let cmp = self.builder.build_int_compare(IntPredicate::SLT, idx, len, "cmp").unwrap();
-                        self.builder.build_conditional_branch(cmp, body_bb, exit_bb).unwrap();
-
-                        self.builder.position_at_end(body_bb);
-                        let offset = self.builder.build_int_add(self.builder.build_int_mul(idx, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "off").unwrap();
-                        let elem_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), lp, &[offset], "ep").unwrap() };
-                        let elem = self.builder.build_load(i64_type, elem_ptr, "elem").unwrap().into_int_value();
-                        let acc = self.builder.build_load(i64_type, acc_alloca, "acc").unwrap().into_int_value();
-                        let new_acc = self.builder.build_int_add(acc, elem, "new_acc").unwrap();
-                        self.builder.build_store(acc_alloca, new_acc).unwrap();
-                        let new_idx = self.builder.build_int_add(idx, i64_type.const_int(1, false), "new_i").unwrap();
-                        self.builder.build_store(idx_alloca, new_idx).unwrap();
-                        self.builder.build_unconditional_branch(cond_bb).unwrap();
-
-                        self.builder.position_at_end(exit_bb);
-                        let result = self.builder.build_load(i64_type, acc_alloca, "sum_result").unwrap();
-                        self.values.insert(result_id, result);
-                    }
+                DialectType::Fn { .. } | DialectType::Closure { .. } => {
+                    Some(self.ctx.struct_type(&[ptr.into(), ptr.into()], false).into())
                 }
-                "list.map" => {
-                    // map(list, closure) → new list with closure applied to each element
-                    if args.len() >= 2 {
-                        let lp = args[0].into_pointer_value();
-                        let closure = args[1].into_struct_value();
-                        let fn_ptr = self.builder.build_extract_value(closure, 0, "map_fn").unwrap().into_pointer_value();
-                        let env_ptr = self.builder.build_extract_value(closure, 1, "map_env").unwrap();
+                _ => None,
+            }
+        }
 
-                        let len = self.builder.build_load(i64_type, lp, "len").unwrap().into_int_value();
-                        let malloc = *self.functions.get("malloc").unwrap();
+        fn meta_type(&self, ty: &DialectType) -> Option<BasicMetadataTypeEnum<'ctx>> {
+            self.llvm_type(ty).map(|t| t.into())
+        }
 
-                        // Allocate result list
-                        let total = self.builder.build_int_add(self.builder.build_int_mul(len, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "total").unwrap();
-                        let res_call = self.builder.build_call(malloc, &[total.into()], "map_res").unwrap();
-                        let res_ptr = if let inkwell::values::ValueKind::Basic(v) = res_call.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
-                        self.builder.build_store(res_ptr, len).unwrap();
-
-                        // Loop
-                        let idx_alloca = self.builder.build_alloca(i64_type, "map_i").unwrap();
-                        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
-                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
-                        let cond_bb = self.context.append_basic_block(function, "map_cond");
-                        let body_bb = self.context.append_basic_block(function, "map_body");
-                        let exit_bb = self.context.append_basic_block(function, "map_exit");
-
-                        self.builder.build_unconditional_branch(cond_bb).unwrap();
-                        self.builder.position_at_end(cond_bb);
-                        let idx = self.builder.build_load(i64_type, idx_alloca, "i").unwrap().into_int_value();
-                        let cmp = self.builder.build_int_compare(IntPredicate::SLT, idx, len, "cmp").unwrap();
-                        self.builder.build_conditional_branch(cmp, body_bb, exit_bb).unwrap();
-
-                        self.builder.position_at_end(body_bb);
-                        let offset = self.builder.build_int_add(self.builder.build_int_mul(idx, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "off").unwrap();
-                        let src_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), lp, &[offset], "sp").unwrap() };
-                        let elem = self.builder.build_load(i64_type, src_ptr, "elem").unwrap();
-
-                        // Call closure: fn_ptr(env_ptr, elem)
-                        let call_ty = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                        let mapped = self.builder.build_indirect_call(call_ty, fn_ptr, &[env_ptr.into(), elem.into()], "mapped").unwrap();
-                        let mapped_val = if let inkwell::values::ValueKind::Basic(v) = mapped.try_as_basic_value() { v } else { i64_type.const_int(0, false).into() };
-
-                        let dst_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), res_ptr, &[offset], "dp").unwrap() };
-                        self.builder.build_store(dst_ptr, mapped_val).unwrap();
-
-                        let new_idx = self.builder.build_int_add(idx, i64_type.const_int(1, false), "").unwrap();
-                        self.builder.build_store(idx_alloca, new_idx).unwrap();
-                        self.builder.build_unconditional_branch(cond_bb).unwrap();
-
-                        self.builder.position_at_end(exit_bb);
-                        self.values.insert(result_id, res_ptr.into());
-                    }
-                }
-                "list.filter" => {
-                    // filter(list, closure) → new list with elements where closure returns true
-                    if args.len() >= 2 {
-                        let lp = args[0].into_pointer_value();
-                        let closure = args[1].into_struct_value();
-                        let fn_ptr = self.builder.build_extract_value(closure, 0, "filt_fn").unwrap().into_pointer_value();
-                        let env_ptr = self.builder.build_extract_value(closure, 1, "filt_env").unwrap();
-
-                        let len = self.builder.build_load(i64_type, lp, "len").unwrap().into_int_value();
-                        let malloc = *self.functions.get("malloc").unwrap();
-
-                        // Allocate max-size result list
-                        let total = self.builder.build_int_add(self.builder.build_int_mul(len, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "total").unwrap();
-                        let res_call = self.builder.build_call(malloc, &[total.into()], "filt_res").unwrap();
-                        let res_ptr = if let inkwell::values::ValueKind::Basic(v) = res_call.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
-
-                        let idx_alloca = self.builder.build_alloca(i64_type, "filt_i").unwrap();
-                        let out_idx_alloca = self.builder.build_alloca(i64_type, "filt_out").unwrap();
-                        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
-                        self.builder.build_store(out_idx_alloca, i64_type.const_int(0, false)).unwrap();
-
-                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
-                        let cond_bb = self.context.append_basic_block(function, "filt_cond");
-                        let body_bb = self.context.append_basic_block(function, "filt_body");
-                        let keep_bb = self.context.append_basic_block(function, "filt_keep");
-                        let next_bb = self.context.append_basic_block(function, "filt_next");
-                        let exit_bb = self.context.append_basic_block(function, "filt_exit");
-
-                        self.builder.build_unconditional_branch(cond_bb).unwrap();
-                        self.builder.position_at_end(cond_bb);
-                        let idx = self.builder.build_load(i64_type, idx_alloca, "i").unwrap().into_int_value();
-                        let cmp = self.builder.build_int_compare(IntPredicate::SLT, idx, len, "cmp").unwrap();
-                        self.builder.build_conditional_branch(cmp, body_bb, exit_bb).unwrap();
-
-                        self.builder.position_at_end(body_bb);
-                        let offset = self.builder.build_int_add(self.builder.build_int_mul(idx, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "off").unwrap();
-                        let src_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), lp, &[offset], "sp").unwrap() };
-                        let elem = self.builder.build_load(i64_type, src_ptr, "elem").unwrap();
-
-                        // Call predicate: fn_ptr(env_ptr, elem) → bool (i1)
-                        let bool_type = self.context.bool_type();
-                        let pred_ty = bool_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                        let pred_result = self.builder.build_indirect_call(pred_ty, fn_ptr, &[env_ptr.into(), elem.into()], "pred").unwrap();
-                        let keep = if let inkwell::values::ValueKind::Basic(v) = pred_result.try_as_basic_value() { v.into_int_value() } else { bool_type.const_int(0, false) };
-                        self.builder.build_conditional_branch(keep, keep_bb, next_bb).unwrap();
-
-                        self.builder.position_at_end(keep_bb);
-                        let out_idx = self.builder.build_load(i64_type, out_idx_alloca, "out_i").unwrap().into_int_value();
-                        let out_offset = self.builder.build_int_add(self.builder.build_int_mul(out_idx, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "out_off").unwrap();
-                        let dst_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), res_ptr, &[out_offset], "dp").unwrap() };
-                        self.builder.build_store(dst_ptr, elem).unwrap();
-                        let new_out = self.builder.build_int_add(out_idx, i64_type.const_int(1, false), "").unwrap();
-                        self.builder.build_store(out_idx_alloca, new_out).unwrap();
-                        self.builder.build_unconditional_branch(next_bb).unwrap();
-
-                        self.builder.position_at_end(next_bb);
-                        let new_idx = self.builder.build_int_add(idx, i64_type.const_int(1, false), "").unwrap();
-                        self.builder.build_store(idx_alloca, new_idx).unwrap();
-                        self.builder.build_unconditional_branch(cond_bb).unwrap();
-
-                        self.builder.position_at_end(exit_bb);
-                        let final_len = self.builder.build_load(i64_type, out_idx_alloca, "final_len").unwrap();
-                        self.builder.build_store(res_ptr, final_len).unwrap();
-                        self.values.insert(result_id, res_ptr.into());
-                    }
-                }
-                "list.fold" => {
-                    // fold(list, init, closure) → accumulator
-                    if args.len() >= 3 {
-                        let lp = args[0].into_pointer_value();
-                        let init = args[1];
-                        let closure = args[2].into_struct_value();
-                        let fn_ptr = self.builder.build_extract_value(closure, 0, "fold_fn").unwrap().into_pointer_value();
-                        let env_ptr = self.builder.build_extract_value(closure, 1, "fold_env").unwrap();
-
-                        let len = self.builder.build_load(i64_type, lp, "len").unwrap().into_int_value();
-                        let acc_alloca = self.builder.build_alloca(i64_type, "fold_acc").unwrap();
-                        let idx_alloca = self.builder.build_alloca(i64_type, "fold_i").unwrap();
-                        self.builder.build_store(acc_alloca, init).unwrap();
-                        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
-
-                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
-                        let cond_bb = self.context.append_basic_block(function, "fold_cond");
-                        let body_bb = self.context.append_basic_block(function, "fold_body");
-                        let exit_bb = self.context.append_basic_block(function, "fold_exit");
-
-                        self.builder.build_unconditional_branch(cond_bb).unwrap();
-                        self.builder.position_at_end(cond_bb);
-                        let idx = self.builder.build_load(i64_type, idx_alloca, "i").unwrap().into_int_value();
-                        let cmp = self.builder.build_int_compare(IntPredicate::SLT, idx, len, "cmp").unwrap();
-                        self.builder.build_conditional_branch(cmp, body_bb, exit_bb).unwrap();
-
-                        self.builder.position_at_end(body_bb);
-                        let offset = self.builder.build_int_add(self.builder.build_int_mul(idx, i64_type.const_int(8, false), "").unwrap(), i64_type.const_int(8, false), "off").unwrap();
-                        let src_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), lp, &[offset], "sp").unwrap() };
-                        let elem = self.builder.build_load(i64_type, src_ptr, "elem").unwrap();
-                        let acc = self.builder.build_load(i64_type, acc_alloca, "acc").unwrap();
-
-                        // Call closure: fn_ptr(env_ptr, acc, elem)
-                        let fold_ty = i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-                        let folded = self.builder.build_indirect_call(fold_ty, fn_ptr, &[env_ptr.into(), acc.into(), elem.into()], "folded").unwrap();
-                        let new_acc = if let inkwell::values::ValueKind::Basic(v) = folded.try_as_basic_value() { v } else { i64_type.const_int(0, false).into() };
-                        self.builder.build_store(acc_alloca, new_acc).unwrap();
-
-                        let new_idx = self.builder.build_int_add(idx, i64_type.const_int(1, false), "").unwrap();
-                        self.builder.build_store(idx_alloca, new_idx).unwrap();
-                        self.builder.build_unconditional_branch(cond_bb).unwrap();
-
-                        self.builder.position_at_end(exit_bb);
-                        let result = self.builder.build_load(i64_type, acc_alloca, "fold_result").unwrap();
-                        self.values.insert(result_id, result);
-                    }
-                }
-                "math.sqrt" => {
-                    if let Some(val) = args.first() {
-                        let f64_type = self.context.f64_type();
-                        let sqrt_fn = if let Some(f) = self.module.get_function("sqrt") { f } else {
-                            let sqrt_ty = f64_type.fn_type(&[f64_type.into()], false);
-                            self.module.add_function("sqrt", sqrt_ty, None)
-                        };
-                        let result = self.builder.build_call(sqrt_fn, &[(*val).into()], "sqrt").unwrap();
-                        if let inkwell::values::ValueKind::Basic(v) = result.try_as_basic_value() {
-                            self.values.insert(result_id, v);
-                        }
-                    }
-                }
-                "map.len" => {
-                    // Map layout: [i64 len][entries...]
-                    // Same as list for the header
-                    if let Some(map_ptr) = args.first() {
-                        let len = self.builder.build_load(i64_type, map_ptr.into_pointer_value(), "map_len").unwrap();
-                        self.values.insert(result_id, len);
-                    }
-                }
-                "string.to_upper" => {
-                    if let Some(str_val) = args.first() {
-                        let src = str_val.into_pointer_value();
-                        let strlen_fn = *self.functions.get("strlen").unwrap();
-                        let malloc = *self.functions.get("malloc").unwrap();
-                        let len_call = self.builder.build_call(strlen_fn, &[src.into()], "slen").unwrap();
-                        let len = if let inkwell::values::ValueKind::Basic(v) = len_call.try_as_basic_value() { v.into_int_value() } else { i64_type.const_int(0, false) };
-                        let len_plus_1 = self.builder.build_int_add(len, i64_type.const_int(1, false), "").unwrap();
-                        let buf_call = self.builder.build_call(malloc, &[len_plus_1.into()], "upper_buf").unwrap();
-                        let buf = if let inkwell::values::ValueKind::Basic(v) = buf_call.try_as_basic_value() { v.into_pointer_value() } else { ptr_type.const_null() };
-
-                        let i32_type = self.context.i32_type();
-                        let toupper = if let Some(f) = self.module.get_function("toupper") { f } else {
-                            let toupper_ty = i32_type.fn_type(&[i32_type.into()], false);
-                            self.module.add_function("toupper", toupper_ty, None)
-                        };
-
-                        let idx_alloca = self.builder.build_alloca(i64_type, "up_i").unwrap();
-                        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
-
-                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
-                        let cond_bb = self.context.append_basic_block(function, "up_cond");
-                        let body_bb = self.context.append_basic_block(function, "up_body");
-                        let exit_bb = self.context.append_basic_block(function, "up_exit");
-
-                        self.builder.build_unconditional_branch(cond_bb).unwrap();
-                        self.builder.position_at_end(cond_bb);
-                        let idx = self.builder.build_load(i64_type, idx_alloca, "i").unwrap().into_int_value();
-                        let cmp = self.builder.build_int_compare(IntPredicate::SLT, idx, len, "cmp").unwrap();
-                        self.builder.build_conditional_branch(cmp, body_bb, exit_bb).unwrap();
-
-                        self.builder.position_at_end(body_bb);
-                        let src_byte_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), src, &[idx], "sbp").unwrap() };
-                        let byte = self.builder.build_load(self.context.i8_type(), src_byte_ptr, "byte").unwrap();
-                        let byte_i32 = self.builder.build_int_z_extend(byte.into_int_value(), i32_type, "ext").unwrap();
-                        let upper_call = self.builder.build_call(toupper, &[byte_i32.into()], "upper").unwrap();
-                        let upper_byte = if let inkwell::values::ValueKind::Basic(v) = upper_call.try_as_basic_value() { v.into_int_value() } else { i32_type.const_int(0, false) };
-                        let upper_i8 = self.builder.build_int_truncate(upper_byte, self.context.i8_type(), "trunc").unwrap();
-                        let dst_byte_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), buf, &[idx], "dbp").unwrap() };
-                        self.builder.build_store(dst_byte_ptr, upper_i8).unwrap();
-                        let new_idx = self.builder.build_int_add(idx, i64_type.const_int(1, false), "").unwrap();
-                        self.builder.build_store(idx_alloca, new_idx).unwrap();
-                        self.builder.build_unconditional_branch(cond_bb).unwrap();
-
-                        self.builder.position_at_end(exit_bb);
-                        // Null-terminate
-                        let end_ptr = unsafe { self.builder.build_gep(self.context.i8_type(), buf, &[len], "end").unwrap() };
-                        self.builder.build_store(end_ptr, self.context.i8_type().const_int(0, false)).unwrap();
-                        self.values.insert(result_id, buf.into());
-                    }
-                }
+        /// Create a default/zero value for a type (prevents verify errors on unhandled ops)
+        fn default_value(&self, ty: &DialectType) -> Option<BasicValueEnum<'ctx>> {
+            match ty {
+                DialectType::I64 => Some(self.ctx.i64_type().const_int(0, false).into()),
+                DialectType::F64 => Some(self.ctx.f64_type().const_float(0.0).into()),
+                DialectType::Bool => Some(self.ctx.bool_type().const_int(0, false).into()),
+                DialectType::I32 => Some(self.ctx.i32_type().const_int(0, false).into()),
+                DialectType::Unit => None,
                 _ => {
-                    // Unknown stdlib call — emit a default value to prevent verify errors
-                    let default_val = match result_ty {
-                        DialectType::I64 => Some(BasicValueEnum::IntValue(i64_type.const_int(0, false))),
-                        DialectType::F64 => Some(BasicValueEnum::FloatValue(self.context.f64_type().const_float(0.0))),
-                        DialectType::Bool => Some(BasicValueEnum::IntValue(self.context.bool_type().const_int(0, false))),
-                        DialectType::String | DialectType::Named(_) | DialectType::List(_)
-                        | DialectType::Map(_, _) | DialectType::Result(_, _) | DialectType::Option(_) => {
-                            Some(BasicValueEnum::PointerValue(ptr_type.const_null()))
-                        }
-                        _ => None,
-                    };
-                    if let Some(v) = default_val {
-                        self.values.insert(result_id, v);
-                    }
-                }
-            }
-        }
-
-        fn declare_printf(&mut self) {
-            let i32_type = self.context.i32_type();
-            let i64_type = self.context.i64_type();
-            let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-
-            let printf_type = i32_type.fn_type(&[ptr_type.into()], true);
-            self.module.add_function("printf", printf_type, None);
-            self.functions.insert("printf".into(), self.module.get_function("printf").unwrap());
-
-            // malloc for heap string allocation
-            let malloc_type = ptr_type.fn_type(&[i64_type.into()], false);
-            self.module.add_function("malloc", malloc_type, None);
-            self.functions.insert("malloc".into(), self.module.get_function("malloc").unwrap());
-
-            // strlen
-            let strlen_type = i64_type.fn_type(&[ptr_type.into()], false);
-            self.module.add_function("strlen", strlen_type, None);
-            self.functions.insert("strlen".into(), self.module.get_function("strlen").unwrap());
-
-            // snprintf
-            let snprintf_type = i32_type.fn_type(&[ptr_type.into(), i64_type.into(), ptr_type.into()], true);
-            self.module.add_function("snprintf", snprintf_type, None);
-            self.functions.insert("snprintf".into(), self.module.get_function("snprintf").unwrap());
-
-            // strcpy
-            let strcpy_type = ptr_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-            self.module.add_function("strcpy", strcpy_type, None);
-            self.functions.insert("strcpy".into(), self.module.get_function("strcpy").unwrap());
-
-            // strcat
-            let strcat_type = ptr_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-            self.module.add_function("strcat", strcat_type, None);
-            self.functions.insert("strcat".into(), self.module.get_function("strcat").unwrap());
-        }
-
-        fn dialect_to_llvm_type(&self, ty: &DialectType) -> Option<BasicMetadataTypeEnum<'ctx>> {
-            match ty {
-                DialectType::I64 => Some(self.context.i64_type().into()),
-                DialectType::F64 => Some(self.context.f64_type().into()),
-                DialectType::Bool => Some(self.context.bool_type().into()),
-                DialectType::I32 => Some(self.context.i32_type().into()),
-                DialectType::I8 => Some(self.context.i8_type().into()),
-                DialectType::String => Some(self.context.ptr_type(inkwell::AddressSpace::default()).into()),
-                DialectType::Named(name) => {
-                    if self.struct_types.contains_key(name.as_str()) {
-                        Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
+                    // Pointer types: null
+                    if self.llvm_type(ty).is_some() {
+                        Some(self.ctx.ptr_type(inkwell::AddressSpace::default()).const_null().into())
                     } else {
                         None
                     }
                 }
-                DialectType::Result(_, _) | DialectType::Option(_) | DialectType::List(_) => {
-                    Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
-                }
-                DialectType::Fn { .. } | DialectType::Closure { .. } => {
-                    // Closure: { ptr fn_ptr, ptr env_ptr }
-                    let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-                    Some(self.context.struct_type(&[ptr_type.into(), ptr_type.into()], false).into())
-                }
-                _ => None,
             }
         }
 
-        fn dialect_to_basic_type(&self, ty: &DialectType) -> Option<inkwell::types::BasicTypeEnum<'ctx>> {
-            match ty {
-                DialectType::I64 => Some(self.context.i64_type().into()),
-                DialectType::F64 => Some(self.context.f64_type().into()),
-                DialectType::Bool => Some(self.context.bool_type().into()),
-                DialectType::I32 => Some(self.context.i32_type().into()),
-                DialectType::I8 => Some(self.context.i8_type().into()),
-                DialectType::String => Some(self.context.ptr_type(inkwell::AddressSpace::default()).into()),
-                DialectType::Named(name) => {
-                    if self.struct_types.contains_key(name.as_str()) {
-                        Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
-                    } else {
-                        None
+        // ── Module compilation ──
+
+        fn compile(&mut self, module: &Module) {
+            self.register_types(module);
+            self.declare_libc();
+            self.declare_functions(module);
+            self.compile_functions(module);
+            self.emit_main_if_needed(module);
+        }
+
+        fn register_types(&mut self, module: &Module) {
+            let i32_ty = self.ctx.i32_type();
+            for td in &module.type_decls {
+                match &td.kind {
+                    TypeDeclKind::Record { fields } => {
+                        let ftys: Vec<_> = fields.iter().filter_map(|(_, t)| self.llvm_type(t)).collect();
+                        let sty = self.ctx.opaque_struct_type(td.name.as_str());
+                        sty.set_body(&ftys, false);
+                        self.struct_types.insert(td.name.as_str().into(), sty);
+                        self.struct_fields.insert(td.name.as_str().into(),
+                            fields.iter().map(|(n, _)| n.as_str().into()).collect());
                     }
-                }
-                DialectType::Result(_, _) | DialectType::Option(_) | DialectType::List(_) => {
-                    Some(self.context.ptr_type(inkwell::AddressSpace::default()).into())
-                }
-                DialectType::Fn { .. } | DialectType::Closure { .. } => {
-                    let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-                    Some(self.context.struct_type(&[ptr_type.into(), ptr_type.into()], false).into())
-                }
-                _ => None,
-            }
-        }
-
-        fn declare_function(&mut self, f: &crate::ops::FuncOp) {
-            let params: Vec<BasicMetadataTypeEnum<'ctx>> = f.params.iter()
-                .filter_map(|(_, ty)| self.dialect_to_llvm_type(ty))
-                .collect();
-
-            let fn_type = if f.name.as_str() == "main" {
-                // C ABI: main returns i32
-                self.context.i32_type().fn_type(&params, false)
-            } else if matches!(f.ret_ty, DialectType::Unit) {
-                self.context.void_type().fn_type(&params, false)
-            } else if let Some(ret) = self.dialect_to_basic_type(&f.ret_ty) {
-                ret.fn_type(&params, false)
-            } else {
-                self.context.void_type().fn_type(&params, false)
-            };
-
-            // Sanitize function name for LLVM (replace spaces/dots with underscores)
-            let llvm_name = f.name.as_str().replace(' ', "_").replace('.', "_");
-            let function = self.module.add_function(&llvm_name, fn_type, None);
-            self.functions.insert(f.name.as_str().to_string(), function);
-        }
-
-        fn compile_function(&mut self, f: &crate::ops::FuncOp) {
-            let function = match self.functions.get(f.name.as_str()) {
-                Some(f) => *f,
-                None => return,
-            };
-
-            let entry = self.context.append_basic_block(function, "entry");
-            self.builder.position_at_end(entry);
-            self.values.clear();
-            self.allocas.clear();
-
-            // Map params to ValueIds
-            if let Some(block) = f.body.first() {
-                for (i, (val_id, _)) in block.args.iter().enumerate() {
-                    if let Some(param) = function.get_nth_param(i as u32) {
-                        self.values.insert(*val_id, param);
-                    }
-                }
-            }
-
-            // Compile body
-            for block in &f.body {
-                for op in &block.ops {
-                    self.compile_op(op);
-                }
-                // Terminator
-                match &block.terminator {
-                    Terminator::Return(v) => {
-                        if f.name.as_str() == "main" {
-                            // C ABI: return 0
-                            let zero = self.context.i32_type().const_int(0, false);
-                            self.builder.build_return(Some(&zero)).unwrap();
-                        } else if matches!(f.ret_ty, DialectType::Unit) {
-                            self.builder.build_return(None).unwrap();
-                        } else if let Some(val) = self.values.get(v) {
-                            self.builder.build_return(Some(val)).unwrap();
-                        } else {
-                            self.builder.build_return(None).unwrap();
+                    TypeDeclKind::Variant { cases } => {
+                        let max_payload = cases.iter().map(|c| c.payload.len() * 8).max().unwrap_or(0);
+                        let sty = self.ctx.opaque_struct_type(td.name.as_str());
+                        sty.set_body(&[i32_ty.into(), self.ctx.i8_type().array_type(max_payload as u32).into()], false);
+                        self.struct_types.insert(td.name.as_str().into(), sty);
+                        self.struct_fields.insert(td.name.as_str().into(),
+                            cases.iter().map(|c| c.name.as_str().into()).collect());
+                        for (i, c) in cases.iter().enumerate() {
+                            self.variant_cases.insert(c.name.as_str().into(),
+                                (td.name.as_str().into(), i as u32, c.payload.clone()));
                         }
                     }
-                    _ => {
-                        if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
-                            if f.name.as_str() == "main" {
-                                let zero = self.context.i32_type().const_int(0, false);
-                                self.builder.build_return(Some(&zero)).unwrap();
+                    _ => {}
+                }
+            }
+            // Built-in tagged unions
+            // Result[T, E]: Ok(T)=tag0, Err(E)=tag1
+            {
+                let sty = self.ctx.opaque_struct_type("Result");
+                sty.set_body(&[i32_ty.into(), self.ctx.i8_type().array_type(16).into()], false);
+                self.struct_types.insert("Result".into(), sty);
+                self.variant_cases.insert("Ok".into(), ("Result".into(), 0, vec![DialectType::I64]));
+                self.variant_cases.insert("Err".into(), ("Result".into(), 1, vec![DialectType::String]));
+            }
+            // Option[T]: Some(T)=tag0, None=tag1
+            {
+                let sty = self.ctx.opaque_struct_type("Option");
+                sty.set_body(&[i32_ty.into(), self.ctx.i8_type().array_type(16).into()], false);
+                self.struct_types.insert("Option".into(), sty);
+                self.variant_cases.insert("Some".into(), ("Option".into(), 0, vec![DialectType::I64]));
+                self.variant_cases.insert("None".into(), ("Option".into(), 1, vec![]));
+            }
+        }
+
+        fn declare_libc(&mut self) {
+            let i32 = self.ctx.i32_type();
+            let i64 = self.ctx.i64_type();
+            let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let f64t = self.ctx.f64_type();
+            let decls: Vec<(&str, inkwell::types::FunctionType<'ctx>)> = vec![
+                ("printf", i32.fn_type(&[ptr.into()], true)),
+                ("malloc", ptr.fn_type(&[i64.into()], false)),
+                ("strlen", i64.fn_type(&[ptr.into()], false)),
+                ("snprintf", i32.fn_type(&[ptr.into(), i64.into(), ptr.into()], true)),
+                ("strcpy", ptr.fn_type(&[ptr.into(), ptr.into()], false)),
+                ("strcat", ptr.fn_type(&[ptr.into(), ptr.into()], false)),
+                ("strchr", ptr.fn_type(&[ptr.into(), i32.into()], false)),
+                ("strcmp", i32.fn_type(&[ptr.into(), ptr.into()], false)),
+                ("toupper", i32.fn_type(&[i32.into()], false)),
+                ("sqrt", f64t.fn_type(&[f64t.into()], false)),
+            ];
+            for (name, ty) in decls {
+                let f = self.module.add_function(name, ty, None);
+                self.functions.insert(name.into(), f);
+            }
+        }
+
+        fn declare_functions(&mut self, module: &Module) {
+            for f in &module.functions {
+                let fname = f.name.as_str();
+                if fname.contains('.') && !fname.starts_with("__test_almd_") { continue; }
+                let llvm_name = fname.replace(' ', "_").replace('.', "_");
+                let params: Vec<BasicMetadataTypeEnum> = f.params.iter()
+                    .filter_map(|(_, ty)| self.meta_type(ty)).collect();
+                let fn_type = if fname == "main" {
+                    self.ctx.i32_type().fn_type(&params, false)
+                } else if matches!(f.ret_ty, DialectType::Unit) {
+                    self.ctx.void_type().fn_type(&params, false)
+                } else if let Some(ret) = self.llvm_type(&f.ret_ty) {
+                    ret.fn_type(&params, false)
+                } else {
+                    self.ctx.void_type().fn_type(&params, false)
+                };
+                let func = self.module.add_function(&llvm_name, fn_type, None);
+                self.functions.insert(fname.into(), func);
+            }
+        }
+
+        fn compile_functions(&mut self, module: &Module) {
+            for f in &module.functions {
+                let fname = f.name.as_str();
+                if fname.contains('.') && !fname.starts_with("__test_almd_") { continue; }
+                let func = match self.functions.get(fname).copied() {
+                    Some(f) => f,
+                    None => continue,
+                };
+                let entry = self.ctx.append_basic_block(func, "entry");
+                self.builder.position_at_end(entry);
+
+                let mut scope = FnScope::new();
+
+                // Map params
+                if let Some(block) = f.body.first() {
+                    for (i, (val_id, dty)) in block.args.iter().enumerate() {
+                        if let Some(param) = func.get_nth_param(i as u32) {
+                            scope.set(*val_id, param, dty.clone());
+                        }
+                    }
+                }
+
+                // Compile body
+                for block in &f.body {
+                    for op in &block.ops {
+                        self.compile_op(op, &mut scope);
+                    }
+                    match &block.terminator {
+                        Terminator::Return(v) | Terminator::Yield(v) => {
+                            if fname == "main" {
+                                self.builder.build_return(Some(&self.ctx.i32_type().const_int(0, false))).unwrap();
+                            } else if matches!(f.ret_ty, DialectType::Unit) {
+                                self.builder.build_return(None).unwrap();
+                            } else if let Some(tv) = scope.get(v) {
+                                self.builder.build_return(Some(&tv.val)).unwrap();
+                            } else if let Some(dv) = self.default_value(&f.ret_ty) {
+                                self.builder.build_return(Some(&dv)).unwrap();
                             } else {
                                 self.builder.build_return(None).unwrap();
                             }
                         }
+                        _ => {
+                            if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+                                if fname == "main" {
+                                    self.builder.build_return(Some(&self.ctx.i32_type().const_int(0, false))).unwrap();
+                                } else {
+                                    self.builder.build_return(None).unwrap();
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        fn compile_op(&mut self, op: &Operation) {
-            let result_id = match op.result {
-                Some(id) => id,
-                None => return,
-            };
+        fn emit_main_if_needed(&mut self, module: &Module) {
+            if self.functions.contains_key("main") { return; }
+
+            let test_fns: Vec<String> = self.functions.keys()
+                .filter(|n| n.starts_with("__test_almd_")).cloned().collect();
+
+            let i32 = self.ctx.i32_type();
+            let main = self.module.add_function("main", i32.fn_type(&[], false), None);
+            let entry = self.ctx.append_basic_block(main, "entry");
+            self.builder.position_at_end(entry);
+
+            if test_fns.is_empty() {
+                self.builder.build_return(Some(&i32.const_int(0, false))).unwrap();
+                return;
+            }
+
+            let printf = *self.functions.get("printf").unwrap();
+            let i64 = self.ctx.i64_type();
+            let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let pass_a = self.builder.build_alloca(i64, "pass").unwrap();
+            let fail_a = self.builder.build_alloca(i64, "fail").unwrap();
+            self.builder.build_store(pass_a, i64.const_int(0, false)).unwrap();
+            self.builder.build_store(fail_a, i64.const_int(0, false)).unwrap();
+
+            let ok_fmt = self.builder.build_global_string_ptr("test %s ... ok\n", "ok_fmt").unwrap();
+            let sum_fmt = self.builder.build_global_string_ptr("\ntest result: %lld passed; %lld failed\n", "sum_fmt").unwrap();
+
+            for name in &test_fns {
+                let f = self.functions[name];
+                let ns = self.builder.build_global_string_ptr(name, "tn").unwrap();
+                self.builder.build_call(f, &[], "").unwrap();
+                self.builder.build_call(printf, &[ok_fmt.as_pointer_value().into(), ns.as_pointer_value().into()], "").unwrap();
+                let p = self.builder.build_load(i64, pass_a, "p").unwrap().into_int_value();
+                self.builder.build_store(pass_a, self.builder.build_int_add(p, i64.const_int(1, false), "").unwrap()).unwrap();
+            }
+
+            let fp = self.builder.build_load(i64, pass_a, "fp").unwrap();
+            let ff = self.builder.build_load(i64, fail_a, "ff").unwrap();
+            self.builder.build_call(printf, &[sum_fmt.as_pointer_value().into(), fp.into(), ff.into()], "").unwrap();
+            self.builder.build_return(Some(&i32.const_int(0, false))).unwrap();
+        }
+
+        // ── Operation compilation ──
+
+        fn compile_op(&mut self, op: &Operation, scope: &mut FnScope<'ctx>) {
+            let rid = match op.result { Some(id) => id, None => return };
+            let rty = &op.result_ty;
 
             match &op.kind {
-                OpKind::ConstInt(v) => {
-                    let val = self.context.i64_type().const_int(*v as u64, true);
-                    self.values.insert(result_id, val.into());
-                }
-                OpKind::ConstFloat(v) => {
-                    let val = self.context.f64_type().const_float(*v);
-                    self.values.insert(result_id, val.into());
-                }
-                OpKind::ConstBool(v) => {
-                    let val = self.context.bool_type().const_int(*v as u64, false);
-                    self.values.insert(result_id, val.into());
-                }
+                // ── Constants ──
+                OpKind::ConstInt(v) => scope.set(rid, self.ctx.i64_type().const_int(*v as u64, true).into(), rty.clone()),
+                OpKind::ConstFloat(v) => scope.set(rid, self.ctx.f64_type().const_float(*v).into(), rty.clone()),
+                OpKind::ConstBool(v) => scope.set(rid, self.ctx.bool_type().const_int(*v as u64, false).into(), rty.clone()),
                 OpKind::ConstString(s) => {
-                    let global = self.builder.build_global_string_ptr(s, &format!("str_{}", result_id.0)).unwrap();
-                    self.values.insert(result_id, global.as_pointer_value().into());
+                    let g = self.builder.build_global_string_ptr(s, &format!("s{}", rid.0)).unwrap();
+                    scope.set(rid, g.as_pointer_value().into(), DialectType::String);
                 }
-                OpKind::ConstUnit => {
-                    // Unit is void — no value to store
+                OpKind::ConstUnit => {}
+
+                // ── Arithmetic ──
+                OpKind::BinOp { op: binop, lhs, rhs } => {
+                    if let (Some(l), Some(r)) = (scope.get(lhs), scope.get(rhs)) {
+                        if let Some(result) = self.emit_binop(binop, l, r, rty) {
+                            scope.set(rid, result, rty.clone());
+                        }
+                    }
                 }
-
-                OpKind::BinOp { op, lhs, rhs } => {
-                    let l = self.values.get(lhs).cloned();
-                    let r = self.values.get(rhs).cloned();
-                    if let (Some(l), Some(r)) = (l, r) {
-                        let result = match op {
-                            almide_ir::BinOp::AddInt => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_int_add(lv, rv, "add").unwrap().into())
-                            }
-                            almide_ir::BinOp::SubInt => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_int_sub(lv, rv, "sub").unwrap().into())
-                            }
-                            almide_ir::BinOp::MulInt => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_int_mul(lv, rv, "mul").unwrap().into())
-                            }
-                            almide_ir::BinOp::DivInt => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                // Guard: if rv == 0, return 0 (prevent SIGFPE)
-                                let is_zero = self.builder.build_int_compare(IntPredicate::EQ, rv, self.context.i64_type().const_int(0, false), "div_zero").unwrap();
-                                let safe_rv = self.builder.build_select(is_zero, self.context.i64_type().const_int(1, false), rv, "safe_div").unwrap().into_int_value();
-                                let result = self.builder.build_int_signed_div(lv, safe_rv, "div").unwrap();
-                                let guarded = self.builder.build_select(is_zero, self.context.i64_type().const_int(0, false), result, "div_guarded").unwrap();
-                                Some(guarded.into())
-                            }
-                            almide_ir::BinOp::ModInt => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                let is_zero = self.builder.build_int_compare(IntPredicate::EQ, rv, self.context.i64_type().const_int(0, false), "mod_zero").unwrap();
-                                let safe_rv = self.builder.build_select(is_zero, self.context.i64_type().const_int(1, false), rv, "safe_mod").unwrap().into_int_value();
-                                let result = self.builder.build_int_signed_rem(lv, safe_rv, "rem").unwrap();
-                                let guarded = self.builder.build_select(is_zero, self.context.i64_type().const_int(0, false), result, "mod_guarded").unwrap();
-                                Some(guarded.into())
-                            }
-                            almide_ir::BinOp::AddFloat => {
-                                let lv = l.into_float_value();
-                                let rv = r.into_float_value();
-                                let inst = self.builder.build_float_add(lv, rv, "fadd").unwrap();
-                                set_fast_math(inst);
-                                Some(inst.into())
-                            }
-                            almide_ir::BinOp::SubFloat => {
-                                let lv = l.into_float_value();
-                                let rv = r.into_float_value();
-                                let inst = self.builder.build_float_sub(lv, rv, "fsub").unwrap();
-                                set_fast_math(inst);
-                                Some(inst.into())
-                            }
-                            almide_ir::BinOp::MulFloat => {
-                                let lv = l.into_float_value();
-                                let rv = r.into_float_value();
-                                let inst = self.builder.build_float_mul(lv, rv, "fmul").unwrap();
-                                set_fast_math(inst);
-                                Some(inst.into())
-                            }
-                            almide_ir::BinOp::DivFloat => {
-                                let lv = l.into_float_value();
-                                let rv = r.into_float_value();
-                                let inst = self.builder.build_float_div(lv, rv, "fdiv").unwrap();
-                                set_fast_math(inst);
-                                Some(inst.into())
-                            }
-                            almide_ir::BinOp::Eq | almide_ir::BinOp::Neq
-                            | almide_ir::BinOp::Lt | almide_ir::BinOp::Gt
-                            | almide_ir::BinOp::Lte | almide_ir::BinOp::Gte => {
-                                let pred = match op {
-                                    almide_ir::BinOp::Eq => IntPredicate::EQ,
-                                    almide_ir::BinOp::Neq => IntPredicate::NE,
-                                    almide_ir::BinOp::Lt => IntPredicate::SLT,
-                                    almide_ir::BinOp::Gt => IntPredicate::SGT,
-                                    almide_ir::BinOp::Lte => IntPredicate::SLE,
-                                    almide_ir::BinOp::Gte => IntPredicate::SGE,
-                                    _ => unreachable!(),
-                                };
-                                match (l, r) {
-                                    (BasicValueEnum::IntValue(lv), BasicValueEnum::IntValue(rv)) => {
-                                        Some(self.builder.build_int_compare(pred, lv, rv, "cmp").unwrap().into())
-                                    }
-                                    (BasicValueEnum::FloatValue(lv), BasicValueEnum::FloatValue(rv)) => {
-                                        let fpred = match op {
-                                            almide_ir::BinOp::Eq => inkwell::FloatPredicate::OEQ,
-                                            almide_ir::BinOp::Neq => inkwell::FloatPredicate::ONE,
-                                            almide_ir::BinOp::Lt => inkwell::FloatPredicate::OLT,
-                                            almide_ir::BinOp::Gt => inkwell::FloatPredicate::OGT,
-                                            almide_ir::BinOp::Lte => inkwell::FloatPredicate::OLE,
-                                            almide_ir::BinOp::Gte => inkwell::FloatPredicate::OGE,
-                                            _ => unreachable!(),
-                                        };
-                                        Some(self.builder.build_float_compare(fpred, lv, rv, "fcmp").unwrap().into())
-                                    }
-                                    (BasicValueEnum::PointerValue(lv), BasicValueEnum::PointerValue(rv)) => {
-                                        // Pointer comparison (strings, records) — compare addresses
-                                        Some(self.builder.build_int_compare(pred, lv, rv, "pcmp").unwrap().into())
-                                    }
-                                    _ => None,
-                                }
-                            }
-                            almide_ir::BinOp::ConcatStr => {
-                                // String concatenation: malloc(strlen(a) + strlen(b) + 1), strcpy, strcat
-                                let strlen = self.functions.get("strlen").copied().unwrap();
-                                let malloc = self.functions.get("malloc").copied().unwrap();
-                                let strcpy = self.functions.get("strcpy").copied().unwrap();
-                                let strcat = self.functions.get("strcat").copied().unwrap();
-
-                                let len_a = self.builder.build_call(strlen, &[l.into()], "len_a").unwrap();
-                                let len_b = self.builder.build_call(strlen, &[r.into()], "len_b").unwrap();
-                                let la = if let inkwell::values::ValueKind::Basic(v) = len_a.try_as_basic_value() { v.into_int_value() } else { self.context.i64_type().const_int(0, false) };
-                                let lb = if let inkwell::values::ValueKind::Basic(v) = len_b.try_as_basic_value() { v.into_int_value() } else { self.context.i64_type().const_int(0, false) };
-                                let total = self.builder.build_int_add(la, lb, "total_len").unwrap();
-                                let total_plus_1 = self.builder.build_int_add(total, self.context.i64_type().const_int(1, false), "total_plus_1").unwrap();
-
-                                let buf = self.builder.build_call(malloc, &[total_plus_1.into()], "buf").unwrap();
-                                let buf_ptr = if let inkwell::values::ValueKind::Basic(v) = buf.try_as_basic_value() { v } else { l }; // fallback
-
-                                self.builder.build_call(strcpy, &[buf_ptr.into(), l.into()], "").unwrap();
-                                self.builder.build_call(strcat, &[buf_ptr.into(), r.into()], "").unwrap();
-
-                                Some(buf_ptr)
-                            }
-                            almide_ir::BinOp::And => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_and(lv, rv, "and").unwrap().into())
-                            }
-                            almide_ir::BinOp::Or => {
-                                let lv = l.into_int_value();
-                                let rv = r.into_int_value();
-                                Some(self.builder.build_or(lv, rv, "or").unwrap().into())
-                            }
-                            _ => None,
+                OpKind::UnOp { op: unop, operand } => {
+                    if let Some(v) = scope.get(operand) {
+                        let result = match unop {
+                            almide_ir::UnOp::NegInt => self.builder.build_int_neg(v.val.into_int_value(), "neg").unwrap().into(),
+                            almide_ir::UnOp::NegFloat => self.builder.build_float_neg(v.val.into_float_value(), "fneg").unwrap().into(),
+                            almide_ir::UnOp::Not => self.builder.build_not(v.val.into_int_value(), "not").unwrap().into(),
                         };
-                        if let Some(val) = result {
-                            self.values.insert(result_id, val);
-                        }
+                        scope.set(rid, result, rty.clone());
                     }
                 }
 
-                OpKind::CallOp { callee, args } => {
-                    let callee_str = callee.as_str();
-                    if callee_str == "println" {
-                        // println with printf: %lld\n for ints, %f\n for floats
-                        if let Some(arg) = args.first().and_then(|a| self.values.get(a)) {
-                            let fmt = match arg {
-                                BasicValueEnum::IntValue(_) => self.builder.build_global_string_ptr("%lld\n", "fmt_int").unwrap(),
-                                BasicValueEnum::FloatValue(_) => self.builder.build_global_string_ptr("%.15g\n", "fmt_float").unwrap(),
-                                _ => self.builder.build_global_string_ptr("%s\n", "fmt_str").unwrap(),
-                            };
-                            if let Some(printf) = self.functions.get("printf") {
-                                self.builder.build_call(
-                                    *printf,
-                                    &[fmt.as_pointer_value().into(), (*arg).into()],
-                                    "printf_call",
-                                ).unwrap();
-                            }
-                        }
-                    } else if let Some((parent, tag, payload_tys)) = self.variant_cases.get(callee_str).cloned() {
-                        // Variant constructor: malloc struct, set tag, store payload fields
-                        if let Some(struct_ty) = self.struct_types.get(&parent).copied() {
-                            let size = struct_ty.size_of().unwrap();
-                            let malloc = self.functions.get("malloc").copied().unwrap();
-                            let ptr_call = self.builder.build_call(malloc, &[size.into()], "variant_ptr").unwrap();
-                            if let inkwell::values::ValueKind::Basic(ptr_val) = ptr_call.try_as_basic_value() {
-                                let ptr = ptr_val.into_pointer_value();
-                                // Store tag
-                                let tag_ptr = self.builder.build_struct_gep(struct_ty, ptr, 0, "tag_ptr").unwrap();
-                                self.builder.build_store(tag_ptr, self.context.i32_type().const_int(tag as u64, false)).unwrap();
-                                // Store payload fields into the payload area
-                                if !payload_tys.is_empty() {
-                                    let payload_ptr = self.builder.build_struct_gep(struct_ty, ptr, 1, "payload_ptr").unwrap();
-                                    for (i, arg_id) in args.iter().enumerate() {
-                                        if let Some(arg_val) = self.values.get(arg_id) {
-                                            let offset = (i * 8) as u64;
-                                            let field_ptr = unsafe {
-                                                self.builder.build_gep(self.context.i8_type(), payload_ptr, &[self.context.i64_type().const_int(offset, false)], &format!("pay_{}", i)).unwrap()
-                                            };
-                                            self.builder.build_store(field_ptr, *arg_val).unwrap();
-                                        }
-                                    }
-                                }
-                                self.values.insert(result_id, ptr.into());
-                            }
-                        }
-                    } else if callee_str == "int.to_float" {
-                        // int → float conversion
-                        if let Some(val) = args.first().and_then(|a| self.values.get(a).cloned()) {
-                            let f64_val = self.builder.build_signed_int_to_float(
-                                val.into_int_value(), self.context.f64_type(), "itof").unwrap();
-                            self.values.insert(result_id, f64_val.into());
-                        }
-                    } else if callee_str == "int.to_string" {
-                        // Int → pass through to printf %lld
-                        if let Some(val) = args.first().and_then(|a| self.values.get(a)) {
-                            self.values.insert(result_id, *val);
-                        }
-                    } else if callee_str == "float.to_string" {
-                        let fval = args.first().and_then(|a| self.values.get(a)).cloned();
-                        if let Some(val) = fval {
-                            let helper = self.get_or_emit_float_to_string();
-                            let call = self.builder.build_call(helper, &[val.into()], "fts").unwrap();
-                            if let inkwell::values::ValueKind::Basic(bv) = call.try_as_basic_value() {
-                                self.values.insert(result_id, bv);
-                            }
-                        }
-                    } else if callee_str.starts_with("list.") || callee_str.starts_with("string.") || callee_str.starts_with("map.") || callee_str.starts_with("math.") {
-                        // Stdlib call — emit inline LLVM for list/string operations
-                        let func_name = callee_str.split("__").next().unwrap_or(callee_str); // strip monomorph
-                        let arg_vals: Vec<BasicValueEnum<'ctx>> = args.iter()
-                            .filter_map(|a| self.values.get(a).cloned())
-                            .collect();
-                        self.emit_stdlib_call(result_id, func_name, &arg_vals, &op.result_ty);
-                    } else if let Some(func) = self.functions.get(callee_str).copied() {
-                        let arg_vals: Vec<BasicMetadataValueEnum> = args.iter()
-                            .filter_map(|a| self.values.get(a).map(|v| (*v).into()))
-                            .collect();
-                        let call = self.builder.build_call(func, &arg_vals, "call").unwrap();
-                        if func.get_type().get_return_type().is_some() {
-                            if let inkwell::values::ValueKind::Basic(bv) = call.try_as_basic_value() {
-                                self.values.insert(result_id, bv);
-                            }
-                        }
-                    }
-                }
-
+                // ── Control flow ──
                 OpKind::IfOp { cond, then_region, else_region } => {
-                    if let Some(cond_val) = self.values.get(cond).cloned() {
-                        let cond_int = if cond_val.is_int_value() { cond_val.into_int_value() } else { self.context.bool_type().const_int(0, false) };
-                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
-                        let then_bb = self.context.append_basic_block(function, "then");
-                        let else_bb = self.context.append_basic_block(function, "else");
-                        let merge_bb = self.context.append_basic_block(function, "merge");
-
+                    if let Some(cv) = scope.get(cond) {
+                        let cond_int = if cv.val.is_int_value() { cv.val.into_int_value() } else { self.ctx.bool_type().const_int(0, false) };
+                        let func = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                        let then_bb = self.ctx.append_basic_block(func, "then");
+                        let else_bb = self.ctx.append_basic_block(func, "else");
+                        let merge_bb = self.ctx.append_basic_block(func, "merge");
                         self.builder.build_conditional_branch(cond_int, then_bb, else_bb).unwrap();
 
-                        // Then
                         self.builder.position_at_end(then_bb);
-                        let mut then_val = None;
-                        for block in then_region {
-                            for op in &block.ops { self.compile_op(op); }
-                            if let Terminator::Yield(v) = &block.terminator {
-                                then_val = self.values.get(v).cloned();
-                            }
-                        }
+                        let tv = self.compile_region(then_region, scope);
                         self.builder.build_unconditional_branch(merge_bb).unwrap();
                         let then_end = self.builder.get_insert_block().unwrap();
 
-                        // Else
                         self.builder.position_at_end(else_bb);
-                        let mut else_val = None;
-                        for block in else_region {
-                            for op in &block.ops { self.compile_op(op); }
-                            if let Terminator::Yield(v) = &block.terminator {
-                                else_val = self.values.get(v).cloned();
-                            }
-                        }
+                        let ev = self.compile_region(else_region, scope);
                         self.builder.build_unconditional_branch(merge_bb).unwrap();
                         let else_end = self.builder.get_insert_block().unwrap();
 
-                        // Merge with phi
                         self.builder.position_at_end(merge_bb);
-                        if let (Some(tv), Some(ev)) = (then_val, else_val) {
-                            let phi = self.builder.build_phi(tv.get_type(), "ifval").unwrap();
-                            phi.add_incoming(&[(&tv, then_end), (&ev, else_end)]);
-                            self.values.insert(result_id, phi.as_basic_value());
-                        }
-                    }
-                }
-
-                OpKind::ResultOkOp { value } | OpKind::OptionSomeOp { value } => {
-                    let (type_name, tag) = if matches!(&op.kind, OpKind::ResultOkOp { .. }) {
-                        ("Result", 0u32)
-                    } else {
-                        ("Option", 0u32)
-                    };
-                    if let Some(struct_ty) = self.struct_types.get(type_name).copied() {
-                        let size = struct_ty.size_of().unwrap();
-                        let malloc = self.functions.get("malloc").copied().unwrap();
-                        let ptr_call = self.builder.build_call(malloc, &[size.into()], "ok_ptr").unwrap();
-                        if let inkwell::values::ValueKind::Basic(ptr_val) = ptr_call.try_as_basic_value() {
-                            let ptr = ptr_val.into_pointer_value();
-                            let tag_ptr = self.builder.build_struct_gep(struct_ty, ptr, 0, "ok_tag").unwrap();
-                            self.builder.build_store(tag_ptr, self.context.i32_type().const_int(tag as u64, false)).unwrap();
-                            if let Some(val) = self.values.get(value) {
-                                let payload_ptr = self.builder.build_struct_gep(struct_ty, ptr, 1, "ok_payload").unwrap();
-                                self.builder.build_store(payload_ptr, *val).unwrap();
-                            }
-                            self.values.insert(result_id, ptr.into());
-                        }
-                    }
-                }
-                OpKind::ResultErrOp { value } => {
-                    if let Some(struct_ty) = self.struct_types.get("Result").copied() {
-                        let size = struct_ty.size_of().unwrap();
-                        let malloc = self.functions.get("malloc").copied().unwrap();
-                        let ptr_call = self.builder.build_call(malloc, &[size.into()], "err_ptr").unwrap();
-                        if let inkwell::values::ValueKind::Basic(ptr_val) = ptr_call.try_as_basic_value() {
-                            let ptr = ptr_val.into_pointer_value();
-                            let tag_ptr = self.builder.build_struct_gep(struct_ty, ptr, 0, "err_tag").unwrap();
-                            self.builder.build_store(tag_ptr, self.context.i32_type().const_int(1, false)).unwrap();
-                            if let Some(val) = self.values.get(value) {
-                                let payload_ptr = self.builder.build_struct_gep(struct_ty, ptr, 1, "err_payload").unwrap();
-                                self.builder.build_store(payload_ptr, *val).unwrap();
-                            }
-                            self.values.insert(result_id, ptr.into());
-                        }
-                    }
-                }
-                OpKind::OptionNoneOp => {
-                    if let Some(struct_ty) = self.struct_types.get("Option").copied() {
-                        let size = struct_ty.size_of().unwrap();
-                        let malloc = self.functions.get("malloc").copied().unwrap();
-                        let ptr_call = self.builder.build_call(malloc, &[size.into()], "none_ptr").unwrap();
-                        if let inkwell::values::ValueKind::Basic(ptr_val) = ptr_call.try_as_basic_value() {
-                            let ptr = ptr_val.into_pointer_value();
-                            let tag_ptr = self.builder.build_struct_gep(struct_ty, ptr, 0, "none_tag").unwrap();
-                            self.builder.build_store(tag_ptr, self.context.i32_type().const_int(1, false)).unwrap();
-                            self.values.insert(result_id, ptr.into());
-                        }
-                    }
-                }
-
-                OpKind::ListOp { elements } => {
-                    // List layout: [i64 len][i64 elem0][i64 elem1]...
-                    let i64_type = self.context.i64_type();
-                    let malloc = self.functions.get("malloc").copied().unwrap();
-                    let n = elements.len() as u64;
-                    let total_bytes = 8 + n * 8; // 8 for len + 8 per element
-                    let buf_call = self.builder.build_call(malloc, &[i64_type.const_int(total_bytes, false).into()], "list_ptr").unwrap();
-                    if let inkwell::values::ValueKind::Basic(ptr_val) = buf_call.try_as_basic_value() {
-                        let ptr = ptr_val.into_pointer_value();
-                        // Store length
-                        self.builder.build_store(ptr, i64_type.const_int(n, false)).unwrap();
-                        // Store elements
-                        for (i, elem_id) in elements.iter().enumerate() {
-                            if let Some(elem_val) = self.values.get(elem_id) {
-                                let offset = (8 + i * 8) as u64;
-                                let elem_ptr = unsafe {
-                                    self.builder.build_gep(self.context.i8_type(), ptr, &[i64_type.const_int(offset, false)], &format!("elem_{}", i)).unwrap()
-                                };
-                                self.builder.build_store(elem_ptr, *elem_val).unwrap();
-                            }
-                        }
-                        self.values.insert(result_id, ptr.into());
-                    }
-                }
-
-                OpKind::MapOp { .. } | OpKind::EmptyMapOp => {
-                    // Map layout: [i64 len][pairs...] - for now just store length
-                    let i64_type = self.context.i64_type();
-                    let malloc = self.functions.get("malloc").copied().unwrap();
-                    let n = if let OpKind::MapOp { entries } = &op.kind { entries.len() } else { 0 };
-                    let total_bytes = 8 + n * 16; // 8 for len + 16 per entry (key ptr + val i64)
-                    let buf_call = self.builder.build_call(malloc, &[i64_type.const_int(total_bytes as u64, false).into()], "map_ptr").unwrap();
-                    if let inkwell::values::ValueKind::Basic(ptr_val) = buf_call.try_as_basic_value() {
-                        let ptr = ptr_val.into_pointer_value();
-                        self.builder.build_store(ptr, i64_type.const_int(n as u64, false)).unwrap();
-                        // Store entries (key-value pairs) for future use
-                        if let OpKind::MapOp { entries } = &op.kind {
-                            for (i, (k, v)) in entries.iter().enumerate() {
-                                let offset_k = (8 + i * 16) as u64;
-                                let offset_v = (8 + i * 16 + 8) as u64;
-                                if let Some(kv) = self.values.get(k) {
-                                    let kp = unsafe { self.builder.build_gep(self.context.i8_type(), ptr, &[i64_type.const_int(offset_k, false)], "mk").unwrap() };
-                                    self.builder.build_store(kp, *kv).unwrap();
-                                }
-                                if let Some(vv) = self.values.get(v) {
-                                    let vp = unsafe { self.builder.build_gep(self.context.i8_type(), ptr, &[i64_type.const_int(offset_v, false)], "mv").unwrap() };
-                                    self.builder.build_store(vp, *vv).unwrap();
-                                }
-                            }
-                        }
-                        self.values.insert(result_id, ptr.into());
-                    }
-                }
-
-                OpKind::RecordOp { name, fields } => {
-                    if let Some(type_name) = name {
-                        if let Some(struct_ty) = self.struct_types.get(type_name.as_str()).copied() {
-                            // Allocate struct on heap
-                            let size = struct_ty.size_of().unwrap();
-                            let malloc = self.functions.get("malloc").copied().unwrap();
-                            let ptr = self.builder.build_call(malloc, &[size.into()], "record_ptr").unwrap();
-                            if let inkwell::values::ValueKind::Basic(ptr_val) = ptr.try_as_basic_value() {
-                                let ptr_val = ptr_val.into_pointer_value();
-                                // Store each field
-                                if let Some(field_names) = self.struct_fields.get(type_name.as_str()) {
-                                    for (fname, fval_id) in fields {
-                                        if let Some(idx) = field_names.iter().position(|n| n == fname.as_str()) {
-                                            if let Some(fval) = self.values.get(fval_id) {
-                                                if let Ok(field_ptr) = self.builder.build_struct_gep(struct_ty, ptr_val, idx as u32, &format!("field_{}", fname)) {
-                                                    let _ = self.builder.build_store(field_ptr, *fval);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                self.values.insert(result_id, ptr_val.into());
+                        if let (Some(t), Some(e)) = (tv, ev) {
+                            if t.val.get_type() == e.val.get_type() {
+                                let phi = self.builder.build_phi(t.val.get_type(), "if").unwrap();
+                                phi.add_incoming(&[(&t.val, then_end), (&e.val, else_end)]);
+                                scope.set(rid, phi.as_basic_value(), rty.clone());
                             }
                         }
                     }
                 }
-                OpKind::MemberOp { object, field } => {
-                    if let Some(obj_val) = self.values.get(object).cloned() {
-                        if !obj_val.is_pointer_value() {
-                            // Not a pointer (e.g. struct value) — skip
-                        } else {
-                        let ptr = obj_val.into_pointer_value();
-                        // Find struct type from the object's type info
-                        // We need to find which struct this pointer points to.
-                        // Look through all struct types for a matching field.
-                        let mut found = false;
-                        for (type_name, fields) in &self.struct_fields {
-                            if let Some(idx) = fields.iter().position(|n| n == field.as_str()) {
-                                if let Some(struct_ty) = self.struct_types.get(type_name.as_str()).copied() {
-                                    let field_ptr = self.builder.build_struct_gep(struct_ty, ptr, idx as u32, &format!("get_{}", field)).unwrap();
-                                    // Determine field type
-                                    let field_ty = struct_ty.get_field_type_at_index(idx as u32).unwrap();
-                                    let loaded = self.builder.build_load(field_ty, field_ptr, &format!("load_{}", field)).unwrap();
-                                    self.values.insert(result_id, loaded);
-                                    found = true;
-                                    break;
-                                }
-                            }
-                        }
-                        } // end else (is_pointer_value)
-                    }
-                }
 
-                OpKind::IndexOp { object, index } => {
-                    // List indexing: list_ptr + 8 + index * 8
-                    if let (Some(list_val), Some(idx_val)) = (self.values.get(object).cloned(), self.values.get(index).cloned()) {
-                        let i64_type = self.context.i64_type();
-                        let lp = list_val.into_pointer_value();
-                        let idx = idx_val.into_int_value();
-                        let offset = self.builder.build_int_add(
-                            self.builder.build_int_mul(idx, i64_type.const_int(8, false), "").unwrap(),
-                            i64_type.const_int(8, false), "off").unwrap();
-                        let elem_ptr = unsafe {
-                            self.builder.build_gep(self.context.i8_type(), lp, &[offset], "idx_ptr").unwrap()
-                        };
-                        // Determine element type from result_ty
-                        let load_ty = self.dialect_to_basic_type(&op.result_ty).unwrap_or(i64_type.into());
-                        let loaded = self.builder.build_load(load_ty, elem_ptr, "idx_val").unwrap();
-                        self.values.insert(result_id, loaded);
-                    }
-                }
-
-                OpKind::MatchOp { subject, arms } => {
-                    if let Some(subj_val) = self.values.get(subject).cloned() {
-                        let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
-                        let merge_bb = self.context.append_basic_block(function, "match.merge");
-
-                        // Pre-create all arm blocks
-                        let arm_bbs: Vec<_> = arms.iter().enumerate()
-                            .map(|(i, _)| self.context.append_basic_block(function, &format!("match.arm{}", i)))
-                            .collect();
-
-                        // Determine if this is a variant match (subject is ptr to tagged union)
-                        // or an integer match.
-                        let is_variant_match = arms.iter().any(|a| matches!(&a.pattern, crate::ops::MatchPattern::Variant { .. }));
-
-                        let switch_val = if is_variant_match && subj_val.is_pointer_value() {
-                            let ptr = subj_val.into_pointer_value();
-                            // Find the variant type
-                            let variant_ty = self.struct_types.values().next().copied(); // TODO: track per-value type
-                            if let Some(sty) = variant_ty {
-                                let tag_ptr = self.builder.build_struct_gep(sty, ptr, 0, "match_tag_ptr").unwrap();
-                                self.builder.build_load(self.context.i32_type(), tag_ptr, "match_tag").unwrap().into_int_value()
-                            } else {
-                                self.context.i32_type().const_int(0, false)
-                            }
-                        } else if subj_val.is_int_value() {
-                            subj_val.into_int_value()
-                        } else {
-                            // Non-int, non-variant match (e.g. String) — skip
-                            // TODO: implement string comparison match
-                            self.context.i64_type().const_int(0, false)
-                        };
-
-                        let mut cases: Vec<(inkwell::values::IntValue<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)> = Vec::new();
-                        // Last arm is always default (wildcard or last variant)
-                        let default_bb = *arm_bbs.last().unwrap_or(&merge_bb);
-                        for (i, arm) in arms.iter().enumerate() {
-                            // Skip the default arm (last one) — it's the switch default target
-                            if arm_bbs[i] == default_bb && !matches!(&arm.pattern, crate::ops::MatchPattern::LitInt(_) | crate::ops::MatchPattern::Variant { .. }) {
-                                continue;
-                            }
-                            match &arm.pattern {
-                                crate::ops::MatchPattern::LitInt(v) => {
-                                    // Match switch_val type: i32 for variant tags, i64 for ints
-                                    let const_val = if switch_val.get_type() == self.context.i32_type().into() {
-                                        self.context.i32_type().const_int(*v as u64, true)
-                                    } else {
-                                        self.context.i64_type().const_int(*v as u64, true)
-                                    };
-                                    cases.push((const_val, arm_bbs[i]));
-                                }
-                                crate::ops::MatchPattern::Variant { tag, .. } => {
-                                    if let Some((_, tag_idx, _)) = self.variant_cases.get(tag.as_str()) {
-                                        cases.push((self.context.i32_type().const_int(*tag_idx as u64, false), arm_bbs[i]));
-                                    }
-                                }
-                                _ => {} // wildcard/binding handled as default
-                            }
-                        }
-                        self.builder.build_switch(switch_val, default_bb, &cases).unwrap();
-
-                        // Compile each arm body
-                        let mut arm_results: Vec<(BasicValueEnum<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)> = Vec::new();
-                        for (i, arm) in arms.iter().enumerate() {
-                            self.builder.position_at_end(arm_bbs[i]);
-
-                            // For variant patterns, extract payload bindings
-                            if let crate::ops::MatchPattern::Variant { tag, bindings } = &arm.pattern {
-                                if subj_val.is_pointer_value() {
-                                if let Some((parent, _, payload_tys)) = self.variant_cases.get(tag.as_str()).cloned() {
-                                    if let Some(sty) = self.struct_types.get(&parent).copied() {
-                                        let ptr = subj_val.into_pointer_value();
-                                        let payload_ptr = self.builder.build_struct_gep(sty, ptr, 1, "arm_payload").unwrap();
-                                        for (j, binding_id) in bindings.iter().enumerate() {
-                                            let offset = (j * 8) as u64;
-                                            let field_ptr = unsafe {
-                                                self.builder.build_gep(self.context.i8_type(), payload_ptr, &[self.context.i64_type().const_int(offset, false)], &format!("bind_{}", j)).unwrap()
-                                            };
-                                            let field_ty = if j < payload_tys.len() {
-                                                self.dialect_to_basic_type(&payload_tys[j]).unwrap_or(self.context.i64_type().into())
-                                            } else {
-                                                self.context.i64_type().into()
-                                            };
-                                            let loaded = self.builder.build_load(field_ty, field_ptr, &format!("payload_{}", j)).unwrap();
-                                            self.values.insert(*binding_id, loaded);
-                                        }
-                                    }
-                                }
-                            }
-                            } // is_pointer_value guard
-
-                            let mut arm_val = None;
-                            for block in &arm.body {
-                                for op in &block.ops { self.compile_op(op); }
-                                if let Terminator::Yield(v) = &block.terminator {
-                                    arm_val = self.values.get(v).cloned();
-                                }
-                            }
-                            self.builder.build_unconditional_branch(merge_bb).unwrap();
-                            if let Some(val) = arm_val {
-                                arm_results.push((val, self.builder.get_insert_block().unwrap()));
-                            }
-                        }
-
-                        // Phi at merge
-                        self.builder.position_at_end(merge_bb);
-                        if !arm_results.is_empty() {
-                            let phi = self.builder.build_phi(arm_results[0].0.get_type(), "match_val").unwrap();
-                            let incoming: Vec<(&dyn inkwell::values::BasicValue, inkwell::basic_block::BasicBlock)> =
-                                arm_results.iter().map(|(v, bb)| (v as &dyn inkwell::values::BasicValue, *bb)).collect();
-                            phi.add_incoming(&incoming);
-                            self.values.insert(result_id, phi.as_basic_value());
-                        }
-                    }
-                }
-
-                OpKind::AllocVar { init, ty } => {
-                    if let Some(llvm_ty) = self.dialect_to_basic_type(ty) {
-                        let alloca = self.builder.build_alloca(llvm_ty, &format!("var_{}", result_id.0)).unwrap();
-                        if let Some(init_val) = self.values.get(init) {
-                            self.builder.build_store(alloca, *init_val).unwrap();
-                        }
-                        // Store the alloca pointer as the value for this slot
-                        self.allocas.insert(result_id, alloca);
-                        self.values.insert(result_id, alloca.into());
-                    }
-                }
-                OpKind::LoadVar { slot } => {
-                    if let Some(alloca) = self.allocas.get(slot).copied() {
-                        let pointee = self.dialect_to_basic_type(&op.result_ty)
-                            .unwrap_or(self.context.i64_type().into());
-                        let loaded = self.builder.build_load(pointee, alloca, &format!("load_{}", result_id.0)).unwrap();
-                        self.values.insert(result_id, loaded);
-                    }
-                }
-                OpKind::StoreVar { slot, value } => {
-                    if let (Some(alloca), Some(val)) = (self.allocas.get(slot).copied(), self.values.get(value)) {
-                        self.builder.build_store(alloca, *val).unwrap();
-                    }
-                }
+                OpKind::MatchOp { subject, arms } => self.emit_match(rid, rty, subject, arms, scope),
 
                 OpKind::WhileOp { cond_region, body } => {
-                    let function = self.builder.get_insert_block().unwrap().get_parent().unwrap();
-                    let cond_bb = self.context.append_basic_block(function, "while.cond");
-                    let body_bb = self.context.append_basic_block(function, "while.body");
-                    let exit_bb = self.context.append_basic_block(function, "while.exit");
-
+                    let func = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                    let cond_bb = self.ctx.append_basic_block(func, "wcond");
+                    let body_bb = self.ctx.append_basic_block(func, "wbody");
+                    let exit_bb = self.ctx.append_basic_block(func, "wexit");
                     self.builder.build_unconditional_branch(cond_bb).unwrap();
 
-                    // Condition
                     self.builder.position_at_end(cond_bb);
-                    let mut cond_val = None;
-                    for block in cond_region {
-                        for op in &block.ops { self.compile_op(op); }
-                        if let Terminator::Yield(v) = &block.terminator {
-                            cond_val = self.values.get(v).cloned();
+                    let cv = self.compile_region(cond_region, scope);
+                    if let Some(c) = cv {
+                        if c.val.is_int_value() {
+                            self.builder.build_conditional_branch(c.val.into_int_value(), body_bb, exit_bb).unwrap();
+                        } else {
+                            self.builder.build_unconditional_branch(exit_bb).unwrap();
                         }
-                    }
-                    if let Some(cv) = cond_val {
-                        self.builder.build_conditional_branch(cv.into_int_value(), body_bb, exit_bb).unwrap();
                     } else {
                         self.builder.build_unconditional_branch(exit_bb).unwrap();
                     }
 
-                    // Body
                     self.builder.position_at_end(body_bb);
-                    for block in body {
-                        for op in &block.ops { self.compile_op(op); }
-                    }
+                    self.compile_region(body, scope);
                     self.builder.build_unconditional_branch(cond_bb).unwrap();
 
-                    // Continue after loop
                     self.builder.position_at_end(exit_bb);
                 }
 
-                OpKind::LambdaOp { params, body } => {
-                    // Lift lambda to a global function.
-                    // Closure representation: { fn_ptr, env_ptr }
-                    // For non-capturing lambdas, env_ptr is null.
-                    let lambda_name = format!("__lambda_{}", result_id.0);
-                    let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-
-                    // Build lambda function type: (ptr env, params...) -> ret
-                    let mut param_types: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_type.into()]; // env ptr
-                    for (_, dty) in params {
-                        if let Some(ty) = self.dialect_to_llvm_type(dty) {
-                            param_types.push(ty);
-                        }
+                // ── Mutable variables ──
+                OpKind::AllocVar { init, ty } => {
+                    if let (Some(llvm_ty), Some(iv)) = (self.llvm_type(ty), scope.get(init)) {
+                        let alloca = self.builder.build_alloca(llvm_ty, &format!("var{}", rid.0)).unwrap();
+                        self.builder.build_store(alloca, iv.val).unwrap();
+                        scope.allocas.insert(rid, (alloca, ty.clone()));
+                        scope.set(rid, alloca.into(), ty.clone());
                     }
-
-                    let ret_ty = if let Some(block) = body.first() {
-                        // Infer return type from body's result type
-                        block.ops.last().map(|op| self.dialect_to_basic_type(&op.result_ty)).flatten()
-                    } else {
-                        None
-                    };
-
-                    let fn_type = if let Some(ret) = ret_ty {
-                        ret.fn_type(&param_types, false)
-                    } else {
-                        self.context.void_type().fn_type(&param_types, false)
-                    };
-
-                    let lambda_fn = self.module.add_function(&lambda_name, fn_type, None);
-                    let lambda_entry = self.context.append_basic_block(lambda_fn, "entry");
-
-                    // Detect captured variables: ValueIds used in body but not defined in body or params
-                    let param_ids: std::collections::HashSet<ValueId> = params.iter().map(|(v, _)| *v).collect();
-                    let mut body_defined: std::collections::HashSet<ValueId> = std::collections::HashSet::new();
-                    let mut body_used: Vec<ValueId> = Vec::new();
-                    for block in body {
-                        for bop in &block.ops {
-                            if let Some(r) = bop.result { body_defined.insert(r); }
-                            // Collect used ValueIds from each op kind
-                            match &bop.kind {
-                                OpKind::BinOp { lhs, rhs, .. } => { body_used.push(*lhs); body_used.push(*rhs); }
-                                OpKind::UnOp { operand, .. } => { body_used.push(*operand); }
-                                OpKind::CallOp { args, .. } | OpKind::IntrinsicCallOp { args, .. } | OpKind::ComputedCallOp { args, .. } => {
-                                    body_used.extend(args);
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    let captures: Vec<(ValueId, BasicValueEnum<'ctx>)> = body_used.iter()
-                        .filter(|v| !param_ids.contains(v) && !body_defined.contains(v))
-                        .filter_map(|v| self.values.get(v).map(|val| (*v, *val)))
-                        .collect::<Vec<_>>();
-                    // Deduplicate
-                    let mut seen_captures = std::collections::HashSet::new();
-                    let captures: Vec<(ValueId, BasicValueEnum<'ctx>)> = captures.into_iter()
-                        .filter(|(v, _)| seen_captures.insert(*v))
-                        .collect();
-
-                    // Save state
-                    let saved_block = self.builder.get_insert_block();
-                    let saved_values = self.values.clone();
-
-                    self.builder.position_at_end(lambda_entry);
-
-                    // Map params
-                    for (i, (val_id, _)) in params.iter().enumerate() {
-                        if let Some(param) = lambda_fn.get_nth_param((i + 1) as u32) {
-                            self.values.insert(*val_id, param);
-                        }
-                    }
-
-                    // Unpack captures from env
-                    if !captures.is_empty() {
-                        let env_ptr = lambda_fn.get_nth_param(0).unwrap().into_pointer_value();
-                        for (i, (cap_id, cap_val)) in captures.iter().enumerate() {
-                            let offset = (i * 8) as u64;
-                            let field_ptr = unsafe {
-                                self.builder.build_gep(self.context.i8_type(), env_ptr, &[self.context.i64_type().const_int(offset, false)], &format!("cap_{}", i)).unwrap()
-                            };
-                            let loaded = self.builder.build_load(cap_val.get_type(), field_ptr, &format!("cap_load_{}", i)).unwrap();
-                            self.values.insert(*cap_id, loaded);
-                        }
-                    }
-
-                    // Compile body
-                    let mut last_val = None;
-                    for block in body {
-                        for bop in &block.ops { self.compile_op(bop); }
-                        if let Terminator::Yield(v) | Terminator::Return(v) = &block.terminator {
-                            last_val = self.values.get(v).cloned();
-                        }
-                    }
-                    if let Some(val) = last_val {
-                        self.builder.build_return(Some(&val)).unwrap();
-                    } else {
-                        self.builder.build_return(None).unwrap();
-                    }
-
-                    // Restore state
-                    self.values = saved_values;
-                    if let Some(bb) = saved_block {
-                        self.builder.position_at_end(bb);
-                    }
-
-                    // Create env struct on heap (if captures exist)
-                    let env_ptr_val = if captures.is_empty() {
-                        ptr_type.const_null()
-                    } else {
-                        let env_size = (captures.len() * 8) as u64;
-                        let malloc = self.functions.get("malloc").copied().unwrap();
-                        let env_call = self.builder.build_call(malloc, &[self.context.i64_type().const_int(env_size, false).into()], "env_alloc").unwrap();
-                        let env_ptr = if let inkwell::values::ValueKind::Basic(v) = env_call.try_as_basic_value() {
-                            v.into_pointer_value()
-                        } else {
-                            ptr_type.const_null()
-                        };
-                        // Store captures
-                        for (i, (_, cap_val)) in captures.iter().enumerate() {
-                            let offset = (i * 8) as u64;
-                            let field_ptr = unsafe {
-                                self.builder.build_gep(self.context.i8_type(), env_ptr, &[self.context.i64_type().const_int(offset, false)], &format!("env_store_{}", i)).unwrap()
-                            };
-                            self.builder.build_store(field_ptr, *cap_val).unwrap();
-                        }
-                        env_ptr
-                    };
-
-                    // Create closure struct: { fn_ptr, env_ptr }
-                    let closure_ty = self.context.struct_type(&[ptr_type.into(), ptr_type.into()], false);
-                    let closure_alloca = self.builder.build_alloca(closure_ty, "closure").unwrap();
-                    let fn_ptr = lambda_fn.as_global_value().as_pointer_value();
-                    let fn_field = self.builder.build_struct_gep(closure_ty, closure_alloca, 0, "fn_ptr").unwrap();
-                    self.builder.build_store(fn_field, fn_ptr).unwrap();
-                    let env_field = self.builder.build_struct_gep(closure_ty, closure_alloca, 1, "env_ptr").unwrap();
-                    self.builder.build_store(env_field, env_ptr_val).unwrap();
-
-                    let closure_val = self.builder.build_load(closure_ty, closure_alloca, "closure_val").unwrap();
-                    self.values.insert(result_id, closure_val);
                 }
-
-                OpKind::ComputedCallOp { callee, args } => {
-                    // Call a closure: extract fn_ptr and env_ptr, call fn_ptr(env_ptr, args...)
-                    if let Some(closure_val) = self.values.get(callee).cloned() {
-                        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-                        let closure_ty = self.context.struct_type(&[ptr_type.into(), ptr_type.into()], false);
-
-                        // Extract fn_ptr and env_ptr
-                        let fn_ptr = self.builder.build_extract_value(closure_val.into_struct_value(), 0, "fn_ptr").unwrap();
-                        let env_ptr = self.builder.build_extract_value(closure_val.into_struct_value(), 1, "env_ptr").unwrap();
-
-                        // Build call: fn_ptr(env_ptr, args...)
-                        let mut call_args: Vec<BasicMetadataValueEnum> = vec![env_ptr.into()];
-                        for a in args {
-                            if let Some(v) = self.values.get(a) {
-                                call_args.push((*v).into());
-                            }
-                        }
-
-                        // Build function type from argument types
-                        let arg_types: Vec<BasicMetadataTypeEnum> = call_args.iter().map(|a| {
-                            match a {
-                                BasicMetadataValueEnum::IntValue(v) => v.get_type().into(),
-                                BasicMetadataValueEnum::FloatValue(v) => v.get_type().into(),
-                                BasicMetadataValueEnum::PointerValue(v) => v.get_type().into(),
-                                _ => self.context.i64_type().into(),
-                            }
-                        }).collect();
-                        let ret_basic = self.dialect_to_basic_type(&op.result_ty);
-                        let fn_type = if let Some(ret) = ret_basic {
-                            ret.fn_type(&arg_types, false)
-                        } else {
-                            self.context.void_type().fn_type(&arg_types, false)
-                        };
-
-                        let call = self.builder.build_indirect_call(fn_type, fn_ptr.into_pointer_value(), &call_args, "closure_call").unwrap();
-                        if let inkwell::values::ValueKind::Basic(bv) = call.try_as_basic_value() {
-                            self.values.insert(result_id, bv);
+                OpKind::LoadVar { slot } => {
+                    if let Some((alloca, aty)) = scope.allocas.get(slot).cloned() {
+                        if let Some(llvm_ty) = self.llvm_type(&aty) {
+                            let loaded = self.builder.build_load(llvm_ty, alloca, &format!("ld{}", rid.0)).unwrap();
+                            scope.set(rid, loaded, rty.clone());
                         }
                     }
                 }
+                OpKind::StoreVar { slot, value } => {
+                    if let (Some((alloca, _)), Some(v)) = (scope.allocas.get(slot).cloned(), scope.get(value)) {
+                        self.builder.build_store(alloca, v.val).unwrap();
+                    }
+                }
 
-                _ => {} // TODO: for, collections, etc.
+                // ── Calls ──
+                OpKind::CallOp { callee, args } => self.emit_call(rid, rty, callee.as_str(), args, scope),
+                OpKind::IntrinsicCallOp { symbol, args } => self.emit_call(rid, rty, symbol.as_str(), args, scope),
+                OpKind::ComputedCallOp { callee, args } => self.emit_computed_call(rid, rty, callee, args, scope),
+
+                // ── Collections ──
+                OpKind::ListOp { elements } => self.emit_list(rid, rty, elements, scope),
+                OpKind::MapOp { entries } => self.emit_map(rid, entries, scope),
+                OpKind::EmptyMapOp => {
+                    let p = self.call_malloc(8);
+                    self.builder.build_store(p, self.ctx.i64_type().const_int(0, false)).unwrap();
+                    scope.set(rid, p.into(), rty.clone());
+                }
+                OpKind::RecordOp { name, fields } => self.emit_record(rid, rty, name, fields, scope),
+                OpKind::TupleOp { elements } => {
+                    // Tuple as list (simplified)
+                    self.emit_list(rid, rty, elements, scope);
+                }
+
+                // ── Access ──
+                OpKind::MemberOp { object, field } => self.emit_member(rid, rty, object, field, scope),
+                OpKind::IndexOp { object, index } => self.emit_index(rid, rty, object, index, scope),
+                OpKind::TupleIndexOp { object, index } => {
+                    // Treat like list index
+                    let idx_val = self.ctx.i64_type().const_int(*index as u64, false);
+                    let idx_id = ValueId(rid.0 + 10000); // temp
+                    scope.set(idx_id, idx_val.into(), DialectType::I64);
+                    self.emit_index(rid, rty, object, &idx_id, scope);
+                }
+                OpKind::MapAccessOp { object, key } => {
+                    // Simplified: return null (proper map lookup not implemented)
+                    if let Some(dv) = self.default_value(rty) {
+                        scope.set(rid, dv, rty.clone());
+                    }
+                }
+
+                // ── Result/Option ──
+                OpKind::ResultOkOp { value } | OpKind::OptionSomeOp { value } => {
+                    self.emit_tagged_union(rid, rty, 0, Some(value), scope);
+                }
+                OpKind::ResultErrOp { value } => {
+                    self.emit_tagged_union(rid, rty, 1, Some(value), scope);
+                }
+                OpKind::OptionNoneOp => {
+                    self.emit_tagged_union(rid, rty, 1, None, scope);
+                }
+                OpKind::UnwrapOp { value } | OpKind::TryOp { value } => {
+                    // Simplified: just pass through
+                    if let Some(v) = scope.get(value) { scope.set(rid, v.val, rty.clone()); }
+                }
+                OpKind::UnwrapOrOp { value, fallback } => {
+                    if let Some(v) = scope.get(value) { scope.set(rid, v.val, rty.clone()); }
+                    else if let Some(fb) = scope.get(fallback) { scope.set(rid, fb.val, rty.clone()); }
+                }
+
+                // ── Lambda ──
+                OpKind::LambdaOp { params, body } => self.emit_lambda(rid, rty, params, body, scope),
+
+                // ── Fan ──
+                OpKind::FanOp { regions } => {
+                    for region in regions { self.compile_region(region, scope); }
+                }
+
+                OpKind::ForOp { var, iterable, body } => {
+                    // Simplified: skip (for-in not yet supported in LLVM)
+                }
+
+                _ => {
+                    // Unhandled op: emit default value
+                    if let Some(dv) = self.default_value(rty) {
+                        scope.set(rid, dv, rty.clone());
+                    }
+                }
             }
+        }
+
+        // ── Helpers ──
+
+        fn compile_region(&mut self, blocks: &[Block], scope: &mut FnScope<'ctx>) -> Option<TV<'ctx>> {
+            let mut last = None;
+            for block in blocks {
+                for op in &block.ops { self.compile_op(op, scope); }
+                if let Terminator::Yield(v) | Terminator::Return(v) = &block.terminator {
+                    last = scope.get(v);
+                }
+            }
+            last
+        }
+
+        fn call_malloc(&self, size: u64) -> PointerValue<'ctx> {
+            let malloc = *self.functions.get("malloc").unwrap();
+            let call = self.builder.build_call(malloc, &[self.ctx.i64_type().const_int(size, false).into()], "m").unwrap();
+            if let inkwell::values::ValueKind::Basic(v) = call.try_as_basic_value() {
+                v.into_pointer_value()
+            } else {
+                self.ctx.ptr_type(inkwell::AddressSpace::default()).const_null()
+            }
+        }
+
+        fn set_fast_math(&self, val: inkwell::values::FloatValue<'ctx>) {
+            unsafe {
+                let flags = llvm_sys::LLVMFastMathAllowReassoc | llvm_sys::LLVMFastMathNoNaNs | llvm_sys::LLVMFastMathNoInfs;
+                llvm_sys::core::LLVMSetFastMathFlags(val.as_value_ref(), flags);
+            }
+        }
+
+        // ── BinOp ──
+
+        fn emit_binop(&mut self, op: &almide_ir::BinOp, l: TV<'ctx>, r: TV<'ctx>, rty: &DialectType) -> Option<BasicValueEnum<'ctx>> {
+            use almide_ir::BinOp::*;
+            match op {
+                AddInt => Some(self.builder.build_int_add(l.val.into_int_value(), r.val.into_int_value(), "add").unwrap().into()),
+                SubInt => Some(self.builder.build_int_sub(l.val.into_int_value(), r.val.into_int_value(), "sub").unwrap().into()),
+                MulInt => Some(self.builder.build_int_mul(l.val.into_int_value(), r.val.into_int_value(), "mul").unwrap().into()),
+                DivInt => {
+                    let rv = r.val.into_int_value();
+                    let zero = self.ctx.i64_type().const_int(0, false);
+                    let is_zero = self.builder.build_int_compare(IntPredicate::EQ, rv, zero, "dz").unwrap();
+                    let safe = self.builder.build_select(is_zero, self.ctx.i64_type().const_int(1, false), rv, "sd").unwrap().into_int_value();
+                    let result = self.builder.build_int_signed_div(l.val.into_int_value(), safe, "div").unwrap();
+                    Some(self.builder.build_select(is_zero, zero, result, "dg").unwrap())
+                }
+                ModInt => {
+                    let rv = r.val.into_int_value();
+                    let zero = self.ctx.i64_type().const_int(0, false);
+                    let is_zero = self.builder.build_int_compare(IntPredicate::EQ, rv, zero, "mz").unwrap();
+                    let safe = self.builder.build_select(is_zero, self.ctx.i64_type().const_int(1, false), rv, "sm").unwrap().into_int_value();
+                    let result = self.builder.build_int_signed_rem(l.val.into_int_value(), safe, "rem").unwrap();
+                    Some(self.builder.build_select(is_zero, zero, result, "mg").unwrap())
+                }
+                AddFloat => { let v = self.builder.build_float_add(l.val.into_float_value(), r.val.into_float_value(), "fa").unwrap(); self.set_fast_math(v); Some(v.into()) }
+                SubFloat => { let v = self.builder.build_float_sub(l.val.into_float_value(), r.val.into_float_value(), "fs").unwrap(); self.set_fast_math(v); Some(v.into()) }
+                MulFloat => { let v = self.builder.build_float_mul(l.val.into_float_value(), r.val.into_float_value(), "fm").unwrap(); self.set_fast_math(v); Some(v.into()) }
+                DivFloat => { let v = self.builder.build_float_div(l.val.into_float_value(), r.val.into_float_value(), "fd").unwrap(); self.set_fast_math(v); Some(v.into()) }
+                ConcatStr => self.emit_str_concat(l.val, r.val),
+                ConcatList => None, // TODO
+                Eq | Neq | Lt | Gt | Lte | Gte => self.emit_cmp(op, l, r),
+                And => Some(self.builder.build_and(l.val.into_int_value(), r.val.into_int_value(), "and").unwrap().into()),
+                Or => Some(self.builder.build_or(l.val.into_int_value(), r.val.into_int_value(), "or").unwrap().into()),
+                _ => None,
+            }
+        }
+
+        fn emit_cmp(&mut self, op: &almide_ir::BinOp, l: TV<'ctx>, r: TV<'ctx>) -> Option<BasicValueEnum<'ctx>> {
+            use almide_ir::BinOp::*;
+            match (&l.ty, l.val, r.val) {
+                (DialectType::I64 | DialectType::I32 | DialectType::Bool, BasicValueEnum::IntValue(lv), BasicValueEnum::IntValue(rv)) => {
+                    let pred = match op { Eq => IntPredicate::EQ, Neq => IntPredicate::NE, Lt => IntPredicate::SLT, Gt => IntPredicate::SGT, Lte => IntPredicate::SLE, Gte => IntPredicate::SGE, _ => return None };
+                    Some(self.builder.build_int_compare(pred, lv, rv, "cmp").unwrap().into())
+                }
+                (DialectType::F64, BasicValueEnum::FloatValue(lv), BasicValueEnum::FloatValue(rv)) => {
+                    let pred = match op { Eq => FloatPredicate::OEQ, Neq => FloatPredicate::ONE, Lt => FloatPredicate::OLT, Gt => FloatPredicate::OGT, Lte => FloatPredicate::OLE, Gte => FloatPredicate::OGE, _ => return None };
+                    Some(self.builder.build_float_compare(pred, lv, rv, "fcmp").unwrap().into())
+                }
+                (_, BasicValueEnum::PointerValue(lv), BasicValueEnum::PointerValue(rv)) => {
+                    // String: strcmp; others: pointer compare
+                    if matches!(l.ty, DialectType::String) {
+                        let strcmp = *self.functions.get("strcmp").unwrap();
+                        let call = self.builder.build_call(strcmp, &[lv.into(), rv.into()], "sc").unwrap();
+                        if let inkwell::values::ValueKind::Basic(v) = call.try_as_basic_value() {
+                            let pred = match op { Eq => IntPredicate::EQ, Neq => IntPredicate::NE, Lt => IntPredicate::SLT, Gt => IntPredicate::SGT, Lte => IntPredicate::SLE, Gte => IntPredicate::SGE, _ => return None };
+                            Some(self.builder.build_int_compare(pred, v.into_int_value(), self.ctx.i32_type().const_int(0, false), "scmp").unwrap().into())
+                        } else { None }
+                    } else {
+                        let pred = match op { Eq => IntPredicate::EQ, Neq => IntPredicate::NE, _ => return None };
+                        Some(self.builder.build_int_compare(pred, lv, rv, "pcmp").unwrap().into())
+                    }
+                }
+                _ => None,
+            }
+        }
+
+        fn emit_str_concat(&mut self, l: BasicValueEnum<'ctx>, r: BasicValueEnum<'ctx>) -> Option<BasicValueEnum<'ctx>> {
+            let strlen = *self.functions.get("strlen").unwrap();
+            let strcpy = *self.functions.get("strcpy").unwrap();
+            let strcat = *self.functions.get("strcat").unwrap();
+            let la = self.builder.build_call(strlen, &[l.into()], "la").unwrap();
+            let lb = self.builder.build_call(strlen, &[r.into()], "lb").unwrap();
+            let la = if let inkwell::values::ValueKind::Basic(v) = la.try_as_basic_value() { v.into_int_value() } else { return None };
+            let lb = if let inkwell::values::ValueKind::Basic(v) = lb.try_as_basic_value() { v.into_int_value() } else { return None };
+            let total = self.builder.build_int_add(self.builder.build_int_add(la, lb, "").unwrap(), self.ctx.i64_type().const_int(1, false), "").unwrap();
+            let buf = self.call_malloc(0); // dummy size
+            // Re-call with correct size
+            let malloc = *self.functions.get("malloc").unwrap();
+            let buf_call = self.builder.build_call(malloc, &[total.into()], "buf").unwrap();
+            let buf = if let inkwell::values::ValueKind::Basic(v) = buf_call.try_as_basic_value() { v.into_pointer_value() } else { return None };
+            self.builder.build_call(strcpy, &[buf.into(), l.into()], "").unwrap();
+            self.builder.build_call(strcat, &[buf.into(), r.into()], "").unwrap();
+            Some(buf.into())
+        }
+
+        // ── Call dispatch ──
+
+        fn emit_call(&mut self, rid: ValueId, rty: &DialectType, callee: &str, args: &[ValueId], scope: &mut FnScope<'ctx>) {
+            // Variant constructor
+            if let Some((parent, tag, ptys)) = self.variant_cases.get(callee).cloned() {
+                let arg_vals: Vec<_> = args.iter().filter_map(|a| scope.get(a)).collect();
+                self.emit_variant_ctor(rid, rty, &parent, tag, &ptys, &arg_vals, scope);
+                return;
+            }
+            // println
+            if callee == "println" {
+                self.emit_println(args, scope);
+                return;
+            }
+            // int.to_float
+            if callee == "int.to_float" {
+                if let Some(v) = args.first().and_then(|a| scope.get(a)) {
+                    let f = self.builder.build_signed_int_to_float(v.val.into_int_value(), self.ctx.f64_type(), "itf").unwrap();
+                    scope.set(rid, f.into(), DialectType::F64);
+                }
+                return;
+            }
+            // int.to_string: pass through (println handles format)
+            if callee == "int.to_string" {
+                if let Some(v) = args.first().and_then(|a| scope.get(a)) { scope.set(rid, v.val, v.ty); }
+                return;
+            }
+            // float.to_string: format via helper
+            if callee == "float.to_string" {
+                if let Some(v) = args.first().and_then(|a| scope.get(a)) {
+                    let fts = self.get_float_to_string();
+                    let call = self.builder.build_call(fts, &[v.val.into()], "fts").unwrap();
+                    if let inkwell::values::ValueKind::Basic(bv) = call.try_as_basic_value() {
+                        scope.set(rid, bv, DialectType::String);
+                    }
+                }
+                return;
+            }
+            // Stdlib: list.*, string.*, map.*, math.*
+            let base = callee.split("__").next().unwrap_or(callee);
+            if base.starts_with("list.") || base.starts_with("string.") || base.starts_with("map.") || base.starts_with("math.") {
+                let arg_vals: Vec<_> = args.iter().filter_map(|a| scope.get(a)).collect();
+                self.emit_stdlib(rid, rty, base, &arg_vals, scope);
+                return;
+            }
+            // User function
+            if let Some(func) = self.functions.get(callee).copied() {
+                let arg_vals: Vec<BasicMetadataValueEnum> = args.iter()
+                    .filter_map(|a| scope.get(a).map(|tv| tv.val.into()))
+                    .collect();
+                let call = self.builder.build_call(func, &arg_vals, "c").unwrap();
+                if func.get_type().get_return_type().is_some() {
+                    if let inkwell::values::ValueKind::Basic(bv) = call.try_as_basic_value() {
+                        scope.set(rid, bv, rty.clone());
+                    }
+                }
+            } else {
+                // Unknown callee: default value
+                if let Some(dv) = self.default_value(rty) { scope.set(rid, dv, rty.clone()); }
+            }
+        }
+
+        fn emit_println(&mut self, args: &[ValueId], scope: &FnScope<'ctx>) {
+            let printf = *self.functions.get("printf").unwrap();
+            if let Some(tv) = args.first().and_then(|a| scope.get(a)) {
+                let fmt = match &tv.ty {
+                    DialectType::I64 | DialectType::I32 => self.builder.build_global_string_ptr("%lld\n", "fi").unwrap(),
+                    DialectType::F64 => self.builder.build_global_string_ptr("%.15g\n", "ff").unwrap(),
+                    DialectType::Bool => self.builder.build_global_string_ptr("%d\n", "fb").unwrap(),
+                    _ => self.builder.build_global_string_ptr("%s\n", "fs").unwrap(),
+                };
+                self.builder.build_call(printf, &[fmt.as_pointer_value().into(), tv.val.into()], "").unwrap();
+            }
+        }
+
+        // ── Stdlib dispatch ──
+
+        fn emit_stdlib(&mut self, rid: ValueId, rty: &DialectType, func: &str, args: &[TV<'ctx>], scope: &mut FnScope<'ctx>) {
+            let i64 = self.ctx.i64_type();
+            let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            match func {
+                "list.len" | "map.len" => {
+                    if let Some(tv) = args.first() {
+                        if tv.val.is_pointer_value() {
+                            let len = self.builder.build_load(i64, tv.val.into_pointer_value(), "len").unwrap();
+                            scope.set(rid, len, DialectType::I64);
+                            return;
+                        }
+                    }
+                }
+                "list.sum" => {
+                    if let Some(tv) = args.first() {
+                        if tv.val.is_pointer_value() {
+                            self.emit_list_fold_sum(rid, tv.val.into_pointer_value(), scope);
+                            return;
+                        }
+                    }
+                }
+                "list.map" => {
+                    if args.len() >= 2 && args[0].val.is_pointer_value() && args[1].val.is_struct_value() {
+                        self.emit_list_map(rid, args[0].val.into_pointer_value(), args[1].val.into_struct_value(), scope);
+                        return;
+                    }
+                }
+                "list.filter" => {
+                    if args.len() >= 2 && args[0].val.is_pointer_value() && args[1].val.is_struct_value() {
+                        self.emit_list_filter(rid, args[0].val.into_pointer_value(), args[1].val.into_struct_value(), scope);
+                        return;
+                    }
+                }
+                "list.fold" => {
+                    if args.len() >= 3 && args[0].val.is_pointer_value() && args[2].val.is_struct_value() {
+                        self.emit_list_fold(rid, args[0].val.into_pointer_value(), args[1].val, args[2].val.into_struct_value(), scope);
+                        return;
+                    }
+                }
+                "string.to_upper" => {
+                    if let Some(tv) = args.first() {
+                        if tv.val.is_pointer_value() {
+                            self.emit_string_to_upper(rid, tv.val.into_pointer_value(), scope);
+                            return;
+                        }
+                    }
+                }
+                "math.sqrt" => {
+                    if let Some(tv) = args.first() {
+                        let sqrt = *self.functions.get("sqrt").unwrap();
+                        let call = self.builder.build_call(sqrt, &[tv.val.into()], "sq").unwrap();
+                        if let inkwell::values::ValueKind::Basic(v) = call.try_as_basic_value() {
+                            scope.set(rid, v, DialectType::F64);
+                            return;
+                        }
+                    }
+                }
+                _ => {}
+            }
+            // Fallback: default value
+            if let Some(dv) = self.default_value(rty) { scope.set(rid, dv, rty.clone()); }
+        }
+
+        // ── List operations ──
+
+        fn emit_list(&mut self, rid: ValueId, rty: &DialectType, elements: &[ValueId], scope: &mut FnScope<'ctx>) {
+            let i64 = self.ctx.i64_type();
+            let n = elements.len() as u64;
+            let ptr = self.call_malloc(8 + n * 8);
+            self.builder.build_store(ptr, i64.const_int(n, false)).unwrap();
+            for (i, eid) in elements.iter().enumerate() {
+                if let Some(tv) = scope.get(eid) {
+                    let ep = unsafe { self.builder.build_gep(self.ctx.i8_type(), ptr, &[i64.const_int((8 + i * 8) as u64, false)], "e").unwrap() };
+                    self.builder.build_store(ep, tv.val).unwrap();
+                }
+            }
+            scope.set(rid, ptr.into(), rty.clone());
+        }
+
+        fn emit_map(&mut self, rid: ValueId, entries: &[(ValueId, ValueId)], scope: &mut FnScope<'ctx>) {
+            let i64 = self.ctx.i64_type();
+            let n = entries.len();
+            let ptr = self.call_malloc((8 + n * 16) as u64);
+            self.builder.build_store(ptr, i64.const_int(n as u64, false)).unwrap();
+            for (i, (k, v)) in entries.iter().enumerate() {
+                if let Some(kv) = scope.get(k) {
+                    let kp = unsafe { self.builder.build_gep(self.ctx.i8_type(), ptr, &[i64.const_int((8 + i * 16) as u64, false)], "mk").unwrap() };
+                    self.builder.build_store(kp, kv.val).unwrap();
+                }
+                if let Some(vv) = scope.get(v) {
+                    let vp = unsafe { self.builder.build_gep(self.ctx.i8_type(), ptr, &[i64.const_int((8 + i * 16 + 8) as u64, false)], "mv").unwrap() };
+                    self.builder.build_store(vp, vv.val).unwrap();
+                }
+            }
+            scope.set(rid, ptr.into(), DialectType::Map(Box::new(DialectType::Unknown), Box::new(DialectType::Unknown)));
+        }
+
+        fn emit_index(&mut self, rid: ValueId, rty: &DialectType, object: &ValueId, index: &ValueId, scope: &mut FnScope<'ctx>) {
+            if let (Some(ov), Some(iv)) = (scope.get(object), scope.get(index)) {
+                if ov.val.is_pointer_value() {
+                    let i64 = self.ctx.i64_type();
+                    let idx = iv.val.into_int_value();
+                    let off = self.builder.build_int_add(
+                        self.builder.build_int_mul(idx, i64.const_int(8, false), "").unwrap(),
+                        i64.const_int(8, false), "off").unwrap();
+                    let ep = unsafe { self.builder.build_gep(self.ctx.i8_type(), ov.val.into_pointer_value(), &[off], "ip").unwrap() };
+                    let load_ty = self.llvm_type(rty).unwrap_or(i64.into());
+                    let loaded = self.builder.build_load(load_ty, ep, "iv").unwrap();
+                    scope.set(rid, loaded, rty.clone());
+                }
+            }
+        }
+
+        fn emit_list_fold_sum(&mut self, rid: ValueId, lp: PointerValue<'ctx>, scope: &mut FnScope<'ctx>) {
+            let i64 = self.ctx.i64_type();
+            let len = self.builder.build_load(i64, lp, "len").unwrap().into_int_value();
+            let acc = self.builder.build_alloca(i64, "acc").unwrap();
+            let idx = self.builder.build_alloca(i64, "idx").unwrap();
+            self.builder.build_store(acc, i64.const_int(0, false)).unwrap();
+            self.builder.build_store(idx, i64.const_int(0, false)).unwrap();
+
+            let func = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+            let cbb = self.ctx.append_basic_block(func, "sc"); let bbb = self.ctx.append_basic_block(func, "sb"); let ebb = self.ctx.append_basic_block(func, "se");
+            self.builder.build_unconditional_branch(cbb).unwrap();
+            self.builder.position_at_end(cbb);
+            let i = self.builder.build_load(i64, idx, "i").unwrap().into_int_value();
+            self.builder.build_conditional_branch(self.builder.build_int_compare(IntPredicate::SLT, i, len, "").unwrap(), bbb, ebb).unwrap();
+            self.builder.position_at_end(bbb);
+            let off = self.builder.build_int_add(self.builder.build_int_mul(i, i64.const_int(8, false), "").unwrap(), i64.const_int(8, false), "").unwrap();
+            let ep = unsafe { self.builder.build_gep(self.ctx.i8_type(), lp, &[off], "").unwrap() };
+            let elem = self.builder.build_load(i64, ep, "e").unwrap().into_int_value();
+            let a = self.builder.build_load(i64, acc, "a").unwrap().into_int_value();
+            self.builder.build_store(acc, self.builder.build_int_add(a, elem, "").unwrap()).unwrap();
+            self.builder.build_store(idx, self.builder.build_int_add(i, i64.const_int(1, false), "").unwrap()).unwrap();
+            self.builder.build_unconditional_branch(cbb).unwrap();
+            self.builder.position_at_end(ebb);
+            let result = self.builder.build_load(i64, acc, "sum").unwrap();
+            scope.set(rid, result, DialectType::I64);
+        }
+
+        fn emit_list_map(&mut self, rid: ValueId, lp: PointerValue<'ctx>, closure: inkwell::values::StructValue<'ctx>, scope: &mut FnScope<'ctx>) {
+            let i64 = self.ctx.i64_type();
+            let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let fn_ptr = self.builder.build_extract_value(closure, 0, "fp").unwrap().into_pointer_value();
+            let env_ptr = self.builder.build_extract_value(closure, 1, "ep").unwrap();
+            let len = self.builder.build_load(i64, lp, "len").unwrap().into_int_value();
+            let total = self.builder.build_int_add(self.builder.build_int_mul(len, i64.const_int(8, false), "").unwrap(), i64.const_int(8, false), "").unwrap();
+            let malloc = *self.functions.get("malloc").unwrap();
+            let res = self.builder.build_call(malloc, &[total.into()], "mr").unwrap();
+            let rp = if let inkwell::values::ValueKind::Basic(v) = res.try_as_basic_value() { v.into_pointer_value() } else { return };
+            self.builder.build_store(rp, len).unwrap();
+            let idx = self.builder.build_alloca(i64, "mi").unwrap();
+            self.builder.build_store(idx, i64.const_int(0, false)).unwrap();
+            let func = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+            let cbb = self.ctx.append_basic_block(func, "mc"); let bbb = self.ctx.append_basic_block(func, "mb"); let ebb = self.ctx.append_basic_block(func, "me");
+            self.builder.build_unconditional_branch(cbb).unwrap();
+            self.builder.position_at_end(cbb);
+            let i = self.builder.build_load(i64, idx, "i").unwrap().into_int_value();
+            self.builder.build_conditional_branch(self.builder.build_int_compare(IntPredicate::SLT, i, len, "").unwrap(), bbb, ebb).unwrap();
+            self.builder.position_at_end(bbb);
+            let off = self.builder.build_int_add(self.builder.build_int_mul(i, i64.const_int(8, false), "").unwrap(), i64.const_int(8, false), "").unwrap();
+            let sp = unsafe { self.builder.build_gep(self.ctx.i8_type(), lp, &[off], "").unwrap() };
+            let elem = self.builder.build_load(i64, sp, "e").unwrap();
+            let call_ty = i64.fn_type(&[ptr.into(), i64.into()], false);
+            let mapped = self.builder.build_indirect_call(call_ty, fn_ptr, &[env_ptr.into(), elem.into()], "m").unwrap();
+            let mv = if let inkwell::values::ValueKind::Basic(v) = mapped.try_as_basic_value() { v } else { i64.const_int(0, false).into() };
+            let dp = unsafe { self.builder.build_gep(self.ctx.i8_type(), rp, &[off], "").unwrap() };
+            self.builder.build_store(dp, mv).unwrap();
+            self.builder.build_store(idx, self.builder.build_int_add(i, i64.const_int(1, false), "").unwrap()).unwrap();
+            self.builder.build_unconditional_branch(cbb).unwrap();
+            self.builder.position_at_end(ebb);
+            scope.set(rid, rp.into(), DialectType::List(Box::new(DialectType::I64)));
+        }
+
+        fn emit_list_filter(&mut self, rid: ValueId, lp: PointerValue<'ctx>, closure: inkwell::values::StructValue<'ctx>, scope: &mut FnScope<'ctx>) {
+            let i64 = self.ctx.i64_type();
+            let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let fn_ptr = self.builder.build_extract_value(closure, 0, "fp").unwrap().into_pointer_value();
+            let env_ptr = self.builder.build_extract_value(closure, 1, "ep").unwrap();
+            let len = self.builder.build_load(i64, lp, "len").unwrap().into_int_value();
+            let total = self.builder.build_int_add(self.builder.build_int_mul(len, i64.const_int(8, false), "").unwrap(), i64.const_int(8, false), "").unwrap();
+            let malloc = *self.functions.get("malloc").unwrap();
+            let res = self.builder.build_call(malloc, &[total.into()], "fr").unwrap();
+            let rp = if let inkwell::values::ValueKind::Basic(v) = res.try_as_basic_value() { v.into_pointer_value() } else { return };
+            let idx = self.builder.build_alloca(i64, "fi").unwrap();
+            let oidx = self.builder.build_alloca(i64, "fo").unwrap();
+            self.builder.build_store(idx, i64.const_int(0, false)).unwrap();
+            self.builder.build_store(oidx, i64.const_int(0, false)).unwrap();
+            let func = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+            let cbb = self.ctx.append_basic_block(func, "fc"); let bbb = self.ctx.append_basic_block(func, "fb");
+            let kbb = self.ctx.append_basic_block(func, "fk"); let nbb = self.ctx.append_basic_block(func, "fn");
+            let ebb = self.ctx.append_basic_block(func, "fe");
+            self.builder.build_unconditional_branch(cbb).unwrap();
+            self.builder.position_at_end(cbb);
+            let i = self.builder.build_load(i64, idx, "i").unwrap().into_int_value();
+            self.builder.build_conditional_branch(self.builder.build_int_compare(IntPredicate::SLT, i, len, "").unwrap(), bbb, ebb).unwrap();
+            self.builder.position_at_end(bbb);
+            let off = self.builder.build_int_add(self.builder.build_int_mul(i, i64.const_int(8, false), "").unwrap(), i64.const_int(8, false), "").unwrap();
+            let sp = unsafe { self.builder.build_gep(self.ctx.i8_type(), lp, &[off], "").unwrap() };
+            let elem = self.builder.build_load(i64, sp, "e").unwrap();
+            let pred_ty = self.ctx.bool_type().fn_type(&[ptr.into(), i64.into()], false);
+            let pred = self.builder.build_indirect_call(pred_ty, fn_ptr, &[env_ptr.into(), elem.into()], "p").unwrap();
+            let keep = if let inkwell::values::ValueKind::Basic(v) = pred.try_as_basic_value() { v.into_int_value() } else { self.ctx.bool_type().const_int(0, false) };
+            self.builder.build_conditional_branch(keep, kbb, nbb).unwrap();
+            self.builder.position_at_end(kbb);
+            let oi = self.builder.build_load(i64, oidx, "oi").unwrap().into_int_value();
+            let ooff = self.builder.build_int_add(self.builder.build_int_mul(oi, i64.const_int(8, false), "").unwrap(), i64.const_int(8, false), "").unwrap();
+            let dp = unsafe { self.builder.build_gep(self.ctx.i8_type(), rp, &[ooff], "").unwrap() };
+            self.builder.build_store(dp, elem).unwrap();
+            self.builder.build_store(oidx, self.builder.build_int_add(oi, i64.const_int(1, false), "").unwrap()).unwrap();
+            self.builder.build_unconditional_branch(nbb).unwrap();
+            self.builder.position_at_end(nbb);
+            self.builder.build_store(idx, self.builder.build_int_add(i, i64.const_int(1, false), "").unwrap()).unwrap();
+            self.builder.build_unconditional_branch(cbb).unwrap();
+            self.builder.position_at_end(ebb);
+            let fl = self.builder.build_load(i64, oidx, "fl").unwrap();
+            self.builder.build_store(rp, fl).unwrap();
+            scope.set(rid, rp.into(), DialectType::List(Box::new(DialectType::I64)));
+        }
+
+        fn emit_list_fold(&mut self, rid: ValueId, lp: PointerValue<'ctx>, init: BasicValueEnum<'ctx>, closure: inkwell::values::StructValue<'ctx>, scope: &mut FnScope<'ctx>) {
+            let i64 = self.ctx.i64_type();
+            let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let fn_ptr = self.builder.build_extract_value(closure, 0, "fp").unwrap().into_pointer_value();
+            let env_ptr = self.builder.build_extract_value(closure, 1, "ep").unwrap();
+            let len = self.builder.build_load(i64, lp, "len").unwrap().into_int_value();
+            let acc = self.builder.build_alloca(i64, "fa").unwrap();
+            let idx = self.builder.build_alloca(i64, "fi").unwrap();
+            self.builder.build_store(acc, init).unwrap();
+            self.builder.build_store(idx, i64.const_int(0, false)).unwrap();
+            let func = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+            let cbb = self.ctx.append_basic_block(func, "fc"); let bbb = self.ctx.append_basic_block(func, "fb"); let ebb = self.ctx.append_basic_block(func, "fe");
+            self.builder.build_unconditional_branch(cbb).unwrap();
+            self.builder.position_at_end(cbb);
+            let i = self.builder.build_load(i64, idx, "i").unwrap().into_int_value();
+            self.builder.build_conditional_branch(self.builder.build_int_compare(IntPredicate::SLT, i, len, "").unwrap(), bbb, ebb).unwrap();
+            self.builder.position_at_end(bbb);
+            let off = self.builder.build_int_add(self.builder.build_int_mul(i, i64.const_int(8, false), "").unwrap(), i64.const_int(8, false), "").unwrap();
+            let sp = unsafe { self.builder.build_gep(self.ctx.i8_type(), lp, &[off], "").unwrap() };
+            let elem = self.builder.build_load(i64, sp, "e").unwrap();
+            let a = self.builder.build_load(i64, acc, "a").unwrap();
+            let fold_ty = i64.fn_type(&[ptr.into(), i64.into(), i64.into()], false);
+            let folded = self.builder.build_indirect_call(fold_ty, fn_ptr, &[env_ptr.into(), a.into(), elem.into()], "f").unwrap();
+            let na = if let inkwell::values::ValueKind::Basic(v) = folded.try_as_basic_value() { v } else { i64.const_int(0, false).into() };
+            self.builder.build_store(acc, na).unwrap();
+            self.builder.build_store(idx, self.builder.build_int_add(i, i64.const_int(1, false), "").unwrap()).unwrap();
+            self.builder.build_unconditional_branch(cbb).unwrap();
+            self.builder.position_at_end(ebb);
+            let result = self.builder.build_load(i64, acc, "fr").unwrap();
+            scope.set(rid, result, DialectType::I64);
+        }
+
+        fn emit_string_to_upper(&mut self, rid: ValueId, src: PointerValue<'ctx>, scope: &mut FnScope<'ctx>) {
+            let i64 = self.ctx.i64_type();
+            let i32 = self.ctx.i32_type();
+            let i8 = self.ctx.i8_type();
+            let strlen = *self.functions.get("strlen").unwrap();
+            let toupper = *self.functions.get("toupper").unwrap();
+            let len = self.builder.build_call(strlen, &[src.into()], "sl").unwrap();
+            let len = if let inkwell::values::ValueKind::Basic(v) = len.try_as_basic_value() { v.into_int_value() } else { return };
+            let lp1 = self.builder.build_int_add(len, i64.const_int(1, false), "").unwrap();
+            let malloc = *self.functions.get("malloc").unwrap();
+            let buf = self.builder.build_call(malloc, &[lp1.into()], "ub").unwrap();
+            let buf = if let inkwell::values::ValueKind::Basic(v) = buf.try_as_basic_value() { v.into_pointer_value() } else { return };
+            let idx = self.builder.build_alloca(i64, "ui").unwrap();
+            self.builder.build_store(idx, i64.const_int(0, false)).unwrap();
+            let func = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+            let cbb = self.ctx.append_basic_block(func, "uc"); let bbb = self.ctx.append_basic_block(func, "ub"); let ebb = self.ctx.append_basic_block(func, "ue");
+            self.builder.build_unconditional_branch(cbb).unwrap();
+            self.builder.position_at_end(cbb);
+            let i = self.builder.build_load(i64, idx, "i").unwrap().into_int_value();
+            self.builder.build_conditional_branch(self.builder.build_int_compare(IntPredicate::SLT, i, len, "").unwrap(), bbb, ebb).unwrap();
+            self.builder.position_at_end(bbb);
+            let sp = unsafe { self.builder.build_gep(i8, src, &[i], "").unwrap() };
+            let byte = self.builder.build_load(i8, sp, "b").unwrap();
+            let ext = self.builder.build_int_z_extend(byte.into_int_value(), i32, "").unwrap();
+            let uc = self.builder.build_call(toupper, &[ext.into()], "u").unwrap();
+            let ub = if let inkwell::values::ValueKind::Basic(v) = uc.try_as_basic_value() { v.into_int_value() } else { i32.const_int(0, false) };
+            let trunc = self.builder.build_int_truncate(ub, i8, "t").unwrap();
+            let dp = unsafe { self.builder.build_gep(i8, buf, &[i], "").unwrap() };
+            self.builder.build_store(dp, trunc).unwrap();
+            self.builder.build_store(idx, self.builder.build_int_add(i, i64.const_int(1, false), "").unwrap()).unwrap();
+            self.builder.build_unconditional_branch(cbb).unwrap();
+            self.builder.position_at_end(ebb);
+            let ep = unsafe { self.builder.build_gep(i8, buf, &[len], "").unwrap() };
+            self.builder.build_store(ep, i8.const_int(0, false)).unwrap();
+            scope.set(rid, buf.into(), DialectType::String);
+        }
+
+        // ── Record ──
+
+        fn emit_record(&mut self, rid: ValueId, rty: &DialectType, name: &Option<almide_base::intern::Sym>, fields: &[(almide_base::intern::Sym, ValueId)], scope: &mut FnScope<'ctx>) {
+            if let Some(type_name) = name {
+                if let Some(sty) = self.struct_types.get(type_name.as_str()).copied() {
+                    let size = sty.size_of().unwrap();
+                    let malloc = *self.functions.get("malloc").unwrap();
+                    let pc = self.builder.build_call(malloc, &[size.into()], "rp").unwrap();
+                    if let inkwell::values::ValueKind::Basic(pv) = pc.try_as_basic_value() {
+                        let ptr = pv.into_pointer_value();
+                        if let Some(fnames) = self.struct_fields.get(type_name.as_str()) {
+                            for (fname, fvid) in fields {
+                                if let Some(idx) = fnames.iter().position(|n| n == fname.as_str()) {
+                                    if let Some(fv) = scope.get(fvid) {
+                                        if let Ok(fp) = self.builder.build_struct_gep(sty, ptr, idx as u32, "f") {
+                                            let _ = self.builder.build_store(fp, fv.val);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        scope.set(rid, ptr.into(), rty.clone());
+                    }
+                }
+            }
+        }
+
+        fn emit_member(&mut self, rid: ValueId, rty: &DialectType, object: &ValueId, field: &almide_base::intern::Sym, scope: &mut FnScope<'ctx>) {
+            if let Some(ov) = scope.get(object) {
+                if !ov.val.is_pointer_value() { return; }
+                let ptr = ov.val.into_pointer_value();
+                for (tname, fnames) in &self.struct_fields {
+                    if let Some(idx) = fnames.iter().position(|n| n == field.as_str()) {
+                        if let Some(sty) = self.struct_types.get(tname.as_str()).copied() {
+                            if let Ok(fp) = self.builder.build_struct_gep(sty, ptr, idx as u32, "gf") {
+                                let fty = sty.get_field_type_at_index(idx as u32).unwrap();
+                                let loaded = self.builder.build_load(fty, fp, "lf").unwrap();
+                                scope.set(rid, loaded, rty.clone());
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Variant ──
+
+        fn emit_variant_ctor(&mut self, rid: ValueId, rty: &DialectType, parent: &str, tag: u32, _ptys: &[DialectType], args: &[TV<'ctx>], scope: &mut FnScope<'ctx>) {
+            if let Some(sty) = self.struct_types.get(parent).copied() {
+                let size = sty.size_of().unwrap();
+                let malloc = *self.functions.get("malloc").unwrap();
+                let pc = self.builder.build_call(malloc, &[size.into()], "vp").unwrap();
+                if let inkwell::values::ValueKind::Basic(pv) = pc.try_as_basic_value() {
+                    let ptr = pv.into_pointer_value();
+                    let tp = self.builder.build_struct_gep(sty, ptr, 0, "tp").unwrap();
+                    self.builder.build_store(tp, self.ctx.i32_type().const_int(tag as u64, false)).unwrap();
+                    if !args.is_empty() {
+                        let pp = self.builder.build_struct_gep(sty, ptr, 1, "pp").unwrap();
+                        for (i, tv) in args.iter().enumerate() {
+                            let fp = unsafe { self.builder.build_gep(self.ctx.i8_type(), pp, &[self.ctx.i64_type().const_int((i * 8) as u64, false)], "pf").unwrap() };
+                            self.builder.build_store(fp, tv.val).unwrap();
+                        }
+                    }
+                    scope.set(rid, ptr.into(), rty.clone());
+                }
+            }
+        }
+
+        fn emit_tagged_union(&mut self, rid: ValueId, rty: &DialectType, tag: u32, value: Option<&ValueId>, scope: &mut FnScope<'ctx>) {
+            let type_name = if matches!(rty, DialectType::Result(_, _)) { "Result" } else { "Option" };
+            if let Some(sty) = self.struct_types.get(type_name).copied() {
+                let size = sty.size_of().unwrap();
+                let malloc = *self.functions.get("malloc").unwrap();
+                let pc = self.builder.build_call(malloc, &[size.into()], "tp").unwrap();
+                if let inkwell::values::ValueKind::Basic(pv) = pc.try_as_basic_value() {
+                    let ptr = pv.into_pointer_value();
+                    let tp = self.builder.build_struct_gep(sty, ptr, 0, "t").unwrap();
+                    self.builder.build_store(tp, self.ctx.i32_type().const_int(tag as u64, false)).unwrap();
+                    if let Some(vid) = value {
+                        if let Some(v) = scope.get(vid) {
+                            let pp = self.builder.build_struct_gep(sty, ptr, 1, "p").unwrap();
+                            self.builder.build_store(pp, v.val).unwrap();
+                        }
+                    }
+                    scope.set(rid, ptr.into(), rty.clone());
+                }
+            }
+        }
+
+        // ── Match ──
+
+        fn emit_match(&mut self, rid: ValueId, rty: &DialectType, subject: &ValueId, arms: &[MatchArm], scope: &mut FnScope<'ctx>) {
+            let sv = match scope.get(subject) { Some(v) => v, None => return };
+            let func = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+            let merge_bb = self.ctx.append_basic_block(func, "mm");
+            let is_variant = arms.iter().any(|a| matches!(&a.pattern, MatchPattern::Variant { .. }));
+
+            let switch_val = if is_variant && sv.val.is_pointer_value() {
+                // Load tag from variant ptr
+                let variant_ty = self.struct_types.values().next().copied();
+                if let Some(sty) = variant_ty {
+                    let tp = self.builder.build_struct_gep(sty, sv.val.into_pointer_value(), 0, "mt").unwrap();
+                    self.builder.build_load(self.ctx.i32_type(), tp, "tag").unwrap().into_int_value()
+                } else { self.ctx.i32_type().const_int(0, false) }
+            } else if sv.val.is_int_value() {
+                sv.val.into_int_value()
+            } else {
+                self.ctx.i64_type().const_int(0, false)
+            };
+
+            let arm_bbs: Vec<_> = arms.iter().enumerate()
+                .map(|(i, _)| self.ctx.append_basic_block(func, &format!("a{}", i))).collect();
+            let default_bb = *arm_bbs.last().unwrap_or(&merge_bb);
+
+            let mut cases = Vec::new();
+            for (i, arm) in arms.iter().enumerate() {
+                match &arm.pattern {
+                    MatchPattern::LitInt(v) => {
+                        let cv = if switch_val.get_type() == self.ctx.i32_type().into() {
+                            self.ctx.i32_type().const_int(*v as u64, true)
+                        } else {
+                            self.ctx.i64_type().const_int(*v as u64, true)
+                        };
+                        cases.push((cv, arm_bbs[i]));
+                    }
+                    MatchPattern::Variant { tag, .. } => {
+                        if let Some((_, tag_idx, _)) = self.variant_cases.get(tag.as_str()) {
+                            cases.push((self.ctx.i32_type().const_int(*tag_idx as u64, false), arm_bbs[i]));
+                        }
+                    }
+                    _ => {} // wildcard/binding → default
+                }
+            }
+            self.builder.build_switch(switch_val, default_bb, &cases).unwrap();
+
+            let mut arm_results = Vec::new();
+            for (i, arm) in arms.iter().enumerate() {
+                self.builder.position_at_end(arm_bbs[i]);
+
+                // Extract variant payload bindings
+                if let MatchPattern::Variant { tag, bindings } = &arm.pattern {
+                    if sv.val.is_pointer_value() {
+                        if let Some((parent, _, ptys)) = self.variant_cases.get(tag.as_str()).cloned() {
+                            if let Some(sty) = self.struct_types.get(&parent).copied() {
+                                let pp = self.builder.build_struct_gep(sty, sv.val.into_pointer_value(), 1, "ap").unwrap();
+                                for (j, bid) in bindings.iter().enumerate() {
+                                    let off = (j * 8) as u64;
+                                    let fp = unsafe { self.builder.build_gep(self.ctx.i8_type(), pp, &[self.ctx.i64_type().const_int(off, false)], "bp").unwrap() };
+                                    let fty = if j < ptys.len() { self.llvm_type(&ptys[j]).unwrap_or(self.ctx.i64_type().into()) } else { self.ctx.i64_type().into() };
+                                    let loaded = self.builder.build_load(fty, fp, "bv").unwrap();
+                                    let bty = if j < ptys.len() { ptys[j].clone() } else { DialectType::I64 };
+                                    scope.set(*bid, loaded, bty);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Binding pattern: bind subject value
+                if let MatchPattern::Binding(bid) = &arm.pattern {
+                    scope.set(*bid, sv.val, sv.ty.clone());
+                }
+
+                let av = self.compile_region(&arm.body, scope);
+                self.builder.build_unconditional_branch(merge_bb).unwrap();
+                let end = self.builder.get_insert_block().unwrap();
+                if let Some(v) = av { arm_results.push((v.val, end)); }
+            }
+
+            self.builder.position_at_end(merge_bb);
+            if !arm_results.is_empty() && arm_results.iter().all(|(v, _)| v.get_type() == arm_results[0].0.get_type()) {
+                let phi = self.builder.build_phi(arm_results[0].0.get_type(), "mv").unwrap();
+                let incoming: Vec<_> = arm_results.iter().map(|(v, bb)| (v as &dyn inkwell::values::BasicValue, *bb)).collect();
+                phi.add_incoming(&incoming);
+                scope.set(rid, phi.as_basic_value(), rty.clone());
+            }
+        }
+
+        // ── Lambda ──
+
+        fn emit_lambda(&mut self, rid: ValueId, rty: &DialectType, params: &[(ValueId, DialectType)], body: &[Block], scope: &mut FnScope<'ctx>) {
+            let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let lambda_name = format!("__lambda_{}", rid.0);
+
+            // Detect captures: ValueIds used in body but not params/body-defined
+            let param_ids: std::collections::HashSet<ValueId> = params.iter().map(|(v, _)| *v).collect();
+            let mut body_defined = std::collections::HashSet::new();
+            let mut body_used = Vec::new();
+            for block in body {
+                for bop in &block.ops {
+                    if let Some(r) = bop.result { body_defined.insert(r); }
+                    self.collect_used_values(&bop.kind, &mut body_used);
+                }
+            }
+            let mut seen = std::collections::HashSet::new();
+            let captures: Vec<(ValueId, TV<'ctx>)> = body_used.iter()
+                .filter(|v| !param_ids.contains(v) && !body_defined.contains(v) && seen.insert(**v))
+                .filter_map(|v| scope.get(v).map(|tv| (*v, tv)))
+                .collect();
+
+            // Build lambda function type
+            let mut ptypes: Vec<BasicMetadataTypeEnum> = vec![ptr.into()]; // env
+            for (_, dty) in params {
+                if let Some(t) = self.meta_type(dty) { ptypes.push(t); }
+            }
+            let ret_ty = body.last().and_then(|b| b.ops.last()).and_then(|op| self.llvm_type(&op.result_ty));
+            let fn_type = if let Some(ret) = ret_ty { ret.fn_type(&ptypes, false) } else { self.ctx.void_type().fn_type(&ptypes, false) };
+
+            let lambda_fn = self.module.add_function(&lambda_name, fn_type, None);
+            let lambda_entry = self.ctx.append_basic_block(lambda_fn, "entry");
+
+            let saved_bb = self.builder.get_insert_block();
+            let mut lambda_scope = FnScope::new();
+
+            self.builder.position_at_end(lambda_entry);
+            for (i, (vid, dty)) in params.iter().enumerate() {
+                if let Some(p) = lambda_fn.get_nth_param((i + 1) as u32) {
+                    lambda_scope.set(*vid, p, dty.clone());
+                }
+            }
+            // Unpack captures from env
+            if !captures.is_empty() {
+                let env = lambda_fn.get_nth_param(0).unwrap().into_pointer_value();
+                for (i, (cid, ctv)) in captures.iter().enumerate() {
+                    let off = (i * 8) as u64;
+                    let fp = unsafe { self.builder.build_gep(self.ctx.i8_type(), env, &[self.ctx.i64_type().const_int(off, false)], "cl").unwrap() };
+                    let loaded = self.builder.build_load(ctv.val.get_type(), fp, "cv").unwrap();
+                    lambda_scope.set(*cid, loaded, ctv.ty.clone());
+                }
+            }
+
+            let last = self.compile_region(body, &mut lambda_scope);
+            if let Some(v) = last { self.builder.build_return(Some(&v.val)).unwrap(); }
+            else { self.builder.build_return(None).unwrap(); }
+
+            // Restore
+            if let Some(bb) = saved_bb { self.builder.position_at_end(bb); }
+
+            // Create env on heap
+            let env_ptr = if captures.is_empty() {
+                ptr.const_null()
+            } else {
+                let env_size = (captures.len() * 8) as u64;
+                let ep = self.call_malloc(env_size);
+                for (i, (_, ctv)) in captures.iter().enumerate() {
+                    let off = (i * 8) as u64;
+                    let fp = unsafe { self.builder.build_gep(self.ctx.i8_type(), ep, &[self.ctx.i64_type().const_int(off, false)], "es").unwrap() };
+                    self.builder.build_store(fp, ctv.val).unwrap();
+                }
+                ep
+            };
+
+            // Closure struct
+            let closure_ty = self.ctx.struct_type(&[ptr.into(), ptr.into()], false);
+            let alloca = self.builder.build_alloca(closure_ty, "cl").unwrap();
+            let fp = self.builder.build_struct_gep(closure_ty, alloca, 0, "cfp").unwrap();
+            self.builder.build_store(fp, lambda_fn.as_global_value().as_pointer_value()).unwrap();
+            let ep = self.builder.build_struct_gep(closure_ty, alloca, 1, "cep").unwrap();
+            self.builder.build_store(ep, env_ptr).unwrap();
+            let cv = self.builder.build_load(closure_ty, alloca, "cv").unwrap();
+            scope.set(rid, cv, rty.clone());
+        }
+
+        fn emit_computed_call(&mut self, rid: ValueId, rty: &DialectType, callee: &ValueId, args: &[ValueId], scope: &mut FnScope<'ctx>) {
+            if let Some(cv) = scope.get(callee) {
+                if cv.val.is_struct_value() {
+                    let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                    let sv = cv.val.into_struct_value();
+                    let fn_ptr = self.builder.build_extract_value(sv, 0, "fp").unwrap().into_pointer_value();
+                    let env_ptr = self.builder.build_extract_value(sv, 1, "ep").unwrap();
+                    let mut call_args: Vec<BasicMetadataValueEnum> = vec![env_ptr.into()];
+                    for a in args {
+                        if let Some(tv) = scope.get(a) { call_args.push(tv.val.into()); }
+                    }
+                    let arg_types: Vec<BasicMetadataTypeEnum> = call_args.iter().map(|a| match a {
+                        BasicMetadataValueEnum::IntValue(v) => v.get_type().into(),
+                        BasicMetadataValueEnum::FloatValue(v) => v.get_type().into(),
+                        BasicMetadataValueEnum::PointerValue(v) => v.get_type().into(),
+                        _ => self.ctx.i64_type().into(),
+                    }).collect();
+                    let ret_basic = self.llvm_type(rty);
+                    let fn_type = if let Some(ret) = ret_basic { ret.fn_type(&arg_types, false) } else { self.ctx.void_type().fn_type(&arg_types, false) };
+                    let call = self.builder.build_indirect_call(fn_type, fn_ptr, &call_args, "cc").unwrap();
+                    if let inkwell::values::ValueKind::Basic(bv) = call.try_as_basic_value() {
+                        scope.set(rid, bv, rty.clone());
+                    }
+                }
+            }
+        }
+
+        fn collect_used_values(&self, kind: &OpKind, out: &mut Vec<ValueId>) {
+            match kind {
+                OpKind::BinOp { lhs, rhs, .. } => { out.push(*lhs); out.push(*rhs); }
+                OpKind::UnOp { operand, .. } => { out.push(*operand); }
+                OpKind::CallOp { args, .. } | OpKind::IntrinsicCallOp { args, .. } | OpKind::ComputedCallOp { args, .. } => { out.extend(args); }
+                OpKind::IfOp { cond, .. } => { out.push(*cond); }
+                OpKind::MatchOp { subject, .. } => { out.push(*subject); }
+                OpKind::ListOp { elements } | OpKind::TupleOp { elements } => { out.extend(elements); }
+                OpKind::MapOp { entries } => { for (k, v) in entries { out.push(*k); out.push(*v); } }
+                OpKind::RecordOp { fields, .. } => { for (_, v) in fields { out.push(*v); } }
+                OpKind::MemberOp { object, .. } | OpKind::TupleIndexOp { object, .. } => { out.push(*object); }
+                OpKind::IndexOp { object, index } | OpKind::MapAccessOp { object, key: index } => { out.push(*object); out.push(*index); }
+                OpKind::ResultOkOp { value } | OpKind::ResultErrOp { value } | OpKind::OptionSomeOp { value }
+                | OpKind::TryOp { value } | OpKind::UnwrapOp { value } => { out.push(*value); }
+                OpKind::UnwrapOrOp { value, fallback } => { out.push(*value); out.push(*fallback); }
+                OpKind::AllocVar { init, .. } => { out.push(*init); }
+                OpKind::LoadVar { slot } => { out.push(*slot); }
+                OpKind::StoreVar { slot, value } => { out.push(*slot); out.push(*value); }
+                _ => {}
+            }
+        }
+
+        // ── Float to string helper ──
+
+        fn get_float_to_string(&mut self) -> FunctionValue<'ctx> {
+            if let Some(f) = self.functions.get("__almide_fts") { return *f; }
+            let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let f64t = self.ctx.f64_type();
+            let i64 = self.ctx.i64_type();
+            let func = self.module.add_function("__almide_fts", ptr.fn_type(&[f64t.into()], false), None);
+            let saved = self.builder.get_insert_block();
+            let entry = self.ctx.append_basic_block(func, "e");
+            let has_dot = self.ctx.append_basic_block(func, "hd");
+            let no_dot = self.ctx.append_basic_block(func, "nd");
+            self.builder.position_at_end(entry);
+            let val = func.get_nth_param(0).unwrap().into_float_value();
+            let malloc = *self.functions.get("malloc").unwrap();
+            let snprintf = *self.functions.get("snprintf").unwrap();
+            let strchr = *self.functions.get("strchr").unwrap();
+            let strcat = *self.functions.get("strcat").unwrap();
+            let bc = self.builder.build_call(malloc, &[i64.const_int(64, false).into()], "b").unwrap();
+            let buf = if let inkwell::values::ValueKind::Basic(v) = bc.try_as_basic_value() { v.into_pointer_value() } else { ptr.const_null() };
+            let fmt = self.builder.build_global_string_ptr("%.15g", "fg").unwrap();
+            self.builder.build_call(snprintf, &[buf.into(), i64.const_int(64, false).into(), fmt.as_pointer_value().into(), val.into()], "").unwrap();
+            let dc = self.builder.build_call(strchr, &[buf.into(), self.ctx.i32_type().const_int('.' as u64, false).into()], "dc").unwrap();
+            let dp = if let inkwell::values::ValueKind::Basic(v) = dc.try_as_basic_value() { v.into_pointer_value() } else { ptr.const_null() };
+            let is_null = self.builder.build_is_null(dp, "in").unwrap();
+            self.builder.build_conditional_branch(is_null, no_dot, has_dot).unwrap();
+            self.builder.position_at_end(no_dot);
+            let suffix = self.builder.build_global_string_ptr(".0", "dz").unwrap();
+            self.builder.build_call(strcat, &[buf.into(), suffix.as_pointer_value().into()], "").unwrap();
+            self.builder.build_return(Some(&buf)).unwrap();
+            self.builder.position_at_end(has_dot);
+            self.builder.build_return(Some(&buf)).unwrap();
+            if let Some(bb) = saved { self.builder.position_at_end(bb); }
+            self.functions.insert("__almide_fts".into(), func);
+            func
         }
     }
 }
