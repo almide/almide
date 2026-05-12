@@ -9,10 +9,3 @@ description = "Almide MLIR dialect schema (pure-Rust, FFI-free)"
 almide-base = { path = "../almide-base" }
 almide-lang = { path = "../almide-lang" }
 almide-ir = { path = "../almide-ir" }
-inkwell = { git = "https://github.com/TheDan64/inkwell", features = ["llvm22-1"], optional = true }
-llvm-sys = { version = "221", optional = true }
-either = "1"
-
-[features]
-default = []
-llvm = ["inkwell", "llvm-sys"]

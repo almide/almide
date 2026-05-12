@@ -4,7 +4,7 @@ resolver = "3"
 
 [package]
 name = "almide"
-version = "0.17.0"
+version = "0.16.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -25,9 +25,6 @@ toml = "0.8"
 wasm-encoder = "0.225"
 lasso = { version = "0.7", features = ["multi-threaded"] }
 
-[features]
-default = []
-llvm = ["almide-dialect/llvm"]
 
 [dev-dependencies]
 proptest = "1"

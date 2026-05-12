@@ -15,8 +15,6 @@ pub mod lower;
 pub mod verify;
 pub mod dump;
 pub mod emit_rust;
-#[cfg(feature = "llvm")]
-pub mod emit_llvm;
 
 use almide_base::intern::Sym;
 

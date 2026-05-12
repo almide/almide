@@ -690,3 +690,4 @@ pub fn cmd_clean() {
         eprintln!("No cache to clean");
     }
 }
+
