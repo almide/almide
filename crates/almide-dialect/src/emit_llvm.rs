@@ -600,7 +600,20 @@ pub mod codegen {
                     }
                 }
                 _ => {
-                    // Unknown stdlib call — skip
+                    // Unknown stdlib call — emit a default value to prevent verify errors
+                    let default_val = match result_ty {
+                        DialectType::I64 => Some(BasicValueEnum::IntValue(i64_type.const_int(0, false))),
+                        DialectType::F64 => Some(BasicValueEnum::FloatValue(self.context.f64_type().const_float(0.0))),
+                        DialectType::Bool => Some(BasicValueEnum::IntValue(self.context.bool_type().const_int(0, false))),
+                        DialectType::String | DialectType::Named(_) | DialectType::List(_)
+                        | DialectType::Map(_, _) | DialectType::Result(_, _) | DialectType::Option(_) => {
+                            Some(BasicValueEnum::PointerValue(ptr_type.const_null()))
+                        }
+                        _ => None,
+                    };
+                    if let Some(v) = default_val {
+                        self.values.insert(result_id, v);
+                    }
                 }
             }
         }
@@ -1289,8 +1302,13 @@ pub mod codegen {
                             }
                             match &arm.pattern {
                                 crate::ops::MatchPattern::LitInt(v) => {
-                                    let const_ty = if is_variant_match { self.context.i32_type() } else { self.context.i64_type() };
-                                    cases.push((const_ty.const_int(*v as u64, true), arm_bbs[i]));
+                                    // Match switch_val type: i32 for variant tags, i64 for ints
+                                    let const_val = if switch_val.get_type() == self.context.i32_type().into() {
+                                        self.context.i32_type().const_int(*v as u64, true)
+                                    } else {
+                                        self.context.i64_type().const_int(*v as u64, true)
+                                    };
+                                    cases.push((const_val, arm_bbs[i]));
                                 }
                                 crate::ops::MatchPattern::Variant { tag, .. } => {
                                     if let Some((_, tag_idx, _)) = self.variant_cases.get(tag.as_str()) {
