@@ -819,12 +819,21 @@ pub mod codegen {
                             almide_ir::BinOp::DivInt => {
                                 let lv = l.into_int_value();
                                 let rv = r.into_int_value();
-                                Some(self.builder.build_int_signed_div(lv, rv, "div").unwrap().into())
+                                // Guard: if rv == 0, return 0 (prevent SIGFPE)
+                                let is_zero = self.builder.build_int_compare(IntPredicate::EQ, rv, self.context.i64_type().const_int(0, false), "div_zero").unwrap();
+                                let safe_rv = self.builder.build_select(is_zero, self.context.i64_type().const_int(1, false), rv, "safe_div").unwrap().into_int_value();
+                                let result = self.builder.build_int_signed_div(lv, safe_rv, "div").unwrap();
+                                let guarded = self.builder.build_select(is_zero, self.context.i64_type().const_int(0, false), result, "div_guarded").unwrap();
+                                Some(guarded.into())
                             }
                             almide_ir::BinOp::ModInt => {
                                 let lv = l.into_int_value();
                                 let rv = r.into_int_value();
-                                Some(self.builder.build_int_signed_rem(lv, rv, "rem").unwrap().into())
+                                let is_zero = self.builder.build_int_compare(IntPredicate::EQ, rv, self.context.i64_type().const_int(0, false), "mod_zero").unwrap();
+                                let safe_rv = self.builder.build_select(is_zero, self.context.i64_type().const_int(1, false), rv, "safe_mod").unwrap().into_int_value();
+                                let result = self.builder.build_int_signed_rem(lv, safe_rv, "rem").unwrap();
+                                let guarded = self.builder.build_select(is_zero, self.context.i64_type().const_int(0, false), result, "mod_guarded").unwrap();
+                                Some(guarded.into())
                             }
                             almide_ir::BinOp::AddFloat => {
                                 let lv = l.into_float_value();
