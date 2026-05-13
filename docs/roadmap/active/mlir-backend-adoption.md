@@ -1,5 +1,9 @@
-<!-- description: MLIR backend + egg e-graph rewriter for pure-Almide optimal lowering -->
+<!-- description: Stage 2 progressive lowering — dialect walker passes all 227 spec tests -->
 # MLIR Backend + Egg Rewrite Engine
+
+> **Active scope: Stage 2** — dialect walker が全 spec テストを通過すること。
+> Stage 1 (egg rewriter + dialect PoC) は ✅ 完了 (0.16.0)。
+> Stage 3-4 (GPU/PGO) は on-hold。
 
 ## Decision
 

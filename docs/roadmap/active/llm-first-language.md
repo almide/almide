@@ -1,6 +1,10 @@
 <!-- description: Plan to make Almide the language LLMs write most accurately, measured by dojo MSR -->
 # LLM-first Language
 
+> **Active scope: Phase 4-5** — UFCS 採用判断 + error-recovering parser。
+> Phase 1-3 は ✅ 完了 (Sonnet 100%, 70b 77%)。
+> **Exit criteria**: dojo MSR で Llama 70b ≥ 80%, 8b ≥ 50%。
+
 Almide の **mission**: "The language LLMs can write most accurately." この roadmap はそこに向けた 5 軸の設計判断と、段階的な実装順をまとめる。**every change is measured against almide-dojo MSR delta** — 言語機能を追加する基準は「retry-success が上がるか」 で決める。
 
 ## Design rule

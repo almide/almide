@@ -6,19 +6,18 @@
 
 ## Active
 
-11 items
+10 items
 
 | Item | Description |
 |------|-------------|
 | [DX: `almide test` stderr & `almide explain`](active/dx-testing-explain.md) | almide test stderr passthrough + almide explain <code> subcommand |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Error-Fix Database](active/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
-| [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with rush/spawn/link/cancel |
 | [Llama Inference Demo](active/llama-inference-demo.md) | End-to-end Llama inference demo on Almide, from 1-block to full token generation |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [LLM Integration](active/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
 | [LSP Server](active/lsp.md) | Language Server Protocol for editor completion, diagnostics, and navigation |
-| [MLIR Backend + Egg Rewrite Engine](active/mlir-backend-adoption.md) | MLIR backend + egg e-graph rewriter for pure-Almide optimal lowering |
+| [MLIR Backend + Egg Rewrite Engine](active/mlir-backend-adoption.md) | Stage 2 progressive lowering — dialect walker passes all 227 spec tests |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Secure by Design](active/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
 
@@ -57,10 +56,10 @@
 
 ## Done
 
-230 items
+231 items
 
 <details>
-<summary>Show all 230 completed items</summary>
+<summary>Show all 231 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|

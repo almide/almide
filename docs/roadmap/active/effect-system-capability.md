@@ -1,6 +1,10 @@
 <!-- description: Capability-based effect system for sandboxed AI agent containers -->
 # Capability-Based Effect System
 
+> **Active scope: Phase 1** — capability annotation + compiler checking。
+> **Exit criteria**: porta の全テストが `almide check --capabilities` を通過。
+> Phase 2-5 (WASM pruning, per-dep restriction, type-level, MCP) は on-hold。
+
 Compile-time enforcement of least privilege for AI agent containers. The compiler proves that an agent's code never exceeds its declared capabilities. WASM output contains only the WASI imports the manifest permits.
 
 ## The Problem

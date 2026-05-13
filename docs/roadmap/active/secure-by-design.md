@@ -1,6 +1,10 @@
 <!-- description: Five-layer security model making web vulnerabilities compile-time errors -->
 # Secure by Design
 
+> **Active scope: Phase 1** — opaque types (`Html`, `Sql`, `Path`, `Command`)。
+> **Exit criteria**: XSS/SQLi/path-traversal/command-injection が型エラーになる。
+> Layer 0-1 (effect isolation, @extern) は ✅ 完了。Phase 2+ は on-hold。
+
 ## Thesis
 
 Almide will become **web-safe** in the same way Rust is memory-safe. Not "safe if you're careful," but "safe by default. Won't break unless you intentionally try to break it."
