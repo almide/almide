@@ -378,7 +378,16 @@ fn emit_expr_inline(expr: &IrExpr, vt: &VarTable) -> String {
             match target {
                 CallTarget::Named { name } => {
                     let arg_strs: Vec<String> = args.iter().map(|a| emit_expr_inline(a, vt)).collect();
-                    format!("{}({})", name.as_str(), arg_strs.join(", "))
+                    // Map GPU type constructors to WGSL builtins
+                    let wgsl_name = match name.as_str() {
+                        "Vec2" => "vec2<f32>",
+                        "Vec3" => "vec3<f32>",
+                        "Vec4" => "vec4<f32>",
+                        "Mat3" => "mat3x3<f32>",
+                        "Mat4" => "mat4x4<f32>",
+                        other => other,
+                    };
+                    format!("{}({})", wgsl_name, arg_strs.join(", "))
                 }
                 CallTarget::Module { module, func, .. } => {
                     let m = module.as_str();
