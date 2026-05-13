@@ -1243,6 +1243,8 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
         exports.export("_start", wasm_encoder::ExportKind::Func, main_idx);
     } else if let Some(&runner_idx) = emitter.func_map.get("__test_runner") {
         exports.export("_start", wasm_encoder::ExportKind::Func, runner_idx);
+    } else if let Some(&init_idx) = emitter.func_map.get("__init_globals") {
+        exports.export("_start", wasm_encoder::ExportKind::Func, init_idx);
     }
     // Export __alloc for FFI callers to allocate WASM linear memory
     if let Some(&alloc_idx) = emitter.func_map.get("__alloc") {
