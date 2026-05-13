@@ -43,9 +43,14 @@ pub fn emit(program: &IrProgram) -> String {
         }
     }
 
-    // Emit GPU functions
+    // Emit uniform declarations and GPU functions.
+    // Auto-assign @group/@binding: uniforms get group(0), numbered by order.
+    let mut binding_counter: u32 = 0;
     for (func, stage) in &gpu_fns {
-        out.push_str(&emit_gpu_function(func, *stage, &program.var_table));
+        let (uniform_decls, func_code) =
+            emit_gpu_function_with_uniforms(func, *stage, &program.var_table, &mut binding_counter);
+        out.push_str(&uniform_decls);
+        out.push_str(&func_code);
         out.push('\n');
     }
 
@@ -86,8 +91,74 @@ fn emit_struct(td: &IrTypeDecl, fields: &[IrFieldDecl]) -> String {
     out
 }
 
-/// Emit a GPU function as WGSL.
-fn emit_gpu_function(func: &IrFunction, stage: GpuStage, vt: &VarTable) -> String {
+/// A uniform parameter extracted from an @gpu function.
+struct UniformParam {
+    name: String,
+    ty: String,
+    var_id: VarId,
+}
+
+/// Emit a GPU function as WGSL, separating @uniform params into
+/// module-level var<uniform> declarations. Returns (uniform_decls, function_code).
+fn emit_gpu_function_with_uniforms(
+    func: &IrFunction,
+    stage: GpuStage,
+    vt: &VarTable,
+    binding_counter: &mut u32,
+) -> (String, String) {
+    // Separate @uniform params from regular params
+    let mut uniforms: Vec<UniformParam> = Vec::new();
+    let mut regular_params: Vec<&IrParam> = Vec::new();
+
+    for p in &func.params {
+        if p.attrs.iter().any(|a| a.name.as_str() == "uniform") {
+            uniforms.push(UniformParam {
+                name: p.name.as_str().to_string(),
+                ty: emit_type(&p.ty),
+                var_id: p.var,
+            });
+        } else {
+            regular_params.push(p);
+        }
+    }
+
+    // Generate uniform declarations
+    let mut decls = String::new();
+    let mut uniform_var_names: Vec<(VarId, String, String)> = Vec::new(); // (var_id, wgsl_var_name, field_name)
+
+    if !uniforms.is_empty() {
+        // Single-field uniforms: emit directly without wrapper struct
+        // Multi-field: wrap in a struct
+        if uniforms.len() == 1 {
+            let u = &uniforms[0];
+            let var_name = format!("_uniform_{}", u.name);
+            decls.push_str(&format!(
+                "@group(0) @binding({})\nvar<uniform> {}: {};\n\n",
+                binding_counter, var_name, u.ty
+            ));
+            uniform_var_names.push((u.var_id, var_name, String::new()));
+            *binding_counter += 1;
+        } else {
+            let struct_name = format!("_Uniforms_{}", func.name.as_str());
+            decls.push_str(&format!("struct {} {{\n", struct_name));
+            for u in &uniforms {
+                decls.push_str(&format!("  {}: {},\n", u.name, u.ty));
+            }
+            decls.push_str("}\n\n");
+
+            let var_name = format!("_uniforms_{}", func.name.as_str());
+            decls.push_str(&format!(
+                "@group(0) @binding({})\nvar<uniform> {}: {};\n\n",
+                binding_counter, var_name, struct_name
+            ));
+            for u in &uniforms {
+                uniform_var_names.push((u.var_id, var_name.clone(), u.name.clone()));
+            }
+            *binding_counter += 1;
+        }
+    }
+
+    // Build function code
     let mut out = String::new();
 
     // Stage annotation
@@ -99,12 +170,9 @@ fn emit_gpu_function(func: &IrFunction, stage: GpuStage, vt: &VarTable) -> Strin
     out.push_str(stage_attr);
     out.push('\n');
 
-    // Function signature
+    // Function signature (only regular params)
     out.push_str(&format!("fn {}(", func.name.as_str()));
-
-    // Parameters with WGSL annotations
-    let params: Vec<String> = func
-        .params
+    let params: Vec<String> = regular_params
         .iter()
         .map(|p| {
             let wgsl_ty = emit_type(&p.ty);
@@ -119,7 +187,7 @@ fn emit_gpu_function(func: &IrFunction, stage: GpuStage, vt: &VarTable) -> Strin
     out.push_str(&params.join(", "));
     out.push_str(") -> ");
 
-    // Return type may have annotations from @location on the function
+    // Return type
     let ret_annotation = emit_return_attrs(func);
     if ret_annotation.is_empty() {
         out.push_str(&emit_type(&func.ret_ty));
@@ -129,11 +197,52 @@ fn emit_gpu_function(func: &IrFunction, stage: GpuStage, vt: &VarTable) -> Strin
 
     out.push_str(" {\n");
 
-    // Body
-    out.push_str(&emit_expr(&func.body, vt, 1));
+    // Body — with uniform variable rewriting
+    let body_str = emit_expr(&func.body, vt, 1);
+    // Rewrite references to uniform params: `mvp` → `_uniform_mvp` (single) or `_uniforms_fn.mvp` (multi)
+    let mut rewritten = body_str;
+    for (var_id, var_name, field_name) in &uniform_var_names {
+        let param_name = vt.get(*var_id).name.as_str().to_string();
+        let replacement = if field_name.is_empty() {
+            var_name.clone()
+        } else {
+            format!("{}.{}", var_name, field_name)
+        };
+        // Replace standalone identifier references
+        // Simple word-boundary replacement (sufficient for Phase 0.3)
+        rewritten = replace_identifier(&rewritten, &param_name, &replacement);
+    }
+    out.push_str(&rewritten);
 
     out.push_str("}\n");
-    out
+    (decls, out)
+}
+
+/// Replace a standalone identifier in code, respecting word boundaries.
+fn replace_identifier(code: &str, from: &str, to: &str) -> String {
+    let mut result = String::with_capacity(code.len());
+    let bytes = code.as_bytes();
+    let from_bytes = from.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + from_bytes.len() <= bytes.len() && &bytes[i..i + from_bytes.len()] == from_bytes {
+            let before_ok = i == 0 || !is_ident_char(bytes[i - 1]);
+            let after_ok = i + from_bytes.len() >= bytes.len()
+                || !is_ident_char(bytes[i + from_bytes.len()]);
+            if before_ok && after_ok {
+                result.push_str(to);
+                i += from_bytes.len();
+                continue;
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
+}
+
+fn is_ident_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// Map Almide types to WGSL types.
