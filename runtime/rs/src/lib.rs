@@ -33,5 +33,4 @@ pub mod regex;
 pub mod result;
 pub mod set;
 pub mod testing;
-pub mod base64;
 pub mod hex;

@@ -971,9 +971,9 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         "clone" | "is_some" | "is_none" | "unwrap" | "unwrap_or"
         | "to_string" | "len" | "push" | "pop" | "insert" | "remove"
         | "contains" | "iter" | "into_iter" | "collect" | "map"
-        | "filter" | "to_vec" | "join" | "split" | "trim"
+        | "filter" | "to_vec" | "split" | "trim"
         | "starts_with" | "ends_with" | "replace" | "chars"
-        | "as_str" | "get" | "keys" | "values" | "abs" | "powi" | "powf"
+        | "to_owned" | "as_str" | "get" | "keys" | "values" | "abs" | "powi" | "powf"
         | "is_empty" | "contains_key" | "entry" | "or_insert"
         | "expect" | "ok" | "err" | "and_then" | "map_err"
         | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref" | "as_deref"
@@ -982,6 +982,14 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         | "asin" | "acos" | "atan" | "atan2" | "exp" | "ln" | "log2" | "log10"
         | "is_nan" | "is_infinite"
     );
+    // Fallback for `join`: always route to almide_rt_list_join even when
+    // StdlibLowering couldn't resolve the list type. We add borrows
+    // explicitly since BorrowInsertion didn't process this call.
+    if method == "join" && args.len() == 1 {
+        let obj_str = render_expr(ctx, object);
+        let sep_str = render_expr(ctx, &args[0]);
+        return Some(format!("almide_rt_list_join(&{}, &*{})", obj_str, sep_str));
+    }
     // User-defined UFCS: plain method name (no dots) → func(object, args)
     if !method.contains('.') && !is_rust_intrinsic {
         let obj_str = render_expr(ctx, object);

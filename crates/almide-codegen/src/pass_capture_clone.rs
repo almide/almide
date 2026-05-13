@@ -307,7 +307,11 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
                 kind: IrExprKind::Call {
                     target: CallTarget::Method {
                         object: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None }),
-                        method: almide_base::intern::sym("to_string"),
+                        // Use `to_owned` instead of `to_string` to avoid
+                        // StdlibLowering converting this into a module call
+                        // (e.g. `int.to_string()`) when the Almide-level type
+                        // differs from the Rust-level &str representation.
+                        method: almide_base::intern::sym("to_owned"),
                     },
                     args: vec![],
                     type_args: vec![],
