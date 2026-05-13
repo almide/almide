@@ -46,6 +46,10 @@ pub struct LowerCtx<'a> {
     lambda_id_counter: u32,
     /// Maps const param name → VarId for value parameter lowering.
     pub const_param_vars: HashMap<Sym, VarId>,
+    /// Definition table for cross-package resolution.
+    pub def_table: almide_ir::DefTable,
+    /// Maps qualified name (e.g. "snaidhm.web.gpu.STORAGE") → DefId.
+    pub def_map: HashMap<Sym, almide_ir::DefId>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -60,6 +64,8 @@ impl<'a> LowerCtx<'a> {
             protocol_bounds: HashMap::new(),
             lambda_id_counter: 0,
             const_param_vars: HashMap::new(),
+            def_table: almide_ir::DefTable::new(),
+            def_map: HashMap::new(),
         }
     }
 
@@ -188,6 +194,26 @@ pub fn lower_program(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap) -> 
 fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap, module_prefix: Option<&str>) -> IrProgram {
     let mut ctx = LowerCtx::new(env, type_map);
 
+    // Build DefTable from all known top-level lets (including cross-package).
+    // Each "module.name" key in env.top_lets gets a DefId.
+    for (qual_name, ty) in &env.top_lets {
+        let qual = qual_name.as_str();
+        if let Some(dot_pos) = qual.rfind('.') {
+            let module = &qual[..dot_pos];
+            let name = &qual[dot_pos + 1..];
+            // Extract package name (first segment)
+            let package = module.split('.').next().unwrap_or(module);
+            let def_id = ctx.def_table.alloc(
+                sym(package),
+                sym(module),
+                sym(name),
+                almide_ir::DefKind::TopLet,
+                ty.clone(),
+            );
+            ctx.def_map.insert(*qual_name, def_id);
+        }
+    }
+
     // Collect type conventions (deriving Eq, Repr, etc.)
     for decl in &prog.decls {
         if let ast::Decl::Type { name, deriving: Some(derives), .. } = decl {
@@ -304,7 +330,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         .map(|(name, _)| *name)
         .collect();
 
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: Default::default(), modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {

@@ -243,6 +243,8 @@ pub struct WasmEmitter {
     /// var_table can resolve via name even when their VarId belongs to a
     /// different table.
     pub top_let_globals_by_name: HashMap<String, (u32, ValType)>,
+    /// DefId-keyed global mapping. Authoritative for cross-package resolution.
+    pub def_globals: HashMap<u32, (u32, ValType)>,
     pub top_let_init: Vec<(u32, ValType, i64)>, // (global_idx, type, const_init_bits) in order
     pub next_global: u32,
 
@@ -370,6 +372,7 @@ impl WasmEmitter {
             preopen_table_global: 1,
             preopen_count_global: 2,
             top_let_globals: HashMap::new(),
+            def_globals: HashMap::new(),
             top_let_globals_by_name: HashMap::new(),
             top_let_init: Vec::new(),
             next_global: 3, // 0 = heap_ptr, 1 = preopen_table, 2 = preopen_count
@@ -899,6 +902,10 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             emitter.top_let_globals_by_name.insert(name.clone(), (global_idx, vt));
             emitter.top_let_globals.insert(tl.var.0, (global_idx, vt));
             emitter.top_let_init.push((global_idx, vt, const_bits));
+            // Register by DefId for direct cross-package resolution
+            if let Some(def_id) = tl.def_id {
+                emitter.def_globals.insert(def_id.0, (global_idx, vt));
+            }
 
             // Also register under the ALMIDE_RT_<MOD>_<NAME> synthetic name
             // that cross-module access creates during lowering. Without this,

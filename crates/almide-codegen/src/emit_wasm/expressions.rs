@@ -59,6 +59,13 @@ impl FuncCompiler<'_> {
 
             // ── Variables ──
             IrExprKind::Var { id } => {
+                // DefId-based resolution (highest priority): direct cross-package global lookup
+                if let Some(def_id) = expr.def_id {
+                    if let Some(&(global_idx, _)) = self.emitter.def_globals.get(&def_id.0) {
+                        wasm!(self.func, { global_get(global_idx); });
+                        return;
+                    }
+                }
                 if let Some(&local_idx) = self.var_map.get(&id.0) {
                     if self.emitter.mutable_captures.contains(&id.0) {
                         // Mutable capture: local holds cell ptr, deref to get value
