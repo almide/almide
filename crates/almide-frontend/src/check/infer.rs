@@ -1138,6 +1138,7 @@ impl Checker {
                 | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
                 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
                 | Ty::Float32 | Ty::Float64
+                | Ty::Matrix | Ty::Named(..)
         );
         if !is_numeric(lc) || !is_numeric(rc) {
             self.emit(super::err(

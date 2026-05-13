@@ -91,71 +91,89 @@ fn emit_struct(td: &IrTypeDecl, fields: &[IrFieldDecl]) -> String {
     out
 }
 
-/// A uniform parameter extracted from an @gpu function.
-struct UniformParam {
+/// A GPU resource parameter extracted from an @gpu function.
+#[derive(Debug)]
+struct GpuResource {
     name: String,
     ty: String,
     var_id: VarId,
+    kind: GpuResourceKind,
 }
 
-/// Emit a GPU function as WGSL, separating @uniform params into
-/// module-level var<uniform> declarations. Returns (uniform_decls, function_code).
+#[derive(Debug)]
+enum GpuResourceKind {
+    Uniform,
+    StorageRead,
+    StorageReadWrite,
+}
+
+/// Parse GPU resource kind from parameter attributes.
+fn parse_resource_kind(attrs: &[almide_lang::ast::Attribute]) -> Option<GpuResourceKind> {
+    for attr in attrs {
+        match attr.name.as_str() {
+            "uniform" => return Some(GpuResourceKind::Uniform),
+            "storage" => {
+                // @storage or @storage(read) or @storage(read_write)
+                if let Some(arg) = attr.args.first() {
+                    if let almide_lang::ast::AttrValue::Ident { name } = &arg.value {
+                        return match name.as_str() {
+                            "read" => Some(GpuResourceKind::StorageRead),
+                            "read_write" => Some(GpuResourceKind::StorageReadWrite),
+                            _ => Some(GpuResourceKind::StorageRead),
+                        };
+                    }
+                }
+                return Some(GpuResourceKind::StorageRead);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Emit a GPU function as WGSL, separating @uniform/@storage params into
+/// module-level var declarations. Returns (resource_decls, function_code).
 fn emit_gpu_function_with_uniforms(
     func: &IrFunction,
     stage: GpuStage,
     vt: &VarTable,
     binding_counter: &mut u32,
 ) -> (String, String) {
-    // Separate @uniform params from regular params
-    let mut uniforms: Vec<UniformParam> = Vec::new();
+    // Separate GPU resource params from regular params
+    let mut resources: Vec<GpuResource> = Vec::new();
     let mut regular_params: Vec<&IrParam> = Vec::new();
 
     for p in &func.params {
-        if p.attrs.iter().any(|a| a.name.as_str() == "uniform") {
-            uniforms.push(UniformParam {
+        if let Some(kind) = parse_resource_kind(&p.attrs) {
+            resources.push(GpuResource {
                 name: p.name.as_str().to_string(),
                 ty: emit_type(&p.ty),
                 var_id: p.var,
+                kind,
             });
         } else {
             regular_params.push(p);
         }
     }
 
-    // Generate uniform declarations
+    // Generate resource declarations with auto-assigned @group/@binding
+    // Uniform → group(0), Storage → group(0) (same group, different bindings)
     let mut decls = String::new();
-    let mut uniform_var_names: Vec<(VarId, String, String)> = Vec::new(); // (var_id, wgsl_var_name, field_name)
+    let mut rewrite_map: Vec<(VarId, String)> = Vec::new(); // (var_id, wgsl_var_name)
 
-    if !uniforms.is_empty() {
-        // Single-field uniforms: emit directly without wrapper struct
-        // Multi-field: wrap in a struct
-        if uniforms.len() == 1 {
-            let u = &uniforms[0];
-            let var_name = format!("_uniform_{}", u.name);
-            decls.push_str(&format!(
-                "@group(0) @binding({})\nvar<uniform> {}: {};\n\n",
-                binding_counter, var_name, u.ty
-            ));
-            uniform_var_names.push((u.var_id, var_name, String::new()));
-            *binding_counter += 1;
-        } else {
-            let struct_name = format!("_Uniforms_{}", func.name.as_str());
-            decls.push_str(&format!("struct {} {{\n", struct_name));
-            for u in &uniforms {
-                decls.push_str(&format!("  {}: {},\n", u.name, u.ty));
-            }
-            decls.push_str("}\n\n");
-
-            let var_name = format!("_uniforms_{}", func.name.as_str());
-            decls.push_str(&format!(
-                "@group(0) @binding({})\nvar<uniform> {}: {};\n\n",
-                binding_counter, var_name, struct_name
-            ));
-            for u in &uniforms {
-                uniform_var_names.push((u.var_id, var_name.clone(), u.name.clone()));
-            }
-            *binding_counter += 1;
-        }
+    for res in &resources {
+        let var_name = format!("_{}", res.name);
+        let var_qualifier = match res.kind {
+            GpuResourceKind::Uniform => "uniform",
+            GpuResourceKind::StorageRead => "storage, read",
+            GpuResourceKind::StorageReadWrite => "storage, read_write",
+        };
+        decls.push_str(&format!(
+            "@group(0) @binding({})\nvar<{}> {}: {};\n\n",
+            binding_counter, var_qualifier, var_name, res.ty
+        ));
+        rewrite_map.push((res.var_id, var_name));
+        *binding_counter += 1;
     }
 
     // Build function code
@@ -163,11 +181,14 @@ fn emit_gpu_function_with_uniforms(
 
     // Stage annotation
     let stage_attr = match stage {
-        GpuStage::Vertex => "@vertex",
-        GpuStage::Fragment => "@fragment",
-        GpuStage::Compute => "@compute @workgroup_size(256)",
+        GpuStage::Vertex => "@vertex".to_string(),
+        GpuStage::Fragment => "@fragment".to_string(),
+        GpuStage::Compute => {
+            let wg = parse_workgroup_size(func);
+            format!("@compute @workgroup_size({})", wg)
+        }
     };
-    out.push_str(stage_attr);
+    out.push_str(&stage_attr);
     out.push('\n');
 
     // Function signature (only regular params)
@@ -197,20 +218,12 @@ fn emit_gpu_function_with_uniforms(
 
     out.push_str(" {\n");
 
-    // Body — with uniform variable rewriting
+    // Body — with resource variable rewriting
     let body_str = emit_expr(&func.body, vt, 1);
-    // Rewrite references to uniform params: `mvp` → `_uniform_mvp` (single) or `_uniforms_fn.mvp` (multi)
     let mut rewritten = body_str;
-    for (var_id, var_name, field_name) in &uniform_var_names {
+    for (var_id, var_name) in &rewrite_map {
         let param_name = vt.get(*var_id).name.as_str().to_string();
-        let replacement = if field_name.is_empty() {
-            var_name.clone()
-        } else {
-            format!("{}.{}", var_name, field_name)
-        };
-        // Replace standalone identifier references
-        // Simple word-boundary replacement (sufficient for Phase 0.3)
-        rewritten = replace_identifier(&rewritten, &param_name, &replacement);
+        rewritten = replace_identifier(&rewritten, &param_name, var_name);
     }
     out.push_str(&rewritten);
 
@@ -243,6 +256,25 @@ fn replace_identifier(code: &str, from: &str, to: &str) -> String {
 
 fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Parse workgroup size from @gpu(compute, workgroup = [x, y, z]).
+/// Falls back to "256" if not specified.
+fn parse_workgroup_size(func: &IrFunction) -> String {
+    for attr in &func.attrs {
+        if attr.name.as_str() == "gpu" {
+            for arg in &attr.args {
+                if arg.name.as_ref().map(|n| n.as_str()) == Some("workgroup") {
+                    // workgroup value is stored as a string "[256, 1, 1]"
+                    if let almide_lang::ast::AttrValue::String { value } = &arg.value {
+                        let trimmed = value.trim_matches(|c| c == '[' || c == ']');
+                        return trimmed.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "256".to_string()
 }
 
 /// Map Almide types to WGSL types.
@@ -440,6 +472,20 @@ fn emit_stmt(stmt: &IrStmt, vt: &VarTable, indent: usize) -> String {
         IrStmtKind::Assign { var, value } => {
             let name = vt.get(*var).name.as_str();
             format!("{}{} = {};\n", pad, name, emit_expr_inline(value, vt))
+        }
+        IrStmtKind::IndexAssign { target, index, value } => {
+            let name = vt.get(*target).name.as_str();
+            format!(
+                "{}{}[{}] = {};\n",
+                pad, name, emit_expr_inline(index, vt), emit_expr_inline(value, vt)
+            )
+        }
+        IrStmtKind::FieldAssign { target, field, value } => {
+            let name = vt.get(*target).name.as_str();
+            format!(
+                "{}{}.{} = {};\n",
+                pad, name, field.as_str(), emit_expr_inline(value, vt)
+            )
         }
         IrStmtKind::Expr { expr } => {
             format!("{}{};\n", pad, emit_expr_inline(expr, vt))
