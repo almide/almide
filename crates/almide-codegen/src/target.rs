@@ -145,6 +145,7 @@ fn build_pipeline(target: Target) -> Pipeline {
 
         Target::Wgsl => Pipeline::new()
             .add(UnifyVarTablesPass)
+            .add(LambdaTypeResolvePass)
             .add(ConcretizeTypesPass)
             .add(FanLoweringPass),
 

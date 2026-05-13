@@ -32,7 +32,7 @@ impl NanoPass for LambdaTypeResolvePass {
         // propagate element types into lambda params; the lambda's
         // `c: String` stays `TypeVar` and `MatchSubjectPass` fails to
         // recognise the subject type.
-        Some(vec![Target::Wasm, Target::Rust])
+        Some(vec![Target::Wasm, Target::Rust, Target::Wgsl])
     }
 
     fn postconditions(&self) -> Vec<Postcondition> {
