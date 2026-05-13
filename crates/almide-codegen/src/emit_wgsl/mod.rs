@@ -75,7 +75,12 @@ fn parse_gpu_stage(func: &IrFunction) -> Option<GpuStage> {
 fn emit_struct(td: &IrTypeDecl, fields: &[IrFieldDecl]) -> String {
     let mut out = format!("struct {} {{\n", td.name.as_str());
     for f in fields {
-        out.push_str(&format!("  {}: {},\n", f.name.as_str(), emit_type(&f.ty)));
+        let prefix = emit_wgsl_attrs(&f.attrs);
+        if prefix.is_empty() {
+            out.push_str(&format!("  {}: {},\n", f.name.as_str(), emit_type(&f.ty)));
+        } else {
+            out.push_str(&format!("  {} {}: {},\n", prefix, f.name.as_str(), emit_type(&f.ty)));
+        }
     }
     out.push_str("}\n");
     out
@@ -97,18 +102,30 @@ fn emit_gpu_function(func: &IrFunction, stage: GpuStage, vt: &VarTable) -> Strin
     // Function signature
     out.push_str(&format!("fn {}(", func.name.as_str()));
 
-    // Parameters
+    // Parameters with WGSL annotations
     let params: Vec<String> = func
         .params
         .iter()
         .map(|p| {
             let wgsl_ty = emit_type(&p.ty);
-            format!("{}: {}", p.name.as_str(), wgsl_ty)
+            let prefix = emit_wgsl_attrs(&p.attrs);
+            if prefix.is_empty() {
+                format!("{}: {}", p.name.as_str(), wgsl_ty)
+            } else {
+                format!("{} {}: {}", prefix, p.name.as_str(), wgsl_ty)
+            }
         })
         .collect();
     out.push_str(&params.join(", "));
     out.push_str(") -> ");
-    out.push_str(&emit_type(&func.ret_ty));
+
+    // Return type may have annotations from @location on the function
+    let ret_annotation = emit_return_attrs(func);
+    if ret_annotation.is_empty() {
+        out.push_str(&emit_type(&func.ret_ty));
+    } else {
+        out.push_str(&format!("{} {}", ret_annotation, emit_type(&func.ret_ty)));
+    }
 
     out.push_str(" {\n");
 
@@ -311,6 +328,53 @@ fn emit_stmt(stmt: &IrStmt, vt: &VarTable, indent: usize) -> String {
         }
         _ => format!("{}/* unsupported stmt */\n", pad),
     }
+}
+
+/// Emit WGSL annotations from Almide attributes.
+/// Maps `@builtin(position)` → `@builtin(position)`,
+///      `@location(0)` → `@location(0)`.
+fn emit_wgsl_attrs(attrs: &[almide_lang::ast::Attribute]) -> String {
+    let parts: Vec<String> = attrs.iter().filter_map(|attr| {
+        let name = attr.name.as_str();
+        match name {
+            "builtin" | "location" | "group" | "binding" => {
+                if attr.args.is_empty() {
+                    Some(format!("@{}", name))
+                } else {
+                    let args: Vec<String> = attr.args.iter().map(|a| {
+                        match &a.value {
+                            almide_lang::ast::AttrValue::Ident { name } => name.as_str().to_string(),
+                            almide_lang::ast::AttrValue::Int { value } => format!("{}", value),
+                            almide_lang::ast::AttrValue::String { value } => value.clone(),
+                            almide_lang::ast::AttrValue::Bool { value } => format!("{}", value),
+                        }
+                    }).collect();
+                    Some(format!("@{}({})", name, args.join(", ")))
+                }
+            }
+            _ => None,
+        }
+    }).collect();
+    parts.join(" ")
+}
+
+/// Extract @location annotations from function-level attrs for the return type.
+fn emit_return_attrs(func: &IrFunction) -> String {
+    let parts: Vec<String> = func.attrs.iter().filter_map(|attr| {
+        if attr.name.as_str() == "location" {
+            let args: Vec<String> = attr.args.iter().map(|a| {
+                match &a.value {
+                    almide_lang::ast::AttrValue::Int { value } => format!("{}", value),
+                    almide_lang::ast::AttrValue::Ident { name } => name.as_str().to_string(),
+                    _ => String::new(),
+                }
+            }).collect();
+            Some(format!("@location({})", args.join(", ")))
+        } else {
+            None
+        }
+    }).collect();
+    parts.join(" ")
 }
 
 /// Format a float for WGSL (ensure decimal point is present).

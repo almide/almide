@@ -659,6 +659,8 @@ pub struct IrFieldDecl {
     pub default: Option<IrExpr>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<Sym>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attrs: Vec<almide_lang::ast::Attribute>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -748,6 +750,8 @@ pub struct IrParam {
     pub open_record: Option<OpenRecordInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<Box<IrExpr>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attrs: Vec<almide_lang::ast::Attribute>,
 }
 
 // ── Top-level structures ────────────────────────────────────────

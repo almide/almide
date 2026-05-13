@@ -85,6 +85,7 @@ fn make_test_program() -> IrProgram {
                 borrow: ParamBorrow::Own,
                 open_record: None,
                 default: None,
+                attrs: vec![],
             },
             IrParam {
                 var: v_target,
@@ -93,6 +94,7 @@ fn make_test_program() -> IrProgram {
                 borrow: ParamBorrow::Own,
                 open_record: None,
                 default: None,
+                attrs: vec![],
             },
         ],
         ret_ty: Ty::Int,

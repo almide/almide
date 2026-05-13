@@ -497,6 +497,7 @@ fn lower_fn(
                     ir_params.push(IrParam {
                         var, ty: param_ty, name: g.name,
                         borrow: ParamBorrow::Own, open_record: None, default: None,
+                        attrs: Vec::new(),
                     });
                 }
             }
@@ -510,6 +511,7 @@ fn lower_fn(
         ir_params.push(IrParam {
             var, ty: ty.clone(), name: p.name,
             borrow: ParamBorrow::Own, open_record: None, default,
+            attrs: p.attrs.clone(),
         });
     }
 

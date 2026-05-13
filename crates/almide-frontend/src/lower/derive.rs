@@ -87,7 +87,7 @@ fn auto_derive_repr(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[
 
     IrFunction {
         name: sym(&format!("{}.repr", type_name)),
-        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None }],
+        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }],
         ret_ty: Ty::String,
         body: IrExpr { kind: IrExprKind::StringInterp { parts }, ty: Ty::String, span: None },
         is_effect: false, is_async: false, is_test: false,
@@ -115,8 +115,8 @@ fn auto_derive_variant_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty) -> I
     IrFunction {
         name: sym(&format!("{}.eq", type_name)),
         params: vec![
-            IrParam { var: var_a, ty: type_ty.clone(), name: sym("_a"), borrow: ParamBorrow::Own, open_record: None, default: None },
-            IrParam { var: var_b, ty: type_ty.clone(), name: sym("_b"), borrow: ParamBorrow::Own, open_record: None, default: None },
+            IrParam { var: var_a, ty: type_ty.clone(), name: sym("_a"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] },
+            IrParam { var: var_b, ty: type_ty.clone(), name: sym("_b"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] },
         ],
         ret_ty: Ty::Bool,
         body,
@@ -151,8 +151,8 @@ fn auto_derive_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[Ir
     IrFunction {
         name: sym(&format!("{}.eq", type_name)),
         params: vec![
-            IrParam { var: var_a, ty: type_ty.clone(), name: sym("_a"), borrow: ParamBorrow::Own, open_record: None, default: None },
-            IrParam { var: var_b, ty: type_ty.clone(), name: sym("_b"), borrow: ParamBorrow::Own, open_record: None, default: None },
+            IrParam { var: var_a, ty: type_ty.clone(), name: sym("_a"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] },
+            IrParam { var: var_b, ty: type_ty.clone(), name: sym("_b"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] },
         ],
         ret_ty: Ty::Bool,
         body: body.unwrap_or(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None }),

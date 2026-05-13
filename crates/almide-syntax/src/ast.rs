@@ -78,6 +78,8 @@ pub struct FieldType {
     /// Serialization alias: `name as "external_key": Type`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alias: Option<Sym>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attrs: Vec<Attribute>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,6 +246,8 @@ pub struct Param {
     pub ty: TypeExpr,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Box<Expr>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attrs: Vec<Attribute>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

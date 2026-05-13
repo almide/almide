@@ -754,8 +754,8 @@ mod tests {
                 name: "Bad".into(),
                 kind: IrTypeDeclKind::Record {
                     fields: vec![
-                        IrFieldDecl { name: "x".into(), ty: Ty::Int, default: None, alias: None },
-                        IrFieldDecl { name: "x".into(), ty: Ty::String, default: None, alias: None },
+                        IrFieldDecl { name: "x".into(), ty: Ty::Int, default: None, alias: None, attrs: vec![] },
+                        IrFieldDecl { name: "x".into(), ty: Ty::String, default: None, alias: None, attrs: vec![] },
                     ],
                 },
                 deriving: None,
@@ -818,8 +818,8 @@ mod tests {
         let f = IrFunction {
             name: "bad".into(),
             params: vec![
-                IrParam { var: x, ty: Ty::Int, name: "a".into(), borrow: ParamBorrow::Own, open_record: None, default: None },
-                IrParam { var: x, ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, open_record: None, default: None },
+                IrParam { var: x, ty: Ty::Int, name: "a".into(), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] },
+                IrParam { var: x, ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] },
             ],
             ret_ty: Ty::Int,
             body: lit_int(0),
