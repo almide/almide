@@ -171,7 +171,11 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn mk(&self, kind: IrExprKind, ty: Ty, span: Option<ast::Span>) -> IrExpr {
-        IrExpr { kind, ty, span }
+        IrExpr { kind, ty, span, def_id: None }
+    }
+
+    pub(super) fn mk_def(&self, kind: IrExprKind, ty: Ty, span: Option<ast::Span>, def_id: DefId) -> IrExpr {
+        IrExpr { kind, ty, span, def_id: Some(def_id) }
     }
 }
 

@@ -256,6 +256,10 @@ pub struct IrExpr {
     pub ty: Ty,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span: Option<Span>,
+    /// Cross-package definition reference. When set, codegen uses this
+    /// to directly look up the global/function instead of name-based fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub def_id: Option<DefId>,
 }
 
 impl Default for IrExpr {
@@ -264,6 +268,7 @@ impl Default for IrExpr {
             kind: IrExprKind::Unit,
             ty: Ty::Unit,
             span: None,
+            def_id: None,
         }
     }
 }
@@ -460,6 +465,7 @@ impl IrExpr {
     pub fn map_children(self, f: &mut impl FnMut(IrExpr) -> IrExpr) -> IrExpr {
         let ty = self.ty;
         let span = self.span;
+        let def_id = self.def_id;
         let kind = match self.kind {
             // ── Leaves (no child expressions) ──
             IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
@@ -607,7 +613,7 @@ impl IrExpr {
                 collector: collector.map_exprs(f),
             },
         };
-        IrExpr { kind, ty, span }
+        IrExpr { kind, ty, span, def_id }
     }
 }
 

@@ -234,7 +234,7 @@ fn rewrite_expr(expr: &mut IrExpr, shapes: &mut HashMap<VarId, Shape>) -> bool {
                         // Safe to unroll.
                         let new_kind = make_unrolled_mul(
                             sa.rows, sa.cols, sb.cols, dtype, &args[0], &args[1], expr.ty.clone(), expr.span);
-                        let new_expr = IrExpr { kind: new_kind, ty: expr.ty.clone(), span: expr.span };
+                        let new_expr = IrExpr { kind: new_kind, ty: expr.ty.clone(), span: expr.span, def_id: None };
                         *expr = new_expr;
                         changed = true;
                     }

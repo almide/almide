@@ -218,7 +218,7 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
             let wrapped = wrap_tail_in_ok(*tail, lifted);
             IrExpr {
                 kind: IrExprKind::Block { stmts, expr: Some(Box::new(wrapped)) },
-                ty: Ty::result(ty, Ty::String), span,
+                ty: Ty::result(ty, Ty::String), span, def_id: None,
             }
         }
         IrExprKind::If { cond, then, else_ } => IrExpr {
@@ -227,7 +227,7 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                 then: Box::new(wrap_tail_in_ok(*then, lifted)),
                 else_: Box::new(wrap_tail_in_ok(*else_, lifted)),
             },
-            ty: Ty::result(ty, Ty::String), span,
+            ty: Ty::result(ty, Ty::String), span, def_id: None,
         },
         IrExprKind::Match { subject, arms } => IrExpr {
             kind: IrExprKind::Match {
@@ -237,7 +237,7 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                     body: wrap_tail_in_ok(arm.body, lifted),
                 }).collect(),
             },
-            ty: Ty::result(ty, Ty::String), span,
+            ty: Ty::result(ty, Ty::String), span, def_id: None,
         },
         // Already Result — don't double-wrap
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => expr,
@@ -254,9 +254,9 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                 let result_ty = Ty::result(ty.clone(), Ty::String);
                 IrExpr {
                     kind: IrExprKind::ResultOk {
-                        expr: Box::new(IrExpr { kind: expr.kind, ty, span }),
+                        expr: Box::new(IrExpr { kind: expr.kind, ty, span, def_id: None }),
                     },
-                    ty: result_ty, span,
+                    ty: result_ty, span, def_id: None,
                 }
             }
         }
@@ -267,7 +267,7 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                 kind: IrExprKind::Block {
                     stmts: vec![IrStmt {
                         kind: IrStmtKind::Expr {
-                            expr: IrExpr { kind, ty, span },
+                            expr: IrExpr { kind, ty, span, def_id: None },
                         },
                         span,
                     }],
@@ -276,14 +276,14 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                             expr: Box::new(IrExpr {
                                 kind: IrExprKind::Unit,
                                 ty: Ty::Unit,
-                                span,
+                                span, def_id: None,
                             }),
                         },
                         ty: result_ty.clone(),
-                        span,
+                        span, def_id: None,
                     })),
                 },
-                ty: result_ty, span,
+                ty: result_ty, span, def_id: None,
             }
         }
         // Everything else: wrap in Ok(expr)
@@ -291,9 +291,9 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
             let result_ty = Ty::result(ty.clone(), Ty::String);
             IrExpr {
                 kind: IrExprKind::ResultOk {
-                    expr: Box::new(IrExpr { kind: other, ty, span }),
+                    expr: Box::new(IrExpr { kind: other, ty, span, def_id: None }),
                 },
-                ty: result_ty, span,
+                ty: result_ty, span, def_id: None,
             }
         }
     }
@@ -331,11 +331,11 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
             };
             let args = args.into_iter().map(|a| update_call_types(a, lifted)).collect();
             let final_ty = fn_name.as_ref().and_then(|n| lifted.get(n)).cloned().unwrap_or(ty);
-            return IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty: final_ty, span };
+            return IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty: final_ty, span, def_id: None };
         }
         IrExprKind::RuntimeCall { symbol, args } => {
             let args = args.into_iter().map(|a| update_call_types(a, lifted)).collect();
-            return IrExpr { kind: IrExprKind::RuntimeCall { symbol, args }, ty, span };
+            return IrExpr { kind: IrExprKind::RuntimeCall { symbol, args }, ty, span, def_id: None };
         }
         IrExprKind::Block { stmts, expr: e } => IrExprKind::Block {
             stmts: stmts.into_iter().map(|s| update_call_types_stmt(s, lifted)).collect(),
@@ -370,6 +370,7 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                             kind: IrExprKind::Try { expr: Box::new(arm.body) },
                             ty: inner_ty,
                             span: body_span,
+                            def_id: None,
                         },
                     }
                 } else {
@@ -430,7 +431,7 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
         },
         other => other,
     };
-    IrExpr { kind, ty, span }
+    IrExpr { kind, ty, span, def_id: None }
 }
 
 fn update_call_types_stmt(stmt: IrStmt, lifted: &HashMap<String, Ty>) -> IrStmt {
@@ -520,7 +521,7 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool) -> IrExpr {
                 let tail = strip_tail_try(tail);
                 return IrExpr {
                     kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) },
-                    ty: expr.ty, span: expr.span,
+                    ty: expr.ty, span: expr.span, def_id: None,
                 };
             }
             _ => {
@@ -538,7 +539,7 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool) -> IrExpr {
         let tail = tail.map(|e| Box::new(insert_try(*e, false)));
         return IrExpr {
             kind: IrExprKind::Block { stmts, expr: tail },
-            ty: expr.ty, span: expr.span,
+            ty: expr.ty, span: expr.span, def_id: None,
         };
     }
     insert_try(expr, false)
@@ -573,7 +574,7 @@ fn strip_tail_try(expr: IrExpr) -> IrExpr {
                 pattern: arm.pattern, guard: arm.guard,
                 body: strip_tail_try(arm.body),
             }).collect();
-            IrExpr { kind: IrExprKind::Match { subject, arms }, ty: expr.ty, span: expr.span }
+            IrExpr { kind: IrExprKind::Match { subject, arms }, ty: expr.ty, span: expr.span, def_id: None }
         }
         IrExprKind::If { cond, then, else_ } => IrExpr {
             kind: IrExprKind::If {
@@ -581,11 +582,11 @@ fn strip_tail_try(expr: IrExpr) -> IrExpr {
                 then: Box::new(strip_tail_try(*then)),
                 else_: Box::new(strip_tail_try(*else_)),
             },
-            ty: expr.ty, span: expr.span,
+            ty: expr.ty, span: expr.span, def_id: None,
         },
         IrExprKind::Block { stmts, expr: Some(tail) } => IrExpr {
             kind: IrExprKind::Block { stmts, expr: Some(Box::new(strip_tail_try(*tail))) },
-            ty: expr.ty, span: expr.span,
+            ty: expr.ty, span: expr.span, def_id: None,
         },
         _ => expr,
     }
@@ -723,7 +724,7 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
         other => other,
     };
 
-    let mut result = IrExpr { kind, ty: ty.clone(), span };
+    let mut result = IrExpr { kind, ty: ty.clone(), span, def_id: None };
 
     if should_wrap {
         let inner_ty = match &ty {
@@ -733,7 +734,7 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
         result = IrExpr {
             kind: IrExprKind::Try { expr: Box::new(result) },
             ty: inner_ty,
-            span,
+            span, def_id: None,
         };
     }
 
@@ -758,7 +759,7 @@ fn insert_try_stmt(stmt: IrStmt) -> IrStmt {
                 new_value = IrExpr {
                     kind: IrExprKind::Try { expr: Box::new(new_value) },
                     ty: inner_ty,
-                    span,
+                    span, def_id: None,
                 };
             }
             let new_ty = if matches!(&new_value.kind, IrExprKind::Try { .. }) {
@@ -835,7 +836,7 @@ fn insert_try_in_fan(expr: IrExpr) -> IrExpr {
         },
         other => other,
     };
-    IrExpr { kind, ty, span }
+    IrExpr { kind, ty, span, def_id: None }
 }
 
 fn insert_try_in_fan_stmt(stmt: IrStmt) -> IrStmt {

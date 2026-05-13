@@ -106,7 +106,7 @@ fn convert_expr(
             if free.iter().any(|vid| body_assigns_to(&body, *vid)) {
                 return IrExpr {
                     kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },
-                    ty, span,
+                    ty, span, def_id: None,
                 };
             }
 
@@ -137,7 +137,7 @@ fn convert_expr(
                         var: local, mutability: Mutability::Let, ty: cap_ty.clone(),
                         value: IrExpr {
                             kind: IrExprKind::EnvLoad { env_var, index: idx as u32 },
-                            ty: cap_ty.clone(), span: None,
+                            ty: cap_ty.clone(), span: None, def_id: None,
                         },
                     },
                     span: None,
@@ -159,7 +159,7 @@ fn convert_expr(
                         stmts: prologue,
                         expr: Some(Box::new(rewritten)),
                     },
-                    ty, span,
+                    ty, span, def_id: None,
                 }
             };
 
@@ -336,7 +336,7 @@ fn convert_expr(
         other => other,
     };
 
-    IrExpr { kind, ty, span }
+    IrExpr { kind, ty, span, def_id: None }
 }
 
 fn convert_stmt(

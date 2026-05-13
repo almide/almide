@@ -354,7 +354,7 @@ fn try_hoist_expr(
         let original = std::mem::replace(expr, IrExpr {
             kind: IrExprKind::Var { id: var },
             ty: ty.clone(),
-            span: expr.span,
+            span: expr.span, def_id: None,
         });
         hoisted.push(IrStmt {
             kind: IrStmtKind::Bind {

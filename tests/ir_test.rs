@@ -97,6 +97,7 @@ fn ir_expr_lit_int() {
         kind: IrExprKind::LitInt { value: 42 },
         ty: Ty::Int,
         span: Some(Span { line: 1, col: 1, end_col: 2 }),
+        def_id: None,
     };
     assert_eq!(expr.ty, Ty::Int);
     assert!(matches!(expr.kind, IrExprKind::LitInt { value: 42 }));
@@ -107,7 +108,7 @@ fn ir_expr_lit_float() {
     let expr = IrExpr {
         kind: IrExprKind::LitFloat { value: 3.14 },
         ty: Ty::Float,
-        span: None,
+        span: None, def_id: None,
     };
     assert_eq!(expr.ty, Ty::Float);
 }
@@ -117,7 +118,7 @@ fn ir_expr_lit_str() {
     let expr = IrExpr {
         kind: IrExprKind::LitStr { value: "hello".into() },
         ty: Ty::String,
-        span: None,
+        span: None, def_id: None,
     };
     assert_eq!(expr.ty, Ty::String);
 }
@@ -127,7 +128,7 @@ fn ir_expr_lit_bool() {
     let expr = IrExpr {
         kind: IrExprKind::LitBool { value: true },
         ty: Ty::Bool,
-        span: None,
+        span: None, def_id: None,
     };
     assert_eq!(expr.ty, Ty::Bool);
 }
@@ -137,7 +138,7 @@ fn ir_expr_unit() {
     let expr = IrExpr {
         kind: IrExprKind::Unit,
         ty: Ty::Unit,
-        span: None,
+        span: None, def_id: None,
     };
     assert_eq!(expr.ty, Ty::Unit);
 }
@@ -147,30 +148,30 @@ fn ir_expr_var() {
     let expr = IrExpr {
         kind: IrExprKind::Var { id: VarId(5) },
         ty: Ty::Int,
-        span: None,
+        span: None, def_id: None,
     };
     assert!(matches!(expr.kind, IrExprKind::Var { id: VarId(5) }));
 }
 
 #[test]
 fn ir_expr_binop() {
-    let left = Box::new(IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None });
-    let right = Box::new(IrExpr { kind: IrExprKind::LitInt { value: 2 }, ty: Ty::Int, span: None });
+    let left = Box::new(IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None, def_id: None });
+    let right = Box::new(IrExpr { kind: IrExprKind::LitInt { value: 2 }, ty: Ty::Int, span: None, def_id: None });
     let expr = IrExpr {
         kind: IrExprKind::BinOp { op: BinOp::AddInt, left, right },
         ty: Ty::Int,
-        span: None,
+        span: None, def_id: None,
     };
     assert!(matches!(expr.kind, IrExprKind::BinOp { op: BinOp::AddInt, .. }));
 }
 
 #[test]
 fn ir_expr_unop() {
-    let operand = Box::new(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None });
+    let operand = Box::new(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None, def_id: None });
     let expr = IrExpr {
         kind: IrExprKind::UnOp { op: UnOp::Not, operand },
         ty: Ty::Bool,
-        span: None,
+        span: None, def_id: None,
     };
     assert!(matches!(expr.kind, IrExprKind::UnOp { op: UnOp::Not, .. }));
 }
@@ -262,7 +263,7 @@ fn ir_stmt_bind() {
             var: VarId(0),
             mutability: Mutability::Let,
             ty: Ty::Int,
-            value: IrExpr { kind: IrExprKind::LitInt { value: 42 }, ty: Ty::Int, span: None },
+            value: IrExpr { kind: IrExprKind::LitInt { value: 42 }, ty: Ty::Int, span: None, def_id: None },
         },
         span: None,
     };
@@ -274,7 +275,7 @@ fn ir_stmt_assign() {
     let stmt = IrStmt {
         kind: IrStmtKind::Assign {
             var: VarId(0),
-            value: IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None },
+            value: IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None, def_id: None },
         },
         span: None,
     };
@@ -285,7 +286,7 @@ fn ir_stmt_assign() {
 fn ir_stmt_expr() {
     let stmt = IrStmt {
         kind: IrStmtKind::Expr {
-            expr: IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None },
+            expr: IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
         },
         span: None,
     };
@@ -312,7 +313,7 @@ fn ir_function_construction() {
             IrParam { var: VarId(1), ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![], },
         ],
         ret_ty: Ty::Int,
-        body: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None },
+        body: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None },
         is_effect: false,
         is_async: false,
         is_test: false,
@@ -337,7 +338,7 @@ fn ir_function_effect() {
         name: "main".into(),
         params: vec![],
         ret_ty: Ty::result(Ty::Unit, Ty::String),
-        body: IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None },
+        body: IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
         is_effect: true,
         is_async: false,
         is_test: false,
@@ -384,7 +385,7 @@ fn ir_string_part_lit() {
 #[test]
 fn ir_string_part_expr() {
     let part = IrStringPart::Expr {
-        expr: IrExpr { kind: IrExprKind::Var { id: VarId(0) }, ty: Ty::String, span: None },
+        expr: IrExpr { kind: IrExprKind::Var { id: VarId(0) }, ty: Ty::String, span: None, def_id: None },
     };
     assert!(matches!(part, IrStringPart::Expr { .. }));
 }
@@ -396,7 +397,7 @@ fn ir_match_arm() {
     let arm = IrMatchArm {
         pattern: IrPattern::Wildcard,
         guard: None,
-        body: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None },
+        body: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None },
     };
     assert!(arm.guard.is_none());
     assert!(matches!(arm.pattern, IrPattern::Wildcard));
@@ -406,8 +407,8 @@ fn ir_match_arm() {
 fn ir_match_arm_with_guard() {
     let arm = IrMatchArm {
         pattern: IrPattern::Bind { var: VarId(0), ty: Ty::Unknown },
-        guard: Some(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None }),
-        body: IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None },
+        guard: Some(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None, def_id: None }),
+        body: IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None, def_id: None },
     };
     assert!(arm.guard.is_some());
 }
@@ -418,11 +419,11 @@ fn ir_match_arm_with_guard() {
 fn ir_expr_list() {
     let expr = IrExpr {
         kind: IrExprKind::List { elements: vec![
-            IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None },
-            IrExpr { kind: IrExprKind::LitInt { value: 2 }, ty: Ty::Int, span: None },
+            IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None, def_id: None },
+            IrExpr { kind: IrExprKind::LitInt { value: 2 }, ty: Ty::Int, span: None, def_id: None },
         ]},
         ty: Ty::list(Ty::Int),
-        span: None,
+        span: None, def_id: None,
     };
     if let IrExprKind::List { elements } = &expr.kind {
         assert_eq!(elements.len(), 2);
@@ -433,11 +434,11 @@ fn ir_expr_list() {
 fn ir_expr_tuple() {
     let expr = IrExpr {
         kind: IrExprKind::Tuple { elements: vec![
-            IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None },
-            IrExpr { kind: IrExprKind::LitStr { value: "a".into() }, ty: Ty::String, span: None },
+            IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None, def_id: None },
+            IrExpr { kind: IrExprKind::LitStr { value: "a".into() }, ty: Ty::String, span: None, def_id: None },
         ]},
         ty: Ty::Tuple(vec![Ty::Int, Ty::String]),
-        span: None,
+        span: None, def_id: None,
     };
     if let IrExprKind::Tuple { elements } = &expr.kind {
         assert_eq!(elements.len(), 2);
@@ -448,12 +449,12 @@ fn ir_expr_tuple() {
 fn ir_expr_range() {
     let expr = IrExpr {
         kind: IrExprKind::Range {
-            start: Box::new(IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None }),
-            end: Box::new(IrExpr { kind: IrExprKind::LitInt { value: 10 }, ty: Ty::Int, span: None }),
+            start: Box::new(IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None }),
+            end: Box::new(IrExpr { kind: IrExprKind::LitInt { value: 10 }, ty: Ty::Int, span: None, def_id: None }),
             inclusive: false,
         },
         ty: Ty::list(Ty::Int),
-        span: None,
+        span: None, def_id: None,
     };
     assert!(matches!(expr.kind, IrExprKind::Range { inclusive: false, .. }));
 }
@@ -463,7 +464,7 @@ fn ir_expr_todo() {
     let expr = IrExpr {
         kind: IrExprKind::Todo { message: "not implemented".into() },
         ty: Ty::Unknown,
-        span: None,
+        span: None, def_id: None,
     };
     assert!(matches!(expr.kind, IrExprKind::Todo { .. }));
 }
@@ -473,7 +474,7 @@ fn ir_expr_hole() {
     let expr = IrExpr {
         kind: IrExprKind::Hole,
         ty: Ty::Unknown,
-        span: None,
+        span: None, def_id: None,
     };
     assert!(matches!(expr.kind, IrExprKind::Hole));
 }
@@ -495,7 +496,7 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
                     var: id,
                     mutability: Mutability::Let,
                     ty: Ty::Int,
-                    value: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None },
+                    value: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None },
                 },
                 span: *span,
             });
@@ -516,9 +517,9 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
     }).collect();
 
     let body = IrExpr {
-        kind: IrExprKind::Block { stmts, expr: Some(Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None })) },
+        kind: IrExprKind::Block { stmts, expr: Some(Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None })) },
         ty: Ty::Unit,
-        span: None,
+        span: None, def_id: None,
     };
 
     IrProgram {
@@ -582,14 +583,14 @@ fn unused_var_warning_used_var_no_warning() {
             var: x_id,
             mutability: Mutability::Let,
             ty: Ty::Int,
-            value: IrExpr { kind: IrExprKind::LitInt { value: 42 }, ty: Ty::Int, span: None },
+            value: IrExpr { kind: IrExprKind::LitInt { value: 42 }, ty: Ty::Int, span: None, def_id: None },
         },
         span: Some(Span { line: 2, col: 7, end_col: 8 }),
     };
     let use_expr = IrExpr {
         kind: IrExprKind::Var { id: x_id },
         ty: Ty::Int,
-        span: None,
+        span: None, def_id: None,
     };
     let body = IrExpr {
         kind: IrExprKind::Block {
@@ -597,7 +598,7 @@ fn unused_var_warning_used_var_no_warning() {
             expr: Some(Box::new(use_expr)),
         },
         ty: Ty::Int,
-        span: None,
+        span: None, def_id: None,
     };
 
     let mut prog = IrProgram {

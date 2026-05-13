@@ -299,14 +299,14 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
         let bind_value = match borrow {
             Some(ParamBorrow::RefSlice) => IrExpr {
                 kind: IrExprKind::ToVec {
-                    expr: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None }),
+                    expr: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None, def_id: None }),
                 },
-                ty: ty.clone(), span: None,
+                ty: ty.clone(), span: None, def_id: None,
             },
             Some(ParamBorrow::RefStr) => IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Method {
-                        object: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None }),
+                        object: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None, def_id: None }),
                         // Use `to_owned` instead of `to_string` to avoid
                         // StdlibLowering converting this into a module call
                         // (e.g. `int.to_string()`) when the Almide-level type
@@ -316,9 +316,9 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
                     args: vec![],
                     type_args: vec![],
                 },
-                ty: ty.clone(), span: None,
+                ty: ty.clone(), span: None, def_id: None,
             },
-            _ => IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None },
+            _ => IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None, def_id: None },
         };
 
         stmts.push(IrStmt {
@@ -341,7 +341,7 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
     let lambda_expr = std::mem::replace(expr, IrExpr {
         kind: IrExprKind::Unit,
         ty: Ty::Unit,
-        span: None,
+        span: None, def_id: None,
     });
     let ty = lambda_expr.ty.clone();
     let span = lambda_expr.span;
@@ -351,7 +351,7 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
             expr: Some(Box::new(lambda_expr)),
         },
         ty,
-        span,
+        span, def_id: None,
     };
 }
 

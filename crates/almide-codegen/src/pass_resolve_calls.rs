@@ -120,7 +120,7 @@ impl NanoPass for ResolveCallsPass {
             for fi in 0..program.modules[mi].functions.len() {
                 let mut body = std::mem::replace(
                     &mut program.modules[mi].functions[fi].body,
-                    IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None },
+                    IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None },
                 );
                 rw.visit_expr_mut(&mut body);
                 program.modules[mi].functions[fi].body = body;
@@ -128,7 +128,7 @@ impl NanoPass for ResolveCallsPass {
             for ti in 0..program.modules[mi].top_lets.len() {
                 let mut val = std::mem::replace(
                     &mut program.modules[mi].top_lets[ti].value,
-                    IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None },
+                    IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None },
                 );
                 rw.visit_expr_mut(&mut val);
                 program.modules[mi].top_lets[ti].value = val;

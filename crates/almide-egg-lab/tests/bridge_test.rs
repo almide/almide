@@ -37,7 +37,7 @@ fn var(id: u32, ty: Ty) -> IrExpr {
     IrExpr {
         kind: IrExprKind::Var { id: VarId(id) },
         ty,
-        span: None,
+        span: None, def_id: None,
     }
 }
 
@@ -53,7 +53,7 @@ fn identity_lambda(var_id: u32, ty: Ty) -> IrExpr {
             params: vec![ty.clone()],
             ret: Box::new(ty),
         },
-        span: None,
+        span: None, def_id: None,
     }
 }
 
@@ -64,7 +64,7 @@ fn opaque_lambda(param_id: u32, lambda_id: u32) -> IrExpr {
     let body = IrExpr {
         kind: IrExprKind::LitInt { value: 1 },
         ty: Ty::Int,
-        span: None,
+        span: None, def_id: None,
     };
     IrExpr {
         kind: IrExprKind::Lambda {
@@ -76,7 +76,7 @@ fn opaque_lambda(param_id: u32, lambda_id: u32) -> IrExpr {
             params: vec![Ty::Int],
             ret: Box::new(Ty::Int),
         },
-        span: None,
+        span: None, def_id: None,
     }
 }
 
@@ -91,11 +91,11 @@ fn incr_lambda(param_id: u32, lambda_id: u32, incr: i64) -> IrExpr {
             right: Box::new(IrExpr {
                 kind: IrExprKind::LitInt { value: incr },
                 ty: Ty::Int,
-                span: None,
+                span: None, def_id: None,
             }),
         },
         ty: Ty::Int,
-        span: None,
+        span: None, def_id: None,
     };
     IrExpr {
         kind: IrExprKind::Lambda {
@@ -104,7 +104,7 @@ fn incr_lambda(param_id: u32, lambda_id: u32, incr: i64) -> IrExpr {
             lambda_id: Some(lambda_id),
         },
         ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) },
-        span: None,
+        span: None, def_id: None,
     }
 }
 
@@ -119,7 +119,7 @@ fn list_call(func: &str, args: Vec<IrExpr>, result_ty: Ty) -> IrExpr {
             type_args: vec![],
         },
         ty: result_ty,
-        span: None,
+        span: None, def_id: None,
     }
 }
 
@@ -142,7 +142,7 @@ fn matrix_call(func: &str, args: Vec<IrExpr>) -> IrExpr {
             type_args: vec![],
         },
         ty: Ty::Matrix,
-        span: None,
+        span: None, def_id: None,
     }
 }
 
@@ -425,12 +425,12 @@ fn lower_filter_filter_fuses_into_conjunctive_predicate() {
             body: Box::new(IrExpr {
                 kind: IrExprKind::LitBool { value: true },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             }),
             lambda_id: Some(201),
         },
         ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) },
-        span: None,
+        span: None, def_id: None,
     };
     // q: (x: Int) => false (distinct body to ensure it survives into
     // the right side of the AND)
@@ -440,12 +440,12 @@ fn lower_filter_filter_fuses_into_conjunctive_predicate() {
             body: Box::new(IrExpr {
                 kind: IrExprKind::LitBool { value: false },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             }),
             lambda_id: Some(202),
         },
         ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) },
-        span: None,
+        span: None, def_id: None,
     };
     let inner = list_call("filter", vec![xs, p], list_int());
     let outer = list_call("filter", vec![inner, q], list_int());
@@ -698,14 +698,14 @@ fn block_lets(binds: Vec<(VarId, IrExpr)>, trailing: IrExpr) -> IrExpr {
                 ty: value.ty.clone(),
                 value,
             },
-            span: None,
+            span: None, def_id: None,
         })
         .collect();
     let trailing_ty = trailing.ty.clone();
     IrExpr {
         kind: IrExprKind::Block { stmts, expr: Some(Box::new(trailing)) },
         ty: trailing_ty,
-        span: None,
+        span: None, def_id: None,
     }
 }
 
@@ -713,7 +713,7 @@ fn matrix_var_ref(id: u32) -> IrExpr {
     IrExpr {
         kind: IrExprKind::Var { id: VarId(id) },
         ty: Ty::Matrix,
-        span: None,
+        span: None, def_id: None,
     }
 }
 

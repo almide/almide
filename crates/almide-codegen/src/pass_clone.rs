@@ -271,9 +271,9 @@ fn reset_remaining(remaining: &mut HashMap<VarId, u32>, eligible: &HashSet<VarId
 fn make_clone(id: VarId, ty: Ty, span: Option<Span>) -> IrExpr {
     IrExpr {
         kind: IrExprKind::Clone {
-            expr: Box::new(IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span }),
+            expr: Box::new(IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span, def_id: None }),
         },
-        ty, span,
+        ty, span, def_id: None,
     }
 }
 
@@ -297,7 +297,7 @@ fn insert_clones_live(
                 *r = r.saturating_sub(1);
                 if *r == 0 && !in_loop {
                     // Last use outside a loop → move (no clone)
-                    return IrExpr { kind: IrExprKind::Var { id }, ty, span };
+                    return IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None };
                 }
             }
             return make_clone(id, ty, span);
@@ -407,10 +407,10 @@ fn insert_clones_live(
                     object: Box::new(processed_object),
                     index: Box::new(processed_index),
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             };
             if needs_clone(&ty) {
-                return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span };
+                return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
             }
             return access;
         }
@@ -427,10 +427,10 @@ fn insert_clones_live(
                     object: Box::new(processed_object),
                     key: Box::new(processed_key),
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             };
             if needs_clone(&ty) {
-                return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span };
+                return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
             }
             return access;
         }
@@ -464,10 +464,10 @@ fn insert_clones_live(
                     object: Box::new(processed_object),
                     field,
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             };
             if needs_clone(&ty) {
-                return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span };
+                return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
             }
             return access;
         }
@@ -537,7 +537,7 @@ fn insert_clones_live(
         other => other,
     };
 
-    IrExpr { kind, ty, span }
+    IrExpr { kind, ty, span, def_id: None }
 }
 
 fn insert_clone_stmts_live(

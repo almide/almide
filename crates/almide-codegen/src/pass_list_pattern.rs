@@ -134,7 +134,7 @@ fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> (IrExpr, bool) {
         }
         other => other,
     };
-    (IrExpr { kind, ty: expr.ty, span: expr.span }, changed)
+    (IrExpr { kind, ty: expr.ty, span: expr.span, def_id: None }, changed)
 }
 
 fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut VarTable, changed: &mut bool) -> Vec<IrStmt> {
@@ -172,7 +172,7 @@ fn lower_list_match(subject: IrExpr, arms: Vec<IrMatchArm>, result_ty: &Ty, _vt:
 
 fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mut VarTable) -> IrExpr {
     if arms.is_empty() {
-        return IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None };
+        return IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None, def_id: None };
     }
 
     let arm = &arms[0];
@@ -188,12 +188,12 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                     type_args: vec![],
                 },
                 ty: Ty::Int,
-                span: None,
+                span: None, def_id: None,
             };
             let expected_len = IrExpr {
                 kind: IrExprKind::LitInt { value: elements.len() as i64 },
                 ty: Ty::Int,
-                span: None,
+                span: None, def_id: None,
             };
             let cond = IrExpr {
                 kind: IrExprKind::BinOp {
@@ -202,7 +202,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                     right: Box::new(expected_len),
                 },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             };
 
             // Build body: let bindings for each element + original body
@@ -220,11 +220,11 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                         index: Box::new(IrExpr {
                             kind: IrExprKind::LitInt { value: i as i64 },
                             ty: Ty::Int,
-                            span: None,
+                            span: None, def_id: None,
                         }),
                     },
                     ty: elem_ty.clone(),
-                    span: None,
+                    span: None, def_id: None,
                 };
                 match elem_pat {
                     IrPattern::Bind { var, .. } => {
@@ -247,7 +247,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                                 right: Box::new(lit_expr.clone()),
                             },
                             ty: Ty::Bool,
-                            span: None,
+                            span: None, def_id: None,
                         });
                     }
                     _ => {} // Wildcard: no binding or check needed
@@ -264,7 +264,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                         right: Box::new(ec),
                     },
                     ty: Ty::Bool,
-                    span: None,
+                    span: None, def_id: None,
                 };
             }
 
@@ -279,7 +279,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                         else_: Box::new(else_body),
                     },
                     ty: result_ty.clone(),
-                    span: None,
+                    span: None, def_id: None,
                 };
                 if stmts.is_empty() {
                     guarded
@@ -290,7 +290,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                             expr: Some(Box::new(guarded)),
                         },
                         ty: result_ty.clone(),
-                        span: None,
+                        span: None, def_id: None,
                     }
                 }
             } else if stmts.is_empty() {
@@ -302,7 +302,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                         expr: Some(Box::new(arm.body.clone())),
                     },
                     ty: result_ty.clone(),
-                    span: None,
+                    span: None, def_id: None,
                 }
             };
 
@@ -314,7 +314,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                     else_: Box::new(else_body),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
         // Tuple containing list patterns: extract list checks from tuple elements
@@ -334,7 +334,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                         index: i,
                     },
                     ty: tuple_tys.get(i).cloned().unwrap_or(Ty::Unknown),
-                    span: None,
+                    span: None, def_id: None,
                 };
                 match elem_pat {
                     IrPattern::List { elements: list_elems } => {
@@ -346,7 +346,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                                 type_args: vec![],
                             },
                             ty: Ty::Int,
-                            span: None,
+                            span: None, def_id: None,
                         };
                         conds.push(IrExpr {
                             kind: IrExprKind::BinOp {
@@ -355,11 +355,11 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                                 right: Box::new(IrExpr {
                                     kind: IrExprKind::LitInt { value: list_elems.len() as i64 },
                                     ty: Ty::Int,
-                                    span: None,
+                                    span: None, def_id: None,
                                 }),
                             },
                             ty: Ty::Bool,
-                            span: None,
+                            span: None, def_id: None,
                         });
                         // Bind list elements
                         let inner_elem_ty = match tuple_tys.get(i) {
@@ -379,11 +379,11 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                                                 index: Box::new(IrExpr {
                                                     kind: IrExprKind::LitInt { value: j as i64 },
                                                     ty: Ty::Int,
-                                                    span: None,
+                                                    span: None, def_id: None,
                                                 }),
                                             },
                                             ty: inner_elem_ty.clone(),
-                                            span: None,
+                                            span: None, def_id: None,
                                         },
                                     },
                                     span: None,
@@ -408,12 +408,12 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
 
             // Combine conditions
             let combined_cond = if conds.is_empty() {
-                IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None }
+                IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None, def_id: None }
             } else {
                 conds.into_iter().reduce(|a, b| IrExpr {
                     kind: IrExprKind::BinOp { op: BinOp::And, left: Box::new(a), right: Box::new(b) },
                     ty: Ty::Bool,
-                    span: None,
+                    span: None, def_id: None,
                 }).unwrap()
             };
 
@@ -423,7 +423,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                 IrExpr {
                     kind: IrExprKind::Block { stmts, expr: Some(Box::new(arm.body.clone())) },
                     ty: result_ty.clone(),
-                    span: None,
+                    span: None, def_id: None,
                 }
             };
 
@@ -435,7 +435,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                     else_: Box::new(else_body),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
         // Non-list patterns: re-wrap into a match with remaining arms
@@ -456,7 +456,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                     expr: Some(Box::new(arm.body.clone())),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
         _ => {
@@ -466,7 +466,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                 .filter(|a| !matches!(&a.pattern, IrPattern::List { .. }))
                 .collect();
             if remaining_arms.is_empty() {
-                IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None }
+                IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None, def_id: None }
             } else {
                 IrExpr {
                     kind: IrExprKind::Match {
@@ -474,7 +474,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                         arms: remaining_arms,
                     },
                     ty: result_ty.clone(),
-                    span: None,
+                    span: None, def_id: None,
                 }
             }
         }

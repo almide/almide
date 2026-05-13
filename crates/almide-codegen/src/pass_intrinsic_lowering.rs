@@ -294,5 +294,5 @@ fn ast_literal_to_ir_expr(expr: &ast::Expr) -> IrExpr {
         ),
         _ => return IrExpr::default(),
     };
-    IrExpr { kind, ty, span: expr.span }
+    IrExpr { kind, ty, span: expr.span, def_id: None }
 }

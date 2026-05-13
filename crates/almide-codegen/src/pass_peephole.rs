@@ -229,7 +229,7 @@ fn try_detect_vec_init(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrStmt> 
             type_args: vec![],
         },
         ty: ty.clone(),
-        span: s1.span,
+        span: s1.span, def_id: None,
     };
 
     Some(IrStmt {
@@ -383,9 +383,9 @@ fn try_detect_copy_loop(loop_var: VarId, iterable: &IrExpr, body_stmt: &IrStmt) 
                 kind: IrStmtKind::ListCopySlice { dst: *xs_id, src: *ys_id, len: (**end).clone() },
                 span: None,
             }],
-            expr: Some(Box::new(IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None })),
+            expr: Some(Box::new(IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None })),
         },
         ty: almide_lang::types::Ty::Unit,
-        span: None,
+        span: None, def_id: None,
     })
 }

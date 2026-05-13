@@ -328,7 +328,7 @@ impl Bridge {
             AlmideExpr::Num(n) => Ok(IrExpr {
                 kind: IrExprKind::LitInt { value: *n },
                 ty: Ty::Int,
-                span: None,
+                span: None, def_id: None,
             }),
             AlmideExpr::Map([xs_id, f_id]) => {
                 let xs = self.lower_expr(rec, *xs_id, vt)?;
@@ -345,7 +345,7 @@ impl Bridge {
                         type_args: vec![],
                     },
                     ty: Ty::list(ret_elem),
-                    span: None,
+                    span: None, def_id: None,
                 })
             }
             AlmideExpr::Filter([xs_id, p_id]) => {
@@ -362,7 +362,7 @@ impl Bridge {
                         type_args: vec![],
                     },
                     ty: Ty::list(elem_ty),
-                    span: None,
+                    span: None, def_id: None,
                 })
             }
             AlmideExpr::Fold([xs_id, init_id, f_id]) => {
@@ -382,7 +382,7 @@ impl Bridge {
                         type_args: vec![],
                     },
                     ty: acc_ty,
-                    span: None,
+                    span: None, def_id: None,
                 })
             }
             AlmideExpr::Lam(_)
@@ -441,7 +441,7 @@ impl Bridge {
                         type_args: vec![],
                     },
                     ty: Ty::list(ret_inner),
-                    span: None,
+                    span: None, def_id: None,
                 })
             }
             AlmideExpr::FilterMap([xs_id, f_id]) => {
@@ -463,7 +463,7 @@ impl Bridge {
                         type_args: vec![],
                     },
                     ty: Ty::list(ret_inner),
-                    span: None,
+                    span: None, def_id: None,
                 })
             }
             AlmideExpr::ComposeFold(_) | AlmideExpr::ComposeFlatmap(_)
@@ -507,7 +507,7 @@ impl Bridge {
                 type_args: vec![],
             },
             ty,
-            span: None,
+            span: None, def_id: None,
         })
     }
 
@@ -851,7 +851,7 @@ fn build_identity_lambda(elem_ty: Ty, vt: &mut VarTable) -> IrExpr {
             body: Box::new(IrExpr {
                 kind: IrExprKind::Var { id: var },
                 ty: elem_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }),
             lambda_id: None,
         },
@@ -859,7 +859,7 @@ fn build_identity_lambda(elem_ty: Ty, vt: &mut VarTable) -> IrExpr {
             params: vec![elem_ty.clone()],
             ret: Box::new(elem_ty),
         },
-        span: None,
+        span: None, def_id: None,
     }
 }
 
@@ -877,7 +877,7 @@ fn compose_lambdas_fresh(
     let fresh_var = IrExpr {
         kind: IrExprKind::Var { id: fresh },
         ty: f_param_ty.clone(),
-        span: None,
+        span: None, def_id: None,
     };
     // First rename f's own param to fresh so f_body references fresh,
     // then substitute g's param with the renamed f_body.
@@ -896,7 +896,7 @@ fn compose_lambdas_fresh(
             params: vec![f_param_ty],
             ret: Box::new(ret_ty),
         },
-        span: None,
+        span: None, def_id: None,
     })
 }
 
@@ -915,7 +915,7 @@ fn compose_predicates_fresh(
     let fresh_var = IrExpr {
         kind: IrExprKind::Var { id: fresh },
         ty: p_param_ty.clone(),
-        span: None,
+        span: None, def_id: None,
     };
     let p_body_fresh = substitute_var_in_expr(p_body, p_param_id, &fresh_var);
     let q_body_fresh = substitute_var_in_expr(q_body, q_param_id, &fresh_var);
@@ -927,7 +927,7 @@ fn compose_predicates_fresh(
             right: Box::new(q_body_fresh),
         },
         ty: Ty::Bool,
-        span: None,
+        span: None, def_id: None,
     };
 
     Ok(IrExpr {
@@ -940,7 +940,7 @@ fn compose_predicates_fresh(
             params: vec![p_param_ty],
             ret: Box::new(Ty::Bool),
         },
-        span: None,
+        span: None, def_id: None,
     })
 }
 
@@ -996,7 +996,7 @@ fn compose_map_into_fold_fresh(
             params: vec![g_acc_ty, f_param_ty],
             ret: Box::new(ret_ty),
         },
-        span: None,
+        span: None, def_id: None,
     })
 }
 
@@ -1022,7 +1022,7 @@ fn compose_flatmaps_fresh(
             type_args: vec![],
         },
         ty: g_ret.clone(),
-        span: None,
+        span: None, def_id: None,
     };
 
     Ok(IrExpr {
@@ -1035,7 +1035,7 @@ fn compose_flatmaps_fresh(
             params: vec![f_param_ty],
             ret: Box::new(g_ret),
         },
-        span: None,
+        span: None, def_id: None,
     })
 }
 
@@ -1058,16 +1058,16 @@ fn compose_map_filter_fresh(
             then: Box::new(IrExpr {
                 kind: IrExprKind::OptionSome { expr: Box::new(f_body.clone()) },
                 ty: Ty::option(result_ty.clone()),
-                span: None,
+                span: None, def_id: None,
             }),
             else_: Box::new(IrExpr {
                 kind: IrExprKind::OptionNone,
                 ty: Ty::option(result_ty.clone()),
-                span: None,
+                span: None, def_id: None,
             }),
         },
         ty: Ty::option(result_ty.clone()),
-        span: None,
+        span: None, def_id: None,
     };
 
     Ok(IrExpr {
@@ -1080,7 +1080,7 @@ fn compose_map_filter_fresh(
             params: vec![f_param_ty],
             ret: Box::new(Ty::option(result_ty)),
         },
-        span: None,
+        span: None, def_id: None,
     })
 }
 
@@ -1099,7 +1099,7 @@ fn compose_filter_map_into_fold_fresh(
     let acc_ref = IrExpr {
         kind: IrExprKind::Var { id: g_acc_id },
         ty: g_acc_ty.clone(),
-        span: None,
+        span: None, def_id: None,
     };
 
     use almide_ir::{IrMatchArm, IrPattern};
@@ -1121,7 +1121,7 @@ fn compose_filter_map_into_fold_fresh(
             arms: vec![some_arm, none_arm],
         },
         ty: g_acc_ty.clone(),
-        span: None,
+        span: None, def_id: None,
     };
 
     Ok(IrExpr {
@@ -1137,6 +1137,6 @@ fn compose_filter_map_into_fold_fresh(
             params: vec![g_acc_ty.clone(), fm_param_ty],
             ret: Box::new(g_acc_ty),
         },
-        span: None,
+        span: None, def_id: None,
     })
 }

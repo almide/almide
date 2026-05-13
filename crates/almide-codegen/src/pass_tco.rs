@@ -98,7 +98,7 @@ impl<'a> IrMutVisitor for TcoCallStripper<'a> {
                             let taken = std::mem::replace(inner.as_mut(), IrExpr {
                                 kind: IrExprKind::Unit,
                                 ty: Ty::Unit,
-                                span: None,
+                                span: None, def_id: None,
                             });
                             *arg = taken;
                         }
@@ -491,12 +491,12 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
             cond: Box::new(IrExpr {
                 kind: IrExprKind::LitBool { value: true },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             }),
             body: vec![while_body_stmt],
         },
         ty: Ty::Unit,
-        span: None,
+        span: None, def_id: None,
     };
 
     let while_stmt = IrStmt {
@@ -507,7 +507,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
     let tail_var = IrExpr {
         kind: IrExprKind::Var { id: result_var },
         ty: ret_ty.clone(),
-        span: None,
+        span: None, def_id: None,
     };
 
     // For effect fns, wrap the result in Ok() since the function returns Result
@@ -515,7 +515,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
         IrExpr {
             kind: IrExprKind::ResultOk { expr: Box::new(tail_var) },
             ty: func.ret_ty.clone(),
-            span: None,
+            span: None, def_id: None,
         }
     } else {
         tail_var
@@ -527,7 +527,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
             expr: Some(Box::new(tail_expr)),
         },
         ty: func.ret_ty.clone(),
-        span: func.body.span,
+        span: func.body.span, def_id: None,
     };
 
     reverted_to_own
@@ -568,7 +568,7 @@ fn rewrite_tail_expr(
                     else_: Box::new(new_else),
                 },
                 ty: Ty::Unit,
-                span: expr.span,
+                span: expr.span, def_id: None,
             }
         }
 
@@ -584,7 +584,7 @@ fn rewrite_tail_expr(
             IrExpr {
                 kind: IrExprKind::Match { subject, arms: new_arms },
                 ty: Ty::Unit,
-                span: expr.span,
+                span: expr.span, def_id: None,
             }
         }
 
@@ -597,7 +597,7 @@ fn rewrite_tail_expr(
                     expr: Some(Box::new(new_tail)),
                 },
                 ty: Ty::Unit,
-                span: expr.span,
+                span: expr.span, def_id: None,
             }
         }
 
@@ -660,7 +660,7 @@ fn emit_tail_call_replacement(
                 value: IrExpr {
                     kind: IrExprKind::Var { id: *tmp_var },
                     ty: tmp_ty.clone(),
-                    span: None,
+                    span: None, def_id: None,
                 },
             },
             span: None,
@@ -671,7 +671,7 @@ fn emit_tail_call_replacement(
     let continue_expr = IrExpr {
         kind: IrExprKind::Continue,
         ty: Ty::Unit,
-        span: None,
+        span: None, def_id: None,
     };
 
     IrExpr {
@@ -680,7 +680,7 @@ fn emit_tail_call_replacement(
             expr: Some(Box::new(continue_expr)),
         },
         ty: Ty::Unit,
-        span: None,
+        span: None, def_id: None,
     }
 }
 
@@ -701,7 +701,7 @@ fn emit_base_case(expr: IrExpr, result_var: VarId) -> IrExpr {
     let break_expr = IrExpr {
         kind: IrExprKind::Break,
         ty: Ty::Unit,
-        span: None,
+        span: None, def_id: None,
     };
 
     IrExpr {
@@ -710,7 +710,7 @@ fn emit_base_case(expr: IrExpr, result_var: VarId) -> IrExpr {
             expr: Some(Box::new(break_expr)),
         },
         ty: Ty::Unit,
-        span: None,
+        span: None, def_id: None,
     }
 }
 
@@ -751,7 +751,7 @@ fn default_for_type(ty: &Ty) -> IrExpr {
     IrExpr {
         kind,
         ty: ty.clone(),
-        span: None,
+        span: None, def_id: None,
     }
 }
 

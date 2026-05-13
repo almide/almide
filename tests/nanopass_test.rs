@@ -9,7 +9,7 @@ use almide_base::intern::sym;
 // ── Helpers ─────────────────────────────────────────────────────
 
 fn mk_expr(kind: IrExprKind, ty: Ty) -> IrExpr {
-    IrExpr { kind, ty, span: None }
+    IrExpr { kind, ty, span: None, def_id: None }
 }
 
 fn mk_fn(name: &str, params: Vec<IrParam>, ret_ty: Ty, body: IrExpr, is_effect: bool) -> IrFunction {
