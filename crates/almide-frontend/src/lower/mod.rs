@@ -270,7 +270,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                 let val_ty = ctx.var_table.get(var).ty.clone();
                 let ir_value = lower_expr(&mut ctx, value);
                 let kind = classify_top_let_kind(&ir_value);
-                top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, doc, blank_lines_before: blank_lines });
+                top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, doc, blank_lines_before: blank_lines, def_id: None });
             }
             ast::Decl::Test { name, body, .. } => {
                 let test_fn = lower_test(&mut ctx, name, body);
@@ -300,7 +300,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         .map(|(name, _)| *name)
         .collect();
 
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: Default::default(), modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
@@ -561,6 +561,7 @@ fn lower_fn(
         attrs: attrs.to_vec(),
         visibility: vis,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
@@ -575,5 +576,6 @@ fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
         visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }

@@ -498,6 +498,7 @@ mod tests {
             top_lets: vec![],
             type_decls: vec![],
             var_table,
+            def_table: Default::default(),
             modules: vec![],
             type_registry: Default::default(),
             effect_fn_names: Default::default(),
@@ -529,6 +530,7 @@ mod tests {
             visibility: IrVisibility::Public,
             doc: None,
             blank_lines_before: 0,
+            def_id: None,
         }
     }
 
@@ -705,6 +707,7 @@ mod tests {
             top_lets: vec![],
             type_decls: vec![],
             var_table: main_vt,
+            def_table: Default::default(),
             modules: vec![IrModule {
                 name: "mymod".into(),
                 versioned_name: None,
@@ -765,6 +768,7 @@ mod tests {
                 blank_lines_before: 0,
             }],
             var_table: vt,
+            def_table: Default::default(),
             modules: vec![],
             type_registry: Default::default(),
             effect_fn_names: Default::default(),
@@ -800,6 +804,7 @@ mod tests {
                 blank_lines_before: 0,
             }],
             var_table: vt,
+            def_table: Default::default(),
             modules: vec![],
             type_registry: Default::default(),
             effect_fn_names: Default::default(),
@@ -832,6 +837,7 @@ mod tests {
             visibility: IrVisibility::Public,
             doc: None,
             blank_lines_before: 0,
+            def_id: None,
         };
         let prog = make_program(vec![f], vt);
         let errors = verify_program(&prog);
@@ -955,6 +961,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
+            def_table: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -991,6 +998,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
+            def_table: Default::default(),
         };
         assert!(verify_program(&prog).is_empty());
     }

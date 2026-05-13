@@ -212,6 +212,7 @@ fn convert_expr(
                 is_effect: false, is_async: false, is_test: false,
                 generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
                 visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
+                def_id: None,
             });
 
             IrExprKind::ClosureCreate { func_name, captures }

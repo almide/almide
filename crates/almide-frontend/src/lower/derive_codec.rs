@@ -52,6 +52,7 @@ pub(super) fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &T
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
@@ -225,6 +226,7 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
@@ -366,6 +368,7 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
@@ -458,5 +461,6 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }

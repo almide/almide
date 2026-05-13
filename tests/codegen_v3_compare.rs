@@ -108,6 +108,7 @@ fn make_test_program() -> IrProgram {
         visibility: IrVisibility::Public,
         doc: None,
         blank_lines_before: 0,
+        def_id: None,
     };
 
     IrProgram {
@@ -115,6 +116,7 @@ fn make_test_program() -> IrProgram {
         top_lets: vec![],
         type_decls: vec![],
         var_table,
+        def_table: Default::default(),
         modules: vec![],
         type_registry: Default::default(),
         effect_fn_names: Default::default(),

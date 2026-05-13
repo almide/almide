@@ -1728,6 +1728,7 @@ mod tests {
             top_lets: vec![],
             type_decls: vec![],
             var_table: almide_ir::VarTable::new(),
+            def_table: Default::default(),
             modules: vec![],
             type_registry: Default::default(),
             effect_fn_names: Default::default(),

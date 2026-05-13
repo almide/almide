@@ -322,6 +322,7 @@ fn ir_function_construction() {
         visibility: IrVisibility::Public,
         doc: None,
         blank_lines_before: 0,
+        def_id: None,
     };
     assert_eq!(f.name, "add");
     assert_eq!(f.params.len(), 2);
@@ -346,6 +347,7 @@ fn ir_function_effect() {
         visibility: IrVisibility::Public,
         doc: None,
         blank_lines_before: 0,
+        def_id: None,
     };
     assert!(f.is_effect);
 }
@@ -359,6 +361,7 @@ fn ir_program_construction() {
         top_lets: vec![],
         type_decls: vec![],
         var_table: VarTable::new(),
+        def_table: Default::default(),
         modules: vec![],
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
@@ -533,10 +536,12 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
             visibility: IrVisibility::Public,
             doc: None,
             blank_lines_before: 0,
+            def_id: None,
         }],
         top_lets: vec![],
         type_decls: vec![],
         var_table,
+        def_table: Default::default(),
         modules: vec![],
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
@@ -610,10 +615,12 @@ fn unused_var_warning_used_var_no_warning() {
             visibility: IrVisibility::Public,
             doc: None,
             blank_lines_before: 0,
+            def_id: None,
         }],
         top_lets: vec![],
         type_decls: vec![],
         var_table,
+        def_table: Default::default(),
         modules: vec![],
         type_registry: Default::default(),
         effect_fn_names: Default::default(),

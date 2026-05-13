@@ -74,6 +74,7 @@ pub(super) fn specialize_function(
         visibility: orig.visibility.clone(),
         doc: None,
         blank_lines_before: 0,
+        def_id: None,
     }
 }
 

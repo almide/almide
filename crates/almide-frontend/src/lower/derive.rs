@@ -93,6 +93,7 @@ fn auto_derive_repr(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
@@ -123,6 +124,7 @@ fn auto_derive_variant_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty) -> I
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
@@ -159,5 +161,6 @@ fn auto_derive_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[Ir
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
