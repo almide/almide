@@ -67,14 +67,15 @@ impl FuncCompiler<'_> {
                     } else {
                         wasm!(self.func, { local_get(local_idx); });
                     }
-                } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id.0) {
-                    wasm!(self.func, { global_get(global_idx); });
                 } else if let Some(&(global_idx, _)) = {
-                    // Cross-module top_let access: synthetic Var carrying
-                    // `ALMIDE_RT_<MOD>_<NAME>` resolves via name-keyed globals.
+                    // Try name-based lookup FIRST: cross-module synthetic Vars
+                    // (ALMIDE_RT_<MOD>_<NAME>) must resolve by name because their
+                    // VarIds can collide with unrelated globals after unification.
                     let name = if (id.0 as usize) < self.var_table.len() { self.var_table.get(*id).name.as_str() } else { "" };
                     self.emitter.top_let_globals_by_name.get(name)
                 } {
+                    wasm!(self.func, { global_get(global_idx); });
+                } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id.0) {
                     wasm!(self.func, { global_get(global_idx); });
                 } else {
                     // VarId not in var_map — try name-based lookup as fallback

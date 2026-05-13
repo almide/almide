@@ -895,15 +895,41 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 almide_ir::IrExprKind::LitBool { value } => *value as i64,
                 _ => 0,
             };
-            // Post-unification module top-lets reference the unified
-            // `program.var_table` (see `pass_unify_var_tables`). We
-            // keep the name-keyed map populated for compatibility with
-            // the synthetic Var branch below, but the VarId-keyed
-            // `top_let_globals` is also authoritative now.
             let name = program.var_table.get(tl.var).name.to_string();
-            emitter.top_let_globals_by_name.insert(name, (global_idx, vt));
+            emitter.top_let_globals_by_name.insert(name.clone(), (global_idx, vt));
             emitter.top_let_globals.insert(tl.var.0, (global_idx, vt));
             emitter.top_let_init.push((global_idx, vt, const_bits));
+
+            // Also register under the ALMIDE_RT_<MOD>_<NAME> synthetic name
+            // that cross-module access creates during lowering. Without this,
+            // the name-keyed fallback in expressions.rs can't find the global.
+            let mod_name = module.name.as_str();
+            if !mod_name.is_empty() {
+                // Register ALMIDE_RT_<MOD>_<NAME> under multiple name forms:
+                // - Full module path: ALMIDE_RT_SNAIDHM_WEB_GPU_STORAGE
+                // - VarTable name as-is (may include _V0_ versioning)
+                // - Leaf segment only: ALMIDE_RT_GPU_STORAGE
+                let segments: Vec<&str> = mod_name.split('.').collect();
+                let leaf = segments.last().copied().unwrap_or(mod_name);
+                for alias in [mod_name, leaf] {
+                    let synthetic = format!(
+                        "ALMIDE_RT_{}_{}",
+                        alias.to_uppercase().replace('.', "_"),
+                        name.to_uppercase(),
+                    );
+                    emitter.top_let_globals_by_name.insert(synthetic, (global_idx, vt));
+                }
+                // Also register the VarTable name itself (handles versioned names like ALMIDE_RT_SNAIDHM_V0_...)
+                if name.starts_with("ALMIDE_RT_") {
+                    emitter.top_let_globals_by_name.insert(name.clone(), (global_idx, vt));
+                    // Strip version suffix: ALMIDE_RT_SNAIDHM_V0_WEB_GPU_STORAGE → ALMIDE_RT_SNAIDHM_WEB_GPU_STORAGE
+                    // so that the unversioned lowering synthetic name can also match.
+                    let stripped = name.replacen("_V0_", "_", 1);
+                    if stripped != name {
+                        emitter.top_let_globals_by_name.insert(stripped, (global_idx, vt));
+                    }
+                }
+            }
         }
     }
 
