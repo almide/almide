@@ -6,25 +6,22 @@
 
 ## Active
 
-15 items
+12 items
 
 | Item | Description |
 |------|-------------|
-| [almai — Multi-Provider LLM Client](active/almai-llm-client.md) | almai — multi-provider LLM client library, 8 providers shipped |
 | [Almide Dojo — Continuous MSR Measurement](active/almide-dojo.md) | Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration |
-| [Externalize `try:` Snippets from Rust Literals](active/diagnostic-snippet-externalization.md) | Move try: snippet text out of Rust literals into stdlib/diagnostics/*.almd |
 | [DX: `almide test` stderr & `almide explain`](active/dx-testing-explain.md) | almide test stderr passthrough + almide explain <code> subcommand |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
+| [Error-Fix Database](active/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
 | [Fan Concurrency — Next Generation](active/fan-concurrency-next.md) | fan as a language-level concurrency primitive with rush/spawn/link/cancel |
-| [Flow[T] — Lazy Streaming Sequences](active/flow-design.md) | Flow[T] lazy streaming sequences with flow.* namespace aligned with list.* verbs |
-| [Flow[T] — User Specification (Draft)](active/flow-spec-draft.md) | Draft user-facing spec for Flow[T] — to be promoted to docs/specs/flow.md after Phase 1 |
 | [Llama Inference Demo](active/llama-inference-demo.md) | End-to-end Llama inference demo on Almide, from 1-block to full token generation |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
-| [lumen — Pure Graphics Math](active/lumen-graphics-math.md) | lumen — pure graphics math library (vec3, mat4, color), used by webgl/canvas/obsid |
+| [LLM Integration](active/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
+| [LSP Server](active/lsp.md) | Language Server Protocol for editor completion, diagnostics, and navigation |
 | [MLIR Backend + Egg Rewrite Engine](active/mlir-backend-adoption.md) | MLIR backend + egg e-graph rewriter for pure-Almide optimal lowering |
-| [Almide vs Mojo: Capability Parity Assessment](active/mojo-parity-assessment.md) | Almide vs Mojo capability parity assessment (Mojo = 100) |
-| [`almide update` — Dependency Update Command](active/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
+| [Secure by Design](active/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
 
 ## On Hold
 
@@ -37,20 +34,20 @@
 | [API Diff & Automatic Versioning](on-hold/api-diff-auto-versioning.md) | Automatic semver bump detection via public API diffing |
 | [LLM Benchmark: Next Phase](on-hold/benchmark-next-phase.md) | LLM benchmark Phase 2-3: cross-language comparison, harder problems, publication |
 | [Compile-Time Contracts](on-hold/compile-time-contracts.md) | Compile-time preconditions and type invariants via where clauses |
-| [Error-Fix Database](on-hold/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
+| [Externalize `try:` Snippets from Rust Literals](on-hold/diagnostic-snippet-externalization.md) | Move try: snippet text out of Rust literals into stdlib/diagnostics/*.almd |
+| [Flow[T] — Lazy Streaming Sequences](on-hold/flow-design.md) | Flow[T] lazy streaming sequences with flow.* namespace aligned with list.* verbs |
+| [Flow[T] — User Specification (Draft)](on-hold/flow-spec-draft.md) | Draft user-facing spec for Flow[T] — to be promoted to docs/specs/flow.md after Phase 1 |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
-| [LLM Integration](on-hold/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
 | [LSP Code Actions](on-hold/lsp-code-actions.md) | LSP code actions for auto-fix, refactoring, and import management |
-| [LSP Server](on-hold/lsp.md) | Language Server Protocol for editor completion, diagnostics, and navigation |
 | [Tiny ML Inference Runtime](on-hold/ml-inference.md) | Tiny ML inference runtime using compile-time model specialization |
+| [`almide update` — Dependency Update Command](on-hold/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Registry](on-hold/package-registry.md) | Lock file, semver resolution, and central package registry |
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
 | [Porta Embedded — Sub-10KB Almide IoT Agents on WASI Hosts](on-hold/porta-embedded.md) | Porta-style WASI agent runtime for IoT: <10KB Almide guests on tiny hosts |
 | [Rainbow Bridge — Wrap External Code as Almide Packages](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
 | [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy |
-| [Secure by Design](on-hold/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
 | [Shell Completions](on-hold/shell-completions.md) | almide completions subcommand for bash/zsh/fish auto-completion |
 | [Snapshot Testing](on-hold/snapshot-testing.md) | Built-in snapshot testing for output regression detection |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
@@ -61,10 +58,10 @@
 
 ## Done
 
-226 items
+229 items
 
 <details>
-<summary>Show all 226 completed items</summary>
+<summary>Show all 229 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
