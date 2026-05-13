@@ -772,9 +772,16 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     // Register type declarations (record and variant field layouts).
     // Include both the main program and all imported modules so nominal
     // types from `import mod` resolve during codegen.
-    let all_type_decls = program.type_decls.iter()
-        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
+    // Register module type_decls first, then program's own (self) type_decls.
+    // This ensures self types win over same-named dependency types in record_fields.
+    let all_type_decls = program.modules.iter().flat_map(|m| m.type_decls.iter())
+        .chain(program.type_decls.iter());
     for td in all_type_decls {
+        if td.name.as_str() == "TextLine" {
+            if let almide_ir::IrTypeDeclKind::Record { fields } = &td.kind {
+                eprintln!("[TYPE-DBG] TextLine fields: {:?}", fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>());
+            }
+        }
         match &td.kind {
             almide_ir::IrTypeDeclKind::Record { fields } => {
                 let field_list: Vec<(String, almide_lang::types::Ty)> = fields.iter()
