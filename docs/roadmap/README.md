@@ -6,11 +6,10 @@
 
 ## Active
 
-12 items
+11 items
 
 | Item | Description |
 |------|-------------|
-| [Almide Dojo — Continuous MSR Measurement](active/almide-dojo.md) | Daily automated MSR loop — 30 tasks, Claude 100%, Llama 61%, almai integration |
 | [DX: `almide test` stderr & `almide explain`](active/dx-testing-explain.md) | almide test stderr passthrough + almide explain <code> subcommand |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Error-Fix Database](active/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
@@ -58,10 +57,10 @@
 
 ## Done
 
-229 items
+230 items
 
 <details>
-<summary>Show all 229 completed items</summary>
+<summary>Show all 230 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
