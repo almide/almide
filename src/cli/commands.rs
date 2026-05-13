@@ -472,7 +472,8 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
         almide::mono::monomorphize(&mut ir_program);
 
         let ts_code = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::TypeScript) {
+            // TS target removed — emit Rust target as codegen smoke test
+            match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Rust) {
                 almide::codegen::CodegenOutput::Source(s) => s,
                 almide::codegen::CodegenOutput::Binary(_) => unreachable!(),
             }
@@ -480,7 +481,7 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
         let ts_code = match ts_code {
             Ok(s) => s,
             Err(_) => {
-                eprintln!("SKIP {} (TS codegen panic)", test_file);
+                eprintln!("SKIP {} (codegen panic)", test_file);
                 skipped += 1;
                 continue;
             }

@@ -119,8 +119,8 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
         {
             let t = match target {
                 "rust" | "rs" => codegen::pass::Target::Rust,
-                "ts" | "typescript" => codegen::pass::Target::TypeScript,
-                other => { eprintln!("Unknown target: {}. Use rust, ts.", other); std::process::exit(1); }
+                "wgsl" => codegen::pass::Target::Wgsl,
+                other => { eprintln!("Unknown target: {}. Use rust, wgsl.", other); std::process::exit(1); }
             };
             let opts = codegen::CodegenOptions { repr_c };
             match codegen::codegen_with(ir, t, &opts) {

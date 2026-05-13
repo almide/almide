@@ -156,7 +156,6 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     if !func.extern_attrs.is_empty() {
         let target_str = match ctx.target {
             Target::Rust => "rs",
-            Target::TypeScript => "ts",
             _ => "",
         };
         let native_target = match ctx.target {

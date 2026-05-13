@@ -143,22 +143,9 @@ fn build_pipeline(target: Target) -> Pipeline {
                 .add(NormalizeRuntimeCallsPass)
         }
 
-        Target::TypeScript => Pipeline::new(), // TS codegen removed — use --target wasm for JS runtimes
-
-        Target::Go => Pipeline::new()
-            .add(TailCallOptPass)
-            .add(LICMPass)
-            // Go-specific passes will go here
-            // .add(ResultToTuplePass)
-            // .add(GoroutineLoweringPass)
-            .add(FanLoweringPass),
-
-        Target::Python => Pipeline::new()
-            .add(TailCallOptPass)
-            .add(LICMPass)
-            // Python-specific passes will go here when the target is activated:
-            // .add(OptionErasurePass)      // some(x) → x, none → None
-            // .add(ResultToExceptionPass)  // ok/err → try/except
+        Target::Wgsl => Pipeline::new()
+            .add(UnifyVarTablesPass)
+            .add(ConcretizeTypesPass)
             .add(FanLoweringPass),
 
         Target::Wasm => Pipeline::new()
@@ -209,9 +196,7 @@ fn build_pipeline(target: Target) -> Pipeline {
 fn build_templates(target: Target) -> TemplateSet {
     match target {
         Target::Rust => super::template::rust_templates(),
-        Target::TypeScript => TemplateSet::new("typescript"),
-        Target::Go => TemplateSet::new("go"),
-        Target::Python => TemplateSet::new("python"),
         Target::Wasm => TemplateSet::new("wasm"),
+        Target::Wgsl => TemplateSet::new("wgsl"),
     }
 }

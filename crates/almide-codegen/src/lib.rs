@@ -59,6 +59,7 @@ pub mod template;
 pub mod target;
 pub mod walker;
 pub mod emit_wasm;
+pub mod emit_wgsl;
 
 use almide_ir::*;
 use pass::Target;
@@ -123,6 +124,7 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // Layer 3: Target-specific emit
     match target {
         Target::Wasm => CodegenOutput::Binary(emit_wasm::emit(program)),
+        Target::Wgsl => CodegenOutput::Source(emit_wgsl::emit(program)),
         _ => CodegenOutput::Source(emit_source(program, target, &config, options)),
     }
 }
@@ -241,9 +243,6 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             }).collect();
             for u in &use_lines { output.push_str(u); output.push('\n'); }
             for line in &body_lines { output.push_str(line); output.push('\n'); }
-        }
-        Target::TypeScript => {
-            output.push_str("// TypeScript target removed — use --target wasm for JS runtimes\n");
         }
         _ => {}
     }

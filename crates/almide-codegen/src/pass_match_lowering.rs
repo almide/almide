@@ -22,7 +22,7 @@ impl NanoPass for MatchLoweringPass {
     fn name(&self) -> &str { "MatchLowering" }
 
     fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::TypeScript, Target::Python, Target::Go])
+        None // disabled — no active targets use this pass
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {

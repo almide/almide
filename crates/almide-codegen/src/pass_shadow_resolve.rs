@@ -16,7 +16,7 @@ pub struct ShadowResolvePass;
 impl NanoPass for ShadowResolvePass {
     fn name(&self) -> &str { "ShadowResolve" }
     fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::TypeScript, Target::Python])
+        None // disabled — no active targets use this pass
     }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let IrProgram { functions, modules, var_table, .. } = &mut program;
