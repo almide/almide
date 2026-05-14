@@ -56,6 +56,8 @@ fn take[A](xs: List[A], n: Int) -> List[A] = _
 @consume(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
+fn tail[A](xs: List[A]) -> List[A] = list.drop(xs, 1)
+
 @intrinsic("almide_rt_list_unique")
 fn unique[A](xs: List[A]) -> List[A] = _
 
