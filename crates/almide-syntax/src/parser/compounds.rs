@@ -28,18 +28,33 @@ impl Parser {
     }
 
     fn parse_if_branch(&mut self) -> Result<Expr, String> {
-        if self.check(TokenType::Ident)
-            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq)
-        {
-            let span = Some(self.current_span());
-            let name = self.advance_and_get_sym();
-            self.advance(); // skip =
-            self.skip_newlines();
-            let value = self.parse_expr()?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Block {
-                stmts: vec![Stmt::Assign { name, value, span: None }],
-                expr: None,
-            }));
+        if self.check(TokenType::Ident) {
+            let is_assign = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq)
+                && self.peek_at(2).map(|t| &t.token_type) != Some(&TokenType::Eq);
+            let is_index = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBracket);
+            let is_field = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
+                && self.peek_at(2).map(|t| matches!(t.token_type, TokenType::Ident)).unwrap_or(false)
+                && self.peek_at(3).map(|t| &t.token_type) == Some(&TokenType::Eq)
+                && self.peek_at(4).map(|t| &t.token_type) != Some(&TokenType::Eq);
+
+            if is_assign || is_index || is_field {
+                let span = Some(self.current_span());
+                let stmt = self.parse_stmt()?;
+                match &stmt {
+                    Stmt::Assign { .. } | Stmt::IndexAssign { .. } | Stmt::FieldAssign { .. } => {
+                        return Ok(Expr::new(self.next_id(), span, ExprKind::Block {
+                            stmts: vec![stmt],
+                            expr: None,
+                        }));
+                    }
+                    // index lookahead matched but turned out to be an expression (e.g. xs[i])
+                    Stmt::Expr { expr, .. } => return Ok(expr.clone()),
+                    _ => return Ok(Expr::new(self.next_id(), span, ExprKind::Block {
+                        stmts: vec![stmt],
+                        expr: None,
+                    })),
+                }
+            }
         }
         self.parse_expr()
     }
