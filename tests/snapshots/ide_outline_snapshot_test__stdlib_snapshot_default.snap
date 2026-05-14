@@ -103,6 +103,7 @@ fn list.sort_by[A, B](xs: List[A], f: fn(A) -> B) -> List[A]
 fn list.split_at[T](xs: List[T], n: Int) -> (List[T], List[T])
 fn list.sum(xs: List[Int]) -> Int
 fn list.swap[A](xs: List[A], i: Int, j: Int) -> List[A]
+fn list.tail[A](xs: List[A]) -> List[A]
 fn list.take[A](xs: List[A], n: Int) -> List[A]
 fn list.take_end[A](xs: List[A], n: Int) -> List[A]
 fn list.take_while[A](xs: List[A], f: fn(A) -> Bool) -> List[A]
