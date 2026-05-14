@@ -1,0 +1,42 @@
+var counter = 0
+var label = "init"
+var items: List[Int] = []
+
+fn bump() -> Unit = {
+  counter = counter + 1
+}
+
+fn set_label(s: String) -> Unit = {
+  label = s
+}
+
+test "module var Int read/write" {
+  assert(counter == 0)
+  bump()
+  assert(counter == 1)
+  bump()
+  bump()
+  assert(counter == 3)
+}
+
+test "module var String read/write" {
+  set_label("hello")
+  assert(label == "hello")
+  set_label("world")
+  assert(label == "world")
+}
+
+test "module var List assignment" {
+  items = [10, 20]
+  assert(list.len(items) == 2)
+  assert(items[0] == 10)
+  items = [10, 20, 30]
+  assert(list.len(items) == 3)
+}
+
+test "module var direct assignment in test" {
+  counter = 100
+  assert(counter == 100)
+  counter = counter + 1
+  assert(counter == 101)
+}

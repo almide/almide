@@ -245,14 +245,15 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     // error-recovery `VarId(0)`, and the reference silently aliases the first
     // variable allocated globally (typically a local in the first lowered fn).
     for decl in &prog.decls {
-        if let ast::Decl::TopLet { name, value, .. } = decl {
+        if let ast::Decl::TopLet { name, value, mutable, .. } = decl {
             let prefixed_key = module_prefix
                 .map(|p| almide_base::intern::sym(&format!("{}.{}", p, name.as_str())));
             let val_ty = prefixed_key
                 .and_then(|k| ctx.env.top_lets.get(&k).cloned())
                 .or_else(|| ctx.env.top_lets.get(name).cloned())
                 .unwrap_or_else(|| ctx.expr_ty(value));
-            ctx.define_var(name, val_ty, Mutability::Let, None);
+            let mutability = if *mutable { Mutability::Var } else { Mutability::Let };
+            ctx.define_var(name, val_ty, mutability, None);
         }
     }
 
@@ -290,17 +291,12 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                 td.blank_lines_before = blank_lines;
                 type_decls.push(td);
             }
-            ast::Decl::TopLet { name, ty: _, value, .. } => {
-                // VarId was pre-allocated above. Reuse it so any forward
-                // reference earlier in the file (already lowered to point at
-                // this VarId) lines up with the actual definition emitted
-                // here. Type comes from the same priority chain: prefixed
-                // env entry, unprefixed env entry, otherwise inferred.
+            ast::Decl::TopLet { name, ty: _, value, mutable, .. } => {
                 let var = ctx.lookup_var(name).expect("top-level let pre-registered");
                 let val_ty = ctx.var_table.get(var).ty.clone();
                 let ir_value = lower_expr(&mut ctx, value);
                 let kind = classify_top_let_kind(&ir_value);
-                top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, doc, blank_lines_before: blank_lines, def_id: None });
+                top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, mutable: *mutable, doc, blank_lines_before: blank_lines, def_id: None });
             }
             ast::Decl::Test { name, body, .. } => {
                 let test_fn = lower_test(&mut ctx, name, body);

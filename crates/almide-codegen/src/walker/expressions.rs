@@ -69,6 +69,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // VarId so `lazy_vars` misses it; cross-reference by uppercased
             // name against `lazy_top_let_names` instead.
             let upper = name.to_uppercase();
+            // Mutable top-let: thread_local RefCell — read via .with(|c| ...)
+            if ctx.ann.mutable_top_let_names.contains(&upper) {
+                return format!("{}.with(|c| c.borrow().clone())", upper);
+            }
             let is_synthetic_lazy = name.starts_with("ALMIDE_RT_")
                 && ctx.ann.lazy_top_let_names.contains(&upper);
             if ctx.ann.lazy_vars.contains(id) || is_synthetic_lazy {

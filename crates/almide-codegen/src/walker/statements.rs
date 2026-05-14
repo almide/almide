@@ -93,12 +93,15 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 .unwrap_or_else(|| format!("let _ = _;"))
         }
         IrStmtKind::Assign { var, value } => {
-            // Push optimization (xs = xs + [v] → xs.push(v)) is now handled
-            // by RustLoweringPass which rewrites to a Call(Method("push")).
             let target_s = ctx.var_name(*var).to_string();
+            let upper = target_s.to_uppercase();
             let value_s = render_expr(ctx, value);
-            ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
-                .unwrap_or_else(|| format!("_ = _;"))
+            if ctx.ann.mutable_top_let_names.contains(&upper) {
+                format!("{}.with(|c| *c.borrow_mut() = ({}).into())", upper, value_s)
+            } else {
+                ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
+                    .unwrap_or_else(|| format!("_ = _;"))
+            }
         }
         IrStmtKind::Expr { expr } => {
             let rendered = render_expr(ctx, expr);

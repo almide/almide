@@ -12,6 +12,10 @@ pub struct CodegenAnnotations {
     /// emitting `(*NAME)` — scalar `Const` top_lets (plain `const
     /// NAME: i64 = 42;`) must NOT be dereferenced.
     pub lazy_top_let_names: HashSet<String>,
+    /// Uppercased names of module-level `var` declarations (mutable top-lets).
+    /// The walker wraps reads in `unsafe { NAME }` and writes in
+    /// `unsafe { NAME = value; }` for Rust `static mut` emission.
+    pub mutable_top_let_names: HashSet<String>,
     pub ctor_to_enum: HashMap<String, String>,
     pub anon_records: HashMap<Vec<String>, String>,
     pub named_records: HashMap<Vec<String>, String>,

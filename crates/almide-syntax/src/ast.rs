@@ -348,7 +348,7 @@ pub enum Decl {
         body: Option<Expr>,
         #[serde(skip)] span: Option<Span>,
     },
-    TopLet { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(default)] visibility: Visibility, #[serde(skip)] span: Option<Span> },
+    TopLet { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(default)] mutable: bool, #[serde(default)] visibility: Visibility, #[serde(skip)] span: Option<Span> },
     Protocol { name: Sym, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<ProtocolMethod>, #[serde(skip)] span: Option<Span> },
     Impl { trait_: Sym, for_: Sym, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<Decl>, #[serde(skip)] span: Option<Span> },
     Strict { mode: String, #[serde(skip)] span: Option<Span> },
