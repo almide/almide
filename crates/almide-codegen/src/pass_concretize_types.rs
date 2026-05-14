@@ -84,25 +84,78 @@ impl NanoPass for ConcretizeTypesPass {
         // VarTable entries for lambda accumulator params and match-pattern
         // bindings; downstream passes expect the updates to persist.
         let mut prog_vt = std::mem::take(&mut program.var_table);
+
+        // Phase 1: Resolve top_lets first so their types are available
+        // when functions reference cross-module let values.
+        for tl in &mut program.top_lets {
+            concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
+            if !tl.value.ty.has_unresolved_deep() {
+                if tl.ty.has_unresolved_deep() {
+                    tl.ty = tl.value.ty.clone();
+                }
+                if (tl.var.0 as usize) < prog_vt.len()
+                    && prog_vt.get(tl.var).ty.has_unresolved_deep()
+                {
+                    prog_vt.entries[tl.var.0 as usize].ty = tl.value.ty.clone();
+                }
+            }
+        }
+        for module in &mut program.modules {
+            for tl in &mut module.top_lets {
+                concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
+                if !tl.value.ty.has_unresolved_deep() {
+                    if tl.ty.has_unresolved_deep() {
+                        tl.ty = tl.value.ty.clone();
+                    }
+                    if (tl.var.0 as usize) < prog_vt.len()
+                        && prog_vt.get(tl.var).ty.has_unresolved_deep()
+                    {
+                        prog_vt.entries[tl.var.0 as usize].ty = tl.value.ty.clone();
+                    }
+                }
+            }
+        }
+
+        // Phase 1b: Propagate top_let types by name into VarTable entries
+        // that are cross-module synthetic references (different VarId, same name).
+        let mut top_let_types: std::collections::HashMap<String, Ty> = std::collections::HashMap::new();
+        for tl in &program.top_lets {
+            if !tl.ty.has_unresolved_deep() {
+                let name = prog_vt.get(tl.var).name.to_string();
+                top_let_types.insert(name, tl.ty.clone());
+            }
+        }
+        for module in &program.modules {
+            for tl in &module.top_lets {
+                if !tl.ty.has_unresolved_deep() {
+                    let name = prog_vt.get(tl.var).name.to_string();
+                    top_let_types.insert(name, tl.ty.clone());
+                }
+            }
+        }
+        if !top_let_types.is_empty() {
+            for entry in &mut prog_vt.entries {
+                if entry.ty.has_unresolved_deep() {
+                    if let Some(ty) = top_let_types.get(entry.name.as_str()) {
+                        entry.ty = ty.clone();
+                    }
+                }
+            }
+        }
+
+        // Phase 2: Now resolve functions (which may reference cross-module lets
+        // whose VarTable types are now populated).
         for func in &mut program.functions {
             let ret = func.ret_ty.clone();
             concretize_expr(&mut func.body, &mut prog_vt, &symbols, &ret);
         }
-        for tl in &mut program.top_lets {
-            concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
-        }
-        // Module functions / top_lets now index into the unified
-        // program-level VarTable (post `UnifyVarTablesPass`), so we
-        // keep it taken out while we touch them too.
         for module in &mut program.modules {
             for func in &mut module.functions {
                 let ret = func.ret_ty.clone();
                 concretize_expr(&mut func.body, &mut prog_vt, &symbols, &ret);
             }
-            for tl in &mut module.top_lets {
-                concretize_expr(&mut tl.value, &mut prog_vt, &symbols, &Ty::Unknown);
-            }
         }
+
         program.var_table = prog_vt;
         PassResult { program, changed: true }
     }

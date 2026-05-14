@@ -11,3 +11,24 @@ test "cross-module let composes with stdlib pipes" {
 test "cross-module let alongside cross-module fn" {
   assert_eq(letlib.welcome(), "hello world")
 }
+
+test "cross-module let Float value" {
+  assert(letlib.UNDEFINED == -1.0)
+  assert(letlib.PI > 3.14)
+  assert(letlib.PI < 3.15)
+}
+
+test "cross-module let Int value" {
+  assert(letlib.MAX_ITEMS == 42)
+}
+
+test "cross-module let repeated access" {
+  assert(letlib.UNDEFINED < 0.0)
+  assert(letlib.UNDEFINED == -1.0)
+}
+
+test "cross-module let in expressions" {
+  let half_pi = letlib.PI / 2.0
+  assert(half_pi > 1.57)
+  assert(half_pi < 1.58)
+}

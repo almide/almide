@@ -1,4 +1,7 @@
 let GREETING: String = "hello"
 let NUMBERS: List[Int] = [1, 2, 3]
+let UNDEFINED: Float = -1.0
+let MAX_ITEMS: Int = 42
+let PI: Float = 3.14159
 
 fn welcome() -> String = GREETING + " world"

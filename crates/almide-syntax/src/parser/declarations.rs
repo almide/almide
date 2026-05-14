@@ -144,7 +144,10 @@ impl Parser {
             return self.parse_impl_decl();
         }
         if self.check(TokenType::Let) {
-            return self.parse_top_let(Visibility::Public);
+            return self.parse_top_let(Visibility::Public, false);
+        }
+        if self.check(TokenType::Var) {
+            return self.parse_top_let(Visibility::Public, true);
         }
         if self.check(TokenType::Fn) || self.check(TokenType::Pub)
             || self.check(TokenType::Effect)
@@ -154,15 +157,23 @@ impl Parser {
                 && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Let)
             {
                 self.advance();
-                return self.parse_top_let(Visibility::Public);
+                return self.parse_top_let(Visibility::Public, false);
+            }
+            if self.check(TokenType::Pub)
+                && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Var)
+            {
+                self.advance();
+                return self.parse_top_let(Visibility::Public, true);
             }
             if self.check(TokenType::Local) || self.check(TokenType::Mod) {
                 if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Type) {
                     return self.parse_type_decl();
                 }
-                if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Let) {
+                let peek1 = self.peek_at(1).map(|t| &t.token_type);
+                if peek1 == Some(&TokenType::Let) || peek1 == Some(&TokenType::Var) {
                     let vis = self.parse_visibility();
-                    return self.parse_top_let(vis);
+                    let is_var = self.check(TokenType::Var);
+                    return self.parse_top_let(vis, is_var);
                 }
             }
             return self.parse_fn_decl();
@@ -179,14 +190,18 @@ impl Parser {
             return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
         }
         Err(format!(
-            "Expected top-level declaration (fn, effect fn, type, let, trait, impl, test) at line {}:{} (got {:?} '{}')",
+            "Expected top-level declaration (fn, effect fn, type, let, var, trait, impl, test) at line {}:{} (got {:?} '{}')",
             tok.line, tok.col, tok.token_type, tok.value
         ))
     }
 
-    fn parse_top_let(&mut self, visibility: Visibility) -> Result<Decl, String> {
+    fn parse_top_let(&mut self, visibility: Visibility, mutable: bool) -> Result<Decl, String> {
         let span = self.current_span();
-        self.expect(TokenType::Let)?;
+        if mutable {
+            self.expect(TokenType::Var)?;
+        } else {
+            self.expect(TokenType::Let)?;
+        }
         let name = self.expect_any_name()?;
         let ty = if self.check(TokenType::Colon) {
             self.advance();
@@ -197,7 +212,7 @@ impl Parser {
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
         let value = self.parse_expr()?;
-        Ok(Decl::TopLet { name, ty, value, visibility, span: Some(span) })
+        Ok(Decl::TopLet { name, ty, value, mutable, visibility, span: Some(span) })
     }
 
     /// Parse `@name(args)?` declarations that precede a fn decl.

@@ -886,6 +886,8 @@ pub struct IrTopLet {
     pub value: IrExpr,
     #[serde(default = "default_top_let_kind")]
     pub kind: TopLetKind,
+    #[serde(default)]
+    pub mutable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doc: Option<String>,
     #[serde(default)]

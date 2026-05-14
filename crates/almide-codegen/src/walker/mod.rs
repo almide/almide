@@ -19,6 +19,7 @@ pub use expressions::render_expr;
 pub use statements::{render_stmt, render_pattern};
 
 use almide_ir::*;
+use almide_lang::types::Ty;
 use super::annotations::CodegenAnnotations;
 use super::pass::Target;
 use super::template::TemplateSet;
@@ -363,12 +364,29 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     for module in &program.modules {
         for tl in &module.top_lets {
             if matches!(tl.kind, TopLetKind::Lazy) {
-                // Post-`UnifyVarTablesPass`, module `tl.var` indexes into
-                // `program.var_table` — the per-module tables are empty.
                 ann.lazy_top_let_names.insert(
                     ctx.var_table.get(tl.var).name.to_uppercase()
                 );
             }
+        }
+    }
+    // Index mutable top-let names. Copy types (Int, Float, Bool) use Cell<T>
+    // for zero-cost reads; non-Copy types use RefCell<T>.
+    let register_mutable_top_let = |ann: &mut CodegenAnnotations, tl: &IrTopLet, vt: &VarTable| {
+        if !tl.mutable { return; }
+        let name = vt.get(tl.var).name.to_uppercase();
+        if matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
+            ann.mutable_top_let_copy.insert(name);
+        } else {
+            ann.mutable_top_let_names.insert(name);
+        }
+    };
+    for tl in &program.top_lets {
+        register_mutable_top_let(&mut ann, tl, ctx.var_table);
+    }
+    for module in &program.modules {
+        for tl in &module.top_lets {
+            register_mutable_top_let(&mut ann, tl, ctx.var_table);
         }
     }
     let mut ctx = RenderContext {
@@ -452,7 +470,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         parts.push(rendered);
     }
 
-    // Top-level lets
+    // Top-level lets and vars
     for tl in &program.top_lets {
         let name = ctx.var_table.get(tl.var).name.clone();
         let ty_str = render_type_fn(&ctx, &tl.ty);
@@ -460,13 +478,19 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         if matches!(tl.kind, TopLetKind::Lazy) {
             ctx.ann.lazy_vars.insert(tl.var);
         }
-        let construct = match tl.kind {
-            TopLetKind::Const => "top_let_const",
-            TopLetKind::Lazy => "top_let_lazy",
-        };
         let name_upper = name.to_uppercase();
-        let mut rendered = ctx.templates.render_with(construct, None, &[], &[("name", name_upper.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
-            .unwrap_or_else(|| format!("const {} = {};", name, val_str));
+        let mut rendered = if tl.mutable && matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
+            format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str)
+        } else if tl.mutable {
+            format!("thread_local! {{ static {}: std::cell::RefCell<{}> = std::cell::RefCell::new({}); }}", name_upper, ty_str, val_str)
+        } else {
+            let construct = match tl.kind {
+                TopLetKind::Const => "top_let_const",
+                TopLetKind::Lazy => "top_let_lazy",
+            };
+            ctx.templates.render_with(construct, None, &[], &[("name", name_upper.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
+                .unwrap_or_else(|| format!("const {} = {};", name, val_str))
+        };
         if let Some(ref doc) = tl.doc {
             let doc_lines: String = doc.lines()
                 .map(|line| if line.is_empty() { "///".to_string() } else { format!("/// {}", line) })
