@@ -260,6 +260,31 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
                 _ => {}
             }
+            // Mutating stdlib calls (push, pop, clear) on module-level var:
+            // emit NAME.with(|c| { runtime_fn(&mut *c.borrow_mut(), args) })
+            // so the mutation applies to the RefCell directly, not a clone.
+            if !args.is_empty() {
+                let is_mutating = matches!(symbol.as_str(),
+                    "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_clear");
+                if is_mutating {
+                    if let IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } = &args[0].kind {
+                        if let IrExprKind::Var { id } = &inner.kind {
+                            let name = ctx.var_name(*id).to_string();
+                            let upper = name.to_uppercase();
+                            if ctx.ann.mutable_top_let_names.contains(&upper) {
+                                let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
+                                    .collect::<Vec<_>>().join(", ");
+                                let call_args = if rest_args.is_empty() {
+                                    "&mut *c.borrow_mut()".to_string()
+                                } else {
+                                    format!("&mut *c.borrow_mut(), {}", rest_args)
+                                };
+                                return format!("{}.with(|c| {}({}))", upper, symbol.as_str(), call_args);
+                            }
+                        }
+                    }
+                }
+            }
             // BorrowInsertion wraps args with Borrow / Clone IR nodes
             // based on the `@intrinsic` fn's derived signature
             // (`intrinsic_borrow_mode`). The walker just renders.
