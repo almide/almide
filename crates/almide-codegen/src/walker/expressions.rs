@@ -69,7 +69,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // VarId so `lazy_vars` misses it; cross-reference by uppercased
             // name against `lazy_top_let_names` instead.
             let upper = name.to_uppercase();
-            // Mutable top-let: thread_local RefCell — read via .with(|c| ...)
+            // Mutable top-let: Cell (Copy types) or RefCell (non-Copy)
+            if ctx.ann.mutable_top_let_copy.contains(&upper) {
+                return format!("{}.with(|c| c.get())", upper);
+            }
             if ctx.ann.mutable_top_let_names.contains(&upper) {
                 return format!("{}.with(|c| c.borrow().clone())", upper);
             }

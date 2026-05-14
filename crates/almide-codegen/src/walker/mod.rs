@@ -19,6 +19,7 @@ pub use expressions::render_expr;
 pub use statements::{render_stmt, render_pattern};
 
 use almide_ir::*;
+use almide_lang::types::Ty;
 use super::annotations::CodegenAnnotations;
 use super::pass::Target;
 use super::template::TemplateSet;
@@ -369,21 +370,23 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             }
         }
     }
-    // Index mutable top-let names for unsafe read/write in Rust codegen.
-    for tl in &program.top_lets {
-        if tl.mutable {
-            ann.mutable_top_let_names.insert(
-                ctx.var_table.get(tl.var).name.to_uppercase()
-            );
+    // Index mutable top-let names. Copy types (Int, Float, Bool) use Cell<T>
+    // for zero-cost reads; non-Copy types use RefCell<T>.
+    let register_mutable_top_let = |ann: &mut CodegenAnnotations, tl: &IrTopLet, vt: &VarTable| {
+        if !tl.mutable { return; }
+        let name = vt.get(tl.var).name.to_uppercase();
+        if matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
+            ann.mutable_top_let_copy.insert(name);
+        } else {
+            ann.mutable_top_let_names.insert(name);
         }
+    };
+    for tl in &program.top_lets {
+        register_mutable_top_let(&mut ann, tl, ctx.var_table);
     }
     for module in &program.modules {
         for tl in &module.top_lets {
-            if tl.mutable {
-                ann.mutable_top_let_names.insert(
-                    ctx.var_table.get(tl.var).name.to_uppercase()
-                );
-            }
+            register_mutable_top_let(&mut ann, tl, ctx.var_table);
         }
     }
     let mut ctx = RenderContext {
@@ -476,7 +479,9 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             ctx.ann.lazy_vars.insert(tl.var);
         }
         let name_upper = name.to_uppercase();
-        let mut rendered = if tl.mutable {
+        let mut rendered = if tl.mutable && matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
+            format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str)
+        } else if tl.mutable {
             format!("thread_local! {{ static {}: std::cell::RefCell<{}> = std::cell::RefCell::new({}); }}", name_upper, ty_str, val_str)
         } else {
             let construct = match tl.kind {
