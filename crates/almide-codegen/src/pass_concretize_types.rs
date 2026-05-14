@@ -153,7 +153,7 @@ fn build_symbol_table(program: &IrProgram) -> SymbolTable {
         }
     }
     let mut record_fields = std::collections::HashMap::new();
-    for decl in &program.type_decls {
+    let mut register_type_decl = |decl: &almide_ir::IrTypeDecl| {
         match &decl.kind {
             almide_ir::IrTypeDeclKind::Record { fields } => {
                 let fs: Vec<_> = fields.iter()
@@ -172,6 +172,14 @@ fn build_symbol_table(program: &IrProgram) -> SymbolTable {
                 }
             }
             _ => {}
+        }
+    };
+    for decl in &program.type_decls {
+        register_type_decl(decl);
+    }
+    for module in &program.modules {
+        for decl in &module.type_decls {
+            register_type_decl(decl);
         }
     }
     SymbolTable { sigs, record_fields }
@@ -626,6 +634,11 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
                         .find(|(n, _)| n == field.as_str())
                         .map(|(_, t)| t.clone())
                         .filter(|t| !t.has_unresolved_deep())
+                }
+                Ty::Named(name, _) => {
+                    symbols.lookup_field(name.as_str(), field.as_str())
+                        .filter(|t| !t.has_unresolved_deep())
+                        .cloned()
                 }
                 _ => None,
             }
