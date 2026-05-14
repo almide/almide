@@ -1,0 +1,40 @@
+test "if-then simple assignment without braces" {
+  var a = 0
+  if true then a = 10 else ()
+  assert(a == 10)
+}
+
+test "if-then-else both assignments" {
+  var a = 0
+  if false then a = 10 else a = 20
+  assert(a == 20)
+}
+
+test "if-then index assignment without braces" {
+  var arr: List[Int] = [1, 2, 3]
+  if true then arr[0] = 99 else ()
+  assert(arr[0] == 99)
+}
+
+test "if-then index assignment in for loop" {
+  var deltas: List[Int] = [0, 0, 0]
+  let events = [1, 3, 5]
+  for ev in events {
+    let idx = ev / 2
+    let flag = ev - (ev / 2) * 2 == 1
+    if flag then
+      deltas[idx] = deltas[idx] + 1
+    else ()
+  }
+  assert(deltas[0] == 1)
+  assert(deltas[1] == 1)
+  assert(deltas[2] == 1)
+}
+
+type Point = { x: Int, y: Int }
+
+test "if-then field assignment without braces" {
+  var p = Point { x: 0, y: 0 }
+  if true then p.x = 42 else ()
+  assert(p.x == 42)
+}
