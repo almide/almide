@@ -78,12 +78,36 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             } else {
                 render_expr(ctx, value)
             };
+            // Check if value is a Clone of a Val-wrapped var → use inferred type
+            let is_val_clone = match &value.kind {
+                IrExprKind::Clone { expr: inner } => {
+                    if let IrExprKind::Var { id } = &inner.kind {
+                        ctx.ann.rc_wrapped_vars.contains(id)
+                    } else { false }
+                }
+                _ => false,
+            };
+            let (type_s, value_s) = if is_val_clone {
+                // Clone of Val returns T (via deref). Re-wrap in Val for COW binding.
+                let val_type = format!("RcCow<{}>", type_s);
+                let val_value = format!("RcCow::new({})", value_s);
+                (val_type, val_value)
+            } else {
+                (type_s, value_s)
+            };
             let needs_mut = matches!(mutability, Mutability::Let) && {
                 let ty_str = type_s.as_str();
                 ty_str == "Vec<u8>"
                     || ty_str.starts_with("Vec<")
                     || ty_str.starts_with("HashMap<")
             };
+            // Val-wrap: var of non-Copy type → RcCow<T> with RcCow::new(value) for COW
+            if ctx.ann.rc_wrapped_vars.contains(var) {
+                let val_type = format!("RcCow<{}>", type_s);
+                let val_value = format!("RcCow::new({})", value_s);
+                return ctx.templates.render_with("var_binding", None, &[], &[("name", name_s.as_str()), ("type", val_type.as_str()), ("value", val_value.as_str())])
+                    .unwrap_or_else(|| format!("let mut {} = {};", name_s, val_value));
+            }
             let construct = match mutability {
                 Mutability::Let if needs_mut => "var_binding",
                 Mutability::Let => "let_binding",
@@ -100,6 +124,8 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 format!("{}.with(|c| c.set({}))", upper, value_s)
             } else if ctx.ann.mutable_top_let_names.contains(&upper) {
                 format!("{}.with(|c| *c.borrow_mut() = std::rc::Rc::new(({}).into()))", upper, value_s)
+            } else if ctx.ann.rc_wrapped_vars.contains(var) {
+                format!("{} = RcCow::new({});", target_s, value_s)
             } else {
                 ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
                     .unwrap_or_else(|| format!("_ = _;"))
@@ -148,22 +174,32 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let target_str = ctx.var_name(*target).to_string();
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
-            // Borrow conflict (xs[f(xs)] = v) is now resolved by RustLoweringPass
-            // which lifts the index expression to a let binding at the IR level.
-            ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
-                .unwrap_or_else(|| "idx[...] = ...;".into())
+            if ctx.ann.rc_wrapped_vars.contains(target) {
+                format!("{}.make_mut()[{} as usize] = {};", target_str, idx_str, val_str)
+            } else {
+                ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| "idx[...] = ...;".into())
+            }
         }
         IrStmtKind::MapInsert { target, key, value } => {
             let target_str = ctx.var_name(*target).to_string();
             let key_str = render_expr(ctx, key);
             let val_str = render_expr(ctx, value);
-            ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
-                .unwrap_or_else(|| "map_set(...)".into())
+            if ctx.ann.rc_wrapped_vars.contains(target) {
+                format!("{}.make_mut().insert({}, {});", target_str, key_str, val_str)
+            } else {
+                ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| "map_set(...)".into())
+            }
         }
         IrStmtKind::FieldAssign { target, field, value } => {
             let target_str = ctx.var_name(*target).to_string();
             let val_str = render_expr(ctx, value);
-            format!("{}.{} = {};", target_str, field, val_str)
+            if ctx.ann.rc_wrapped_vars.contains(target) {
+                format!("{}.make_mut().{} = {};", target_str, field, val_str)
+            } else {
+                format!("{}.{} = {};", target_str, field, val_str)
+            }
         }
         IrStmtKind::BindDestructure { pattern, value } => {
             // For record patterns with empty name, resolve from value type

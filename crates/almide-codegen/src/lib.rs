@@ -154,6 +154,21 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             output.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
             output.push_str("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }\n");
             output.push_str("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }\n");
+            // RcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
+            // Inspired by Swift's value type semantics.
+            output.push_str("#[derive(Debug)] struct RcCow<T>(std::rc::Rc<T>);\n");
+            output.push_str("impl<T: Clone> Clone for RcCow<T> { fn clone(&self) -> Self { RcCow(std::rc::Rc::clone(&self.0)) } }\n");
+            output.push_str("impl<T: PartialEq> PartialEq for RcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
+            output.push_str("impl<T: PartialEq> PartialEq<T> for RcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
+            output.push_str("impl PartialEq<&str> for RcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
+            output.push_str("impl<T> std::ops::Deref for RcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
+            output.push_str("impl<T: Clone> std::ops::DerefMut for RcCow<T> { fn deref_mut(&mut self) -> &mut T { std::rc::Rc::make_mut(&mut self.0) } }\n");
+            output.push_str("impl<T> RcCow<T> { fn new(v: T) -> Self { RcCow(std::rc::Rc::new(v)) } fn make_mut(&mut self) -> &mut T where T: Clone { std::rc::Rc::make_mut(&mut self.0) } fn into_inner(self) -> T where T: Clone { std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) } }\n");
+            output.push_str("impl<T> From<T> for RcCow<T> { fn from(v: T) -> Self { RcCow::new(v) } }\n");
+            output.push_str("impl<T: std::fmt::Display> std::fmt::Display for RcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
+            output.push_str("impl<T: std::hash::Hash> std::hash::Hash for RcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
+            // Blanket AlmideConcat: RcCow<T> + Rhs and RcCow<T> + Val<U> — 2 impls cover all combos.
+            output.push_str("impl<T: Clone, Rhs> AlmideConcat<Rhs> for RcCow<T> where T: AlmideConcat<Rhs> { type Output = RcCow<<T as AlmideConcat<Rhs>>::Output>; #[inline(always)] fn concat(self, rhs: Rhs) -> Self::Output { RcCow::new((*self).clone().concat(rhs)) } }\n");
             // Include only runtime modules referenced by the user code.
             // Scan user_code for `almide_rt_<module>_` or `almide_json_` patterns.
             let mut needed: std::collections::HashSet<&str> = std::collections::HashSet::new();

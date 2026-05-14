@@ -96,6 +96,17 @@ impl<'a> RenderContext<'a> {
     }
 }
 
+/// Check if a tail expression contains a Val-wrapped Var that needs unwrapping
+/// at function return boundaries (Var, ResultOk{Var}, Block{tail: Var}).
+fn tail_has_val_var(expr: &IrExpr, rc_vars: &std::collections::HashSet<VarId>) -> bool {
+    match &expr.kind {
+        IrExprKind::Var { id } => rc_vars.contains(id),
+        IrExprKind::ResultOk { expr: inner } => tail_has_val_var(inner, rc_vars),
+        IrExprKind::Block { expr: Some(tail), .. } => tail_has_val_var(tail, rc_vars),
+        _ => false,
+    }
+}
+
 // ── Function rendering ──
 
 pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
@@ -236,7 +247,23 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
                 .map(|s| terminate_stmt(&fn_ctx, render_stmt_fn(&fn_ctx, s)))
                 .collect();
             if let Some(e) = expr {
-                let expr_str = render_expr_fn(&fn_ctx, e);
+                let mut expr_str = render_expr_fn(&fn_ctx, e);
+                // Val-wrapped var at function return: unwrap to plain T.
+                // For simple Var: append .into_inner().
+                // For ResultOk { Var }: the Var inside Ok needs unwrapping.
+                if let IrExprKind::Var { id } = &e.kind {
+                    if fn_ctx.ann.rc_wrapped_vars.contains(id) {
+                        expr_str = format!("{}.into_inner()", expr_str);
+                    }
+                } else if let IrExprKind::ResultOk { expr: inner } = &e.kind {
+                    if let IrExprKind::Var { id } = &inner.kind {
+                        if fn_ctx.ann.rc_wrapped_vars.contains(id) {
+                            // Re-render with unwrap: Ok(var.into_inner())
+                            let var_name = fn_ctx.var_table.get(*id).name.to_string();
+                            expr_str = format!("Ok({}.into_inner())", var_name);
+                        }
+                    }
+                }
                 let is_control = matches!(&e.kind, IrExprKind::Break | IrExprKind::Continue);
                 if is_control {
                     parts.push(expr_str);
@@ -248,7 +275,12 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             parts.join("\n")
         }
         _ => {
-            let raw = render_expr_fn(&fn_ctx, &func.body);
+            let mut raw = render_expr_fn(&fn_ctx, &func.body);
+            if let IrExprKind::Var { id } = &func.body.kind {
+                if fn_ctx.ann.rc_wrapped_vars.contains(id) {
+                    raw = format!("{}.into_inner()", raw);
+                }
+            }
             let is_control = matches!(&func.body.kind, IrExprKind::Break | IrExprKind::Continue);
             if is_control {
                 raw
@@ -387,6 +419,34 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     for module in &program.modules {
         for tl in &module.top_lets {
             register_mutable_top_let(&mut ann, tl, ctx.var_table);
+        }
+    }
+    // Rc-wrap function-local `var` bindings of non-Copy types for COW.
+    // Exclude module-level vars and function params.
+    let mut exclude_var_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    for tl in &program.top_lets {
+        if tl.mutable { exclude_var_ids.insert(tl.var.0); }
+    }
+    for module in &program.modules {
+        for tl in &module.top_lets {
+            if tl.mutable { exclude_var_ids.insert(tl.var.0); }
+        }
+    }
+    // Exclude function params (they're borrowed or owned, not Val-wrapped)
+    for func in &program.functions {
+        for p in &func.params { exclude_var_ids.insert(p.var.0); }
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            for p in &func.params { exclude_var_ids.insert(p.var.0); }
+        }
+    }
+    for (idx, entry) in program.var_table.entries.iter().enumerate() {
+        if entry.mutability == almide_ir::Mutability::Var
+            && !matches!(entry.ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit | Ty::Unknown)
+            && !exclude_var_ids.contains(&(idx as u32))
+        {
+            ann.rc_wrapped_vars.insert(VarId(idx as u32));
         }
     }
     let mut ctx = RenderContext {

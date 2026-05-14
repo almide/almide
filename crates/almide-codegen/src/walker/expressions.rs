@@ -272,6 +272,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         if let IrExprKind::Var { id } = &inner.kind {
                             let name = ctx.var_name(*id).to_string();
                             let upper = name.to_uppercase();
+                            // Module-level var: thread_local RefCell<Rc<T>>
                             if ctx.ann.mutable_top_let_names.contains(&upper) {
                                 let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
                                     .collect::<Vec<_>>().join(", ");
@@ -282,6 +283,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                     format!("{}, {}", rc_mut, rest_args)
                                 };
                                 return format!("{}.with(|c| {}({}))", upper, symbol.as_str(), call_args);
+                            }
+                            // Local Val-wrapped var: val.make_mut()
+                            if ctx.ann.rc_wrapped_vars.contains(id) {
+                                let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
+                                    .collect::<Vec<_>>().join(", ");
+                                let call_args = if rest_args.is_empty() {
+                                    format!("{}.make_mut()", name)
+                                } else {
+                                    format!("{}.make_mut(), {}", name, rest_args)
+                                };
+                                return format!("{}({})", symbol.as_str(), call_args);
                             }
                         }
                     }
@@ -663,6 +675,13 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Codegen nodes (inserted by passes — walker just renders) ──
         IrExprKind::Clone { expr: inner } => {
+            // Val-wrapped var: deref then clone to get T. Bind handler re-wraps in RcCow::new().
+            if let IrExprKind::Var { id } = &inner.kind {
+                if ctx.ann.rc_wrapped_vars.contains(id) {
+                    let var_name = ctx.var_name(*id).to_string();
+                    return format!("(*{}).clone()", var_name);
+                }
+            }
             let expr_s = render_expr(ctx, inner);
             // Special case: cloning a String-typed Var that's a fn param
             // (so it's actually emitted as `&str` in Rust). `.clone()` on
@@ -711,6 +730,13 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
             }
             if *mutable {
+                // Val-wrapped var: .make_mut() for COW semantics
+                if let IrExprKind::Var { id } = &inner.kind {
+                    if ctx.ann.rc_wrapped_vars.contains(id) {
+                        let var_name = ctx.var_name(*id).to_string();
+                        return format!("{}.make_mut()", var_name);
+                    }
+                }
                 format!("&mut {}", render_expr(ctx, inner))
             } else if *as_str {
                 format!("&*{}", render_expr(ctx, inner))
@@ -947,6 +973,24 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
         CallTarget::Method { object, method } => {
             if let Some(full) = render_method_call_full(ctx, object, method, args) {
                 return full;
+            }
+            // Val-wrapped var: mutating method calls need .make_mut()
+            if let IrExprKind::Var { id } = &object.kind {
+                if ctx.ann.rc_wrapped_vars.contains(id) {
+                    let is_mutating_method = matches!(method.as_str(),
+                        "push" | "pop" | "clear" | "extend" | "insert" | "remove"
+                        | "sort" | "sort_by" | "reverse" | "truncate" | "retain");
+                    if is_mutating_method {
+                        let var_name = ctx.var_name(*id).to_string();
+                        let args_str = args.iter().map(|a| render_expr(ctx, a))
+                            .collect::<Vec<_>>().join(", ");
+                        if args_str.is_empty() {
+                            return format!("{}.make_mut().{}()", var_name, method);
+                        } else {
+                            return format!("{}.make_mut().{}({})", var_name, method, args_str);
+                        }
+                    }
+                }
             }
             {
                 let obj_str = render_expr(ctx, object);
