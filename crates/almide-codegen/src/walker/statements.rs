@@ -78,20 +78,31 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             } else {
                 render_expr(ctx, value)
             };
-            // Check if value is a Clone of a Val-wrapped var → use inferred type
+            // Check if value comes from a RcCow-wrapped var (Clone or direct)
             let is_val_clone = match &value.kind {
                 IrExprKind::Clone { expr: inner } => {
                     if let IrExprKind::Var { id } = &inner.kind {
                         ctx.ann.rc_wrapped_vars.contains(id)
                     } else { false }
                 }
+                IrExprKind::Var { id } => ctx.ann.rc_wrapped_vars.contains(id),
                 _ => false,
             };
             let (type_s, value_s) = if is_val_clone {
-                // Clone of Val returns T (via deref). Re-wrap in Val for COW binding.
-                let val_type = format!("RcCow<{}>", type_s);
-                let val_value = format!("RcCow::new({})", value_s);
-                (val_type, val_value)
+                match &value.kind {
+                    // Direct Var from RcCow: use .clone() (Rc::clone O(1))
+                    IrExprKind::Var { .. } => {
+                        let val_type = format!("RcCow<{}>", type_s);
+                        let val_value = format!("{}.clone()", value_s);
+                        (val_type, val_value)
+                    }
+                    // Clone of RcCow var: deref+clone returned T, re-wrap
+                    _ => {
+                        let val_type = format!("RcCow<{}>", type_s);
+                        let val_value = format!("RcCow::new({})", value_s);
+                        (val_type, val_value)
+                    }
+                }
             } else {
                 (type_s, value_s)
             };
