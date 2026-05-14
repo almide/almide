@@ -289,7 +289,23 @@ impl Checker {
         // Selective import (`import json.{from_string}`) lets bare `from_string`
         // resolve via direct map → "json.from_string".
         let qualified_via_direct = self.env.import_table.resolve_direct(name);
+        // Resolve import alias in module-qualified calls: "gpu.create_buffer" → "snaidhm.web.gpu.create_buffer"
+        let resolved_name = if let Some((module, func)) = name.split_once('.') {
+            if let Some(canonical) = self.env.import_table.resolve(module) {
+                Some(format!("{}.{}", canonical.as_str(), func))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let sig = self.env.functions.get(&sym(name)).cloned().or_else(|| {
+            if let Some(ref rn) = resolved_name {
+                self.env.functions.get(&sym(rn)).cloned()
+            } else {
+                None
+            }
+        }).or_else(|| {
             let (module, func) = name.split_once('.')?;
             crate::stdlib::lookup_sig(module, func)
         }).or_else(|| {

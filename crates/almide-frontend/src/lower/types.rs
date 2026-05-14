@@ -12,7 +12,7 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
         ast::TypeExpr::Record { fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name, ty: resolve_type_expr(&f.ty), default, alias: f.alias }
+                IrFieldDecl { name: f.name, ty: resolve_type_expr(&f.ty), default, alias: f.alias, attrs: f.attrs.clone() }
             }).collect();
             IrTypeDeclKind::Record { fields: fs }
         }
@@ -45,7 +45,7 @@ fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str
         ast::VariantCase::Record { name, fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name, ty: resolve_type_expr(&f.ty), default, alias: f.alias }
+                IrFieldDecl { name: f.name, ty: resolve_type_expr(&f.ty), default, alias: f.alias, attrs: f.attrs.clone() }
             }).collect();
             IrVariantDecl { name: *name, kind: IrVariantKind::Record { fields: fs } }
         }

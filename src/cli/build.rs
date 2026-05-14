@@ -349,12 +349,9 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
         (file.strip_suffix(".almd").unwrap_or("my-package").to_string(), "0.1.0".to_string())
     };
 
-    // Generate JS via v3 codegen
+    // Generate JS via v3 codegen (TS target removed — emit stub)
     almide::mono::monomorphize(&mut ir_program);
-    let js_code = match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::TypeScript) {
-        almide::codegen::CodegenOutput::Source(s) => s,
-        almide::codegen::CodegenOutput::Binary(_) => unreachable!(),
-    };
+    let js_code = "// TypeScript target has been removed. Use --target wasm instead.\n".to_string();
 
     let package_json = format!(
         r#"{{"name":"{}","version":"{}","main":"index.js","type":"module"}}"#,

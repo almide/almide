@@ -30,7 +30,7 @@ impl FuncCompiler<'_> {
                     type_args: vec![],
                 },
                 ty: Ty::Matrix,
-                span: None,
+                span: None, def_id: None,
             };
             let scale_args = vec![mul_call, args[1].clone()];
             return self.emit_matrix_call("scale", &scale_args);
@@ -44,7 +44,7 @@ impl FuncCompiler<'_> {
                     type_args: vec![],
                 },
                 ty: Ty::Matrix,
-                span: None,
+                span: None, def_id: None,
             };
             return self.emit_matrix_call("mul", &[args[0].clone(), transpose_call]);
         }
@@ -56,7 +56,7 @@ impl FuncCompiler<'_> {
                     type_args: vec![],
                 },
                 ty: Ty::Matrix,
-                span: None,
+                span: None, def_id: None,
             };
             return self.emit_matrix_call("mul_scaled", &[args[0].clone(), args[1].clone(), transpose_call]);
         }

@@ -183,7 +183,7 @@ fn try_fold(expr: &IrExpr) -> Option<IrExpr> {
                 }
                 _ => None,
             };
-            folded_kind.map(|kind| IrExpr { kind, ty: expr.ty.clone(), span: expr.span })
+            folded_kind.map(|kind| IrExpr { kind, ty: expr.ty.clone(), span: expr.span, def_id: None })
         }
 
         // ── Unary on literals ──
@@ -194,7 +194,7 @@ fn try_fold(expr: &IrExpr) -> Option<IrExpr> {
                 (UnOp::Not,      IrExprKind::LitBool  { value }) => Some(IrExprKind::LitBool  { value: !value }),
                 _ => None,
             };
-            folded_kind.map(|kind| IrExpr { kind, ty: expr.ty.clone(), span: expr.span })
+            folded_kind.map(|kind| IrExpr { kind, ty: expr.ty.clone(), span: expr.span, def_id: None })
         }
 
         // ── if true then a else b -> a,  if false then a else b -> b ──
@@ -248,15 +248,15 @@ mod tests {
     use almide_lang::types::Ty;
 
     fn lit_int(v: i64) -> IrExpr {
-        IrExpr { kind: IrExprKind::LitInt { value: v }, ty: Ty::Int, span: None }
+        IrExpr { kind: IrExprKind::LitInt { value: v }, ty: Ty::Int, span: None, def_id: None }
     }
 
     fn lit_str(v: &str) -> IrExpr {
-        IrExpr { kind: IrExprKind::LitStr { value: v.to_string() }, ty: Ty::String, span: None }
+        IrExpr { kind: IrExprKind::LitStr { value: v.to_string() }, ty: Ty::String, span: None, def_id: None }
     }
 
     fn lit_bool(v: bool) -> IrExpr {
-        IrExpr { kind: IrExprKind::LitBool { value: v }, ty: Ty::Bool, span: None }
+        IrExpr { kind: IrExprKind::LitBool { value: v }, ty: Ty::Bool, span: None, def_id: None }
     }
 
     #[test]
@@ -268,7 +268,7 @@ mod tests {
                 right: Box::new(lit_int(2)),
             },
             ty: Ty::Int,
-            span: None,
+            span: None, def_id: None,
         };
         fold_expr(&mut e);
         assert!(matches!(e.kind, IrExprKind::LitInt { value: 3 }));
@@ -283,7 +283,7 @@ mod tests {
                 right: Box::new(lit_str("b")),
             },
             ty: Ty::String,
-            span: None,
+            span: None, def_id: None,
         };
         fold_expr(&mut e);
         assert!(matches!(e.kind, IrExprKind::LitStr { ref value } if value == "ab"));
@@ -297,7 +297,7 @@ mod tests {
                 operand: Box::new(lit_bool(true)),
             },
             ty: Ty::Bool,
-            span: None,
+            span: None, def_id: None,
         };
         fold_expr(&mut e);
         assert!(matches!(e.kind, IrExprKind::LitBool { value: false }));
@@ -312,7 +312,7 @@ mod tests {
                 else_: Box::new(lit_int(20)),
             },
             ty: Ty::Int,
-            span: None,
+            span: None, def_id: None,
         };
         fold_expr(&mut e);
         assert!(matches!(e.kind, IrExprKind::LitInt { value: 10 }));
@@ -327,7 +327,7 @@ mod tests {
                 else_: Box::new(lit_int(20)),
             },
             ty: Ty::Int,
-            span: None,
+            span: None, def_id: None,
         };
         fold_expr(&mut e);
         assert!(matches!(e.kind, IrExprKind::LitInt { value: 20 }));
@@ -347,7 +347,7 @@ mod tests {
                     ty: Ty::Int,
                     value: lit_int(42),
                 },
-                span: None,
+                span: None, def_id: None,
             },
         ];
         dce_stmts(&mut stmts, &var_table);
@@ -368,7 +368,7 @@ mod tests {
                     ty: Ty::Int,
                     value: lit_int(42),
                 },
-                span: None,
+                span: None, def_id: None,
             },
         ];
         dce_stmts(&mut stmts, &var_table);
@@ -394,10 +394,10 @@ mod tests {
                             type_args: vec![],
                         },
                         ty: Ty::Int,
-                        span: None,
+                        span: None, def_id: None,
                     },
                 },
-                span: None,
+                span: None, def_id: None,
             },
         ];
         dce_stmts(&mut stmts, &var_table);

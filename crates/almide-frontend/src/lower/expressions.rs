@@ -426,8 +426,11 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             // eta expansion.
             if let ast::ExprKind::Ident { name: mod_name, .. } = &object.kind {
                 if let Ty::Fn { params, ret } = &ty {
+                    let resolved_mod_for_fn = ctx.env.import_table.resolve(mod_name)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| mod_name.to_string());
                     let is_module_fn = crate::stdlib::lookup_sig(mod_name, field).is_some()
-                        || ctx.env.functions.contains_key(&sym(&format!("{}.{}", mod_name, field)))
+                        || ctx.env.functions.contains_key(&sym(&format!("{}.{}", resolved_mod_for_fn, field)))
                         || ctx.env.user_modules.contains(&sym(mod_name))
                         || ctx.env.import_table.aliases.contains_key(&sym(mod_name));
                     if is_module_fn {
@@ -435,17 +438,26 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     }
                 }
                 // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
-                // Spec Visibility section applies to fn, type, AND let.
-                // Module top_lets are emitted as `static ALMIDE_RT_<MOD>_<NAME>` —
-                // a lazy global on both Rust (LazyLock<T>) and WASM. We synthesize
-                // a Var carrying that exact name; codegen recognises the
-                // ALMIDE_RT_ prefix to auto-deref (Rust) and falls back to a
-                // name-based global lookup (WASM).
-                let qual_let_key = format!("{}.{}", mod_name, field);
+                // Resolve import alias to canonical module name, then look up DefId.
+                let resolved_mod = ctx.env.import_table.resolve(mod_name)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| mod_name.to_string());
+                let qual_let_key = format!("{}.{}", resolved_mod, field);
                 if ctx.env.top_lets.contains_key(&sym(&qual_let_key)) {
+                    // DefId-based resolution (preferred): direct mapping to codegen global
+                    if let Some(&def_id) = ctx.def_map.get(&sym(&qual_let_key)) {
+                        let symbol = format!(
+                            "ALMIDE_RT_{}_{}",
+                            resolved_mod.to_uppercase().replace('.', "_"),
+                            field.as_str().to_uppercase(),
+                        );
+                        let var_id = ctx.var_table.alloc(sym(&symbol), ty.clone(), Mutability::Let, None);
+                        return ctx.mk_def(IrExprKind::Var { id: var_id }, ty, span, def_id);
+                    }
+                    // Fallback: synthetic name (legacy path, to be removed)
                     let symbol = format!(
                         "ALMIDE_RT_{}_{}",
-                        mod_name.as_str().to_uppercase(),
+                        resolved_mod.to_uppercase().replace('.', "_"),
                         field.as_str().to_uppercase(),
                     );
                     let var_id = ctx.var_table.alloc(sym(&symbol), ty.clone(), Mutability::Let, None);

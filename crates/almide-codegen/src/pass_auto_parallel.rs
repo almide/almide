@@ -532,7 +532,7 @@ fn rewrite_expr(
         other => other,
     };
 
-    IrExpr { kind, ty, span }
+    IrExpr { kind, ty, span, def_id: None }
 }
 
 fn rewrite_stmts(

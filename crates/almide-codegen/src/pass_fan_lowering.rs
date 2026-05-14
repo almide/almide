@@ -149,7 +149,7 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
         other => other,
     };
 
-    IrExpr { kind, ty, span }
+    IrExpr { kind, ty, span, def_id: None }
 }
 
 fn rewrite_stmts(stmts: Vec<IrStmt>, inside_fan: bool) -> Vec<IrStmt> {
@@ -211,13 +211,13 @@ fn rewrite_fan_arg(arg: IrExpr) -> IrExpr {
                 body: Box::new(rewrite_expr(*body, true)),
                 lambda_id,
             },
-            ty, span,
+            ty, span, def_id: None,
         },
         IrExprKind::List { elements } => IrExpr {
             kind: IrExprKind::List {
                 elements: elements.into_iter().map(rewrite_fan_arg).collect(),
             },
-            ty, span,
+            ty, span, def_id: None,
         },
         _ => rewrite_expr(arg, false),
     }

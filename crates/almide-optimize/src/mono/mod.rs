@@ -250,7 +250,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                 // Can't borrow both program.modules[mi] and Discover's program view;
                 // take ownership, walk, restore.
                 let mut body = std::mem::replace(&mut program.modules[mi].functions[fi].body, almide_ir::IrExpr {
-                    kind: IrExprKind::Unit, ty: Ty::Unit, span: None,
+                    kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
                 });
                 d.visit_expr_mut(&mut body);
                 program.modules[mi].functions[fi].body = body;
@@ -258,7 +258,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
             let tl_count = program.modules[mi].top_lets.len();
             for ti in 0..tl_count {
                 let mut val = std::mem::replace(&mut program.modules[mi].top_lets[ti].value, almide_ir::IrExpr {
-                    kind: IrExprKind::Unit, ty: Ty::Unit, span: None,
+                    kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
                 });
                 d.visit_expr_mut(&mut val);
                 program.modules[mi].top_lets[ti].value = val;
@@ -363,14 +363,14 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
     for mi in 0..program.modules.len() {
         for fi in 0..program.modules[mi].functions.len() {
             let mut body = std::mem::replace(&mut program.modules[mi].functions[fi].body, almide_ir::IrExpr {
-                kind: IrExprKind::Unit, ty: Ty::Unit, span: None,
+                kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
             });
             rw.visit_expr_mut(&mut body);
             program.modules[mi].functions[fi].body = body;
         }
         for ti in 0..program.modules[mi].top_lets.len() {
             let mut val = std::mem::replace(&mut program.modules[mi].top_lets[ti].value, almide_ir::IrExpr {
-                kind: IrExprKind::Unit, ty: Ty::Unit, span: None,
+                kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
             });
             rw.visit_expr_mut(&mut val);
             program.modules[mi].top_lets[ti].value = val;

@@ -225,7 +225,7 @@ impl Parser {
 
     /// Parse a single `@name` or `@name(args...)`. Positioned at the
     /// leading `@` token.
-    fn parse_attribute(&mut self) -> Result<Attribute, String> {
+    pub(crate) fn parse_attribute(&mut self) -> Result<Attribute, String> {
         let span = self.current_span();
         self.expect(TokenType::At)?;
         let name = self.expect_ident_like_name()?;
@@ -607,6 +607,7 @@ impl Parser {
                 name: sym("self"),
                 ty: TypeExpr::Simple { name: sym("Self") },
                 default: None,
+                attrs: Vec::new(),
             });
             self.advance();
             if self.check(TokenType::Comma) { self.advance(); }
@@ -616,6 +617,12 @@ impl Parser {
         while !self.check(TokenType::RParen) {
             self.skip_newlines();
             if self.check(TokenType::RParen) { break; }
+            // Collect param-level attributes (e.g. @builtin(vertex_index), @location(0))
+            let mut attrs = Vec::new();
+            while self.check(TokenType::At) {
+                attrs.push(self.parse_attribute()?);
+                self.skip_newlines();
+            }
             let param_name = self.expect_any_param_name()?;
             self.expect(TokenType::Colon)?;
             let param_type = self.parse_type_expr()?;
@@ -629,7 +636,7 @@ impl Parser {
                 }
                 None
             };
-            params.push(Param { name: param_name, ty: param_type, default });
+            params.push(Param { name: param_name, ty: param_type, default, attrs });
             if self.check(TokenType::Comma) {
                 self.advance();
                 self.skip_newlines();

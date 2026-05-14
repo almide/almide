@@ -190,9 +190,9 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::Var { id } if deref_ids.contains(&id) => {
             return IrExpr {
                 kind: IrExprKind::Deref {
-                    expr: Box::new(IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span }),
+                    expr: Box::new(IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span, def_id: None }),
                 },
-                ty, span,
+                ty, span, def_id: None,
             };
         }
         // Recurse
@@ -291,7 +291,7 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
         other => other,
     };
 
-    IrExpr { kind, ty, span }
+    IrExpr { kind, ty, span, def_id: None }
 }
 
 fn insert_deref_stmts(stmts: Vec<IrStmt>, deref_ids: &HashSet<VarId>) -> Vec<IrStmt> {

@@ -521,7 +521,7 @@ impl FuncCompiler<'_> {
                 let dummy_arg = IrExpr {
                     kind: args[0].kind.clone(),
                     ty: args[0].ty.clone(),
-                    span: args[0].span,
+                    span: args[0].span, def_id: None,
                 };
                 self.emit_bytes_is_valid_utf8(std::slice::from_ref(&dummy_arg));
                 let err_str = self.emitter.intern_string("invalid UTF-8");

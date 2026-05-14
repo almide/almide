@@ -48,7 +48,7 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
             if let Some(inner_fn_ty) = inner.ty.option_inner() {
                 if matches!(inner_fn_ty, almide_lang::types::Ty::Fn { .. }) {
                     let old_fallback = std::mem::replace(fallback.as_mut(), IrExpr {
-                        kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None,
+                        kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None,
                     });
                     *fallback.as_mut() = IrExpr {
                         ty: old_fallback.ty.clone(),
@@ -57,6 +57,7 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
                             expr: Box::new(old_fallback),
                             cast_ty: Some(Box::new(inner_fn_ty.clone())),
                         },
+                        def_id: None,
                     };
                     changed = true;
                 }
@@ -138,12 +139,13 @@ fn rewrite_stmt(stmt: &mut IrStmt, vt: &mut VarTable) -> bool {
                         let cast = Some(Box::new(fn_ty));
                         for elem in elements.iter_mut() {
                             let inner = std::mem::replace(elem, IrExpr {
-                                kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None,
+                                kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None,
                             });
                             *elem = IrExpr {
                                 ty: inner.ty.clone(),
                                 span: inner.span,
                                 kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: cast.clone() },
+                                def_id: None,
                             };
                         }
                         // Change type to mark it (walker will render Rc type from the RcWrap nodes)
@@ -176,7 +178,7 @@ fn rewrite_stmt(stmt: &mut IrStmt, vt: &mut VarTable) -> bool {
             let idx_ref = IrExpr {
                 kind: IrExprKind::Var { id: idx_var },
                 ty: almide_lang::types::Ty::Int,
-                span: None,
+                span: None, def_id: None,
             };
             let new_assign = IrStmt {
                 kind: IrStmtKind::IndexAssign {
@@ -194,7 +196,7 @@ fn rewrite_stmt(stmt: &mut IrStmt, vt: &mut VarTable) -> bool {
                         expr: None,
                     },
                     ty: almide_lang::types::Ty::Unit,
-                    span: None,
+                    span: None, def_id: None,
                 },
             };
             return true;
@@ -220,7 +222,7 @@ fn try_rewrite_push(var: VarId, value: &IrExpr, span: Option<almide_base::Span>)
                 object: Box::new(IrExpr {
                     kind: IrExprKind::Var { id: var },
                     ty: left.ty.clone(),
-                    span: None,
+                    span: None, def_id: None,
                 }),
                 method: sym("push"),
             },
@@ -228,7 +230,7 @@ fn try_rewrite_push(var: VarId, value: &IrExpr, span: Option<almide_base::Span>)
             type_args: vec![],
         },
         ty: almide_lang::types::Ty::Unit,
-        span: None,
+        span: None, def_id: None,
     };
     Some(IrStmt {
         kind: IrStmtKind::Expr { expr: push_call },

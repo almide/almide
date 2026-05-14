@@ -5,6 +5,7 @@ fn test_wasm_empty_program_valid() {
         top_lets: vec![],
         type_decls: vec![],
         var_table: almide::ir::VarTable::new(),
+        def_table: Default::default(),
         modules: vec![],
         type_registry: almide::types::TypeConstructorRegistry::new(),
         effect_fn_names: Default::default(),

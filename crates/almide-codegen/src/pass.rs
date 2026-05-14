@@ -39,10 +39,8 @@ pub struct ScopeContext {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Rust,
-    TypeScript,
-    Go,
-    Python,
     Wasm,
+    Wgsl,
 }
 
 // ── Target Attributes ──

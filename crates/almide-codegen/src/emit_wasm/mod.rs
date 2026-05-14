@@ -243,6 +243,8 @@ pub struct WasmEmitter {
     /// var_table can resolve via name even when their VarId belongs to a
     /// different table.
     pub top_let_globals_by_name: HashMap<String, (u32, ValType)>,
+    /// DefId-keyed global mapping. Authoritative for cross-package resolution.
+    pub def_globals: HashMap<u32, (u32, ValType)>,
     pub top_let_init: Vec<(u32, ValType, i64)>, // (global_idx, type, const_init_bits) in order
     pub next_global: u32,
 
@@ -370,6 +372,7 @@ impl WasmEmitter {
             preopen_table_global: 1,
             preopen_count_global: 2,
             top_let_globals: HashMap::new(),
+            def_globals: HashMap::new(),
             top_let_globals_by_name: HashMap::new(),
             top_let_init: Vec::new(),
             next_global: 3, // 0 = heap_ptr, 1 = preopen_table, 2 = preopen_count
@@ -769,9 +772,16 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     // Register type declarations (record and variant field layouts).
     // Include both the main program and all imported modules so nominal
     // types from `import mod` resolve during codegen.
-    let all_type_decls = program.type_decls.iter()
-        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
+    // Register module type_decls first, then program's own (self) type_decls.
+    // This ensures self types win over same-named dependency types in record_fields.
+    let all_type_decls = program.modules.iter().flat_map(|m| m.type_decls.iter())
+        .chain(program.type_decls.iter());
     for td in all_type_decls {
+        if td.name.as_str() == "TextLine" {
+            if let almide_ir::IrTypeDeclKind::Record { fields } = &td.kind {
+                eprintln!("[TYPE-DBG] TextLine fields: {:?}", fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>());
+            }
+        }
         match &td.kind {
             almide_ir::IrTypeDeclKind::Record { fields } => {
                 let field_list: Vec<(String, almide_lang::types::Ty)> = fields.iter()
@@ -895,15 +905,45 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 almide_ir::IrExprKind::LitBool { value } => *value as i64,
                 _ => 0,
             };
-            // Post-unification module top-lets reference the unified
-            // `program.var_table` (see `pass_unify_var_tables`). We
-            // keep the name-keyed map populated for compatibility with
-            // the synthetic Var branch below, but the VarId-keyed
-            // `top_let_globals` is also authoritative now.
             let name = program.var_table.get(tl.var).name.to_string();
-            emitter.top_let_globals_by_name.insert(name, (global_idx, vt));
+            emitter.top_let_globals_by_name.insert(name.clone(), (global_idx, vt));
             emitter.top_let_globals.insert(tl.var.0, (global_idx, vt));
             emitter.top_let_init.push((global_idx, vt, const_bits));
+            // Register by DefId for direct cross-package resolution
+            if let Some(def_id) = tl.def_id {
+                emitter.def_globals.insert(def_id.0, (global_idx, vt));
+            }
+
+            // Also register under the ALMIDE_RT_<MOD>_<NAME> synthetic name
+            // that cross-module access creates during lowering. Without this,
+            // the name-keyed fallback in expressions.rs can't find the global.
+            let mod_name = module.name.as_str();
+            if !mod_name.is_empty() {
+                // Register ALMIDE_RT_<MOD>_<NAME> under multiple name forms:
+                // - Full module path: ALMIDE_RT_SNAIDHM_WEB_GPU_STORAGE
+                // - VarTable name as-is (may include _V0_ versioning)
+                // - Leaf segment only: ALMIDE_RT_GPU_STORAGE
+                let segments: Vec<&str> = mod_name.split('.').collect();
+                let leaf = segments.last().copied().unwrap_or(mod_name);
+                for alias in [mod_name, leaf] {
+                    let synthetic = format!(
+                        "ALMIDE_RT_{}_{}",
+                        alias.to_uppercase().replace('.', "_"),
+                        name.to_uppercase(),
+                    );
+                    emitter.top_let_globals_by_name.insert(synthetic, (global_idx, vt));
+                }
+                // Also register the VarTable name itself (handles versioned names like ALMIDE_RT_SNAIDHM_V0_...)
+                if name.starts_with("ALMIDE_RT_") {
+                    emitter.top_let_globals_by_name.insert(name.clone(), (global_idx, vt));
+                    // Strip version suffix: ALMIDE_RT_SNAIDHM_V0_WEB_GPU_STORAGE → ALMIDE_RT_SNAIDHM_WEB_GPU_STORAGE
+                    // so that the unversioned lowering synthetic name can also match.
+                    let stripped = name.replacen("_V0_", "_", 1);
+                    if stripped != name {
+                        emitter.top_let_globals_by_name.insert(stripped, (global_idx, vt));
+                    }
+                }
+            }
         }
     }
 
@@ -1243,6 +1283,8 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
         exports.export("_start", wasm_encoder::ExportKind::Func, main_idx);
     } else if let Some(&runner_idx) = emitter.func_map.get("__test_runner") {
         exports.export("_start", wasm_encoder::ExportKind::Func, runner_idx);
+    } else if let Some(&init_idx) = emitter.func_map.get("__init_globals") {
+        exports.export("_start", wasm_encoder::ExportKind::Func, init_idx);
     }
     // Export __alloc for FFI callers to allocate WASM linear memory
     if let Some(&alloc_idx) = emitter.func_map.get("__alloc") {
@@ -1700,6 +1742,7 @@ mod tests {
             top_lets: vec![],
             type_decls: vec![],
             var_table: almide_ir::VarTable::new(),
+            def_table: Default::default(),
             modules: vec![],
             type_registry: Default::default(),
             effect_fn_names: Default::default(),

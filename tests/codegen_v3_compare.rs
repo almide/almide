@@ -30,7 +30,7 @@ fn make_test_program() -> IrProgram {
                 func: "find".into(),
             },
             args: vec![
-                IrExpr { kind: IrExprKind::Var { id: v_products }, ty: Ty::list(Ty::String), span: None },
+                IrExpr { kind: IrExprKind::Var { id: v_products }, ty: Ty::list(Ty::String), span: None, def_id: None },
                 IrExpr {
                     kind: IrExprKind::Lambda {
                         params: vec![(v_p, Ty::String)],
@@ -38,21 +38,21 @@ fn make_test_program() -> IrProgram {
                         body: Box::new(IrExpr {
                             kind: IrExprKind::BinOp {
                                 op: BinOp::Eq,
-                                left: Box::new(IrExpr { kind: IrExprKind::Var { id: v_p }, ty: Ty::String, span: None }),
-                                right: Box::new(IrExpr { kind: IrExprKind::Var { id: v_target }, ty: Ty::String, span: None }),
+                                left: Box::new(IrExpr { kind: IrExprKind::Var { id: v_p }, ty: Ty::String, span: None, def_id: None }),
+                                right: Box::new(IrExpr { kind: IrExprKind::Var { id: v_target }, ty: Ty::String, span: None, def_id: None }),
                             },
                             ty: Ty::Bool,
-                            span: None,
+                            span: None, def_id: None,
                         }),
                     },
                     ty: Ty::Fn { params: vec![Ty::String], ret: Box::new(Ty::Bool) },
-                    span: None,
+                    span: None, def_id: None,
                 },
             ],
             type_args: vec![],
         },
         ty: Ty::option(Ty::String),
-        span: None,
+        span: None, def_id: None,
     };
 
     let match_expr = IrExpr {
@@ -62,17 +62,17 @@ fn make_test_program() -> IrProgram {
                 IrMatchArm {
                     pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: v_x, ty: Ty::Unknown }) },
                     guard: None,
-                    body: IrExpr { kind: IrExprKind::Var { id: v_x }, ty: Ty::Int, span: None },
+                    body: IrExpr { kind: IrExprKind::Var { id: v_x }, ty: Ty::Int, span: None, def_id: None },
                 },
                 IrMatchArm {
                     pattern: IrPattern::None,
                     guard: None,
-                    body: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None },
+                    body: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None },
                 },
             ],
         },
         ty: Ty::Int,
-        span: None,
+        span: None, def_id: None,
     };
 
     let func = IrFunction {
@@ -85,6 +85,7 @@ fn make_test_program() -> IrProgram {
                 borrow: ParamBorrow::Own,
                 open_record: None,
                 default: None,
+                attrs: vec![],
             },
             IrParam {
                 var: v_target,
@@ -93,6 +94,7 @@ fn make_test_program() -> IrProgram {
                 borrow: ParamBorrow::Own,
                 open_record: None,
                 default: None,
+                attrs: vec![],
             },
         ],
         ret_ty: Ty::Int,
@@ -106,6 +108,7 @@ fn make_test_program() -> IrProgram {
         visibility: IrVisibility::Public,
         doc: None,
         blank_lines_before: 0,
+        def_id: None,
     };
 
     IrProgram {
@@ -113,6 +116,7 @@ fn make_test_program() -> IrProgram {
         top_lets: vec![],
         type_decls: vec![],
         var_table,
+        def_table: Default::default(),
         modules: vec![],
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
@@ -152,11 +156,11 @@ fn test_walker_option_some_divergence() {
             expr: Box::new(IrExpr {
                 kind: IrExprKind::Var { id: v },
                 ty: Ty::Int,
-                span: None,
+                span: None, def_id: None,
             }),
         },
         ty: Ty::option(Ty::Int),
-        span: None,
+        span: None, def_id: None,
     };
 
     // Rust: Some(value)
@@ -177,11 +181,11 @@ fn test_walker_result_divergence() {
             expr: Box::new(IrExpr {
                 kind: IrExprKind::Var { id: v },
                 ty: Ty::String,
-                span: None,
+                span: None, def_id: None,
             }),
         },
         ty: Ty::result(Ty::String, Ty::String),
-        span: None,
+        span: None, def_id: None,
     };
 
     // Rust: Ok(data)
@@ -200,11 +204,11 @@ fn test_walker_concat_type_dispatch() {
     let concat = IrExpr {
         kind: IrExprKind::BinOp {
             op: BinOp::ConcatStr,
-            left: Box::new(IrExpr { kind: IrExprKind::Var { id: a }, ty: Ty::String, span: None }),
-            right: Box::new(IrExpr { kind: IrExprKind::Var { id: b }, ty: Ty::String, span: None }),
+            left: Box::new(IrExpr { kind: IrExprKind::Var { id: a }, ty: Ty::String, span: None, def_id: None }),
+            right: Box::new(IrExpr { kind: IrExprKind::Var { id: b }, ty: Ty::String, span: None, def_id: None }),
         },
         ty: Ty::String,
-        span: None,
+        span: None, def_id: None,
     };
 
     // Rust: format!("{}{}", a, b)
@@ -225,17 +229,17 @@ fn test_walker_if_formatting() {
             cond: Box::new(IrExpr {
                 kind: IrExprKind::BinOp {
                     op: BinOp::Gt,
-                    left: Box::new(IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None }),
-                    right: Box::new(IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None }),
+                    left: Box::new(IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None }),
+                    right: Box::new(IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None }),
                 },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             }),
-            then: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "positive".into() }, ty: Ty::String, span: None }),
-            else_: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "non-positive".into() }, ty: Ty::String, span: None }),
+            then: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "positive".into() }, ty: Ty::String, span: None, def_id: None }),
+            else_: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "non-positive".into() }, ty: Ty::String, span: None, def_id: None }),
         },
         ty: Ty::String,
-        span: None,
+        span: None, def_id: None,
     };
 
     // Rust: if cond { ... } else { ... }  (no parens around cond)

@@ -106,7 +106,7 @@ fn convert_expr(
             if free.iter().any(|vid| body_assigns_to(&body, *vid)) {
                 return IrExpr {
                     kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },
-                    ty, span,
+                    ty, span, def_id: None,
                 };
             }
 
@@ -137,7 +137,7 @@ fn convert_expr(
                         var: local, mutability: Mutability::Let, ty: cap_ty.clone(),
                         value: IrExpr {
                             kind: IrExprKind::EnvLoad { env_var, index: idx as u32 },
-                            ty: cap_ty.clone(), span: None,
+                            ty: cap_ty.clone(), span: None, def_id: None,
                         },
                     },
                     span: None,
@@ -159,7 +159,7 @@ fn convert_expr(
                         stmts: prologue,
                         expr: Some(Box::new(rewritten)),
                     },
-                    ty, span,
+                    ty, span, def_id: None,
                 }
             };
 
@@ -172,7 +172,7 @@ fn convert_expr(
             };
             let mut func_params = vec![IrParam {
                 var: env_var, ty: env_ty, name: sym("__env"),
-                borrow: ParamBorrow::Own, open_record: None, default: None,
+                borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![],
             }];
             for (i, (vid, vty)) in params.iter().enumerate() {
                 let info_name = vt.get(*vid).name;
@@ -192,7 +192,7 @@ fn convert_expr(
                 }
                 func_params.push(IrParam {
                     var: *vid, ty: resolved, name: info_name,
-                    borrow: ParamBorrow::Own, open_record: None, default: None,
+                    borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![],
                 });
             }
 
@@ -212,6 +212,7 @@ fn convert_expr(
                 is_effect: false, is_async: false, is_test: false,
                 generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
                 visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
+                def_id: None,
             });
 
             IrExprKind::ClosureCreate { func_name, captures }
@@ -335,7 +336,7 @@ fn convert_expr(
         other => other,
     };
 
-    IrExpr { kind, ty, span }
+    IrExpr { kind, ty, span, def_id: None }
 }
 
 fn convert_stmt(

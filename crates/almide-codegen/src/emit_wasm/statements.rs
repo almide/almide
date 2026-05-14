@@ -481,7 +481,7 @@ impl FuncCompiler<'_> {
                 if let Some(&local_idx) = self.var_map.get(&target.0) {
                     // Emit map.set(target, key, value) using the existing map call infrastructure
                     let set_args = vec![
-                        almide_ir::IrExpr { kind: almide_ir::IrExprKind::Var { id: *target }, ty: self.var_table.get(*target).ty.clone(), span: None },
+                        almide_ir::IrExpr { kind: almide_ir::IrExprKind::Var { id: *target }, ty: self.var_table.get(*target).ty.clone(), span: None, def_id: None },
                         key.clone(),
                         value.clone(),
                     ];

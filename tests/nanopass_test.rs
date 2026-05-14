@@ -9,7 +9,7 @@ use almide_base::intern::sym;
 // ── Helpers ─────────────────────────────────────────────────────
 
 fn mk_expr(kind: IrExprKind, ty: Ty) -> IrExpr {
-    IrExpr { kind, ty, span: None }
+    IrExpr { kind, ty, span: None, def_id: None }
 }
 
 fn mk_fn(name: &str, params: Vec<IrParam>, ret_ty: Ty, body: IrExpr, is_effect: bool) -> IrFunction {
@@ -18,12 +18,13 @@ fn mk_fn(name: &str, params: Vec<IrParam>, ret_ty: Ty, body: IrExpr, is_effect: 
         is_effect, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
 fn mk_param(vt: &mut VarTable, name: &str, ty: Ty) -> IrParam {
     let var = vt.alloc(sym(name), ty.clone(), Mutability::Let, None);
-    IrParam { var, ty: ty.clone(), name: sym(name), borrow: ParamBorrow::Own, open_record: None, default: None }
+    IrParam { var, ty: ty.clone(), name: sym(name), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }
 }
 
 fn mk_program(functions: Vec<IrFunction>, var_table: VarTable) -> IrProgram {

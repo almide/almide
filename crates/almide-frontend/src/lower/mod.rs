@@ -46,6 +46,10 @@ pub struct LowerCtx<'a> {
     lambda_id_counter: u32,
     /// Maps const param name → VarId for value parameter lowering.
     pub const_param_vars: HashMap<Sym, VarId>,
+    /// Definition table for cross-package resolution.
+    pub def_table: almide_ir::DefTable,
+    /// Maps qualified name (e.g. "snaidhm.web.gpu.STORAGE") → DefId.
+    pub def_map: HashMap<Sym, almide_ir::DefId>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -60,6 +64,8 @@ impl<'a> LowerCtx<'a> {
             protocol_bounds: HashMap::new(),
             lambda_id_counter: 0,
             const_param_vars: HashMap::new(),
+            def_table: almide_ir::DefTable::new(),
+            def_map: HashMap::new(),
         }
     }
 
@@ -171,7 +177,11 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn mk(&self, kind: IrExprKind, ty: Ty, span: Option<ast::Span>) -> IrExpr {
-        IrExpr { kind, ty, span }
+        IrExpr { kind, ty, span, def_id: None }
+    }
+
+    pub(super) fn mk_def(&self, kind: IrExprKind, ty: Ty, span: Option<ast::Span>, def_id: DefId) -> IrExpr {
+        IrExpr { kind, ty, span, def_id: Some(def_id) }
     }
 }
 
@@ -183,6 +193,26 @@ pub fn lower_program(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap) -> 
 
 fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap, module_prefix: Option<&str>) -> IrProgram {
     let mut ctx = LowerCtx::new(env, type_map);
+
+    // Build DefTable from all known top-level lets (including cross-package).
+    // Each "module.name" key in env.top_lets gets a DefId.
+    for (qual_name, ty) in &env.top_lets {
+        let qual = qual_name.as_str();
+        if let Some(dot_pos) = qual.rfind('.') {
+            let module = &qual[..dot_pos];
+            let name = &qual[dot_pos + 1..];
+            // Extract package name (first segment)
+            let package = module.split('.').next().unwrap_or(module);
+            let def_id = ctx.def_table.alloc(
+                sym(package),
+                sym(module),
+                sym(name),
+                almide_ir::DefKind::TopLet,
+                ty.clone(),
+            );
+            ctx.def_map.insert(*qual_name, def_id);
+        }
+    }
 
     // Collect type conventions (deriving Eq, Repr, etc.)
     for decl in &prog.decls {
@@ -270,7 +300,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                 let val_ty = ctx.var_table.get(var).ty.clone();
                 let ir_value = lower_expr(&mut ctx, value);
                 let kind = classify_top_let_kind(&ir_value);
-                top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, doc, blank_lines_before: blank_lines });
+                top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, doc, blank_lines_before: blank_lines, def_id: None });
             }
             ast::Decl::Test { name, body, .. } => {
                 let test_fn = lower_test(&mut ctx, name, body);
@@ -300,7 +330,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         .map(|(name, _)| *name)
         .collect();
 
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
@@ -497,6 +527,7 @@ fn lower_fn(
                     ir_params.push(IrParam {
                         var, ty: param_ty, name: g.name,
                         borrow: ParamBorrow::Own, open_record: None, default: None,
+                        attrs: Vec::new(),
                     });
                 }
             }
@@ -510,6 +541,7 @@ fn lower_fn(
         ir_params.push(IrParam {
             var, ty: ty.clone(), name: p.name,
             borrow: ParamBorrow::Own, open_record: None, default,
+            attrs: p.attrs.clone(),
         });
     }
 
@@ -559,6 +591,7 @@ fn lower_fn(
         attrs: attrs.to_vec(),
         visibility: vis,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
@@ -573,5 +606,6 @@ fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
         visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }

@@ -177,28 +177,28 @@ fn ast_expr_to_ir_literal(expr: &almide_lang::ast::Expr) -> Option<IrExpr> {
             Some(IrExpr {
                 kind: IrExprKind::LitInt { value: n },
                 ty: Ty::Int,
-                span: None,
+                span: None, def_id: None,
             })
         }
         ExprKind::Float { value } => Some(IrExpr {
             kind: IrExprKind::LitFloat { value: *value },
             ty: Ty::Float,
-            span: None,
+            span: None, def_id: None,
         }),
         ExprKind::String { value } => Some(IrExpr {
             kind: IrExprKind::LitStr { value: value.clone() },
             ty: Ty::String,
-            span: None,
+            span: None, def_id: None,
         }),
         ExprKind::Bool { value } => Some(IrExpr {
             kind: IrExprKind::LitBool { value: *value },
             ty: Ty::Bool,
-            span: None,
+            span: None, def_id: None,
         }),
         ExprKind::Ident { name } if name.as_str() == "none" => Some(IrExpr {
             kind: IrExprKind::OptionNone,
             ty: Ty::option(Ty::Unknown),
-            span: None,
+            span: None, def_id: None,
         }),
         _ => None,
     }
@@ -428,7 +428,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                 return IrExpr {
                     kind: IrExprKind::InlineRust { template: spec.template, args: paired },
                     ty,
-                    span,
+                    span, def_id: None,
                 };
             }
 
@@ -447,7 +447,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         type_args,
                     },
                     ty,
-                    span,
+                    span, def_id: None,
                 };
             }
 
@@ -478,7 +478,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                     type_args,
                 },
                 ty,
-                span,
+                span, def_id: None,
             };
         }
 
@@ -498,7 +498,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                                     target: CallTarget::Module { module: module.to_string().into(), func: method },
                                     args: call_args, type_args,
                                 },
-                                ty: ty.clone(), span,
+                                ty: ty.clone(), span, def_id: None,
                             };
                             return rewrite_expr(module_call);
                         }
@@ -523,7 +523,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                                 return IrExpr { kind: IrExprKind::Call {
                                     target: CallTarget::Method { object, method },
                                     args, type_args,
-                                }, ty, span };
+                                }, ty, span, def_id: None };
                             }
                         let mut call_args = vec![*object];
                         call_args.extend(args);
@@ -532,7 +532,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                                 target: CallTarget::Module { module: mod_name.into(), func: func_name.into() },
                                 args: call_args, type_args,
                             },
-                            ty: ty.clone(), span,
+                            ty: ty.clone(), span, def_id: None,
                         };
                         return rewrite_expr(module_call);
                     }
@@ -656,7 +656,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         other => other,
     };
 
-    IrExpr { kind, ty, span }
+    IrExpr { kind, ty, span, def_id: None }
 }
 
 /// Resolve a stdlib module from the receiver/arg type and method name.
@@ -746,12 +746,12 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
                         target: CallTarget::Module { module: module.to_string().into(), func: name },
                         args, type_args,
                     },
-                    ty, span,
+                    ty, span, def_id: None,
                 });
             }
             return IrExpr {
                 kind: IrExprKind::Call { target: CallTarget::Named { name }, args, type_args },
-                ty, span,
+                ty, span, def_id: None,
             };
         }
         // Method call: xs.map(fn) → list.map(xs, fn) when type is known
@@ -772,12 +772,12 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
                         target: CallTarget::Module { module: module.to_string().into(), func: method },
                         args: call_args, type_args,
                     },
-                    ty, span,
+                    ty, span, def_id: None,
                 });
             }
             return IrExpr {
                 kind: IrExprKind::Call { target: CallTarget::Method { object, method }, args, type_args },
-                ty, span,
+                ty, span, def_id: None,
             };
         }
         _ => {}
@@ -796,7 +796,7 @@ fn resolve_ufcs_stmts(stmts: Vec<IrStmt>, siblings: &[String]) -> Vec<IrStmt> {
 /// Inline math/float/int intrinsics as native Rust expressions.
 /// Eliminates runtime function call overhead for hot-path numeric operations.
 fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
-    let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span };
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: ty.clone(), span, def_id: None };
 
     // NOTE: `float` entries that used to live here (sqrt/abs/floor/
     // ceil/round/is_nan/is_infinite) have been deleted. The bundled
@@ -938,7 +938,7 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                     steps: vec![IterStep::Map { lambda: Box::new(lambda) }],
                     collector: IterCollector::Collect,
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             })
         }
         "filter" if args.len() >= 2 && matches!(args[1].kind, IrExprKind::Lambda { .. }) => {
@@ -951,7 +951,7 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                     steps: vec![IterStep::Filter { lambda: Box::new(lambda) }],
                     collector: IterCollector::Collect,
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             })
         }
         "flat_map" if args.len() >= 2 => {
@@ -964,7 +964,7 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                     steps: vec![IterStep::FlatMap { lambda: Box::new(lambda) }],
                     collector: IterCollector::Collect,
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             })
         }
         "filter_map" if args.len() >= 2 => {
@@ -977,7 +977,7 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                     steps: vec![IterStep::FilterMap { lambda: Box::new(lambda) }],
                     collector: IterCollector::Collect,
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             })
         }
         "fold" if args.len() >= 3 => {
@@ -991,7 +991,7 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                     steps: vec![],
                     collector: IterCollector::Fold { init: Box::new(init), lambda: Box::new(lambda) },
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             })
         }
         "find" if args.len() >= 2 && matches!(args[1].kind, IrExprKind::Lambda { .. }) => {
@@ -1004,7 +1004,7 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                     steps: vec![],
                     collector: IterCollector::Find { lambda: Box::new(lambda) },
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             })
         }
         // ── Borrowing operations (iter) → produce scalar ──
@@ -1018,7 +1018,7 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                     steps: vec![],
                     collector: IterCollector::Any { lambda: Box::new(lambda) },
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             })
         }
         "all" if args.len() >= 2 => {
@@ -1031,7 +1031,7 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                     steps: vec![],
                     collector: IterCollector::All { lambda: Box::new(lambda) },
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             })
         }
         "count" if args.len() >= 2 && matches!(args[1].kind, IrExprKind::Lambda { .. }) => {
@@ -1044,7 +1044,7 @@ fn try_lower_to_iter_chain(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Opt
                     steps: vec![],
                     collector: IterCollector::Count { lambda: Box::new(lambda) },
                 },
-                ty: ty.clone(), span,
+                ty: ty.clone(), span, def_id: None,
             })
         }
         _ => None,
@@ -1066,12 +1066,12 @@ fn prepare_lambda(arg: IrExpr) -> IrExpr {
                 let body_span = body.span;
                 IrExpr {
                     kind: IrExprKind::Block { stmts: clone_stmts, expr: Some(body) },
-                    ty: body_ty, span: body_span,
+                    ty: body_ty, span: body_span, def_id: None,
                 }
             };
             IrExpr {
                 kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
-                ty, span,
+                ty, span, def_id: None,
             }
         }
         _ => arg,
@@ -1093,17 +1093,17 @@ fn prepare_lambda_borrowed(arg: IrExpr) -> IrExpr {
                         // *x (deref the reference)
                         IrExpr {
                             kind: IrExprKind::Deref {
-                                expr: Box::new(IrExpr { kind: IrExprKind::Var { id: *id }, ty: param_ty.clone(), span: None }),
+                                expr: Box::new(IrExpr { kind: IrExprKind::Var { id: *id }, ty: param_ty.clone(), span: None, def_id: None }),
                             },
-                            ty: param_ty.clone(), span: None,
+                            ty: param_ty.clone(), span: None, def_id: None,
                         }
                     } else {
                         // x.clone() (clone from reference)
                         IrExpr {
                             kind: IrExprKind::Clone {
-                                expr: Box::new(IrExpr { kind: IrExprKind::Var { id: *id }, ty: param_ty.clone(), span: None }),
+                                expr: Box::new(IrExpr { kind: IrExprKind::Var { id: *id }, ty: param_ty.clone(), span: None, def_id: None }),
                             },
-                            ty: param_ty.clone(), span: None,
+                            ty: param_ty.clone(), span: None, def_id: None,
                         }
                     };
                     IrStmt {
@@ -1119,12 +1119,12 @@ fn prepare_lambda_borrowed(arg: IrExpr) -> IrExpr {
                 let body_span = body.span;
                 IrExpr {
                     kind: IrExprKind::Block { stmts: deref_stmts, expr: Some(body) },
-                    ty: body_ty, span: body_span,
+                    ty: body_ty, span: body_span, def_id: None,
                 }
             };
             IrExpr {
                 kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
-                ty, span,
+                ty, span, def_id: None,
             }
         }
         _ => arg,
@@ -1146,7 +1146,7 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
             let args = args.into_iter().map(|a| prefix_intra_module_calls(a, mod_name, siblings)).collect();
             return IrExpr {
                 kind: IrExprKind::Call { target: CallTarget::Named { name: prefixed.into() }, args, type_args },
-                ty: expr.ty, span: expr.span,
+                ty: expr.ty, span: expr.span, def_id: None,
             };
         }
         IrExprKind::FnRef { name } if siblings.iter().any(|s| s == &**name) => {
@@ -1154,7 +1154,7 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
             let mod_ident = mod_name.replace('.', "_");
             return IrExpr {
                 kind: IrExprKind::FnRef { name: format!("almide_rt_{}_{}", mod_ident, sanitized).into() },
-                ty: expr.ty, span: expr.span,
+                ty: expr.ty, span: expr.span, def_id: None,
             };
         }
         _ => {}
@@ -1175,7 +1175,7 @@ fn rewrite_module_names(expr: IrExpr, map: &std::collections::HashMap<String, St
             let args = args.into_iter().map(|a| rewrite_module_names(a, map)).collect();
             return IrExpr {
                 kind: IrExprKind::Call { target: CallTarget::Module { module: new_module, func }, args, type_args },
-                ty: expr.ty, span: expr.span,
+                ty: expr.ty, span: expr.span, def_id: None,
             };
         }
     }
@@ -1216,11 +1216,11 @@ fn build_clone_stmts_for_lambda(params: &[(VarId, Ty)], body: &IrExpr) -> Vec<Ir
                                 expr: Box::new(IrExpr {
                                     kind: IrExprKind::Var { id: *id },
                                     ty: param_ty.clone(),
-                                    span: None,
+                                    span: None, def_id: None,
                                 }),
                             },
                             ty: param_ty.clone(),
-                            span: None,
+                            span: None, def_id: None,
                         },
                     },
                     span: None,
@@ -1235,7 +1235,7 @@ fn build_clone_stmts_for_lambda(params: &[(VarId, Ty)], body: &IrExpr) -> Vec<Ir
                         value: IrExpr {
                             kind: IrExprKind::Var { id: *id },
                             ty: param_ty.clone(),
-                            span: None,
+                            span: None, def_id: None,
                         },
                     },
                     span: None,

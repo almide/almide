@@ -14,25 +14,25 @@ pub(super) fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &T
     let pairs: Vec<IrExpr> = fields.iter().map(|f| {
         let field_access = IrExpr {
             kind: IrExprKind::Member {
-                object: Box::new(IrExpr { kind: IrExprKind::Var { id: var }, ty: type_ty.clone(), span: None }),
+                object: Box::new(IrExpr { kind: IrExprKind::Var { id: var }, ty: type_ty.clone(), span: None, def_id: None }),
                 field: f.name,
             },
-            ty: f.ty.clone(), span: None,
+            ty: f.ty.clone(), span: None, def_id: None,
         };
         // Choose value constructor based on field type
         let value_call = encode_field_value(&field_access, &f.ty, &value_ty);
         IrExpr {
             kind: IrExprKind::Tuple { elements: vec![
-                IrExpr { kind: IrExprKind::LitStr { value: f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()) }, ty: Ty::String, span: None },
+                IrExpr { kind: IrExprKind::LitStr { value: f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()) }, ty: Ty::String, span: None, def_id: None },
                 value_call,
             ]},
-            ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None,
+            ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None, def_id: None,
         }
     }).collect();
 
     let pairs_list = IrExpr {
         kind: IrExprKind::List { elements: pairs },
-        ty: Ty::list(Ty::Tuple(vec![Ty::String, value_ty.clone()])), span: None,
+        ty: Ty::list(Ty::Tuple(vec![Ty::String, value_ty.clone()])), span: None, def_id: None,
     };
 
     let body = IrExpr {
@@ -41,17 +41,18 @@ pub(super) fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &T
             args: vec![pairs_list],
             type_args: vec![],
         },
-        ty: value_ty.clone(), span: None,
+        ty: value_ty.clone(), span: None, def_id: None,
     };
 
     IrFunction {
         name: sym(&format!("{}.encode", type_name)),
-        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None }],
+        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }],
         ret_ty: value_ty,
         body,
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
@@ -70,7 +71,7 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
                     args: vec![field_expr.clone()],
                     type_args: vec![],
                 },
-                ty: value_ty.clone(), span: None,
+                ty: value_ty.clone(), span: None, def_id: None,
             };
         }
         Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
@@ -86,7 +87,7 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
                     args: vec![field_expr.clone()],
                     type_args: vec![],
                 },
-                ty: value_ty.clone(), span: None,
+                ty: value_ty.clone(), span: None, def_id: None,
             };
         }
         _ => {
@@ -98,7 +99,7 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
                         args: vec![field_expr.clone()],
                         type_args: vec![],
                     },
-                    ty: value_ty.clone(), span: None,
+                    ty: value_ty.clone(), span: None, def_id: None,
                 };
             }
             // Fallback: value.str(to_string(field))
@@ -111,7 +112,7 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
             args: vec![field_expr.clone()],
             type_args: vec![],
         },
-        ty: value_ty.clone(), span: None,
+        ty: value_ty.clone(), span: None, def_id: None,
     }
 }
 
@@ -136,12 +137,12 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
             kind: IrExprKind::Call {
                 target: CallTarget::Module { module: sym("value"), func: sym("field") },
                 args: vec![
-                    IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None },
-                    IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None },
+                    IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
+                    IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None, def_id: None },
                 ],
                 type_args: vec![],
             },
-            ty: Ty::result(value_ty.clone(), Ty::String), span: None,
+            ty: Ty::result(value_ty.clone(), Ty::String), span: None, def_id: None,
         };
 
         let decode_expr = if is_option {
@@ -152,38 +153,38 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
                     kind: IrExprKind::Call {
                         target: CallTarget::Named { name: sym(&format!("__decode_option_{}", decode_func_suffix(&inner_ty))) },
                         args: vec![
-                            IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None },
-                            IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None },
+                            IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
+                            IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None, def_id: None },
                         ],
                         type_args: vec![],
                     },
-                    ty: Ty::result(f.ty.clone(), Ty::String), span: None,
+                    ty: Ty::result(f.ty.clone(), Ty::String), span: None, def_id: None,
                 })},
-                ty: f.ty.clone(), span: None,
+                ty: f.ty.clone(), span: None, def_id: None,
             }
         } else if has_default {
             // Default: use runtime helper value_decode_with_default(_v, "key", default, as_T)
-            let default_expr = f.default.clone().unwrap_or(IrExpr { kind: IrExprKind::Unit, ty: f.ty.clone(), span: None });
+            let default_expr = f.default.clone().unwrap_or(IrExpr { kind: IrExprKind::Unit, ty: f.ty.clone(), span: None, def_id: None });
             IrExpr {
                 kind: IrExprKind::Try { expr: Box::new(IrExpr {
                     kind: IrExprKind::Call {
                         target: CallTarget::Named { name: sym(&format!("__decode_default_{}", decode_func_suffix(&f.ty))) },
                         args: vec![
-                            IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None },
-                            IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None },
+                            IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
+                            IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None, def_id: None },
                             default_expr,
                         ],
                         type_args: vec![],
                     },
-                    ty: Ty::result(f.ty.clone(), Ty::String), span: None,
+                    ty: Ty::result(f.ty.clone(), Ty::String), span: None, def_id: None,
                 })},
-                ty: f.ty.clone(), span: None,
+                ty: f.ty.clone(), span: None, def_id: None,
             }
         } else {
             // Required: value.field(_v, "key")? |> as_T?
             let get_and_try = IrExpr {
                 kind: IrExprKind::Try { expr: Box::new(get_field_call) },
-                ty: value_ty.clone(), span: None,
+                ty: value_ty.clone(), span: None, def_id: None,
             };
             decode_field_value(get_and_try, &f.ty, &value_ty)
         };
@@ -200,10 +201,10 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
         kind: IrExprKind::Record {
             name: Some(sym(type_name)),
             fields: field_vars.iter().map(|(name, var)| {
-                (*name, IrExpr { kind: IrExprKind::Var { id: *var }, ty: Ty::Unknown, span: None })
+                (*name, IrExpr { kind: IrExprKind::Var { id: *var }, ty: Ty::Unknown, span: None, def_id: None })
             }).collect(),
         },
-        ty: type_ty.clone(), span: None,
+        ty: type_ty.clone(), span: None, def_id: None,
     };
 
     let body = IrExpr {
@@ -211,20 +212,21 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
             stmts,
             expr: Some(Box::new(IrExpr {
                 kind: IrExprKind::ResultOk { expr: Box::new(record) },
-                ty: result_ty.clone(), span: None,
+                ty: result_ty.clone(), span: None, def_id: None,
             })),
         },
-        ty: result_ty.clone(), span: None,
+        ty: result_ty.clone(), span: None, def_id: None,
     };
 
     IrFunction {
         name: sym(&format!("{}.decode", type_name)),
-        params: vec![IrParam { var: var_v, ty: value_ty, name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None }],
+        params: vec![IrParam { var: var_v, ty: value_ty, name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }],
         ret_ty: result_ty,
         body,
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
@@ -259,9 +261,9 @@ fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, _value_ty: &Ty) -> 
                         args: vec![get_field_expr],
                         type_args: vec![],
                     },
-                    ty: Ty::result(field_ty.clone(), Ty::String), span: None,
+                    ty: Ty::result(field_ty.clone(), Ty::String), span: None, def_id: None,
                 })},
-                ty: field_ty.clone(), span: None,
+                ty: field_ty.clone(), span: None, def_id: None,
             };
         }
         _ => {
@@ -274,9 +276,9 @@ fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, _value_ty: &Ty) -> 
                             args: vec![get_field_expr],
                             type_args: vec![],
                         },
-                        ty: Ty::result(field_ty.clone(), Ty::String), span: None,
+                        ty: Ty::result(field_ty.clone(), Ty::String), span: None, def_id: None,
                     })},
-                    ty: field_ty.clone(), span: None,
+                    ty: field_ty.clone(), span: None, def_id: None,
                 };
             }
             ("value", "as_string") // fallback
@@ -290,9 +292,9 @@ fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, _value_ty: &Ty) -> 
                 args: vec![get_field_expr],
                 type_args: vec![],
             },
-            ty: Ty::result(field_ty.clone(), Ty::String), span: None,
+            ty: Ty::result(field_ty.clone(), Ty::String), span: None, def_id: None,
         })},
-        ty: field_ty.clone(), span: None,
+        ty: field_ty.clone(), span: None, def_id: None,
     }
 }
 
@@ -307,7 +309,7 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
         let (pattern, payload_value) = match &case.kind {
             IrVariantKind::Unit => {
                 (IrPattern::Constructor { name: case.name.to_string(), args: vec![] },
-                 IrExpr { kind: IrExprKind::Call { target: CallTarget::Named { name: sym("almide_rt_value_null") }, args: vec![], type_args: vec![] }, ty: value_ty.clone(), span: None })
+                 IrExpr { kind: IrExprKind::Call { target: CallTarget::Named { name: sym("almide_rt_value_null") }, args: vec![], type_args: vec![] }, ty: value_ty.clone(), span: None, def_id: None })
             }
             IrVariantKind::Tuple { fields } => {
                 let mut pat_vars = vec![];
@@ -315,11 +317,11 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
                 for (i, field_ty) in fields.iter().enumerate() {
                     let pv = vt.alloc(sym(&format!("_f{}", i)), field_ty.clone(), Mutability::Let, None);
                     pat_vars.push(IrPattern::Bind { var: pv, ty: field_ty.clone() });
-                    let field_expr = IrExpr { kind: IrExprKind::Var { id: pv }, ty: field_ty.clone(), span: None };
+                    let field_expr = IrExpr { kind: IrExprKind::Var { id: pv }, ty: field_ty.clone(), span: None, def_id: None };
                     encode_elems.push(encode_field_value(&field_expr, field_ty, &value_ty));
                 }
                 (IrPattern::Constructor { name: case.name.to_string(), args: pat_vars },
-                 IrExpr { kind: IrExprKind::Call { target: CallTarget::Named { name: sym("almide_rt_value_array") }, args: vec![IrExpr { kind: IrExprKind::List { elements: encode_elems }, ty: Ty::list(value_ty.clone()), span: None }], type_args: vec![] }, ty: value_ty.clone(), span: None })
+                 IrExpr { kind: IrExprKind::Call { target: CallTarget::Named { name: sym("almide_rt_value_array") }, args: vec![IrExpr { kind: IrExprKind::List { elements: encode_elems }, ty: Ty::list(value_ty.clone()), span: None, def_id: None }], type_args: vec![] }, ty: value_ty.clone(), span: None, def_id: None })
             }
             IrVariantKind::Record { fields } => {
                 let mut pat_fields = vec![];
@@ -327,15 +329,15 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
                 for f in fields {
                     let pv = vt.alloc(sym(&format!("_{}", f.name)), f.ty.clone(), Mutability::Let, None);
                     pat_fields.push(IrFieldPattern { name: f.name.to_string(), pattern: Some(IrPattern::Bind { var: pv, ty: f.ty.clone() }) });
-                    let field_expr = IrExpr { kind: IrExprKind::Var { id: pv }, ty: f.ty.clone(), span: None };
+                    let field_expr = IrExpr { kind: IrExprKind::Var { id: pv }, ty: f.ty.clone(), span: None, def_id: None };
                     let val = encode_field_value(&field_expr, &f.ty, &value_ty);
                     encode_pairs.push(IrExpr { kind: IrExprKind::Tuple { elements: vec![
-                        IrExpr { kind: IrExprKind::LitStr { value: f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()) }, ty: Ty::String, span: None },
+                        IrExpr { kind: IrExprKind::LitStr { value: f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()) }, ty: Ty::String, span: None, def_id: None },
                         val,
-                    ]}, ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None });
+                    ]}, ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None, def_id: None });
                 }
                 (IrPattern::RecordPattern { name: case.name.to_string(), fields: pat_fields, rest: false },
-                 IrExpr { kind: IrExprKind::Call { target: CallTarget::Named { name: sym("almide_rt_value_object") }, args: vec![IrExpr { kind: IrExprKind::List { elements: encode_pairs }, ty: Ty::list(Ty::Tuple(vec![Ty::String, value_ty.clone()])), span: None }], type_args: vec![] }, ty: value_ty.clone(), span: None })
+                 IrExpr { kind: IrExprKind::Call { target: CallTarget::Named { name: sym("almide_rt_value_object") }, args: vec![IrExpr { kind: IrExprKind::List { elements: encode_pairs }, ty: Ty::list(Ty::Tuple(vec![Ty::String, value_ty.clone()])), span: None, def_id: None }], type_args: vec![] }, ty: value_ty.clone(), span: None, def_id: None })
             }
         };
         // Wrap payload in {"CaseName": payload}
@@ -343,29 +345,30 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
             kind: IrExprKind::Call {
                 target: CallTarget::Named { name: sym("almide_rt_value_object") },
                 args: vec![IrExpr { kind: IrExprKind::List { elements: vec![IrExpr { kind: IrExprKind::Tuple { elements: vec![
-                    IrExpr { kind: IrExprKind::LitStr { value: case.name.to_string() }, ty: Ty::String, span: None },
+                    IrExpr { kind: IrExprKind::LitStr { value: case.name.to_string() }, ty: Ty::String, span: None, def_id: None },
                     payload_value,
-                ]}, ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None }] }, ty: Ty::list(Ty::Tuple(vec![Ty::String, value_ty.clone()])), span: None }],
+                ]}, ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None, def_id: None }] }, ty: Ty::list(Ty::Tuple(vec![Ty::String, value_ty.clone()])), span: None, def_id: None }],
                 type_args: vec![],
             },
-            ty: value_ty.clone(), span: None,
+            ty: value_ty.clone(), span: None, def_id: None,
         };
         IrMatchArm { pattern, guard: None, body: tagged }
     }).collect();
 
     let body = IrExpr {
-        kind: IrExprKind::Match { subject: Box::new(IrExpr { kind: IrExprKind::Var { id: var }, ty: type_ty.clone(), span: None }), arms },
-        ty: value_ty.clone(), span: None,
+        kind: IrExprKind::Match { subject: Box::new(IrExpr { kind: IrExprKind::Var { id: var }, ty: type_ty.clone(), span: None, def_id: None }), arms },
+        ty: value_ty.clone(), span: None, def_id: None,
     };
 
     IrFunction {
         name: sym(&format!("{}.encode", type_name)),
-        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None }],
+        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }],
         ret_ty: value_ty,
         body,
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }
 
@@ -387,12 +390,12 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                 kind: IrExprKind::Try { expr: Box::new(IrExpr {
                     kind: IrExprKind::Call {
                         target: CallTarget::Named { name: sym("almide_rt_value_tagged_variant") },
-                        args: vec![IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None }],
+                        args: vec![IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None }],
                         type_args: vec![],
                     },
-                    ty: Ty::result(Ty::Tuple(vec![Ty::String, value_ty.clone()]), Ty::String), span: None,
+                    ty: Ty::result(Ty::Tuple(vec![Ty::String, value_ty.clone()]), Ty::String), span: None, def_id: None,
                 })},
-                ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None,
+                ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None, def_id: None,
             },
         },
         span: None,
@@ -402,19 +405,19 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
     let mut else_expr = IrExpr {
         kind: IrExprKind::ResultErr { expr: Box::new(IrExpr {
             kind: IrExprKind::LitStr { value: format!("unknown variant for {}", type_name) },
-            ty: Ty::String, span: None,
+            ty: Ty::String, span: None, def_id: None,
         })},
-        ty: result_ty.clone(), span: None,
+        ty: result_ty.clone(), span: None, def_id: None,
     };
 
     for case in cases.iter().rev() {
         let tag_check = IrExpr {
             kind: IrExprKind::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(IrExpr { kind: IrExprKind::Var { id: var_tag }, ty: Ty::String, span: None }),
-                right: Box::new(IrExpr { kind: IrExprKind::LitStr { value: case.name.to_string() }, ty: Ty::String, span: None }),
+                left: Box::new(IrExpr { kind: IrExprKind::Var { id: var_tag }, ty: Ty::String, span: None, def_id: None }),
+                right: Box::new(IrExpr { kind: IrExprKind::LitStr { value: case.name.to_string() }, ty: Ty::String, span: None, def_id: None }),
             },
-            ty: Ty::Bool, span: None,
+            ty: Ty::Bool, span: None, def_id: None,
         };
 
         let construct = match &case.kind {
@@ -422,9 +425,9 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                 IrExpr {
                     kind: IrExprKind::ResultOk { expr: Box::new(IrExpr {
                         kind: IrExprKind::Call { target: CallTarget::Named { name: case.name }, args: vec![], type_args: vec![] },
-                        ty: type_ty.clone(), span: None,
+                        ty: type_ty.clone(), span: None, def_id: None,
                     })},
-                    ty: result_ty.clone(), span: None,
+                    ty: result_ty.clone(), span: None, def_id: None,
                 }
             }
             _ => {
@@ -432,31 +435,32 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                 IrExpr {
                     kind: IrExprKind::ResultErr { expr: Box::new(IrExpr {
                         kind: IrExprKind::LitStr { value: format!("variant {} payload decode not yet implemented", case.name) },
-                        ty: Ty::String, span: None,
+                        ty: Ty::String, span: None, def_id: None,
                     })},
-                    ty: result_ty.clone(), span: None,
+                    ty: result_ty.clone(), span: None, def_id: None,
                 }
             }
         };
 
         else_expr = IrExpr {
             kind: IrExprKind::If { cond: Box::new(tag_check), then: Box::new(construct), else_: Box::new(else_expr) },
-            ty: result_ty.clone(), span: None,
+            ty: result_ty.clone(), span: None, def_id: None,
         };
     }
 
     let body = IrExpr {
         kind: IrExprKind::Block { stmts: vec![extract], expr: Some(Box::new(else_expr)) },
-        ty: result_ty.clone(), span: None,
+        ty: result_ty.clone(), span: None, def_id: None,
     };
 
     IrFunction {
         name: sym(&format!("{}.decode", type_name)),
-        params: vec![IrParam { var: var_v, ty: value_ty, name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None }],
+        params: vec![IrParam { var: var_v, ty: value_ty, name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }],
         ret_ty: result_ty,
         body,
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
+        def_id: None,
     }
 }

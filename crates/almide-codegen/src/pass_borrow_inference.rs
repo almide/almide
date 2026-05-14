@@ -951,15 +951,15 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
                         match borrows.get(i + arg_offset) {
                             Some(ParamBorrow::Ref | ParamBorrow::RefSlice) => {
                                 let t = arg.ty.clone(); let s = arg.span;
-                                IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: false }, ty: t, span: s }
+                                IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: false }, ty: t, span: s, def_id: None }
                             }
                             Some(ParamBorrow::RefMut) => {
                                 let t = arg.ty.clone(); let s = arg.span;
-                                IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: true }, ty: t, span: s }
+                                IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: true }, ty: t, span: s, def_id: None }
                             }
                             Some(ParamBorrow::RefStr) => {
                                 let t = arg.ty.clone(); let s = arg.span;
-                                IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true, mutable: false }, ty: t, span: s }
+                                IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true, mutable: false }, ty: t, span: s, def_id: None }
                             }
                             _ => arg,
                         }
@@ -976,11 +976,11 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
                                 match b {
                                     ParamBorrow::Ref | ParamBorrow::RefSlice => {
                                         let t = obj.ty.clone(); let s = obj.span;
-                                        obj = IrExpr { kind: IrExprKind::Borrow { expr: Box::new(obj), as_str: false, mutable: false }, ty: t, span: s };
+                                        obj = IrExpr { kind: IrExprKind::Borrow { expr: Box::new(obj), as_str: false, mutable: false }, ty: t, span: s, def_id: None };
                                     }
                                     ParamBorrow::RefStr => {
                                         let t = obj.ty.clone(); let s = obj.span;
-                                        obj = IrExpr { kind: IrExprKind::Borrow { expr: Box::new(obj), as_str: true, mutable: false }, ty: t, span: s };
+                                        obj = IrExpr { kind: IrExprKind::Borrow { expr: Box::new(obj), as_str: true, mutable: false }, ty: t, span: s, def_id: None };
                                     }
                                     _ => {}
                                 }
@@ -1124,15 +1124,15 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
                     match borrows.get(i) {
                         Some(ParamBorrow::Ref | ParamBorrow::RefSlice) => {
                             let t = arg.ty.clone(); let s = arg.span;
-                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: false }, ty: t, span: s }
+                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: false }, ty: t, span: s, def_id: None }
                         }
                         Some(ParamBorrow::RefMut) => {
                             let t = arg.ty.clone(); let s = arg.span;
-                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: true }, ty: t, span: s }
+                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: false, mutable: true }, ty: t, span: s, def_id: None }
                         }
                         Some(ParamBorrow::RefStr) => {
                             let t = arg.ty.clone(); let s = arg.span;
-                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true, mutable: false }, ty: t, span: s }
+                            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(arg), as_str: true, mutable: false }, ty: t, span: s, def_id: None }
                         }
                         _ => arg,
                     }
@@ -1143,7 +1143,7 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
         other => other,
     };
 
-    IrExpr { kind, ty, span }
+    IrExpr { kind, ty, span, def_id: None }
 }
 
 fn rewrite_calls_stmt(stmt: IrStmt, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_scope: Option<&str>) -> IrStmt {

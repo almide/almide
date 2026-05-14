@@ -28,7 +28,7 @@ mod tests {
     use almide_lang::types::Ty;
 
     fn mk(kind: IrExprKind) -> IrExpr {
-        IrExpr { kind, ty: Ty::Unknown, span: None }
+        IrExpr { kind, ty: Ty::Unknown, span: None, def_id: None }
     }
 
     fn mk_int(n: i64) -> IrExpr {

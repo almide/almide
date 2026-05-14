@@ -144,12 +144,12 @@ fn transform_match_subject(subject: &mut Box<IrExpr>, arms: &[IrMatchArm]) {
         if has_str_pat {
             let inner = std::mem::replace(
                 subject.as_mut(),
-                IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None },
+                IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
             );
             **subject = IrExpr {
                 kind: IrExprKind::Borrow { expr: Box::new(inner), as_str: true, mutable: false },
                 ty: Ty::String, // type is still String for downstream
-                span: subject.span,
+                span: subject.span, def_id: None,
             };
         }
     }
@@ -168,7 +168,7 @@ fn transform_match_subject(subject: &mut Box<IrExpr>, arms: &[IrMatchArm]) {
             if has_some_str_pat {
                 let inner = std::mem::replace(
                     subject.as_mut(),
-                    IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None },
+                    IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
                 );
                 let deref_ty = Ty::Applied(TypeConstructorId::Option, vec![Ty::String]);
                 **subject = IrExpr {
@@ -181,7 +181,7 @@ fn transform_match_subject(subject: &mut Box<IrExpr>, arms: &[IrMatchArm]) {
                         type_args: vec![],
                     },
                     ty: deref_ty,
-                    span: subject.span,
+                    span: subject.span, def_id: None,
                 };
             }
         }

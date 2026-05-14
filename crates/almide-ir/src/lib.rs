@@ -46,6 +46,59 @@ pub use substitute::{substitute_var_in_expr, substitute_var_in_stmt};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct VarId(pub u32);
 
+/// Unique definition identifier. Identifies every named definition
+/// (function, type, top-level let, module) across all packages.
+/// Assigned during name resolution, propagated through IR to codegen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DefId(pub u32);
+
+/// What kind of definition a DefId refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefKind {
+    Function,
+    Type,
+    TopLet,
+    Module,
+}
+
+/// Metadata for a definition, keyed by DefId.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefInfo {
+    /// Package name (e.g., "snaidhm")
+    pub package: Sym,
+    /// Full module path (e.g., "snaidhm.web.gpu")
+    pub module: Sym,
+    /// Local name (e.g., "STORAGE")
+    pub name: Sym,
+    /// Definition kind
+    pub kind: DefKind,
+    /// Type of the definition (for top-level lets and functions)
+    pub ty: Ty,
+}
+
+/// Table mapping DefId → DefInfo. Single source of truth for all definitions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DefTable {
+    pub entries: Vec<DefInfo>,
+}
+
+impl DefTable {
+    pub fn new() -> Self { DefTable { entries: Vec::new() } }
+
+    pub fn alloc(&mut self, package: Sym, module: Sym, name: Sym, kind: DefKind, ty: Ty) -> DefId {
+        let id = DefId(self.entries.len() as u32);
+        self.entries.push(DefInfo { package, module, name, kind, ty });
+        id
+    }
+
+    pub fn get(&self, id: DefId) -> &DefInfo { &self.entries[id.0 as usize] }
+
+    pub fn len(&self) -> usize { self.entries.len() }
+
+    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+}
+
 // ── Operators (type-dispatched) ─────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,6 +256,10 @@ pub struct IrExpr {
     pub ty: Ty,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span: Option<Span>,
+    /// Cross-package definition reference. When set, codegen uses this
+    /// to directly look up the global/function instead of name-based fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub def_id: Option<DefId>,
 }
 
 impl Default for IrExpr {
@@ -211,6 +268,7 @@ impl Default for IrExpr {
             kind: IrExprKind::Unit,
             ty: Ty::Unit,
             span: None,
+            def_id: None,
         }
     }
 }
@@ -407,6 +465,7 @@ impl IrExpr {
     pub fn map_children(self, f: &mut impl FnMut(IrExpr) -> IrExpr) -> IrExpr {
         let ty = self.ty;
         let span = self.span;
+        let def_id = self.def_id;
         let kind = match self.kind {
             // ── Leaves (no child expressions) ──
             IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
@@ -554,7 +613,7 @@ impl IrExpr {
                 collector: collector.map_exprs(f),
             },
         };
-        IrExpr { kind, ty, span }
+        IrExpr { kind, ty, span, def_id }
     }
 }
 
@@ -659,6 +718,8 @@ pub struct IrFieldDecl {
     pub default: Option<IrExpr>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<Sym>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attrs: Vec<almide_lang::ast::Attribute>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -748,6 +809,8 @@ pub struct IrParam {
     pub open_record: Option<OpenRecordInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<Box<IrExpr>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attrs: Vec<almide_lang::ast::Attribute>,
 }
 
 // ── Top-level structures ────────────────────────────────────────
@@ -782,6 +845,9 @@ pub struct IrFunction {
     /// Number of blank lines before this declaration in source.
     #[serde(default)]
     pub blank_lines_before: u32,
+    /// Definition ID for cross-package resolution (None during migration).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub def_id: Option<DefId>,
 }
 
 /// Prefix applied to test function names in lowering to guarantee
@@ -824,6 +890,9 @@ pub struct IrTopLet {
     pub doc: Option<String>,
     #[serde(default)]
     pub blank_lines_before: u32,
+    /// Definition ID for cross-package resolution (None during migration).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub def_id: Option<DefId>,
 }
 
 fn default_top_let_kind() -> TopLetKind { TopLetKind::Lazy }
@@ -852,6 +921,10 @@ pub struct IrProgram {
     pub top_lets: Vec<IrTopLet>,
     pub type_decls: Vec<IrTypeDecl>,
     pub var_table: VarTable,
+    /// Definition table: maps DefId → DefInfo for cross-package resolution.
+    /// Populated during name resolution, consumed by codegen.
+    #[serde(default)]
+    pub def_table: DefTable,
     /// Imported user modules, lowered to IR
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modules: Vec<IrModule>,

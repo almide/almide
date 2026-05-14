@@ -190,6 +190,12 @@ impl Parser {
                 self.skip_newlines();
                 break;
             }
+            // Collect field-level attributes (e.g. @builtin(position), @location(0))
+            let mut attrs = Vec::new();
+            while self.check(TokenType::At) {
+                attrs.push(self.parse_attribute()?);
+                self.skip_newlines();
+            }
             let field_name = self.expect_ident()?;
             let alias = self.parse_field_alias()?;
             self.expect(TokenType::Colon)?;
@@ -200,7 +206,7 @@ impl Parser {
             } else {
                 None
             };
-            fields.push(FieldType { name: field_name, ty: field_type, default, alias });
+            fields.push(FieldType { name: field_name, ty: field_type, default, alias, attrs });
             self.skip_newlines();
             if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
         }
@@ -212,6 +218,11 @@ impl Parser {
         let mut fields = Vec::new();
         while !self.check(TokenType::RBrace) {
             self.skip_newlines();
+            let mut attrs = Vec::new();
+            while self.check(TokenType::At) {
+                attrs.push(self.parse_attribute()?);
+                self.skip_newlines();
+            }
             let field_name = self.expect_ident()?;
             let alias = self.parse_field_alias()?;
             self.expect(TokenType::Colon)?;
@@ -222,7 +233,7 @@ impl Parser {
             } else {
                 None
             };
-            fields.push(FieldType { name: field_name, ty: field_type, default, alias });
+            fields.push(FieldType { name: field_name, ty: field_type, default, alias, attrs });
             self.skip_newlines();
             if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
         }

@@ -254,7 +254,7 @@ impl FuncCompiler<'_> {
             let wrapped = IrExpr {
                 kind: IrExprKind::ResultOk { expr: Box::new(body.clone()) },
                 ty: result_ty.clone(),
-                span: body.span,
+                span: body.span, def_id: None,
             };
             self.emit_expr(&wrapped);
         } else {

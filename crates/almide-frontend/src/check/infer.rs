@@ -183,9 +183,13 @@ impl Checker {
                             ret: Box::new(sig.ret.clone()),
                         };
                     }
-                    let key = format!("{}.{}", mod_name, field);
+                    let resolved_mod_name = self.env.import_table.resolve(mod_name)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| mod_name.to_string());
+                    let key = format!("{}.{}", resolved_mod_name, field);
                     if let Some(sig) = self.env.functions.get(&sym(&key)).cloned() {
                         self.type_map.insert(object.id, Ty::Unit);
+                        self.env.import_table.mark_used(mod_name);
                         return Ty::Fn {
                             params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
                             ret: Box::new(sig.ret.clone()),
@@ -195,6 +199,7 @@ impl Checker {
                     // Spec Visibility section applies to fn, type, AND let.
                     if let Some(let_ty) = self.env.top_lets.get(&sym(&key)).cloned() {
                         self.type_map.insert(object.id, Ty::Unit);
+                        self.env.import_table.mark_used(mod_name);
                         return let_ty;
                     }
                     // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
@@ -366,6 +371,10 @@ impl Checker {
                                     | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
                                     | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
                                     | Ty::Float32 | Ty::Float64
+                                    | Ty::Matrix
+                                    // GPU vector/matrix types (Vec2, Vec3, Vec4, Mat3, Mat4)
+                                    // support arithmetic ops; emitted as WGSL builtins.
+                                    | Ty::Named(..)
                             );
                             let is_sized_scalar = |t: &Ty| matches!(
                                 t,
@@ -1134,6 +1143,7 @@ impl Checker {
                 | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
                 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
                 | Ty::Float32 | Ty::Float64
+                | Ty::Matrix | Ty::Named(..)
         );
         if !is_numeric(lc) || !is_numeric(rc) {
             self.emit(super::err(

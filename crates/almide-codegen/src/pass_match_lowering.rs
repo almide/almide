@@ -22,7 +22,7 @@ impl NanoPass for MatchLoweringPass {
     fn name(&self) -> &str { "MatchLowering" }
 
     fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::TypeScript, Target::Python, Target::Go])
+        None // disabled — no active targets use this pass
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
@@ -132,7 +132,7 @@ fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
         other => other,
     };
 
-    IrExpr { kind, ty: expr.ty, span: expr.span }
+    IrExpr { kind, ty: expr.ty, span: expr.span, def_id: None }
 }
 
 fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut VarTable) -> Vec<IrStmt> {
@@ -174,7 +174,7 @@ fn lower_match(subject: IrExpr, arms: Vec<IrMatchArm>, result_ty: &Ty, vt: &mut 
     let subj_ref = IrExpr {
         kind: IrExprKind::Var { id: subj_var },
         ty: subject.ty.clone(),
-        span: None,
+        span: None, def_id: None,
     };
 
     // Build the if/else chain from the arms (bottom-up)
@@ -198,7 +198,7 @@ fn lower_match(subject: IrExpr, arms: Vec<IrMatchArm>, result_ty: &Ty, vt: &mut 
 fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mut VarTable) -> IrExpr {
     if arms.is_empty() {
         // Fallback: should never happen in well-typed code
-        return IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None };
+        return IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None, def_id: None };
     }
 
     let arm = &arms[0];
@@ -216,7 +216,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                         else_: Box::new(else_body),
                     },
                     ty: result_ty.clone(),
-                    span: None,
+                    span: None, def_id: None,
                 }
             } else {
                 arm.body.clone()
@@ -245,11 +245,11 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                                 else_: Box::new(else_body),
                             },
                             ty: result_ty.clone(),
-                            span: None,
+                            span: None, def_id: None,
                         })),
                     },
                     ty: result_ty.clone(),
-                    span: None,
+                    span: None, def_id: None,
                 }
             } else {
                 IrExpr {
@@ -258,7 +258,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                         expr: Some(Box::new(arm.body.clone())),
                     },
                     ty: result_ty.clone(),
-                    span: None,
+                    span: None, def_id: None,
                 }
             };
             body_with_bind
@@ -270,10 +270,10 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                 kind: IrExprKind::BinOp {
                     op: BinOp::Neq,
                     left: Box::new(subject.clone()),
-                    right: Box::new(IrExpr { kind: IrExprKind::OptionNone, ty: subject.ty.clone(), span: None }),
+                    right: Box::new(IrExpr { kind: IrExprKind::OptionNone, ty: subject.ty.clone(), span: None, def_id: None }),
                 },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             };
 
             let then_body = build_pattern_bind(subject, inner, &arm.body, result_ty);
@@ -286,7 +286,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     else_: Box::new(else_body),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
 
@@ -296,10 +296,10 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                 kind: IrExprKind::BinOp {
                     op: BinOp::Eq,
                     left: Box::new(subject.clone()),
-                    right: Box::new(IrExpr { kind: IrExprKind::OptionNone, ty: subject.ty.clone(), span: None }),
+                    right: Box::new(IrExpr { kind: IrExprKind::OptionNone, ty: subject.ty.clone(), span: None, def_id: None }),
                 },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             };
 
             let else_body = build_if_chain(subject, rest, result_ty, vt);
@@ -311,7 +311,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     else_: Box::new(else_body),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
 
@@ -324,7 +324,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     right: Box::new(lit.clone()),
                 },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             };
 
             let else_body = build_if_chain(subject, rest, result_ty, vt);
@@ -336,7 +336,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     else_: Box::new(else_body),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
 
@@ -351,12 +351,12 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                             field: "ok".into(),
                         },
                         ty: Ty::Bool,
-                        span: None,
+                        span: None, def_id: None,
                     }),
-                    right: Box::new(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None }),
+                    right: Box::new(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None, def_id: None }),
                 },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             };
 
             let value_expr = IrExpr {
@@ -365,7 +365,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     field: "value".into(),
                 },
                 ty: unwrap_result_ok(&subject.ty),
-                span: None,
+                span: None, def_id: None,
             };
 
             let then_body = build_pattern_bind(&value_expr, inner, &arm.body, result_ty);
@@ -378,7 +378,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     else_: Box::new(else_body),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
 
@@ -393,12 +393,12 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                             field: "ok".into(),
                         },
                         ty: Ty::Bool,
-                        span: None,
+                        span: None, def_id: None,
                     }),
-                    right: Box::new(IrExpr { kind: IrExprKind::LitBool { value: false }, ty: Ty::Bool, span: None }),
+                    right: Box::new(IrExpr { kind: IrExprKind::LitBool { value: false }, ty: Ty::Bool, span: None, def_id: None }),
                 },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             };
 
             let error_expr = IrExpr {
@@ -407,7 +407,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     field: "error".into(),
                 },
                 ty: unwrap_result_err(&subject.ty),
-                span: None,
+                span: None, def_id: None,
             };
 
             let then_body = build_pattern_bind(&error_expr, inner, &arm.body, result_ty);
@@ -420,7 +420,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     else_: Box::new(else_body),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
 
@@ -435,12 +435,12 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                             field: "tag".into(),
                         },
                         ty: Ty::String,
-                        span: None,
+                        span: None, def_id: None,
                     }),
-                    right: Box::new(IrExpr { kind: IrExprKind::LitStr { value: name.clone() }, ty: Ty::String, span: None }),
+                    right: Box::new(IrExpr { kind: IrExprKind::LitStr { value: name.clone() }, ty: Ty::String, span: None, def_id: None }),
                 },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             };
 
             // Bind tuple args from subject.value array
@@ -455,12 +455,12 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                                     field: "value".into(),
                                 },
                                 ty: Ty::Unknown,
-                                span: None,
+                                span: None, def_id: None,
                             }),
-                            index: Box::new(IrExpr { kind: IrExprKind::LitInt { value: i as i64 }, ty: Ty::Int, span: None }),
+                            index: Box::new(IrExpr { kind: IrExprKind::LitInt { value: i as i64 }, ty: Ty::Int, span: None, def_id: None }),
                         },
                         ty: Ty::Unknown,
-                        span: None,
+                        span: None, def_id: None,
                     };
                     bind_stmts.push(IrStmt {
                         kind: IrStmtKind::Bind {
@@ -480,7 +480,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     expr: Some(Box::new(arm.body.clone())),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             };
             let else_body = build_if_chain(subject, rest, result_ty, vt);
 
@@ -491,7 +491,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     else_: Box::new(else_body),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
 
@@ -506,12 +506,12 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                             field: "tag".into(),
                         },
                         ty: Ty::String,
-                        span: None,
+                        span: None, def_id: None,
                     }),
-                    right: Box::new(IrExpr { kind: IrExprKind::LitStr { value: name.clone() }, ty: Ty::String, span: None }),
+                    right: Box::new(IrExpr { kind: IrExprKind::LitStr { value: name.clone() }, ty: Ty::String, span: None, def_id: None }),
                 },
                 ty: Ty::Bool,
-                span: None,
+                span: None, def_id: None,
             };
 
             // Bind each field from subject
@@ -526,7 +526,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                             field: fp.name.clone().into(),
                         },
                         ty: Ty::Unknown,
-                        span: None,
+                        span: None, def_id: None,
                     };
                     bind_stmts.push(IrStmt {
                         kind: IrStmtKind::Bind {
@@ -544,7 +544,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                             field: fp.name.clone().into(),
                         },
                         ty: Ty::Unknown,
-                        span: None,
+                        span: None, def_id: None,
                     };
                     bind_stmts.push(IrStmt {
                         kind: IrStmtKind::Bind {
@@ -564,7 +564,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     expr: Some(Box::new(arm.body.clone())),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             };
             let else_body = build_if_chain(subject, rest, result_ty, vt);
 
@@ -575,7 +575,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     else_: Box::new(else_body),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
 
@@ -604,7 +604,7 @@ fn build_pattern_bind(value: &IrExpr, pattern: &IrPattern, body: &IrExpr, result
                     expr: Some(Box::new(body.clone())),
                 },
                 ty: result_ty.clone(),
-                span: None,
+                span: None, def_id: None,
             }
         }
         IrPattern::Wildcard => body.clone(),
