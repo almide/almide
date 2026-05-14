@@ -121,6 +121,8 @@ pub struct StringRuntime {
 pub struct RuntimeFuncs {
     pub fd_write: u32,
     pub alloc: u32,
+    pub rc_inc: u32,
+    pub cow_check: u32,
     pub heap_save: u32,
     pub heap_restore: u32,
     pub println_str: u32,
@@ -309,7 +311,7 @@ impl WasmEmitter {
             // First byte is newline at NEWLINE_OFFSET
             data_bytes: vec![0x0A],
             rt: RuntimeFuncs {
-                fd_write: 0, alloc: 0,
+                fd_write: 0, alloc: 0, rc_inc: 0, cow_check: 0,
                 heap_save: 0, heap_restore: 0,
                 println_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
