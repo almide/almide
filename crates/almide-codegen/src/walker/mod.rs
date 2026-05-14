@@ -482,7 +482,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         let mut rendered = if tl.mutable && matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
             format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str)
         } else if tl.mutable {
-            format!("thread_local! {{ static {}: std::cell::RefCell<{}> = std::cell::RefCell::new({}); }}", name_upper, ty_str, val_str)
+            format!("thread_local! {{ static {}: std::cell::RefCell<std::rc::Rc<{}>> = std::cell::RefCell::new(std::rc::Rc::new({})); }}", name_upper, ty_str, val_str)
         } else {
             let construct = match tl.kind {
                 TopLetKind::Const => "top_let_const",

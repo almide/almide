@@ -74,7 +74,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 return format!("{}.with(|c| c.get())", upper);
             }
             if ctx.ann.mutable_top_let_names.contains(&upper) {
-                return format!("{}.with(|c| c.borrow().clone())", upper);
+                return format!("{}.with(|c| (**c.borrow()).clone())", upper);
             }
             let is_synthetic_lazy = name.starts_with("ALMIDE_RT_")
                 && ctx.ann.lazy_top_let_names.contains(&upper);
@@ -261,8 +261,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 _ => {}
             }
             // Mutating stdlib calls (push, pop, clear) on module-level var:
-            // emit NAME.with(|c| { runtime_fn(&mut *c.borrow_mut(), args) })
-            // so the mutation applies to the RefCell directly, not a clone.
+            // emit NAME.with(|c| { runtime_fn(Rc::make_mut(&mut *c.borrow_mut()), args) })
+            // Rc::make_mut provides Swift-style COW: if refcount==1, mutate in-place;
+            // if shared, clone first then mutate the unique copy.
             if !args.is_empty() {
                 let is_mutating = matches!(symbol.as_str(),
                     "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_clear");
@@ -274,10 +275,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                             if ctx.ann.mutable_top_let_names.contains(&upper) {
                                 let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
                                     .collect::<Vec<_>>().join(", ");
+                                let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
                                 let call_args = if rest_args.is_empty() {
-                                    "&mut *c.borrow_mut()".to_string()
+                                    rc_mut.to_string()
                                 } else {
-                                    format!("&mut *c.borrow_mut(), {}", rest_args)
+                                    format!("{}, {}", rc_mut, rest_args)
                                 };
                                 return format!("{}.with(|c| {}({}))", upper, symbol.as_str(), call_args);
                             }
