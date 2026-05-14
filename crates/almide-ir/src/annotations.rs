@@ -18,6 +18,10 @@ pub struct CodegenAnnotations {
     /// Uppercased names of module-level `var` declarations that use `Cell<T>`
     /// (Copy types: Int, Float, Bool). Read with `.get()`, write with `.set()`.
     pub mutable_top_let_copy: HashSet<String>,
+    /// VarIds of function-local `var` bindings with non-Copy types (String,
+    /// List, etc.) that are Rc-wrapped for Swift-style COW semantics.
+    /// Clone → Rc::clone (O(1)), mutation → Rc::make_mut (COW).
+    pub rc_wrapped_vars: HashSet<VarId>,
     pub ctor_to_enum: HashMap<String, String>,
     pub anon_records: HashMap<Vec<String>, String>,
     pub named_records: HashMap<Vec<String>, String>,
