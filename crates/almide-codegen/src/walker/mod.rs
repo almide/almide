@@ -422,31 +422,56 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         }
     }
     // Rc-wrap function-local `var` bindings of non-Copy types for COW.
-    // Exclude module-level vars and function params.
-    let mut exclude_var_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    for tl in &program.top_lets {
-        if tl.mutable { exclude_var_ids.insert(tl.var.0); }
-    }
-    for module in &program.modules {
-        for tl in &module.top_lets {
-            if tl.mutable { exclude_var_ids.insert(tl.var.0); }
+    // Scan IR Bind statements (not VarTable) because use_count demotes
+    // unused-assigned vars from Var to Let. We need the original mutability.
+    {
+        let mut exclude: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        // Exclude module-level vars and function params
+        for tl in &program.top_lets {
+            if tl.mutable { exclude.insert(tl.var.0); }
         }
-    }
-    // Exclude function params (they're borrowed or owned, not Val-wrapped)
-    for func in &program.functions {
-        for p in &func.params { exclude_var_ids.insert(p.var.0); }
-    }
-    for module in &program.modules {
-        for func in &module.functions {
-            for p in &func.params { exclude_var_ids.insert(p.var.0); }
+        for module in &program.modules {
+            for tl in &module.top_lets {
+                if tl.mutable { exclude.insert(tl.var.0); }
+            }
         }
-    }
-    for (idx, entry) in program.var_table.entries.iter().enumerate() {
-        if entry.mutability == almide_ir::Mutability::Var
-            && !matches!(entry.ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit | Ty::Unknown)
-            && !exclude_var_ids.contains(&(idx as u32))
-        {
-            ann.rc_wrapped_vars.insert(VarId(idx as u32));
+        for func in &program.functions {
+            for p in &func.params { exclude.insert(p.var.0); }
+        }
+        for module in &program.modules {
+            for func in &module.functions {
+                for p in &func.params { exclude.insert(p.var.0); }
+            }
+        }
+        // Scan IR Bind stmts for Mutability::Var
+        struct VarBindCollector { vars: std::collections::HashSet<u32> }
+        impl almide_ir::visit::IrVisitor for VarBindCollector {
+            fn visit_stmt(&mut self, stmt: &IrStmt) {
+                if let IrStmtKind::Bind { var, mutability: almide_ir::Mutability::Var, ty, .. } = &stmt.kind {
+                    if !matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit | Ty::Unknown) {
+                        self.vars.insert(var.0);
+                    }
+                }
+                almide_ir::visit::walk_stmt(self, stmt);
+            }
+            fn visit_expr(&mut self, expr: &IrExpr) {
+                almide_ir::visit::walk_expr(self, expr);
+            }
+        }
+        let mut collector = VarBindCollector { vars: std::collections::HashSet::new() };
+        use almide_ir::visit::IrVisitor;
+        for func in &program.functions {
+            collector.visit_expr(&func.body);
+        }
+        for module in &program.modules {
+            for func in &module.functions {
+                collector.visit_expr(&func.body);
+            }
+        }
+        for var_id in collector.vars {
+            if !exclude.contains(&var_id) {
+                ann.rc_wrapped_vars.insert(VarId(var_id));
+            }
         }
     }
     let mut ctx = RenderContext {

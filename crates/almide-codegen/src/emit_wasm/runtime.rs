@@ -135,6 +135,13 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     let alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.alloc = emitter.register_func("__alloc", alloc_ty);
 
+    // __rc_inc(ptr: i32) -> i32 — increment refcount at ptr-4, return ptr
+    emitter.rt.rc_inc = emitter.register_func("__rc_inc", alloc_ty);
+
+    // __cow_check(ptr: i32, size: i32) -> i32 — if rc>1, copy data, dec old rc, return new ptr
+    let cow_check_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+    emitter.rt.cow_check = emitter.register_func("__cow_check", cow_check_ty);
+
     // __heap_save() -> i32   — return current heap pointer
     let heap_save_ty = emitter.register_type(vec![], vec![ValType::I32]);
     emitter.rt.heap_save = emitter.register_func("__heap_save", heap_save_ty);
@@ -282,6 +289,8 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 /// Compile all runtime function bodies.
 pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_alloc(emitter);
+    compile_rc_inc(emitter);
+    compile_cow_check(emitter);
     compile_heap_save(emitter);
     compile_heap_restore(emitter);
     compile_println_str(emitter);
@@ -336,14 +345,17 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(1, ValType::I32)]); // local 1: $ptr
 
     wasm!(f, {
+        // COW: allocate size+4 for refcount header, return ptr+4.
+        // Refcount at ptr-4 is initialized to 1.
         // Align heap_ptr up to 8-byte boundary: ptr = (heap_ptr + 7) & ~7
         global_get(emitter.heap_ptr_global);
         i32_const(7); i32_add; i32_const(-8); i32_and;
         local_set(1);
-        // Advance heap_ptr past the allocation: heap_ptr = ptr + size
+        // Advance heap_ptr past the allocation: heap_ptr = ptr + size + 4
         local_get(1);
         local_get(0);
         i32_add;
+        i32_const(4); i32_add;
         global_set(emitter.heap_ptr_global);
         // Grow memory if needed: while heap_ptr > memory.size * 64KB.
         // Compare in i64 because `memory_size * 65536` overflows i32 once
@@ -366,10 +378,74 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
           if_empty; unreachable; end;
           br(0);
         end; end;
+        // Write refcount = 1 at ptr
         local_get(1);
+        i32_const(1);
+        i32_store(2, 0);  // store rc=1 at ptr (align=4)
+        // Return ptr + 4 (data starts after refcount header)
+        local_get(1);
+        i32_const(4); i32_add;
         end;
     });
 
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+// __rc_inc(ptr: i32) -> i32
+// Increment refcount at ptr-4, return ptr unchanged.
+fn compile_rc_inc(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.rc_inc];
+    let mut f = Function::new([]);
+    wasm!(f, {
+        // rc = load(ptr - 4)
+        local_get(0); i32_const(4); i32_sub;
+        local_get(0); i32_const(4); i32_sub;
+        i32_load(2, 0);
+        // rc + 1
+        i32_const(1); i32_add;
+        // store(ptr - 4, rc + 1)
+        i32_store(2, 0);
+        // return ptr
+        local_get(0);
+        end;
+    });
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+// __cow_check(ptr: i32, size: i32) -> i32
+// If refcount > 1: allocate new buffer, memcpy, decrement old rc, return new ptr.
+// If refcount == 1: return ptr unchanged (in-place mutation is safe).
+fn compile_cow_check(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.cow_check];
+    let mut f = Function::new([(1, ValType::I32)]); // local 2: $new_ptr
+    wasm!(f, {
+        // if load(ptr - 4) <= 1 then return ptr (unique owner)
+        local_get(0); i32_const(4); i32_sub;
+        i32_load(2, 0);
+        i32_const(1); i32_le_u;
+        if_empty;
+            local_get(0);
+            return_;
+        end;
+        // Shared: allocate new buffer of `size` bytes
+        local_get(1);
+        call(emitter.rt.alloc);
+        local_set(2);
+        // memcpy: new_ptr[0..size] = ptr[0..size]
+        local_get(2); // dst
+        local_get(0); // src
+        local_get(1); // size
+        memory_copy(0, 0);
+        // Decrement old refcount
+        local_get(0); i32_const(4); i32_sub;
+        local_get(0); i32_const(4); i32_sub;
+        i32_load(2, 0);
+        i32_const(1); i32_sub;
+        i32_store(2, 0);
+        // Return new ptr
+        local_get(2);
+        end;
+    });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
