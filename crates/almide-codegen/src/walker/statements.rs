@@ -8,6 +8,19 @@ use super::types::render_type;
 use super::expressions::render_expr;
 use super::helpers::{template_or, terminate_stmt, ty_has_named_typevar, erase_named_typevars};
 
+/// If `target` is a module-level mutable var (non-Copy), return the uppercased
+/// name and a format for mutation via `.with(|c| Rc::make_mut(&mut *c.borrow_mut()))`.
+/// Returns None for local vars and Copy module vars.
+fn module_var_mut_target(ctx: &RenderContext, target: &VarId) -> Option<String> {
+    let name = ctx.var_name(*target).to_string();
+    let upper = name.to_uppercase();
+    if ctx.ann.mutable_top_let_names.contains(&upper) {
+        Some(upper)
+    } else {
+        None
+    }
+}
+
 /// Check if an expression references a specific variable (any depth).
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     match &stmt.kind {
@@ -203,7 +216,9 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let target_str = ctx.var_name(*target).to_string();
             let key_str = render_expr(ctx, key);
             let val_str = render_expr(ctx, value);
-            if ctx.ann.rc_wrapped_vars.contains(target) {
+            if let Some(upper) = module_var_mut_target(ctx, target) {
+                format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).insert({}, {}))", upper, key_str, val_str)
+            } else if ctx.ann.rc_wrapped_vars.contains(target) {
                 format!("{}.make_mut().insert({}, {});", target_str, key_str, val_str)
             } else {
                 ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
@@ -213,7 +228,9 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         IrStmtKind::FieldAssign { target, field, value } => {
             let target_str = ctx.var_name(*target).to_string();
             let val_str = render_expr(ctx, value);
-            if ctx.ann.rc_wrapped_vars.contains(target) {
+            if let Some(upper) = module_var_mut_target(ctx, target) {
+                format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).{} = {})", upper, field, val_str)
+            } else if ctx.ann.rc_wrapped_vars.contains(target) {
                 format!("{}.make_mut().{} = {};", target_str, field, val_str)
             } else {
                 format!("{}.{} = {};", target_str, field, val_str)
@@ -277,27 +294,54 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let t = ctx.var_name(*target).to_string();
             let a_s = render_expr(ctx, a);
             let b_s = render_expr(ctx, b);
-            ctx.templates.render_with("peep_swap", None, &[], &[("target", &t), ("a", &a_s), ("b", &b_s)])
-                .unwrap_or_else(|| format!("{}.swap({}, {});", t, a_s, b_s))
+            if let Some(upper) = module_var_mut_target(ctx, target) {
+                format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).swap({} as usize, {} as usize))", upper, a_s, b_s)
+            } else if ctx.ann.rc_wrapped_vars.contains(target) {
+                format!("{}.make_mut().swap({} as usize, {} as usize);", t, a_s, b_s)
+            } else {
+                ctx.templates.render_with("peep_swap", None, &[], &[("target", &t), ("a", &a_s), ("b", &b_s)])
+                    .unwrap_or_else(|| format!("{}.swap({}, {});", t, a_s, b_s))
+            }
         }
         IrStmtKind::ListReverse { target, end } => {
             let t = ctx.var_name(*target).to_string();
             let e = render_expr(ctx, end);
-            ctx.templates.render_with("peep_reverse", None, &[], &[("target", &t), ("end", &e)])
-                .unwrap_or_else(|| format!("{}[..={}].reverse();", t, e))
+            if let Some(upper) = module_var_mut_target(ctx, target) {
+                format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].reverse())", upper, e)
+            } else if ctx.ann.rc_wrapped_vars.contains(target) {
+                format!("{}.make_mut()[..={} as usize].reverse();", t, e)
+            } else {
+                ctx.templates.render_with("peep_reverse", None, &[], &[("target", &t), ("end", &e)])
+                    .unwrap_or_else(|| format!("{}[..={} as usize].reverse();", t, e))
+            }
         }
         IrStmtKind::ListRotateLeft { target, end } => {
             let t = ctx.var_name(*target).to_string();
             let e = render_expr(ctx, end);
-            ctx.templates.render_with("peep_rotate_left", None, &[], &[("target", &t), ("end", &e)])
-                .unwrap_or_else(|| format!("{}[..={}].rotate_left(1);", t, e))
+            if let Some(upper) = module_var_mut_target(ctx, target) {
+                format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].rotate_left(1))", upper, e)
+            } else if ctx.ann.rc_wrapped_vars.contains(target) {
+                format!("{}.make_mut()[..={} as usize].rotate_left(1);", t, e)
+            } else {
+                ctx.templates.render_with("peep_rotate_left", None, &[], &[("target", &t), ("end", &e)])
+                    .unwrap_or_else(|| format!("{}[..={} as usize].rotate_left(1);", t, e))
+            }
         }
         IrStmtKind::ListCopySlice { dst, src, len } => {
             let d = ctx.var_name(*dst).to_string();
             let s = ctx.var_name(*src).to_string();
             let n = render_expr(ctx, len);
-            ctx.templates.render_with("peep_copy_slice", None, &[], &[("dst", &d), ("src", &s), ("n", &n)])
-                .unwrap_or_else(|| format!("{}[..{}].copy_from_slice(&{}[..{}]);", d, n, s, n))
+            if let Some(upper_d) = module_var_mut_target(ctx, dst) {
+                let src_read = if let Some(upper_s) = module_var_mut_target(ctx, src) {
+                    format!("{}.with(|c| c.borrow().clone())", upper_s)
+                } else { s.clone() };
+                format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]))", upper_d, n=n, src_read=src_read)
+            } else if ctx.ann.rc_wrapped_vars.contains(dst) {
+                format!("{}.make_mut()[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, s, n)
+            } else {
+                ctx.templates.render_with("peep_copy_slice", None, &[], &[("dst", &d), ("src", &s), ("n", &n)])
+                    .unwrap_or_else(|| format!("{}[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, s, n))
+            }
         }
         IrStmtKind::Comment { text } => format!("// {}", text),
     }

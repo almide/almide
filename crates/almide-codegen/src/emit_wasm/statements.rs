@@ -8,6 +8,29 @@ use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
 use super::FuncCompiler;
+use super::wasm_macro::wasm;
+
+impl FuncCompiler<'_> {
+    /// Emit instruction to push a var's pointer/value onto the stack.
+    /// Tries local var_map first, then module-level globals.
+    /// Returns true if resolved, false if not found.
+    fn emit_var_get(&mut self, var: &VarId) -> bool {
+        if let Some(&local_idx) = self.var_map.get(&var.0) {
+            wasm!(self.func, { local_get(local_idx); });
+            return true;
+        }
+        let name = if (var.0 as usize) < self.var_table.len() {
+            self.var_table.get(*var).name.as_str()
+        } else { "" };
+        if let Some(&(global_idx, _)) = self.emitter.top_let_globals_by_name.get(name)
+            .or_else(|| self.emitter.top_let_globals.get(&var.0))
+        {
+            wasm!(self.func, { global_get(global_idx); });
+            return true;
+        }
+        false
+    }
+}
 use super::VariantCase;
 use super::equality::extract_record_fields;
 use super::values;
@@ -314,36 +337,33 @@ impl FuncCompiler<'_> {
             }
             IrStmtKind::FieldAssign { target, field, value } => {
                 // record.field = value
-                if let Some(&local_idx) = self.var_map.get(&target.0) {
-                    let var_ty = &self.var_table.get(*target).ty;
-                    let fields = self.extract_record_fields(var_ty);
-                    let tag_offset = self.variant_tag_offset(var_ty);
-                    if let Some((offset, _)) = super::values::field_offset(&fields, field) {
-                        let total_offset = tag_offset + offset;
-                        wasm!(self.func, { local_get(local_idx); });
+                let var_ty = &self.var_table.get(*target).ty;
+                let fields = self.extract_record_fields(var_ty);
+                let tag_offset = self.variant_tag_offset(var_ty);
+                if let Some((offset, _)) = super::values::field_offset(&fields, field) {
+                    let total_offset = tag_offset + offset;
+                    if self.emit_var_get(target) {
                         self.emit_expr(value);
                         self.emit_store_at(&value.ty, total_offset);
                     }
                 }
             }
             IrStmtKind::ListSwap { target, a, b } => {
-                // xs.swap(a, b): swap elements at indices a and b
-                // Layout: list_ptr + 4 + idx * elem_size
                 let elem_ty = self.list_elem_ty_var(*target);
                 let elem_size = values::byte_size(&elem_ty) as i32;
-                if let Some(&list_local) = self.var_map.get(&target.0) {
+                if self.emit_var_get(target) {
+                    let list_ptr = self.scratch.alloc_i32();
+                    wasm!(self.func, { local_set(list_ptr); });
                     let addr_a = self.scratch.alloc_i32();
                     let addr_b = self.scratch.alloc_i32();
                     let tmp = self.scratch_for_ty(&elem_ty);
 
-                    // addr_a = list_ptr + 4 + a * elem_size
-                    wasm!(self.func, { local_get(list_local); i32_const(4); i32_add; });
+                    wasm!(self.func, { local_get(list_ptr); i32_const(4); i32_add; });
                     self.emit_expr(a);
                     if matches!(&a.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
                     wasm!(self.func, { i32_const(elem_size); i32_mul; i32_add; local_set(addr_a); });
 
-                    // addr_b = list_ptr + 4 + b * elem_size
-                    wasm!(self.func, { local_get(list_local); i32_const(4); i32_add; });
+                    wasm!(self.func, { local_get(list_ptr); i32_const(4); i32_add; });
                     self.emit_expr(b);
                     if matches!(&b.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
                     wasm!(self.func, { i32_const(elem_size); i32_mul; i32_add; local_set(addr_b); });
@@ -363,19 +383,20 @@ impl FuncCompiler<'_> {
                     self.emit_get_scratch(tmp, &elem_ty);
                     self.emit_store_at(&elem_ty, 0);
 
+                    self.scratch.free_i32(list_ptr);
                     self.scratch.free_i32(addr_a);
                     self.scratch.free_i32(addr_b);
                     self.free_scratch_for_ty(tmp, &elem_ty);
                 }
             }
             IrStmtKind::ListReverse { target, end } => {
-                // xs[..=end].reverse(): swap from both ends inward
-                // Optimized: use shl for power-of-2 elem sizes, local.tee for addr reuse
                 let elem_ty = self.list_elem_ty_var(*target);
                 let elem_size = values::byte_size(&elem_ty) as i32;
                 let elem_shift = (elem_size as u32).trailing_zeros();
                 let use_shift = (elem_size as u32).is_power_of_two() && elem_shift > 0;
-                if let Some(&list_local) = self.var_map.get(&target.0) {
+                if self.emit_var_get(target) {
+                    let list_local = self.scratch.alloc_i32();
+                    wasm!(self.func, { local_set(list_local); });
                     let lo = self.scratch.alloc_i32();
                     let hi = self.scratch.alloc_i32();
                     let addr_lo = self.scratch.alloc_i32();
@@ -434,6 +455,7 @@ impl FuncCompiler<'_> {
                         end; // block
                     });
 
+                    self.scratch.free_i32(list_local);
                     self.scratch.free_i32(base_ptr);
                     self.scratch.free_i32(lo);
                     self.scratch.free_i32(hi);
@@ -443,10 +465,11 @@ impl FuncCompiler<'_> {
                 }
             }
             IrStmtKind::ListRotateLeft { target, end } => {
-                // xs[..=end].rotate_left(1): save xs[0], shift left, put saved at end
                 let elem_ty = self.list_elem_ty_var(*target);
                 let elem_size = values::byte_size(&elem_ty) as i32;
-                if let Some(&list_local) = self.var_map.get(&target.0) {
+                if self.emit_var_get(target) {
+                    let list_local = self.scratch.alloc_i32();
+                    wasm!(self.func, { local_set(list_local); });
                     let tmp = self.scratch_for_ty(&elem_ty);
                     let base = self.scratch.alloc_i32();
                     let end_i32 = self.scratch.alloc_i32();
@@ -475,40 +498,61 @@ impl FuncCompiler<'_> {
                     self.emit_store_at(&elem_ty, 0);
 
                     self.free_scratch_for_ty(tmp, &elem_ty);
+                    self.scratch.free_i32(list_local);
                     self.scratch.free_i32(base);
                     self.scratch.free_i32(end_i32);
                 }
             }
             IrStmtKind::ListCopySlice { dst, src, len } => {
                 // dst[..n].copy_from_slice(&src[..n])
-                if let (Some(&dst_local), Some(&src_local)) = (self.var_map.get(&dst.0), self.var_map.get(&src.0)) {
-                    let elem_ty = self.list_elem_ty_var(*dst);
-                    let elem_size = values::byte_size(&elem_ty) as i32;
-
-                    // memory.copy: dst=dst_ptr+4, src=src_ptr+4, len=n*elem_size
-                    wasm!(self.func, {
-                        local_get(dst_local); i32_const(4); i32_add;
-                        local_get(src_local); i32_const(4); i32_add;
-                    });
-                    self.emit_expr(len);
-                    if matches!(&len.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
-                    wasm!(self.func, {
-                        i32_const(elem_size); i32_mul;
-                        memory_copy;
-                    });
+                let dst_ok = self.emit_var_get(dst);
+                if dst_ok {
+                    let dst_ptr = self.scratch.alloc_i32();
+                    wasm!(self.func, { local_set(dst_ptr); });
+                    let src_ok = self.emit_var_get(src);
+                    if src_ok {
+                        let src_ptr = self.scratch.alloc_i32();
+                        wasm!(self.func, { local_set(src_ptr); });
+                        let elem_ty = self.list_elem_ty_var(*dst);
+                        let elem_size = values::byte_size(&elem_ty) as i32;
+                        wasm!(self.func, {
+                            local_get(dst_ptr); i32_const(4); i32_add;
+                            local_get(src_ptr); i32_const(4); i32_add;
+                        });
+                        self.emit_expr(len);
+                        if matches!(&len.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
+                        wasm!(self.func, {
+                            i32_const(elem_size); i32_mul;
+                            memory_copy;
+                        });
+                        self.scratch.free_i32(src_ptr);
+                    }
+                    self.scratch.free_i32(dst_ptr);
                 }
             }
             IrStmtKind::MapInsert { target, key, value } => {
                 // m[k] = v  →  target = map.set(target, key, value)
-                if let Some(&local_idx) = self.var_map.get(&target.0) {
-                    // Emit map.set(target, key, value) using the existing map call infrastructure
+                // Resolve target: local or global
+                let has_local = self.var_map.get(&target.0).copied();
+                let global_idx = if has_local.is_none() {
+                    let name = if (target.0 as usize) < self.var_table.len() {
+                        self.var_table.get(*target).name.as_str()
+                    } else { "" };
+                    self.emitter.top_let_globals_by_name.get(name).map(|&(g, _)| g)
+                        .or_else(|| self.emitter.top_let_globals.get(&target.0).map(|&(g, _)| g))
+                } else { None };
+                if has_local.is_some() || global_idx.is_some() {
                     let set_args = vec![
                         almide_ir::IrExpr { kind: almide_ir::IrExprKind::Var { id: *target }, ty: self.var_table.get(*target).ty.clone(), span: None, def_id: None },
                         key.clone(),
                         value.clone(),
                     ];
                     self.emit_map_call("set", &set_args);
-                    wasm!(self.func, { local_set(local_idx); });
+                    if let Some(local_idx) = has_local {
+                        wasm!(self.func, { local_set(local_idx); });
+                    } else if let Some(g) = global_idx {
+                        wasm!(self.func, { global_set(g); });
+                    }
                 }
             }
         }
