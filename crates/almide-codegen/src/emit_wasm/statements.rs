@@ -274,19 +274,30 @@ impl FuncCompiler<'_> {
             IrStmtKind::IndexAssign { target, index, value } => {
                 // xs[i] = v → store value at list_ptr + 4 + i * elem_size
                 let elem_size = super::values::byte_size(&value.ty);
-                if let Some(&local_idx) = self.var_map.get(&target.0) {
-                    // Optimize constant index: compute offset at compile time
+                // Resolve list pointer: local var or module-level global
+                let has_ptr = if let Some(&local_idx) = self.var_map.get(&target.0) {
+                    wasm!(self.func, { local_get(local_idx); });
+                    true
+                } else {
+                    let name = if (target.0 as usize) < self.var_table.len() {
+                        self.var_table.get(*target).name.as_str()
+                    } else { "" };
+                    if let Some(&(global_idx, _)) = self.emitter.top_let_globals_by_name.get(name)
+                        .or_else(|| self.emitter.top_let_globals.get(&target.0))
+                    {
+                        wasm!(self.func, { global_get(global_idx); });
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if has_ptr {
                     if let IrExprKind::LitInt { value: idx_val } = &index.kind {
                         let offset = 4 + (*idx_val as u32) * (elem_size as u32);
-                        wasm!(self.func, { local_get(local_idx); });
                         self.emit_expr(value);
                         self.emit_store_at(&value.ty, offset);
                     } else {
-                        wasm!(self.func, {
-                            local_get(local_idx);
-                            i32_const(4);
-                            i32_add;
-                        });
+                        wasm!(self.func, { i32_const(4); i32_add; });
                         self.emit_expr(index);
                         if matches!(&index.ty, almide_lang::types::Ty::Int) {
                             wasm!(self.func, { i32_wrap_i64; });
