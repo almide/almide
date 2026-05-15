@@ -133,8 +133,8 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let upper = target_s.to_uppercase();
             let value_s = render_expr(ctx, value);
             match ctx.ann.get_var_storage(var, &target_s) {
-                VarStorage::ModuleCell => format!("{}.with(|c| c.set({}))", upper, value_s),
-                VarStorage::ModuleRc => format!("{}.with(|c| *c.borrow_mut() = std::rc::Rc::new(({}).into()))", upper, value_s),
+                VarStorage::ModuleCell => format!("{}.with(|c| c.set({}));", upper, value_s),
+                VarStorage::ModuleRc => format!("{}.with(|c| *c.borrow_mut() = std::rc::Rc::new(({}).into()));", upper, value_s),
                 VarStorage::RcCow => format!("{} = RcCow::new({});", target_s, value_s),
                 VarStorage::Local => ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
                     .unwrap_or_else(|| format!("_ = _;")),
@@ -185,8 +185,8 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
             match ctx.ann.get_var_storage(target, &target_str) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[{} as usize] = {})", upper, idx_str, val_str),
-                VarStorage::ModuleCell => format!("{}.with(|c| c.get())", upper),
+                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[{} as usize] = {});", upper, idx_str, val_str),
+                VarStorage::ModuleCell => format!("{}.with(|c| c.get());", upper),
                 VarStorage::RcCow => format!("{}.make_mut()[{} as usize] = {};", target_str, idx_str, val_str),
                 VarStorage::Local => ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| "idx[...] = ...;".into()),
@@ -198,7 +198,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let key_str = render_expr(ctx, key);
             let val_str = render_expr(ctx, value);
             match ctx.ann.get_var_storage(target, &target_str) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).insert({}, {}))", upper, key_str, val_str),
+                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).insert({}, {}));", upper, key_str, val_str),
                 VarStorage::RcCow => format!("{}.make_mut().insert({}, {});", target_str, key_str, val_str),
                 VarStorage::ModuleCell | VarStorage::Local => ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| "map_set(...)".into()),
@@ -209,7 +209,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let upper = target_str.to_uppercase();
             let val_str = render_expr(ctx, value);
             match ctx.ann.get_var_storage(target, &target_str) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).{} = {})", upper, field, val_str),
+                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).{} = {});", upper, field, val_str),
                 VarStorage::RcCow => format!("{}.make_mut().{} = {};", target_str, field, val_str),
                 VarStorage::ModuleCell | VarStorage::Local => format!("{}.{} = {};", target_str, field, val_str),
             }
@@ -274,7 +274,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let a_s = render_expr(ctx, a);
             let b_s = render_expr(ctx, b);
             match ctx.ann.get_var_storage(target, &t) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).swap({} as usize, {} as usize))", upper, a_s, b_s),
+                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).swap({} as usize, {} as usize));", upper, a_s, b_s),
                 VarStorage::RcCow => format!("{}.make_mut().swap({} as usize, {} as usize);", t, a_s, b_s),
                 VarStorage::ModuleCell | VarStorage::Local => ctx.templates.render_with("peep_swap", None, &[], &[("target", &t), ("a", &a_s), ("b", &b_s)])
                     .unwrap_or_else(|| format!("{}.swap({}, {});", t, a_s, b_s)),
@@ -285,7 +285,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let upper = t.to_uppercase();
             let e = render_expr(ctx, end);
             match ctx.ann.get_var_storage(target, &t) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].reverse())", upper, e),
+                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].reverse());", upper, e),
                 VarStorage::RcCow => format!("{}.make_mut()[..={} as usize].reverse();", t, e),
                 VarStorage::ModuleCell | VarStorage::Local => ctx.templates.render_with("peep_reverse", None, &[], &[("target", &t), ("end", &e)])
                     .unwrap_or_else(|| format!("{}[..={} as usize].reverse();", t, e)),
@@ -296,7 +296,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let upper = t.to_uppercase();
             let e = render_expr(ctx, end);
             match ctx.ann.get_var_storage(target, &t) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].rotate_left(1))", upper, e),
+                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].rotate_left(1));", upper, e),
                 VarStorage::RcCow => format!("{}.make_mut()[..={} as usize].rotate_left(1);", t, e),
                 VarStorage::ModuleCell | VarStorage::Local => ctx.templates.render_with("peep_rotate_left", None, &[], &[("target", &t), ("end", &e)])
                     .unwrap_or_else(|| format!("{}[..={} as usize].rotate_left(1);", t, e)),
@@ -312,7 +312,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     let src_read = if matches!(ctx.ann.get_var_storage(src, &s), VarStorage::ModuleRc) {
                         format!("{}.with(|c| c.borrow().clone())", s.to_uppercase())
                     } else { s.clone() };
-                    format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]))", upper_d, n=n, src_read=src_read)
+                    format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]));", upper_d, n=n, src_read=src_read)
                 }
                 VarStorage::RcCow => format!("{}.make_mut()[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, s, n),
                 VarStorage::ModuleCell | VarStorage::Local => ctx.templates.render_with("peep_copy_slice", None, &[], &[("dst", &d), ("src", &s), ("n", &n)])
