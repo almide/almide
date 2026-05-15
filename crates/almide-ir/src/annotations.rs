@@ -1,6 +1,22 @@
 use std::collections::{HashSet, HashMap};
 use crate::{VarId, IrExpr};
 
+/// How a variable is stored at the Rust codegen level.
+///
+/// Each mutable binding falls into one of four categories, determined once
+/// during program rendering and looked up at every read/write site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VarStorage {
+    /// Plain local variable (immutable let or mutable Copy-type var).
+    Local,
+    /// Local `var` of non-Copy type → `RcCow<T>` (Swift-style COW).
+    RcCow,
+    /// Module-level `var` of Copy type → `thread_local! { Cell<T> }`.
+    ModuleCell,
+    /// Module-level `var` of non-Copy type → `thread_local! { RefCell<Rc<T>> }`.
+    ModuleRc,
+}
+
 /// Annotations populated by Nanopass passes, read by the walker.
 #[derive(Debug, Clone, Default)]
 pub struct CodegenAnnotations {
@@ -12,16 +28,12 @@ pub struct CodegenAnnotations {
     /// emitting `(*NAME)` — scalar `Const` top_lets (plain `const
     /// NAME: i64 = 42;`) must NOT be dereferenced.
     pub lazy_top_let_names: HashSet<String>,
-    /// Uppercased names of module-level `var` declarations (mutable top-lets)
-    /// that use `RefCell<T>` (non-Copy types: String, List, etc.).
-    pub mutable_top_let_names: HashSet<String>,
-    /// Uppercased names of module-level `var` declarations that use `Cell<T>`
-    /// (Copy types: Int, Float, Bool). Read with `.get()`, write with `.set()`.
-    pub mutable_top_let_copy: HashSet<String>,
-    /// VarIds of function-local `var` bindings with non-Copy types (String,
-    /// List, etc.) that are Rc-wrapped for Swift-style COW semantics.
-    /// Clone → Rc::clone (O(1)), mutation → Rc::make_mut (COW).
-    pub rc_wrapped_vars: HashSet<VarId>,
+    /// Unified variable storage classification.
+    /// Keyed by VarId for local vars (RcCow) and module vars with known ids.
+    pub var_storage: HashMap<VarId, VarStorage>,
+    /// Keyed by uppercased name for cross-module synthetic refs
+    /// (ALMIDE_RT_<MOD>_<NAME>) that carry fresh VarIds.
+    pub var_storage_by_name: HashMap<String, VarStorage>,
     pub ctor_to_enum: HashMap<String, String>,
     pub anon_records: HashMap<Vec<String>, String>,
     pub named_records: HashMap<Vec<String>, String>,
@@ -36,4 +48,27 @@ pub struct CodegenAnnotations {
     /// derive `PartialEq` (a field transitively blocks equality — e.g.
     /// contains a Matrix or a function pointer).
     pub eq_blocked_types: HashSet<String>,
+}
+
+impl CodegenAnnotations {
+    /// Look up the storage mode for a variable. Checks VarId first (precise),
+    /// then falls back to uppercased name (for cross-module synthetic refs).
+    pub fn get_var_storage(&self, var: &VarId, name: &str) -> VarStorage {
+        if let Some(s) = self.var_storage.get(var) {
+            return *s;
+        }
+        let upper = name.to_uppercase();
+        if let Some(s) = self.var_storage_by_name.get(&upper) {
+            return *s;
+        }
+        VarStorage::Local
+    }
+
+    pub fn is_rc_cow(&self, var: &VarId) -> bool {
+        matches!(self.var_storage.get(var), Some(VarStorage::RcCow))
+    }
+
+    pub fn is_module_var(&self, var: &VarId, name: &str) -> bool {
+        matches!(self.get_var_storage(var, name), VarStorage::ModuleCell | VarStorage::ModuleRc)
+    }
 }
