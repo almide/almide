@@ -404,21 +404,28 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     }
     // Index mutable top-let names. Copy types (Int, Float, Bool) use Cell<T>
     // for zero-cost reads; non-Copy types use RefCell<T>.
-    let register_mutable_top_let = |ann: &mut CodegenAnnotations, tl: &IrTopLet, vt: &VarTable| {
+    let register_mutable_top_let = |ann: &mut CodegenAnnotations, tl: &IrTopLet, vt: &VarTable, module_name: Option<&str>| {
         if !tl.mutable { return; }
-        let name = vt.get(tl.var).name.to_uppercase();
-        if matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
-            ann.mutable_top_let_copy.insert(name);
+        let var_name = vt.get(tl.var).name.to_uppercase();
+        let set = if matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
+            &mut ann.mutable_top_let_copy
         } else {
-            ann.mutable_top_let_names.insert(name);
+            &mut ann.mutable_top_let_names
+        };
+        set.insert(var_name.clone());
+        // Also register the ALMIDE_RT_<MODULE>_<NAME> synthetic form
+        // so cross-module var references match.
+        if let Some(mod_name) = module_name {
+            set.insert(format!("ALMIDE_RT_{}_{}", mod_name.to_uppercase(), var_name));
         }
     };
     for tl in &program.top_lets {
-        register_mutable_top_let(&mut ann, tl, ctx.var_table);
+        register_mutable_top_let(&mut ann, tl, ctx.var_table, None);
     }
     for module in &program.modules {
+        let mod_name = module.name.as_str();
         for tl in &module.top_lets {
-            register_mutable_top_let(&mut ann, tl, ctx.var_table);
+            register_mutable_top_let(&mut ann, tl, ctx.var_table, Some(mod_name));
         }
     }
     // Rc-wrap function-local `var` bindings of non-Copy types for COW.
@@ -653,7 +660,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         let mod_ident = module.versioned_name
             .map(|v| v.replace('.', "_"))
             .unwrap_or_else(|| module.name.replace('.', "_"));
-        // Module top-level lets (names already prefixed during lowering)
+        // Module top-level lets and vars
         for tl in &module.top_lets {
             let name = mod_ctx.var_table.get(tl.var).name.to_string();
             let ty_str = render_type_fn(&mod_ctx, &tl.ty);
@@ -661,12 +668,18 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             if matches!(tl.kind, TopLetKind::Lazy) {
                 mod_ctx.ann.lazy_vars.insert(tl.var);
             }
-            let construct = match tl.kind {
-                TopLetKind::Const => "top_let_const",
-                TopLetKind::Lazy => "top_let_lazy",
+            let rendered = if tl.mutable && matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
+                format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name, ty_str, val_str)
+            } else if tl.mutable {
+                format!("thread_local! {{ static {}: std::cell::RefCell<std::rc::Rc<{}>> = std::cell::RefCell::new(std::rc::Rc::new({})); }}", name, ty_str, val_str)
+            } else {
+                let construct = match tl.kind {
+                    TopLetKind::Const => "top_let_const",
+                    TopLetKind::Lazy => "top_let_lazy",
+                };
+                mod_ctx.templates.render_with(construct, None, &[], &[("name", name.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| format!("const {} = {};", name, val_str))
             };
-            let rendered = mod_ctx.templates.render_with(construct, None, &[], &[("name", name.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
-                .unwrap_or_else(|| format!("const {} = {};", name, val_str));
             parts.push(rendered);
         }
         for func in &module.functions {
