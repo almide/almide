@@ -183,9 +183,16 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::IndexAssign { target, index, value } => {
             let target_str = ctx.var_name(*target).to_string();
+            let upper = target_str.to_uppercase();
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
-            if ctx.ann.rc_wrapped_vars.contains(target) {
+            if ctx.ann.mutable_top_let_names.contains(&upper) {
+                // Module-level var (non-Copy): RefCell<Rc<Vec<T>>> — COW index assign
+                format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[{} as usize] = {})", upper, idx_str, val_str)
+            } else if ctx.ann.mutable_top_let_copy.contains(&upper) {
+                // Module-level var (Copy list) — shouldn't happen but handle gracefully
+                format!("{}.with(|c| c.get())", upper)
+            } else if ctx.ann.rc_wrapped_vars.contains(target) {
                 format!("{}.make_mut()[{} as usize] = {};", target_str, idx_str, val_str)
             } else {
                 ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
