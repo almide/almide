@@ -96,17 +96,6 @@ impl<'a> RenderContext<'a> {
     }
 }
 
-/// Check if a tail expression contains a Val-wrapped Var that needs unwrapping
-/// at function return boundaries (Var, ResultOk{Var}, Block{tail: Var}).
-fn tail_has_val_var(expr: &IrExpr, rc_vars: &std::collections::HashSet<VarId>) -> bool {
-    match &expr.kind {
-        IrExprKind::Var { id } => rc_vars.contains(id),
-        IrExprKind::ResultOk { expr: inner } => tail_has_val_var(inner, rc_vars),
-        IrExprKind::Block { expr: Some(tail), .. } => tail_has_val_var(tail, rc_vars),
-        _ => false,
-    }
-}
-
 // ── Function rendering ──
 
 pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
@@ -252,12 +241,12 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
                 // For simple Var: append .into_inner().
                 // For ResultOk { Var }: the Var inside Ok needs unwrapping.
                 if let IrExprKind::Var { id } = &e.kind {
-                    if fn_ctx.ann.rc_wrapped_vars.contains(id) {
+                    if fn_ctx.ann.is_rc_cow(id) {
                         expr_str = format!("{}.into_inner()", expr_str);
                     }
                 } else if let IrExprKind::ResultOk { expr: inner } = &e.kind {
                     if let IrExprKind::Var { id } = &inner.kind {
-                        if fn_ctx.ann.rc_wrapped_vars.contains(id) {
+                        if fn_ctx.ann.is_rc_cow(id) {
                             // Re-render with unwrap: Ok(var.into_inner())
                             let var_name = fn_ctx.var_table.get(*id).name.to_string();
                             expr_str = format!("Ok({}.into_inner())", var_name);
@@ -277,7 +266,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         _ => {
             let mut raw = render_expr_fn(&fn_ctx, &func.body);
             if let IrExprKind::Var { id } = &func.body.kind {
-                if fn_ctx.ann.rc_wrapped_vars.contains(id) {
+                if fn_ctx.ann.is_rc_cow(id) {
                     raw = format!("{}.into_inner()", raw);
                 }
             }
@@ -402,36 +391,42 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             }
         }
     }
-    // Index mutable top-let names. Copy types (Int, Float, Bool) use Cell<T>
-    // for zero-cost reads; non-Copy types use RefCell<T>.
-    let register_mutable_top_let = |ann: &mut CodegenAnnotations, tl: &IrTopLet, vt: &VarTable, module_name: Option<&str>| {
-        if !tl.mutable { return; }
-        let var_name = vt.get(tl.var).name.to_uppercase();
-        let set = if matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
-            &mut ann.mutable_top_let_copy
-        } else {
-            &mut ann.mutable_top_let_names
+    // Classify mutable top-lets into VarStorage. Copy types (Int, Float, Bool)
+    // → ModuleCell (thread_local Cell<T>); non-Copy → ModuleRc (thread_local RefCell<Rc<T>>).
+    {
+        use almide_ir::annotations::VarStorage;
+        let register = |ann: &mut CodegenAnnotations, tl: &IrTopLet, vt: &VarTable, module_name: Option<&str>| {
+            if !tl.mutable { return; }
+            let var_name = vt.get(tl.var).name.to_uppercase();
+            let storage = if matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
+                VarStorage::ModuleCell
+            } else {
+                VarStorage::ModuleRc
+            };
+            ann.var_storage.insert(tl.var, storage);
+            ann.var_storage_by_name.insert(var_name.clone(), storage);
+            if let Some(mod_name) = module_name {
+                ann.var_storage_by_name.insert(
+                    format!("ALMIDE_RT_{}_{}", mod_name.to_uppercase(), var_name),
+                    storage,
+                );
+            }
         };
-        set.insert(var_name.clone());
-        // Also register the ALMIDE_RT_<MODULE>_<NAME> synthetic form
-        // so cross-module var references match.
-        if let Some(mod_name) = module_name {
-            set.insert(format!("ALMIDE_RT_{}_{}", mod_name.to_uppercase(), var_name));
+        for tl in &program.top_lets {
+            register(&mut ann, tl, ctx.var_table, None);
         }
-    };
-    for tl in &program.top_lets {
-        register_mutable_top_let(&mut ann, tl, ctx.var_table, None);
-    }
-    for module in &program.modules {
-        let mod_name = module.name.as_str();
-        for tl in &module.top_lets {
-            register_mutable_top_let(&mut ann, tl, ctx.var_table, Some(mod_name));
+        for module in &program.modules {
+            let mod_name = module.name.as_str();
+            for tl in &module.top_lets {
+                register(&mut ann, tl, ctx.var_table, Some(mod_name));
+            }
         }
     }
-    // Rc-wrap function-local `var` bindings of non-Copy types for COW.
+    // Classify function-local `var` bindings of non-Copy types as RcCow.
     // Scan IR Bind statements (not VarTable) because use_count demotes
     // unused-assigned vars from Var to Let. We need the original mutability.
     {
+        use almide_ir::annotations::VarStorage;
         let mut exclude: std::collections::HashSet<u32> = std::collections::HashSet::new();
         // Exclude module-level vars and function params
         for tl in &program.top_lets {
@@ -450,7 +445,6 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                 for p in &func.params { exclude.insert(p.var.0); }
             }
         }
-        // Scan IR Bind stmts for Mutability::Var
         struct VarBindCollector { vars: std::collections::HashSet<u32> }
         impl almide_ir::visit::IrVisitor for VarBindCollector {
             fn visit_stmt(&mut self, stmt: &IrStmt) {
@@ -477,7 +471,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         }
         for var_id in collector.vars {
             if !exclude.contains(&var_id) {
-                ann.rc_wrapped_vars.insert(VarId(var_id));
+                ann.var_storage.insert(VarId(var_id), VarStorage::RcCow);
             }
         }
     }

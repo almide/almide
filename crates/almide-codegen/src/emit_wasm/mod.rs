@@ -254,8 +254,8 @@ pub struct WasmEmitter {
     pub func_table: Vec<u32>, // list of func_idx in table order
     pub func_to_table_idx: HashMap<u32, u32>, // func_idx → table index
 
-    // User-defined public functions to export (name list, populated during emit)
-    pub user_exports: Vec<String>,
+    // User-defined public functions to export: (export_name, internal_name)
+    pub user_exports: Vec<(String, String)>,
 
     // Type info: record/variant name → field list (for field offset computation)
     pub record_fields: HashMap<String, Vec<(String, almide_lang::types::Ty)>>,
@@ -1158,14 +1158,20 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     // Phase 2.5: Dead Code Elimination
     let dce_count = dce::eliminate_dead_code(&mut emitter);
 
-    // Collect public user functions for WASM export (skip imports)
+    // Collect public user functions for WASM export (skip imports).
+    // @export(wasm, "symbol") overrides the export name; otherwise use fn name.
     for (func_enum_idx, func) in program.functions.iter().enumerate() {
         if extern_wasm_set.contains(&func_enum_idx) { continue; }
         if func.is_test { continue; }
         if !matches!(func.visibility, almide_ir::IrVisibility::Public) { continue; }
         if func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
         if func.name.as_str() == "main" { continue; }
-        emitter.user_exports.push(func.name.to_string());
+        let internal_name = func.name.to_string();
+        let export_name = func.export_attrs.iter()
+            .find(|a| a.target.as_str() == "wasm")
+            .map(|a| a.symbol.to_string())
+            .unwrap_or_else(|| internal_name.clone());
+        emitter.user_exports.push((export_name, internal_name));
     }
 
     // Phase 3: Assemble (DCE already ran in Phase 2.5: {} functions eliminated)
@@ -1302,9 +1308,9 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
         exports.export("__heap_restore", wasm_encoder::ExportKind::Func, idx);
     }
     // Export public user functions (collected during emit)
-    for name in &emitter.user_exports {
-        if let Some(&idx) = emitter.func_map.get(name.as_str()) {
-            exports.export(name, wasm_encoder::ExportKind::Func, idx);
+    for (export_name, internal_name) in &emitter.user_exports {
+        if let Some(&idx) = emitter.func_map.get(internal_name.as_str()) {
+            exports.export(export_name, wasm_encoder::ExportKind::Func, idx);
         }
     }
     module.section(&exports);

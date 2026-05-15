@@ -1,6 +1,7 @@
 //! Expression rendering: converts IrExpr nodes to target-specific code strings.
 
 use almide_ir::*;
+use almide_ir::annotations::VarStorage;
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
 use super::super::pass::Target;
@@ -61,21 +62,18 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Variables ──
         IrExprKind::Var { id } => {
             let name = ctx.var_name(*id).to_string();
+            let upper = name.to_uppercase();
+            // Module-level mutable var: dispatch by storage type
+            match ctx.ann.get_var_storage(id, &name) {
+                VarStorage::ModuleCell => return format!("{}.with(|c| c.get())", upper),
+                VarStorage::ModuleRc => return format!("{}.with(|c| (**c.borrow()).clone())", upper),
+                _ => {}
+            }
             // Lazy vars need deref via template. Cross-module top_let synthetic
             // vars carry an `ALMIDE_RT_<MOD>_<NAME>` name and reference a static
             // LazyLock — auto-deref them too, BUT only if the target top_let's
             // kind is Lazy. Scalar `Const` top_lets (plain `const NAME: i64 = 42;`)
-            // must NOT be dereferenced. The synthetic Var carries a fresh
-            // VarId so `lazy_vars` misses it; cross-reference by uppercased
-            // name against `lazy_top_let_names` instead.
-            let upper = name.to_uppercase();
-            // Mutable top-let: Cell (Copy types) or RefCell (non-Copy)
-            if ctx.ann.mutable_top_let_copy.contains(&upper) {
-                return format!("{}.with(|c| c.get())", upper);
-            }
-            if ctx.ann.mutable_top_let_names.contains(&upper) {
-                return format!("{}.with(|c| (**c.borrow()).clone())", upper);
-            }
+            // must NOT be dereferenced.
             let is_synthetic_lazy = name.starts_with("ALMIDE_RT_")
                 && ctx.ann.lazy_top_let_names.contains(&upper);
             if ctx.ann.lazy_vars.contains(id) || is_synthetic_lazy {
@@ -86,7 +84,6 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             } else {
                 name
             }
-            // Clone/Deref are now IR nodes (CloneInsertionPass / BoxDerefPass)
         }
         IrExprKind::FnRef { name } => name.to_string(),
 
@@ -260,10 +257,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
                 _ => {}
             }
-            // Mutating stdlib calls (push, pop, clear) on module-level var:
-            // emit NAME.with(|c| { runtime_fn(Rc::make_mut(&mut *c.borrow_mut()), args) })
-            // Rc::make_mut provides Swift-style COW: if refcount==1, mutate in-place;
-            // if shared, clone first then mutate the unique copy.
+            // Mutating stdlib calls (push, pop, clear) on module-level or RcCow var:
+            // dispatch by VarStorage for COW-correct mutation.
             if !args.is_empty() {
                 let is_mutating = matches!(symbol.as_str(),
                     "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_clear");
@@ -272,28 +267,29 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         if let IrExprKind::Var { id } = &inner.kind {
                             let name = ctx.var_name(*id).to_string();
                             let upper = name.to_uppercase();
-                            // Module-level var: thread_local RefCell<Rc<T>>
-                            if ctx.ann.mutable_top_let_names.contains(&upper) {
-                                let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
-                                    .collect::<Vec<_>>().join(", ");
-                                let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
-                                let call_args = if rest_args.is_empty() {
-                                    rc_mut.to_string()
-                                } else {
-                                    format!("{}, {}", rc_mut, rest_args)
-                                };
-                                return format!("{}.with(|c| {}({}))", upper, symbol.as_str(), call_args);
-                            }
-                            // Local Val-wrapped var: val.make_mut()
-                            if ctx.ann.rc_wrapped_vars.contains(id) {
-                                let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
-                                    .collect::<Vec<_>>().join(", ");
-                                let call_args = if rest_args.is_empty() {
-                                    format!("{}.make_mut()", name)
-                                } else {
-                                    format!("{}.make_mut(), {}", name, rest_args)
-                                };
-                                return format!("{}({})", symbol.as_str(), call_args);
+                            match ctx.ann.get_var_storage(id, &name) {
+                                VarStorage::ModuleRc => {
+                                    let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
+                                        .collect::<Vec<_>>().join(", ");
+                                    let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
+                                    let call_args = if rest_args.is_empty() {
+                                        rc_mut.to_string()
+                                    } else {
+                                        format!("{}, {}", rc_mut, rest_args)
+                                    };
+                                    return format!("{}.with(|c| {}({}))", upper, symbol.as_str(), call_args);
+                                }
+                                VarStorage::RcCow => {
+                                    let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
+                                        .collect::<Vec<_>>().join(", ");
+                                    let call_args = if rest_args.is_empty() {
+                                        format!("{}.make_mut()", name)
+                                    } else {
+                                        format!("{}.make_mut(), {}", name, rest_args)
+                                    };
+                                    return format!("{}({})", symbol.as_str(), call_args);
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -677,7 +673,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Clone { expr: inner } => {
             // Val-wrapped var: deref then clone to get T. Bind handler re-wraps in RcCow::new().
             if let IrExprKind::Var { id } = &inner.kind {
-                if ctx.ann.rc_wrapped_vars.contains(id) {
+                if ctx.ann.is_rc_cow(id) {
                     let var_name = ctx.var_name(*id).to_string();
                     return format!("(*{}).clone()", var_name);
                 }
@@ -732,7 +728,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             if *mutable {
                 // Val-wrapped var: .make_mut() for COW semantics
                 if let IrExprKind::Var { id } = &inner.kind {
-                    if ctx.ann.rc_wrapped_vars.contains(id) {
+                    if ctx.ann.is_rc_cow(id) {
                         let var_name = ctx.var_name(*id).to_string();
                         return format!("{}.make_mut()", var_name);
                     }
@@ -976,7 +972,7 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
             }
             // Val-wrapped var: mutating method calls need .make_mut()
             if let IrExprKind::Var { id } = &object.kind {
-                if ctx.ann.rc_wrapped_vars.contains(id) {
+                if ctx.ann.is_rc_cow(id) {
                     let is_mutating_method = matches!(method.as_str(),
                         "push" | "pop" | "clear" | "extend" | "insert" | "remove"
                         | "sort" | "sort_by" | "reverse" | "truncate" | "retain");
