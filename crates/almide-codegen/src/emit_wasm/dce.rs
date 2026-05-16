@@ -397,3 +397,265 @@ fn block_type_size(bytes: &[u8]) -> usize {
         consumed
     }
 }
+
+// ── Tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasm_encoder::Instruction;
+
+    /// Build a Function with given instructions and extract its call targets.
+    fn calls_in(instrs: &[Instruction]) -> Vec<u32> {
+        let mut f = Function::new([]);
+        for i in instrs { f.instruction(i); }
+        f.instruction(&Instruction::End);
+        extract_call_targets(&f)
+    }
+
+    #[test]
+    fn simple_call() {
+        let targets = calls_in(&[Instruction::Call(42)]);
+        assert_eq!(targets, vec![42]);
+    }
+
+    #[test]
+    fn multiple_calls() {
+        let targets = calls_in(&[
+            Instruction::Call(1),
+            Instruction::Call(2),
+            Instruction::Call(3),
+        ]);
+        assert_eq!(targets, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn no_calls() {
+        let targets = calls_in(&[
+            Instruction::I32Const(0),
+            Instruction::Drop,
+        ]);
+        assert!(targets.is_empty());
+    }
+
+    // ── 0xFC prefix: bulk memory ops must not desync the scanner ──
+
+    #[test]
+    fn call_after_memory_copy() {
+        let targets = calls_in(&[
+            Instruction::I32Const(0),
+            Instruction::I32Const(0),
+            Instruction::I32Const(8),
+            Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 },
+            Instruction::Call(99),
+        ]);
+        assert_eq!(targets, vec![99]);
+    }
+
+    #[test]
+    fn call_after_memory_fill() {
+        let targets = calls_in(&[
+            Instruction::I32Const(0),
+            Instruction::I32Const(0),
+            Instruction::I32Const(8),
+            Instruction::MemoryFill(0),
+            Instruction::Call(77),
+        ]);
+        assert_eq!(targets, vec![77]);
+    }
+
+    #[test]
+    fn calls_around_memory_copy() {
+        let targets = calls_in(&[
+            Instruction::Call(10),
+            Instruction::I32Const(0),
+            Instruction::I32Const(0),
+            Instruction::I32Const(4),
+            Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 },
+            Instruction::Call(20),
+            Instruction::I32Const(0),
+            Instruction::I32Const(0),
+            Instruction::I32Const(4),
+            Instruction::MemoryFill(0),
+            Instruction::Call(30),
+        ]);
+        assert_eq!(targets, vec![10, 20, 30]);
+    }
+
+    // ── Regression: multiple memory ops in sequence (init_globals pattern) ──
+
+    #[test]
+    fn many_memory_ops_then_call() {
+        let mut instrs = Vec::new();
+        for _ in 0..10 {
+            instrs.push(Instruction::I32Const(0));
+            instrs.push(Instruction::I32Const(0));
+            instrs.push(Instruction::I32Const(16));
+            instrs.push(Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
+        }
+        instrs.push(Instruction::Call(55));
+        let targets = calls_in(&instrs);
+        assert_eq!(targets, vec![55]);
+    }
+
+    // ── Other multi-byte instructions that must not confuse the scanner ──
+
+    #[test]
+    fn call_after_block_and_loop() {
+        let targets = calls_in(&[
+            Instruction::Block(wasm_encoder::BlockType::Empty),
+            Instruction::Call(1),
+            Instruction::End,
+            Instruction::Loop(wasm_encoder::BlockType::Empty),
+            Instruction::Call(2),
+            Instruction::End,
+        ]);
+        assert_eq!(targets, vec![1, 2]);
+    }
+
+    #[test]
+    fn call_after_br_table() {
+        let targets = calls_in(&[
+            Instruction::I32Const(0),
+            Instruction::BrTable(
+                std::borrow::Cow::Borrowed(&[0, 1]),
+                2,
+            ),
+            Instruction::Call(42),
+        ]);
+        assert_eq!(targets, vec![42]);
+    }
+
+    #[test]
+    fn call_after_i64_const() {
+        let targets = calls_in(&[
+            Instruction::I64Const(0x7FFF_FFFF_FFFF),
+            Instruction::Drop,
+            Instruction::Call(88),
+        ]);
+        assert_eq!(targets, vec![88]);
+    }
+
+    #[test]
+    fn call_after_f64_const() {
+        let targets = calls_in(&[
+            Instruction::F64Const(3.14159),
+            Instruction::Drop,
+            Instruction::Call(66),
+        ]);
+        assert_eq!(targets, vec![66]);
+    }
+
+    #[test]
+    fn call_after_global_set() {
+        let targets = calls_in(&[
+            Instruction::I32Const(0),
+            Instruction::GlobalSet(5),
+            Instruction::Call(33),
+        ]);
+        assert_eq!(targets, vec![33]);
+    }
+
+    #[test]
+    fn call_after_memory_load_store() {
+        let targets = calls_in(&[
+            Instruction::I32Const(0),
+            Instruction::I32Load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 }),
+            Instruction::I32Const(0),
+            Instruction::I32Store(wasm_encoder::MemArg { offset: 4, align: 2, memory_index: 0 }),
+            Instruction::Call(44),
+        ]);
+        assert_eq!(targets, vec![44]);
+    }
+
+    // ── Exhaustive coverage: every instruction type the emitter uses ──
+
+    /// Verify the scanner stays in sync through a function body that
+    /// exercises every instruction family the WASM emitter produces.
+    /// If a new instruction type is added without updating the scanner,
+    /// the call at the end will be missed and this test will fail.
+    #[test]
+    fn exhaustive_instruction_coverage() {
+        let mut f = Function::new([(1, wasm_encoder::ValType::I32)]);
+        // Numeric constants
+        f.instruction(&Instruction::I32Const(999));
+        f.instruction(&Instruction::I64Const(0x7FFF_FFFF_FFFF));
+        f.instruction(&Instruction::F64Const(3.14));
+        f.instruction(&Instruction::Drop);
+        f.instruction(&Instruction::Drop);
+        // Local/global access
+        f.instruction(&Instruction::LocalGet(0));
+        f.instruction(&Instruction::LocalSet(0));
+        f.instruction(&Instruction::LocalTee(0));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::GlobalGet(0));
+        f.instruction(&Instruction::GlobalSet(0));
+        // Memory load/store
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 }));
+        f.instruction(&Instruction::Drop);
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Store(wasm_encoder::MemArg { offset: 4, align: 2, memory_index: 0 }));
+        f.instruction(&Instruction::MemorySize(0));
+        f.instruction(&Instruction::Drop);
+        // 0xFC prefix: bulk memory
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::MemoryFill(0));
+        // Control flow: block, br, br_if, if
+        f.instruction(&Instruction::Block(wasm_encoder::BlockType::Empty));
+        f.instruction(&Instruction::Br(0));
+        f.instruction(&Instruction::End);
+        f.instruction(&Instruction::Block(wasm_encoder::BlockType::Empty));
+        f.instruction(&Instruction::I32Const(1));
+        f.instruction(&Instruction::BrIf(0));
+        f.instruction(&Instruction::End);
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+        f.instruction(&Instruction::End);
+        // br_table
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::BrTable(std::borrow::Cow::Borrowed(&[0]), 0));
+        // call_indirect
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::CallIndirect { type_index: 0, table_index: 0 });
+        f.instruction(&Instruction::Drop);
+        // THE call — must be found after all the above
+        f.instruction(&Instruction::Call(777));
+        f.instruction(&Instruction::End);
+        let targets = extract_call_targets(&f);
+        assert!(targets.contains(&777),
+            "scanner lost sync after exhaustive instruction mix: call(777) not found in {:?}", targets);
+    }
+
+    /// Cross-validation: build the same function via instructions AND check
+    /// that the byte-count is exactly what we expect. This catches the case
+    /// where wasm_encoder changes its encoding and the scanner drifts.
+    #[test]
+    fn memory_copy_encoding_size() {
+        let mut f = Function::new([]);
+        let before_len = f.clone().into_raw_body().len();
+        f.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
+        let after_len = f.clone().into_raw_body().len();
+        // memory.copy encodes as: 0xFC 0x0A 0x00 0x00 = 4 bytes
+        assert_eq!(after_len - before_len, 4,
+            "memory.copy encoding changed — update DCE scanner's 0xFC handler");
+    }
+
+    #[test]
+    fn memory_fill_encoding_size() {
+        let mut f = Function::new([]);
+        let before_len = f.clone().into_raw_body().len();
+        f.instruction(&Instruction::MemoryFill(0));
+        let after_len = f.clone().into_raw_body().len();
+        // memory.fill encodes as: 0xFC 0x0B 0x00 = 3 bytes
+        assert_eq!(after_len - before_len, 3,
+            "memory.fill encoding changed — update DCE scanner's 0xFC handler");
+    }
+}
