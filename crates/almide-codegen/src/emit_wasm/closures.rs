@@ -296,7 +296,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
                 wrapper_params.extend_from_slice(&orig_params);
                 let wrapper_type_idx = emitter.register_type(wrapper_params, orig_results);
 
-                let mut f = wasm_encoder::Function::new([]);
+                let mut f = super::TrackedFunction::new([]);
                 // Skip env (local 0), pass remaining params to original
                 for i in 0..orig_params.len() {
                     f.instruction(&wasm_encoder::Instruction::LocalGet((i + 1) as u32));
@@ -304,7 +304,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
                 f.instruction(&wasm_encoder::Instruction::Call(orig_func_idx));
                 f.instruction(&wasm_encoder::Instruction::End);
 
-                emitter.add_compiled(CompiledFunc::new(wrapper_type_idx, f));
+                emitter.add_compiled(CompiledFunc::tracked(wrapper_type_idx, f));
             }
         }
     }

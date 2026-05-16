@@ -1493,7 +1493,7 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
 /// Compile a test runner function that calls each test, printing results.
 fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_globals: Option<u32>) {
     let void_type = emitter.register_type(vec![], vec![]);
-    let mut f = Function::new([]);
+    let mut f = TrackedFunction::new([]);
 
     // Initialize globals if needed
     if let Some(init_idx) = init_globals {
@@ -1516,7 +1516,7 @@ fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_
     }
 
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc::new(void_type, f));
+    emitter.add_compiled(CompiledFunc::tracked(void_type, f));
 }
 
 /// Pre-register variant deep-equality functions for all variant types with pointer fields.
