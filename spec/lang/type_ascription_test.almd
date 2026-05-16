@@ -1,0 +1,24 @@
+// Type ascription: `expr: Type` in call arguments
+
+fn identity[T](x: T) -> T = x
+
+test "empty list with ascription" {
+  let xs = identity([]: List[Int])
+  assert(list.len(xs) == 0)
+}
+
+test "empty map with ascription" {
+  let m = identity([:]: Map[String, Int])
+  assert(map.len(m) == 0)
+}
+
+test "ascription preserves type" {
+  let xs = identity([]: List[String])
+  let ys = xs + ["hello"]
+  assert(list.len(ys) == 1)
+}
+
+test "ascription in nested call" {
+  let n = list.len(identity([]: List[Float]))
+  assert(n == 0)
+}

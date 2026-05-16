@@ -62,7 +62,22 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
     }
 
     ir_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
-    let target = lower_call_target(ctx, callee);
+    let mut target = lower_call_target(ctx, callee);
+
+    // Cross-module UFCS: Method { object, "module.func" } → Module { module, func }
+    // with object prepended to args. This lets module-level mono discover and rename.
+    if let CallTarget::Method { ref object, ref method } = target {
+        if let Some(dot) = method.as_str().find('.') {
+            let mod_str = &method.as_str()[..dot];
+            let func_str = &method.as_str()[dot+1..];
+            // Only convert if it's a user module (not Convention like Dog.repr)
+            if mod_str.chars().next().map_or(false, |c| c.is_lowercase()) {
+                let obj_expr = (**object).clone();
+                ir_args.insert(0, obj_expr);
+                target = CallTarget::Module { module: sym(mod_str), func: sym(func_str) };
+            }
+        }
+    }
 
     // Named args: resolve to positional order using function signature
     if let (false, CallTarget::Named { name }) = (named_args.is_empty(), &target) {
@@ -311,6 +326,24 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                                 return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
                             }
                         }
+                    }
+                }
+            }
+            // Cross-module UFCS: object type is Named → find defining module
+            if let Ty::Named(type_name, _) = &obj_ty {
+                let defining_module = ctx.env.types.keys()
+                    .find(|k| {
+                        let s = k.as_str();
+                        s.ends_with(&format!(".{}", type_name.as_str()))
+                            && s.len() > type_name.as_str().len() + 1
+                    })
+                    .map(|k| k.as_str()[..k.as_str().len() - type_name.as_str().len() - 1].to_string());
+                if let Some(module) = defining_module {
+                    let key = format!("{}.{}", module, field);
+                    if ctx.env.functions.contains_key(&sym(&key)) {
+                        let ir_obj = lower_expr(ctx, object);
+                        // Return Method with "module.func" key — lower_call converts to Module target
+                        return CallTarget::Method { object: Box::new(ir_obj), method: sym(&key) };
                     }
                 }
             }

@@ -4,7 +4,8 @@
 //! Only fd_write is imported from WASI.
 
 use super::{CompiledFunc, WasmEmitter, SCRATCH_ITOA, NEWLINE_OFFSET};
-use wasm_encoder::{Function, ValType};
+use wasm_encoder::{ValType};
+use super::TrackedFunction as Function;
 
 /// Register WASI host imports only. Must be called before any register_func.
 /// After this, callers may register additional imports (e.g. @extern(wasm))
@@ -388,7 +389,7 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 // __rc_inc(ptr: i32) -> i32
@@ -409,7 +410,7 @@ fn compile_rc_inc(emitter: &mut WasmEmitter) {
         local_get(0);
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 // __cow_check(ptr: i32, size: i32) -> i32
@@ -446,7 +447,7 @@ fn compile_cow_check(emitter: &mut WasmEmitter) {
         local_get(2);
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 // __heap_save() -> i32
@@ -458,7 +459,7 @@ fn compile_heap_save(emitter: &mut WasmEmitter) {
     let mut f = Function::new([]);
     f.instruction(&wasm_encoder::Instruction::GlobalGet(emitter.heap_ptr_global));
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 // __heap_restore(ptr: i32) -> ()
@@ -471,7 +472,7 @@ fn compile_heap_restore(emitter: &mut WasmEmitter) {
     f.instruction(&wasm_encoder::Instruction::LocalGet(0));
     f.instruction(&wasm_encoder::Instruction::GlobalSet(emitter.heap_ptr_global));
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __println_str(ptr: i32)
@@ -523,7 +524,7 @@ fn compile_println_str(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __int_to_string(n: i64) -> i32
@@ -702,7 +703,7 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
     // return $result
     wasm!(f, { local_get(6); end; });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __float_to_string(f: f64) -> i32
@@ -797,7 +798,7 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __println_int(n: i64)
@@ -813,7 +814,7 @@ fn compile_println_int(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __concat_str(left: i32, right: i32) -> i32
@@ -888,7 +889,7 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
     });
 
     wasm!(f, { local_get(5); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// Emit a byte-by-byte copy loop: dst[dst_off+i] = src[src_off+i], 0..len
@@ -1001,7 +1002,7 @@ fn compile_init_preopen_dirs(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __resolve_path(path_ptr: i32, path_len: i32) → i32 (result_ptr)
@@ -1146,7 +1147,7 @@ fn compile_resolve_path(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 
@@ -1215,5 +1216,5 @@ pub(super) fn compile_bytes_f16_to_f64(emitter: &mut WasmEmitter) {
         end;
         end;  // close function body
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }

@@ -15,6 +15,39 @@ fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
     stmts.iter().map(|s| render_stmt(ctx, s)).collect()
 }
 
+/// Mangle a type into the monomorphization suffix form (mirrors mono/utils.rs).
+fn mangle_ty_for_mono(ty: &Ty) -> String {
+    match ty {
+        Ty::Int => "Int".into(),
+        Ty::Float => "Float".into(),
+        Ty::String => "String".into(),
+        Ty::Bool => "Bool".into(),
+        Ty::Int8 => "Int8".into(),
+        Ty::Int16 => "Int16".into(),
+        Ty::Int32 => "Int32".into(),
+        Ty::UInt8 => "UInt8".into(),
+        Ty::UInt16 => "UInt16".into(),
+        Ty::UInt32 => "UInt32".into(),
+        Ty::UInt64 => "UInt64".into(),
+        Ty::Float32 => "Float32".into(),
+        Ty::Bytes => "Bytes".into(),
+        Ty::Unit => "Unit".into(),
+        Ty::Named(name, args) => {
+            if args.is_empty() { name.to_string() }
+            else { format!("{}_{}", name, args.iter().map(mangle_ty_for_mono).collect::<Vec<_>>().join("_")) }
+        }
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 =>
+            format!("List_{}", mangle_ty_for_mono(&args[0])),
+        Ty::Applied(id, args) => {
+            let name = format!("{:?}", id);
+            if args.is_empty() { name } else {
+                format!("{}_{}", name, args.iter().map(mangle_ty_for_mono).collect::<Vec<_>>().join("_"))
+            }
+        }
+        _ => "Unknown".into(),
+    }
+}
+
 /// Render an expression ensuring an owned value (not RcCow wrapper).
 /// For RcCow vars, produces `(*var).clone()` to yield the unwrapped T.
 /// Used at sites that need owned T: function args, record fields, concat operands.
@@ -255,65 +288,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Pre-resolved runtime call (from @intrinsic / NormalizeRuntimeCalls) ──
-        IrExprKind::RuntimeCall { symbol, args } => {
-            // Inline numeric casts: a runtime function call that has a
-            // direct Rust equivalent (`x as f64` / `x as i64`). Emitted
-            // here so the cost is paid as a single language-level cast
-            // instead of a runtime helper call.
-            match symbol.as_str() {
-                "almide_rt_float_from_int" | "almide_rt_int_to_float" if args.len() == 1 => {
-                    return format!("({} as f64)", render_expr(ctx, &args[0]));
-                }
-                "almide_rt_float_to_int" if args.len() == 1 => {
-                    return format!("({} as i64)", render_expr(ctx, &args[0]));
-                }
-                _ => {}
-            }
-            // Mutating stdlib calls (push, pop, clear) on module-level or RcCow var:
-            // dispatch by VarStorage for COW-correct mutation.
-            if !args.is_empty() {
-                let is_mutating = matches!(symbol.as_str(),
-                    "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_clear");
-                if is_mutating {
-                    if let IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } = &args[0].kind {
-                        if let IrExprKind::Var { id } = &inner.kind {
-                            let name = ctx.var_name(*id).to_string();
-                            let upper = name.to_uppercase();
-                            match ctx.ann.get_var_storage(id, &name) {
-                                VarStorage::ModuleRc => {
-                                    let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
-                                        .collect::<Vec<_>>().join(", ");
-                                    let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
-                                    let call_args = if rest_args.is_empty() {
-                                        rc_mut.to_string()
-                                    } else {
-                                        format!("{}, {}", rc_mut, rest_args)
-                                    };
-                                    return format!("{}.with(|c| {}({}))", upper, symbol.as_str(), call_args);
-                                }
-                                VarStorage::RcCow => {
-                                    let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
-                                        .collect::<Vec<_>>().join(", ");
-                                    let call_args = if rest_args.is_empty() {
-                                        format!("{}.make_mut()", name)
-                                    } else {
-                                        format!("{}.make_mut(), {}", name, rest_args)
-                                    };
-                                    return format!("{}({})", symbol.as_str(), call_args);
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-            // BorrowInsertion wraps args with Borrow / Clone IR nodes
-            // based on the `@intrinsic` fn's derived signature
-            // (`intrinsic_borrow_mode`). Unwrap bare RcCow vars to owned T.
-            let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
-                .collect::<Vec<_>>().join(", ");
-            format!("{}({})", symbol.as_str(), args_str)
-        }
+        IrExprKind::RuntimeCall { symbol, args } => render_runtime_call(ctx, symbol, args),
 
         // ── Calls ──
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
@@ -486,53 +461,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── String interpolation ──
-        IrExprKind::StringInterp { parts } => {
-            // Collect format string and args separately
-            let mut fmt_parts = Vec::new();
-            let mut arg_parts = Vec::new();
-            for part in parts {
-                match part {
-                    IrStringPart::Lit { value } => {
-                        // Escape special chars for format!-style templates.
-                        // Include control chars so they don't land as real
-                        // source newlines in the format string — otherwise
-                        // rustfmt continuation indent leaks into runtime
-                        // output. Bug seen with "foo\n" + "${var}" chains.
-                        fmt_parts.push(value
-                            .replace('\\', "\\\\")
-                            .replace('"', "\\\"")
-                            .replace('\n', "\\n")
-                            .replace('\t', "\\t")
-                            .replace('\r', "\\r")
-                            .replace('{', "{{")
-                            .replace('}', "}}"));
-                    }
-                    IrStringPart::Expr { expr } => {
-                        fmt_parts.push("{}".to_string());
-                        arg_parts.push(render_expr(ctx, expr));
-                    }
-                }
-            }
-            let format_str_s = fmt_parts.join("");
-            let args_s = arg_parts.join(", ");
-            let template_str_s = {
-                // For TS-style template literals: `${expr}`
-                let mut s = String::new();
-                for part in parts {
-                    match part {
-                        IrStringPart::Lit { value } => s.push_str(value),
-                        IrStringPart::Expr { expr } => {
-                            s.push_str("${");
-                            s.push_str(&render_expr(ctx, expr));
-                            s.push('}');
-                        }
-                    }
-                }
-                s
-            };
-            ctx.templates.render_with("string_interp", None, &[], &[("format_str", format_str_s.as_str()), ("args", args_s.as_str()), ("template_str", template_str_s.as_str())])
-                .unwrap_or_else(|| format!("\"...\""))
-        }
+        IrExprKind::StringInterp { parts } => render_string_interp(ctx, parts),
 
         // ── Range ──
         IrExprKind::Range { start, end, inclusive } => {
@@ -801,42 +730,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Fan (concurrency) — fully template-driven ──
-        IrExprKind::Fan { exprs } => {
-            let rendered: Vec<String> = exprs.iter().map(|e| {
-                let mut body = render_expr(ctx, e);
-                // Strip trailing ? from body (fan closures return raw Result)
-                if e.ty.is_result() && body.ends_with('?') {
-                    body.pop();
-                }
-                body
-            }).collect();
-            let exprs_s = rendered.join(", ");
-            let count_s = format!("{}", exprs.len());
-            // Build spawn/join parts for thread-based template
-            let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__fan_h{}", i)).collect();
-            let spawns: Vec<String> = rendered.iter().enumerate()
-                .map(|(i, body)| format!("let {} = __s.spawn(move || {{ {} }});", handles[i], body))
-                .collect();
-            let any_result = exprs.iter().any(|e| e.ty.is_result());
-            let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
-                if e.ty.is_result() {
-                    if ctx.auto_unwrap {
-                        format!("{}.join().unwrap()?", handles[i])
-                    } else {
-                        format!("{}.join().unwrap().unwrap()", handles[i])
-                    }
-                } else {
-                    format!("{}.join().unwrap()", handles[i])
-                }
-            }).collect();
-            let join_expr = if joins.len() == 1 { joins[0].clone() }
-                else { format!("({})", joins.join(", ")) };
-            let spawns_s = spawns.join(" ");
-            // Select template variant
-            let construct = if any_result && ctx.auto_unwrap { "fan_effect" } else { "fan_expr" };
-            ctx.templates.render_with(construct, None, &[], &[("exprs", exprs_s.as_str()), ("count", count_s.as_str()), ("spawns", spawns_s.as_str()), ("join_expr", join_expr.as_str())])
-                .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
-        }
+        IrExprKind::Fan { exprs } => render_fan(ctx, exprs),
 
         // ── Iterator chain (Rust-only) ──
         IrExprKind::IterChain { source, consume, steps, collector } => {
@@ -1055,32 +949,70 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
 
 /// Render a method call as a full expression for UFCS and module.func patterns.
 /// Returns Some(full_expr) if the method call was handled, None for normal obj.method calls.
+///
+/// Dispatch strategy (type-driven):
+///   1. join fallback (StdlibLowering miss)
+///   2. Dot-qualified → module/convention
+///   3. User-defined type (Ty::Named) → ALWAYS UFCS free function
+///   4. Builtin type + native Rust method → None (emit obj.method())
+///   5. Builtin type + non-native method → UFCS (user fn on builtin type)
 fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, args: &[IrExpr]) -> Option<String> {
-    let is_rust_intrinsic = matches!(method,
-        "clone" | "is_some" | "is_none" | "unwrap" | "unwrap_or"
-        | "to_string" | "len" | "push" | "pop" | "insert" | "remove"
-        | "contains" | "iter" | "into_iter" | "collect" | "map"
-        | "filter" | "to_vec" | "split" | "trim"
-        | "starts_with" | "ends_with" | "replace" | "chars"
-        | "to_owned" | "as_str" | "get" | "keys" | "values" | "abs" | "powi" | "powf"
-        | "is_empty" | "contains_key" | "entry" | "or_insert"
-        | "expect" | "ok" | "err" | "and_then" | "map_err"
-        | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref" | "as_deref"
-        // math intrinsics (inlined by StdlibLowering)
-        | "sqrt" | "floor" | "ceil" | "round" | "sin" | "cos" | "tan"
-        | "asin" | "acos" | "atan" | "atan2" | "exp" | "ln" | "log2" | "log10"
-        | "is_nan" | "is_infinite"
-    );
-    // Fallback for `join`: always route to almide_rt_list_join even when
-    // StdlibLowering couldn't resolve the list type. We add borrows
-    // explicitly since BorrowInsertion didn't process this call.
+    // 1. join fallback: route to almide_rt_list_join when StdlibLowering missed it
     if method == "join" && args.len() == 1 {
         let obj_str = render_expr(ctx, object);
         let sep_str = render_expr(ctx, &args[0]);
         return Some(format!("almide_rt_list_join(&{}, &*{})", obj_str, sep_str));
     }
-    // User-defined UFCS: plain method name (no dots) → func(object, args)
-    if !method.contains('.') && !is_rust_intrinsic {
+
+    // 2. Dot-qualified: handled after type-based dispatch (below)
+
+    // 3. User-defined types: ALWAYS UFCS — Rust structs have no methods.
+    //    Derive monomorphized name from type args when generic.
+    if let Ty::Named(_type_name, type_args) = &object.ty {
+        if !method.contains('.') {
+            let obj_str = render_expr_owned(ctx, object);
+            let mut all_args = vec![obj_str];
+            all_args.extend(args.iter().map(|a| render_expr_owned(ctx, a)));
+            let func_name = if type_args.is_empty() {
+                method.to_string()
+            } else {
+                let suffix = type_args.iter()
+                    .map(|t| mangle_ty_for_mono(t))
+                    .collect::<Vec<_>>().join("_");
+                format!("{}__{}", method, suffix)
+            };
+            return Some(format!("{}({})", func_name, all_args.join(", ")));
+        }
+    }
+
+    // 4+5. Builtin types: distinguish native Rust methods from user UFCS.
+    //    Native methods exist on the Rust type and should remain as obj.method().
+    //    Non-native methods are user-defined UFCS → func(obj, args).
+    let is_native_rust_method = matches!(method,
+        // Universal traits (Clone, Display)
+        "clone" | "to_string"
+        // Vec<T>
+        | "len" | "push" | "pop" | "insert" | "remove" | "contains"
+        | "iter" | "into_iter" | "collect" | "is_empty" | "to_vec" | "get"
+        // HashMap<K,V>
+        | "keys" | "values" | "contains_key" | "entry" | "or_insert"
+        // String
+        | "split" | "trim" | "starts_with" | "ends_with" | "replace" | "chars"
+        | "to_owned" | "as_str"
+        // Option<T> / Result<T,E>
+        | "is_some" | "is_none" | "unwrap" | "unwrap_or" | "expect"
+        | "ok" | "err" | "and_then" | "map_err" | "unwrap_or_else"
+        | "ok_or" | "flatten" | "as_ref" | "as_deref"
+        // Iterator adapters (from collect/filter chains)
+        | "map" | "filter"
+        // f64 math
+        | "abs" | "powi" | "powf" | "sqrt" | "floor" | "ceil" | "round"
+        | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2"
+        | "exp" | "ln" | "log2" | "log10" | "is_nan" | "is_infinite"
+    );
+
+    if !method.contains('.') && !is_native_rust_method {
+        // 5. Non-native method on builtin type → UFCS
         let obj_str = render_expr(ctx, object);
         let mut all_args = vec![obj_str];
         all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
@@ -1158,4 +1090,128 @@ fn coerce_to_owned_string(rendered: &str, expr: &IrExpr) -> String {
     } else {
         rendered.to_string()
     }
+}
+
+// ── Extracted sub-functions (reduce render_expr complexity) ──
+
+fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
+    // Inline numeric casts
+    match symbol.as_str() {
+        "almide_rt_float_from_int" | "almide_rt_int_to_float" if args.len() == 1 => {
+            return format!("({} as f64)", render_expr(ctx, &args[0]));
+        }
+        "almide_rt_float_to_int" if args.len() == 1 => {
+            return format!("({} as i64)", render_expr(ctx, &args[0]));
+        }
+        _ => {}
+    }
+    // Mutating stdlib calls (push, pop, clear) on module-level or RcCow var
+    if !args.is_empty() {
+        let is_mutating = matches!(symbol.as_str(),
+            "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_clear");
+        if is_mutating {
+            if let IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } = &args[0].kind {
+                if let IrExprKind::Var { id } = &inner.kind {
+                    let name = ctx.var_name(*id).to_string();
+                    let upper = name.to_uppercase();
+                    match ctx.ann.get_var_storage(id, &name) {
+                        VarStorage::ModuleRc => {
+                            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
+                                .collect::<Vec<_>>().join(", ");
+                            let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
+                            let call_args = if rest_args.is_empty() {
+                                rc_mut.to_string()
+                            } else {
+                                format!("{}, {}", rc_mut, rest_args)
+                            };
+                            return format!("{}.with(|c| {}({}))", upper, symbol.as_str(), call_args);
+                        }
+                        VarStorage::RcCow => {
+                            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
+                                .collect::<Vec<_>>().join(", ");
+                            let call_args = if rest_args.is_empty() {
+                                format!("{}.make_mut()", name)
+                            } else {
+                                format!("{}.make_mut(), {}", name, rest_args)
+                            };
+                            return format!("{}({})", symbol.as_str(), call_args);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    // Default: render all args as owned
+    let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
+        .collect::<Vec<_>>().join(", ");
+    format!("{}({})", symbol.as_str(), args_str)
+}
+
+fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
+    let mut fmt_parts = Vec::new();
+    let mut arg_parts = Vec::new();
+    for part in parts {
+        match part {
+            IrStringPart::Lit { value } => {
+                fmt_parts.push(value
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\t', "\\t")
+                    .replace('\r', "\\r")
+                    .replace('{', "{{")
+                    .replace('}', "}}"));
+            }
+            IrStringPart::Expr { expr } => {
+                fmt_parts.push("{}".to_string());
+                arg_parts.push(render_expr(ctx, expr));
+            }
+        }
+    }
+    let format_str_s = fmt_parts.join("");
+    let args_s = arg_parts.join(", ");
+    let template_str_s = {
+        let mut s = String::new();
+        for part in parts {
+            match part {
+                IrStringPart::Lit { value } => s.push_str(value),
+                IrStringPart::Expr { expr } => {
+                    s.push_str("${");
+                    s.push_str(&render_expr(ctx, expr));
+                    s.push('}');
+                }
+            }
+        }
+        s
+    };
+    ctx.templates.render_with("string_interp", None, &[], &[("format_str", format_str_s.as_str()), ("args", args_s.as_str()), ("template_str", template_str_s.as_str())])
+        .unwrap_or_else(|| "\"...\"".into())
+}
+
+fn render_fan(ctx: &RenderContext, exprs: &[IrExpr]) -> String {
+    let rendered: Vec<String> = exprs.iter().map(|e| {
+        let mut body = render_expr(ctx, e);
+        if e.ty.is_result() && body.ends_with('?') { body.pop(); }
+        body
+    }).collect();
+    let exprs_s = rendered.join(", ");
+    let count_s = format!("{}", exprs.len());
+    let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__fan_h{}", i)).collect();
+    let spawns: Vec<String> = rendered.iter().enumerate()
+        .map(|(i, body)| format!("let {} = __s.spawn(move || {{ {} }});", handles[i], body))
+        .collect();
+    let any_result = exprs.iter().any(|e| e.ty.is_result());
+    let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
+        if e.ty.is_result() {
+            if ctx.auto_unwrap { format!("{}.join().unwrap()?", handles[i]) }
+            else { format!("{}.join().unwrap().unwrap()", handles[i]) }
+        } else { format!("{}.join().unwrap()", handles[i]) }
+    }).collect();
+    let join_expr = if joins.len() == 1 { joins[0].clone() }
+        else { format!("({})", joins.join(", ")) };
+    let spawns_s = spawns.join(" ");
+    let construct = if any_result && ctx.auto_unwrap { "fan_effect" } else { "fan_expr" };
+    ctx.templates.render_with(construct, None, &[], &[("exprs", exprs_s.as_str()), ("count", count_s.as_str()), ("spawns", spawns_s.as_str()), ("join_expr", join_expr.as_str())])
+        .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
 }

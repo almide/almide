@@ -256,6 +256,8 @@ let x = 1                   // immutable
 let x: Int = 1              // with type annotation
 var y = 2                   // mutable
 y = y + 1                   // reassign (var only)
+f([]: List[Int])            // type ascription in call args
+f([:]: Map[String, Int])    // typed empty map in call args
 ```
 
 ### Destructuring

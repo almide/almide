@@ -139,4 +139,7 @@ almide-js archived — replaced by almide-web.
 | syntax_guide false positive fix | ✅ 0.17.6 |
 | @export annotation string | ✅ 0.17.6 |
 | COW List → Vec (Rust codegen) | ❌ pending |
-| Record spread `{ ...r, field: val }` | ❌ pending (pipe utility ergonomics) |
+| Record spread `{ ...r, field: val }` | ✅ works (tested, pipe utilities use it) |
+| UFCS on generic types (Rust codegen) | ✅ 0.17.7 — mono discovery + cross-module type checker + lowering |
+| almide-web created | ✅ (DOM, fetch, timer, console) |
+| almide-js archived | ✅ |

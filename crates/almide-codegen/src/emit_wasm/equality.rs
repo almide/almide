@@ -705,7 +705,14 @@ pub(super) fn extract_record_fields(
             fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect()
         }
         Ty::Named(name, type_args) => {
-            if let Some(fields) = record_fields.get(name.as_str()) {
+            // Try full qualified name first (e.g. "todoapp.Todo"), then bare name ("Todo").
+            // Module-qualified types from submodules carry the prefix in the IR, but
+            // record_fields is keyed by the declaration name (unprefixed).
+            let fields_opt = record_fields.get(name.as_str()).or_else(|| {
+                let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
+                if bare != name.as_str() { record_fields.get(bare) } else { None }
+            });
+            if let Some(fields) = fields_opt {
                 if type_args.is_empty() {
                     fields.clone()
                 } else {

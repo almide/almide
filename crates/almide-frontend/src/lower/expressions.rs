@@ -585,6 +585,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
         // ── Misc ──
         ast::ExprKind::Paren { expr, .. } => lower_expr(ctx, expr),
+        ast::ExprKind::TypeAscription { expr, .. } => lower_expr(ctx, expr),
         ast::ExprKind::Hole => ctx.mk(IrExprKind::Hole, ty, span),
         ast::ExprKind::Todo { message, .. } => ctx.mk(IrExprKind::Todo { message: message.clone() }, ty, span),
         ast::ExprKind::Error => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),

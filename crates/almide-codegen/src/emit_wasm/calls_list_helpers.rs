@@ -27,26 +27,26 @@ impl SortKind {
     fn elem_size(&self) -> u32 {
         match self { SortKind::Int | SortKind::Float => 8, _ => 4 }
     }
-    fn emit_load(&self, f: &mut Function) {
+    fn emit_load(&self, f: &mut super::TrackedFunction) {
         match self {
             SortKind::Int => { f.instruction(&Instruction::I64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
             SortKind::Float => { f.instruction(&Instruction::F64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
             _ => { f.instruction(&Instruction::I32Load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
         }
     }
-    fn emit_store(&self, f: &mut Function) {
+    fn emit_store(&self, f: &mut super::TrackedFunction) {
         match self {
             SortKind::Int => { f.instruction(&Instruction::I64Store(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
             SortKind::Float => { f.instruction(&Instruction::F64Store(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
             _ => { f.instruction(&Instruction::I32Store(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
         }
     }
-    fn emit_copy_one(&self, f: &mut Function) {
+    fn emit_copy_one(&self, f: &mut super::TrackedFunction) {
         self.emit_load(f);
         self.emit_store(f);
     }
     /// Emit `dst[j] <= key` comparison, leaving an i32 boolean on the stack.
-    fn emit_le_cmp(&self, f: &mut Function, emitter: &WasmEmitter) {
+    fn emit_le_cmp(&self, f: &mut super::TrackedFunction, emitter: &WasmEmitter) {
         match self {
             SortKind::Int => { f.instruction(&Instruction::I64LeS); }
             SortKind::Float => { f.instruction(&Instruction::F64Le); }

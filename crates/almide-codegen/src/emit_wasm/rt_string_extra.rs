@@ -4,7 +4,8 @@
 //! called from `compile()` in rt_string.rs.
 
 use super::{CompiledFunc, WasmEmitter};
-use wasm_encoder::{Function, ValType};
+use wasm_encoder::{ValType};
+use super::TrackedFunction as Function;
 
 // ── Replace/search variants ──
 
@@ -30,7 +31,7 @@ pub(super) fn compile_replace_first(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 pub(super) fn compile_last_index_of(emitter: &mut WasmEmitter) {
@@ -64,7 +65,7 @@ pub(super) fn compile_last_index_of(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 pub(super) fn compile_strip_prefix(emitter: &mut WasmEmitter) {
@@ -95,7 +96,7 @@ pub(super) fn compile_strip_prefix(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 pub(super) fn compile_strip_suffix(emitter: &mut WasmEmitter) {
@@ -125,7 +126,7 @@ pub(super) fn compile_strip_suffix(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 // ── Predicates ──
@@ -157,7 +158,7 @@ pub(super) fn compile_byte_predicate_range(emitter: &mut WasmEmitter, func_idx: 
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 pub(super) fn compile_is_digit(emitter: &mut WasmEmitter) {
@@ -196,7 +197,7 @@ pub(super) fn compile_is_alpha(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// is_alnum: alpha or digit. Empty string returns false.
@@ -229,7 +230,7 @@ pub(super) fn compile_is_alnum(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// is_whitespace: space(32), tab(9), LF(10), CR(13). Empty string returns false.
@@ -261,7 +262,7 @@ pub(super) fn compile_is_whitespace(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// is_upper: all alpha chars in [A-Z], non-alpha chars allowed, empty=false
@@ -305,7 +306,7 @@ fn compile_case_predicate(emitter: &mut WasmEmitter, func_idx: u32, lo: i32, hi:
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __str_cmp(a: i32, b: i32) -> i32
@@ -354,5 +355,5 @@ pub(super) fn compile_cmp(emitter: &mut WasmEmitter) {
     f.instruction(&LocalGet(1)).instruction(&I32Load(mem0));
     f.instruction(&I32Sub);
     f.instruction(&End);
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }

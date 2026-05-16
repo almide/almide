@@ -194,6 +194,8 @@ pub enum ExprKind {
     Some { expr: Box<Expr> },
     Ok { expr: Box<Expr> },
     Err { expr: Box<Expr> },
+    /// Type ascription: `expr: Type` (e.g. `[]: List[Int]` in call args).
+    TypeAscription { expr: Box<Expr>, #[serde(rename = "type")] ty: TypeExpr },
     /// Placeholder for a parse error — allows partial AST construction.
     Error,
 }
@@ -490,6 +492,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
                 if let StringPart::Expr { expr: e } = part { visit_expr_mut(e, f); }
             }
         }
+        ExprKind::TypeAscription { expr, .. } => visit_expr_mut(expr, f),
         ExprKind::Int { .. } | ExprKind::Float { .. } | ExprKind::String { .. } |
         ExprKind::Bool { .. } | ExprKind::Ident { .. } | ExprKind::TypeName { .. } |
         ExprKind::EmptyMap | ExprKind::Hole | ExprKind::Todo { .. } |

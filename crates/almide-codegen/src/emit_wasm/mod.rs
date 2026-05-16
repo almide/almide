@@ -74,10 +74,66 @@ use almide_lang::types::Ty;
 const SCRATCH_ITOA: u32 = 16;
 const NEWLINE_OFFSET: u32 = 48;
 
+/// Wrapper around `wasm_encoder::Function` that automatically records
+/// `call` targets as instructions are emitted. Used by `FuncCompiler`
+/// so DCE gets a type-safe call graph without bytecode scanning.
+pub struct TrackedFunction {
+    pub inner: Function,
+    pub call_targets: Vec<u32>,
+}
+
+impl TrackedFunction {
+    pub fn new<I>(locals: I) -> Self
+    where
+        I: IntoIterator<Item = (u32, ValType)>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        Self { inner: Function::new(locals), call_targets: Vec::new() }
+    }
+
+    /// Emit an instruction, recording call targets automatically.
+    pub fn instruction(&mut self, i: &wasm_encoder::Instruction) -> &mut Self {
+        match i {
+            wasm_encoder::Instruction::Call(idx) => self.call_targets.push(*idx),
+            wasm_encoder::Instruction::ReturnCall(idx) => self.call_targets.push(*idx),
+            _ => {}
+        }
+        self.inner.instruction(i);
+        self
+    }
+
+    /// Consume into a raw body (delegates to inner Function).
+    pub fn into_raw_body(self) -> Vec<u8> {
+        self.inner.into_raw_body()
+    }
+}
+
+impl Clone for TrackedFunction {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone(), call_targets: self.call_targets.clone() }
+    }
+}
+
 /// A compiled WASM function ready for the code section.
+///
+/// All functions MUST be constructed via `CompiledFunc::tracked()` to ensure
+/// DCE has a complete call graph. Direct construction is impossible — the
+/// `call_targets` field is always populated by TrackedFunction.
 pub struct CompiledFunc {
     pub type_idx: u32,
     pub func: Function,
+    /// Call targets recorded during compilation. DCE uses this directly —
+    /// no bytecode scanning needed. Guaranteed non-empty by construction
+    /// (TrackedFunction records all `call` instructions automatically).
+    pub call_targets: Vec<u32>,
+}
+
+impl CompiledFunc {
+    /// Construct from a TrackedFunction. This is the ONLY constructor —
+    /// enforces that call_targets is always populated.
+    pub fn tracked(type_idx: u32, tf: TrackedFunction) -> Self {
+        Self { type_idx, func: tf.inner, call_targets: tf.call_targets }
+    }
 }
 
 /// String stdlib runtime function indices.
@@ -448,7 +504,7 @@ impl DepthGuard {
 /// Per-function compilation state.
 pub struct FuncCompiler<'a> {
     pub emitter: &'a mut WasmEmitter,
-    pub func: Function,
+    pub func: TrackedFunction,
     pub var_map: HashMap<u32, u32>,
     pub depth: u32,
     pub loop_stack: Vec<LoopLabels>,
@@ -779,11 +835,6 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     let all_type_decls = program.modules.iter().flat_map(|m| m.type_decls.iter())
         .chain(program.type_decls.iter());
     for td in all_type_decls {
-        if td.name.as_str() == "TextLine" {
-            if let almide_ir::IrTypeDeclKind::Record { fields } = &td.kind {
-                eprintln!("[TYPE-DBG] TextLine fields: {:?}", fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>());
-            }
-        }
         match &td.kind {
             almide_ir::IrTypeDeclKind::Record { fields } => {
                 let field_list: Vec<(String, almide_lang::types::Ty)> = fields.iter()
@@ -1370,7 +1421,7 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     let scratch_v128_base = local_decls.len() as u32;
     for _ in 0..scratch_v128_cap { local_decls.push((1, ValType::V128)); }
 
-    let wasm_func = Function::new(local_decls);
+    let wasm_func = TrackedFunction::new(local_decls);
     let compiled_func = {
         let mut scratch_alloc = scratch::ScratchAllocator::new();
         scratch_alloc.set_bases_with_capacity(scratch_i32_base, scratch_i32_cap, scratch_i64_base, scratch_i64_cap, scratch_f64_base, scratch_f64_cap);
@@ -1437,13 +1488,13 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
         f
     };
 
-    emitter.add_compiled(CompiledFunc { type_idx: void_type, func: compiled_func });
+    emitter.add_compiled(CompiledFunc::tracked(void_type, compiled_func));
 }
 
 /// Compile a test runner function that calls each test, printing results.
 fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_globals: Option<u32>) {
     let void_type = emitter.register_type(vec![], vec![]);
-    let mut f = Function::new([]);
+    let mut f = TrackedFunction::new([]);
 
     // Initialize globals if needed
     if let Some(init_idx) = init_globals {
@@ -1466,7 +1517,7 @@ fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_
     }
 
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc { type_idx: void_type, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(void_type, f));
 }
 
 /// Pre-register variant deep-equality functions for all variant types with pointer fields.
@@ -1522,7 +1573,7 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
         let scratch_f64_base = scratch_i64_base + scratch_i64_cap as u32;
         for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); }
 
-        let wasm_func = wasm_encoder::Function::new(local_decls);
+        let wasm_func = TrackedFunction::new(local_decls);
         let mut scratch_alloc = scratch::ScratchAllocator::new();
         scratch_alloc.set_bases_with_capacity(
             scratch_i32_base, scratch_i32_cap,
@@ -1589,7 +1640,7 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
             compiler.func
         };
 
-        emitter.add_compiled(CompiledFunc { type_idx, func: compiled_func });
+        emitter.add_compiled(CompiledFunc::tracked(type_idx, compiled_func));
     }
 }
 

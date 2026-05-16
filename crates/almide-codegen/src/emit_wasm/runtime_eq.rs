@@ -4,7 +4,8 @@
 //! called from `compile_runtime()` in runtime.rs.
 
 use super::{CompiledFunc, WasmEmitter};
-use wasm_encoder::{Function, ValType};
+use wasm_encoder::{ValType};
+use super::TrackedFunction as Function;
 
 pub(super) fn compile_option_eq_i64(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.option_eq_i64];
@@ -44,7 +45,7 @@ pub(super) fn compile_option_eq_i64(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __option_eq_str(a: i32, b: i32) -> i32
@@ -82,7 +83,7 @@ pub(super) fn compile_option_eq_str(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __result_eq_i64_str(a: i32, b: i32) -> i32
@@ -127,7 +128,7 @@ pub(super) fn compile_result_eq_i64_str(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __str_contains(haystack: i32, needle: i32) -> i32 (bool)
@@ -184,7 +185,7 @@ pub(super) fn compile_mem_eq(emitter: &mut WasmEmitter) {
     });
 
     wasm!(f, { i32_const(0); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __list_eq(a: i32, b: i32, elem_size: i32) -> i32
@@ -271,7 +272,7 @@ pub(super) fn compile_list_eq(emitter: &mut WasmEmitter) {
     });
 
     wasm!(f, { i32_const(0); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __list_list_str_cmp(a: i32, b: i32) -> i32
@@ -312,7 +313,7 @@ pub(super) fn compile_list_list_str_cmp(emitter: &mut WasmEmitter) {
         local_get(2); local_get(3); i32_sub;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __concat_list(a: i32, b: i32, elem_size: i32) -> i32
@@ -397,7 +398,7 @@ pub(super) fn compile_concat_list(emitter: &mut WasmEmitter) {
     });
 
     wasm!(f, { local_get(6); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __int_parse(s: i32) -> i32 (Result[Int, String])
@@ -582,5 +583,5 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }

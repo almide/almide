@@ -423,7 +423,20 @@ impl Parser {
                 let tok = self.current();
                 return Err(format!("positional argument after named argument at line {}:{}", tok.line, tok.col));
             }
-            args.push(self.parse_expr()?);
+            let expr = self.parse_expr()?;
+            // Type ascription: `[]: List[Int]`, `[:]: Map[K,V]`, `(expr): Type`
+            // Disambiguated from named args because those are consumed above
+            // (only triggered when expr is NOT a bare Ident).
+            if self.check(TokenType::Colon) && self.peek_at(1).map(|t| &t.token_type) != Some(&TokenType::Colon) {
+                let span = expr.span;
+                self.advance(); // skip :
+                let ty = self.parse_type_expr()?;
+                args.push(Expr::new(self.next_id(), span, ExprKind::TypeAscription {
+                    expr: Box::new(expr), ty,
+                }));
+            } else {
+                args.push(expr);
+            }
         }
         Ok(())
     }

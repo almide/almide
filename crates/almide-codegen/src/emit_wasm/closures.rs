@@ -224,7 +224,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
         let scratch_f64_base = local_idx;
         for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); local_idx += 1; }
 
-        let mut wasm_func = wasm_encoder::Function::new(local_decls);
+        let mut wasm_func = super::TrackedFunction::new(local_decls);
 
         // Load captured vars from env
         for (ci, (vid, ty)) in capture_list.iter().enumerate() {
@@ -282,7 +282,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
             compiler.func
         };
 
-        emitter.add_compiled(CompiledFunc { type_idx, func: compiled_func });
+        emitter.add_compiled(CompiledFunc::tracked(type_idx, compiled_func));
     }
 
     // Compile FnRef wrappers
@@ -296,7 +296,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
                 wrapper_params.extend_from_slice(&orig_params);
                 let wrapper_type_idx = emitter.register_type(wrapper_params, orig_results);
 
-                let mut f = wasm_encoder::Function::new([]);
+                let mut f = super::TrackedFunction::new([]);
                 // Skip env (local 0), pass remaining params to original
                 for i in 0..orig_params.len() {
                     f.instruction(&wasm_encoder::Instruction::LocalGet((i + 1) as u32));
@@ -304,7 +304,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
                 f.instruction(&wasm_encoder::Instruction::Call(orig_func_idx));
                 f.instruction(&wasm_encoder::Instruction::End);
 
-                emitter.add_compiled(CompiledFunc { type_idx: wrapper_type_idx, func: f });
+                emitter.add_compiled(CompiledFunc::tracked(wrapper_type_idx, f));
             }
         }
     }

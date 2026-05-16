@@ -580,6 +580,11 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
             });
             out.push_str(") => "); fmt_expr(out, body, depth);
         }
+        ExprKind::TypeAscription { expr, ty } => {
+            fmt_expr(out, expr, depth);
+            out.push_str(": ");
+            fmt_type(out, ty, depth);
+        }
     }
 }
 
