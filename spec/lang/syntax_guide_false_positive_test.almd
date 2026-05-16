@@ -1,0 +1,29 @@
+// Verify that syntax_guide hints don't reject valid identifiers
+// that happen to match other-language keywords.
+
+type View = { kind: Int, value: String }
+
+fn diff(old: View, new: View) -> Int =
+  if old.kind != new.kind then 1 else 0
+
+test "new as param name" {
+  let a = View { kind: 1, value: "a" }
+  let b = View { kind: 2, value: "b" }
+  assert(diff(a, b) == 1)
+  assert(diff(a, a) == 0)
+}
+
+test "new as variable name" {
+  let new = 42
+  assert(new == 42)
+}
+
+test "null as variable name" {
+  let null = "not null"
+  assert(null == "not null")
+}
+
+test "void as variable name" {
+  let void = 0
+  assert(void == 0)
+}
