@@ -18,7 +18,7 @@ fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
 /// Render an expression ensuring an owned value (not RcCow wrapper).
 /// For RcCow vars, produces `(*var).clone()` to yield the unwrapped T.
 /// Used at sites that need owned T: function args, record fields, concat operands.
-fn render_expr_owned(ctx: &RenderContext, expr: &IrExpr) -> String {
+pub(crate) fn render_expr_owned(ctx: &RenderContext, expr: &IrExpr) -> String {
     if let IrExprKind::Var { id } = &expr.kind {
         if ctx.ann.is_rc_cow(id) {
             return format!("(*{}).clone()", ctx.var_name(*id));
@@ -309,8 +309,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             }
             // BorrowInsertion wraps args with Borrow / Clone IR nodes
             // based on the `@intrinsic` fn's derived signature
-            // (`intrinsic_borrow_mode`). The walker just renders.
-            let args_str = args.iter().map(|a| render_expr(ctx, a))
+            // (`intrinsic_borrow_mode`). Unwrap bare RcCow vars to owned T.
+            let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
                 .collect::<Vec<_>>().join(", ");
             format!("{}({})", symbol.as_str(), args_str)
         }
@@ -320,7 +320,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             match target {
                 CallTarget::Module { module, func } => {
                     // Module calls: use template (TS/JS) or runtime function (Rust)
-                    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
+                    let args_str = args.iter().map(|a| render_expr_owned(ctx, a)).collect::<Vec<_>>().join(", ");
                     let mod_ident = module.replace('.', "_");
                     let func_ident = func.replace('.', "_");
                     ctx.templates.render_with("module_call", None, &[], &[("module", mod_ident.as_str()), ("func", func_ident.as_str()), ("args", args_str.as_str())])
@@ -352,7 +352,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     return rendered;
                 }
             }
-            let elems = elements.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
+            let elems = elements.iter().map(|e| render_expr_owned(ctx, e)).collect::<Vec<_>>().join(", ");
             ctx.templates.render_with("list_literal", None, &[], &[("elements", elems.as_str())])
                 .unwrap_or_else(|| format!("[...]"))
         }
@@ -441,9 +441,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Option / Result ──
         IrExprKind::OptionSome { expr: inner } => {
-            let inner_s = render_expr(ctx, inner);
+            let inner_s = render_expr_owned(ctx, inner);
             ctx.templates.render_with("some_expr", None, &[], &[("inner", inner_s.as_str())])
-                .unwrap_or_else(|| format!("Some({})", render_expr(ctx, inner)))
+                .unwrap_or_else(|| format!("Some({})", inner_s))
         }
         IrExprKind::OptionNone => {
             // Typed None: pass inner type via bindings + attribute for template guard
@@ -457,9 +457,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             template_or(ctx, "none_expr", &[], "None")
         }
         IrExprKind::ResultOk { expr: inner } => {
-            let inner_s = render_expr(ctx, inner);
+            let inner_s = render_expr_owned(ctx, inner);
             ctx.templates.render_with("ok_expr", None, &[], &[("inner", inner_s.as_str())])
-                .unwrap_or_else(|| format!("Ok({})", render_expr(ctx, inner)))
+                .unwrap_or_else(|| format!("Ok({})", inner_s))
         }
         IrExprKind::ResultErr { expr: inner } => {
             let inner_str = render_expr(ctx, inner);
@@ -545,7 +545,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Tuple ──
         IrExprKind::Tuple { elements } => {
-            let parts = elements.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
+            let parts = elements.iter().map(|e| render_expr_owned(ctx, e)).collect::<Vec<_>>().join(", ");
             ctx.templates.render_with("tuple_literal", None, &[], &[("elements", parts.as_str())])
                 .unwrap_or_else(|| "tuple(...)".into())
         }
