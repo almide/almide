@@ -73,6 +73,11 @@ pub struct Checker {
     /// `elems[index]`. Drained iteratively after `solve_constraints`
     /// to give the union-find a chance to propagate before resolution.
     pub(crate) deferred_tuple_indices: Vec<(Ty, usize, Ty)>,
+    /// Deferred field accesses: `(object_ty, field_name, result_var)`.
+    /// Registered when `obj.field` is inferred while `obj` is an unresolved
+    /// inference var. After solving, `object_ty` should be concrete and the
+    /// field type can be looked up and unified with `result_var`.
+    pub(crate) deferred_field_accesses: Vec<(Ty, almide_base::intern::Sym, Ty)>,
     /// Map literal key types to validate after constraint solving.
     /// Each entry: (key_type, span) — checked via `is_hash()` once types are resolved.
     pub(crate) deferred_map_key_checks: Vec<(Ty, Option<crate::ast::Span>)>,
@@ -91,6 +96,7 @@ impl Checker {
             constraints: Vec::new(), uf: UnionFind::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),
+            deferred_field_accesses: Vec::new(),
             deferred_map_key_checks: Vec::new(),
         }
     }
@@ -217,6 +223,27 @@ impl Checker {
                 }
             }
             self.deferred_tuple_indices = still_pending;
+            if !progressed { break; }
+        }
+        // Drain deferred field accesses: `obj.field` where `obj` was an
+        // unresolved inference var at inference time. Now that constraints
+        // are solved, resolve the field type and unify.
+        loop {
+            let pending = std::mem::take(&mut self.deferred_field_accesses);
+            if pending.is_empty() { break; }
+            let mut still_pending = Vec::new();
+            let mut progressed = false;
+            for (obj_ty, field, result_ty) in pending {
+                let resolved = resolve_ty(&obj_ty, &self.uf);
+                let field_ty = self.resolve_field_type(&resolved, field.as_str());
+                if !matches!(field_ty, Ty::Unknown) {
+                    self.unify_infer(&result_ty, &field_ty);
+                    progressed = true;
+                } else {
+                    still_pending.push((obj_ty, field, result_ty));
+                }
+            }
+            self.deferred_field_accesses = still_pending;
             if !progressed { break; }
         }
     }
@@ -691,16 +718,50 @@ impl Checker {
                         _ => {}
                     }
                 }
+                // Deduplicate: prefixed (`mod.Todo`) and unprefixed (`Todo`)
+                // aliases resolve to the same record definition; keep one.
+                candidates.dedup_by(|a, b| {
+                    self.env.types.get(&a.0) == self.env.types.get(&b.0)
+                });
                 if candidates.len() == 1 {
                     let (type_name, field_ty) = candidates.pop().unwrap();
                     let named = Ty::Named(type_name, vec![]);
                     self.unify_infer(ty, &named);
                     field_ty
+                } else if !candidates.is_empty() && candidates.iter().all(|(_, t)| *t == candidates[0].1) {
+                    // Multiple types share the same field name+type: safe to return
+                    // the type but don't unify the object (ambiguous which type it is).
+                    // Deferred field access will resolve once the parent chain is concrete.
+                    let field_ty = candidates[0].1.clone();
+                    let result = self.fresh_var();
+                    self.deferred_field_accesses.push((
+                        ty.clone(),
+                        almide_base::intern::sym(field),
+                        result.clone(),
+                    ));
+                    self.unify_infer(&result, &field_ty);
+                    field_ty
                 } else {
                     Ty::Unknown
                 }
             }
-            _ => Ty::Unknown,
+            _ => {
+                // The type might be an inference variable that hasn't been
+                // resolved yet (e.g. lambda param `t` whose type `?x` will
+                // be unified with a record type after constraint solving).
+                // Defer the field access: park a fresh var and unify it
+                // once the object type is concrete.
+                if matches!(&resolved, Ty::TypeVar(n) if n.as_str().starts_with('?')) {
+                    let result = self.fresh_var();
+                    self.deferred_field_accesses.push((
+                        ty.clone(),
+                        almide_base::intern::sym(field),
+                        result.clone(),
+                    ));
+                    return result;
+                }
+                Ty::Unknown
+            },
         }
     }
 }
