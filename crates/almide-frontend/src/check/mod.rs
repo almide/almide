@@ -742,6 +742,18 @@ impl Checker {
                     self.unify_infer(&result, &field_ty);
                     field_ty
                 } else {
+                    // Ambiguous candidates (e.g. Cubic.a: Vec2, Color.a: Float).
+                    // If this is an inference var, defer — once the type resolves
+                    // the field lookup will succeed unambiguously.
+                    if tv.as_str().starts_with('?') {
+                        let result = self.fresh_var();
+                        self.deferred_field_accesses.push((
+                            ty.clone(),
+                            almide_base::intern::sym(field),
+                            result.clone(),
+                        ));
+                        return result;
+                    }
                     Ty::Unknown
                 }
             }
