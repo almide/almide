@@ -82,7 +82,7 @@ pub fn render_body_content(ctx: &RenderContext, expr: &almide_ir::IrExpr) -> Str
                 .map(|s| terminate_stmt(ctx, super::statements::render_stmt(ctx, s)))
                 .collect();
             if let Some(e) = tail {
-                let expr_str = super::expressions::render_expr(ctx, e);
+                let expr_str = super::expressions::render_expr_owned(ctx, e);
                 let is_control = matches!(&e.kind, IrExprKind::Break | IrExprKind::Continue);
                 if is_control {
                     parts.push(expr_str);
@@ -93,7 +93,7 @@ pub fn render_body_content(ctx: &RenderContext, expr: &almide_ir::IrExpr) -> Str
             }
             parts.join("\n")
         }
-        _ => super::expressions::render_expr(ctx, expr),
+        _ => super::expressions::render_expr_owned(ctx, expr),
     }
 }
 

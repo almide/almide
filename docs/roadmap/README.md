@@ -6,10 +6,11 @@
 
 ## Active
 
-10 items
+12 items
 
 | Item | Description |
 |------|-------------|
+| [Ceangal Widget System](active/ceangal-widget-system.md) | Ceangal UI framework — widget system, reactive state, GPU rendering pipeline |
 | [DX: `almide test` stderr & `almide explain`](active/dx-testing-explain.md) | almide test stderr passthrough + almide explain <code> subcommand |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Error-Fix Database](active/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
@@ -18,6 +19,7 @@
 | [LLM Integration](active/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
 | [LSP Server](active/lsp.md) | Language Server Protocol for editor completion, diagnostics, and navigation |
 | [MLIR Backend + Egg Rewrite Engine](active/mlir-backend-adoption.md) | Stage 2 progressive lowering — dialect walker passes all 227 spec tests |
+| [Name Resolution Pass — Unified Cross-Package Symbol Resolution](active/name-resolution-pass.md) |  |
 | [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Secure by Design](active/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
 
@@ -56,10 +58,10 @@
 
 ## Done
 
-231 items
+232 items
 
 <details>
-<summary>Show all 231 completed items</summary>
+<summary>Show all 232 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|

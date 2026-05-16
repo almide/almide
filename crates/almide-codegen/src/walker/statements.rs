@@ -334,7 +334,7 @@ pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide
     let body = if matches!(&arm.body.kind, IrExprKind::ResultErr { .. }) && !match_ty.is_result() {
         format!("return {}", render_expr(ctx, &arm.body))
     } else {
-        render_expr(ctx, &arm.body)
+        super::expressions::render_expr_owned(ctx, &arm.body)
     };
     // Append guard to pattern if present
     let full_pattern = if let Some(ref guard) = arm.guard {

@@ -4,11 +4,29 @@ use super::{HintContext, HintResult, HintScope};
 /// Guide users from other languages toward Almide idioms.
 /// Covers: return, null, throw, catch, loop, print, let mut, etc.
 pub fn check(ctx: &HintContext) -> Option<HintResult> {
-    // Expression-level rejected keywords
+    // Expression-level rejected keywords — only when the ident is used
+    // as a keyword (e.g. `new Foo()`), not as a normal identifier
+    // (e.g. `new.kind`, `new == old`, param name `new: View`).
     if ctx.scope == HintScope::Expression || ctx.scope == HintScope::Block {
         if ctx.got.token_type == TokenType::Ident {
-            if let Some(r) = check_rejected_ident(ctx.got.value.as_str()) {
-                return Some(r);
+            let is_used_as_identifier = ctx.next.map_or(false, |next| matches!(
+                next.token_type,
+                TokenType::Dot | TokenType::Colon | TokenType::Comma
+                | TokenType::RParen | TokenType::RBracket | TokenType::RBrace
+                | TokenType::Eq | TokenType::EqEq | TokenType::BangEq
+                | TokenType::LBracket | TokenType::LParen
+                | TokenType::Plus | TokenType::Minus | TokenType::Star | TokenType::Slash
+                | TokenType::Percent | TokenType::LAngle | TokenType::RAngle
+                | TokenType::LtEq | TokenType::GtEq | TokenType::Pipe
+                | TokenType::PipeArrow | TokenType::Caret
+                | TokenType::Newline | TokenType::EOF
+            ) || (next.token_type == TokenType::Ident && matches!(
+                next.value.as_str(), "and" | "or" | "then" | "else"
+            )));
+            if !is_used_as_identifier {
+                if let Some(r) = check_rejected_ident(ctx.got.value.as_str()) {
+                    return Some(r);
+                }
             }
         }
     }
