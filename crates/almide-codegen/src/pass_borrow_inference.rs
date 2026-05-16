@@ -614,6 +614,7 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
         // ── Control flow: recurse ──
         IrExprKind::If { cond, then, else_ } => {
             check_needs_ownership(cond, var, needs);
+            if is_var(then, var) || is_var(else_, var) { *needs = true; return; }
             check_needs_ownership(then, var, needs);
             check_needs_ownership(else_, var, needs);
         }
@@ -624,6 +625,7 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             check_needs_ownership(subject, var, needs);
             for arm in arms {
                 if let Some(g) = &arm.guard { check_needs_ownership(g, var, needs); }
+                if is_var(&arm.body, var) { *needs = true; return; }
                 check_needs_ownership(&arm.body, var, needs);
             }
         }
