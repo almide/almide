@@ -1088,10 +1088,26 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
 
 /// Render a method call as a full expression for UFCS and module.func patterns.
 /// Returns Some(full_expr) if the method call was handled, None for normal obj.method calls.
+///
+/// Dispatch strategy (type-driven):
+///   1. join fallback (StdlibLowering miss)
+///   2. Dot-qualified → module/convention
+///   3. User-defined type (Ty::Named) → ALWAYS UFCS free function
+///   4. Builtin type + native Rust method → None (emit obj.method())
+///   5. Builtin type + non-native method → UFCS (user fn on builtin type)
 fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, args: &[IrExpr]) -> Option<String> {
-    // User-defined types (Ty::Named): always UFCS — they have no Rust methods.
-    // Derive monomorphized name from type args when present.
-    if let Ty::Named(type_name, type_args) = &object.ty {
+    // 1. join fallback: route to almide_rt_list_join when StdlibLowering missed it
+    if method == "join" && args.len() == 1 {
+        let obj_str = render_expr(ctx, object);
+        let sep_str = render_expr(ctx, &args[0]);
+        return Some(format!("almide_rt_list_join(&{}, &*{})", obj_str, sep_str));
+    }
+
+    // 2. Dot-qualified: handled after type-based dispatch (below)
+
+    // 3. User-defined types: ALWAYS UFCS — Rust structs have no methods.
+    //    Derive monomorphized name from type args when generic.
+    if let Ty::Named(_type_name, type_args) = &object.ty {
         if !method.contains('.') {
             let obj_str = render_expr_owned(ctx, object);
             let mut all_args = vec![obj_str];
@@ -1099,42 +1115,43 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
             let func_name = if type_args.is_empty() {
                 method.to_string()
             } else {
-                // Monomorphized name: method__TypeArg1_TypeArg2
                 let suffix = type_args.iter()
                     .map(|t| mangle_ty_for_mono(t))
                     .collect::<Vec<_>>().join("_");
-                let mono_name = format!("{}__{}", method, suffix);
-                mono_name
+                format!("{}__{}", method, suffix)
             };
             return Some(format!("{}({})", func_name, all_args.join(", ")));
         }
     }
 
-    let is_rust_intrinsic = matches!(method,
-        "clone" | "is_some" | "is_none" | "unwrap" | "unwrap_or"
-        | "to_string" | "len" | "push" | "pop" | "insert" | "remove"
-        | "contains" | "iter" | "into_iter" | "collect" | "map"
-        | "filter" | "to_vec" | "split" | "trim"
-        | "starts_with" | "ends_with" | "replace" | "chars"
-        | "to_owned" | "as_str" | "get" | "keys" | "values" | "abs" | "powi" | "powf"
-        | "is_empty" | "contains_key" | "entry" | "or_insert"
-        | "expect" | "ok" | "err" | "and_then" | "map_err"
-        | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref" | "as_deref"
-        // math intrinsics (inlined by StdlibLowering)
-        | "sqrt" | "floor" | "ceil" | "round" | "sin" | "cos" | "tan"
-        | "asin" | "acos" | "atan" | "atan2" | "exp" | "ln" | "log2" | "log10"
-        | "is_nan" | "is_infinite"
+    // 4+5. Builtin types: distinguish native Rust methods from user UFCS.
+    //    Native methods exist on the Rust type and should remain as obj.method().
+    //    Non-native methods are user-defined UFCS → func(obj, args).
+    let is_native_rust_method = matches!(method,
+        // Universal traits (Clone, Display)
+        "clone" | "to_string"
+        // Vec<T>
+        | "len" | "push" | "pop" | "insert" | "remove" | "contains"
+        | "iter" | "into_iter" | "collect" | "is_empty" | "to_vec" | "get"
+        // HashMap<K,V>
+        | "keys" | "values" | "contains_key" | "entry" | "or_insert"
+        // String
+        | "split" | "trim" | "starts_with" | "ends_with" | "replace" | "chars"
+        | "to_owned" | "as_str"
+        // Option<T> / Result<T,E>
+        | "is_some" | "is_none" | "unwrap" | "unwrap_or" | "expect"
+        | "ok" | "err" | "and_then" | "map_err" | "unwrap_or_else"
+        | "ok_or" | "flatten" | "as_ref" | "as_deref"
+        // Iterator adapters (from collect/filter chains)
+        | "map" | "filter"
+        // f64 math
+        | "abs" | "powi" | "powf" | "sqrt" | "floor" | "ceil" | "round"
+        | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2"
+        | "exp" | "ln" | "log2" | "log10" | "is_nan" | "is_infinite"
     );
-    // Fallback for `join`: always route to almide_rt_list_join even when
-    // StdlibLowering couldn't resolve the list type. We add borrows
-    // explicitly since BorrowInsertion didn't process this call.
-    if method == "join" && args.len() == 1 {
-        let obj_str = render_expr(ctx, object);
-        let sep_str = render_expr(ctx, &args[0]);
-        return Some(format!("almide_rt_list_join(&{}, &*{})", obj_str, sep_str));
-    }
-    // User-defined UFCS: plain method name (no dots) → func(object, args)
-    if !method.contains('.') && !is_rust_intrinsic {
+
+    if !method.contains('.') && !is_native_rust_method {
+        // 5. Non-native method on builtin type → UFCS
         let obj_str = render_expr(ctx, object);
         let mut all_args = vec![obj_str];
         all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
