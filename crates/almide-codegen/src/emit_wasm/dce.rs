@@ -651,4 +651,191 @@ mod tests {
         assert_eq!(after_len - before_len, 3,
             "memory.fill encoding changed — update DCE scanner's 0xFC handler");
     }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Cross-validation: TrackedFunction vs wasmparser (reference impl)
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // These tests build a TrackedFunction, then independently parse its
+    // bytecode with `wasmparser` to extract call targets. If the two
+    // disagree, TrackedFunction has a recording bug.
+
+    use super::super::TrackedFunction;
+
+    /// Extract call targets from raw function bytes using wasmparser.
+    /// This is the "ground truth" — wasmparser is battle-tested across
+    /// the entire WASM ecosystem.
+    fn wasmparser_call_targets(tf: &TrackedFunction) -> Vec<u32> {
+        use wasmparser::{Parser, Payload, Operator};
+        // Build a minimal valid WASM module containing just this function
+        let mut module = wasm_encoder::Module::new();
+        // Type section: () -> ()
+        let mut types = wasm_encoder::TypeSection::new();
+        types.ty().function([], []);
+        module.section(&types);
+        // Function section
+        let mut funcs = wasm_encoder::FunctionSection::new();
+        funcs.function(0);
+        module.section(&funcs);
+        // Code section
+        let mut code = wasm_encoder::CodeSection::new();
+        code.function(&tf.inner);
+        module.section(&code);
+        let wasm_bytes = module.finish();
+
+        let mut targets = Vec::new();
+        for payload in Parser::new(0).parse_all(&wasm_bytes) {
+            if let Ok(Payload::CodeSectionEntry(body)) = payload {
+                let ops = body.get_operators_reader().expect("valid body");
+                for op in ops {
+                    match op {
+                        Ok(Operator::Call { function_index }) => targets.push(function_index),
+                        Ok(Operator::ReturnCall { function_index }) => targets.push(function_index),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        targets
+    }
+
+    /// Cross-validate: TrackedFunction recording == wasmparser scan
+    fn assert_tracked_matches_wasmparser(tf: &TrackedFunction) {
+        let tracked = &tf.call_targets;
+        let parsed = wasmparser_call_targets(tf);
+        assert_eq!(tracked, &parsed,
+            "TrackedFunction disagrees with wasmparser!\n  tracked: {:?}\n  wasmparser: {:?}",
+            tracked, parsed);
+    }
+
+    #[test]
+    fn cross_validate_simple() {
+        let mut tf = TrackedFunction::new([]);
+        tf.instruction(&Instruction::Call(5));
+        tf.instruction(&Instruction::Call(10));
+        tf.instruction(&Instruction::End);
+        assert_tracked_matches_wasmparser(&tf);
+    }
+
+    #[test]
+    fn cross_validate_no_calls() {
+        let mut tf = TrackedFunction::new([]);
+        tf.instruction(&Instruction::I32Const(42));
+        tf.instruction(&Instruction::Drop);
+        tf.instruction(&Instruction::End);
+        assert_tracked_matches_wasmparser(&tf);
+    }
+
+    #[test]
+    fn cross_validate_memory_ops() {
+        let mut tf = TrackedFunction::new([]);
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::I32Const(8));
+        tf.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
+        tf.instruction(&Instruction::Call(99));
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::I32Const(4));
+        tf.instruction(&Instruction::MemoryFill(0));
+        tf.instruction(&Instruction::Call(100));
+        tf.instruction(&Instruction::End);
+        assert_tracked_matches_wasmparser(&tf);
+    }
+
+    #[test]
+    fn cross_validate_complex_control_flow() {
+        let mut tf = TrackedFunction::new([(1, wasm_encoder::ValType::I32)]);
+        tf.instruction(&Instruction::Call(1));
+        tf.instruction(&Instruction::Block(wasm_encoder::BlockType::Empty));
+        tf.instruction(&Instruction::Call(2));
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::BrIf(0));
+        tf.instruction(&Instruction::Call(3));
+        tf.instruction(&Instruction::End);
+        tf.instruction(&Instruction::Loop(wasm_encoder::BlockType::Empty));
+        tf.instruction(&Instruction::Call(4));
+        tf.instruction(&Instruction::I32Const(1));
+        tf.instruction(&Instruction::BrIf(0));
+        tf.instruction(&Instruction::End);
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+        tf.instruction(&Instruction::Call(5));
+        tf.instruction(&Instruction::Else);
+        tf.instruction(&Instruction::Call(6));
+        tf.instruction(&Instruction::End);
+        tf.instruction(&Instruction::Call(7));
+        tf.instruction(&Instruction::End);
+        assert_tracked_matches_wasmparser(&tf);
+    }
+
+    #[test]
+    fn cross_validate_all_instruction_families() {
+        let mut tf = TrackedFunction::new([(1, wasm_encoder::ValType::I32)]);
+        // Constants
+        tf.instruction(&Instruction::I32Const(0x7FFFFFFF));
+        tf.instruction(&Instruction::Drop);
+        tf.instruction(&Instruction::I64Const(0x7FFFFFFFFFFFFFFF));
+        tf.instruction(&Instruction::Drop);
+        tf.instruction(&Instruction::F64Const(f64::MAX));
+        tf.instruction(&Instruction::Drop);
+        // Local/global
+        tf.instruction(&Instruction::LocalGet(0));
+        tf.instruction(&Instruction::LocalSet(0));
+        tf.instruction(&Instruction::LocalTee(0));
+        tf.instruction(&Instruction::Drop);
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::GlobalSet(0));
+        tf.instruction(&Instruction::GlobalGet(0));
+        tf.instruction(&Instruction::Drop);
+        // Memory
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::I32Load(wasm_encoder::MemArg { offset: 100, align: 2, memory_index: 0 }));
+        tf.instruction(&Instruction::Drop);
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::I64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 }));
+        tf.instruction(&Instruction::Drop);
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::F64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 }));
+        tf.instruction(&Instruction::Drop);
+        // Bulk memory (0xFC)
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::I32Const(16));
+        tf.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::I32Const(16));
+        tf.instruction(&Instruction::MemoryFill(0));
+        // br_table
+        tf.instruction(&Instruction::I32Const(0));
+        tf.instruction(&Instruction::BrTable(std::borrow::Cow::Borrowed(&[0, 0, 0]), 0));
+        // Numeric ops
+        tf.instruction(&Instruction::I32Const(1));
+        tf.instruction(&Instruction::I32Const(2));
+        tf.instruction(&Instruction::I32Add);
+        tf.instruction(&Instruction::Drop);
+        // Call — THE target we must find
+        tf.instruction(&Instruction::Call(42));
+        tf.instruction(&Instruction::Call(999));
+        tf.instruction(&Instruction::End);
+        assert_tracked_matches_wasmparser(&tf);
+    }
+
+    /// Stress test: many calls interleaved with diverse instructions.
+    #[test]
+    fn cross_validate_stress() {
+        let mut tf = TrackedFunction::new([(1, wasm_encoder::ValType::I32)]);
+        for i in 0..50u32 {
+            tf.instruction(&Instruction::I32Const(i as i32));
+            tf.instruction(&Instruction::LocalSet(0));
+            tf.instruction(&Instruction::Call(i));
+            tf.instruction(&Instruction::I32Const(0));
+            tf.instruction(&Instruction::I32Const(0));
+            tf.instruction(&Instruction::I32Const(4));
+            tf.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
+        }
+        tf.instruction(&Instruction::End);
+        assert_tracked_matches_wasmparser(&tf);
+    }
 }
