@@ -224,7 +224,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
         let scratch_f64_base = local_idx;
         for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); local_idx += 1; }
 
-        let mut wasm_func = wasm_encoder::Function::new(local_decls);
+        let mut wasm_func = super::TrackedFunction::new(local_decls);
 
         // Load captured vars from env
         for (ci, (vid, ty)) in capture_list.iter().enumerate() {
@@ -282,7 +282,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
             compiler.func
         };
 
-        emitter.add_compiled(CompiledFunc::new(type_idx, compiled_func));
+        emitter.add_compiled(CompiledFunc::tracked(type_idx, compiled_func));
     }
 
     // Compile FnRef wrappers

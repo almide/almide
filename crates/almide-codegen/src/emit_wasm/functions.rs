@@ -66,7 +66,7 @@ pub fn compile_function_with_init(
     let scratch_v128_base = param_count + local_decls.len() as u32;
     for _ in 0..scratch_v128_cap { local_decls.push((1, ValType::V128)); }
 
-    let wasm_func = Function::new(local_decls);
+    let wasm_func = super::TrackedFunction::new(local_decls);
 
     let mut scratch_alloc = super::scratch::ScratchAllocator::new();
     scratch_alloc.set_bases_with_capacity(scratch_i32_base, scratch_i32_cap, scratch_i64_base, scratch_i64_cap, scratch_f64_base, scratch_f64_cap);
@@ -102,5 +102,5 @@ pub fn compile_function_with_init(
 
     wasm!(compiler.func, { end; });
 
-    CompiledFunc::new(type_idx, compiler.func)
+    CompiledFunc::tracked(type_idx, compiler.func)
 }
