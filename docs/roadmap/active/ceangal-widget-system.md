@@ -139,4 +139,7 @@ almide-js archived — replaced by almide-web.
 | syntax_guide false positive fix | ✅ 0.17.6 |
 | @export annotation string | ✅ 0.17.6 |
 | COW List → Vec (Rust codegen) | ❌ pending |
-| Record spread `{ ...r, field: val }` | ❌ pending (pipe utility ergonomics) |
+| Record spread `{ ...r, field: val }` | ✅ works (tested, pipe utilities use it) |
+| UFCS on generic types (Rust codegen) | ❌ pending 0.17.7 partial fix — cell.get()/set()/update() blocked |
+| almide-web created | ✅ (DOM, fetch, timer, console) |
+| almide-js archived | ✅ |
