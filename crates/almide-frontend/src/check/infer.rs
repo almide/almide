@@ -763,6 +763,13 @@ impl Checker {
                 }
             }
             ExprKind::EmptyMap => Ty::map_of(self.fresh_var(), self.fresh_var()),
+
+            ExprKind::TypeAscription { expr, ty } => {
+                let inferred = self.infer_expr(expr);
+                let ascribed = self.resolve_type_expr(ty);
+                self.constrain(ascribed.clone(), inferred, "type ascription");
+                ascribed
+            }
         }
     }
 
