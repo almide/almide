@@ -15,6 +15,39 @@ fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
     stmts.iter().map(|s| render_stmt(ctx, s)).collect()
 }
 
+/// Mangle a type into the monomorphization suffix form (mirrors mono/utils.rs).
+fn mangle_ty_for_mono(ty: &Ty) -> String {
+    match ty {
+        Ty::Int => "Int".into(),
+        Ty::Float => "Float".into(),
+        Ty::String => "String".into(),
+        Ty::Bool => "Bool".into(),
+        Ty::Int8 => "Int8".into(),
+        Ty::Int16 => "Int16".into(),
+        Ty::Int32 => "Int32".into(),
+        Ty::UInt8 => "UInt8".into(),
+        Ty::UInt16 => "UInt16".into(),
+        Ty::UInt32 => "UInt32".into(),
+        Ty::UInt64 => "UInt64".into(),
+        Ty::Float32 => "Float32".into(),
+        Ty::Bytes => "Bytes".into(),
+        Ty::Unit => "Unit".into(),
+        Ty::Named(name, args) => {
+            if args.is_empty() { name.to_string() }
+            else { format!("{}_{}", name, args.iter().map(mangle_ty_for_mono).collect::<Vec<_>>().join("_")) }
+        }
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 =>
+            format!("List_{}", mangle_ty_for_mono(&args[0])),
+        Ty::Applied(id, args) => {
+            let name = format!("{:?}", id);
+            if args.is_empty() { name } else {
+                format!("{}_{}", name, args.iter().map(mangle_ty_for_mono).collect::<Vec<_>>().join("_"))
+            }
+        }
+        _ => "Unknown".into(),
+    }
+}
+
 /// Render an expression ensuring an owned value (not RcCow wrapper).
 /// For RcCow vars, produces `(*var).clone()` to yield the unwrapped T.
 /// Used at sites that need owned T: function args, record fields, concat operands.
@@ -1056,6 +1089,27 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
 /// Render a method call as a full expression for UFCS and module.func patterns.
 /// Returns Some(full_expr) if the method call was handled, None for normal obj.method calls.
 fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, args: &[IrExpr]) -> Option<String> {
+    // User-defined types (Ty::Named): always UFCS — they have no Rust methods.
+    // Derive monomorphized name from type args when present.
+    if let Ty::Named(type_name, type_args) = &object.ty {
+        if !method.contains('.') {
+            let obj_str = render_expr_owned(ctx, object);
+            let mut all_args = vec![obj_str];
+            all_args.extend(args.iter().map(|a| render_expr_owned(ctx, a)));
+            let func_name = if type_args.is_empty() {
+                method.to_string()
+            } else {
+                // Monomorphized name: method__TypeArg1_TypeArg2
+                let suffix = type_args.iter()
+                    .map(|t| mangle_ty_for_mono(t))
+                    .collect::<Vec<_>>().join("_");
+                let mono_name = format!("{}__{}", method, suffix);
+                mono_name
+            };
+            return Some(format!("{}({})", func_name, all_args.join(", ")));
+        }
+    }
+
     let is_rust_intrinsic = matches!(method,
         "clone" | "is_some" | "is_none" | "unwrap" | "unwrap_or"
         | "to_string" | "len" | "push" | "pop" | "insert" | "remove"
