@@ -140,6 +140,29 @@ impl Checker {
                     all_args.extend(arg_tys.iter().cloned());
                     return self.check_named_call(&field, &all_args);
                 }
+                // Cross-module UFCS: find the module that defines the object's type,
+                // then check if module.method exists.
+                let cross_type_name = match &obj_concrete {
+                    Ty::Named(n, _) => Some(n.to_string()),
+                    _ => None,
+                };
+                if let Some(type_name) = cross_type_name {
+                    let defining_module = self.env.types.keys()
+                        .find(|k| {
+                            let s = k.as_str();
+                            s.ends_with(&format!(".{}", type_name))
+                                && s.len() > type_name.len() + 1
+                        })
+                        .map(|k| k.as_str()[..k.as_str().len() - type_name.len() - 1].to_string());
+                    if let Some(module) = defining_module {
+                        let key = format!("{}.{}", module, field);
+                        if self.env.functions.contains_key(&sym(&key)) {
+                            let mut all_args = vec![obj_ty];
+                            all_args.extend(arg_tys.iter().cloned());
+                            return self.check_named_call(&key, &all_args);
+                        }
+                    }
+                }
                 // Almide-specific hint: method-call syntax isn't supported.
                 // If obj_ty maps to a stdlib module, suggest the module-call
                 // form (plus the closest existing name if there's a typo).
