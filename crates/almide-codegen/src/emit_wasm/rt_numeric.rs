@@ -153,7 +153,7 @@ pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// Emit the err return for int_from_hex: alloc [tag=1][str_ptr] and return.
@@ -339,7 +339,7 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// Emit the err return for float_parse: alloc [tag=1][str_ptr] and return.
@@ -522,7 +522,7 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// __float_pow(base: f64, exp: f64) -> f64
@@ -657,7 +657,7 @@ pub(super) fn compile_float_pow(emitter: &mut WasmEmitter) {
 
     wasm!(f, { end; }); // end function
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// __math_sin(x: f64) -> f64
@@ -724,7 +724,7 @@ pub(super) fn compile_math_sin(emitter: &mut WasmEmitter) {
     }
 
     wasm!(f, { local_get(3); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// __math_cos(x: f64) -> f64
@@ -791,7 +791,7 @@ pub(super) fn compile_math_cos(emitter: &mut WasmEmitter) {
     }
 
     wasm!(f, { local_get(3); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// __math_tan(x: f64) -> f64
@@ -806,7 +806,7 @@ pub(super) fn compile_math_tan(emitter: &mut WasmEmitter) {
         f64_div;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// __math_log(x: f64) -> f64
@@ -939,7 +939,7 @@ pub(super) fn compile_math_log(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// __math_log10(x: f64) -> f64
@@ -980,7 +980,7 @@ pub(super) fn compile_math_log10(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// __math_log2(x: f64) -> f64
@@ -1021,7 +1021,7 @@ pub(super) fn compile_math_log2(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// __math_exp(x: f64) -> f64
@@ -1143,5 +1143,5 @@ pub(super) fn compile_math_exp(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }

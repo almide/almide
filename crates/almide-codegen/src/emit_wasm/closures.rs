@@ -282,7 +282,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
             compiler.func
         };
 
-        emitter.add_compiled(CompiledFunc { type_idx, func: compiled_func });
+        emitter.add_compiled(CompiledFunc::new(type_idx, compiled_func));
     }
 
     // Compile FnRef wrappers
@@ -304,7 +304,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
                 f.instruction(&wasm_encoder::Instruction::Call(orig_func_idx));
                 f.instruction(&wasm_encoder::Instruction::End);
 
-                emitter.add_compiled(CompiledFunc { type_idx: wrapper_type_idx, func: f });
+                emitter.add_compiled(CompiledFunc::new(wrapper_type_idx, f));
             }
         }
     }

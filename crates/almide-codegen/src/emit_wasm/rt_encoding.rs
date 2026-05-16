@@ -204,7 +204,7 @@ pub(super) fn compile_base64_encode(emitter: &mut WasmEmitter, url_safe: bool) {
         end; // end function
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// Emit code that consumes nothing and pushes the alphabet character for
@@ -412,7 +412,7 @@ pub(super) fn compile_base64_decode(emitter: &mut WasmEmitter, _url_safe: bool) 
         end; // end function
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// Emit a base64 character → 0..63 lookup. Pops one i32 (char), pushes one i32
@@ -501,7 +501,7 @@ pub(super) fn compile_hex_encode(emitter: &mut WasmEmitter, upper: bool) {
         local_get(3);
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn emit_hex_nibble_to_char(f: &mut Function, nibble_local: u32, alpha_offset: i32) {
@@ -578,7 +578,7 @@ pub(super) fn compile_hex_decode(emitter: &mut WasmEmitter) {
         local_get(7);
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn emit_hex_char_to_nibble(f: &mut Function) {

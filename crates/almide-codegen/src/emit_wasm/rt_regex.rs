@@ -127,7 +127,7 @@ fn compile_skip_class(emitter: &mut WasmEmitter) {
         end; end;
     });
     wasm!(f, { local_get(2); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ─── match_class(pat, pat_pos_at_bracket, byte) -> i32 ───
@@ -197,7 +197,7 @@ fn compile_match_class(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ─── match_atom(pat, text, pat_pos, text_pos) -> i32 ───
@@ -297,7 +297,7 @@ fn compile_match_atom(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ─── atom_len(pat, pat_pos) -> i32 ───
@@ -334,7 +334,7 @@ fn compile_atom_len(emitter: &mut WasmEmitter) {
     // Everything else (literal, dot): 1 byte
     wasm!(f, { i32_const(1); end; });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ─── skip_group(pat, pat_pos) -> i32 ───
@@ -380,7 +380,7 @@ fn compile_skip_group(emitter: &mut WasmEmitter) {
 
     wasm!(f, { local_get(2); end; });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ─── match_anchored(pat, text, pat_pos, text_pos) -> i32 ───
@@ -574,7 +574,7 @@ fn compile_match_anchored(emitter: &mut WasmEmitter) {
     wasm!(f, { end; end; }); // end loop, block
     wasm!(f, { local_get(3); end; }); // success
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ─── match_search(pat, text, start) -> i32 ───
@@ -638,7 +638,7 @@ fn compile_match_search(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ─── captures_inner(pat, text, pat_pos, text_pos, cap_buf, cap_count) -> i32 ───
@@ -781,7 +781,7 @@ fn compile_captures_inner(emitter: &mut WasmEmitter) {
     wasm!(f, { end; end; }); // end loop, block
     wasm!(f, { local_get(3); end; });
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ─── captures_search(pat, text, start) -> i32 ───
@@ -879,7 +879,7 @@ fn compile_captures_search(emitter: &mut WasmEmitter) {
 
     wasm!(f, { i32_const(0); end; }); // no match
 
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// Helper: initialize cap_buf entries to -1

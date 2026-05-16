@@ -78,6 +78,16 @@ const NEWLINE_OFFSET: u32 = 48;
 pub struct CompiledFunc {
     pub type_idx: u32,
     pub func: Function,
+    /// Call targets recorded during compilation. When `Some`, DCE uses this
+    /// instead of bytecode scanning — immune to opcode parsing bugs.
+    /// Runtime helpers use `None` (bytecode scan fallback).
+    pub call_targets: Option<Vec<u32>>,
+}
+
+impl CompiledFunc {
+    pub fn new(type_idx: u32, func: Function) -> Self {
+        Self { type_idx, func, call_targets: None }
+    }
 }
 
 /// String stdlib runtime function indices.
@@ -1437,7 +1447,7 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
         f
     };
 
-    emitter.add_compiled(CompiledFunc { type_idx: void_type, func: compiled_func });
+    emitter.add_compiled(CompiledFunc::new(void_type, compiled_func));
 }
 
 /// Compile a test runner function that calls each test, printing results.
@@ -1466,7 +1476,7 @@ fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_
     }
 
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc { type_idx: void_type, func: f });
+    emitter.add_compiled(CompiledFunc::new(void_type, f));
 }
 
 /// Pre-register variant deep-equality functions for all variant types with pointer fields.
@@ -1589,7 +1599,7 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
             compiler.func
         };
 
-        emitter.add_compiled(CompiledFunc { type_idx, func: compiled_func });
+        emitter.add_compiled(CompiledFunc::new(type_idx, compiled_func));
     }
 }
 

@@ -102,8 +102,5 @@ pub fn compile_function_with_init(
 
     wasm!(compiler.func, { end; });
 
-    CompiledFunc {
-        type_idx,
-        func: compiler.func,
-    }
+    CompiledFunc::new(type_idx, compiler.func)
 }

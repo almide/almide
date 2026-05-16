@@ -143,7 +143,7 @@ fn compile_char_count(emitter: &mut WasmEmitter) {
         local_get(3); i64_extend_i32_u;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ── Core ──
@@ -177,7 +177,7 @@ fn compile_eq(emitter: &mut WasmEmitter) {
         end; end;
     });
     wasm!(f, { i32_const(0); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_contains(emitter: &mut WasmEmitter) {
@@ -210,7 +210,7 @@ fn compile_contains(emitter: &mut WasmEmitter) {
         end; end;
         i32_const(0); end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_trim(emitter: &mut WasmEmitter) {
@@ -260,7 +260,7 @@ fn compile_trim(emitter: &mut WasmEmitter) {
         call(emitter.rt.string.slice);
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ── Slice / transform ──
@@ -283,7 +283,7 @@ fn compile_slice(emitter: &mut WasmEmitter) {
         end; end;
         local_get(3); end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_reverse(emitter: &mut WasmEmitter) {
@@ -305,7 +305,7 @@ fn compile_reverse(emitter: &mut WasmEmitter) {
         end; end;
         local_get(2); end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_repeat(emitter: &mut WasmEmitter) {
@@ -327,7 +327,7 @@ fn compile_repeat(emitter: &mut WasmEmitter) {
         end; end;
         local_get(3); end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_index_of(emitter: &mut WasmEmitter) {
@@ -363,7 +363,7 @@ fn compile_index_of(emitter: &mut WasmEmitter) {
         end; end;
         i64_const(-1); end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_replace(emitter: &mut WasmEmitter) {
@@ -390,7 +390,7 @@ fn compile_replace(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 /// Recursive split using index_of. Supports multi-char delimiter.
@@ -462,7 +462,7 @@ fn compile_split(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_join(emitter: &mut WasmEmitter) {
@@ -496,7 +496,7 @@ fn compile_join(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_count(emitter: &mut WasmEmitter) {
@@ -526,7 +526,7 @@ fn compile_count(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ── Padding / trimming ──
@@ -545,7 +545,7 @@ fn compile_pad_start(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_pad_end(emitter: &mut WasmEmitter) {
@@ -562,7 +562,7 @@ fn compile_pad_end(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_trim_start(emitter: &mut WasmEmitter) {
@@ -589,7 +589,7 @@ fn compile_trim_start(emitter: &mut WasmEmitter) {
         call(emitter.rt.string.slice);
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_trim_end(emitter: &mut WasmEmitter) {
@@ -614,7 +614,7 @@ fn compile_trim_end(emitter: &mut WasmEmitter) {
         call(emitter.rt.string.slice);
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ── Case transform ──
@@ -656,7 +656,7 @@ fn compile_case_transform(emitter: &mut WasmEmitter, type_idx: u32, lo: i32, hi:
         end; end;
         local_get(2); end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 // ── Decompose ──
@@ -686,7 +686,7 @@ fn compile_chars(emitter: &mut WasmEmitter) {
         end; end;
         local_get(2); end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_lines(emitter: &mut WasmEmitter) {
@@ -707,7 +707,7 @@ fn compile_lines(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_from_bytes(emitter: &mut WasmEmitter) {
@@ -729,7 +729,7 @@ fn compile_from_bytes(emitter: &mut WasmEmitter) {
         end; end;
         local_get(2); end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
 fn compile_to_bytes(emitter: &mut WasmEmitter) {
@@ -751,6 +751,6 @@ fn compile_to_bytes(emitter: &mut WasmEmitter) {
         end; end;
         local_get(2); end;
     });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+    emitter.add_compiled(CompiledFunc::new(type_idx, f));
 }
 
