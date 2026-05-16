@@ -405,9 +405,7 @@ impl FuncCompiler<'_> {
         };
         let mut fields = self.extract_record_fields(&resolved_ty);
         let tag_offset = self.variant_tag_offset(&resolved_ty);
-        if fields.is_empty() {
-            eprintln!("[MEMBER-DBG] EMPTY fields for field='{}' resolved_ty={:?} obj.ty={:?}", field, resolved_ty, object.ty);
-        }
+        // (debug removed)
 
         // If fields are empty and type is Unknown, try searching record_fields for a type that has this field
         if fields.is_empty() && resolved_ty.is_unresolved() {
@@ -425,7 +423,6 @@ impl FuncCompiler<'_> {
             let total_offset = tag_offset + field_offset;
             self.emit_load_at(&field_ty, total_offset);
         } else {
-            eprintln!("[MEMBER-UNREACHABLE] field='{}' resolved_ty={:?} fields={:?}", field, resolved_ty, fields);
             wasm!(self.func, { unreachable; });
         }
     }

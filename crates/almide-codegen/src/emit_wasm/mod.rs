@@ -834,11 +834,6 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     let all_type_decls = program.modules.iter().flat_map(|m| m.type_decls.iter())
         .chain(program.type_decls.iter());
     for td in all_type_decls {
-        if td.name.as_str() == "TextLine" {
-            if let almide_ir::IrTypeDeclKind::Record { fields } = &td.kind {
-                eprintln!("[TYPE-DBG] TextLine fields: {:?}", fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>());
-            }
-        }
         match &td.kind {
             almide_ir::IrTypeDeclKind::Record { fields } => {
                 let field_list: Vec<(String, almide_lang::types::Ty)> = fields.iter()
