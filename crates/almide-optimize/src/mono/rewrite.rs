@@ -88,11 +88,51 @@ fn rewrite_expr_calls(
                     }
                 }
             }
-            match target {
-                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => {
-                    rewrite_expr_calls(object, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
+            // Rewrite UFCS Method calls to Named calls when method matches a monomorphized function
+            if let CallTarget::Method { object, method } = target {
+                rewrite_expr_calls(object, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
+                if let Some(bounded_params) = bound_fns.get(method.as_str()) {
+                    let param_types = fn_param_types.get(method.as_str());
+                    let pt = param_types.map(|pts| pts.as_slice()).unwrap_or(&[]);
+                    // Synthetic args: [object, ...args]
+                    let mut ufcs_args: Vec<IrExpr> = vec![(**object).clone()];
+                    ufcs_args.extend(args.iter().cloned());
+                    let mut bindings = collect_mono_bindings(bounded_params, &ufcs_args, pt);
+                    // Infer from return type
+                    if bindings.is_empty() || bindings.values().any(|v| matches!(v, Ty::Unknown)) {
+                        if let Some(gnames) = fn_generics.get(method.as_str()) {
+                            if let Some(ret_ty) = fn_ret_types.get(method.as_str()) {
+                                for gname in gnames {
+                                    if !bindings.contains_key(gname) || matches!(bindings.get(gname), Some(Ty::Unknown)) {
+                                        let extracted = extract_typevar_binding(ret_ty, &expr.ty, gname);
+                                        if !matches!(extracted, Ty::Unknown) {
+                                            bindings.insert(gname.clone(), extracted);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+                        !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+                        && !matches!(ty, Ty::TypeVar(_)) && !ty.contains_typevar()
+                    );
+                    if all_concrete {
+                        let suffix = mangle_suffix(&bindings);
+                        if instances.contains_key(&(method.to_string(), suffix.clone())) {
+                            let mono_name = format!("{}__{}", method, suffix);
+                            // Convert Method → Named with object prepended to args
+                            let obj_expr = (**object).clone();
+                            let mut new_args: Vec<IrExpr> = vec![obj_expr];
+                            new_args.extend(args.drain(..));
+                            *args = new_args;
+                            *target = CallTarget::Named { name: mono_name.into() };
+                            expr.ty = substitute_ty(&expr.ty, &bindings);
+                        }
+                    }
                 }
-                _ => {}
+            } else if let CallTarget::Computed { callee: object } = target {
+                rewrite_expr_calls(object, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
             }
         }
         IrExprKind::BinOp { left, right, .. } => {

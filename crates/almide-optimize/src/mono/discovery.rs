@@ -62,6 +62,46 @@ pub(super) fn discover_in_expr(
 ) {
     match &expr.kind {
         IrExprKind::Call { target, args, type_args } => {
+            // UFCS Method calls: check if method name matches a generic function.
+            // Treat as Named call with object prepended to args.
+            if let CallTarget::Method { object, method } = target {
+                if let Some(bounded_params) = bound_fns.get::<str>(method) {
+                    let orig_fn = program_functions.iter().find(|f| !f.is_test && f.name == *method);
+                    let param_types: Vec<Ty> = orig_fn
+                        .map(|f| f.params.iter().map(|p| p.ty.clone()).collect())
+                        .unwrap_or_default();
+                    // Synthetic args: [object, ...args]
+                    let mut ufcs_args: Vec<&IrExpr> = vec![object];
+                    ufcs_args.extend(args.iter());
+                    let ufcs_exprs: Vec<IrExpr> = ufcs_args.iter().map(|e| (*e).clone()).collect();
+                    let mut bindings = collect_mono_bindings(bounded_params, &ufcs_exprs, &param_types);
+                    // Infer from return type
+                    if bindings.values().any(|ty| matches!(ty, Ty::Unknown)) || bindings.is_empty() {
+                        if let Some(func) = orig_fn {
+                            if let Some(ref generics) = func.generics {
+                                let ret_ty = &func.ret_ty;
+                                for g in generics {
+                                    if !bindings.contains_key(&*g.name) || matches!(bindings.get(&*g.name), Some(Ty::Unknown)) {
+                                        let extracted = extract_typevar_binding(ret_ty, &expr.ty, &g.name);
+                                        if !matches!(extracted, Ty::Unknown) {
+                                            bindings.insert(g.name.to_string(), extracted);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+                        !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+                        && !matches!(ty, Ty::TypeVar(_))
+                        && !ty.contains_typevar()
+                    );
+                    if all_concrete {
+                        let suffix = mangle_suffix(&bindings);
+                        instances.insert((method.to_string(), suffix), bindings);
+                    }
+                }
+            }
             if let CallTarget::Named { name } = target {
                 if let Some(bounded_params) = bound_fns.get::<str>(name) {
                     // Find the original generic function to get parameter types
