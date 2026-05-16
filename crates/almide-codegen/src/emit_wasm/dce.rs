@@ -233,6 +233,77 @@ fn extract_call_targets(func: &Function) -> Vec<u32> {
                     pos += consumed;
                 }
             }
+            // 0xFC prefix: multi-byte instructions (saturating trunc, bulk memory)
+            0xFC => {
+                if pos < bytes.len() {
+                    let (sub_opcode, consumed) = read_leb128_u32(&bytes[pos..]);
+                    pos += consumed;
+                    match sub_opcode {
+                        // memory.init: segment_idx + memory_idx
+                        0x08 => {
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                        }
+                        // data.drop: segment_idx
+                        0x09 => {
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                        }
+                        // memory.copy: dst_mem + src_mem
+                        0x0A => {
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                        }
+                        // memory.fill: memory_idx
+                        0x0B => {
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                        }
+                        // table.init: elem_idx + table_idx
+                        0x0C => {
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                        }
+                        // elem.drop: elem_idx
+                        0x0D => {
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                        }
+                        // table.copy: dst_table + src_table
+                        0x0E => {
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                        }
+                        // table.grow, table.size, table.fill: table_idx
+                        0x0F | 0x10 | 0x11 => {
+                            let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                        }
+                        // 0x00-0x07: saturating truncation (no extra operands)
+                        _ => {}
+                    }
+                }
+            }
+            // 0xFD prefix: SIMD instructions (V128)
+            0xFD => {
+                if pos < bytes.len() {
+                    let (sub_opcode, consumed) = read_leb128_u32(&bytes[pos..]);
+                    pos += consumed;
+                    // v128.load/store variants have memarg (align + offset)
+                    if sub_opcode <= 11 || (sub_opcode >= 84 && sub_opcode <= 91)
+                        || (sub_opcode >= 92 && sub_opcode <= 95)
+                    {
+                        let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                        let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                    } else if sub_opcode == 12 {
+                        // v128.const: 16 bytes
+                        pos += 16;
+                    } else if sub_opcode == 13 {
+                        // i8x16.shuffle: 16 lane indices
+                        pos += 16;
+                    } else if sub_opcode >= 21 && sub_opcode <= 34 {
+                        // extract/replace lane: 1 byte lane index
+                        pos += 1;
+                    }
+                    // All other SIMD: no extra operands
+                }
+            }
             // All other single-byte instructions (no immediate)
             // 0x00 unreachable, 0x01 nop, 0x05 else, 0x0B end, 0x0F return,
             // 0x1A drop, 0x1B select, 0x45-0xC4 numeric ops, etc.
