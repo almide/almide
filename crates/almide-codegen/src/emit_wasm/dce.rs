@@ -50,14 +50,7 @@ pub fn eliminate_dead_code(emitter: &mut WasmEmitter) -> usize {
     let mut call_graph: Vec<Vec<u32>> = Vec::with_capacity(num_compiled);
 
     for cf in &emitter.compiled {
-        // Prefer explicitly tracked call targets (type-safe, no opcode parsing).
-        // Fall back to bytecode scanning for hand-written runtime functions.
-        let calls = if let Some(ref targets) = cf.call_targets {
-            targets.clone()
-        } else {
-            extract_call_targets(&cf.func)
-        };
-        call_graph.push(calls);
+        call_graph.push(cf.call_targets.clone());
     }
 
     // Step 3: BFS from entry points to find reachable set

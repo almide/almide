@@ -115,23 +115,24 @@ impl Clone for TrackedFunction {
 }
 
 /// A compiled WASM function ready for the code section.
+///
+/// All functions MUST be constructed via `CompiledFunc::tracked()` to ensure
+/// DCE has a complete call graph. Direct construction is impossible — the
+/// `call_targets` field is always populated by TrackedFunction.
 pub struct CompiledFunc {
     pub type_idx: u32,
     pub func: Function,
-    /// Call targets recorded during compilation. When `Some`, DCE uses this
-    /// instead of bytecode scanning — immune to opcode parsing bugs.
-    /// Runtime helpers use `None` (bytecode scan fallback).
-    pub call_targets: Option<Vec<u32>>,
+    /// Call targets recorded during compilation. DCE uses this directly —
+    /// no bytecode scanning needed. Guaranteed non-empty by construction
+    /// (TrackedFunction records all `call` instructions automatically).
+    pub call_targets: Vec<u32>,
 }
 
 impl CompiledFunc {
-    /// Runtime helpers: raw Function, no call tracking (falls back to bytecode scan).
-    pub fn new(type_idx: u32, func: Function) -> Self {
-        Self { type_idx, func, call_targets: None }
-    }
-    /// User/module functions via FuncCompiler: extracts tracked call targets.
+    /// Construct from a TrackedFunction. This is the ONLY constructor —
+    /// enforces that call_targets is always populated.
     pub fn tracked(type_idx: u32, tf: TrackedFunction) -> Self {
-        Self { type_idx, func: tf.inner, call_targets: Some(tf.call_targets) }
+        Self { type_idx, func: tf.inner, call_targets: tf.call_targets }
     }
 }
 
