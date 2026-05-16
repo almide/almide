@@ -15,6 +15,18 @@ fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
     stmts.iter().map(|s| render_stmt(ctx, s)).collect()
 }
 
+/// Render an expression ensuring an owned value (not RcCow wrapper).
+/// For RcCow vars, produces `(*var).clone()` to yield the unwrapped T.
+/// Used at sites that need owned T: function args, record fields, concat operands.
+fn render_expr_owned(ctx: &RenderContext, expr: &IrExpr) -> String {
+    if let IrExprKind::Var { id } = &expr.kind {
+        if ctx.ann.is_rc_cow(id) {
+            return format!("(*{}).clone()", ctx.var_name(*id));
+        }
+    }
+    render_expr(ctx, expr)
+}
+
 pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
     match &expr.kind {
         // ── Literals ──
@@ -350,9 +362,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let ctor_name_str = name.as_ref().map(|s| s.as_str()).unwrap_or("");
             let explicit_names: std::collections::HashSet<&str> = fields.iter().map(|(k, _)| &**k).collect();
             let mut field_strs: Vec<String> = Vec::new();
-            // Render explicit fields
+            // Render explicit fields (owned: RcCow vars unwrapped to T)
             for (k, v) in fields.iter() {
-                let mut val_str = render_expr(ctx, v);
+                let mut val_str = render_expr_owned(ctx, v);
                 // Box recursive fields (annotation is target-aware — empty for non-Rust)
                 if let Some(cn) = name {
                     if ctx.ann.boxed_fields.contains(&(cn.to_string(), k.to_string())) {
@@ -875,7 +887,10 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
     match op {
         BinOp::ConcatStr | BinOp::ConcatList => {
             let ty_tag = if op == BinOp::ConcatStr { "String" } else { "List" };
-            ctx.templates.render_with("concat_expr", Some(ty_tag), &[], &[("left", l.as_str()), ("right", r.as_str())])
+            // Unwrap RcCow operands to owned T for concat
+            let lo = render_expr_owned(ctx, left);
+            let ro = render_expr_owned(ctx, right);
+            ctx.templates.render_with("concat_expr", Some(ty_tag), &[], &[("left", lo.as_str()), ("right", ro.as_str())])
                 .unwrap_or_else(|| format!("concat(_, _)"))
         }
         BinOp::MulMatrix => {
@@ -1033,7 +1048,7 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
         }
         CallTarget::Module { .. } => unreachable!(),
     };
-    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
+    let args_str = args.iter().map(|a| render_expr_owned(ctx, a)).collect::<Vec<_>>().join(", ");
     ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
         .unwrap_or_else(|| format!("call(...)"))
 }
