@@ -1,0 +1,137 @@
+// Memory stress tests — catch layout bugs, buffer overflows, heap corruption.
+
+fn count_matches(xs: List[Int], expected: (Int) -> Int, n: Int) -> Int = {
+  var pass = 0
+  for i in 0..n {
+    pass = if xs[i] == expected(i) then pass + 1 else pass
+  }
+  pass
+}
+
+fn test_push_verify_all() -> String = {
+  var xs: List[Int] = []
+  for i in 0..100 { list.push(xs, i * 7 + 3) }
+  let pass = count_matches(xs, (i) => i * 7 + 3, 100)
+  int.to_string(pass)
+}
+
+fn test_repeat_index_assign_all() -> String = {
+  var xs = list.repeat(0, 50)
+  for i in 0..50 { xs[i] = (i + 1) * 11 }
+  let pass = count_matches(xs, (i) => (i + 1) * 11, 50)
+  int.to_string(pass)
+}
+
+fn test_nested_list() -> String = {
+  var outer: List[List[Int]] = []
+  for i in 0..10 {
+    outer = outer + [[i * 100, i * 100 + 1, i * 100 + 2]]
+  }
+  let v = outer[5]
+  int.to_string(v[2]) + " " + int.to_string(list.len(outer))
+}
+
+fn test_push_pop_integrity() -> String = {
+  var xs: List[Int] = []
+  for i in 0..20 { list.push(xs, i) }
+  for _ in 0..10 { list.pop(xs) }
+  for i in 0..10 { list.push(xs, 100 + i) }
+  let a = int.to_string(xs[0]) + " " + int.to_string(xs[9])
+  let b = int.to_string(xs[10]) + " " + int.to_string(xs[19])
+  a + " " + b
+}
+
+fn test_split_join_roundtrip() -> String = {
+  let original = "alpha:beta:gamma:delta:epsilon"
+  let parts = string.split(original, ":")
+  let rejoined = string.join(parts, ":")
+  if original == rejoined then "match" else "MISMATCH:" + rejoined
+}
+
+fn test_map_entries_roundtrip() -> String = {
+  let m1 = map.from_list([("a", 1), ("b", 2), ("c", 3)])
+  let es = map.entries(m1)
+  let m2 = map.from_list(es)
+  let v = map.get(m2, "b") ?? -1
+  int.to_string(list.len(es)) + " " + int.to_string(v)
+}
+
+fn test_forin_with_parallel_push() -> String = {
+  let source = [10, 20, 30, 40, 50]
+  var dest: List[Int] = []
+  for x in source { list.push(dest, x * 2) }
+  int.to_string(dest[0]) + " " + int.to_string(dest[4]) + " " + int.to_string(list.len(dest))
+}
+
+fn test_many_small_lists() -> String = {
+  var lists: List[List[Int]] = []
+  for i in 0..100 {
+    lists = lists + [[i, i + 1, i + 2]]
+  }
+  let first = lists[0]
+  let mid = lists[50]
+  let last = lists[99]
+  int.to_string(first[0]) + " " + int.to_string(mid[1]) + " " + int.to_string(last[2])
+}
+
+fn test_large_string_list() -> String = {
+  var xs: List[String] = []
+  for i in 0..30 { list.push(xs, "item_" + int.to_string(i)) }
+  xs[0] + " " + xs[15] + " " + xs[29] + " " + int.to_string(list.len(xs))
+}
+
+fn test_filter_map_chain() -> String = {
+  var ys: List[Int] = []
+  for i in 0..50 { ys = ys + [i] }
+  let result = ys
+    |> list.filter((x) => x % 3 == 0)
+    |> list.map((x) => x * x)
+    |> list.reverse
+  let len = list.len(result)
+  int.to_string(len) + " " + int.to_string(result[0]) + " " + int.to_string(result[len - 1])
+}
+
+fn test_concurrent_push_11_lists() -> String = {
+  var l0: List[Int] = []
+  var l1: List[Int] = []
+  var l2: List[Int] = []
+  var l3: List[Int] = []
+  var l4: List[Int] = []
+  var l5: List[Int] = []
+  var l6: List[Int] = []
+  var l7: List[Int] = []
+  var l8: List[Int] = []
+  var l9: List[Int] = []
+  var l10: List[Int] = []
+  for i in 0..25 {
+    list.push(l0, i)
+    list.push(l1, i + 100)
+    list.push(l2, i + 200)
+    list.push(l3, i + 300)
+    list.push(l4, i + 400)
+    list.push(l5, i + 500)
+    list.push(l6, i + 600)
+    list.push(l7, i + 700)
+    list.push(l8, i + 800)
+    list.push(l9, i + 900)
+    list.push(l10, i + 1000)
+  }
+  let p0 = count_matches(l0, (i) => i, 25)
+  let p5 = count_matches(l5, (i) => i + 500, 25)
+  let p10 = count_matches(l10, (i) => i + 1000, 25)
+  int.to_string(p0 + p5 + p10) + " " + int.to_string(l3[24]) + " " + int.to_string(l7[0])
+}
+
+fn main() -> Unit = {
+  println(test_push_verify_all())
+  println(test_repeat_index_assign_all())
+  println(test_nested_list())
+  println(test_push_pop_integrity())
+  println(test_split_join_roundtrip())
+  println(test_map_entries_roundtrip())
+  println(test_forin_with_parallel_push())
+  println(test_many_small_lists())
+  println(test_large_string_list())
+  println(test_filter_map_chain())
+  println(test_concurrent_push_11_lists())
+}
