@@ -358,12 +358,12 @@ impl FuncCompiler<'_> {
                     let addr_b = self.scratch.alloc_i32();
                     let tmp = self.scratch_for_ty(&elem_ty);
 
-                    wasm!(self.func, { local_get(list_ptr); i32_const(4); i32_add; });
+                    wasm!(self.func, { local_get(list_ptr); i32_const(8); i32_add; });
                     self.emit_expr(a);
                     if matches!(&a.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
                     wasm!(self.func, { i32_const(elem_size); i32_mul; i32_add; local_set(addr_a); });
 
-                    wasm!(self.func, { local_get(list_ptr); i32_const(4); i32_add; });
+                    wasm!(self.func, { local_get(list_ptr); i32_const(8); i32_add; });
                     self.emit_expr(b);
                     if matches!(&b.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
                     wasm!(self.func, { i32_const(elem_size); i32_mul; i32_add; local_set(addr_b); });
@@ -410,7 +410,7 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { local_set(hi); });
 
                     let base_ptr = self.scratch.alloc_i32();
-                    wasm!(self.func, { local_get(list_local); i32_const(4); i32_add; local_set(base_ptr); });
+                    wasm!(self.func, { local_get(list_local); i32_const(8); i32_add; local_set(base_ptr); });
                     wasm!(self.func, {
                         block_empty;
                         loop_empty;
@@ -474,7 +474,7 @@ impl FuncCompiler<'_> {
                     let base = self.scratch.alloc_i32();
                     let end_i32 = self.scratch.alloc_i32();
 
-                    wasm!(self.func, { local_get(list_local); i32_const(4); i32_add; local_set(base); });
+                    wasm!(self.func, { local_get(list_local); i32_const(8); i32_add; local_set(base); });
                     self.emit_expr(end);
                     if matches!(&end.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
                     wasm!(self.func, { local_set(end_i32); });
@@ -516,8 +516,8 @@ impl FuncCompiler<'_> {
                         let elem_ty = self.list_elem_ty_var(*dst);
                         let elem_size = values::byte_size(&elem_ty) as i32;
                         wasm!(self.func, {
-                            local_get(dst_ptr); i32_const(4); i32_add;
-                            local_get(src_ptr); i32_const(4); i32_add;
+                            local_get(dst_ptr); i32_const(8); i32_add;
+                            local_get(src_ptr); i32_const(8); i32_add;
                         });
                         self.emit_expr(len);
                         if matches!(&len.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }

@@ -249,13 +249,13 @@ impl FuncCompiler<'_> {
                 block_empty; loop_empty;
                   local_get(i); local_get(a); i32_load(0); i32_ge_u; br_if(1);
                   // Load a[i]
-                  local_get(a); i32_const(4); i32_add;
+                  local_get(a); i32_const(8); i32_add;
                   local_get(i); i32_const(elem_size as i32); i32_mul; i32_add;
         });
         self.emit_load_at(elem_ty, 0);
         // Load b[i]
         wasm!(self.func, {
-                  local_get(b); i32_const(4); i32_add;
+                  local_get(b); i32_const(8); i32_add;
                   local_get(i); i32_const(elem_size as i32); i32_mul; i32_add;
         });
         self.emit_load_at(elem_ty, 0);

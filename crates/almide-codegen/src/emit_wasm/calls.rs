@@ -1396,7 +1396,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(closure);
                     local_get(xs); i32_load(0); local_set(len);
-                    i32_const(4); local_get(len); i32_const(out_es); i32_mul; i32_add;
+                    i32_const(8); local_get(len); i32_const(out_es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(len); i32_store(0);
                     i32_const(0); local_set(i);
@@ -1404,7 +1404,7 @@ impl FuncCompiler<'_> {
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       // Call closure(elem) — closure returns Result ptr (i32)
                       local_get(closure); i32_load(4); // env
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(8); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -1424,7 +1424,7 @@ impl FuncCompiler<'_> {
                       local_get(res); i32_load(0); i32_const(0); i32_ne;
                       if_empty; local_get(res); return_; end;
                       // Store unwrapped ok value into dst
-                      local_get(dst); i32_const(4); i32_add;
+                      local_get(dst); i32_const(8); i32_add;
                       local_get(i); i32_const(out_es); i32_mul; i32_add;
                       local_get(res);
                 });
@@ -1452,7 +1452,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(list_scratch);
                     // Get first closure: fns[0]
-                    local_get(list_scratch); i32_const(4); i32_add; i32_load(0);
+                    local_get(list_scratch); i32_const(8); i32_add; i32_load(0);
                 });
                 // Call the closure (0-arg + env)
                 let res_scratch = self.scratch.alloc_i32();
@@ -1489,7 +1489,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(list_scratch); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(list_scratch); i32_const(4); i32_add;
+                      local_get(list_scratch); i32_const(8); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(closure);
                       local_get(closure); i32_load(4); // env
@@ -1532,13 +1532,13 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(list_scratch);
                     // Alloc result list
-                    i32_const(4); local_get(list_scratch); i32_load(0); i32_const(4); i32_mul; i32_add;
+                    i32_const(8); local_get(list_scratch); i32_load(0); i32_const(4); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(list_scratch); i32_load(0); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(list_scratch); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(list_scratch); i32_const(4); i32_add;
+                      local_get(list_scratch); i32_const(8); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(closure);
                       local_get(closure); i32_load(4);
@@ -1550,7 +1550,7 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                       // Store result[i] = closure result
-                      local_get(result); i32_const(4); i32_add;
+                      local_get(result); i32_const(8); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                 });
                 // swap: [result_ptr, result_i32_addr] → need [addr, value]

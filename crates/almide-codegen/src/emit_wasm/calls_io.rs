@@ -332,14 +332,14 @@ impl FuncCompiler<'_> {
                 // Build List[Int]: [total:i32][i64 * total]
                 wasm!(self.func, {
                     // Allocate: 4 + total * 8
-                    local_get(total); i32_const(8); i32_mul; i32_const(4); i32_add;
+                    local_get(total); i32_const(8); i32_mul; i32_const(8); i32_add;
                     call(self.emitter.rt.alloc); local_set(list_ptr);
                     local_get(list_ptr); local_get(total); i32_store(0);
                     // Copy bytes → i64 elements
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(total); i32_ge_u; br_if(1);
-                      local_get(list_ptr); i32_const(4); i32_add;
+                      local_get(list_ptr); i32_const(8); i32_add;
                       local_get(i); i32_const(8); i32_mul; i32_add;
                       local_get(raw_buf); local_get(i); i32_add; i32_load8_u(0); i64_extend_i32_u;
                       i64_store(0);
@@ -392,7 +392,7 @@ impl FuncCompiler<'_> {
                         block_empty; loop_empty;
                           local_get(i); local_get(len); i32_ge_u; br_if(1);
                           local_get(tmp_buf); local_get(i); i32_add;
-                          local_get(list_ptr); i32_const(4); i32_add;
+                          local_get(list_ptr); i32_const(8); i32_add;
                           local_get(i); i32_const(8); i32_mul; i32_add;
                           i64_load(0); i32_wrap_i64;
                           i32_store8(0);
