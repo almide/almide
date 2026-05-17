@@ -1,4 +1,10 @@
 fn main() -> Unit = {
+  // repeat + IndexAssign
+  var rep = list.repeat(0, 4)
+  rep[0] = 42
+  rep[2] = 99
+  println(int.to_string(rep[0]) + " " + int.to_string(rep[2]))
+
   // Construction + access
   let xs = [10, 20, 30, 40, 50]
   println(int.to_string(xs[0]) + " " + int.to_string(xs[4]))

@@ -316,11 +316,11 @@ impl FuncCompiler<'_> {
                 };
                 if has_ptr {
                     if let IrExprKind::LitInt { value: idx_val } = &index.kind {
-                        let offset = 4 + (*idx_val as u32) * (elem_size as u32);
+                        let offset = (super::list_layout::DATA_OFFSET as u32) + (*idx_val as u32) * (elem_size as u32);
                         self.emit_expr(value);
                         self.emit_store_at(&value.ty, offset);
                     } else {
-                        wasm!(self.func, { i32_const(4); i32_add; });
+                        wasm!(self.func, { i32_const(super::list_layout::DATA_OFFSET); i32_add; });
                         self.emit_expr(index);
                         if matches!(&index.ty, almide_lang::types::Ty::Int) {
                             wasm!(self.func, { i32_wrap_i64; });
