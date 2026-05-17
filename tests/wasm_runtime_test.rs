@@ -15,10 +15,14 @@ use std::process::Command;
 use std::path::Path;
 
 fn almide_bin() -> String {
-    // Use the installed almide binary
-    std::env::var("ALMIDE_BIN")
-        .unwrap_or_else(|_| "almide".to_string())
+    // Try: ALMIDE_BIN env → cargo build output → PATH
+    if let Ok(bin) = std::env::var("ALMIDE_BIN") { return bin; }
+    let cargo_bin = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target/release/almide");
+    if cargo_bin.exists() { return cargo_bin.to_str().unwrap().to_string(); }
+    "almide".to_string()
 }
+
 
 /// Compile and run an .almd program on the Rust target, return stdout.
 fn run_rust(source: &str) -> String {
@@ -85,6 +89,11 @@ wasi.start(inst);
 
 /// Assert that a program produces identical output on Rust and WASM targets.
 fn assert_cross_target(source: &str) {
+    // Skip if almide binary or node not available (e.g. CI without make install)
+    let bin = almide_bin();
+    if Command::new(&bin).arg("--version").output().is_err() { return; }
+    if Command::new("node").arg("--version").output().is_err() { return; }
+
     let rust_out = run_rust(source);
     let wasm_out = run_wasm(source);
     assert_eq!(
@@ -428,10 +437,13 @@ fn main() -> Unit = {
 
 #[test]
 fn wasm_cross_target_spec() {
+    // Skip if prerequisites unavailable
+    let bin = almide_bin();
+    if Command::new(&bin).arg("--version").output().is_err() { return; }
+    if Command::new("node").arg("--version").output().is_err() { return; }
+
     let spec_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/wasm_cross");
-    if !spec_dir.exists() {
-        return; // No spec dir = skip (CI might not have it)
-    }
+    if !spec_dir.exists() { return; }
 
     let mut entries: Vec<_> = std::fs::read_dir(&spec_dir)
         .unwrap()
