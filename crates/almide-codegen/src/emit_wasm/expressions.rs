@@ -808,15 +808,16 @@ impl FuncCompiler<'_> {
                       i32_const(0);
                     end;
                     local_set(len);
-                    // alloc: 4 + len * 8
-                    i32_const(4); local_get(len); i32_const(8); i32_mul; i32_add;
+                    // alloc: 8 + len * 8 (header: [len:i32][cap:i32])
+                    i32_const(8); local_get(len); i32_const(8); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(len); i32_store(0);
+                    local_get(dst); local_get(len); i32_store(4); // cap = len
                     // fill elements
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(dst); i32_const(4); i32_add;
+                      local_get(dst); i32_const(8); i32_add;
                       local_get(i); i32_const(8); i32_mul; i32_add;
                       // value = start + i
                       local_get(s); local_get(i); i64_extend_i32_u; i64_add;

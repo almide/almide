@@ -1,0 +1,67 @@
+fn main() -> Unit = {
+  // Construction + access
+  let xs = [10, 20, 30, 40, 50]
+  println(int.to_string(xs[0]) + " " + int.to_string(xs[4]))
+  println(int.to_string(list.len(xs)))
+
+  // push (capacity growth)
+  var ys: List[Int] = []
+  for i in 0..25 { list.push(ys, i * 2) }
+  println(int.to_string(list.len(ys)) + " " + int.to_string(ys[24]))
+
+  // pop
+  var zs = [100, 200, 300]
+  let popped = list.pop(zs) ?? -1
+  println(int.to_string(popped) + " " + int.to_string(list.len(zs)))
+
+  // with_capacity
+  var ws = list.with_capacity(32)
+  for i in 0..10 { list.push(ws, i) }
+  println(int.to_string(ws[9]))
+
+  // slice / take / drop
+  let sliced = list.slice(xs, 1, 4)
+  println(int.to_string(list.len(sliced)) + " " + int.to_string(sliced[2]))
+  let taken = list.take(xs, 2)
+  let dropped = list.drop(xs, 3)
+  println(int.to_string(taken[1]) + " " + int.to_string(dropped[0]))
+
+  // reverse
+  let rev = list.reverse(xs)
+  println(int.to_string(rev[0]) + " " + int.to_string(rev[4]))
+
+  // concat
+  let ab = [1, 2] + [3, 4, 5]
+  println(int.to_string(list.len(ab)) + " " + int.to_string(ab[4]))
+
+  // sort
+  let unsorted = [5, 1, 4, 2, 3]
+  let sorted = list.sort(unsorted)
+  println(int.to_string(sorted[0]) + " " + int.to_string(sorted[4]))
+
+  // map / filter / flat_map
+  let squares = list.map(xs, (x) => x * x)
+  println(int.to_string(squares[2]))
+  let big = list.filter(xs, (x) => x > 25)
+  println(int.to_string(list.len(big)) + " " + int.to_string(big[0]))
+  let flat = list.flat_map([1, 2, 3], (x) => [x, x * 10])
+  println(int.to_string(list.len(flat)) + " " + int.to_string(flat[3]))
+
+  // find / contains
+  let found = list.find(xs, (x) => x > 30) ?? -1
+  println(int.to_string(found))
+  let has = if list.contains(xs, 30) then "y" else "n"
+  println(has)
+
+  // fold
+  let sum = list.fold(xs, 0, (acc, x) => acc + x)
+  println(int.to_string(sum))
+
+  // enumerate
+  let pairs = list.enumerate(["a", "b", "c"])
+  println(int.to_string(list.len(pairs)))
+
+  // get_or
+  println(int.to_string(list.get_or(xs, 2, -1)))
+  println(int.to_string(list.get_or(xs, 99, -1)))
+}

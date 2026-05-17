@@ -394,9 +394,9 @@ impl FuncCompiler<'_> {
                     local_get(nread_ptr); i32_load(0); local_set(file_size);
                 });
 
-                // Build List[Int]: [count:i32][i64 * count]
+                // Build List[Int]: [len:i32][cap:i32][i64 * count]
                 wasm!(self.func, {
-                    local_get(file_size); i32_const(8); i32_mul; i32_const(4); i32_add;
+                    local_get(file_size); i32_const(8); i32_mul; i32_const(8); i32_add;
                     call(self.emitter.rt.alloc); local_set(list_ptr);
                     local_get(list_ptr); local_get(file_size); i32_store(0);
                 });
@@ -406,7 +406,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(counter);
                     block_empty; loop_empty;
                     local_get(counter); local_get(file_size); i32_ge_u; br_if(1);
-                    local_get(list_ptr); i32_const(4); i32_add;
+                    local_get(list_ptr); i32_const(8); i32_add;
                     local_get(counter); i32_const(8); i32_mul; i32_add;
                     local_get(data_buf); local_get(counter); i32_add; i32_load8_u(0);
                     i64_extend_i32_u;
@@ -473,7 +473,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                     local_get(counter); local_get(count); i32_ge_u; br_if(1);
                     local_get(byte_buf); local_get(counter); i32_add;
-                    local_get(list_ptr); i32_const(4); i32_add;
+                    local_get(list_ptr); i32_const(8); i32_add;
                     local_get(counter); i32_const(8); i32_mul; i32_add;
                     i64_load(0); i32_wrap_i64;
                     i32_store8(0);
@@ -865,9 +865,9 @@ impl FuncCompiler<'_> {
                     end; end;
                 });
 
-                // Allocate List[String]: [count:i32][ptr:i32 * count]
+                // Allocate List[String]: [len:i32][cap:i32][ptr:i32 * count]
                 wasm!(self.func, {
-                    local_get(list_count); i32_const(4); i32_mul; i32_const(4); i32_add;
+                    local_get(list_count); i32_const(4); i32_mul; i32_const(8); i32_add;
                     call(self.emitter.rt.alloc); local_set(list_ptr);
                     local_get(list_ptr); local_get(list_count); i32_store(0);
                 });
@@ -1637,7 +1637,7 @@ impl FuncCompiler<'_> {
             br(0);
             end; end;
             // Store in list
-            local_get(list_ptr); i32_const(4); i32_add;
+            local_get(list_ptr); i32_const(8); i32_add;
             local_get(counter); i32_const(4); i32_mul; i32_add;
             local_get(str_ptr); i32_store(0);
             local_get(counter); i32_const(1); i32_add; local_set(counter);

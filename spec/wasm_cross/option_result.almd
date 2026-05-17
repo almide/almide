@@ -1,0 +1,31 @@
+fn safe_div(a: Int, b: Int) -> Option[Int] =
+  if b == 0 then None
+  else Some(a / b)
+
+fn main() -> Unit = {
+  // Option basics
+  let some_val = Some(42)
+  let none_val: Option[Int] = None
+  println(int.to_string(some_val ?? -1))
+  println(int.to_string(none_val ?? -1))
+
+  // Option map
+  let doubled = option.map(some_val, (x) => x * 2)
+  println(int.to_string(doubled ?? 0))
+  let none_doubled = option.map(none_val, (x) => x * 2)
+  println(int.to_string(none_doubled ?? 0))
+
+  // Safe division
+  let div_ok = safe_div(10, 3) ?? -1
+  let div_fail = safe_div(10, 0) ?? -1
+  println(int.to_string(div_ok) + " " + int.to_string(div_fail))
+
+  // Option to_list
+  let some_list = option.to_list(Some(99))
+  let none_list = option.to_list(none_val)
+  println(int.to_string(list.len(some_list)) + " " + int.to_string(list.len(none_list)))
+
+  // flat_map
+  let chained = option.flat_map(some_val, (x) => safe_div(x, 7))
+  println(int.to_string(chained ?? -1))
+}

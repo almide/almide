@@ -180,7 +180,7 @@ fn compile_value_stringify(emitter: &mut WasmEmitter) {
     wasm!(f, {
           block_empty; loop_empty;
             local_get(5); local_get(4); i32_ge_u; br_if(1);
-            local_get(3); i32_const(4); i32_add;
+            local_get(3); i32_const(8); i32_add;
             local_get(5); i32_const(4); i32_mul; i32_add;
             i32_load(0); call(stringify_fn); local_set(6);
             local_get(5); i32_const(0); i32_gt_u;
@@ -209,8 +209,8 @@ fn compile_value_stringify(emitter: &mut WasmEmitter) {
     wasm!(f, {
           block_empty; loop_empty;
             local_get(5); local_get(4); i32_ge_u; br_if(1);
-            // Load tuple pointer: list[4 + i*4] (each list elem is an i32 ptr)
-            local_get(3); i32_const(4); i32_add;
+            // Load tuple pointer: list[8 + i*4] (each list elem is an i32 ptr)
+            local_get(3); i32_const(8); i32_add;
             local_get(5); i32_const(4); i32_mul; i32_add;
             i32_load(0); // dereference to get tuple ptr
             local_set(6);
@@ -763,7 +763,7 @@ fn emit_parse_array(f: &mut Function, alloc: u32, parse_at_fn: u32) {
             i32_load8_u(0); i32_const(93); i32_eq;
             if_empty;
               local_get(1); i32_const(1); i32_add; local_set(1);
-              i32_const(4); call(alloc); local_set(8);
+              i32_const(8); call(alloc); local_set(8);
               local_get(8); i32_const(0); i32_store(0);
               i32_const(8); call(alloc); local_set(6);
               local_get(6); i32_const(5); i32_store(0);
@@ -778,7 +778,7 @@ fn emit_parse_array(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     // Parse elements — growable buffer (local 14 = capacity)
     wasm!(f, {
           i32_const(64); local_set(14); // initial capacity
-          i32_const(260); call(alloc); local_set(8); // 4 + 64*4
+          i32_const(264); call(alloc); local_set(8); // 8 + 64*4
           i32_const(0); local_set(9); // count = 0
           block_empty; loop_empty;
             local_get(0); local_get(1);
@@ -797,15 +797,15 @@ fn emit_parse_array(f: &mut Function, alloc: u32, parse_at_fn: u32) {
             if_empty;
               local_get(8); local_set(15); // save old buf
               local_get(14); i32_const(1); i32_shl; local_set(14); // cap *= 2
-              i32_const(4); local_get(14); i32_const(4); i32_mul; i32_add;
+              i32_const(8); local_get(14); i32_const(4); i32_mul; i32_add;
               call(alloc); local_set(8); // new buf → local 8
               local_get(8); local_get(15);
-              i32_const(4); local_get(9); i32_const(4); i32_mul; i32_add;
+              i32_const(8); local_get(9); i32_const(4); i32_mul; i32_add;
               memory_copy;
             end;
     });
     wasm!(f, {
-            local_get(8); i32_const(4); i32_add;
+            local_get(8); i32_const(8); i32_add;
             local_get(9); i32_const(4); i32_mul; i32_add;
             local_get(10); i32_load(0); i32_store(0);
             local_get(10); i32_load(4); local_set(1);
@@ -887,7 +887,7 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
             i32_load8_u(0); i32_const(125); i32_eq;
             if_empty;
               local_get(1); i32_const(1); i32_add; local_set(1);
-              i32_const(4); call(alloc); local_set(8);
+              i32_const(8); call(alloc); local_set(8);
               local_get(8); i32_const(0); i32_store(0);
               i32_const(8); call(alloc); local_set(6);
               local_get(6); i32_const(6); i32_store(0);
@@ -902,7 +902,7 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     // Parse key-value pairs — growable buffer (local 14 = capacity)
     wasm!(f, {
           i32_const(64); local_set(14); // initial capacity
-          i32_const(260); call(alloc); local_set(8); // 4 + 64*4
+          i32_const(264); call(alloc); local_set(8); // 8 + 64*4
           i32_const(0); local_set(9);
           block_empty; loop_empty;
     });
@@ -969,10 +969,10 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
             if_empty;
               local_get(8); local_set(15); // save old buf
               local_get(14); i32_const(1); i32_shl; local_set(14); // cap *= 2
-              i32_const(4); local_get(14); i32_const(4); i32_mul; i32_add;
+              i32_const(8); local_get(14); i32_const(4); i32_mul; i32_add;
               call(alloc); local_set(8); // new buf
               local_get(8); local_get(15);
-              i32_const(4); local_get(9); i32_const(4); i32_mul; i32_add;
+              i32_const(8); local_get(9); i32_const(4); i32_mul; i32_add;
               memory_copy;
             end;
     });
@@ -983,7 +983,7 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
             local_get(5); local_get(7); i32_store(0); // key
             local_get(5); local_get(10); i32_load(0); i32_store(4); // value
             // Store tuple pointer in list at position count
-            local_get(8); i32_const(4); i32_add;
+            local_get(8); i32_const(8); i32_add;
             local_get(9); i32_const(4); i32_mul; i32_add;
             local_get(5); i32_store(0);
             local_get(10); i32_load(4); local_set(1);
@@ -1124,7 +1124,7 @@ fn compile_json_get_path(emitter: &mut WasmEmitter) {
             i32_const(0); local_set(13); // found = 0
             block_empty; loop_empty;
               local_get(11); local_get(10); i32_ge_u; br_if(1);
-              local_get(9); i32_const(4); i32_add;
+              local_get(9); i32_const(8); i32_add;
               local_get(11); i32_const(4); i32_mul; i32_add;
               i32_load(0); local_set(12); // pair_ptr
               local_get(12); i32_load(0); // pair key
@@ -1159,7 +1159,7 @@ fn compile_json_get_path(emitter: &mut WasmEmitter) {
             i32_or;
             if_empty; i32_const(0); return_; end; // out of bounds → none
             // cur_val = list[index]
-            local_get(9); i32_const(4); i32_add;
+            local_get(9); i32_const(8); i32_add;
             local_get(11); i32_const(4); i32_mul; i32_add;
             i32_load(0); local_set(8);
           end;

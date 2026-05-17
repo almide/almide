@@ -909,9 +909,9 @@ fn emit_build_captures_list(
     let alloc = emitter.rt.alloc;
     let slice_fn = emitter.rt.string.slice;
 
-    // Allocate list
+    // Allocate list: [len:4][cap:4][data...]
     wasm!(f, {
-        local_get(num_groups); i32_const(4); i32_mul; i32_const(4); i32_add;
+        local_get(num_groups); i32_const(4); i32_mul; i32_const(8); i32_add;
         call(alloc); local_set(list_ptr);
     });
     wasm!(f, { local_get(list_ptr); local_get(num_groups); i32_store(0); });
@@ -948,7 +948,7 @@ fn emit_build_captures_list(
 
     wasm!(f, {
         local_set(str_ptr);
-        local_get(list_ptr); i32_const(4); i32_add;
+        local_get(list_ptr); i32_const(8); i32_add;
         local_get(i); i32_const(4); i32_mul; i32_add;
         local_get(str_ptr); i32_store(0);
     });

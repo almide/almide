@@ -246,13 +246,13 @@ pub(super) fn compile_list_eq(emitter: &mut WasmEmitter) {
         return_;
         end;
         local_get(0);
-        i32_const(4);
+        i32_const(8);
         i32_add;
         local_get(5);
         i32_add;
         i32_load8_u(0);
         local_get(1);
-        i32_const(4);
+        i32_const(8);
         i32_add;
         local_get(5);
         i32_add;
@@ -299,9 +299,9 @@ pub(super) fn compile_list_list_str_cmp(emitter: &mut WasmEmitter) {
         i32_const(0); local_set(5);
         block_empty; loop_empty;
           local_get(5); local_get(4); i32_ge_u; br_if(1);
-          local_get(0); i32_const(4); i32_add;
+          local_get(0); i32_const(8); i32_add;
           local_get(5); i32_const(4); i32_mul; i32_add; i32_load(0);
-          local_get(1); i32_const(4); i32_add;
+          local_get(1); i32_const(8); i32_add;
           local_get(5); i32_const(4); i32_mul; i32_add; i32_load(0);
           call(str_cmp); local_set(6);
           local_get(6); i32_const(0); i32_ne;
@@ -317,7 +317,7 @@ pub(super) fn compile_list_list_str_cmp(emitter: &mut WasmEmitter) {
 }
 
 /// __concat_list(a: i32, b: i32, elem_size: i32) -> i32
-/// Concatenate two lists. Layout: [len:i32][data...]. Generic over elem_size.
+/// Concatenate two lists. Layout: [len:i32][cap:i32][data...]. Generic over elem_size.
 pub(super) fn compile_concat_list(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.concat_list];
     let mut f = Function::new([
@@ -349,22 +349,27 @@ pub(super) fn compile_concat_list(emitter: &mut WasmEmitter) {
         local_get(2);
         i32_mul;
         local_set(8);
-        i32_const(4);
+        i32_const(8);
         local_get(7);
         i32_add;
         local_get(8);
         i32_add;
         call(emitter.rt.alloc);
         local_set(6);
+        // Store len
         local_get(6);
         local_get(5);
         i32_store(0);
+        // Store cap = new_len
+        local_get(6);
+        local_get(5);
+        i32_store(4);
     });
 
     // Copy a's data
-    super::runtime::emit_memcpy_loop(&mut f, 6, 0, 7, 9, 4, 4);
+    super::runtime::emit_memcpy_loop(&mut f, 6, 0, 7, 9, 8, 8);
 
-    // Copy b's data: dst=$result+4+$bytes_a, src=$b+4
+    // Copy b's data: dst=$result+8+$bytes_a, src=$b+8
     wasm!(f, {
         i32_const(0);
         local_set(9);
@@ -375,14 +380,14 @@ pub(super) fn compile_concat_list(emitter: &mut WasmEmitter) {
         i32_ge_u;
         br_if(1);
         local_get(6);
-        i32_const(4);
+        i32_const(8);
         i32_add;
         local_get(7);
         i32_add;
         local_get(9);
         i32_add;
         local_get(1);
-        i32_const(4);
+        i32_const(8);
         i32_add;
         local_get(9);
         i32_add;

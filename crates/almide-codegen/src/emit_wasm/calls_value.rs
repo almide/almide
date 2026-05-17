@@ -385,7 +385,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(i);
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(list); i32_const(4); i32_add;
+                local_get(list); i32_const(8); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 local_get(pair_ptr); i32_load(0);
@@ -512,7 +512,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(i);
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(list); i32_const(4); i32_add;
+                local_get(list); i32_const(8); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 local_get(pair_ptr); i32_load(0);
@@ -692,7 +692,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(result);
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(list); i32_const(4); i32_add;
+                local_get(list); i32_const(8); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 local_get(pair_ptr); i32_load(0);
@@ -1287,7 +1287,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(found); // 0 = not found
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(list); i32_const(4); i32_add;
+                local_get(list); i32_const(8); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 local_get(pair_ptr); i32_load(0);
@@ -1503,7 +1503,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(found);
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(list); i32_const(4); i32_add;
+                local_get(list); i32_const(8); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 local_get(pair_ptr); i32_load(0);

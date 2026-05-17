@@ -411,14 +411,14 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(map_ptr);
                     local_get(map_ptr); i32_load(0); local_set(len);
-                    i32_const(4); local_get(len); i32_const(ks as i32); i32_mul; i32_add;
+                    i32_const(8); local_get(len); i32_const(ks as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(len); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      // dst: result[4 + i*ks]
-                      local_get(result); i32_const(4); i32_add;
+                      // dst: result[8 + i*ks]
+                      local_get(result); i32_const(8); i32_add;
                       local_get(i); i32_const(ks as i32); i32_mul; i32_add;
                       // src: map[4 + i*entry]
                       local_get(map_ptr); i32_const(4); i32_add;
@@ -448,13 +448,13 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(map_ptr);
                     local_get(map_ptr); i32_load(0); local_set(len);
-                    i32_const(4); local_get(len); i32_const(vs as i32); i32_mul; i32_add;
+                    i32_const(8); local_get(len); i32_const(vs as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(len); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(result); i32_const(4); i32_add;
+                      local_get(result); i32_const(8); i32_add;
                       local_get(i); i32_const(vs as i32); i32_mul; i32_add;
                       local_get(map_ptr); i32_const(4); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
@@ -485,8 +485,8 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(map_ptr);
                     local_get(map_ptr); i32_load(0); local_set(len);
-                    // Alloc list of ptrs: [len:4][ptr0:4][ptr1:4]...
-                    i32_const(4); local_get(len); i32_const(4); i32_mul; i32_add;
+                    // Alloc list of ptrs: [len:4][cap:4][ptr0:4][ptr1:4]...
+                    i32_const(8); local_get(len); i32_const(4); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(len); i32_store(0);
                     i32_const(0); local_set(i);
@@ -510,7 +510,7 @@ impl FuncCompiler<'_> {
                 self.emit_elem_copy_sized(vs);
                 wasm!(self.func, {
                       // Store tuple ptr in result list
-                      local_get(result); i32_const(4); i32_add;
+                      local_get(result); i32_const(8); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       local_get(tuple_ptr); i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -673,8 +673,8 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      // tuple_ptr = pairs[4 + i*4]
-                      local_get(pairs); i32_const(4); i32_add;
+                      // tuple_ptr = pairs[8 + i*4] (list data at offset 8)
+                      local_get(pairs); i32_const(8); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(tuple_ptr);
                       // Load tuple's key into search slot

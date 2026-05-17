@@ -228,7 +228,7 @@ impl FuncCompiler<'_> {
         wasm!(self.func, { local_get(result_scratch); });
     }
 
-    /// Emit a list literal: allocate [len:i32][elem0][elem1]...
+    /// Emit a list literal: allocate [len:i32][cap:i32][elem0][elem1]...
     pub(super) fn emit_list(&mut self, elements: &[IrExpr], _list_ty: &Ty) {
         let elem_ty = if let Some(first) = elements.first() {
             first.ty.clone()
@@ -237,7 +237,7 @@ impl FuncCompiler<'_> {
         };
         let elem_size = values::byte_size(&elem_ty);
         let n = elements.len() as u32;
-        let total = 4 + n * elem_size;
+        let total = 8 + n * elem_size;
 
         wasm!(self.func, {
             i32_const(total as i32);
@@ -254,9 +254,16 @@ impl FuncCompiler<'_> {
             i32_store(0);
         });
 
+        // Store capacity = len (exact fit)
+        wasm!(self.func, {
+            local_get(scratch);
+            i32_const(n as i32);
+            i32_store(4);
+        });
+
         // Store each element
         for (i, elem) in elements.iter().enumerate() {
-            let offset = 4 + (i as u32) * elem_size;
+            let offset = 8 + (i as u32) * elem_size;
             wasm!(self.func, { local_get(scratch); });
             self.emit_expr(elem);
             self.emit_store_at(&elem.ty, offset);
@@ -266,7 +273,7 @@ impl FuncCompiler<'_> {
         wasm!(self.func, { local_get(scratch); });
     }
 
-    /// Emit index access: list_ptr + 4 + index * elem_size
+    /// Emit index access: list_ptr + 8 + index * elem_size
     pub(super) fn emit_index_access(&mut self, object: &IrExpr, index: &IrExpr, result_ty: &Ty) {
         let elem_size = values::byte_size(result_ty);
 
@@ -274,13 +281,13 @@ impl FuncCompiler<'_> {
 
         // Optimize constant index: compute offset at compile time
         if let IrExprKind::LitInt { value } = &index.kind {
-            let offset = 4 + (*value as u32) * (elem_size as u32);
+            let offset = 8 + (*value as u32) * (elem_size as u32);
             self.emit_load_at(result_ty, offset);
             return;
         }
 
         wasm!(self.func, {
-            i32_const(4);
+            i32_const(8);
             i32_add;
         });
 
