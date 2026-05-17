@@ -5,6 +5,11 @@ fn main() -> Unit = {
   rep[2] = 99
   println(int.to_string(rep[0]) + " " + int.to_string(rep[2]))
 
+  // push onto large list (cap=0 realloc must not overflow)
+  var big = list.repeat(0, 20)
+  list.push(big, 999)
+  println(int.to_string(big[0]) + " " + int.to_string(big[19]) + " " + int.to_string(big[20]))
+
   // Construction + access
   let xs = [10, 20, 30, 40, 50]
   println(int.to_string(xs[0]) + " " + int.to_string(xs[4]))

@@ -1034,9 +1034,12 @@ impl FuncCompiler<'_> {
                     else_;
                 });
 
-                // Slow path: realloc with new_cap = max(cap * 2, 8)
+                // Slow path: new_cap = max(cap * 2, len + 1, 8)
+                // cap=0 is common (lists created without explicit cap), so
+                // we MUST ensure new_cap >= len+1 to avoid buffer overflow.
                 wasm!(self.func, {
-                    local_get(cap_local); i32_const(1); i32_shl; // cap * 2
+                    // cap_local = max(cap * 2, 8)
+                    local_get(cap_local); i32_const(1); i32_shl;
                     i32_const(8);
                     i32_gt_u;
                     if_i32;
@@ -1044,7 +1047,15 @@ impl FuncCompiler<'_> {
                     else_;
                       i32_const(8);
                     end;
-                    local_set(cap_local); // new_cap
+                    local_set(cap_local);
+                    // cap_local = max(cap_local, len + 1)
+                    local_get(cap_local);
+                    local_get(len_local); i32_const(1); i32_add;
+                    i32_lt_u;
+                    if_empty;
+                      local_get(len_local); i32_const(1); i32_add;
+                      local_set(cap_local);
+                    end;
                 });
 
                 // Ensure new_cap > len (edge case: cap=0, len=0 → new_cap=8 > 0 ✓)
