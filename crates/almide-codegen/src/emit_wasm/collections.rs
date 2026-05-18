@@ -87,10 +87,9 @@ impl FuncCompiler<'_> {
         if !type_fields.is_empty() {
             // Emit in type-definition order
             for (field_name, field_ty) in &type_fields {
-                wasm!(self.func, { local_get(scratch); });
                 if let Some(expr) = explicit_map.get(field_name.as_str()) {
+                    wasm!(self.func, { local_get(scratch); });
                     self.emit_expr(expr);
-                    // Use type-definition type when expr.ty is Unknown
                     let store_ty = if expr.ty.is_unresolved() {
                         field_ty
                     } else {
@@ -100,6 +99,7 @@ impl FuncCompiler<'_> {
                     offset += values::byte_size(store_ty);
                 } else if let Some(ctor_name) = name {
                     if let Some(default_expr) = self.emitter.default_fields.get(&(ctor_name.to_string(), field_name.clone())) {
+                        wasm!(self.func, { local_get(scratch); });
                         let default_expr = default_expr.clone();
                         let dt = match (&default_expr.ty, &default_expr.kind) {
                             (Ty::Unknown, almide_ir::IrExprKind::LitInt { .. }) => Ty::Int,
@@ -112,7 +112,7 @@ impl FuncCompiler<'_> {
                         self.emit_store_at(&dt, offset);
                         offset += values::byte_size(&dt);
                     } else {
-                        // No value — zero-fill
+                        // No value, no default — skip (zero from alloc)
                         offset += values::byte_size(field_ty);
                     }
                 } else {
