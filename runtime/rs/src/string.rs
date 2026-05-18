@@ -1,7 +1,7 @@
 // string extern — Rust native implementations
 // TOML templates use &*{s} which dereferences String to &str
 
-pub fn almide_rt_string_len(s: &str) -> i64 { s.chars().count() as i64 }
+pub fn almide_rt_string_len(s: &str) -> i64 { s.len() as i64 }
 pub fn almide_rt_string_to_upper(s: &str) -> String { s.to_uppercase() }
 pub fn almide_rt_string_to_lower(s: &str) -> String { s.to_lowercase() }
 pub fn almide_rt_string_trim(s: &str) -> String { s.trim().to_string() }
@@ -16,10 +16,15 @@ pub fn almide_rt_string_join(parts: &Vec<String>, sep: &str) -> String { parts.j
 pub fn almide_rt_string_repeat(s: &str, n: i64) -> String { s.repeat(n as usize) }
 pub fn almide_rt_string_reverse(s: &str) -> String { s.chars().rev().collect() }
 pub fn almide_rt_string_chars(s: &str) -> Vec<String> { s.chars().map(|c| c.to_string()).collect() }
-pub fn almide_rt_string_char_at(s: &str, i: i64) -> Option<String> { s.chars().nth(i as usize).map(|c| c.to_string()) }
+pub fn almide_rt_string_char_at(s: &str, i: i64) -> Option<String> {
+    let idx = i as usize;
+    if idx >= s.len() { return None; }
+    let idx = snap_to_char_boundary(s, idx);
+    s[idx..].chars().next().map(|c| c.to_string())
+}
 pub fn almide_rt_string_char_count(s: &str) -> i64 { s.chars().count() as i64 }
-pub fn almide_rt_string_index_of(s: &str, sub: &str) -> Option<i64> { s.find(sub).map(|i| s[..i].chars().count() as i64) }
-pub fn almide_rt_string_last_index_of(s: &str, sub: &str) -> Option<i64> { s.rfind(sub).map(|i| s[..i].chars().count() as i64) }
+pub fn almide_rt_string_index_of(s: &str, sub: &str) -> Option<i64> { s.find(sub).map(|i| i as i64) }
+pub fn almide_rt_string_last_index_of(s: &str, sub: &str) -> Option<i64> { s.rfind(sub).map(|i| i as i64) }
 pub fn almide_rt_string_count(s: &str, sub: &str) -> i64 { s.matches(sub).count() as i64 }
 pub fn almide_rt_string_lines(s: &str) -> Vec<String> { s.lines().map(|l| l.to_string()).collect() }
 pub fn almide_rt_string_is_empty(s: &str) -> bool { s.is_empty() }
@@ -38,10 +43,16 @@ pub fn almide_rt_string_codepoint(s: &str) -> Option<i64> { s.chars().next().map
 pub fn almide_rt_string_from_codepoint(cp: i64) -> String { char::from_u32(cp as u32).map(|c| c.to_string()).unwrap_or_default() }
 
 pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let s = start.max(0) as usize;
-    let e = end.min(chars.len() as i64) as usize;
-    if s >= e { String::new() } else { chars[s..e].iter().collect() }
+    let len = s.len();
+    let s_idx = (start.max(0) as usize).min(len);
+    let e_idx = (end.max(0) as usize).min(len);
+    if s_idx >= e_idx { String::new() }
+    else {
+        // Snap to char boundaries to avoid panics on multi-byte UTF-8
+        let s_idx = snap_to_char_boundary(s, s_idx);
+        let e_idx = snap_to_char_boundary(s, e_idx);
+        s[s_idx..e_idx].to_string()
+    }
 }
 
 pub fn almide_rt_string_pad_left(s: &str, width: i64, pad: &str) -> String {
@@ -64,6 +75,14 @@ pub fn almide_rt_string_replace_first(s: &str, from: &str, to: &str) -> String {
 
 pub fn almide_rt_string_strip_prefix(s: &str, prefix: &str) -> Option<String> { s.strip_prefix(prefix).map(|r| r.to_string()) }
 pub fn almide_rt_string_strip_suffix(s: &str, suffix: &str) -> Option<String> { s.strip_suffix(suffix).map(|r| r.to_string()) }
+
+/// Snap a byte index to the nearest valid UTF-8 char boundary (rounding down).
+fn snap_to_char_boundary(s: &str, idx: usize) -> usize {
+    if idx >= s.len() { return s.len(); }
+    let mut i = idx;
+    while i > 0 && !s.is_char_boundary(i) { i -= 1; }
+    i
+}
 
 #[cfg(test)]
 mod tests {

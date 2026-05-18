@@ -1,0 +1,45 @@
+fn fib(n: Int) -> Int =
+  if n <= 1 then n
+  else fib(n - 1) + fib(n - 2)
+
+fn factorial(n: Int) -> Int =
+  if n <= 1 then 1
+  else n * factorial(n - 1)
+
+fn main() -> Unit = {
+  // Recursion
+  println(int.to_string(fib(10)))
+  println(int.to_string(factorial(7)))
+
+  // While loop
+  var sum = 0
+  var i = 0
+  while i < 100 {
+    sum = sum + i
+    i = i + 1
+  }
+  println(int.to_string(sum))
+
+  // For-in with list
+  var total = 0
+  for x in [10, 20, 30, 40] { total = total + x }
+  println(int.to_string(total))
+
+  // Match on Int
+  let result = match 42 {
+    0 => "zero",
+    _ => "nonzero",
+  }
+  println(result)
+
+  // If/else chain
+  let x = 15
+  let label = if x > 20 then "big"
+    else if x > 10 then "medium"
+    else "small"
+  println(label)
+
+  // Pipe
+  let v = 5 |> (n) => n * n |> (n) => n + 1
+  println(int.to_string(v))
+}

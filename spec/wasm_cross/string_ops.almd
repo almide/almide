@@ -1,0 +1,36 @@
+fn main() -> Unit = {
+  // split / join roundtrip
+  let parts = string.split("one:two:three", ":")
+  let joined = string.join(parts, ",")
+  println(joined)
+
+  // slice
+  let s = "hello world"
+  println(string.slice(s, 0, 5))
+
+  // repeat
+  println(string.repeat("ab", 3))
+
+  // contains / starts_with / ends_with
+  let r1 = if string.contains(s, "world") then "y" else "n"
+  let r2 = if string.starts_with(s, "hello") then "y" else "n"
+  let r3 = if string.ends_with(s, "xyz") then "y" else "n"
+  println(r1 + r2 + r3)
+
+  // trim
+  println(string.trim("  hi  "))
+
+  // replace
+  println(string.replace("aabbcc", "bb", "XX"))
+
+  // len
+  println(int.to_string(string.len("hello")))
+
+  // index_of
+  let idx = string.index_of("abcdef", "cd") ?? -1
+  println(int.to_string(idx))
+
+  // lines
+  let ls = string.lines("a\nb\nc")
+  println(int.to_string(list.len(ls)) + " " + ls[0] + " " + ls[2])
+}

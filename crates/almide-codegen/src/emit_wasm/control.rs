@@ -164,10 +164,10 @@ impl FuncCompiler<'_> {
                         }
                     }
                 } else {
-                    // List iteration: load element directly
+                    // List iteration: load element directly (data at offset 8)
                     wasm!(self.func, {
                         local_get(list_scratch);
-                        i32_const(4);
+                        i32_const(8);
                         i32_add;
                         local_get(idx_scratch);
                         i32_const(entry_size as i32);

@@ -1,0 +1,42 @@
+import self.rec as tw
+import self.ease
+
+var items: List[tw.Tween] = []
+var count = 0
+
+fn init() -> Unit = {
+  count = 4
+  items = []
+  let easings = [ease.LINEAR, ease.OUT_CUBIC, ease.IN_OUT_QUAD, ease.OUT_ELASTIC]
+  for i in 0..count {
+    let t0 = tw.create(0.0, 1.0, 1200.0)
+    let t1 = tw.with_easing(t0, easings[i])
+    let t2 = tw.with_delay(t1, int.to_float(i) * 80.0)
+    let t3 = tw.looping(t2)
+    let t4 = tw.with_direction(t3, tw.ALTERNATE)
+    items = items + [t4]
+  }
+}
+
+fn tick_a(dt: Float) -> Unit = {
+  var out: List[tw.Tween] = []
+  for i in 0..count {
+    out = out + [tw.tick(items[i], dt)]
+  }
+  items = out
+}
+
+fn tick_b(dt: Float) -> Unit = {
+  var out: List[tw.Tween] = []
+  for i in 0..count {
+    out = out + [tw.tick(items[i], dt)]
+  }
+  items = out
+}
+
+fn main() -> Unit = {
+  init()
+  tick_a(500.0)
+  tick_b(500.0)
+  println(float.to_string(tw.value(items[0])) + " " + float.to_string(items[0].elapsed))
+}

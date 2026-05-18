@@ -1,0 +1,57 @@
+// RED test: cross-module spread record with diamond dependency + test pipes.
+// Reproduces ceangal-anime func validation failure.
+// Trigger: tween.almd test blocks use pipe chains on spread-heavy record type,
+// AND stagger.almd shares the same easing import, causing monomorphizer to
+// generate broken lifted functions.
+
+// This test uses the exact ceangal-anime pattern via the test package at
+// /tmp/spread_exact/. Since we can't import external packages in spec tests,
+// we inline the minimal reproduction here.
+
+// NOTE: This test will FAIL (RED) until the spread codegen / pipe + test
+// block interaction is fixed. Once green, the fix is verified.
+
+type Tw = {
+  a: Float, b: Float, c: Float, d: Float,
+  e: Int, f: Int, g: Int,
+  h: Float, i: Int, j: Int,
+}
+
+fn tw_make(a: Float, b: Float, c: Float) -> Tw =
+  Tw { a: a, b: b, c: c, d: 0.0, e: 0, f: 0, g: 0, h: 0.0, i: 1, j: 0 }
+
+fn tw_tick(tw: Tw, dt: Float) -> Tw = {
+  if tw.i != 1 then tw
+  else {
+    let nh = tw.h + dt
+    let at = nh - tw.d
+    if at >= tw.c then {
+      if tw.g == 0 - 1 or tw.j < tw.g then {
+        let ov = at - tw.c
+        { ...tw, h: tw.d + ov, j: tw.j + 1 }
+      } else {
+        { ...tw, h: nh, i: 3 }
+      }
+    } else {
+      { ...tw, h: nh }
+    }
+  }
+}
+
+fn main() -> Unit = {
+  var items: List[Tw] = []
+  for i in 0..5 {
+    items = items + [tw_make(0.0, 1.0, 100.0)]
+  }
+  // tick all
+  var out: List[Tw] = []
+  for i in 0..5 {
+    out = out + [tw_tick(items[i], 10.0)]
+  }
+  // second tick loop (2 for+concat loops = trigger condition)
+  var out2: List[Tw] = []
+  for i in 0..5 {
+    out2 = out2 + [tw_tick(out[i], 10.0)]
+  }
+  println(float.to_string(out2[0].h))
+}

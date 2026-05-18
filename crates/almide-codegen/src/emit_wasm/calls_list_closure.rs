@@ -34,7 +34,7 @@ impl FuncCompiler<'_> {
                       local_get(i); local_get(xs); i32_load(0); i32_ge_u; br_if(1);
                       // Call pred(xs[i])
                       local_get(closure); i32_load(4); // env
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -47,7 +47,7 @@ impl FuncCompiler<'_> {
                         // Found: alloc some(xs[i])
                         i32_const(es); call(self.emitter.rt.alloc); local_set(tmp);
                         local_get(tmp);
-                        local_get(xs); i32_const(4); i32_add;
+                        local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -84,7 +84,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(xs); i32_load(0); i32_ge_u; br_if(1);
                       local_get(closure); i32_load(4); // env
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -125,7 +125,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(xs); i32_load(0); i32_ge_u; br_if(1);
                       local_get(closure); i32_load(4);
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -160,7 +160,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(xs); i32_load(0); i32_ge_u; br_if(1);
                       local_get(closure); i32_load(4);
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -194,7 +194,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(xs); i32_load(0); i32_ge_u; br_if(1);
                       local_get(closure); i32_load(4);
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -232,15 +232,15 @@ impl FuncCompiler<'_> {
                     // new_len = len - start
                     local_get(xs); i32_load(0); local_get(start); i32_sub;
                     local_set(new_len);
-                    i32_const(4); local_get(new_len); i32_const(es); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(new_len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(new_len); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(new_len); i32_ge_u; br_if(1);
-                      local_get(dst); i32_const(4); i32_add;
+                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(start); local_get(i); i32_add;
                       i32_const(es); i32_mul; i32_add;
                 });
@@ -276,15 +276,15 @@ impl FuncCompiler<'_> {
                     local_set(new_len); // new_len
                     local_get(new_len); i32_const(0); i32_lt_s;
                     if_empty; i32_const(0); local_set(new_len); end;
-                    i32_const(4); local_get(new_len); i32_const(es); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(new_len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(new_len); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(new_len); i32_ge_u; br_if(1);
-                      local_get(dst); i32_const(4); i32_add;
+                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -314,13 +314,13 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]); // n
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(n);
-                    i32_const(4); local_get(n); i32_const(es); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(n); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(n); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(n); i32_ge_u; br_if(1);
-                      local_get(dst); i32_const(4); i32_add;
+                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                       local_get(val);
                 });
@@ -355,7 +355,7 @@ impl FuncCompiler<'_> {
                     if_i32; i32_const(0); // empty → none
                     else_;
                       // acc = xs[0]
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, { local_set(acc); });
@@ -366,7 +366,7 @@ impl FuncCompiler<'_> {
                         // Call f(acc, xs[i])
                         local_get(closure); i32_load(4); // env
                         local_get(acc); // acc
-                        local_get(xs); i32_const(4); i32_add;
+                        local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -421,17 +421,17 @@ impl FuncCompiler<'_> {
                     local_set(closure);
                     local_get(xs); i32_load(0); local_set(len);
                     // Alloc temp list-of-lists: [len][ptr0][ptr1]...
-                    i32_const(4); local_get(len); i32_const(4); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(4); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(lol);
                     local_get(lol); local_get(len); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       // Call f(xs[i]) → List[B]
-                      local_get(lol); i32_const(4); i32_add;
+                      local_get(lol); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add; // dst addr for result ptr
                       local_get(closure); i32_load(4); // env
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -452,7 +452,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(lol); i32_load(0); i32_ge_u; br_if(1);
                       local_get(total);
-                      local_get(lol); i32_const(4); i32_add;
+                      local_get(lol); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); i32_load(0);
                       i32_add; local_set(total);
@@ -460,7 +460,7 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                     // Alloc result
-                    i32_const(4); local_get(total); i32_const(out_es); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(total); i32_const(out_es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(total); i32_store(0);
                 });
@@ -470,15 +470,15 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(lol); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(lol); i32_const(4); i32_add;
+                      local_get(lol); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(inner);
                       i32_const(0); local_set(j);
                       block_empty; loop_empty;
                         local_get(j); local_get(inner); i32_load(0); i32_ge_u; br_if(1);
-                        local_get(result); i32_const(4); i32_add;
+                        local_get(result); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(total); i32_const(out_es); i32_mul; i32_add;
-                        local_get(inner); i32_const(4); i32_add;
+                        local_get(inner); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(j); i32_const(out_es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&out_elem_ty);
@@ -531,14 +531,14 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(closure);
                     local_get(xs); i32_load(0); local_set(len);
-                    i32_const(4); local_get(len); i32_const(out_es); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(out_es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); i32_const(0); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       local_get(closure); i32_load(4); // env
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -551,7 +551,7 @@ impl FuncCompiler<'_> {
                       local_get(opt); i32_const(0); i32_ne;
                       if_empty;
                         // Append unwrapped value to result
-                        local_get(dst); i32_const(4); i32_add;
+                        local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(dst); i32_load(0); i32_const(out_es); i32_mul; i32_add;
                         local_get(opt); // some ptr
                 });
@@ -596,16 +596,16 @@ impl FuncCompiler<'_> {
                     i32_wrap_i64; local_set(idx_j);
                     local_get(xs); i32_load(0); local_set(len);
                     // Alloc copy
-                    i32_const(4); local_get(len); i32_const(es); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(len); i32_store(0);
                     // Copy all elements
                     i32_const(0); local_set(k);
                     block_empty; loop_empty;
                       local_get(k); local_get(len); i32_ge_u; br_if(1);
-                      local_get(dst); i32_const(4); i32_add;
+                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(k); i32_const(es); i32_mul; i32_add;
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(k); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -617,22 +617,22 @@ impl FuncCompiler<'_> {
                 // Swap dst[i] and dst[j] using typed scratch local as temp
                 // tmp = dst[i]
                 wasm!(self.func, {
-                    local_get(dst); i32_const(4); i32_add;
+                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(idx_i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, { local_set(tmp); });
                 // dst[i] = dst[j]
                 wasm!(self.func, {
-                    local_get(dst); i32_const(4); i32_add;
+                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(idx_i); i32_const(es); i32_mul; i32_add;
-                    local_get(dst); i32_const(4); i32_add;
+                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(idx_j); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
                 // dst[j] = tmp
                 wasm!(self.func, {
-                    local_get(dst); i32_const(4); i32_add;
+                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(idx_j); i32_const(es); i32_mul; i32_add;
                     local_get(tmp);
                 });
@@ -671,7 +671,7 @@ impl FuncCompiler<'_> {
                     local_get(n); i32_div_u;
                     local_set(num_chunks);
                     // Alloc outer: 4 + num_chunks * 4 (list of ptrs)
-                    i32_const(4); local_get(num_chunks); i32_const(4); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(num_chunks); i32_const(4); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(outer);
                     local_get(outer); local_get(num_chunks); i32_store(0);
                     i32_const(0); local_set(i);
@@ -683,16 +683,16 @@ impl FuncCompiler<'_> {
                       local_get(chunk_len); local_get(n); i32_gt_u;
                       if_empty; local_get(n); local_set(chunk_len); end;
                       // Alloc inner: 4 + chunk_len * es
-                      i32_const(4); local_get(chunk_len); i32_const(es); i32_mul; i32_add;
+                      i32_const(super::list_layout::HEADER_SIZE); local_get(chunk_len); i32_const(es); i32_mul; i32_add;
                       call(self.emitter.rt.alloc); local_set(inner);
                       local_get(inner); local_get(chunk_len); i32_store(0);
                       // Copy elements
                       i32_const(0); local_set(j);
                       block_empty; loop_empty;
                         local_get(j); local_get(chunk_len); i32_ge_u; br_if(1);
-                        local_get(inner); i32_const(4); i32_add;
+                        local_get(inner); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(j); i32_const(es); i32_mul; i32_add;
-                        local_get(xs); i32_const(4); i32_add;
+                        local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(i); local_get(n); i32_mul;
                         local_get(j); i32_add;
                         i32_const(es); i32_mul; i32_add;
@@ -703,7 +703,7 @@ impl FuncCompiler<'_> {
                         br(0);
                       end; end;
                       // outer[i] = inner_ptr
-                      local_get(outer); i32_const(4); i32_add;
+                      local_get(outer); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       local_get(inner); i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -748,23 +748,23 @@ impl FuncCompiler<'_> {
                     end;
                     local_set(num_win);
                     // Alloc outer: 4 + num_win * 4
-                    i32_const(4); local_get(num_win); i32_const(4); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(num_win); i32_const(4); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(outer);
                     local_get(outer); local_get(num_win); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(num_win); i32_ge_u; br_if(1);
                       // Alloc inner: 4 + n * es
-                      i32_const(4); local_get(n); i32_const(es); i32_mul; i32_add;
+                      i32_const(super::list_layout::HEADER_SIZE); local_get(n); i32_const(es); i32_mul; i32_add;
                       call(self.emitter.rt.alloc); local_set(inner);
                       local_get(inner); local_get(n); i32_store(0);
                       // Copy n elements starting at i
                       i32_const(0); local_set(j);
                       block_empty; loop_empty;
                         local_get(j); local_get(n); i32_ge_u; br_if(1);
-                        local_get(inner); i32_const(4); i32_add;
+                        local_get(inner); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(j); i32_const(es); i32_mul; i32_add;
-                        local_get(xs); i32_const(4); i32_add;
+                        local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(i); local_get(j); i32_add;
                         i32_const(es); i32_mul; i32_add;
                 });
@@ -774,7 +774,7 @@ impl FuncCompiler<'_> {
                         br(0);
                       end; end;
                       // outer[i] = inner_ptr
-                      local_get(outer); i32_const(4); i32_add;
+                      local_get(outer); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       local_get(inner); i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -805,7 +805,7 @@ impl FuncCompiler<'_> {
                     local_set(xs);
                     local_get(xs); i32_load(0); local_set(len);
                     // Alloc dst (max = len)
-                    i32_const(4); local_get(len); i32_const(es); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     i32_const(0); local_set(out_count);
                     // If empty, return empty
@@ -814,8 +814,8 @@ impl FuncCompiler<'_> {
                       local_get(dst); i32_const(0); i32_store(0);
                     else_;
                       // Always include first element
-                      local_get(dst); i32_const(4); i32_add;
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
                 wasm!(self.func, {
@@ -824,10 +824,10 @@ impl FuncCompiler<'_> {
                       block_empty; loop_empty;
                         local_get(i); local_get(len); i32_ge_u; br_if(1);
                         // Compare xs[i] with xs[i-1]
-                        local_get(xs); i32_const(4); i32_add;
+                        local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                         i32_load(0);
-                        local_get(xs); i32_const(4); i32_add;
+                        local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(i); i32_const(1); i32_sub;
                         i32_const(es); i32_mul; i32_add;
                         i32_load(0);
@@ -839,9 +839,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                         i32_eqz; // not equal → include
                         if_empty;
-                          local_get(dst); i32_const(4); i32_add;
+                          local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                           local_get(out_count); i32_const(es); i32_mul; i32_add;
-                          local_get(xs); i32_const(4); i32_add;
+                          local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                           local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -908,16 +908,16 @@ impl FuncCompiler<'_> {
                     local_set(closure);
                     local_get(xs); i32_load(0); local_set(len);
                     // Alloc copy of elements
-                    i32_const(4); local_get(len); i32_const(es); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(len); i32_store(0);
                     // Copy all elements
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(dst); i32_const(4); i32_add;
+                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
-                      local_get(xs); i32_const(4); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -935,7 +935,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       local_get(closure); i32_load(4); // env
-                      local_get(dst); i32_const(4); i32_add;
+                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -1033,22 +1033,22 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                           // Swap dst[j] and dst[j+1] using typed scratch local
                           // tmp_elem = dst[j]
-                          local_get(dst); i32_const(4); i32_add;
+                          local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                           local_get(j); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
                           local_set(tmp_elem);
                           // dst[j] = dst[j+1]
-                          local_get(dst); i32_const(4); i32_add;
+                          local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                           local_get(j); i32_const(es); i32_mul; i32_add;
-                          local_get(dst); i32_const(4); i32_add;
+                          local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                           local_get(j); i32_const(1); i32_add; i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
                 wasm!(self.func, {
                           // dst[j+1] = tmp_elem
-                          local_get(dst); i32_const(4); i32_add;
+                          local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                           local_get(j); i32_const(1); i32_add; i32_const(es); i32_mul; i32_add;
                           local_get(tmp_elem);
                 });

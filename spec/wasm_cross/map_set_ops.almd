@@ -1,0 +1,46 @@
+fn main() -> Unit = {
+  // Map from_list
+  let m = map.from_list([("a", 1), ("b", 2), ("c", 3)])
+  println(int.to_string(map.len(m)))
+
+  // keys / values
+  let ks = map.keys(m)
+  println(int.to_string(list.len(ks)))
+  let vs = map.values(m)
+  println(int.to_string(list.len(vs)))
+
+  // get
+  let v = map.get(m, "b") ?? -1
+  println(int.to_string(v))
+  let missing = map.get(m, "z") ?? -1
+  println(int.to_string(missing))
+
+  // set
+  let m2 = map.set(m, "d", 4)
+  println(int.to_string(map.len(m2)))
+
+  // remove
+  let m3 = map.remove(m, "b")
+  println(int.to_string(map.len(m3)))
+
+  // entries
+  let es = map.entries(m)
+  println(int.to_string(list.len(es)))
+
+  // Set
+  let s = set.from_list([3, 1, 4, 1, 5, 9, 2, 6, 5])
+  let xs = set.to_list(s)
+  println(int.to_string(list.len(xs)))
+
+  // set contains
+  let has3 = if set.contains(s, 3) then "y" else "n"
+  let has7 = if set.contains(s, 7) then "y" else "n"
+  println(has3 + " " + has7)
+
+  // set union / intersection
+  let a = set.from_list([1, 2, 3])
+  let b = set.from_list([2, 3, 4])
+  let u = set.union(a, b)
+  let inter = set.intersection(a, b)
+  println(int.to_string(set.len(u)) + " " + int.to_string(set.len(inter)))
+}

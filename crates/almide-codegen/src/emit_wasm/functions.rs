@@ -15,7 +15,18 @@ pub fn compile_function(
     _var_table: &VarTable,
     type_idx: u32,
 ) -> CompiledFunc {
-    compile_function_with_init(emitter, func, _var_table, type_idx, None)
+    compile_function_inner(emitter, func, _var_table, type_idx, None, None)
+}
+
+/// Compile a module function with module-name context for intra-module call resolution.
+pub fn compile_module_function(
+    emitter: &mut WasmEmitter,
+    func: &IrFunction,
+    _var_table: &VarTable,
+    type_idx: u32,
+    module_name: &str,
+) -> CompiledFunc {
+    compile_function_inner(emitter, func, _var_table, type_idx, None, Some(module_name.to_string()))
 }
 
 pub fn compile_function_with_init(
@@ -24,6 +35,17 @@ pub fn compile_function_with_init(
     _var_table: &VarTable,
     type_idx: u32,
     init_globals_idx: Option<u32>,
+) -> CompiledFunc {
+    compile_function_inner(emitter, func, _var_table, type_idx, init_globals_idx, None)
+}
+
+fn compile_function_inner(
+    emitter: &mut WasmEmitter,
+    func: &IrFunction,
+    _var_table: &VarTable,
+    type_idx: u32,
+    init_globals_idx: Option<u32>,
+    module_name: Option<String>,
 ) -> CompiledFunc {
     let param_count = func.params.len() as u32;
 
@@ -80,6 +102,7 @@ pub fn compile_function_with_init(
         scratch: scratch_alloc,
         var_table: _var_table,
         stub_ret_ty: almide_lang::types::Ty::Unit,
+        current_module_name: module_name,
     };
 
     if let Some(init_idx) = init_globals_idx {

@@ -1,0 +1,26 @@
+fn main() -> Unit = {
+  // basic arithmetic
+  println(int.to_string(3 + 4 * 2))
+  println(int.to_string(10 / 3))
+  println(int.to_string(10 % 3))
+  println(int.to_string(-5 |> int.abs))
+
+  // int parsing
+  let parsed = int.parse("42") ?? -1
+  println(int.to_string(parsed))
+  let bad = int.parse("abc") ?? -1
+  println(int.to_string(bad))
+
+  // int.to_string
+  println(int.to_string(0))
+  println(int.to_string(-123))
+
+  // float basics
+  println(float.to_string(3.14))
+  println(float.to_string(float.floor(3.7)))
+  println(float.to_string(float.ceil(3.2)))
+
+  // min/max
+  println(int.to_string(int.min(5, 3)))
+  println(int.to_string(int.max(5, 3)))
+}

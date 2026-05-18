@@ -1,0 +1,34 @@
+import json
+
+fn main() -> Unit = {
+  // Parse array
+  let arr = json.parse("[1, 2, 3, 4, 5]") ?? json.null()
+  let items = value.as_array(arr) ?? []
+  println(int.to_string(list.len(items)))
+
+  // Parse object + get
+  let obj = json.parse("{\"name\":\"almide\",\"version\":42}") ?? json.null()
+  let name = value.get(obj, "name") ?? json.null()
+  let name_str = value.as_string(name) ?? "?"
+  println(name_str)
+
+  let ver = value.get(obj, "version") ?? json.null()
+  let ver_int = value.as_int(ver) ?? -1
+  println(int.to_string(ver_int))
+
+  // Nested
+  let nested = json.parse("{\"data\":{\"x\":10}}") ?? json.null()
+  let data = value.get(nested, "data") ?? json.null()
+  let x = value.get(data, "x") ?? json.null()
+  let x_val = value.as_int(x) ?? -1
+  println(int.to_string(x_val))
+
+  // Stringify roundtrip
+  let v = json.parse("[true, false, null]") ?? json.null()
+  println(value.stringify(v))
+
+  // Missing key
+  let missing = value.get(obj, "nonexistent") ?? json.null()
+  let r = value.stringify(missing)
+  println(r)
+}

@@ -1,0 +1,17 @@
+type Point = { x: Int, y: Int }
+
+fn distance_sq(a: Point, b: Point) -> Int =
+  (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
+
+fn main() -> Unit = {
+  // Record construction + field access
+  let p1 = Point { x: 3, y: 4 }
+  let p2 = Point { x: 0, y: 0 }
+  println(int.to_string(p1.x) + " " + int.to_string(p1.y))
+  println(int.to_string(distance_sq(p1, p2)))
+
+  // List of records
+  let points = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }, Point { x: 5, y: 6 }]
+  let xs = list.map(points, (p) => p.x)
+  println(int.to_string(xs[0]) + " " + int.to_string(xs[2]))
+}

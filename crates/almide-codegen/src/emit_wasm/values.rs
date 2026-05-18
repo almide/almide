@@ -3,6 +3,10 @@
 use almide_lang::types::Ty;
 use wasm_encoder::{BlockType, ValType};
 
+/// List memory layout: [len:i32][cap:i32][data...]
+/// Data starts at byte offset 8 from the list pointer.
+pub const LIST_DATA_OFFSET: i32 = 8;
+
 /// Map an Almide type to a WASM value type.
 /// Returns None for Unit (which has no WASM representation).
 pub fn ty_to_valtype(ty: &Ty) -> Option<ValType> {

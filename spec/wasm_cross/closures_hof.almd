@@ -1,0 +1,38 @@
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int =
+  (x) => f(g(x))
+
+fn main() -> Unit = {
+  // Basic closure
+  let double = (x: Int) => x * 2
+  println(int.to_string(apply(double, 5)))
+
+  // Capture
+  let offset = 100
+  let add_offset = (x: Int) => x + offset
+  println(int.to_string(add_offset(42)))
+
+  // Compose
+  let inc = (x: Int) => x + 1
+  let triple = (x: Int) => x * 3
+  let inc_then_triple = compose(triple, inc)
+  println(int.to_string(inc_then_triple(4)))
+
+  // Closure in list operations
+  let multiplier = 7
+  let xs = [1, 2, 3, 4, 5]
+  let result = list.map(xs, (x) => x * multiplier)
+  println(int.to_string(result[4]))
+
+  // Nested closure capture
+  let base = 10
+  let make_adder = (n: Int) => (x: Int) => x + n + base
+  let add5 = make_adder(5)
+  println(int.to_string(add5(3)))
+
+  // Filter with capture
+  let threshold = 3
+  let big = list.filter(xs, (x) => x > threshold)
+  println(int.to_string(list.len(big)) + " " + int.to_string(big[0]))
+}
