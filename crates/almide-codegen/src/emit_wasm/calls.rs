@@ -347,8 +347,20 @@ impl FuncCompiler<'_> {
                         for arg in args {
                             self.emit_expr(arg);
                         }
-                        if let Some(&func_idx) = self.emitter.func_map.get(name.as_str()) {
-                            wasm!(self.func, { call(func_idx); });
+                        // Resolve: try bare name, then try all qualified variants
+                        // (handles intra-module calls where bare name collides with
+                        // another module's function of the same name)
+                        let func_idx = self.emitter.func_map.get(name.as_str()).copied()
+                            .or_else(|| {
+                                // Try qualified: "{module}.{name}" for each known module
+                                self.emitter.module_names.iter()
+                                    .find_map(|m| {
+                                        let qn = format!("{}.{}", m, name.as_str());
+                                        self.emitter.func_map.get(qn.as_str()).copied()
+                                    })
+                            });
+                        if let Some(idx) = func_idx {
+                            wasm!(self.func, { call(idx); });
                         } else {
                             wasm!(self.func, { unreachable; });
                         }

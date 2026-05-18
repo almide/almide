@@ -269,6 +269,7 @@ pub struct WasmEmitter {
     // Function index tracking
     next_func_idx: u32,
     pub func_map: HashMap<String, u32>,
+    pub module_names: Vec<String>,
     /// Reverse lookup for `@intrinsic("almide_rt_<m>_<f>")` attributes:
     /// mangled symbol → (stdlib module name, Almide fn name). Populated
     /// once from bundled stdlib sources; used by the WASM `RuntimeCall`
@@ -361,6 +362,7 @@ impl WasmEmitter {
             num_imports: 0,
             next_func_idx: 0,
             func_map: HashMap::new(),
+            module_names: Vec::new(),
             intrinsic_symbol_to_fn: HashMap::new(),
             func_type_indices: HashMap::new(),
             compiled: Vec::new(),
@@ -787,6 +789,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     // Module @extern(wasm) imports: key = (module_idx, func_idx)
     let mut extern_wasm_module_set: HashSet<(usize, usize)> = HashSet::new();
     for (mi, module) in program.modules.iter().enumerate() {
+        emitter.module_names.push(module.name.to_string());
         let mod_ident = module.versioned_name
             .map(|v| v.to_string().replace('.', "_"))
             .unwrap_or_else(|| module.name.to_string().replace('.', "_"));
@@ -811,11 +814,11 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 let module_name = module.name.to_string();
                 let qualified_name = format!("{}.{}", module_name, func.name);
                 emitter.func_map.insert(qualified_name, func_idx);
-                // Bare name: only if no collision
+                // Bare name: last-write-wins (later modules override earlier ones
+                // so intra-module calls resolve to the local function, not an
+                // imported module's function with the same name)
                 let bare_name = func.name.to_string();
-                if !emitter.func_map.contains_key(&bare_name) {
-                    emitter.func_map.insert(bare_name, func_idx);
-                }
+                emitter.func_map.insert(bare_name, func_idx);
                 if func.is_effect {
                     let effect_prefixed = format!("almide_rt_{}_{}", mod_ident, func_name_sanitized);
                     emitter.effect_fns.insert(effect_prefixed);
