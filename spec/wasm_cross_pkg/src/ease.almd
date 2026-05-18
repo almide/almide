@@ -1,0 +1,226 @@
+// ceangal-anime easing — Robert Penner's easing functions
+//
+// All functions: (t: Float) -> Float where t ∈ [0, 1]
+// Adapted from anime.js v4 / https://robertpenner.com/easing/
+//
+// Naming: ease_{direction}_{curve}
+//   direction: in, out, in_out, out_in
+//   curve: quad, cubic, quart, quint, sine, circ, expo, bounce, back, elastic
+
+import math
+
+let PI = 3.14159265358979323846
+let HALF_PI = PI / 2.0
+let DOUBLE_PI = PI * 2.0
+
+// ── Linear ──
+
+fn linear(t: Float) -> Float = t
+
+// ── Power easing (quad/cubic/quart/quint) ──
+
+fn ease_in_power(t: Float, p: Float) -> Float = math.fpow(t, p)
+fn ease_out_power(t: Float, p: Float) -> Float = 1.0 - math.fpow(1.0 - t, p)
+fn ease_in_out_power(t: Float, p: Float) -> Float =
+  if t < 0.5 then math.fpow(t * 2.0, p) / 2.0
+  else 1.0 - math.fpow(t * (0.0 - 2.0) + 2.0, p) / 2.0
+
+fn ease_in_quad(t: Float) -> Float = t * t
+fn ease_out_quad(t: Float) -> Float = 1.0 - (1.0 - t) * (1.0 - t)
+fn ease_in_out_quad(t: Float) -> Float = ease_in_out_power(t, 2.0)
+
+fn ease_in_cubic(t: Float) -> Float = t * t * t
+fn ease_out_cubic(t: Float) -> Float = 1.0 - math.fpow(1.0 - t, 3.0)
+fn ease_in_out_cubic(t: Float) -> Float = ease_in_out_power(t, 3.0)
+
+fn ease_in_quart(t: Float) -> Float = t * t * t * t
+fn ease_out_quart(t: Float) -> Float = 1.0 - math.fpow(1.0 - t, 4.0)
+fn ease_in_out_quart(t: Float) -> Float = ease_in_out_power(t, 4.0)
+
+fn ease_in_quint(t: Float) -> Float = t * t * t * t * t
+fn ease_out_quint(t: Float) -> Float = 1.0 - math.fpow(1.0 - t, 5.0)
+fn ease_in_out_quint(t: Float) -> Float = ease_in_out_power(t, 5.0)
+
+// ── Sine ──
+
+fn ease_in_sine(t: Float) -> Float = 1.0 - math.cos(t * HALF_PI)
+fn ease_out_sine(t: Float) -> Float = math.sin(t * HALF_PI)
+fn ease_in_out_sine(t: Float) -> Float = 0.0 - (math.cos(PI * t) - 1.0) / 2.0
+
+// ── Circ ──
+
+fn ease_in_circ(t: Float) -> Float = 1.0 - math.sqrt(1.0 - t * t)
+fn ease_out_circ(t: Float) -> Float = math.sqrt(1.0 - (t - 1.0) * (t - 1.0))
+fn ease_in_out_circ(t: Float) -> Float =
+  if t < 0.5 then (1.0 - math.sqrt(1.0 - 4.0 * t * t)) / 2.0
+  else (math.sqrt(1.0 - (0.0 - 2.0 * t + 2.0) * (0.0 - 2.0 * t + 2.0)) + 1.0) / 2.0
+
+// ── Expo ──
+
+fn ease_in_expo(t: Float) -> Float = if t == 0.0 then 0.0 else math.fpow(2.0, 10.0 * t - 10.0)
+fn ease_out_expo(t: Float) -> Float = if t == 1.0 then 1.0 else 1.0 - math.fpow(2.0, 0.0 - 10.0 * t)
+fn ease_in_out_expo(t: Float) -> Float =
+  if t == 0.0 then 0.0
+  else if t == 1.0 then 1.0
+  else if t < 0.5 then math.fpow(2.0, 20.0 * t - 10.0) / 2.0
+  else (2.0 - math.fpow(2.0, 0.0 - 20.0 * t + 10.0)) / 2.0
+
+// ── Back ──
+
+fn ease_in_back(t: Float) -> Float = {
+  let c = 1.70158
+  (c + 1.0) * t * t * t - c * t * t
+}
+
+fn ease_out_back(t: Float) -> Float = {
+  let c = 1.70158
+  let u = t - 1.0
+  1.0 + (c + 1.0) * u * u * u + c * u * u
+}
+
+fn ease_in_out_back(t: Float) -> Float = {
+  let c = 1.70158 * 1.525
+  if t < 0.5 then {
+    let u = 2.0 * t
+    u * u * ((c + 1.0) * u - c) / 2.0
+  } else {
+    let u = 2.0 * t - 2.0
+    (u * u * ((c + 1.0) * u + c) + 2.0) / 2.0
+  }
+}
+
+// ── Elastic ──
+
+fn ease_in_elastic(t: Float) -> Float = {
+  if t == 0.0 or t == 1.0 then t
+  else {
+    let p = 0.3
+    let s = p / 4.0
+    let u = t - 1.0
+    0.0 - math.fpow(2.0, 10.0 * u) * math.sin((u - s) * DOUBLE_PI / p)
+  }
+}
+
+fn ease_out_elastic(t: Float) -> Float = {
+  if t == 0.0 or t == 1.0 then t
+  else {
+    let p = 0.3
+    let s = p / 4.0
+    math.fpow(2.0, 0.0 - 10.0 * t) * math.sin((t - s) * DOUBLE_PI / p) + 1.0
+  }
+}
+
+fn ease_in_out_elastic(t: Float) -> Float = {
+  if t == 0.0 or t == 1.0 then t
+  else {
+    let p = 0.45
+    let s = p / 4.0
+    if t < 0.5 then {
+      let u = 2.0 * t - 1.0
+      0.0 - math.fpow(2.0, 10.0 * u) * math.sin((u - s) * DOUBLE_PI / p) / 2.0
+    } else {
+      let u = 2.0 * t - 1.0
+      math.fpow(2.0, 0.0 - 10.0 * u) * math.sin((u - s) * DOUBLE_PI / p) / 2.0 + 1.0
+    }
+  }
+}
+
+// ── Bounce ──
+
+fn ease_out_bounce(t: Float) -> Float = {
+  let n = 7.5625
+  let d = 2.75
+  if t < 1.0 / d then n * t * t
+  else if t < 2.0 / d then {
+    let u = t - 1.5 / d
+    n * u * u + 0.75
+  }
+  else if t < 2.5 / d then {
+    let u = t - 2.25 / d
+    n * u * u + 0.9375
+  }
+  else {
+    let u = t - 2.625 / d
+    n * u * u + 0.984375
+  }
+}
+
+fn ease_in_bounce(t: Float) -> Float = 1.0 - ease_out_bounce(1.0 - t)
+
+fn ease_in_out_bounce(t: Float) -> Float =
+  if t < 0.5 then (1.0 - ease_out_bounce(1.0 - 2.0 * t)) / 2.0
+  else (1.0 + ease_out_bounce(2.0 * t - 1.0)) / 2.0
+
+// ── Easing ID system (for use without closures) ──
+
+let LINEAR = 0
+let IN_QUAD = 1
+let OUT_QUAD = 2
+let IN_OUT_QUAD = 3
+let IN_CUBIC = 4
+let OUT_CUBIC = 5
+let IN_OUT_CUBIC = 6
+let IN_QUART = 7
+let OUT_QUART = 8
+let IN_OUT_QUART = 9
+let IN_QUINT = 10
+let OUT_QUINT = 11
+let IN_OUT_QUINT = 12
+let IN_SINE = 13
+let OUT_SINE = 14
+let IN_OUT_SINE = 15
+let IN_CIRC = 16
+let OUT_CIRC = 17
+let IN_OUT_CIRC = 18
+let IN_EXPO = 19
+let OUT_EXPO = 20
+let IN_OUT_EXPO = 21
+let IN_BACK = 22
+let OUT_BACK = 23
+let IN_OUT_BACK = 24
+let IN_ELASTIC = 25
+let OUT_ELASTIC = 26
+let IN_OUT_ELASTIC = 27
+let IN_BOUNCE = 28
+let OUT_BOUNCE = 29
+let IN_OUT_BOUNCE = 30
+
+fn apply(id: Int, t: Float) -> Float =
+  if id == LINEAR then linear(t)
+  else if id == IN_QUAD then ease_in_quad(t)
+  else if id == OUT_QUAD then ease_out_quad(t)
+  else if id == IN_OUT_QUAD then ease_in_out_quad(t)
+  else if id == IN_CUBIC then ease_in_cubic(t)
+  else if id == OUT_CUBIC then ease_out_cubic(t)
+  else if id == IN_OUT_CUBIC then ease_in_out_cubic(t)
+  else if id == IN_QUART then ease_in_quart(t)
+  else if id == OUT_QUART then ease_out_quart(t)
+  else if id == IN_OUT_QUART then ease_in_out_quart(t)
+  else if id == IN_QUINT then ease_in_quint(t)
+  else if id == OUT_QUINT then ease_out_quint(t)
+  else if id == IN_OUT_QUINT then ease_in_out_quint(t)
+  else if id == IN_SINE then ease_in_sine(t)
+  else if id == OUT_SINE then ease_out_sine(t)
+  else if id == IN_OUT_SINE then ease_in_out_sine(t)
+  else if id == IN_CIRC then ease_in_circ(t)
+  else if id == OUT_CIRC then ease_out_circ(t)
+  else if id == IN_OUT_CIRC then ease_in_out_circ(t)
+  else if id == IN_EXPO then ease_in_expo(t)
+  else if id == OUT_EXPO then ease_out_expo(t)
+  else if id == IN_OUT_EXPO then ease_in_out_expo(t)
+  else if id == IN_BACK then ease_in_back(t)
+  else if id == OUT_BACK then ease_out_back(t)
+  else if id == IN_OUT_BACK then ease_in_out_back(t)
+  else if id == IN_ELASTIC then ease_in_elastic(t)
+  else if id == OUT_ELASTIC then ease_out_elastic(t)
+  else if id == IN_OUT_ELASTIC then ease_in_out_elastic(t)
+  else if id == IN_BOUNCE then ease_in_bounce(t)
+  else if id == OUT_BOUNCE then ease_out_bounce(t)
+  else if id == IN_OUT_BOUNCE then ease_in_out_bounce(t)
+  else linear(t)
+
+// ── Tests ──
+
+
+
+

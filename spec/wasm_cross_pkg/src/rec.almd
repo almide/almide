@@ -1,27 +1,112 @@
-type R = {
-  a: Float, b: Float, c: Float, d: Float,
-  e: Int, f: Int, g: Int,
-  h: Float, i: Int, j: Int,
+// ceangal-anime tween — value interpolation over time
+//
+// Tween = from + to + duration + easing + delay + loop
+// tick(dt) advances time, value() returns current interpolated value.
+
+import self.ease as ease
+
+// ── Direction ──
+
+let NORMAL = 0     // 0 → 1
+let REVERSE = 1    // 1 → 0
+let ALTERNATE = 2  // 0 → 1 → 0 → 1 ...
+
+// ── State ──
+
+let IDLE = 0
+let RUNNING = 1
+let PAUSED = 2
+let FINISHED = 3
+
+// ── Tween ──
+
+type Tween = {
+  from: Float,
+  to: Float,
+  duration: Float,   // ms
+  delay: Float,      // ms
+  easing: Int,       // easing ID
+  direction: Int,
+  loop_count: Int,   // 0 = no loop, -1 = infinite
+  elapsed: Float,    // ms (includes delay)
+  state: Int,
+  current_loop: Int,
 }
 
-fn make(a: Float, b: Float, c: Float) -> R =
-  R { a: a, b: b, c: c, d: 0.0, e: 0, f: 0, g: 0, h: 0.0, i: 1, j: 0 }
+fn create(from: Float, to: Float, duration: Float) -> Tween = {
+  from: from, to: to, duration: duration, delay: 0.0,
+  easing: ease.OUT_CUBIC, direction: NORMAL, loop_count: 0,
+  elapsed: 0.0, state: RUNNING, current_loop: 0,
+}
 
-fn tick(r: R, dt: Float) -> R = {
-  if r.i != 1 then r
+// ── Builders ──
+
+fn with_easing(tw: Tween, e: Int) -> Tween = { ...tw, easing: e }
+fn with_delay(tw: Tween, d: Float) -> Tween = { ...tw, delay: d }
+fn with_direction(tw: Tween, d: Int) -> Tween = { ...tw, direction: d }
+fn with_loop(tw: Tween, n: Int) -> Tween = { ...tw, loop_count: n }
+fn looping(tw: Tween) -> Tween = { ...tw, loop_count: 0 - 1 }
+
+// ── Progress ──
+
+fn progress(tw: Tween) -> Float = {
+  let active_time = tw.elapsed - tw.delay
+  if active_time < 0.0 then 0.0
+  else if tw.duration <= 0.0 then 1.0
+  else float.min(1.0, active_time / tw.duration)
+}
+
+fn directed_progress(tw: Tween) -> Float = {
+  let p = progress(tw)
+  if tw.direction == REVERSE then 1.0 - p
+  else if tw.direction == ALTERNATE then {
+    if tw.current_loop % 2 == 0 then p else 1.0 - p
+  }
+  else p
+}
+
+fn value(tw: Tween) -> Float = {
+  let t = ease.apply(tw.easing, directed_progress(tw))
+  tw.from + (tw.to - tw.from) * t
+}
+
+// ── Tick ──
+
+fn tick(tw: Tween, dt_ms: Float) -> Tween = {
+  if tw.state != RUNNING then tw
   else {
-    let nh = r.h + dt
-    let at = nh - r.d
-    if at >= r.c then {
-      if r.g == 0 - 1 or r.j < r.g then {
-        let ov = at - r.c
-        // 10-field explicit record construction in nested if/else = BUG TRIGGER
-        R { a: r.a, b: r.b, c: r.c, d: r.d, e: r.e, f: r.f, g: r.g, h: r.d + ov, i: r.i, j: r.j + 1 }
+    let new_elapsed = tw.elapsed + dt_ms
+    let active_time = new_elapsed - tw.delay
+    if active_time >= tw.duration then {
+      // Loop or finish
+      if tw.loop_count == 0 - 1 or tw.current_loop < tw.loop_count then {
+        // Next loop
+        let overflow = active_time - tw.duration
+        Tween { from: tw.from, to: tw.to, duration: tw.duration, delay: tw.delay, easing: tw.easing, direction: tw.direction, loop_count: tw.loop_count,
+          elapsed: tw.delay + overflow,
+          current_loop: tw.current_loop + 1,
+        }
       } else {
-        { ...r, h: nh, i: 3 }
+        Tween { from: tw.from, to: tw.to, duration: tw.duration, delay: tw.delay, easing: tw.easing, direction: tw.direction, loop_count: tw.loop_count, elapsed: new_elapsed, state: FINISHED, current_loop: tw.current_loop }
       }
     } else {
-      { ...r, h: nh }
+      { ...tw, elapsed: new_elapsed }
     }
   }
 }
+
+// ── Control ──
+
+fn pause(tw: Tween) -> Tween = { ...tw, state: PAUSED }
+fn resume(tw: Tween) -> Tween = { ...tw, state: RUNNING }
+fn reset(tw: Tween) -> Tween = { ...tw, elapsed: 0.0, state: RUNNING, current_loop: 0 }
+
+fn is_running(tw: Tween) -> Bool = tw.state == RUNNING
+fn is_finished(tw: Tween) -> Bool = tw.state == FINISHED
+
+// ── Tests ──
+
+
+
+
+
