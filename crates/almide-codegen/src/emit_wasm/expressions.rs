@@ -817,7 +817,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(dst); i32_const(8); i32_add;
+                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(8); i32_mul; i32_add;
                       // value = start + i
                       local_get(s); local_get(i); i64_extend_i32_u; i64_add;
