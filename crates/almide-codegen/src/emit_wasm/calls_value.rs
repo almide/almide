@@ -385,7 +385,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(i);
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(list); i32_const(8); i32_add;
+                local_get(list); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 local_get(pair_ptr); i32_load(0);
@@ -512,7 +512,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(i);
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(list); i32_const(8); i32_add;
+                local_get(list); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 local_get(pair_ptr); i32_load(0);
@@ -635,9 +635,9 @@ impl FuncCompiler<'_> {
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
                 // result[i] = pair[i].key
-                local_get(result); i32_const(4); i32_add;
+                local_get(result); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
-                local_get(list); i32_const(4); i32_add;
+                local_get(list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); // pair ptr
                 i32_load(0); // key string ptr
@@ -692,7 +692,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(result);
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(list); i32_const(8); i32_add;
+                local_get(list); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 local_get(pair_ptr); i32_load(0);
@@ -754,7 +754,7 @@ impl FuncCompiler<'_> {
             else_;
               // Get first pair: key = tag name, value = payload
               local_get(v); i32_load(4); local_set(list); // pairs list
-              local_get(list); i32_const(4); i32_add; i32_load(0); local_set(pair_ptr); // first pair tuple
+              local_get(list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add; i32_load(0); local_set(pair_ptr); // first pair tuple
               // Build tuple (tag_name: String, payload: Value)
               i32_const(8); call(self.emitter.rt.alloc); local_set(result);
               local_get(result); local_get(pair_ptr); i32_load(0); i32_store(0); // tag name string
@@ -812,7 +812,7 @@ impl FuncCompiler<'_> {
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
                 // Get old pair
-                local_get(old_list); i32_const(4); i32_add;
+                local_get(old_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(old_pair);
                 local_get(old_pair); i32_load(0); local_set(old_key);
@@ -830,7 +830,7 @@ impl FuncCompiler<'_> {
             wasm!(self.func, {
                 block_empty; loop_empty;
                   local_get(j); local_get(src_len); i32_ge_u; br_if(1);
-                  local_get(old_key); i32_const(4); i32_add; local_get(j); i32_add; i32_load8_u(0);
+                  local_get(old_key); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(j); i32_add; i32_load8_u(0);
                   local_set(ch);
                   local_get(ch); i32_const(95); i32_eq; // '_'
                   if_empty;
@@ -838,15 +838,15 @@ impl FuncCompiler<'_> {
                     local_get(j); i32_const(1); i32_add; local_set(j);
                     local_get(j); local_get(src_len); i32_lt_u;
                     if_empty;
-                      local_get(dst_buf); i32_const(4); i32_add; local_get(dst_pos); i32_add;
-                      local_get(old_key); i32_const(4); i32_add; local_get(j); i32_add; i32_load8_u(0);
+                      local_get(dst_buf); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(dst_pos); i32_add;
+                      local_get(old_key); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(j); i32_add; i32_load8_u(0);
                       i32_const(32); i32_sub; // to uppercase
                       i32_store8(0);
                       local_get(dst_pos); i32_const(1); i32_add; local_set(dst_pos);
                     end;
                   else_;
                     // Copy char as-is
-                    local_get(dst_buf); i32_const(4); i32_add; local_get(dst_pos); i32_add;
+                    local_get(dst_buf); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(dst_pos); i32_add;
                     local_get(ch);
                     i32_store8(0);
                     local_get(dst_pos); i32_const(1); i32_add; local_set(dst_pos);
@@ -860,7 +860,7 @@ impl FuncCompiler<'_> {
             wasm!(self.func, {
                 block_empty; loop_empty;
                   local_get(j); local_get(src_len); i32_ge_u; br_if(1);
-                  local_get(old_key); i32_const(4); i32_add; local_get(j); i32_add; i32_load8_u(0);
+                  local_get(old_key); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(j); i32_add; i32_load8_u(0);
                   local_set(ch);
                   // Check if uppercase (A=65..Z=90)
                   local_get(ch); i32_const(65); i32_ge_u;
@@ -868,15 +868,15 @@ impl FuncCompiler<'_> {
                   i32_and;
                   if_empty;
                     // Insert underscore then lowercase char
-                    local_get(dst_buf); i32_const(4); i32_add; local_get(dst_pos); i32_add;
+                    local_get(dst_buf); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(dst_pos); i32_add;
                     i32_const(95); i32_store8(0); // '_'
                     local_get(dst_pos); i32_const(1); i32_add; local_set(dst_pos);
-                    local_get(dst_buf); i32_const(4); i32_add; local_get(dst_pos); i32_add;
+                    local_get(dst_buf); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(dst_pos); i32_add;
                     local_get(ch); i32_const(32); i32_add; // to lowercase
                     i32_store8(0);
                     local_get(dst_pos); i32_const(1); i32_add; local_set(dst_pos);
                   else_;
-                    local_get(dst_buf); i32_const(4); i32_add; local_get(dst_pos); i32_add;
+                    local_get(dst_buf); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(dst_pos); i32_add;
                     local_get(ch); i32_store8(0);
                     local_get(dst_pos); i32_const(1); i32_add; local_set(dst_pos);
                   end;
@@ -895,7 +895,7 @@ impl FuncCompiler<'_> {
                 local_get(new_pair); local_get(new_key); i32_store(0);
                 local_get(new_pair); local_get(old_pair); i32_load(4); i32_store(4);
                 // Store in new list
-                local_get(new_list); i32_const(4); i32_add;
+                local_get(new_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 local_get(new_pair); i32_store(0);
                 local_get(i); i32_const(1); i32_add; local_set(i);
@@ -959,7 +959,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(i);
               block_empty; loop_empty;
                 local_get(i); local_get(old_len); i32_ge_u; br_if(1);
-                local_get(old_list); i32_const(4); i32_add;
+                local_get(old_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 // Check if key is in keys list
@@ -968,7 +968,7 @@ impl FuncCompiler<'_> {
                 block_empty; loop_empty;
                   local_get(j); local_get(keys_len); i32_ge_u; br_if(1);
                   local_get(pair_ptr); i32_load(0);
-                  local_get(keys); i32_const(4); i32_add;
+                  local_get(keys); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                   local_get(j); i32_const(4); i32_mul; i32_add;
                   i32_load(0);
                   call(self.emitter.rt.string.eq);
@@ -1005,7 +1005,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(count); // reuse as write index
               block_empty; loop_empty;
                 local_get(i); local_get(old_len); i32_ge_u; br_if(1);
-                local_get(old_list); i32_const(4); i32_add;
+                local_get(old_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 i32_const(0); local_set(found);
@@ -1013,7 +1013,7 @@ impl FuncCompiler<'_> {
                 block_empty; loop_empty;
                   local_get(j); local_get(keys_len); i32_ge_u; br_if(1);
                   local_get(pair_ptr); i32_load(0);
-                  local_get(keys); i32_const(4); i32_add;
+                  local_get(keys); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                   local_get(j); i32_const(4); i32_mul; i32_add;
                   i32_load(0);
                   call(self.emitter.rt.string.eq);
@@ -1032,7 +1032,7 @@ impl FuncCompiler<'_> {
         }
         wasm!(self.func, {
                 if_empty;
-                  local_get(new_list); i32_const(4); i32_add;
+                  local_get(new_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                   local_get(count); i32_const(4); i32_mul; i32_add;
                   local_get(pair_ptr); i32_store(0);
                   local_get(count); i32_const(1); i32_add; local_set(count);
@@ -1096,7 +1096,7 @@ impl FuncCompiler<'_> {
             i32_const(0); local_set(i);
             block_empty; loop_empty;
               local_get(i); local_get(a_len); i32_ge_u; br_if(1);
-              local_get(a_list); i32_const(4); i32_add;
+              local_get(a_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
               local_get(i); i32_const(4); i32_mul; i32_add;
               i32_load(0); local_set(pair_ptr);
               // Check if key exists in b
@@ -1105,7 +1105,7 @@ impl FuncCompiler<'_> {
               block_empty; loop_empty;
                 local_get(j); local_get(b_len); i32_ge_u; br_if(1);
                 local_get(pair_ptr); i32_load(0);
-                local_get(b_list); i32_const(4); i32_add;
+                local_get(b_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                 local_get(j); i32_const(4); i32_mul; i32_add;
                 i32_load(0); i32_load(0); // b pair key
                 call(self.emitter.rt.string.eq);
@@ -1115,7 +1115,7 @@ impl FuncCompiler<'_> {
               end; end;
               local_get(found); i32_eqz;
               if_empty;
-                local_get(new_list); i32_const(4); i32_add;
+                local_get(new_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                 local_get(count); i32_const(4); i32_mul; i32_add;
                 local_get(pair_ptr); i32_store(0);
                 local_get(count); i32_const(1); i32_add; local_set(count);
@@ -1127,9 +1127,9 @@ impl FuncCompiler<'_> {
             i32_const(0); local_set(i);
             block_empty; loop_empty;
               local_get(i); local_get(b_len); i32_ge_u; br_if(1);
-              local_get(new_list); i32_const(4); i32_add;
+              local_get(new_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
               local_get(count); i32_const(4); i32_mul; i32_add;
-              local_get(b_list); i32_const(4); i32_add;
+              local_get(b_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
               local_get(i); i32_const(4); i32_mul; i32_add;
               i32_load(0); i32_store(0);
               local_get(count); i32_const(1); i32_add; local_set(count);
@@ -1287,7 +1287,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(found); // 0 = not found
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(list); i32_const(8); i32_add;
+                local_get(list); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 local_get(pair_ptr); i32_load(0);
@@ -1503,7 +1503,7 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(found);
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(list); i32_const(8); i32_add;
+                local_get(list); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(pair_ptr);
                 local_get(pair_ptr); i32_load(0);
@@ -1693,7 +1693,7 @@ impl FuncCompiler<'_> {
         match suffix {
             "string" => {
                 wasm!(self.func, {
-                    local_get(xs); i32_const(4); i32_add;
+                    local_get(xs); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                     local_get(i); i32_const(4); i32_mul; i32_add;
                     i32_load(0); local_set(elem);
                     i32_const(8); call(self.emitter.rt.alloc); local_set(result);
@@ -1704,7 +1704,7 @@ impl FuncCompiler<'_> {
             "int" => {
                 let elem64 = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_get(xs); i32_const(4); i32_add;
+                    local_get(xs); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                     local_get(i); i32_const(8); i32_mul; i32_add;
                     i64_load(0); local_set(elem64);
                     i32_const(12); call(self.emitter.rt.alloc); local_set(result);
@@ -1716,7 +1716,7 @@ impl FuncCompiler<'_> {
             "float" => {
                 let elem_f = self.scratch.alloc_f64();
                 wasm!(self.func, {
-                    local_get(xs); i32_const(4); i32_add;
+                    local_get(xs); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                     local_get(i); i32_const(8); i32_mul; i32_add;
                     f64_load(0); local_set(elem_f);
                     i32_const(12); call(self.emitter.rt.alloc); local_set(result);
@@ -1727,7 +1727,7 @@ impl FuncCompiler<'_> {
             }
             "bool" => {
                 wasm!(self.func, {
-                    local_get(xs); i32_const(4); i32_add;
+                    local_get(xs); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                     local_get(i); i32_const(4); i32_mul; i32_add;
                     i32_load(0); local_set(elem);
                     i32_const(8); call(self.emitter.rt.alloc); local_set(result);
@@ -1738,7 +1738,7 @@ impl FuncCompiler<'_> {
             _ => {
                 // Named type: call Type.encode(elem)
                 wasm!(self.func, {
-                    local_get(xs); i32_const(4); i32_add;
+                    local_get(xs); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                     local_get(i); i32_const(4); i32_mul; i32_add;
                     i32_load(0);
                 });
@@ -1752,7 +1752,7 @@ impl FuncCompiler<'_> {
         }
         wasm!(self.func, {
               // Store value in val_list
-              local_get(val_list); i32_const(4); i32_add;
+              local_get(val_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
               local_get(i); i32_const(4); i32_mul; i32_add;
               local_get(result); i32_store(0);
               local_get(i); i32_const(1); i32_add; local_set(i);
@@ -1810,7 +1810,7 @@ impl FuncCompiler<'_> {
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
                 // Get Value element from array
-                local_get(arr_list); i32_const(4); i32_add;
+                local_get(arr_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(elem_val);
         });
@@ -1818,7 +1818,7 @@ impl FuncCompiler<'_> {
         match suffix {
             "string" => {
                 wasm!(self.func, {
-                    local_get(out_list); i32_const(4); i32_add;
+                    local_get(out_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                     local_get(i); i32_const(4); i32_mul; i32_add;
                     local_get(elem_val); i32_load(4); // string ptr from Value
                     i32_store(0);
@@ -1826,7 +1826,7 @@ impl FuncCompiler<'_> {
             }
             "int" => {
                 wasm!(self.func, {
-                    local_get(out_list); i32_const(4); i32_add;
+                    local_get(out_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                     local_get(i); i32_const(8); i32_mul; i32_add;
                     local_get(elem_val); i64_load(4); // i64 from Value
                     i64_store(0);
@@ -1834,7 +1834,7 @@ impl FuncCompiler<'_> {
             }
             "float" => {
                 wasm!(self.func, {
-                    local_get(out_list); i32_const(4); i32_add;
+                    local_get(out_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                     local_get(i); i32_const(8); i32_mul; i32_add;
                     local_get(elem_val); f64_load(4);
                     f64_store(0);
@@ -1842,7 +1842,7 @@ impl FuncCompiler<'_> {
             }
             "bool" => {
                 wasm!(self.func, {
-                    local_get(out_list); i32_const(4); i32_add;
+                    local_get(out_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                     local_get(i); i32_const(4); i32_mul; i32_add;
                     local_get(elem_val); i32_load(4); // bool (0/1)
                     i32_store(0);
@@ -1855,7 +1855,7 @@ impl FuncCompiler<'_> {
                     let dr = self.scratch.alloc_i32();
                     wasm!(self.func, {
                         local_get(elem_val); call(func_idx); local_set(dr);
-                        local_get(out_list); i32_const(4); i32_add;
+                        local_get(out_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                         local_get(i); i32_const(4); i32_mul; i32_add;
                         local_get(dr); i32_load(4); // ok payload (pointer)
                         i32_store(0);
@@ -1863,7 +1863,7 @@ impl FuncCompiler<'_> {
                     self.scratch.free_i32(dr);
                 } else {
                     wasm!(self.func, {
-                        local_get(out_list); i32_const(4); i32_add;
+                        local_get(out_list); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                         local_get(i); i32_const(4); i32_mul; i32_add;
                         local_get(elem_val);
                         i32_store(0);

@@ -126,7 +126,7 @@ impl FuncCompiler<'_> {
                 // Use nread as actual length (may be <= file_size)
                 wasm!(self.func, {
                     local_get(nread_ptr); i32_load(0); local_set(file_size);
-                    local_get(file_size); i32_const(4); i32_add;
+                    local_get(file_size); i32_const(super::list_layout::STRING_HEADER_SIZE); i32_add;
                     call(self.emitter.rt.alloc); local_set(str_ptr);
                     local_get(str_ptr); local_get(file_size); i32_store(0);
                 });
@@ -138,7 +138,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(counter);
                     block_empty; loop_empty;
                     local_get(counter); local_get(file_size); i32_ge_u; br_if(1);
-                    local_get(str_ptr); i32_const(4); i32_add; local_get(counter); i32_add;
+                    local_get(str_ptr); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(counter); i32_add;
                     local_get(data_buf); local_get(counter); i32_add;
                     i32_load8_u(0);
                     i32_store8(0);
@@ -241,7 +241,7 @@ impl FuncCompiler<'_> {
                 // Build iov: [content_ptr+4, content_len]
                 wasm!(self.func, {
                     i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
-                    local_get(iov_ptr); local_get(content_str); i32_const(4); i32_add; i32_store(0);
+                    local_get(iov_ptr); local_get(content_str); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; i32_store(0);
                     local_get(iov_ptr); local_get(content_str); i32_load(0); i32_store(4);
                 });
 
@@ -396,7 +396,7 @@ impl FuncCompiler<'_> {
 
                 // Build List[Int]: [len:i32][cap:i32][i64 * count]
                 wasm!(self.func, {
-                    local_get(file_size); i32_const(8); i32_mul; i32_const(8); i32_add;
+                    local_get(file_size); i32_const(8); i32_mul; i32_const(super::list_layout::HEADER_SIZE); i32_add;
                     call(self.emitter.rt.alloc); local_set(list_ptr);
                     local_get(list_ptr); local_get(file_size); i32_store(0);
                 });
@@ -406,7 +406,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(counter);
                     block_empty; loop_empty;
                     local_get(counter); local_get(file_size); i32_ge_u; br_if(1);
-                    local_get(list_ptr); i32_const(8); i32_add;
+                    local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(counter); i32_const(8); i32_mul; i32_add;
                     local_get(data_buf); local_get(counter); i32_add; i32_load8_u(0);
                     i64_extend_i32_u;
@@ -473,7 +473,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                     local_get(counter); local_get(count); i32_ge_u; br_if(1);
                     local_get(byte_buf); local_get(counter); i32_add;
-                    local_get(list_ptr); i32_const(8); i32_add;
+                    local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(counter); i32_const(8); i32_mul; i32_add;
                     i64_load(0); i32_wrap_i64;
                     i32_store8(0);
@@ -597,7 +597,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
                     i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
-                    local_get(iov_ptr); local_get(content_str); i32_const(4); i32_add; i32_store(0);
+                    local_get(iov_ptr); local_get(content_str); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; i32_store(0);
                     local_get(iov_ptr); local_get(content_str); i32_load(0); i32_store(4);
                     i32_const(4); call(self.emitter.rt.alloc); local_set(nwritten_ptr);
                     local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nwritten_ptr);
@@ -867,7 +867,7 @@ impl FuncCompiler<'_> {
 
                 // Allocate List[String]: [len:i32][cap:i32][ptr:i32 * count]
                 wasm!(self.func, {
-                    local_get(list_count); i32_const(4); i32_mul; i32_const(8); i32_add;
+                    local_get(list_count); i32_const(4); i32_mul; i32_const(super::list_layout::HEADER_SIZE); i32_add;
                     call(self.emitter.rt.alloc); local_set(list_ptr);
                     local_get(list_ptr); local_get(list_count); i32_store(0);
                 });
@@ -1563,7 +1563,7 @@ impl FuncCompiler<'_> {
         let resolve_result = self.scratch.alloc_i32();
         wasm!(self.func, {
             // Call __resolve_path(path_ptr, path_len) → result_ptr [fd, rel_ptr, rel_len]
-            local_get(path_str); i32_const(4); i32_add; // raw path bytes (skip string length prefix)
+            local_get(path_str); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; // raw path bytes (skip string length prefix)
             local_get(path_str); i32_load(0);            // path byte length
             call(self.emitter.rt.resolve_path);
             local_set(resolve_result);
@@ -1622,14 +1622,14 @@ impl FuncCompiler<'_> {
         dir_buf: u32, offset: u32, list_ptr: u32, counter: u32,
     ) {
         wasm!(self.func, {
-            local_get(entry_name_len); i32_const(4); i32_add;
+            local_get(entry_name_len); i32_const(super::list_layout::STRING_HEADER_SIZE); i32_add;
             call(self.emitter.rt.alloc); local_set(str_ptr);
             local_get(str_ptr); local_get(entry_name_len); i32_store(0);
             // Copy name bytes
             i32_const(0); local_set(copy_i);
             block_empty; loop_empty;
             local_get(copy_i); local_get(entry_name_len); i32_ge_u; br_if(1);
-            local_get(str_ptr); i32_const(4); i32_add; local_get(copy_i); i32_add;
+            local_get(str_ptr); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(copy_i); i32_add;
             local_get(dir_buf); local_get(offset); i32_add; i32_const(24); i32_add;
             local_get(copy_i); i32_add; i32_load8_u(0);
             i32_store8(0);
@@ -1637,7 +1637,7 @@ impl FuncCompiler<'_> {
             br(0);
             end; end;
             // Store in list
-            local_get(list_ptr); i32_const(8); i32_add;
+            local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
             local_get(counter); i32_const(4); i32_mul; i32_add;
             local_get(str_ptr); i32_store(0);
             local_get(counter); i32_const(1); i32_add; local_set(counter);
@@ -1698,7 +1698,7 @@ impl FuncCompiler<'_> {
             call(self.emitter.rt.fd_filestat_get); drop;
             local_get(stat_buf); i32_const(32); i32_add; i32_load(0); local_set(file_size);
             local_get(file_size); call(self.emitter.rt.alloc); local_set(data_buf);
-            i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+            i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr); // iov struct [buf_ptr:i32, buf_len:i32]
             local_get(iov_ptr); local_get(data_buf); i32_store(0);
             local_get(iov_ptr); local_get(file_size); i32_store(4);
             i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
@@ -1709,7 +1709,7 @@ impl FuncCompiler<'_> {
         });
 
         wasm!(self.func, {
-            local_get(file_size); i32_const(4); i32_add;
+            local_get(file_size); i32_const(super::list_layout::STRING_HEADER_SIZE); i32_add;
             call(self.emitter.rt.alloc); local_set(str_ptr);
             local_get(str_ptr); local_get(file_size); i32_store(0);
         });
@@ -1719,7 +1719,7 @@ impl FuncCompiler<'_> {
             i32_const(0); local_set(counter);
             block_empty; loop_empty;
             local_get(counter); local_get(file_size); i32_ge_u; br_if(1);
-            local_get(str_ptr); i32_const(4); i32_add; local_get(counter); i32_add;
+            local_get(str_ptr); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(counter); i32_add;
             local_get(data_buf); local_get(counter); i32_add;
             i32_load8_u(0);
             i32_store8(0);

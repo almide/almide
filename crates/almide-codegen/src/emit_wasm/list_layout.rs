@@ -1,16 +1,39 @@
-//! List memory layout helpers — single source of truth for [len:i32][cap:i32][data...].
+//! Heap layout constants — single source of truth for collection headers.
 //!
-//! All list creation and data access in the WASM emitter should use these helpers
-//! instead of hardcoding offsets. This prevents layout changes from requiring
-//! shotgun surgery across 20+ files.
+//! All list/string/map creation and data access in the WASM emitter should use
+//! these constants instead of hardcoding offsets. This prevents layout changes
+//! from requiring shotgun surgery across 20+ files.
 
 use super::FuncCompiler;
 
-/// List header: [len:i32 @ 0][cap:i32 @ 4], data starts at offset 8.
+// ── List: [len:i32 @ 0][cap:i32 @ 4][data @ 8...] ──
+
+/// Byte offset from list pointer to first data element.
 pub const DATA_OFFSET: i32 = 8;
 
-/// Header size in bytes (same as DATA_OFFSET for lists).
+/// Header size in bytes (len + cap fields).
 pub const HEADER_SIZE: i32 = 8;
+
+// ── String: [byte_len:i32 @ 0][data @ 4...] ──
+
+/// Byte offset from string pointer to UTF-8 data.
+pub const STRING_DATA_OFFSET: i32 = 4;
+
+/// String header size in bytes (byte_len field only).
+pub const STRING_HEADER_SIZE: i32 = 4;
+
+// ── Map: [len:i32 @ 0][kv_pairs @ 4...] ──
+
+/// Byte offset from map pointer to first key-value pair.
+pub const MAP_DATA_OFFSET: i32 = 4;
+
+/// Map header size in bytes (len field only).
+pub const MAP_HEADER_SIZE: i32 = 4;
+
+// ── Set: same layout as List (to_list returns identity) ──
+
+/// Byte offset from set pointer to data. Same as list.
+pub const SET_DATA_OFFSET: i32 = DATA_OFFSET;
 
 impl FuncCompiler<'_> {
     // ── List data access ──
@@ -77,7 +100,7 @@ impl FuncCompiler<'_> {
         dst
     }
 
-    // ── List length ──
+    // ���─ List length ──
 
     /// Emit: load list length (i32) from list at local.
     /// Leaves len on the WASM stack.

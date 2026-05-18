@@ -16,7 +16,7 @@ impl FuncCompiler<'_> {
                 // map.new() → empty map [len=0]
                 let result = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(result);
+                    i32_const(super::list_layout::MAP_HEADER_SIZE); call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); i32_const(0); i32_store(0);
                     local_get(result);
                 });
@@ -57,7 +57,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
                       // Compare map_key[i] with search key
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
@@ -68,7 +68,7 @@ impl FuncCompiler<'_> {
                         // Found: build some(val) and stash in `result`, then exit loop
                         i32_const(vs as i32); call(self.emitter.rt.alloc); local_set(val_copy);
                         local_get(val_copy);
-                        local_get(map_ptr); i32_const(4); i32_add;
+                        local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                         local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                         i32_const(ks as i32); i32_add; // val offset
                 });
@@ -112,7 +112,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
@@ -127,7 +127,7 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                 });
-                // If found → load val at (map_ptr + 4 + i*entry + ks); else → emit default.
+                // If found → load val at (map_ptr + MAP_DATA_OFFSET + i*entry + ks); else → emit default.
                 wasm!(self.func, {
                     local_get(found); i32_eqz;
                 });
@@ -139,7 +139,7 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[2]); // default
                 wasm!(self.func, { else_; });
                 wasm!(self.func, {
-                    local_get(map_ptr); i32_const(4); i32_add;
+                    local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                     local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                     i32_const(ks as i32); i32_add;
                 });
@@ -170,7 +170,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
@@ -223,7 +223,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(old_len); i32_ge_u; br_if(1);
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
@@ -241,7 +241,7 @@ impl FuncCompiler<'_> {
                     if_i32; local_get(old_len); else_; local_get(old_len); i32_const(1); i32_add; end;
                     local_set(i); // reuse i as new_len
                     // Alloc new map
-                    i32_const(4); local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                    i32_const(super::list_layout::MAP_HEADER_SIZE); local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(new_map);
                     local_get(new_map); local_get(i); i32_store(0);
                 });
@@ -251,9 +251,9 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(old_len); i32_ge_u; br_if(1);
                       // Copy key: dst entry, src entry
-                      local_get(new_map); i32_const(4); i32_add;
+                      local_get(new_map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_elem_copy_sized(ks);
@@ -262,7 +262,7 @@ impl FuncCompiler<'_> {
                       local_get(i); local_get(found_idx); i32_eq;
                       if_empty;
                         // Replace value from scratch local
-                        local_get(new_map); i32_const(4); i32_add;
+                        local_get(new_map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                         local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                         i32_const(ks as i32); i32_add;
                         local_get(val_scratch);
@@ -275,10 +275,10 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                       else_;
                         // Copy original value
-                        local_get(new_map); i32_const(4); i32_add;
+                        local_get(new_map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                         local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                         i32_const(ks as i32); i32_add;
-                        local_get(map_ptr); i32_const(4); i32_add;
+                        local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                         local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                         i32_const(ks as i32); i32_add;
                 });
@@ -294,14 +294,14 @@ impl FuncCompiler<'_> {
                     local_get(found_idx); i32_const(0); i32_lt_s;
                     if_empty;
                       // Append key: dst[old_len]
-                      local_get(new_map); i32_const(4); i32_add;
+                      local_get(new_map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(old_len); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
                 self.emit_key_store(&key_ty, 0);
                 // Append value
                 wasm!(self.func, {
-                      local_get(new_map); i32_const(4); i32_add;
+                      local_get(new_map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(old_len); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                       local_get(val_scratch);
@@ -347,7 +347,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(src_i);
                     block_empty; loop_empty;
                       local_get(src_i); local_get(old_len); i32_ge_u; br_if(1);
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(src_i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
@@ -363,7 +363,7 @@ impl FuncCompiler<'_> {
                     if_i32; local_get(map_ptr);
                     else_;
                       // Alloc new map with len-1
-                      i32_const(4); local_get(old_len); i32_const(1); i32_sub;
+                      i32_const(super::list_layout::MAP_HEADER_SIZE); local_get(old_len); i32_const(1); i32_sub;
                       i32_const(entry as i32); i32_mul; i32_add;
                       call(self.emitter.rt.alloc); local_set(new_map);
                       local_get(new_map); local_get(old_len); i32_const(1); i32_sub; i32_store(0);
@@ -375,9 +375,9 @@ impl FuncCompiler<'_> {
                         local_get(src_i); local_get(found_idx); i32_ne;
                         if_empty;
                           // Copy entire entry (key+val)
-                          local_get(new_map); i32_const(4); i32_add;
+                          local_get(new_map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                           local_get(dst_i); i32_const(entry as i32); i32_mul; i32_add;
-                          local_get(map_ptr); i32_const(4); i32_add;
+                          local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                           local_get(src_i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_entry_copy(entry);
@@ -411,17 +411,17 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(map_ptr);
                     local_get(map_ptr); i32_load(0); local_set(len);
-                    i32_const(8); local_get(len); i32_const(ks as i32); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(ks as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(len); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      // dst: result[8 + i*ks]
-                      local_get(result); i32_const(8); i32_add;
+                      // dst: result[DATA_OFFSET + i*ks]
+                      local_get(result); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(ks as i32); i32_mul; i32_add;
-                      // src: map[4 + i*entry]
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      // src: map[MAP_DATA_OFFSET + i*entry]
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_elem_copy_sized(ks);
@@ -448,15 +448,15 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(map_ptr);
                     local_get(map_ptr); i32_load(0); local_set(len);
-                    i32_const(8); local_get(len); i32_const(vs as i32); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(vs as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(len); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(result); i32_const(8); i32_add;
+                      local_get(result); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(vs as i32); i32_mul; i32_add;
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                 });
@@ -486,7 +486,7 @@ impl FuncCompiler<'_> {
                     local_set(map_ptr);
                     local_get(map_ptr); i32_load(0); local_set(len);
                     // Alloc list of ptrs: [len:4][cap:4][ptr0:4][ptr1:4]...
-                    i32_const(8); local_get(len); i32_const(4); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(4); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(len); i32_store(0);
                     i32_const(0); local_set(i);
@@ -496,21 +496,21 @@ impl FuncCompiler<'_> {
                       i32_const(entry as i32); call(self.emitter.rt.alloc); local_set(tuple_ptr);
                       // Copy key
                       local_get(tuple_ptr);
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_elem_copy_sized(ks);
                 // Copy val
                 wasm!(self.func, {
                       local_get(tuple_ptr); i32_const(ks as i32); i32_add;
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                 });
                 self.emit_elem_copy_sized(vs);
                 wasm!(self.func, {
                       // Store tuple ptr in result list
-                      local_get(result); i32_const(8); i32_add;
+                      local_get(result); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       local_get(tuple_ptr); i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -550,7 +550,7 @@ impl FuncCompiler<'_> {
                     local_get(map_a); i32_load(0); local_set(a_len);
                     local_get(map_b); i32_load(0); local_set(b_len);
                     // Alloc result of worst case (a_len + b_len) entries
-                    i32_const(4); local_get(a_len); local_get(b_len); i32_add;
+                    i32_const(super::list_layout::MAP_HEADER_SIZE); local_get(a_len); local_get(b_len); i32_add;
                     i32_const(entry as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     // Copy a entries first
@@ -558,9 +558,9 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(a_len); i32_ge_u; br_if(1);
                       // Copy entry i from a → result[i]
-                      local_get(result); i32_const(4); i32_add;
+                      local_get(result); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
-                      local_get(map_a); i32_const(4); i32_add;
+                      local_get(map_a); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_elem_copy_sized(ks);
@@ -575,7 +575,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(j); local_get(b_len); i32_ge_u; br_if(1);
                       // Load b's key into search slot
-                      local_get(map_b); i32_const(4); i32_add;
+                      local_get(map_b); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(j); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
@@ -586,7 +586,7 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(i);
                       block_empty; loop_empty;
                         local_get(i); local_get(result_len); i32_ge_u; br_if(1);
-                        local_get(result); i32_const(4); i32_add;
+                        local_get(result); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                         local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
@@ -604,19 +604,19 @@ impl FuncCompiler<'_> {
                         local_get(result_len); i32_const(1); i32_add; local_set(result_len);
                       end;
                       // Copy entry j from b → result[found_idx]
-                      local_get(result); i32_const(4); i32_add;
+                      local_get(result); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
-                      local_get(map_b); i32_const(4); i32_add;
+                      local_get(map_b); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(j); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_elem_copy_sized(ks);
-                // Copy value: dst = result + 4 + found_idx*entry + ks,
-                //             src = map_b + 4 + j*entry + ks.
+                // Copy value: dst = result + MAP_DATA_OFFSET + found_idx*entry + ks,
+                //             src = map_b + MAP_DATA_OFFSET + j*entry + ks.
                 wasm!(self.func, {
-                      local_get(result); i32_const(4); i32_add;
+                      local_get(result); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
-                      local_get(map_b); i32_const(4); i32_add;
+                      local_get(map_b); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(j); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                 });
@@ -666,15 +666,15 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(pairs);
                     local_get(pairs); i32_load(0); local_set(len);
-                    // Alloc map: 4 + len * entry (worst case, no dedup)
-                    i32_const(4); local_get(len); i32_const(entry as i32); i32_mul; i32_add;
+                    // Alloc map: MAP_HEADER_SIZE + len * entry (worst case, no dedup)
+                    i32_const(super::list_layout::MAP_HEADER_SIZE); local_get(len); i32_const(entry as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     i32_const(0); local_set(result_len);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      // tuple_ptr = pairs[8 + i*4] (list data at offset 8)
-                      local_get(pairs); i32_const(8); i32_add;
+                      // tuple_ptr = pairs[DATA_OFFSET + i*4] (list data at DATA_OFFSET)
+                      local_get(pairs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(tuple_ptr);
                       // Load tuple's key into search slot
@@ -688,7 +688,7 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(j);
                       block_empty; loop_empty;
                         local_get(j); local_get(result_len); i32_ge_u; br_if(1);
-                        local_get(result); i32_const(4); i32_add;
+                        local_get(result); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                         local_get(j); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
@@ -706,14 +706,14 @@ impl FuncCompiler<'_> {
                         local_get(result_len); i32_const(1); i32_add; local_set(result_len);
                       end;
                       // Copy key: result[found_idx].key = tuple[0]
-                      local_get(result); i32_const(4); i32_add;
+                      local_get(result); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
                       local_get(tuple_ptr);
                 });
                 self.emit_elem_copy_sized(ks);
                 wasm!(self.func, {
                       // Copy val: result[found_idx].val = tuple[ks]
-                      local_get(result); i32_const(4); i32_add;
+                      local_get(result); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                       local_get(tuple_ptr); i32_const(ks as i32); i32_add;
@@ -773,14 +773,14 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_get(map_ptr); i32_load(0); local_set(old_len);
                     // Alloc new map with old_len entries (may be 1 less)
-                    i32_const(4); local_get(old_len); i32_const(entry as i32); i32_mul; i32_add;
+                    i32_const(super::list_layout::MAP_HEADER_SIZE); local_get(old_len); i32_const(entry as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(new_map);
                     i32_const(0); local_set(i);
                     i32_const(0); local_set(j);
                     block_empty; loop_empty;
                       local_get(i); local_get(old_len); i32_ge_u; br_if(1);
                       // Compare key[i] with search key
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
@@ -791,9 +791,9 @@ impl FuncCompiler<'_> {
                         // Skip this entry (key matches)
                       else_;
                         // Copy entry to new_map[j]
-                        local_get(new_map); i32_const(4); i32_add;
+                        local_get(new_map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                         local_get(j); i32_const(entry as i32); i32_mul; i32_add;
-                        local_get(map_ptr); i32_const(4); i32_add;
+                        local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
                         local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                         i32_const(entry as i32);
                         memory_copy;
@@ -825,7 +825,7 @@ impl FuncCompiler<'_> {
                 // clear(m) → Unit. Replace with empty map.
                 let new_map = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(new_map);
+                    i32_const(super::list_layout::MAP_HEADER_SIZE); call(self.emitter.rt.alloc); local_set(new_map);
                     local_get(new_map); i32_const(0); i32_store(0);
                 });
                 if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
@@ -926,10 +926,10 @@ impl FuncCompiler<'_> {
 
     fn emit_merge_copy_val(&mut self, entry: u32, ks: u32, vs: u32, result: u32, i: u32, map_a: u32) {
         wasm!(self.func, {
-              local_get(result); i32_const(4); i32_add;
+              local_get(result); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
               local_get(i); i32_const(entry as i32); i32_mul; i32_add;
               i32_const(ks as i32); i32_add;
-              local_get(map_a); i32_const(4); i32_add;
+              local_get(map_a); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
               local_get(i); i32_const(entry as i32); i32_mul; i32_add;
               i32_const(ks as i32); i32_add;
         });
@@ -938,11 +938,11 @@ impl FuncCompiler<'_> {
 
     fn emit_merge_copy_val2(&mut self, entry: u32, ks: u32, vs: u32, result: u32, a_len: u32, i: u32, map_b: u32) {
         wasm!(self.func, {
-              local_get(result); i32_const(4); i32_add;
+              local_get(result); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
               local_get(a_len); local_get(i); i32_add;
               i32_const(entry as i32); i32_mul; i32_add;
               i32_const(ks as i32); i32_add;
-              local_get(map_b); i32_const(4); i32_add;
+              local_get(map_b); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
               local_get(i); i32_const(entry as i32); i32_mul; i32_add;
               i32_const(ks as i32); i32_add;
         });

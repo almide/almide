@@ -337,18 +337,18 @@ impl FuncCompiler<'_> {
                     local_get(s); i32_eqz;
                     if_i32;
                       // empty list: [len=0][cap=0]
-                      i32_const(8); call(self.emitter.rt.alloc); local_set(s2);
+                      i32_const(super::list_layout::HEADER_SIZE); call(self.emitter.rt.alloc); local_set(s2);
                       local_get(s2); i32_const(0); i32_store(0);
                       local_get(s2);
                     else_;
                       // [len=1, cap=0, elem]
-                      i32_const((8 + elem_size) as i32); call(self.emitter.rt.alloc); local_set(s2);
+                      i32_const((super::list_layout::HEADER_SIZE + elem_size as i32)); call(self.emitter.rt.alloc); local_set(s2);
                       local_get(s2); i32_const(1); i32_store(0);
                       local_get(s2);
                       local_get(s);
                 });
                 self.emit_load_at(&inner_ty, 0);
-                self.emit_store_at(&inner_ty, 8);
+                self.emit_store_at(&inner_ty, super::list_layout::DATA_OFFSET as u32);
                 wasm!(self.func, {
                       local_get(s2);
                     end;
@@ -644,16 +644,16 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(rs);
                     local_get(rs); i32_load(0); local_set(len);
-                    i32_const(8); local_get(len); i32_const(ok_size); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(ok_size); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(ok_list);
-                    i32_const(8); local_get(len); i32_const(err_size); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(err_size); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(err_list);
                     i32_const(0); local_set(ok_cnt);
                     i32_const(0); local_set(err_cnt);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(rs); i32_const(8); i32_add;
+                      local_get(rs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(elem);
                 });
@@ -711,16 +711,16 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(rs);
                     local_get(rs); i32_load(0); local_set(len);
-                    i32_const(8); local_get(len); i32_const(ok_size); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(ok_size); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(ok_list);
-                    i32_const(8); local_get(len); i32_const(err_size); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(err_size); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(err_list);
                     i32_const(0); local_set(ok_cnt);
                     i32_const(0); local_set(err_cnt);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(rs); i32_const(8); i32_add;
+                      local_get(rs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(elem);
                 });
@@ -778,9 +778,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(closure);
                     local_get(xs); i32_load(0); local_set(len);
-                    i32_const(8); local_get(len); i32_const(ok_size); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(ok_size); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(ok_list);
-                    i32_const(8); local_get(len); i32_const(err_size); i32_mul; i32_add;
+                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(err_size); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(err_list);
                     i32_const(0); local_set(ok_cnt);
                     i32_const(0); local_set(err_cnt);
@@ -789,7 +789,7 @@ impl FuncCompiler<'_> {
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       // Call closure with xs[i]
                       local_get(closure); i32_load(4); // env
-                      local_get(xs); i32_const(8); i32_add;
+                      local_get(xs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -911,7 +911,7 @@ impl FuncCompiler<'_> {
         self.emit_result_branch_ok(elem);
         wasm!(self.func, {
             if_empty; // tag==0 → ok
-              local_get(ok_list); i32_const(8); i32_add;
+              local_get(ok_list); i32_const(super::list_layout::DATA_OFFSET); i32_add;
               local_get(ok_cnt); i32_const(ok_size); i32_mul; i32_add;
               local_get(elem); i32_const(4); i32_add; // Result payload at +4
         });
@@ -919,7 +919,7 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
               local_get(ok_cnt); i32_const(1); i32_add; local_set(ok_cnt);
             else_;
-              local_get(err_list); i32_const(8); i32_add;
+              local_get(err_list); i32_const(super::list_layout::DATA_OFFSET); i32_add;
               local_get(err_cnt); i32_const(err_size); i32_mul; i32_add;
               local_get(elem); i32_const(4); i32_add; // Result payload at +4
         });

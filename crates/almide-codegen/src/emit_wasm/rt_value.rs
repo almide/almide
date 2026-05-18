@@ -7,6 +7,7 @@
 //!   Minimal recursive descent JSON parser.
 
 use super::{CompiledFunc, WasmEmitter};
+use super::list_layout::{DATA_OFFSET, HEADER_SIZE, STRING_DATA_OFFSET, STRING_HEADER_SIZE, MAP_DATA_OFFSET};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
 
@@ -180,7 +181,7 @@ fn compile_value_stringify(emitter: &mut WasmEmitter) {
     wasm!(f, {
           block_empty; loop_empty;
             local_get(5); local_get(4); i32_ge_u; br_if(1);
-            local_get(3); i32_const(8); i32_add;
+            local_get(3); i32_const(DATA_OFFSET); i32_add;
             local_get(5); i32_const(4); i32_mul; i32_add;
             i32_load(0); call(stringify_fn); local_set(6);
             local_get(5); i32_const(0); i32_gt_u;
@@ -210,7 +211,7 @@ fn compile_value_stringify(emitter: &mut WasmEmitter) {
           block_empty; loop_empty;
             local_get(5); local_get(4); i32_ge_u; br_if(1);
             // Load tuple pointer: list[8 + i*4] (each list elem is an i32 ptr)
-            local_get(3); i32_const(8); i32_add;
+            local_get(3); i32_const(DATA_OFFSET); i32_add;
             local_get(5); i32_const(4); i32_mul; i32_add;
             i32_load(0); // dereference to get tuple ptr
             local_set(6);
@@ -321,7 +322,7 @@ fn compile_json_parse_at(emitter: &mut WasmEmitter) {
 
     // Load current char
     wasm!(f, {
-        local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+        local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
         i32_load8_u(0); local_set(4);
     });
 
@@ -440,7 +441,7 @@ fn emit_parse_exponent(f: &mut Function) {
     wasm!(f, {
         local_get(1); local_get(3); i32_lt_u;
         if_empty;
-          local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
           i32_load8_u(0); local_set(4);
           local_get(4); i32_const(101); i32_eq; // 'e'
           local_get(4); i32_const(69); i32_eq;  // 'E'
@@ -451,7 +452,7 @@ fn emit_parse_exponent(f: &mut Function) {
             i32_const(1); local_set(7); // exp_sign = 1 (positive)
             local_get(1); local_get(3); i32_lt_u;
             if_empty;
-              local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+              local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
               i32_load8_u(0); local_set(4);
               local_get(4); i32_const(45); i32_eq; // '-'
               if_empty;
@@ -470,7 +471,7 @@ fn emit_parse_exponent(f: &mut Function) {
     wasm!(f, {
             block_empty; loop_empty;
               local_get(1); local_get(3); i32_ge_u; br_if(1);
-              local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+              local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
               i32_load8_u(0); local_set(4);
               local_get(4); i32_const(48); i32_lt_u; br_if(1);
               local_get(4); i32_const(57); i32_gt_u; br_if(1);
@@ -509,7 +510,7 @@ fn emit_skip_ws(f: &mut Function) {
     wasm!(f, {
         block_empty; loop_empty;
           local_get(1); local_get(3); i32_ge_u; br_if(1);
-          local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
           i32_load8_u(0); local_set(4);
           local_get(4); i32_const(32); i32_eq;
           local_get(4); i32_const(9); i32_eq; i32_or;
@@ -535,7 +536,7 @@ fn emit_parse_string(f: &mut Function, alloc: u32) {
     wasm!(f, {
           block_empty; loop_empty;
             local_get(1); local_get(3); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
             i32_load8_u(0); local_set(7);
             local_get(7); i32_const(34); i32_eq; br_if(1);
             local_get(7); i32_const(92); i32_eq;
@@ -549,7 +550,7 @@ fn emit_parse_string(f: &mut Function, alloc: u32) {
     // Build string
     wasm!(f, {
           local_get(1); local_get(5); i32_sub; local_set(7);
-          i32_const(4); local_get(7); i32_add; call(alloc); local_set(6);
+          i32_const(STRING_HEADER_SIZE); local_get(7); i32_add; call(alloc); local_set(6);
           local_get(6); local_get(7); i32_store(0);
           i32_const(0); local_set(9);
     });
@@ -562,7 +563,7 @@ fn emit_parse_string(f: &mut Function, alloc: u32) {
           block_empty; loop_empty;
             local_get(8); local_get(7); i32_ge_u; br_if(1);
             // byte = in[in_base + read_off]
-            local_get(0); i32_const(4); i32_add; local_get(5); i32_add; local_get(8); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(5); i32_add; local_get(8); i32_add;
             i32_load8_u(0); local_set(4);
             // if byte == 0x5C (backslash): decode next byte
             local_get(4); i32_const(92); i32_eq;
@@ -571,7 +572,7 @@ fn emit_parse_string(f: &mut Function, alloc: u32) {
               local_get(8); i32_const(1); i32_add; local_set(8);
               local_get(8); local_get(7); i32_ge_u; br_if(2);
               // load next byte
-              local_get(0); i32_const(4); i32_add; local_get(5); i32_add; local_get(8); i32_add;
+              local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(5); i32_add; local_get(8); i32_add;
               i32_load8_u(0); local_set(4);
               // Decode escape: overwrite local 4 in-place via if/else chain.
               // Decoded values (8,9,10,12,13) and idempotent ones (34,47,92) don't
@@ -585,7 +586,7 @@ fn emit_parse_string(f: &mut Function, alloc: u32) {
               // ", \, /  decode to themselves — no rewrite needed.
             end;
             // out[out_base + write_off] = byte
-            local_get(6); i32_const(4); i32_add; local_get(9); i32_add;
+            local_get(6); i32_const(STRING_DATA_OFFSET); i32_add; local_get(9); i32_add;
             local_get(4);
             i32_store8(0);
             local_get(9); i32_const(1); i32_add; local_set(9);
@@ -630,7 +631,7 @@ fn emit_parse_number(f: &mut Function, alloc: u32) {
     wasm!(f, {
           block_empty; loop_empty;
             local_get(1); local_get(3); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
             i32_load8_u(0); local_set(4);
             local_get(4); i32_const(48); i32_lt_u; br_if(1);
             local_get(4); i32_const(57); i32_gt_u; br_if(1);
@@ -645,7 +646,7 @@ fn emit_parse_number(f: &mut Function, alloc: u32) {
     wasm!(f, {
           local_get(1); local_get(3); i32_lt_u;
           if_empty;
-            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
             i32_load8_u(0); i32_const(46); i32_eq;
             if_empty;
               local_get(1); i32_const(1); i32_add; local_set(1);
@@ -655,7 +656,7 @@ fn emit_parse_number(f: &mut Function, alloc: u32) {
     wasm!(f, {
               block_empty; loop_empty;
                 local_get(1); local_get(3); i32_ge_u; br_if(1);
-                local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+                local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
                 i32_load8_u(0); local_set(4);
                 local_get(4); i32_const(48); i32_lt_u; br_if(1);
                 local_get(4); i32_const(57); i32_gt_u; br_if(1);
@@ -694,7 +695,7 @@ fn emit_parse_number(f: &mut Function, alloc: u32) {
           // Check for e/E after integer
           local_get(1); local_get(3); i32_lt_u;
           if_empty;
-            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
             i32_load8_u(0); local_set(4);
             local_get(4); i32_const(101); i32_eq; // 'e'
             local_get(4); i32_const(69); i32_eq;  // 'E'
@@ -744,7 +745,7 @@ fn emit_parse_array(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     wasm!(f, {
           block_empty; loop_empty;
             local_get(1); local_get(3); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
             i32_load8_u(0); local_set(4);
             local_get(4); i32_const(32); i32_eq;
             local_get(4); i32_const(9); i32_eq; i32_or;
@@ -759,11 +760,11 @@ fn emit_parse_array(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     wasm!(f, {
           local_get(1); local_get(3); i32_lt_u;
           if_empty;
-            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
             i32_load8_u(0); i32_const(93); i32_eq;
             if_empty;
               local_get(1); i32_const(1); i32_add; local_set(1);
-              i32_const(8); call(alloc); local_set(8);
+              i32_const(HEADER_SIZE); call(alloc); local_set(8);
               local_get(8); i32_const(0); i32_store(0);
               i32_const(8); call(alloc); local_set(6);
               local_get(6); i32_const(5); i32_store(0);
@@ -797,15 +798,15 @@ fn emit_parse_array(f: &mut Function, alloc: u32, parse_at_fn: u32) {
             if_empty;
               local_get(8); local_set(15); // save old buf
               local_get(14); i32_const(1); i32_shl; local_set(14); // cap *= 2
-              i32_const(8); local_get(14); i32_const(4); i32_mul; i32_add;
+              i32_const(HEADER_SIZE); local_get(14); i32_const(4); i32_mul; i32_add;
               call(alloc); local_set(8); // new buf → local 8
               local_get(8); local_get(15);
-              i32_const(8); local_get(9); i32_const(4); i32_mul; i32_add;
+              i32_const(HEADER_SIZE); local_get(9); i32_const(4); i32_mul; i32_add;
               memory_copy;
             end;
     });
     wasm!(f, {
-            local_get(8); i32_const(8); i32_add;
+            local_get(8); i32_const(DATA_OFFSET); i32_add;
             local_get(9); i32_const(4); i32_mul; i32_add;
             local_get(10); i32_load(0); i32_store(0);
             local_get(10); i32_load(4); local_set(1);
@@ -815,7 +816,7 @@ fn emit_parse_array(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     wasm!(f, {
             block_empty; loop_empty;
               local_get(1); local_get(3); i32_ge_u; br_if(1);
-              local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+              local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
               i32_load8_u(0); local_set(4);
               local_get(4); i32_const(32); i32_eq;
               local_get(4); i32_const(9); i32_eq; i32_or;
@@ -829,7 +830,7 @@ fn emit_parse_array(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     // Check ] or ,
     wasm!(f, {
             local_get(1); local_get(3); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
             i32_load8_u(0); local_set(4);
             local_get(4); i32_const(93); i32_eq;
             if_empty;
@@ -868,7 +869,7 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     wasm!(f, {
           block_empty; loop_empty;
             local_get(1); local_get(3); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
             i32_load8_u(0); local_set(4);
             local_get(4); i32_const(32); i32_eq;
             local_get(4); i32_const(9); i32_eq; i32_or;
@@ -883,11 +884,11 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     wasm!(f, {
           local_get(1); local_get(3); i32_lt_u;
           if_empty;
-            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
             i32_load8_u(0); i32_const(125); i32_eq;
             if_empty;
               local_get(1); i32_const(1); i32_add; local_set(1);
-              i32_const(8); call(alloc); local_set(8);
+              i32_const(HEADER_SIZE); call(alloc); local_set(8);
               local_get(8); i32_const(0); i32_store(0);
               i32_const(8); call(alloc); local_set(6);
               local_get(6); i32_const(6); i32_store(0);
@@ -910,7 +911,7 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     wasm!(f, {
             block_empty; loop_empty;
               local_get(1); local_get(3); i32_ge_u; br_if(1);
-              local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+              local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
               i32_load8_u(0); local_set(4);
               local_get(4); i32_const(32); i32_eq;
               local_get(4); i32_const(9); i32_eq; i32_or;
@@ -939,7 +940,7 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     wasm!(f, {
             block_empty; loop_empty;
               local_get(1); local_get(3); i32_ge_u; br_if(1);
-              local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+              local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
               i32_load8_u(0); local_set(4);
               local_get(4); i32_const(32); i32_eq;
               local_get(4); i32_const(9); i32_eq; i32_or;
@@ -969,10 +970,10 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
             if_empty;
               local_get(8); local_set(15); // save old buf
               local_get(14); i32_const(1); i32_shl; local_set(14); // cap *= 2
-              i32_const(8); local_get(14); i32_const(4); i32_mul; i32_add;
+              i32_const(HEADER_SIZE); local_get(14); i32_const(4); i32_mul; i32_add;
               call(alloc); local_set(8); // new buf
               local_get(8); local_get(15);
-              i32_const(8); local_get(9); i32_const(4); i32_mul; i32_add;
+              i32_const(HEADER_SIZE); local_get(9); i32_const(4); i32_mul; i32_add;
               memory_copy;
             end;
     });
@@ -983,7 +984,7 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
             local_get(5); local_get(7); i32_store(0); // key
             local_get(5); local_get(10); i32_load(0); i32_store(4); // value
             // Store tuple pointer in list at position count
-            local_get(8); i32_const(8); i32_add;
+            local_get(8); i32_const(DATA_OFFSET); i32_add;
             local_get(9); i32_const(4); i32_mul; i32_add;
             local_get(5); i32_store(0);
             local_get(10); i32_load(4); local_set(1);
@@ -993,7 +994,7 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     wasm!(f, {
             block_empty; loop_empty;
               local_get(1); local_get(3); i32_ge_u; br_if(1);
-              local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+              local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
               i32_load8_u(0); local_set(4);
               local_get(4); i32_const(32); i32_eq;
               local_get(4); i32_const(9); i32_eq; i32_or;
@@ -1007,7 +1008,7 @@ fn emit_parse_object(f: &mut Function, alloc: u32, parse_at_fn: u32) {
     // Check } or ,
     wasm!(f, {
             local_get(1); local_get(3); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(1); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add;
             i32_load8_u(0); local_set(4);
             local_get(4); i32_const(125); i32_eq;
             if_empty;
@@ -1124,7 +1125,7 @@ fn compile_json_get_path(emitter: &mut WasmEmitter) {
             i32_const(0); local_set(13); // found = 0
             block_empty; loop_empty;
               local_get(11); local_get(10); i32_ge_u; br_if(1);
-              local_get(9); i32_const(8); i32_add;
+              local_get(9); i32_const(DATA_OFFSET); i32_add;
               local_get(11); i32_const(4); i32_mul; i32_add;
               i32_load(0); local_set(12); // pair_ptr
               local_get(12); i32_load(0); // pair key
@@ -1159,7 +1160,7 @@ fn compile_json_get_path(emitter: &mut WasmEmitter) {
             i32_or;
             if_empty; i32_const(0); return_; end; // out of bounds → none
             // cur_val = list[index]
-            local_get(9); i32_const(8); i32_add;
+            local_get(9); i32_const(DATA_OFFSET); i32_add;
             local_get(11); i32_const(4); i32_mul; i32_add;
             i32_load(0); local_set(8);
           end;
@@ -1272,7 +1273,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
             i32_const(0); local_set(17); // found = 0
             block_empty; loop_empty;
               local_get(12); local_get(11); i32_ge_u; br_if(1);
-              local_get(10); i32_const(4); i32_add;
+              local_get(10); i32_const(MAP_DATA_OFFSET); i32_add;
               local_get(12); i32_const(4); i32_mul; i32_add;
               i32_load(0); local_set(13); // pair
               local_get(13); i32_load(0);
@@ -1322,7 +1323,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
               local_get(14); return_;
             end;
             local_get(16); local_get(6); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
-            local_get(10); i32_const(4); i32_add;
+            local_get(10); i32_const(DATA_OFFSET); i32_add;
             local_get(18); i32_const(4); i32_mul; i32_add;
             i32_load(0); i32_store(0);
           end;
@@ -1364,7 +1365,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
               i32_const(0); local_set(12);
               block_empty; loop_empty;
                 local_get(12); local_get(11); i32_ge_u; br_if(1);
-                local_get(10); i32_const(4); i32_add;
+                local_get(10); i32_const(MAP_DATA_OFFSET); i32_add;
                 local_get(12); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(13);
                 local_get(13); i32_load(0);
@@ -1377,14 +1378,14 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
               // new_len = old_len + (found ? 0 : 1)
               local_get(11); local_get(17); i32_eqz; i32_add; local_set(18);
               // Alloc new pairs list
-              i32_const(4); local_get(18); i32_const(4); i32_mul; i32_add;
+              i32_const(MAP_DATA_OFFSET); local_get(18); i32_const(4); i32_mul; i32_add;
               call(alloc); local_set(15);
               local_get(15); local_get(18); i32_store(0);
               // Copy, replacing match
               i32_const(0); local_set(12);
               block_empty; loop_empty;
                 local_get(12); local_get(11); i32_ge_u; br_if(1);
-                local_get(10); i32_const(4); i32_add;
+                local_get(10); i32_const(MAP_DATA_OFFSET); i32_add;
                 local_get(12); i32_const(4); i32_mul; i32_add;
                 i32_load(0); local_set(13);
                 local_get(13); i32_load(0);
@@ -1395,11 +1396,11 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
                   i32_const(8); call(alloc); local_set(17);
                   local_get(17); local_get(13); i32_load(0); i32_store(0);
                   local_get(17); local_get(9); i32_store(4);
-                  local_get(15); i32_const(4); i32_add;
+                  local_get(15); i32_const(MAP_DATA_OFFSET); i32_add;
                   local_get(12); i32_const(4); i32_mul; i32_add;
                   local_get(17); i32_store(0);
                 else_;
-                  local_get(15); i32_const(4); i32_add;
+                  local_get(15); i32_const(MAP_DATA_OFFSET); i32_add;
                   local_get(12); i32_const(4); i32_mul; i32_add;
                   local_get(13); i32_store(0);
                 end;
@@ -1412,7 +1413,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
                 i32_const(8); call(alloc); local_set(17);
                 local_get(17); local_get(7); i32_load(8); i32_store(0);
                 local_get(17); local_get(9); i32_store(4);
-                local_get(15); i32_const(4); i32_add;
+                local_get(15); i32_const(MAP_DATA_OFFSET); i32_add;
                 local_get(11); i32_const(4); i32_mul; i32_add;
                 local_get(17); i32_store(0);
               end;
@@ -1427,7 +1428,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
               i32_const(8); call(alloc); local_set(17); // pair
               local_get(17); local_get(7); i32_load(8); i32_store(0);
               local_get(17); local_get(9); i32_store(4);
-              local_get(15); i32_const(4); i32_add; local_get(17); i32_store(0);
+              local_get(15); i32_const(MAP_DATA_OFFSET); i32_add; local_get(17); i32_store(0);
               i32_const(8); call(alloc); local_set(9);
               local_get(9); i32_const(6); i32_store(0);
               local_get(9); local_get(15); i32_store(4);
@@ -1443,18 +1444,18 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
             local_get(10); i32_load(0); local_set(11); // len
             local_get(7); i32_load(8); local_set(18); // idx
             // Clone list replacing at idx
-            i32_const(4); local_get(11); i32_const(4); i32_mul; i32_add;
+            i32_const(HEADER_SIZE); local_get(11); i32_const(4); i32_mul; i32_add;
             call(alloc); local_set(15);
             local_get(15); local_get(11); i32_store(0);
             i32_const(0); local_set(12);
             block_empty; loop_empty;
               local_get(12); local_get(11); i32_ge_u; br_if(1);
-              local_get(15); i32_const(4); i32_add;
+              local_get(15); i32_const(DATA_OFFSET); i32_add;
               local_get(12); i32_const(4); i32_mul; i32_add;
               local_get(12); local_get(18); i32_eq;
               if_i32; local_get(9);
               else_;
-                local_get(10); i32_const(4); i32_add;
+                local_get(10); i32_const(DATA_OFFSET); i32_add;
                 local_get(12); i32_const(4); i32_mul; i32_add;
                 i32_load(0);
               end;
@@ -1562,7 +1563,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
             i32_const(0); local_set(13);
             block_empty; loop_empty;
               local_get(11); local_get(10); i32_ge_u; br_if(1);
-              local_get(9); i32_const(4); i32_add;
+              local_get(9); i32_const(MAP_DATA_OFFSET); i32_add;
               local_get(11); i32_const(4); i32_mul; i32_add;
               i32_load(0); local_set(12);
               local_get(12); i32_load(0);
@@ -1596,7 +1597,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
             i32_or;
             if_empty; local_get(0); return_; end;
             local_get(14); local_get(5); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
-            local_get(9); i32_const(4); i32_add;
+            local_get(9); i32_const(DATA_OFFSET); i32_add;
             local_get(17); i32_const(4); i32_mul; i32_add;
             i32_load(0); i32_store(0);
           end;
@@ -1627,13 +1628,13 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
           local_get(8); i32_load(4); local_set(9);
           local_get(9); i32_load(0); local_set(10);
           // Alloc new list (worst case same size)
-          i32_const(4); local_get(10); i32_const(4); i32_mul; i32_add;
+          i32_const(MAP_DATA_OFFSET); local_get(10); i32_const(4); i32_mul; i32_add;
           call(alloc); local_set(15);
           i32_const(0); local_set(11); // src
           i32_const(0); local_set(18); // dst
           block_empty; loop_empty;
             local_get(11); local_get(10); i32_ge_u; br_if(1);
-            local_get(9); i32_const(4); i32_add;
+            local_get(9); i32_const(MAP_DATA_OFFSET); i32_add;
             local_get(11); i32_const(4); i32_mul; i32_add;
             i32_load(0); local_set(12);
             local_get(12); i32_load(0);
@@ -1641,7 +1642,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
             call(str_eq);
             i32_eqz;
             if_empty;
-              local_get(15); i32_const(4); i32_add;
+              local_get(15); i32_const(MAP_DATA_OFFSET); i32_add;
               local_get(18); i32_const(4); i32_mul; i32_add;
               local_get(12); i32_store(0);
               local_get(18); i32_const(1); i32_add; local_set(18);
@@ -1671,7 +1672,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
           if_empty; local_get(0); return_; end;
           // Alloc new list (len - 1)
           local_get(10); i32_const(1); i32_sub; local_set(13);
-          i32_const(4); local_get(13); i32_const(4); i32_mul; i32_add;
+          i32_const(HEADER_SIZE); local_get(13); i32_const(4); i32_mul; i32_add;
           call(alloc); local_set(15);
           local_get(15); local_get(13); i32_store(0);
           i32_const(0); local_set(11); // src
@@ -1680,9 +1681,9 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
             local_get(11); local_get(10); i32_ge_u; br_if(1);
             local_get(11); local_get(17); i32_ne;
             if_empty;
-              local_get(15); i32_const(4); i32_add;
+              local_get(15); i32_const(DATA_OFFSET); i32_add;
               local_get(18); i32_const(4); i32_mul; i32_add;
-              local_get(9); i32_const(4); i32_add;
+              local_get(9); i32_const(DATA_OFFSET); i32_add;
               local_get(11); i32_const(4); i32_mul; i32_add;
               i32_load(0); i32_store(0);
               local_get(18); i32_const(1); i32_add; local_set(18);
@@ -1715,13 +1716,13 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
           if_empty;
             local_get(8); i32_load(4); local_set(9);
             local_get(9); i32_load(0); local_set(10);
-            i32_const(4); local_get(10); i32_const(4); i32_mul; i32_add;
+            i32_const(MAP_DATA_OFFSET); local_get(10); i32_const(4); i32_mul; i32_add;
             call(alloc); local_set(15);
             local_get(15); local_get(10); i32_store(0);
             i32_const(0); local_set(11);
             block_empty; loop_empty;
               local_get(11); local_get(10); i32_ge_u; br_if(1);
-              local_get(9); i32_const(4); i32_add;
+              local_get(9); i32_const(MAP_DATA_OFFSET); i32_add;
               local_get(11); i32_const(4); i32_mul; i32_add;
               i32_load(0); local_set(12);
               local_get(12); i32_load(0);
@@ -1731,11 +1732,11 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
                 i32_const(8); call(alloc); local_set(13);
                 local_get(13); local_get(12); i32_load(0); i32_store(0);
                 local_get(13); local_get(16); i32_store(4);
-                local_get(15); i32_const(4); i32_add;
+                local_get(15); i32_const(MAP_DATA_OFFSET); i32_add;
                 local_get(11); i32_const(4); i32_mul; i32_add;
                 local_get(13); i32_store(0);
               else_;
-                local_get(15); i32_const(4); i32_add;
+                local_get(15); i32_const(MAP_DATA_OFFSET); i32_add;
                 local_get(11); i32_const(4); i32_mul; i32_add;
                 local_get(12); i32_store(0);
               end;
@@ -1755,18 +1756,18 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
             local_get(8); i32_load(4); local_set(9);
             local_get(9); i32_load(0); local_set(10);
             local_get(6); i32_load(8); local_set(17);
-            i32_const(4); local_get(10); i32_const(4); i32_mul; i32_add;
+            i32_const(HEADER_SIZE); local_get(10); i32_const(4); i32_mul; i32_add;
             call(alloc); local_set(15);
             local_get(15); local_get(10); i32_store(0);
             i32_const(0); local_set(11);
             block_empty; loop_empty;
               local_get(11); local_get(10); i32_ge_u; br_if(1);
-              local_get(15); i32_const(4); i32_add;
+              local_get(15); i32_const(DATA_OFFSET); i32_add;
               local_get(11); i32_const(4); i32_mul; i32_add;
               local_get(11); local_get(17); i32_eq;
               if_i32; local_get(16);
               else_;
-                local_get(9); i32_const(4); i32_add;
+                local_get(9); i32_const(DATA_OFFSET); i32_add;
                 local_get(11); i32_const(4); i32_mul; i32_add;
                 i32_load(0);
               end;
