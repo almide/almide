@@ -1102,10 +1102,19 @@ impl FuncCompiler<'_> {
                     _ => { wasm!(self.func, { i32_store(0); }); }
                 }
 
-                // Write back to var: xs = new_ptr
+                // Write back to var: xs = new_ptr (handles local, global, and mutable capture)
                 if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-                    if let Some(&local_idx) = self.var_map.get(&id.0) {
+                    if self.emitter.mutable_captures.contains(&id.0) {
+                        // Mutable capture: store new_ptr into the cell
+                        if let Some(&local_idx) = self.var_map.get(&id.0) {
+                            wasm!(self.func, { local_get(local_idx); local_get(new_ptr); i32_store(0); });
+                        }
+                    } else if let Some(&local_idx) = self.var_map.get(&id.0) {
+                        // Local var
                         wasm!(self.func, { local_get(new_ptr); local_set(local_idx); });
+                    } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id.0) {
+                        // Global var
+                        wasm!(self.func, { local_get(new_ptr); global_set(global_idx); });
                     }
                 }
 
