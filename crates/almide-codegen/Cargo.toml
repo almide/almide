@@ -12,11 +12,11 @@ almide-ir = { path = "../almide-ir" }
 almide-egg-lab = { path = "../almide-egg-lab" }
 egg = "0.10"
 wasm-encoder = "0.225"
+wasmparser = "0.225"
 toml = "0.8"
 serde_json = "1"
 
 [dev-dependencies]
-wasmparser = "0.225"
 
 [build-dependencies]
 toml = "0.8"

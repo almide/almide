@@ -182,7 +182,14 @@ impl SymbolTable {
         self.sigs.get(&(String::new(), func.to_string()))
     }
     fn lookup_field(&self, record: &str, field: &str) -> Option<&Ty> {
-        let fs = self.record_fields.get(record)?;
+        // Try exact name first, then scan all records for matching field
+        let fs = self.record_fields.get(record).or_else(|| {
+            // Cross-module type alias mismatch: Named("R") vs registered "Tween".
+            // Fallback: find any record that has the requested field.
+            self.record_fields.values().find(|fields| {
+                fields.iter().any(|(n, _)| n.as_str() == field)
+            })
+        })?;
         fs.iter().find(|(n, _)| n.as_str() == field).map(|(_, t)| t)
     }
 }
@@ -635,7 +642,32 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
         // Now resolve this node's type from child types + VarTable + symbols.
         if (expr.ty).has_unresolved_deep() {
             if let Some(ty) = resolve_node_ty(expr, self.vt, self.symbols) {
-                expr.ty = ty;
+                expr.ty = ty.clone();
+                // Propagate: if this was IndexAccess and it resolved, the
+                // parent Member can now resolve too. But we're bottom-up,
+                // so Member visits AFTER this. Make sure we updated expr.ty.
+            }
+        }
+        // Second chance for Member: debug why it fails
+        if (expr.ty).has_unresolved_deep() {
+            if let IrExprKind::Member { object, field } = &expr.kind {
+                let obj_ty = effective_ty(object, self.vt);
+                let resolved = match &obj_ty {
+                    Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                        fields.iter().find(|(n, _)| n == field.as_str()).map(|(_, t)| t.clone())
+                            .filter(|t| !t.has_unresolved_deep())
+                    }
+                    Ty::Named(name, _) => {
+                        let r = self.symbols.lookup_field(name.as_str(), field.as_str());
+                        r.filter(|t| !t.has_unresolved_deep()).cloned()
+                    }
+                    _ => {
+                        None
+                    }
+                };
+                if let Some(ty) = resolved {
+                    expr.ty = ty;
+                }
             }
         }
     }
@@ -731,8 +763,11 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
             })
         }
         IrExprKind::IndexAccess { object, .. } => {
-            // For List[T], result is T
-            if let Ty::Applied(_, args) = &object.ty {
+            // For List[T], result is T. Use effective_ty to resolve through VarTable.
+            let obj_ty = effective_ty(object, vt);
+            if obj_ty.has_unresolved_deep() {
+            }
+            if let Ty::Applied(_, args) = &obj_ty {
                 args.first().cloned().filter(|t| !t.has_unresolved_deep())
             } else { None }
         }

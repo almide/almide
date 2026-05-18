@@ -1397,7 +1397,17 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     }
     module.section(&data);
 
-    module.finish()
+    let wasm_bytes = module.finish();
+
+    // Validate the generated WASM — catch type errors at compile time rather
+    // than letting broken binaries reach the runtime.
+    use wasmparser::Validator;
+    if let Err(e) = Validator::new().validate_all(&wasm_bytes) {
+        eprintln!("warning: generated WASM failed validation: {e}");
+        eprintln!("  This is an almide codegen bug. The binary may crash at runtime.");
+    }
+
+    wasm_bytes
 }
 
 // ── Test runner ─────────────────────────────────────────────────
