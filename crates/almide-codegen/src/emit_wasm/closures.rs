@@ -276,6 +276,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
                 scratch: scratch_alloc,
                 var_table: &program.var_table,
                 stub_ret_ty: Ty::Unit,
+                current_module_name: None,
             };
             compiler.emit_expr(body);
             compiler.func.instruction(&wasm_encoder::Instruction::End);

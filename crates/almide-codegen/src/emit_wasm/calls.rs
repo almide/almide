@@ -347,10 +347,14 @@ impl FuncCompiler<'_> {
                         for arg in args {
                             self.emit_expr(arg);
                         }
-                        // Resolve: try bare name, then try all qualified variants
-                        // (handles intra-module calls where bare name collides with
-                        // another module's function of the same name)
-                        let func_idx = self.emitter.func_map.get(name.as_str()).copied()
+                        // Resolve: prefer current module's qualified name, then bare,
+                        // then try all qualified variants
+                        let func_idx = self.current_module_name.as_ref()
+                            .and_then(|m| {
+                                let qn = format!("{}.{}", m, name.as_str());
+                                self.emitter.func_map.get(qn.as_str()).copied()
+                            })
+                            .or_else(|| self.emitter.func_map.get(name.as_str()).copied())
                             .or_else(|| {
                                 // Try qualified: "{module}.{name}" for each known module
                                 self.emitter.module_names.iter()

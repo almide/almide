@@ -517,6 +517,8 @@ pub struct FuncCompiler<'a> {
     pub var_table: &'a almide_ir::VarTable,
     // Return type for stub calls (set by emit_call before delegating to handlers)
     pub stub_ret_ty: Ty,
+    // Module name of the function being compiled (for intra-module call resolution)
+    pub current_module_name: Option<String>,
 }
 
 impl FuncCompiler<'_> {
@@ -1107,6 +1109,10 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             let results = values::ret_type(&func.ret_ty);
             let type_idx = emitter.register_type(params, results);
             let func_idx = emitter.register_func(&prefixed_name, type_idx);
+            // Register qualified name: "{module}.{func}" for intra-module resolution
+            let module_name_str = module.name.to_string();
+            let qualified_name = format!("{}.{}", module_name_str, func.name);
+            emitter.func_map.insert(qualified_name, func_idx);
             // Also register by bare name so lifted closures from this module
             // can call module-local functions. ClosureConversion lifts lambdas
             // from modules to program.functions, but their Named call targets
@@ -1190,7 +1196,8 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     for &(mi, fi, type_idx) in &module_func_meta {
         let module = &program.modules[mi];
         let func = &module.functions[fi];
-        let compiled = functions::compile_function(&mut emitter, func, &program.var_table, type_idx);
+        let mod_name = module.name.to_string();
+        let compiled = functions::compile_module_function(&mut emitter, func, &program.var_table, type_idx, &mod_name);
         emitter.add_compiled(compiled);
     }
 
@@ -1530,6 +1537,7 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
             scratch: scratch_alloc,
             var_table: &program.var_table,
             stub_ret_ty: Ty::Unit,
+            current_module_name: None,
         };
 
         for tl in &program.top_lets {
@@ -1561,6 +1569,7 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
             scratch: scratch_alloc,
             var_table: &program.var_table,
             stub_ret_ty: Ty::Unit,
+            current_module_name: None,
         };
         for tl in &module.top_lets {
             mc.emit_expr(&tl.value);
@@ -1686,6 +1695,7 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
                 scratch: scratch_alloc,
                 var_table,
                 stub_ret_ty: almide_lang::types::Ty::Unit,
+                current_module_name: None,
             };
 
             // Compare tags
