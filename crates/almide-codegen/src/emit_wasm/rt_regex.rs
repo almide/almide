@@ -27,6 +27,7 @@
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
+use super::list_layout::{DATA_OFFSET, HEADER_SIZE, STRING_DATA_OFFSET, STRING_HEADER_SIZE};
 
 /// Regex-related runtime function indices.
 #[derive(Default, Clone)]
@@ -102,7 +103,7 @@ fn compile_skip_class(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(3); local_get(2); i32_lt_u;
         if_empty;
-            local_get(0); i32_const(4); i32_add; local_get(3); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add; i32_load8_u(0);
             i32_const(94); i32_eq;
             if_empty; local_get(3); i32_const(1); i32_add; local_set(3); end;
         end;
@@ -111,7 +112,7 @@ fn compile_skip_class(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(3); local_get(2); i32_lt_u;
         if_empty;
-            local_get(0); i32_const(4); i32_add; local_get(3); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add; i32_load8_u(0);
             i32_const(93); i32_eq;
             if_empty; local_get(3); i32_const(1); i32_add; local_set(3); end;
         end;
@@ -120,7 +121,7 @@ fn compile_skip_class(emitter: &mut WasmEmitter) {
     wasm!(f, {
         block_empty; loop_empty;
             local_get(3); local_get(2); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(3); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add; i32_load8_u(0);
             i32_const(93); i32_eq;
             if_empty; local_get(3); i32_const(1); i32_add; return_; end;
             local_get(3); i32_const(1); i32_add; local_set(3);
@@ -146,7 +147,7 @@ fn compile_match_class(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(3); local_get(5); i32_lt_u;
         if_empty;
-            local_get(0); i32_const(4); i32_add; local_get(3); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add; i32_load8_u(0);
             i32_const(94); i32_eq;
             if_empty; i32_const(1); local_set(4); local_get(3); i32_const(1); i32_add; local_set(3); end;
         end;
@@ -155,17 +156,17 @@ fn compile_match_class(emitter: &mut WasmEmitter) {
     // Loop over class chars
     wasm!(f, { block_empty; loop_empty; });
     wasm!(f, { local_get(3); local_get(5); i32_ge_u; br_if(1); });
-    wasm!(f, { local_get(0); i32_const(4); i32_add; local_get(3); i32_add; i32_load8_u(0); local_set(6); });
+    wasm!(f, { local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add; i32_load8_u(0); local_set(6); });
     wasm!(f, { local_get(6); i32_const(93); i32_eq; br_if(1); }); // ']' ends class
 
     // Check range: pos+2 < pat_len && pat[pos+1] == '-' && pat[pos+2] != ']'
     wasm!(f, {
         local_get(3); i32_const(2); i32_add; local_get(5); i32_lt_u;
         if_empty;
-            local_get(0); i32_const(4); i32_add; local_get(3); i32_const(1); i32_add; i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_const(1); i32_add; i32_add; i32_load8_u(0);
             i32_const(45); i32_eq;
             if_empty;
-                local_get(0); i32_const(4); i32_add; local_get(3); i32_const(2); i32_add; i32_add; i32_load8_u(0);
+                local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_const(2); i32_add; i32_add; i32_load8_u(0);
                 local_set(8);
                 local_get(8); i32_const(93); i32_ne;
                 if_empty;
@@ -219,8 +220,8 @@ fn compile_match_atom(emitter: &mut WasmEmitter) {
         local_get(3); local_get(5); i32_ge_u;
         if_empty; i32_const(-1); return_; end;
     });
-    wasm!(f, { local_get(1); i32_const(4); i32_add; local_get(3); i32_add; i32_load8_u(0); local_set(7); });
-    wasm!(f, { local_get(0); i32_const(4); i32_add; local_get(2); i32_add; i32_load8_u(0); local_set(6); });
+    wasm!(f, { local_get(1); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add; i32_load8_u(0); local_set(7); });
+    wasm!(f, { local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0); local_set(6); });
 
     // Dot: match any
     wasm!(f, {
@@ -234,7 +235,7 @@ fn compile_match_atom(emitter: &mut WasmEmitter) {
         if_empty;
             local_get(2); i32_const(1); i32_add; local_get(4); i32_ge_u;
             if_empty; i32_const(-1); return_; end;
-            local_get(0); i32_const(4); i32_add; local_get(2); i32_const(1); i32_add; i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_const(1); i32_add; i32_add; i32_load8_u(0);
             local_set(8);
             i32_const(0); local_set(9);
     });
@@ -316,7 +317,7 @@ fn compile_atom_len(emitter: &mut WasmEmitter) {
         local_get(1); local_get(3); i32_ge_u;
         if_empty; i32_const(0); return_; end;
     });
-    wasm!(f, { local_get(0); i32_const(4); i32_add; local_get(1); i32_add; i32_load8_u(0); local_set(2); });
+    wasm!(f, { local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add; i32_load8_u(0); local_set(2); });
 
     // Escape: 2 bytes
     wasm!(f, {
@@ -352,7 +353,7 @@ fn compile_skip_group(emitter: &mut WasmEmitter) {
     wasm!(f, { block_empty; loop_empty; });
     wasm!(f, { local_get(2); local_get(4); i32_ge_u; br_if(1); });
     wasm!(f, { local_get(3); i32_eqz; br_if(1); });
-    wasm!(f, { local_get(0); i32_const(4); i32_add; local_get(2); i32_add; i32_load8_u(0); local_set(5); });
+    wasm!(f, { local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0); local_set(5); });
 
     // Skip [...]
     wasm!(f, {
@@ -409,7 +410,7 @@ fn compile_match_anchored(emitter: &mut WasmEmitter) {
     });
 
     // Load current pattern char
-    wasm!(f, { local_get(0); i32_const(4); i32_add; local_get(2); i32_add; i32_load8_u(0); local_set(6); });
+    wasm!(f, { local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0); local_set(6); });
 
     // Handle '$' at end of pattern
     wasm!(f, {
@@ -452,7 +453,7 @@ fn compile_match_anchored(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(11); local_get(4); i32_lt_u;
         if_empty;
-            local_get(0); i32_const(4); i32_add; local_get(11); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(11); i32_add; i32_load8_u(0);
             local_set(8);
         else_;
             i32_const(0); local_set(8);
@@ -596,7 +597,7 @@ fn compile_match_search(emitter: &mut WasmEmitter) {
         i32_const(0); local_set(7);
         local_get(6); i32_const(0); i32_gt_u;
         if_empty;
-            local_get(0); i32_const(4); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; i32_load8_u(0);
             i32_const(94); i32_eq;
             if_empty; i32_const(1); local_set(7); end;
         end;
@@ -667,7 +668,7 @@ fn compile_captures_inner(emitter: &mut WasmEmitter) {
         if_empty; local_get(3); return_; end;
     });
 
-    wasm!(f, { local_get(0); i32_const(4); i32_add; local_get(2); i32_add; i32_load8_u(0); local_set(8); });
+    wasm!(f, { local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0); local_set(8); });
 
     // Handle '$'
     wasm!(f, {
@@ -721,7 +722,7 @@ fn compile_captures_inner(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(13); local_get(6); i32_lt_u;
         if_empty;
-            local_get(0); i32_const(4); i32_add; local_get(13); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(13); i32_add; i32_load8_u(0);
             local_set(10);
         else_;
             i32_const(0); local_set(10);
@@ -805,7 +806,7 @@ fn compile_captures_search(emitter: &mut WasmEmitter) {
     wasm!(f, { i32_const(0); local_set(7); i32_const(0); local_set(10); });
     wasm!(f, { block_empty; loop_empty; });
     wasm!(f, { local_get(10); local_get(14); i32_ge_u; br_if(1); });
-    wasm!(f, { local_get(0); i32_const(4); i32_add; local_get(10); i32_add; i32_load8_u(0); local_set(16); });
+    wasm!(f, { local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(10); i32_add; i32_load8_u(0); local_set(16); });
     // Skip escaped chars
     wasm!(f, {
         local_get(16); i32_const(92); i32_eq;
@@ -828,7 +829,7 @@ fn compile_captures_search(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(14); i32_const(0); i32_gt_u;
         if_empty;
-            local_get(0); i32_const(4); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; i32_load8_u(0);
             i32_const(94); i32_eq;
             if_empty;
     });
@@ -911,7 +912,7 @@ fn emit_build_captures_list(
 
     // Allocate list: [len:4][cap:4][data...]
     wasm!(f, {
-        local_get(num_groups); i32_const(4); i32_mul; i32_const(8); i32_add;
+        local_get(num_groups); i32_const(4); i32_mul; i32_const(HEADER_SIZE); i32_add;
         call(alloc); local_set(list_ptr);
     });
     wasm!(f, { local_get(list_ptr); local_get(num_groups); i32_store(0); });
@@ -934,7 +935,7 @@ fn emit_build_captures_list(
     wasm!(f, {
         local_get(grp_start); i32_const(-1); i32_eq;
         if_i32;
-            i32_const(4); call(alloc); local_set(str_ptr);
+            i32_const(STRING_HEADER_SIZE); call(alloc); local_set(str_ptr);
             local_get(str_ptr); i32_const(0); i32_store(0);
             local_get(str_ptr);
         else_;
@@ -948,7 +949,7 @@ fn emit_build_captures_list(
 
     wasm!(f, {
         local_set(str_ptr);
-        local_get(list_ptr); i32_const(8); i32_add;
+        local_get(list_ptr); i32_const(DATA_OFFSET); i32_add;
         local_get(i); i32_const(4); i32_mul; i32_add;
         local_get(str_ptr); i32_store(0);
     });

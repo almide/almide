@@ -3,6 +3,7 @@
 use almide_ir::{CallTarget, IrExpr};
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
+use super::list_layout::{DATA_OFFSET, HEADER_SIZE, STRING_HEADER_SIZE};
 
 use super::FuncCompiler;
 use super::values;
@@ -557,7 +558,7 @@ impl FuncCompiler<'_> {
                             local_get(s); i32_load(0); i32_eqz; // tag == 0?
                             if_i32;
                               // ok → empty string
-                              i32_const(4); call(self.emitter.rt.alloc); local_set(s1);
+                              i32_const(STRING_HEADER_SIZE); call(self.emitter.rt.alloc); local_set(s1);
                               local_get(s1); i32_const(0); i32_store(0);
                               local_get(s1);
                             else_;
@@ -1140,10 +1141,10 @@ impl FuncCompiler<'_> {
             Ty::Float => { wasm!(self.func, { f64_const(0.0); }); }
             Ty::Bool => { wasm!(self.func, { i32_const(0); }); }
             Ty::String => {
-                // Empty string: alloc 4 bytes, len=0
+                // Empty string: alloc STRING_HEADER_SIZE bytes, len=0
                 let tmp = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc);
+                    i32_const(STRING_HEADER_SIZE); call(self.emitter.rt.alloc);
                     local_set(tmp);
                     local_get(tmp);
                     i32_const(0); i32_store(0);

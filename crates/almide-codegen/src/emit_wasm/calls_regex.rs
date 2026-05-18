@@ -12,6 +12,7 @@
 
 use super::FuncCompiler;
 use almide_ir::IrExpr;
+use super::list_layout::{DATA_OFFSET, HEADER_SIZE};
 
 impl FuncCompiler<'_> {
     /// Dispatch a `regex.*` module call.
@@ -190,7 +191,7 @@ impl FuncCompiler<'_> {
             end; end;
 
             // Build result list: [len:i32][ptr0..ptrN]
-            local_get(count); i32_const(4); i32_mul; i32_const(8); i32_add;
+            local_get(count); i32_const(4); i32_mul; i32_const(HEADER_SIZE); i32_add;
             call(self.emitter.rt.alloc);
             local_set(result);
             local_get(result); local_get(count); i32_store(0);
@@ -199,7 +200,7 @@ impl FuncCompiler<'_> {
             i32_const(0); local_set(pos);
             block_empty; loop_empty;
                 local_get(pos); local_get(count); i32_ge_u; br_if(1);
-                local_get(result); i32_const(8); i32_add;
+                local_get(result); i32_const(DATA_OFFSET); i32_add;
                 local_get(pos); i32_const(4); i32_mul; i32_add;
                 local_get(buf); local_get(pos); i32_const(4); i32_mul; i32_add; i32_load(0);
                 i32_store(0);
@@ -457,14 +458,14 @@ impl FuncCompiler<'_> {
         });
         // Build result list
         wasm!(self.func, {
-            local_get(count); i32_const(4); i32_mul; i32_const(8); i32_add;
+            local_get(count); i32_const(4); i32_mul; i32_const(HEADER_SIZE); i32_add;
             call(self.emitter.rt.alloc);
             local_set(result);
             local_get(result); local_get(count); i32_store(0);
             i32_const(0); local_set(pos);
             block_empty; loop_empty;
                 local_get(pos); local_get(count); i32_ge_u; br_if(1);
-                local_get(result); i32_const(8); i32_add;
+                local_get(result); i32_const(DATA_OFFSET); i32_add;
                 local_get(pos); i32_const(4); i32_mul; i32_add;
                 local_get(buf); local_get(pos); i32_const(4); i32_mul; i32_add; i32_load(0);
                 i32_store(0);

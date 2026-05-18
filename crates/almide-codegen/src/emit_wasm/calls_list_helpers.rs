@@ -283,14 +283,14 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_set(xs_ptr);
             local_get(xs_ptr); i32_load(0); local_set(len);
-            i32_const(8); local_get(len); i32_const(es as i32); i32_mul; i32_add;
+            i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(es as i32); i32_mul; i32_add;
             call(self.emitter.rt.alloc); local_set(dst);
             local_get(dst); local_get(len); i32_store(0);
             i32_const(0); local_set(i);
             block_empty; loop_empty;
               local_get(i); local_get(len); i32_ge_u; br_if(1);
-              local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
-              local_get(xs_ptr); i32_const(8); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
+              local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
+              local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
         });
         kind.emit_copy_one(&mut self.func);
         wasm!(self.func, {
@@ -304,7 +304,7 @@ impl FuncCompiler<'_> {
             block_empty; loop_empty;
               local_get(i); local_get(len); i32_ge_u; br_if(1);
               // key = dst[4 + i*es]
-              local_get(dst); i32_const(8); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
+              local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
         });
         kind.emit_load(&mut self.func);
         wasm!(self.func, {
@@ -314,7 +314,7 @@ impl FuncCompiler<'_> {
               block_empty; loop_empty;
                 local_get(j); i32_const(0); i32_lt_s; br_if(1);
                 // compare dst[j] with key
-                local_get(dst); i32_const(8); i32_add; local_get(j); i32_const(es as i32); i32_mul; i32_add;
+                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(j); i32_const(es as i32); i32_mul; i32_add;
         });
         kind.emit_load(&mut self.func);     // load dst[j]
         wasm!(self.func, { local_get(key); }); // push key
@@ -322,9 +322,9 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
                 br_if(1); // dst[j] <= key → stop
                 // shift: dst[j+1] = dst[j]
-                local_get(dst); i32_const(8); i32_add;
+                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(j); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
-                local_get(dst); i32_const(8); i32_add;
+                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(j); i32_const(es as i32); i32_mul; i32_add;
         });
         kind.emit_copy_one(&mut self.func);
@@ -332,7 +332,7 @@ impl FuncCompiler<'_> {
                 local_get(j); i32_const(1); i32_sub; local_set(j); br(0);
               end; end;
               // place key at dst[j+1]
-              local_get(dst); i32_const(8); i32_add;
+              local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
               local_get(j); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
               local_get(key);
         });
@@ -392,13 +392,13 @@ impl FuncCompiler<'_> {
         match values::ty_to_valtype(&elem_ty) {
             Some(ValType::I64) => {
                 wasm!(self.func, {
-                    local_get(xs_ptr); i32_const(8); i32_add;
+                    local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(i); i32_const(8); i32_mul; i32_add;
                     i64_load(0);
                     local_get(search_val_i64); i64_eq;
                     if_empty;
                       // Found: store some(i) and break
-                      i32_const(8); call(self.emitter.rt.alloc); local_set(found_ptr);
+                      i32_const(super::list_layout::HEADER_SIZE); call(self.emitter.rt.alloc); local_set(found_ptr);
                       local_get(found_ptr); local_get(i); i64_extend_i32_u; i64_store(0);
                       local_get(found_ptr); local_set(result); br(2);
                     end;
@@ -406,7 +406,7 @@ impl FuncCompiler<'_> {
             }
             _ => {
                 wasm!(self.func, {
-                    local_get(xs_ptr); i32_const(8); i32_add;
+                    local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(i); i32_const(elem_size as i32); i32_mul; i32_add;
                     i32_load(0);
                     local_get(search_val_i32);
@@ -419,7 +419,7 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                     if_empty;
-                      i32_const(8); call(self.emitter.rt.alloc); local_set(found_ptr);
+                      i32_const(super::list_layout::HEADER_SIZE); call(self.emitter.rt.alloc); local_set(found_ptr);
                       local_get(found_ptr); local_get(i); i64_extend_i32_u; i64_store(0);
                       local_get(found_ptr); local_set(result); br(2);
                     end;
@@ -456,7 +456,7 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_set(src);
             local_get(src); i32_load(0); local_set(src_len); // src_len
-            i32_const(8); local_get(src_len); i32_const(es); i32_mul; i32_add;
+            i32_const(super::list_layout::HEADER_SIZE); local_get(src_len); i32_const(es); i32_mul; i32_add;
             call(self.emitter.rt.alloc); local_set(dst); // dst
             local_get(dst); i32_const(0); i32_store(0);
             i32_const(0); local_set(i); // i
@@ -467,10 +467,10 @@ impl FuncCompiler<'_> {
               i32_const(0); local_set(found); // found
               block_empty; loop_empty;
                 local_get(j); local_get(dst); i32_load(0); i32_ge_u; br_if(1);
-                local_get(src); i32_const(8); i32_add;
+                local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(es); i32_mul; i32_add;
                 i32_load(0);
-                local_get(dst); i32_const(8); i32_add;
+                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(j); i32_const(es); i32_mul; i32_add;
                 i32_load(0);
         });
@@ -485,9 +485,9 @@ impl FuncCompiler<'_> {
               end; end;
               local_get(found); i32_eqz;
               if_empty;
-                local_get(dst); i32_const(8); i32_add;
+                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(dst); i32_load(0); i32_const(es); i32_mul; i32_add;
-                local_get(src); i32_const(8); i32_add;
+                local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(es); i32_mul; i32_add;
         });
         self.emit_elem_copy(&elem_ty);
@@ -531,7 +531,7 @@ impl FuncCompiler<'_> {
             i32_load(0);
             local_set(len_local);
             // Alloc dst: [len] + len * ptr_size(4)
-            i32_const(8);
+            i32_const(super::list_layout::HEADER_SIZE);
             local_get(len_local);
             i32_const(4); // each entry is a tuple ptr (i32)
             i32_mul;
@@ -568,7 +568,7 @@ impl FuncCompiler<'_> {
             local_get(tuple_ptr);
             // Load src element
             local_get(src_ptr);
-            i32_const(8);
+            i32_const(super::list_layout::DATA_OFFSET);
             i32_add;
             local_get(idx_local);
             i32_const(elem_size as i32);
@@ -581,7 +581,7 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             // dst[idx] = tuple_ptr
             local_get(dst_ptr);
-            i32_const(8);
+            i32_const(super::list_layout::DATA_OFFSET);
             i32_add;
             local_get(idx_local);
             i32_const(4); // tuple ptrs are i32

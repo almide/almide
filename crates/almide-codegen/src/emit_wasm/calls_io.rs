@@ -5,6 +5,7 @@ use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use super::values;
 use wasm_encoder::Instruction;
+use super::list_layout::{DATA_OFFSET, HEADER_SIZE, STRING_DATA_OFFSET, STRING_HEADER_SIZE};
 
 impl FuncCompiler<'_> {
     pub(super) fn emit_io_call(&mut self, func: &str, args: &[IrExpr]) {
@@ -16,9 +17,9 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(s);
-                    // iov[0].buf = s + 4 (skip length prefix)
+                    // iov[0].buf = s + STRING_DATA_OFFSET (skip length prefix)
                     i32_const(0);
-                    local_get(s); i32_const(4); i32_add;
+                    local_get(s); i32_const(STRING_DATA_OFFSET); i32_add;
                     i32_store(0);
                     // iov[0].len = *s (load length)
                     i32_const(4);
@@ -123,14 +124,14 @@ impl FuncCompiler<'_> {
 
                 // Build Almide string [len:i32][data:u8...]
                 wasm!(self.func, {
-                    local_get(len); i32_const(4); i32_add;
+                    local_get(len); i32_const(STRING_HEADER_SIZE); i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(len); i32_store(0);
-                    // Copy buf[0..len] to result+4
+                    // Copy buf[0..len] to result+STRING_DATA_OFFSET
                     i32_const(0); local_set(copy_i);
                     block_empty; loop_empty;
                       local_get(copy_i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(result); i32_const(4); i32_add; local_get(copy_i); i32_add;
+                      local_get(result); i32_const(STRING_DATA_OFFSET); i32_add; local_get(copy_i); i32_add;
                       local_get(buf); local_get(copy_i); i32_add; i32_load8_u(0);
                       i32_store8(0);
                       local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
@@ -228,14 +229,14 @@ impl FuncCompiler<'_> {
 
                 // Build Almide string [len:i32][data:u8...]
                 wasm!(self.func, {
-                    local_get(len); i32_const(4); i32_add;
+                    local_get(len); i32_const(STRING_HEADER_SIZE); i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(len); i32_store(0);
-                    // Copy buf[0..len] to result+4
+                    // Copy buf[0..len] to result+STRING_DATA_OFFSET
                     i32_const(0); local_set(copy_i);
                     block_empty; loop_empty;
                       local_get(copy_i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(result); i32_const(4); i32_add; local_get(copy_i); i32_add;
+                      local_get(result); i32_const(STRING_DATA_OFFSET); i32_add; local_get(copy_i); i32_add;
                       local_get(buf); local_get(copy_i); i32_add; i32_load8_u(0);
                       i32_store8(0);
                       local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
@@ -331,15 +332,15 @@ impl FuncCompiler<'_> {
 
                 // Build List[Int]: [total:i32][i64 * total]
                 wasm!(self.func, {
-                    // Allocate: 4 + total * 8
-                    local_get(total); i32_const(8); i32_mul; i32_const(8); i32_add;
+                    // Allocate: HEADER_SIZE + total * 8
+                    local_get(total); i32_const(8); i32_mul; i32_const(HEADER_SIZE); i32_add;
                     call(self.emitter.rt.alloc); local_set(list_ptr);
                     local_get(list_ptr); local_get(total); i32_store(0);
                     // Copy bytes → i64 elements
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(total); i32_ge_u; br_if(1);
-                      local_get(list_ptr); i32_const(8); i32_add;
+                      local_get(list_ptr); i32_const(DATA_OFFSET); i32_add;
                       local_get(i); i32_const(8); i32_mul; i32_add;
                       local_get(raw_buf); local_get(i); i32_add; i32_load8_u(0); i64_extend_i32_u;
                       i64_store(0);
@@ -367,7 +368,7 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, {
                         local_set(s);
                         i32_const(0);
-                        local_get(s); i32_const(4); i32_add;
+                        local_get(s); i32_const(STRING_DATA_OFFSET); i32_add;
                         i32_store(0);
                         i32_const(4);
                         local_get(s); i32_load(0);
@@ -392,7 +393,7 @@ impl FuncCompiler<'_> {
                         block_empty; loop_empty;
                           local_get(i); local_get(len); i32_ge_u; br_if(1);
                           local_get(tmp_buf); local_get(i); i32_add;
-                          local_get(list_ptr); i32_const(8); i32_add;
+                          local_get(list_ptr); i32_const(DATA_OFFSET); i32_add;
                           local_get(i); i32_const(8); i32_mul; i32_add;
                           i64_load(0); i32_wrap_i64;
                           i32_store8(0);
