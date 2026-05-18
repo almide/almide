@@ -1,0 +1,26 @@
+import self.rec as r
+
+var items: List[r.R] = []
+
+fn run_a(dt: Float) -> Unit = {
+  var out: List[r.R] = []
+  for i in 0..list.len(items) {
+    out = out + [r.tick(items[i], dt)]
+  }
+  items = out
+}
+
+fn run_b(dt: Float) -> Unit = {
+  var out: List[r.R] = []
+  for i in 0..list.len(items) {
+    out = out + [r.tick(items[i], dt * 2.0)]
+  }
+  items = out
+}
+
+fn main() -> Unit = {
+  items = [r.make(0.0, 1.0, 100.0), r.make(0.0, 1.0, 100.0)]
+  run_a(10.0)
+  run_b(20.0)
+  println(float.to_string(items[0].h))
+}

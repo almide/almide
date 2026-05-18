@@ -1,0 +1,27 @@
+type R = {
+  a: Float, b: Float, c: Float, d: Float,
+  e: Int, f: Int, g: Int,
+  h: Float, i: Int, j: Int,
+}
+
+fn make(a: Float, b: Float, c: Float) -> R =
+  R { a: a, b: b, c: c, d: 0.0, e: 0, f: 0, g: 0, h: 0.0, i: 1, j: 0 }
+
+fn tick(r: R, dt: Float) -> R = {
+  if r.i != 1 then r
+  else {
+    let nh = r.h + dt
+    let at = nh - r.d
+    if at >= r.c then {
+      if r.g == 0 - 1 or r.j < r.g then {
+        let ov = at - r.c
+        // 10-field explicit record construction in nested if/else = BUG TRIGGER
+        R { a: r.a, b: r.b, c: r.c, d: r.d, e: r.e, f: r.f, g: r.g, h: r.d + ov, i: r.i, j: r.j + 1 }
+      } else {
+        { ...r, h: nh, i: 3 }
+      }
+    } else {
+      { ...r, h: nh }
+    }
+  }
+}

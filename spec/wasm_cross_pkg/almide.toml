@@ -1,0 +1,5 @@
+[package]
+name = "cross_spread_test"
+version = "0.1.0"
+[targets]
+wasm = true
