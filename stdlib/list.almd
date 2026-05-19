@@ -227,8 +227,7 @@ fn binary_search(xs: List[Int], target: Int) -> Option[Int] = _
 // ── mutable (in-place) ──
 
 @intrinsic("almide_rt_list_push")
-@mutating(xs)
-fn push[A](xs: List[A], x: A) -> Unit = _
+fn push[A](mut xs: List[A], x: A) -> Unit = _
 
 // Create an empty list with preallocated capacity. Subsequent `push`es
 // up to `cap` avoid the repeated Vec doublings that dominate tight
@@ -237,12 +236,10 @@ fn push[A](xs: List[A], x: A) -> Unit = _
 fn with_capacity[A](cap: Int) -> List[A] = _
 
 @intrinsic("almide_rt_list_pop")
-@mutating(xs)
-fn pop[A](xs: List[A]) -> Option[A] = _
+fn pop[A](mut xs: List[A]) -> Option[A] = _
 
 @intrinsic("almide_rt_list_clear")
-@mutating(xs)
-fn clear[A](xs: List[A]) -> Unit = _
+fn clear[A](mut xs: List[A]) -> Unit = _
 
 // ── bundled-Almide extensions (non-TOML, pure Almide body) ──
 

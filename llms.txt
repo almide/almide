@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.17.10 (prev v0.17.9). Versioned constant codegen, for-in list iteration, @intrinsic mono skip, LICM mutation tracking via @mutating(param), mut parameter modifier roadmap.
+- Current stable: v0.18.0 (prev v0.17.10). `mut` parameter modifier: first-class keyword, checker-enforced mutability at call sites (E007), FnSig.mut_params, stdlib migrated from @mutating to `mut`.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.

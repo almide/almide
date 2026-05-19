@@ -250,6 +250,10 @@ pub struct Param {
     pub default: Option<Box<Expr>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attrs: Vec<Attribute>,
+    /// `mut` parameter modifier — the function may mutate this argument in place.
+    /// Caller must pass a `var` binding (not `let` or temporary).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_mut: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

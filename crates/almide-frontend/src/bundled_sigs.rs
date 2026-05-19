@@ -169,6 +169,10 @@ fn build_fn_sig(
         .collect();
     let ret = crate::canonicalize::resolve::resolve_type_expr(return_type, resolver_ctx);
     let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
+    let mut_params: Vec<usize> = params.iter().enumerate()
+        .filter(|(_, p)| p.is_mut)
+        .map(|(i, _)| i)
+        .collect();
     FnSig {
         generics: gnames,
         params: ptys,
@@ -176,5 +180,6 @@ fn build_fn_sig(
         is_effect,
         structural_bounds: HashMap::new(),
         protocol_bounds: HashMap::new(),
+        mut_params,
     }
 }

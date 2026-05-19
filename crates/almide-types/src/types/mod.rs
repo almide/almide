@@ -134,13 +134,15 @@ pub struct FnSig {
     pub structural_bounds: std::collections::HashMap<Sym, Ty>,
     /// Protocol bounds for generics: TypeVar name → list of protocol names
     pub protocol_bounds: std::collections::HashMap<Sym, Vec<Sym>>,
+    /// Which parameters are `mut` (in-place mutation). Indices into `params`.
+    pub mut_params: Vec<usize>,
 }
 
 /// Convenience macro for creating FnSig without generics (stdlib functions)
 #[macro_export]
 macro_rules! fn_sig {
     (params: $params:expr, ret: $ret:expr, is_effect: $eff:expr) => {
-        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![], structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() }
+        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![], structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new(), mut_params: vec![] }
     };
 }
 

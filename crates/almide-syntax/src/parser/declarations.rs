@@ -623,6 +623,7 @@ impl Parser {
                 ty: TypeExpr::Simple { name: sym("Self") },
                 default: None,
                 attrs: Vec::new(),
+                is_mut: false,
             });
             self.advance();
             if self.check(TokenType::Comma) { self.advance(); }
@@ -638,6 +639,8 @@ impl Parser {
                 attrs.push(self.parse_attribute()?);
                 self.skip_newlines();
             }
+            let is_mut = self.check(TokenType::Mut);
+            if is_mut { self.advance(); }
             let param_name = self.expect_any_param_name()?;
             self.expect(TokenType::Colon)?;
             let param_type = self.parse_type_expr()?;
@@ -651,7 +654,7 @@ impl Parser {
                 }
                 None
             };
-            params.push(Param { name: param_name, ty: param_type, default, attrs });
+            params.push(Param { name: param_name, ty: param_type, default, attrs, is_mut });
             if self.check(TokenType::Comma) {
                 self.advance();
                 self.skip_newlines();
