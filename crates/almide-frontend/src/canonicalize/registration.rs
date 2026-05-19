@@ -179,13 +179,17 @@ pub fn register_fn_sig(
         }
     }
     let ptys: Vec<(Sym, Ty)> = params.iter().map(|p| (sym(&p.name), resolve(env, &p.ty))).collect();
+    let mut_params: Vec<usize> = params.iter().enumerate()
+        .filter(|(_, p)| p.is_mut)
+        .map(|(i, _)| i)
+        .collect();
     let ret = resolve(env, return_type);
     for gn in &gnames { env.types.remove(gn); }
     let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
     let key = prefixed_key(prefix, name);
     if prefix.is_none() && is_effect { env.effect_fns.insert(sym(name)); }
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
-    env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb });
+    env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb, mut_params });
     // Record visibility so `resolve_module_call` can reject cross-module access
     // to `mod fn` / `local fn`. Only non-Public entries need to be stored — the
     // lookup in the checker treats "missing" as Public (stdlib, impl methods,
@@ -226,23 +230,23 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str)
             "Eq" => {
                 let fn_key = format!("{}.eq", type_name);
                 if !env.functions.contains_key(&sym(&fn_key)) {
-                    env.functions.insert(sym(&fn_key), FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone() });
+                    env.functions.insert(sym(&fn_key), FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
                 }
             }
             "Repr" => {
                 let fn_key = format!("{}.repr", type_name);
                 if !env.functions.contains_key(&sym(&fn_key)) {
-                    env.functions.insert(sym(&fn_key), FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone() });
+                    env.functions.insert(sym(&fn_key), FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
                 }
             }
             "Codec" => {
                 let encode_key = format!("{}.encode", type_name);
                 if !env.functions.contains_key(&sym(&encode_key)) {
-                    env.functions.insert(sym(&encode_key), FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone() });
+                    env.functions.insert(sym(&encode_key), FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
                 }
                 let decode_key = format!("{}.decode", type_name);
                 if !env.functions.contains_key(&sym(&decode_key)) {
-                    env.functions.insert(sym(&decode_key), FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone() });
+                    env.functions.insert(sym(&decode_key), FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
                 }
             }
             _ => {}

@@ -1,0 +1,30 @@
+// mut parameter modifier — checker enforcement tests
+
+fn add_item(mut xs: List[Int], x: Int) -> Unit = {
+  list.push(xs, x)
+}
+
+test "mut param accepts var binding" {
+  var data: List[Int] = []
+  add_item(data, 1)
+  add_item(data, 2)
+  assert(list.len(data) == 2)
+  assert(data[0] == 1)
+  assert(data[1] == 2)
+}
+
+test "mut param with stdlib list.push" {
+  var xs: List[Int] = [10]
+  list.push(xs, 20)
+  list.push(xs, 30)
+  assert(list.len(xs) == 3)
+  assert(xs[2] == 30)
+}
+
+test "mut param with map.insert" {
+  var m = map.new[String, Int]()
+  map.insert(m, "a", 1)
+  map.insert(m, "b", 2)
+  assert(map.len(m) == 2)
+  assert(map.get_or(m, "a", 0) == 1)
+}

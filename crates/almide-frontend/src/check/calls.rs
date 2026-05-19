@@ -34,7 +34,10 @@ impl Checker {
                 if self.env.lookup_var(&name).is_some() {
                     let _ = self.infer_expr(callee);
                 }
-                self.check_named_call_spanned(&name, &arg_tys, type_args, callee_span_snapshot)
+                let ret = self.check_named_call_spanned(&name, &arg_tys, type_args, callee_span_snapshot);
+                let arg_refs: Vec<&ast::Expr> = args.iter().collect();
+                self.validate_mut_args(&name, &arg_refs);
+                ret
             }
             ExprKind::TypeName { name, .. } => {
                 if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
@@ -76,6 +79,8 @@ impl Checker {
                 let resolved = self.resolve_static_member(object, field, &arg_tys);
                 self.callee_span_hint = prev;
                 if let Some(result) = resolved {
+                    let arg_refs: Vec<&ast::Expr> = args.iter().collect();
+                    self.validate_mut_args(&format!("{}.{}", if let ExprKind::Ident { name, .. } = &object.kind { name.as_str() } else { "?" }, field), &arg_refs);
                     return result;
                 }
                 // UFCS method: obj.method(args) -> module.method(obj, args)
@@ -346,6 +351,7 @@ impl Checker {
         }
 
         let Some(sig) = sig else {
+            self.last_mut_params = vec![];
             // No function signature found — try constructor, variable, or report error
             if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
                 self.check_constructor_args(name, &case, arg_tys);
@@ -433,6 +439,8 @@ impl Checker {
             self.emit(diag);
             return Ty::Unknown;
         };
+
+        self.last_mut_params = sig.mut_params.clone();
 
         // Effect isolation: pure fn cannot call effect fn
         if sig.is_effect && !self.env.can_call_effect {
@@ -542,6 +550,35 @@ impl Checker {
             return Ty::result(ret, Ty::String);
         }
         ret
+    }
+
+    /// Validate that arguments passed to `mut` parameters are mutable (`var`) bindings.
+    /// Called after `check_named_call_with_type_args` which populates `self.last_mut_params`.
+    pub(crate) fn validate_mut_args(&mut self, fn_name: &str, arg_exprs: &[&ast::Expr]) {
+        let mut_params = std::mem::take(&mut self.last_mut_params);
+        for &idx in &mut_params {
+            if idx >= arg_exprs.len() { continue; }
+            let arg = arg_exprs[idx];
+            let param_name = fn_name.split('.').last().unwrap_or(fn_name);
+            match &arg.kind {
+                ExprKind::Ident { name, .. } => {
+                    if !self.env.mutable_vars.contains(&sym(name)) {
+                        self.emit(super::err(
+                            format!("cannot pass immutable binding '{}' to `mut` parameter of {}()", name, fn_name),
+                            format!("Declare '{}' with `var` instead of `let` to allow mutation", name),
+                            format!("call to {}()", fn_name),
+                        ).with_code("E007"));
+                    }
+                }
+                _ => {
+                    self.emit(super::err(
+                        format!("cannot pass a temporary expression to `mut` parameter of {}()", fn_name),
+                        "Pass a mutable `var` binding instead",
+                        format!("call to {}()", fn_name),
+                    ).with_code("E007"));
+                }
+            }
+        }
     }
 
     /// Create fresh inference variables for a type's generic parameters.

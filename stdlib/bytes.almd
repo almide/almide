@@ -140,8 +140,7 @@ fn pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = _
 fn pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = _
 
 @intrinsic("almide_rt_bytes_push")
-@mutating(b)
-fn push(b: Bytes, val: Int) -> Unit = _
+fn push(mut b: Bytes, val: Int) -> Unit = _
 
 @intrinsic("almide_rt_bytes_read_bool")
 fn read_bool(b: Bytes, pos: Int) -> Bool = _

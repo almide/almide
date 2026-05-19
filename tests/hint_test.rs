@@ -334,16 +334,16 @@ fn syntax_guide_print() {
 #[test]
 fn syntax_guide_let_mut() {
     let prev = tok(TokenType::Let, "let");
-    let got = tok(TokenType::Ident, "mut");
-    let ctx = HintContext { expected: Some(TokenType::Ident), got: &got, prev: Some(&prev), next: None, scope: HintScope::Block };
+    let got = tok(TokenType::Mut, "mut");
+    let ctx = HintContext { expected: Some(TokenType::Mut), got: &got, prev: Some(&prev), next: None, scope: HintScope::Block };
     assert_hint_match(&ctx, "var");
 }
 
 #[test]
 fn syntax_guide_let_mut_needs_let_prev() {
     let prev = tok(TokenType::Ident, "x");
-    let got = tok(TokenType::Ident, "mut");
-    let ctx = HintContext { expected: Some(TokenType::Ident), got: &got, prev: Some(&prev), next: None, scope: HintScope::Block };
+    let got = tok(TokenType::Mut, "mut");
+    let ctx = HintContext { expected: Some(TokenType::Mut), got: &got, prev: Some(&prev), next: None, scope: HintScope::Block };
     // "mut" after a non-let token should not trigger the let mut hint
     let result = check_hint(&ctx);
     if let Some(r) = result {

@@ -19,7 +19,7 @@ pub enum TokenType {
     // Identifiers
     Ident, TypeName,
     // Keywords
-    Module, Import, Type, Protocol, Impl, For, In, Fn, Let, Var,
+    Module, Import, Type, Protocol, Impl, For, In, Fn, Let, Var, Mut,
     If, Then, Else, Match, Ok, Err, Some, None, Todo,
     True, False, Not, And, Or,
     Strict, Pub, Effect, Test,
@@ -453,7 +453,7 @@ fn keyword(s: &str) -> Option<TokenType> {
         "type" => Some(TokenType::Type), "protocol" => Some(TokenType::Protocol),
         "impl" => Some(TokenType::Impl), "for" => Some(TokenType::For),
         "in" => Some(TokenType::In), "fn" => Some(TokenType::Fn),
-        "let" => Some(TokenType::Let), "var" => Some(TokenType::Var),
+        "let" => Some(TokenType::Let), "var" => Some(TokenType::Var), "mut" => Some(TokenType::Mut),
         "if" => Some(TokenType::If), "then" => Some(TokenType::Then),
         "else" => Some(TokenType::Else), "match" => Some(TokenType::Match),
         "ok" | "Ok" => Some(TokenType::Ok), "err" | "Err" => Some(TokenType::Err),

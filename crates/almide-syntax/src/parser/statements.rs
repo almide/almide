@@ -89,9 +89,9 @@ impl Parser {
         }
 
         // Detect `let mut` (Rust style)
-        if self.check(TokenType::Ident) && self.current().value == "mut" {
+        if self.check(TokenType::Mut) {
             return Err(self.check_hint_or_err(
-                Some(TokenType::Ident), super::hints::HintScope::Block,
+                Some(TokenType::Mut), super::hints::HintScope::Block,
                 "'let mut' is not valid in Almide",
             ));
         }

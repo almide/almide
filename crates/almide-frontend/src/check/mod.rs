@@ -57,6 +57,10 @@ pub struct Checker {
     /// rewrite the whole call (UFCS `x.to_uppercase()` →
     /// `string.to_upper(x)`) can target the full range.
     pub(crate) call_span_hint: Option<crate::ast::Span>,
+    /// `mut` parameter indices from the last resolved function signature.
+    /// Set by `check_named_call_with_type_args`, consumed by callers
+    /// that have access to argument expressions for mutability validation.
+    pub(crate) last_mut_params: Vec<usize>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Module-name prefix active during `infer_module`. `None` for the
@@ -93,6 +97,7 @@ impl Checker {
             current_span: None,
             callee_span_hint: None,
             call_span_hint: None,
+            last_mut_params: Vec::new(),
             constraints: Vec::new(), uf: UnionFind::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),
@@ -503,6 +508,7 @@ impl Checker {
             let ty = self.resolve_type_expr(&p.ty);
             self.env.define_var(&p.name, ty.clone());
             self.env.param_vars.insert(sym(&p.name));
+            if p.is_mut { self.env.mutable_vars.insert(sym(&p.name)); }
             if let Some(ref mut default_expr) = p.default {
                 let dty = self.infer_expr(default_expr);
                 self.constrain(ty, dty, format!("default arg '{}'", p.name));
@@ -543,7 +549,8 @@ impl Checker {
                 self.env.can_call_effect = prev_call;
                 self.env.pop_scope();
             }
-            ast::Decl::TopLet { name, value, .. } => {
+            ast::Decl::TopLet { name, value, mutable, .. } => {
+                if *mutable { self.env.mutable_vars.insert(sym(name)); }
                 let ity = self.infer_expr(value);
                 let resolved = resolve_ty(&ity, &self.uf);
                 // Update env.top_lets with the fully inferred type.

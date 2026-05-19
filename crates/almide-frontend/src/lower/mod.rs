@@ -579,15 +579,23 @@ fn lower_fn(
         if remaining.is_empty() { None } else { Some(remaining) }
     }).flatten();
 
-    // Resolve @mutating(param_name) → parameter indices
-    let mutated_params = attrs.iter()
-        .filter(|a| a.name.as_str() == "mutating")
-        .flat_map(|a| a.args.iter().filter_map(|arg| {
+    // Resolve mut params: from `mut` keyword and @mutating(param_name) annotation
+    let mut mutated_params: Vec<usize> = params.iter().enumerate()
+        .filter(|(_, p)| p.is_mut)
+        .map(|(i, _)| i)
+        .collect();
+    // Merge @mutating(param_name) indices (backward compat)
+    for attr in attrs.iter().filter(|a| a.name.as_str() == "mutating") {
+        for arg in &attr.args {
             if let almide_lang::ast::AttrValue::Ident { name: pname } = &arg.value {
-                params.iter().position(|p| p.name == *pname)
-            } else { None }
-        }))
-        .collect::<Vec<_>>();
+                if let Some(idx) = params.iter().position(|p| p.name == *pname) {
+                    if !mutated_params.contains(&idx) {
+                        mutated_params.push(idx);
+                    }
+                }
+            }
+        }
+    }
 
     IrFunction {
         name: sym(name), params: ir_params, ret_ty, body: ir_body,

@@ -32,8 +32,8 @@ pub fn check(ctx: &HintContext) -> Option<HintResult> {
     }
 
     // `let mut` → `var`
-    if ctx.expected == Some(TokenType::Ident) || ctx.expected.is_none() {
-        if ctx.got.token_type == TokenType::Ident && ctx.got.value == "mut" {
+    if ctx.expected == Some(TokenType::Ident) || ctx.expected == Some(TokenType::Mut) || ctx.expected.is_none() {
+        if ctx.got.token_type == TokenType::Mut {
             if let Some(prev) = ctx.prev {
                 if prev.token_type == TokenType::Let {
                     return Some(HintResult {
