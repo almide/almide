@@ -1,7 +1,7 @@
 <!-- description: mut parameter modifier for in-place mutation (Swift inout / Mojo mut) -->
 # `mut` Parameter Modifier
 
-> **Status: Active** — design finalized, implementation pending.
+> **Status: Done** — shipped in v0.18.0.
 > **Predecessor**: `@mutating(param)` annotation (shipped in 0.17.10) provides the IR
 > infrastructure (`IrFunction.mutated_params`). This roadmap item promotes it to a
 > first-class language feature.
