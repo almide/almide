@@ -475,6 +475,7 @@ fn fn_sig_format_params() {
         generics: vec![],
         structural_bounds: std::collections::HashMap::new(),
         protocol_bounds: std::collections::HashMap::new(),
+        mut_params: vec![],
     };
     assert_eq!(sig.format_params(), "a: Int, b: String");
 }
@@ -488,6 +489,7 @@ fn fn_sig_format_params_empty() {
         generics: vec![],
         structural_bounds: std::collections::HashMap::new(),
         protocol_bounds: std::collections::HashMap::new(),
+        mut_params: vec![],
     };
     assert_eq!(sig.format_params(), "");
 }
