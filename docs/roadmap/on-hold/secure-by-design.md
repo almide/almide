@@ -1,11 +1,11 @@
 <!-- description: Five-layer security model making web vulnerabilities compile-time errors -->
 # Secure by Design
 
-> **Status: On Hold** — language feature complete, stdlib integration deferred.
+> **Status: On Hold** — Phase 1 complete, Phase 2-4 blocked on infrastructure.
 > Layer 0-1 (effect isolation, @extern) ✅ complete.
 > Phase 1a (opaque type language feature) ✅ complete (v0.18.0): `mod type T = U` creates nominal newtype with E008 cross-module constructor rejection.
-> Phase 1b (stdlib SafeHtml/SafeSql/SafePath builders) deferred — requires web framework / I/O API.
-> Phase 2-4 on hold.
+> Phase 1b (stdlib opaque types) ✅ complete: `html.SafeHtml` (escape/raw/to_string/concat), `path.SafePath` (from_string with traversal rejection/trusted/to_string). `sql.SafeSql` deferred until DB driver exists.
+> Phase 2-4 on hold (requires @extern platform tags, package registry).
 
 ## Thesis
 
