@@ -69,6 +69,9 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
                     base
                 }
             });
+            if let Some(ref v) = versioned {
+                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
+            }
             let self_name = checker.env.self_module_name.map(|s| s.to_string());
             let import_table_name = self_name.as_deref().unwrap_or(name);
             let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);

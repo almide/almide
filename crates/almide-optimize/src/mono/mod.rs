@@ -156,7 +156,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                 // Skip them here so the call site stays `Module { list, len }`
                 // and the dispatcher sees the unsuffixed name.
                 let is_template_dispatch = f.attrs.iter().any(|a|
-                    matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"));
+                    matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic" | "intrinsic"));
                 if is_template_dispatch { return None; }
                 let mut bounded = Vec::new();
                 for g in gs.iter() {

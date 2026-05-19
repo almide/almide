@@ -251,7 +251,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     let op = if *inclusive { "..=" } else { ".." };
                     format!("{}{}{}", s, op, e)
                 }
-                _ => render_expr(ctx, iterable),
+                _ => {
+                    let base = render_expr(ctx, iterable);
+                    // List types: .iter().cloned() works for both RcCow<Vec<T>>
+                    // (via Deref) and plain Vec<T>, giving owned T values.
+                    match &iterable.ty {
+                        Ty::Applied(TypeConstructorId::List, _) => format!("{}.iter().cloned()", base),
+                        _ => base,
+                    }
+                }
             };
             let body_raw = render_stmts(ctx, body).join("\n");
             let body_str = indent_lines(&body_raw, 4);

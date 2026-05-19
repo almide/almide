@@ -390,6 +390,9 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
                     base
                 }
             });
+            if let Some(ref v) = versioned {
+                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
+            }
             // Set module's import table for lowering, then restore
             let self_name = checker.env.self_module_name.map(|s| s.to_string());
             let import_table_name = self_name.as_deref().unwrap_or(name);

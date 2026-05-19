@@ -84,6 +84,11 @@ pub struct TypeEnv {
     /// "undefined function 'name'" diagnostics for calls to these — the real
     /// cause is the parse error already surfaced.
     pub failed_fn_names: std::collections::HashSet<String>,
+
+    /// Maps canonical module name → versioned module name for dependencies.
+    /// e.g. "snaidhm.web.gpu" → "snaidhm_v0.web.gpu"
+    /// Used by expression lowering to generate correct cross-module constant names.
+    pub module_versioned_names: std::collections::HashMap<Sym, Sym>,
 }
 
 impl TypeEnv {
@@ -122,6 +127,7 @@ impl TypeEnv {
             fn_decl_spans: std::collections::HashMap::new(),
             in_test_block: false,
             failed_fn_names: std::collections::HashSet::new(),
+            module_versioned_names: std::collections::HashMap::new(),
         }
     }
 

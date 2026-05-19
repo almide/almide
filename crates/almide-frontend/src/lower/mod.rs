@@ -579,6 +579,16 @@ fn lower_fn(
         if remaining.is_empty() { None } else { Some(remaining) }
     }).flatten();
 
+    // Resolve @mutating(param_name) → parameter indices
+    let mutated_params = attrs.iter()
+        .filter(|a| a.name.as_str() == "mutating")
+        .flat_map(|a| a.args.iter().filter_map(|arg| {
+            if let almide_lang::ast::AttrValue::Ident { name: pname } = &arg.value {
+                params.iter().position(|p| p.name == *pname)
+            } else { None }
+        }))
+        .collect::<Vec<_>>();
+
     IrFunction {
         name: sym(name), params: ir_params, ret_ty, body: ir_body,
         is_effect, is_async, is_test: false,
@@ -588,6 +598,7 @@ fn lower_fn(
         visibility: vis,
         doc: None, blank_lines_before: 0,
         def_id: None,
+        mutated_params,
     }
 }
 
@@ -603,5 +614,6 @@ fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
         visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
+        mutated_params: vec![],
     }
 }
