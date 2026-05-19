@@ -352,7 +352,12 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     let mut generic_types = std::collections::HashSet::new();
     for td in &program.type_decls {
         match &td.kind {
-            IrTypeDeclKind::Alias { target } => { type_aliases.insert(td.name, target.clone()); }
+            IrTypeDeclKind::Alias { target } => {
+                // Opaque (mod/local) aliases are newtypes — don't expand transparently
+                if matches!(td.visibility, IrVisibility::Public) {
+                    type_aliases.insert(td.name, target.clone());
+                }
+            }
             _ => {}
         }
         // Track types with generic parameters

@@ -1,0 +1,47 @@
+// opaque type — comprehensive test for mod type (nominal newtype)
+
+mod type SafeHtml = String
+
+// ── Construction ──
+fn escape(s: String) -> SafeHtml = SafeHtml(s)
+
+// ── Unwrap (pattern match) ──
+fn unwrap_html(h: SafeHtml) -> String = match h {
+  SafeHtml(s) => s,
+}
+
+// ── Pass opaque type around ──
+fn wrap_in_div(inner: String) -> SafeHtml = SafeHtml("<div>" + inner + "</div>")
+
+// ── Equality ──
+fn html_eq(a: SafeHtml, b: SafeHtml) -> Bool = a == b
+
+test "construction inside module" {
+  let html = escape("hello")
+  let inner = unwrap_html(html)
+  assert(inner == "hello")
+}
+
+test "unwrap via pattern match" {
+  let html = wrap_in_div("content")
+  let raw = unwrap_html(html)
+  assert(raw == "<div>content</div>")
+}
+
+test "opaque type equality" {
+  let a = escape("hello")
+  let b = escape("hello")
+  assert(html_eq(a, b))
+  assert(html_eq(a, escape("world")) == false)
+}
+
+test "opaque type in list" {
+  let items: List[SafeHtml] = [escape("a"), escape("b"), escape("c")]
+  assert(list.len(items) == 3)
+  assert(unwrap_html(items[0]) == "a")
+}
+
+test "opaque type pipe" {
+  let raw = "hello" |> escape |> unwrap_html
+  assert(raw == "hello")
+}

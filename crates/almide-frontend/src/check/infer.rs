@@ -1040,6 +1040,14 @@ impl Checker {
                             _ => vec![],
                         })
                         .unwrap_or_default(),
+                    // Opaque alias destructure: SafeHtml(s) → inner type
+                    Ty::Named(tname, _) => {
+                        if let Some(target) = self.env.opaque_alias_targets.get(tname).cloned() {
+                            vec![target]
+                        } else {
+                            vec![]
+                        }
+                    }
                     _ => vec![],
                 };
                 for (i, arg) in args.iter().enumerate() {

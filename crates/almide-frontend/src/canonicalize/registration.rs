@@ -465,7 +465,7 @@ pub fn register_impl_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
 }
 
 pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>,
-                       generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>) {
+                       generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>, visibility: ast::Visibility) {
     if let Some(derives) = deriving {
         validate_protocols(env, diagnostics, derives, name);
     }
@@ -473,6 +473,20 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     for gn in &gnames { env.types.insert(*gn, Ty::TypeVar(*gn)); }
     let mut resolved = resolve(env, ty);
     for gn in &gnames { env.types.remove(gn); }
+    // mod/local type alias → nominal newtype (opaque constructor)
+    let is_opaque_alias = !matches!(visibility, ast::Visibility::Public)
+        && !matches!(resolved, Ty::Variant { .. })
+        && !matches!(resolved, Ty::Record { .. });
+    if is_opaque_alias {
+        // Store the inner target type for codegen
+        env.opaque_alias_targets.insert(sym(name), resolved.clone());
+        // Register as nominal type (not transparent alias)
+        let generic_args: Vec<Ty> = gnames.iter().map(|g| Ty::TypeVar(*g)).collect();
+        resolved = Ty::Named(sym(name), generic_args);
+        // Register constructor with visibility restriction
+        env.opaque_alias_visibility.insert(sym(name), visibility);
+        env.opaque_alias_module.insert(sym(name), prefix.map(|p| sym(p)));
+    }
     if let Ty::Variant { name: ref mut vn, ref cases } = resolved {
         *vn = sym(name);
         for case in cases { env.constructors.insert(case.name, (sym(name), case.clone())); }
@@ -549,8 +563,8 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
                 }
                 seen_test.insert(test_key, span.clone());
             }
-            ast::Decl::Type { name, ty, deriving, generics, .. } => {
-                register_type_decl(env, diagnostics, name, ty, deriving, generics, prefix);
+            ast::Decl::Type { name, ty, deriving, generics, visibility, .. } => {
+                register_type_decl(env, diagnostics, name, ty, deriving, generics, prefix, *visibility);
                 if let Some(derives) = deriving {
                     for d in derives {
                         env.type_protocols

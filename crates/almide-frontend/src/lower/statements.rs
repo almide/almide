@@ -286,6 +286,13 @@ fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, sub
             crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t)| t.clone()).collect(),
             crate::types::VariantPayload::Unit => vec![],
         }
+    } else if let Ty::Named(tname, _) = subject_ty {
+        // Opaque alias destructure: SafeHtml(s) → inner target type
+        if let Some(target) = ctx.env.opaque_alias_targets.get(tname) {
+            vec![target.clone()]
+        } else {
+            vec![]
+        }
     } else {
         vec![]
     }
