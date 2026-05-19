@@ -109,6 +109,7 @@ fn make_test_program() -> IrProgram {
         doc: None,
         blank_lines_before: 0,
         def_id: None,
+        mutated_params: vec![],
     };
 
     IrProgram {

@@ -848,6 +848,11 @@ pub struct IrFunction {
     /// Definition ID for cross-package resolution (None during migration).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub def_id: Option<DefId>,
+    /// Parameter indices that this function mutates in-place.
+    /// Populated from `@mutating(param_name)` attributes during lowering.
+    /// Consumed by LICM to track loop-modified variables.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mutated_params: Vec<usize>,
 }
 
 /// Prefix applied to test function names in lowering to guarantee

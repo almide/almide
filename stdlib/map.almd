@@ -83,10 +83,13 @@ fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 // ── mutable (in-place) ──
 
 @intrinsic("almide_rt_map_insert")
+@mutating(m)
 fn insert[K, V](m: Map[K, V], key: K, value: V) -> Unit = _
 
 @intrinsic("almide_rt_map_delete")
+@mutating(m)
 fn delete[K, V](m: Map[K, V], key: K) -> Unit = _
 
 @intrinsic("almide_rt_map_clear")
+@mutating(m)
 fn clear[K, V](m: Map[K, V]) -> Unit = _

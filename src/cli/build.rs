@@ -207,6 +207,9 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
                 base
             }
         });
+        if let Some(ref v) = versioned {
+            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
+        }
         let self_name = checker.env.self_module_name.map(|s| s.to_string());
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
@@ -328,6 +331,9 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
         }
         checker.infer_module(&mut mod_prog.clone(), name);
         let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
+        if let Some(ref v) = versioned {
+            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
+        }
         let self_name = checker.env.self_module_name.map(|s| s.to_string());
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = almide::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
