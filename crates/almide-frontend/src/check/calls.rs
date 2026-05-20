@@ -34,6 +34,7 @@ impl Checker {
                 if self.env.lookup_var(&name).is_some() {
                     let _ = self.infer_expr(callee);
                 }
+                self.arg_spans = args.iter().map(|a| a.span).collect();
                 let ret = self.check_named_call_spanned(&name, &arg_tys, type_args, callee_span_snapshot);
                 let arg_refs: Vec<&ast::Expr> = args.iter().collect();
                 self.validate_mut_args(&name, &arg_refs);
@@ -103,6 +104,7 @@ impl Checker {
             }
             // Module call: string.trim(s), list.map(xs, f), etc.
             ExprKind::Member { object, field, .. } => {
+                self.arg_spans = args.iter().map(|a| a.span).collect();
                 // Try static resolution: module.func, alias.func, TypeName.method, codec.encode
                 // Thread the callee's span so `E002` can emit a
                 // mechanically-applicable `try_replace` when the stdlib
@@ -526,10 +528,17 @@ impl Checker {
         }
         let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_ty(a, &self.uf)).collect();
         let mut e005_fired: Vec<bool> = Vec::new();
-        for ((pname, pty), aty) in sig.params.iter().zip(concrete_args.iter()) {
+        for (i, ((pname, pty), aty)) in sig.params.iter().zip(concrete_args.iter()).enumerate() {
+            // Point caret at the exact argument expression for E005
+            let saved_span = self.current_span;
+            if let Some(sp) = self.arg_spans.get(i).copied().flatten() {
+                self.current_span = Some(sp);
+            }
             let fired = self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, &mut bindings);
+            if !fired { self.current_span = saved_span; }
             e005_fired.push(fired);
         }
+        self.arg_spans.clear();
         // Verify protocol bounds on generic type parameters
         for (tv_name, proto_names) in &sig.protocol_bounds {
             if let Some(concrete_ty) = bindings.get(tv_name) {

@@ -61,6 +61,9 @@ pub struct Checker {
     /// Set by `check_named_call_with_type_args`, consumed by callers
     /// that have access to argument expressions for mutability validation.
     pub(crate) last_mut_params: Vec<usize>,
+    /// Argument spans for the current call. Set before `check_named_call_*`
+    /// so E005 can point at the exact argument expression.
+    pub(crate) arg_spans: Vec<Option<crate::ast::Span>>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Module-name prefix active during `infer_module`. `None` for the
@@ -98,6 +101,7 @@ impl Checker {
             callee_span_hint: None,
             call_span_hint: None,
             last_mut_params: Vec::new(),
+            arg_spans: Vec::new(),
             constraints: Vec::new(), uf: UnionFind::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),
