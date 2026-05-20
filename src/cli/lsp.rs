@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use lsp_server::{Connection, Message, Request, Response, Notification};
 use lsp_types::*;
 
@@ -11,6 +12,14 @@ pub fn run_lsp() {
         completion_provider: Some(CompletionOptions {
             trigger_characters: Some(vec![".".to_string()]),
             ..Default::default()
+        }),
+        document_symbol_provider: Some(OneOf::Left(true)),
+        document_formatting_provider: Some(OneOf::Left(true)),
+        definition_provider: Some(OneOf::Left(true)),
+        signature_help_provider: Some(SignatureHelpOptions {
+            trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+            retrigger_characters: None,
+            work_done_progress_options: Default::default(),
         }),
         ..Default::default()
     }).unwrap();
@@ -88,6 +97,39 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>) -> Option<Res
             let source = documents.get(uri)?;
             let items = compute_completions(source, pos);
             let result = serde_json::to_value(CompletionResponse::Array(items)).unwrap();
+            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+        }
+        "textDocument/documentSymbol" => {
+            let params: DocumentSymbolParams = serde_json::from_value(req.params.clone()).ok()?;
+            let source = documents.get(&params.text_document.uri)?;
+            let symbols = compute_document_symbols(source);
+            let result = serde_json::to_value(DocumentSymbolResponse::Flat(symbols)).unwrap();
+            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+        }
+        "textDocument/formatting" => {
+            let params: DocumentFormattingParams = serde_json::from_value(req.params.clone()).ok()?;
+            let source = documents.get(&params.text_document.uri)?;
+            let edits = compute_formatting(source);
+            let result = serde_json::to_value(edits).unwrap();
+            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+        }
+        "textDocument/definition" => {
+            let params: GotoDefinitionParams = serde_json::from_value(req.params.clone()).ok()?;
+            let uri = &params.text_document_position_params.text_document.uri;
+            let pos = params.text_document_position_params.position;
+            let source = documents.get(uri)?;
+            let loc = compute_definition(source, pos, uri);
+            let result = loc.map(|l| serde_json::to_value(GotoDefinitionResponse::Scalar(l)).unwrap())
+                .unwrap_or(serde_json::Value::Null);
+            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+        }
+        "textDocument/signatureHelp" => {
+            let params: SignatureHelpParams = serde_json::from_value(req.params.clone()).ok()?;
+            let uri = &params.text_document_position_params.text_document.uri;
+            let pos = params.text_document_position_params.position;
+            let source = documents.get(uri)?;
+            let help = compute_signature_help(source, pos);
+            let result = help.map(|h| serde_json::to_value(h).unwrap()).unwrap_or(serde_json::Value::Null);
             Some(Response { id: req.id.clone(), result: Some(result), error: None })
         }
         _ => None,
@@ -261,4 +303,227 @@ fn compute_completions(source: &str, pos: Position) -> Vec<CompletionItem> {
             ..Default::default()
         })
         .collect()
+}
+
+// ── Phase 2: Document Symbols ──
+
+fn compute_document_symbols(source: &str) -> Vec<SymbolInformation> {
+    let tokens = crate::lexer::Lexer::tokenize(source);
+    let mut parser = crate::parser::Parser::new(tokens);
+    let prog = match parser.parse() {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+    let mut symbols = Vec::new();
+    for decl in &prog.decls {
+        let (name, kind, span) = match decl {
+            crate::ast::Decl::Fn { name, span, .. } => {
+                (name.as_str().to_string(), SymbolKind::FUNCTION, span)
+            }
+            crate::ast::Decl::Type { name, span, .. } => {
+                (name.as_str().to_string(), SymbolKind::STRUCT, span)
+            }
+            crate::ast::Decl::TopLet { name, span, .. } => {
+                (name.as_str().to_string(), SymbolKind::VARIABLE, span)
+            }
+            crate::ast::Decl::Test { name, span, .. } => {
+                (format!("test \"{}\"", name), SymbolKind::METHOD, span)
+            }
+            _ => continue,
+        };
+        let line = span.as_ref().map(|s| s.line.saturating_sub(1) as u32).unwrap_or(0);
+        let col = span.as_ref().map(|s| s.col.saturating_sub(1) as u32).unwrap_or(0);
+        #[allow(deprecated)]
+        symbols.push(SymbolInformation {
+            name,
+            kind,
+            location: Location {
+                uri: Uri::from_str("file:///").unwrap(),
+                range: Range {
+                    start: Position { line, character: col },
+                    end: Position { line, character: col },
+                },
+            },
+            tags: None,
+            deprecated: None,
+            container_name: None,
+        });
+    }
+    symbols
+}
+
+// ── Phase 2: Formatting ──
+
+fn compute_formatting(source: &str) -> Vec<TextEdit> {
+    let tokens = crate::lexer::Lexer::tokenize(source);
+    let mut parser = crate::parser::Parser::new(tokens);
+    let program = match parser.parse() {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+    let formatted = crate::fmt::format_program(&program);
+    if formatted == source {
+        return vec![];
+    }
+    let line_count = source.lines().count().max(1);
+    vec![TextEdit {
+        range: Range {
+            start: Position { line: 0, character: 0 },
+            end: Position { line: line_count as u32, character: 0 },
+        },
+        new_text: formatted,
+    }]
+}
+
+// ── Phase 2: Go to Definition ──
+
+fn compute_definition(source: &str, pos: Position, uri: &Uri) -> Option<Location> {
+    let lines: Vec<&str> = source.lines().collect();
+    let line = lines.get(pos.line as usize)?;
+    let col = pos.character as usize;
+    if col >= line.len() { return None; }
+
+    let start = line[..col].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
+    let end = col + line[col..].find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(line.len() - col);
+    let word = &line[start..end];
+    if word.is_empty() { return None; }
+
+    // Search for declaration of this name in the source
+    let tokens = crate::lexer::Lexer::tokenize(source);
+    let mut parser = crate::parser::Parser::new(tokens);
+    let prog = match parser.parse() {
+        Ok(p) => p,
+        Err(_) => return None,
+    };
+
+    for decl in &prog.decls {
+        let (name, span) = match decl {
+            crate::ast::Decl::Fn { name, span, .. } => (name.as_str(), span),
+            crate::ast::Decl::Type { name, span, .. } => (name.as_str(), span),
+            crate::ast::Decl::TopLet { name, span, .. } => (name.as_str(), span),
+            _ => continue,
+        };
+        if name == word {
+            let def_line = span.as_ref().map(|s| s.line.saturating_sub(1) as u32).unwrap_or(0);
+            let def_col = span.as_ref().map(|s| s.col.saturating_sub(1) as u32).unwrap_or(0);
+            return Some(Location {
+                uri: uri.clone(),
+                range: Range {
+                    start: Position { line: def_line, character: def_col },
+                    end: Position { line: def_line, character: def_col + name.len() as u32 },
+                },
+            });
+        }
+    }
+    None
+}
+
+// ── Phase 2: Signature Help ──
+
+fn compute_signature_help(source: &str, pos: Position) -> Option<SignatureHelp> {
+    let lines: Vec<&str> = source.lines().collect();
+    let line = lines.get(pos.line as usize)?;
+    let col = pos.character as usize;
+    let prefix = &line[..col.min(line.len())];
+
+    // Find the innermost unclosed `(` to determine the function being called
+    let mut depth = 0i32;
+    let mut call_end = None;
+    let mut active_param = 0u32;
+    for (i, ch) in prefix.char_indices().rev() {
+        match ch {
+            ')' => depth += 1,
+            '(' => {
+                if depth == 0 {
+                    call_end = Some(i);
+                    break;
+                }
+                depth -= 1;
+            }
+            ',' if depth == 0 => active_param += 1,
+            _ => {}
+        }
+    }
+    let paren_pos = call_end?;
+    let before_paren = prefix[..paren_pos].trim_end();
+
+    // Extract function name (possibly module.func)
+    let name_start = before_paren.rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '.')
+        .map(|i| i + 1).unwrap_or(0);
+    let func_name = &before_paren[name_start..];
+    if func_name.is_empty() { return None; }
+
+    // Try module.func lookup
+    if let Some(dot) = func_name.rfind('.') {
+        let module = &func_name[..dot];
+        let func = &func_name[dot + 1..];
+        if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
+            let params: Vec<ParameterInformation> = sig.params.iter().map(|(n, t)| {
+                ParameterInformation {
+                    label: ParameterLabel::Simple(format!("{}: {}", n, t.display())),
+                    documentation: None,
+                }
+            }).collect();
+            let params_str = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
+            return Some(SignatureHelp {
+                signatures: vec![SignatureInformation {
+                    label: format!("fn {}.{}({}) -> {}", module, func, params_str, sig.ret.display()),
+                    documentation: None,
+                    parameters: Some(params),
+                    active_parameter: Some(active_param),
+                }],
+                active_signature: Some(0),
+                active_parameter: Some(active_param),
+            });
+        }
+    }
+
+    // Try user-defined function lookup
+    let tokens = crate::lexer::Lexer::tokenize(source);
+    let mut parser = crate::parser::Parser::new(tokens);
+    if let Ok(prog) = parser.parse() {
+        for decl in &prog.decls {
+            if let crate::ast::Decl::Fn { name, params, return_type, .. } = decl {
+                if name.as_str() == func_name {
+                    let param_infos: Vec<ParameterInformation> = params.iter().map(|p| {
+                        ParameterInformation {
+                            label: ParameterLabel::Simple(format!("{}: {}", p.name.as_str(), format_type_expr(&p.ty))),
+                            documentation: None,
+                        }
+                    }).collect();
+                    let params_str = params.iter().map(|p| format!("{}: {}", p.name.as_str(), format_type_expr(&p.ty))).collect::<Vec<_>>().join(", ");
+                    return Some(SignatureHelp {
+                        signatures: vec![SignatureInformation {
+                            label: format!("fn {}({}) -> {}", func_name, params_str, format_type_expr(return_type)),
+                            documentation: None,
+                            parameters: Some(param_infos),
+                            active_parameter: Some(active_param),
+                        }],
+                        active_signature: Some(0),
+                        active_parameter: Some(active_param),
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+fn format_type_expr(te: &crate::ast::TypeExpr) -> String {
+    match te {
+        crate::ast::TypeExpr::Simple { name } => name.as_str().to_string(),
+        crate::ast::TypeExpr::Generic { name, args } => {
+            let args_str = args.iter().map(|a| format_type_expr(a)).collect::<Vec<_>>().join(", ");
+            format!("{}[{}]", name.as_str(), args_str)
+        }
+        crate::ast::TypeExpr::Tuple { elements } => {
+            let s = elements.iter().map(|e| format_type_expr(e)).collect::<Vec<_>>().join(", ");
+            format!("({})", s)
+        }
+        crate::ast::TypeExpr::Fn { params, ret } => {
+            let s = params.iter().map(|p| format_type_expr(p)).collect::<Vec<_>>().join(", ");
+            format!("({}) -> {}", s, format_type_expr(ret))
+        }
+        _ => "?".to_string(),
+    }
 }
