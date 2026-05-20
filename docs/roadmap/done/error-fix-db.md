@@ -1,9 +1,8 @@
 <!-- description: Elm-grade compiler error experience — hospitality, not hostility -->
 # Elm-Grade Error Experience
 
-> **Status: Active** — redesigned from "LLM error-fix DB" to "best-in-class compiler UX".
-> The goal is not a database. The goal is that anyone who sees an Almide error
-> thinks: "this compiler is incredibly helpful."
+> **Status: Done** — Phase 1-2 shipped. Phase 3-4 (tone/teaching) deferred — current style is accurate, LLM-friendly, and sufficient.
+> Improvements: E005/E001 dedup, caret on exact argument, fix code in try: snippet.
 
 ## The Standard: Elm
 
