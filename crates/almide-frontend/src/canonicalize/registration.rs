@@ -465,7 +465,7 @@ pub fn register_impl_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
 }
 
 pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>,
-                       generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>) {
+                       generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>, visibility: ast::Visibility) {
     if let Some(derives) = deriving {
         validate_protocols(env, diagnostics, derives, name);
     }
@@ -473,6 +473,20 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     for gn in &gnames { env.types.insert(*gn, Ty::TypeVar(*gn)); }
     let mut resolved = resolve(env, ty);
     for gn in &gnames { env.types.remove(gn); }
+    // mod/local type alias → nominal newtype (opaque constructor)
+    let is_opaque_alias = !matches!(visibility, ast::Visibility::Public)
+        && !matches!(resolved, Ty::Variant { .. })
+        && !matches!(resolved, Ty::Record { .. });
+    if is_opaque_alias {
+        // Store the inner target type for codegen
+        env.opaque_alias_targets.insert(sym(name), resolved.clone());
+        // Register as nominal type (not transparent alias)
+        let generic_args: Vec<Ty> = gnames.iter().map(|g| Ty::TypeVar(*g)).collect();
+        resolved = Ty::Named(sym(name), generic_args);
+        // Register constructor with visibility restriction
+        env.opaque_alias_visibility.insert(sym(name), visibility);
+        env.opaque_alias_module.insert(sym(name), prefix.map(|p| sym(p)));
+    }
     if let Ty::Variant { name: ref mut vn, ref cases } = resolved {
         *vn = sym(name);
         for case in cases { env.constructors.insert(case.name, (sym(name), case.clone())); }
@@ -524,6 +538,13 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
                     seen_fn.insert(key, span.clone());
                 }
                 register_fn_sig(env, name, params, return_type, effect, r#async, generics, prefix, span.as_ref(), *visibility);
+                // Register in DefTable
+                let fn_key = prefixed_key(prefix, name);
+                let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
+                let mod_path = prefix.unwrap_or("");
+                let ret = env.functions.get(&sym(&fn_key)).map(|s| s.ret.clone()).unwrap_or(Ty::Unknown);
+                let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Function, ret);
+                env.def_map.insert(sym(&fn_key), did);
             }
             ast::Decl::Test { name, span, .. } => {
                 let test_key = name.to_string();
@@ -549,8 +570,15 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
                 }
                 seen_test.insert(test_key, span.clone());
             }
-            ast::Decl::Type { name, ty, deriving, generics, .. } => {
-                register_type_decl(env, diagnostics, name, ty, deriving, generics, prefix);
+            ast::Decl::Type { name, ty, deriving, generics, visibility, .. } => {
+                register_type_decl(env, diagnostics, name, ty, deriving, generics, prefix, *visibility);
+                // Register in DefTable
+                let type_key = prefixed_key(prefix, name);
+                let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
+                let mod_path = prefix.unwrap_or("");
+                let resolved_ty = env.types.get(&sym(&type_key)).cloned().unwrap_or(Ty::Unknown);
+                let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Type, resolved_ty);
+                env.def_map.insert(sym(&type_key), did);
                 if let Some(derives) = deriving {
                     for d in derives {
                         env.type_protocols
@@ -569,7 +597,12 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
             ast::Decl::TopLet { name, ty, value, .. } => {
                 let rt = ty.as_ref().map(|te| resolve(env, te)).unwrap_or_else(|| infer_literal_type(value));
                 let key = prefixed_key(prefix, name);
-                env.top_lets.insert(sym(&key), rt);
+                env.top_lets.insert(sym(&key), rt.clone());
+                // Register in DefTable
+                let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
+                let mod_path = prefix.unwrap_or("");
+                let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::TopLet, rt);
+                env.def_map.insert(sym(&key), did);
             }
             _ => {}
         }

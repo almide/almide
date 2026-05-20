@@ -712,7 +712,7 @@ fn eta_expand_module_fn(
         || ctx.env.import_table.aliases.contains_key(&module)
     {
         let resolved = ctx.env.import_table.aliases.get(&module).copied().unwrap_or(module);
-        CallTarget::Module { module: resolved, func: field }
+        CallTarget::Module { module: resolved, func: field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", resolved, field))).copied() }
     } else {
         CallTarget::Named { name: sym(&format!("{}.{}", module, field)) }
     };

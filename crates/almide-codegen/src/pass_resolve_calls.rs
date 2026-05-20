@@ -8,7 +8,7 @@
 //!
 //! ## What this pass does
 //!
-//! Walks every `CallTarget::Module { module, func }` and either:
+//! Walks every `CallTarget::Module { module, func, .. }` and either:
 //! - **Verifies**: a TOML-backed stdlib fn or a user-module fn exists; if
 //!   neither matches, emits a postcondition violation — a hard contract
 //!   (panic in debug, diagnostic in release; S2 flip).
@@ -67,7 +67,7 @@ impl NanoPass for ResolveCallsPass {
             fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
                 walk_expr_mut(self, expr);
                 if let IrExprKind::Call { target, .. } = &mut expr.kind {
-                    if let CallTarget::Module { module, func } = target {
+                    if let CallTarget::Module { module, func, .. } = target {
                         let m = module.as_str();
                         let f = func.as_str();
                         // bundled-Almide stdlib fn (in IR module, no TOML entry)
@@ -154,7 +154,7 @@ fn verify_all_calls_resolved(program: &IrProgram) -> Vec<String> {
     impl<'a> IrVisitor for CallChecker<'a> {
         fn visit_expr(&mut self, expr: &IrExpr) {
             if let IrExprKind::Call { target, .. } = &expr.kind {
-                if let CallTarget::Module { module, func } = target {
+                if let CallTarget::Module { module, func, .. } = target {
                     let m = module.as_str();
                     let f = func.as_str();
                     let is_stdlib = almide_lang::stdlib_info::is_any_stdlib(m);

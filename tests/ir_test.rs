@@ -247,8 +247,8 @@ fn call_target_named() {
 
 #[test]
 fn call_target_module() {
-    let t = CallTarget::Module { module: "string".into(), func: "trim".into() };
-    if let CallTarget::Module { module, func } = &t {
+    let t = CallTarget::Module { module: "string".into(), func: "trim".into(), def_id: None };
+    if let CallTarget::Module { module, func, .. } = &t {
         assert_eq!(module, "string");
         assert_eq!(func, "trim");
     }

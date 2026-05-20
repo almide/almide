@@ -25,7 +25,7 @@ impl FuncCompiler<'_> {
         if method == "mul_scaled" || method == "mul_f32_scaled" {
             let mul_call = IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Module { module: sym("matrix"), func: sym("mul") },
+                    target: CallTarget::Module { module: sym("matrix"), func: sym("mul"), def_id: None },
                     args: vec![args[0].clone(), args[2].clone()],
                     type_args: vec![],
                 },
@@ -39,7 +39,7 @@ impl FuncCompiler<'_> {
         if method == "mul_f32_t" {
             let transpose_call = IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Module { module: sym("matrix"), func: sym("transpose") },
+                    target: CallTarget::Module { module: sym("matrix"), func: sym("transpose"), def_id: None },
                     args: vec![args[1].clone()],
                     type_args: vec![],
                 },
@@ -51,7 +51,7 @@ impl FuncCompiler<'_> {
         if method == "mul_f32_t_scaled" {
             let transpose_call = IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Module { module: sym("matrix"), func: sym("transpose") },
+                    target: CallTarget::Module { module: sym("matrix"), func: sym("transpose"), def_id: None },
                     args: vec![args[2].clone()],
                     type_args: vec![],
                 },

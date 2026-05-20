@@ -1,0 +1,37 @@
+// html — safe HTML construction (secure-by-design Layer 3)
+//
+// `SafeHtml` is an opaque type: external modules cannot construct it
+// directly from String. All construction goes through escape() or raw().
+// This makes XSS a compile-time type error.
+
+mod type SafeHtml = String
+
+// Escape HTML special characters: & < > " '
+fn escape(s: String) -> SafeHtml = {
+  let escaped = s
+    |> string.replace("&", "&amp;")
+    |> string.replace("<", "&lt;")
+    |> string.replace(">", "&gt;")
+    |> string.replace("\"", "&quot;")
+    |> string.replace("'", "&#39;")
+  SafeHtml(escaped)
+}
+
+// Trust raw HTML — explicit opt-in for pre-sanitized content.
+// Use only for trusted sources (e.g., markdown renderer output).
+fn raw(s: String) -> SafeHtml = SafeHtml(s)
+
+// Unwrap SafeHtml to String (for rendering)
+fn to_string(h: SafeHtml) -> String = match h {
+  SafeHtml(s) => s,
+}
+
+// Concatenate two SafeHtml values
+fn concat(a: SafeHtml, b: SafeHtml) -> SafeHtml = {
+  let sa = to_string(a)
+  let sb = to_string(b)
+  SafeHtml(sa + sb)
+}
+
+// Empty SafeHtml
+fn empty() -> SafeHtml = SafeHtml("")

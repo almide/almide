@@ -64,8 +64,8 @@ impl<'a> LowerCtx<'a> {
             protocol_bounds: HashMap::new(),
             lambda_id_counter: 0,
             const_param_vars: HashMap::new(),
-            def_table: almide_ir::DefTable::new(),
-            def_map: HashMap::new(),
+            def_table: env.def_table.clone(),
+            def_map: env.def_map.iter().map(|(k, v)| (*k, *v)).collect(),
         }
     }
 
@@ -194,21 +194,18 @@ pub fn lower_program(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap) -> 
 fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap, module_prefix: Option<&str>) -> IrProgram {
     let mut ctx = LowerCtx::new(env, type_map);
 
-    // Build DefTable from all known top-level lets (including cross-package).
-    // Each "module.name" key in env.top_lets gets a DefId.
+    // Register cross-package top-level lets that weren't in register_decls
+    // (dependency packages populate env.top_lets during project fetch).
     for (qual_name, ty) in &env.top_lets {
+        if ctx.def_map.contains_key(qual_name) { continue; }
         let qual = qual_name.as_str();
         if let Some(dot_pos) = qual.rfind('.') {
             let module = &qual[..dot_pos];
             let name = &qual[dot_pos + 1..];
-            // Extract package name (first segment)
             let package = module.split('.').next().unwrap_or(module);
             let def_id = ctx.def_table.alloc(
-                sym(package),
-                sym(module),
-                sym(name),
-                almide_ir::DefKind::TopLet,
-                ty.clone(),
+                sym(package), sym(module), sym(name),
+                almide_ir::DefKind::TopLet, ty.clone(),
             );
             ctx.def_map.insert(*qual_name, def_id);
         }
@@ -296,7 +293,8 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                 let val_ty = ctx.var_table.get(var).ty.clone();
                 let ir_value = lower_expr(&mut ctx, value);
                 let kind = classify_top_let_kind(&ir_value);
-                top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, mutable: *mutable, doc, blank_lines_before: blank_lines, def_id: None });
+                let tl_def_id = ctx.def_map.get(&sym(name)).copied();
+                top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, mutable: *mutable, doc, blank_lines_before: blank_lines, def_id: tl_def_id });
             }
             ast::Decl::Test { name, body, .. } => {
                 let test_fn = lower_test(&mut ctx, name, body);
@@ -605,7 +603,7 @@ fn lower_fn(
         attrs: attrs.to_vec(),
         visibility: vis,
         doc: None, blank_lines_before: 0,
-        def_id: None,
+        def_id: ctx.def_map.get(&sym(name)).copied(),
         mutated_params,
     }
 }

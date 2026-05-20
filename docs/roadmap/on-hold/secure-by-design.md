@@ -1,9 +1,11 @@
 <!-- description: Five-layer security model making web vulnerabilities compile-time errors -->
 # Secure by Design
 
-> **Active scope: Phase 1** — opaque types (`Html`, `Sql`, `Path`, `Command`)。
-> **Exit criteria**: XSS/SQLi/path-traversal/command-injection が型エラーになる。
-> Layer 0-1 (effect isolation, @extern) は ✅ 完了。Phase 2+ は on-hold。
+> **Status: On Hold** — Phase 1 complete, Phase 2-4 blocked on infrastructure.
+> Layer 0-1 (effect isolation, @extern) ✅ complete.
+> Phase 1a (opaque type language feature) ✅ complete (v0.18.0): `mod type T = U` creates nominal newtype with E008 cross-module constructor rejection.
+> Phase 1b (stdlib opaque types) ✅ complete: `html.SafeHtml` (escape/raw/to_string/concat), `path.SafePath` (from_string with traversal rejection/trusted/to_string). `sql.SafeSql` deferred until DB driver exists.
+> Phase 2-4 on hold (requires @extern platform tags, package registry).
 
 ## Thesis
 
@@ -68,7 +70,7 @@ let doc = Html { p { user_input } }
 Response.html(doc |> render)  // ← returns SafeHtml
 ```
 
-**Status: ❌ Opaque types are not implemented.** Requires addition to parser + checker + codegen as a language feature.
+**Status: ✅ Opaque types implemented (v0.18.0).** `mod type SafeHtml = String` creates a nominal newtype. Cross-module constructor calls rejected with E008. Pattern match unwrap works within defining module. Stdlib builders (SafeHtml, SafeSql, SafePath) deferred to web framework integration.
 
 ### Layer 4: Capability Inference — Compiler infers package permissions
 

@@ -224,6 +224,7 @@ fn try_detect_vec_init(s1: &IrStmt, s2: &IrStmt, s3: &IrStmt) -> Option<IrStmt> 
             target: CallTarget::Module {
                 module: almide_base::intern::sym("list"),
                 func: almide_base::intern::sym("repeat"),
+                def_id: None,
             },
             args: vec![single_val.clone(), (**end).clone()],
             type_args: vec![],

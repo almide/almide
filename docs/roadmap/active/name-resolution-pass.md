@@ -1,6 +1,15 @@
 # Name Resolution Pass — Unified Cross-Package Symbol Resolution
 
-## Status: Active (blocker for ceangal/snaidhm integration)
+## Status: Active (partially implemented)
+
+### Progress
+- Phase 1 (DefId/DefTable infrastructure): ✅ `DefId`, `DefTable`, `DefInfo`, `DefKind` in `almide-ir`.
+- Phase 2a (populate DefTable): ✅ `register_decls` registers all Function, Type, TopLet. `def_map` (qualified name → DefId) in TypeEnv.
+- Phase 2b (IR propagation): ✅ `IrFunction.def_id` and `IrTopLet.def_id` populated from def_map during lowering.
+- Phase 2c (checker integration): ✅ def_map-first lookup in `check_named_call_with_type_args`.
+- Phase 3 (CallTarget DefId): ✅ `CallTarget::Module` gains `def_id: Option<DefId>`. Lowering populates from def_map. 31 files updated.
+- v0.17.10 workaround: `module_versioned_names` still in place (to be removed in Phase 4).
+- Phase 4 (remove ad-hoc resolution): not started. Best done while building ceangal cross-package.
 
 ## Problem
 

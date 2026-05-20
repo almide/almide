@@ -66,6 +66,39 @@ impl Checker {
                         }
                     }
                     Ty::Named(type_name, generic_args)
+                } else if let Some(target_ty) = self.env.opaque_alias_targets.get(&sym(name)).cloned() {
+                    // Opaque alias constructor: SafeHtml("hello")
+                    let vis = self.env.opaque_alias_visibility.get(&sym(name)).copied()
+                        .unwrap_or(ast::Visibility::Public);
+                    if !matches!(vis, ast::Visibility::Public) {
+                        // Check if we're in the defining module
+                        let defining_module = self.env.opaque_alias_module.get(&sym(name))
+                            .cloned().flatten();
+                        let current_module = self.env.self_module_name
+                            .or(self.current_module_prefix.as_ref().map(|p| sym(p)));
+                        let allowed = match (&defining_module, &current_module) {
+                            (None, None) => true,       // defined in main, used in main
+                            (Some(def), Some(cur)) => def == cur, // same module
+                            _ => false,                 // cross-module
+                        };
+                        if !allowed {
+                            self.emit(super::err(
+                                format!("cannot construct opaque type '{}' outside its defining module", name),
+                                format!("Use the module's public API to create '{}' values", name),
+                                format!("constructor {}()", name),
+                            ).with_code("E008"));
+                        }
+                    }
+                    if arg_tys.len() != 1 {
+                        self.emit(super::err(
+                            format!("{}() takes exactly 1 argument but got {}", name, arg_tys.len()),
+                            "Opaque type constructor wraps a single value",
+                            format!("constructor {}()", name),
+                        ).with_code("E004"));
+                    } else {
+                        self.constrain(target_ty, arg_tys[0].clone(), format!("constructor {}()", name));
+                    }
+                    Ty::Named(sym(name), vec![])
                 } else { Ty::Named(sym(name), vec![]) }
             }
             // Module call: string.trim(s), list.map(xs, f), etc.
@@ -327,21 +360,28 @@ impl Checker {
         } else {
             None
         };
-        let sig = self.env.functions.get(&sym(name)).cloned().or_else(|| {
-            if let Some(ref rn) = resolved_name {
-                self.env.functions.get(&sym(rn)).cloned()
-            } else {
-                None
-            }
-        }).or_else(|| {
-            let (module, func) = name.split_once('.')?;
-            crate::stdlib::lookup_sig(module, func)
-        }).or_else(|| {
-            let q = qualified_via_direct.as_ref()?;
-            let (module, func) = q.split_once('.')?;
-            crate::stdlib::lookup_sig(module, func)
-                .or_else(|| self.env.functions.get(&sym(q)).cloned())
-        });
+        // DefId-based resolution: try def_map first for canonical lookup
+        let sig = self.env.def_map.get(&sym(name))
+            .and_then(|_did| self.env.functions.get(&sym(name)).cloned())
+            .or_else(|| {
+                if let Some(ref rn) = resolved_name {
+                    self.env.def_map.get(&sym(rn))
+                        .and_then(|_did| self.env.functions.get(&sym(rn)).cloned())
+                        .or_else(|| self.env.functions.get(&sym(rn)).cloned())
+                } else {
+                    None
+                }
+            })
+            .or_else(|| self.env.functions.get(&sym(name)).cloned())
+            .or_else(|| {
+                let (module, func) = name.split_once('.')?;
+                crate::stdlib::lookup_sig(module, func)
+            }).or_else(|| {
+                let q = qualified_via_direct.as_ref()?;
+                let (module, func) = q.split_once('.')?;
+                crate::stdlib::lookup_sig(module, func)
+                    .or_else(|| self.env.functions.get(&sym(q)).cloned())
+            });
 
         // Mark the source module as used (for unused-import diagnostic).
         if qualified_via_direct.is_some() {

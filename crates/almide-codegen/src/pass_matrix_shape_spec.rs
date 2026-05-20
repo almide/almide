@@ -96,7 +96,7 @@ struct Shape { rows: i64, cols: i64, dtype: Dtype }
 
 /// Extract `matrix.<func>(args)`-style Module calls.
 fn match_module_call<'a>(expr: &'a IrExpr) -> Option<(&'a str, &'a str, &'a [IrExpr])> {
-    if let IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } = &expr.kind {
+    if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind {
         return Some((module.as_str(), func.as_str(), args.as_slice()));
     }
     None

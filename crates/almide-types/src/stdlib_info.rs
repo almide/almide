@@ -23,7 +23,7 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "error", "math", "datetime", "value", "option", "result",
     "map", "set", "string",
     "env", "io", "random", "regex", "testing",
-    "process", "fs", "http", "json", "matrix",
+    "process", "fs", "http", "html", "json", "matrix",
     "int8", "int16", "int32",
     "uint8", "uint16", "uint32", "uint64",
     "float32",

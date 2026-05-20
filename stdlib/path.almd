@@ -1,5 +1,27 @@
-// path — file path manipulation
+// path — file path manipulation (secure-by-design Layer 3)
 // Bundled stdlib module (written in Almide, auto multi-target)
+//
+// `SafePath` is an opaque type: external modules cannot construct it
+// from raw String. Construction goes through from_string() which
+// rejects path traversal attempts (.. segments).
+
+mod type SafePath = String
+
+// Validate and construct a SafePath. Rejects paths containing ".." segments.
+fn from_string(s: String) -> Result[SafePath, String] = {
+  let segments = string.split(s, "/")
+  let has_traversal = list.any(segments, (seg) => seg == "..")
+  if has_traversal then err("path traversal rejected: " + s)
+  else ok(SafePath(s))
+}
+
+// Trust a raw path — explicit opt-in for known-safe paths.
+fn trusted(s: String) -> SafePath = SafePath(s)
+
+// Unwrap SafePath to String
+fn to_string(p: SafePath) -> String = match p {
+  SafePath(s) => s,
+}
 
 fn join(base: String, child: String) -> String = {
   // If child is absolute, it replaces base (matches Rust Path::join behavior)

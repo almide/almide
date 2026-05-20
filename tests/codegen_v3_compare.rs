@@ -28,6 +28,7 @@ fn make_test_program() -> IrProgram {
             target: CallTarget::Module {
                 module: "list".into(),
                 func: "find".into(),
+                def_id: None,
             },
             args: vec![
                 IrExpr { kind: IrExprKind::Var { id: v_products }, ty: Ty::list(Ty::String), span: None, def_id: None },

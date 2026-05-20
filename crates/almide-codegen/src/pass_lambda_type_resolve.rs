@@ -339,7 +339,7 @@ fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut Va
     //   - `Named { "almide_rt_<mod>_<func>" }`   — post-ResolveCalls
     let resolved: Option<(Option<&str>, String)> = match target {
         CallTarget::Method { method, .. } => Some((None, method.as_str().to_string())),
-        CallTarget::Module { module, func } => {
+        CallTarget::Module { module, func, .. } => {
             let m = module.as_str();
             if m == "list" || m == "option" || m == "result" {
                 Some((Some(m), func.as_str().to_string()))
@@ -589,7 +589,7 @@ fn resolve_list_elem_ty(expr: &IrExpr, vt: &VarTable) -> Option<Ty> {
     // `Named { "almide_rt_list_zip" }`, and post-IntrinsicLowering
     // `RuntimeCall { symbol: "almide_rt_list_zip", .. }`.
     let zip_args: Option<&Vec<IrExpr>> = match &expr.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
             if module.as_str() == "list" && func.as_str() == "zip" => Some(args),
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if name.as_str() == "almide_rt_list_zip" => Some(args),
@@ -749,7 +749,7 @@ pub(crate) fn infer_param_ty_from_body(body: &IrExpr, target: VarId) -> Option<T
 fn compute_stdlib_call_ret(target: &CallTarget, args: &[IrExpr], vt: &VarTable) -> Option<Ty> {
     use almide_lang::types::constructor::TypeConstructorId as TCI;
     let (module, func): (&str, &str) = match target {
-        CallTarget::Module { module, func } => (module.as_str(), func.as_str()),
+        CallTarget::Module { module, func, .. } => (module.as_str(), func.as_str()),
         CallTarget::Named { name } => {
             let s = name.as_str();
             let rest = s.strip_prefix("almide_rt_")?;

@@ -180,7 +180,7 @@ impl<'a> LowerCtx<'a> {
                     .map(|a| self.lower_expr_into(a, ops))
                     .collect();
                 match target {
-                    CallTarget::Module { module, func } => {
+                    CallTarget::Module { module, func, .. } => {
                         let callee = almide_base::intern::sym(&format!("{}.{}", module, func));
                         self.emit(ops, result_ty, OpKind::CallOp { callee, args: arg_vals })
                     }

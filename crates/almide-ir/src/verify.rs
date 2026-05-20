@@ -160,7 +160,7 @@ impl<'a> IrVisitor for Verifier<'a> {
                         }
                         // else: could be stdlib, builtin, or test function — skip
                     }
-                    CallTarget::Module { module, func } => {
+                    CallTarget::Module { module, func, .. } => {
                         // Only validate user modules (present in known_module_functions).
                         // Stdlib modules are not in known_module_functions and are handled by codegen.
                         if let Some(funcs) = self.known_module_functions.get::<str>(module) {

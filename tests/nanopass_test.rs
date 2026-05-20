@@ -223,7 +223,7 @@ mod effect_inference {
         // fn read() -> String = fs.read_text("file.txt")
         let mut vt = VarTable::new();
         let body = mk_expr(IrExprKind::Call {
-            target: CallTarget::Module { module: sym("fs"), func: sym("read_text") },
+            target: CallTarget::Module { module: sym("fs"), func: sym("read_text"), def_id: None },
             args: vec![mk_expr(IrExprKind::LitStr { value: "file.txt".into() }, Ty::String)],
             type_args: vec![],
         }, Ty::String);
@@ -339,7 +339,7 @@ mod borrow_insertion {
         let p = mk_param(&mut vt, "name", Ty::String);
         let var_id = p.var;
         let body = mk_expr(IrExprKind::Call {
-            target: CallTarget::Module { module: sym("string"), func: sym("len") },
+            target: CallTarget::Module { module: sym("string"), func: sym("len"), def_id: None },
             args: vec![mk_expr(IrExprKind::Var { id: var_id }, Ty::String)],
             type_args: vec![],
         }, Ty::Int);
@@ -518,7 +518,7 @@ mod stdlib_lowering {
         let var_id = p.var;
 
         let body = mk_expr(IrExprKind::Call {
-            target: CallTarget::Module { module: sym("string"), func: sym("slice") },
+            target: CallTarget::Module { module: sym("string"), func: sym("slice"), def_id: None },
             args: vec![
                 mk_expr(IrExprKind::Var { id: var_id }, Ty::String),
                 mk_expr(IrExprKind::LitInt { value: 0 }, Ty::Int),
@@ -535,7 +535,7 @@ mod stdlib_lowering {
         // lowering happens in IntrinsicLoweringPass which runs before it
         // in the full pipeline.
         match &result.functions[0].body.kind {
-            IrExprKind::Call { target: CallTarget::Module { module, func }, .. } => {
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
                 assert_eq!(module.as_str(), "string");
                 assert_eq!(func.as_str(), "slice");
             }

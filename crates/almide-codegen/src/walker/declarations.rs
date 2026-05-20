@@ -127,6 +127,14 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             if matches!(target, Ty::Fn { .. }) {
                 return String::new();
             }
+            // Opaque (mod/local) aliases → newtype struct
+            if matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private) {
+                let type_s = render_type(ctx, target);
+                return format!(
+                    "#[derive(Clone, Debug, PartialEq)]\npub struct {}({});",
+                    td.name, type_s
+                );
+            }
             let type_s = render_type(ctx, target);
             ctx.templates.render_with("type_alias", None, &[], &[("name", td.name.as_str()), ("type", type_s.as_str())])
                 .unwrap_or_else(|| format!("type {} = {};", td.name, render_type(ctx, target)))
