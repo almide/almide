@@ -294,7 +294,7 @@ fn compute_hover(source: &str, pos: Position) -> Option<Hover> {
     let word = &line[start..end];
     if word.is_empty() { return None; }
 
-    // Module.func hover
+    // Module.func hover — cursor on module name (word = "string", after = "contains")
     let after = if end < line.len() && line.as_bytes()[end] == b'.' {
         let func_start = end + 1;
         let func_end = func_start + line[func_start..].find(|c: char| !c.is_alphanumeric() && c != '_' && c != '?').unwrap_or(line.len() - func_start);
@@ -316,6 +316,25 @@ fn compute_hover(source: &str, pos: Position) -> Option<Hover> {
         }
     }
 
+    // Module.func hover — cursor on func name (word = "contains", before = "string")
+    if start > 0 && line.as_bytes()[start - 1] == b'.' {
+        let mod_end = start - 1;
+        let mod_start = line[..mod_end].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
+        let module = &line[mod_start..mod_end];
+        if !module.is_empty() {
+            if let Some(sig) = crate::stdlib::lookup_sig(module, word) {
+                let params = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
+                return Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: format!("```almide\nfn {}.{}({}) -> {}\n```", module, word, params, sig.ret.display()),
+                    }),
+                    range: None,
+                });
+            }
+        }
+    }
+
     let info = match word {
         "fn" => Some("Function declaration"),
         "let" => Some("Immutable binding"),
@@ -326,16 +345,104 @@ fn compute_hover(source: &str, pos: Position) -> Option<Hover> {
         "effect" => Some("Effect function — can perform I/O"),
         "test" => Some("Test block"),
         "import" => Some("Module import"),
+        "if" => Some("Conditional expression: `if cond then a else b`"),
+        "then" => Some("Then branch of an if expression"),
+        "else" => Some("Else branch of an if expression"),
+        "for" => Some("For-in loop: `for item in collection { ... }`"),
+        "in" => Some("Iterator binding in for loop"),
+        "true" => Some("`Bool` literal (true)"),
+        "false" => Some("`Bool` literal (false)"),
+        "none" => Some("`Option[T]` — no value"),
+        "some" => Some("`Option[T]` constructor — wraps a value"),
+        "ok" => Some("`Result[T, E]` — success value"),
+        "err" => Some("`Result[T, E]` — error value"),
+        "assert" => Some("Test assertion: `assert(condition)` — fails the test if false"),
+        "assert_eq" => Some("Test assertion: `assert_eq(actual, expected)` — fails if not equal"),
         _ => None,
     };
 
-    info.map(|text| Hover {
-        contents: HoverContents::Markup(MarkupContent {
-            kind: MarkupKind::Markdown,
-            value: text.to_string(),
-        }),
-        range: None,
-    })
+    if let Some(text) = info {
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: text.to_string(),
+            }),
+            range: None,
+        });
+    }
+
+    // Variable / function type from checker
+    hover_from_checker(source, word)
+}
+
+fn hover_from_checker(source: &str, word: &str) -> Option<Hover> {
+    let tokens = crate::lexer::Lexer::tokenize(source);
+    let mut parser = crate::parser::Parser::new(tokens);
+    let mut program = parser.parse().ok()?;
+    let canon = crate::canonicalize::canonicalize_program(
+        &program,
+        std::iter::empty::<(&str, &crate::ast::Program, bool)>(),
+    );
+    let mut checker = crate::check::Checker::from_env(canon.env);
+    checker.source_text = Some(source.to_string());
+    checker.diagnostics = canon.diagnostics;
+    let _ = checker.infer_program(&mut program);
+
+    let sym = crate::intern::sym(word);
+
+    // Check user-defined functions
+    if let Some(sig) = checker.env.functions.get(&sym) {
+        let params = sig.params.iter()
+            .map(|(n, t)| format!("{}: {}", n, t.display()))
+            .collect::<Vec<_>>().join(", ");
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!("```almide\nfn {}({}) -> {}\n```", word, params, sig.ret.display()),
+            }),
+            range: None,
+        });
+    }
+
+    // Check top-level lets
+    if let Some(ty) = checker.env.top_lets.get(&sym) {
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!("```almide\nlet {}: {}\n```", word, ty.display()),
+            }),
+            range: None,
+        });
+    }
+
+    // Check variant constructors in type declarations
+    for decl in &program.decls {
+        if let crate::ast::Decl::Type { name: type_name, ty: crate::ast::TypeExpr::Variant { cases }, .. } = decl {
+            for case in cases {
+                let (case_name, fields) = match case {
+                    crate::ast::VariantCase::Unit { name } => (name.as_str(), vec![]),
+                    crate::ast::VariantCase::Tuple { name, fields } => (name.as_str(), fields.iter().map(|f| format_type_expr(f)).collect()),
+                    crate::ast::VariantCase::Record { name, fields } => (name.as_str(), fields.iter().map(|f| format!("{}: {}", f.name.as_str(), format_type_expr(&f.ty))).collect()),
+                };
+                if case_name == word {
+                    let display = if fields.is_empty() {
+                        format!("```almide\n{} (variant of {})\n```", word, type_name.as_str())
+                    } else {
+                        format!("```almide\n{}({}) (variant of {})\n```", word, fields.join(", "), type_name.as_str())
+                    };
+                    return Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: display,
+                        }),
+                        range: None,
+                    });
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn compute_completions(source: &str, pos: Position) -> Vec<CompletionItem> {
@@ -474,6 +581,7 @@ fn compute_definition(source: &str, pos: Position, uri: &Uri) -> Option<Location
     };
 
     for decl in &prog.decls {
+        // Direct declaration match
         let (name, span) = match decl {
             crate::ast::Decl::Fn { name, span, .. } => (name.as_str(), span),
             crate::ast::Decl::Type { name, span, .. } => (name.as_str(), span),
@@ -490,6 +598,27 @@ fn compute_definition(source: &str, pos: Position, uri: &Uri) -> Option<Location
                     end: Position { line: def_line, character: def_col + name.len() as u32 },
                 },
             });
+        }
+        // Variant constructor match — jump to the parent type declaration
+        if let crate::ast::Decl::Type { ty: crate::ast::TypeExpr::Variant { cases }, span, .. } = decl {
+            for case in cases {
+                let case_name = match case {
+                    crate::ast::VariantCase::Unit { name } => name.as_str(),
+                    crate::ast::VariantCase::Tuple { name, .. } => name.as_str(),
+                    crate::ast::VariantCase::Record { name, .. } => name.as_str(),
+                };
+                if case_name == word {
+                    let def_line = span.as_ref().map(|s| s.line.saturating_sub(1) as u32).unwrap_or(0);
+                    let def_col = span.as_ref().map(|s| s.col.saturating_sub(1) as u32).unwrap_or(0);
+                    return Some(Location {
+                        uri: uri.clone(),
+                        range: Range {
+                            start: Position { line: def_line, character: def_col },
+                            end: Position { line: def_line, character: def_col },
+                        },
+                    });
+                }
+            }
         }
     }
     None
