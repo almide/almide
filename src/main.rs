@@ -8,13 +8,21 @@ pub use almide::{
 };
 
 use std::process::Command;
+
+/// When true, suppress warning output during compilation (used by REPL).
+pub(crate) static SUPPRESS_WARNINGS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn warnings_suppressed() -> bool {
+    SUPPRESS_WARNINGS.load(std::sync::atomic::Ordering::Relaxed)
+}
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "almide", version)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -302,7 +310,7 @@ fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::Diagnostic>)
     }
 }
 
-fn try_compile(file: &str, no_check: bool) -> Result<String, String> {
+pub(crate) fn try_compile(file: &str, no_check: bool) -> Result<String, String> {
     try_compile_with_ir(file, no_check, &codegen::CodegenOptions::default()).map(|(code, _)| code)
 }
 
@@ -358,16 +366,20 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             eprintln!("\n{} error(s) found", all_errors.len());
             return Err(format!("{} error(s) found", all_errors.len()));
         }
-        for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-            eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
+        if !warnings_suppressed() {
+            for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
+                eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
+            }
         }
         // Lower to IR only if no parse errors (partial AST can't produce valid IR)
         if !has_parse_errors {
             let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
             // Emit unused variable warnings
-            let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
-            for d in &unused_warnings {
-                eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
+            if !warnings_suppressed() {
+                let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
+                for d in &unused_warnings {
+                    eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
+                }
             }
             ir_program = Some(ir);
         }
@@ -566,7 +578,14 @@ fn main() {
 }
 
 fn dispatch(cli: Cli) {
-    match cli.command {
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => {
+            cli::repl::run_repl();
+            return;
+        }
+    };
+    match command {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, program_args } => {
             let file = resolve_file(file);
