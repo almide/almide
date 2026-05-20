@@ -1,6 +1,6 @@
 # Name Resolution Pass — Unified Cross-Package Symbol Resolution
 
-## Status: Active (partially implemented)
+## Status: Done (Phase 1-3 shipped in v0.18.1, Phase 4 cleanup deferred to cross-package builds)
 
 ### Progress
 - Phase 1 (DefId/DefTable infrastructure): ✅ `DefId`, `DefTable`, `DefInfo`, `DefKind` in `almide-ir`.

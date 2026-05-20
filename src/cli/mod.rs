@@ -8,6 +8,8 @@ mod check;
 mod commands;
 mod install;
 mod selfupdate;
+pub mod lsp;
+pub mod repl;
 mod ide;
 mod fix;
 mod docs_gen;
@@ -255,7 +257,7 @@ codegen-units = 1
 
 /// Build generated Rust code using cargo.
 /// Returns the path to the built binary on success.
-fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {
+pub(crate) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {
     cargo_build_generated_with_native(rs_code, project_dir, release, &[], None)
 }
 
