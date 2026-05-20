@@ -1,158 +1,122 @@
-<!-- description: Structured error-to-fix mapping for LLM auto-repair of compiler errors -->
-# Error-Fix Database
+<!-- description: Elm-grade compiler error experience — hospitality, not hostility -->
+# Elm-Grade Error Experience
 
-Structured mapping from every compiler error to fix suggestions with before/after code examples. Enables LLM auto-repair (target: 70%+ repair rate).
+> **Status: Active** — redesigned from "LLM error-fix DB" to "best-in-class compiler UX".
+> The goal is not a database. The goal is that anyone who sees an Almide error
+> thinks: "this compiler is incredibly helpful."
 
-## Why
+## The Standard: Elm
 
-Current error messages have inline hints, but they're:
-- Embedded in Rust source code (diagnostic.rs, parser/hints/)
-- Not machine-queryable
-- Not testable independently
-- Not usable as LLM prompt context
+Elm's compiler is the gold standard for error experience. It treats errors as
+a conversation, not a punishment. Key properties:
 
-An external, structured database makes errors:
-- **Queryable**: LLM receives exact fix suggestions for the error it sees
-- **Testable**: Each error→fix pair can be verified (apply fix → compiles)
-- **Maintainable**: Non-engineers can review and improve suggestions
-- **Measurable**: Track which errors LLMs can/can't self-repair
+1. **One error, one message** — no cascade, no duplicate diagnostics
+2. **Points at the right thing** — caret highlights the exact expression, not a comma
+3. **Speaks human** — "I expected X, but you gave me Y", not "E005: argument mismatch"
+4. **Shows the fix** — actual corrected code, not just "fix the type"
+5. **Teaches** — explains why, links to deeper understanding
+
+## Current State (v0.18.1)
+
+What works:
+- E001-E008 error codes with hints
+- `suggest_alias` for typo correction ("Did you mean X?")
+- `try_replace` for mechanically applicable fixes
+- Secondary spans ("defined here")
+
+What's broken:
+- **Duplicate errors**: E005 + E001 fire for the same type mismatch
+- **Caret misalignment**: points at comma/space instead of the argument expression
+- **Tone**: technical and cold — "expected Int but got String"
+- **No fix code**: hint says "fix the type" but doesn't show the fixed code
+- **No teaching**: doesn't explain why the types don't match
 
 ## Design
 
-### Data Format
+### Principle: Hospitality
 
-```json
-{
-  "errors": [
-    {
-      "id": "type-mismatch",
-      "pattern": "type mismatch: expected {expected}, got {actual}",
-      "category": "type-check",
-      "severity": "error",
-      "description": "Expression type doesn't match expected type",
-      "fixes": [
-        {
-          "description": "Convert the value to the expected type",
-          "conditions": "when {actual} is String and {expected} is Int",
-          "before": "let x: Int = \"42\"",
-          "after": "let x: Int = int.parse(\"42\")",
-          "confidence": "high"
-        },
-        {
-          "description": "Change the binding type to match the value",
-          "conditions": "when the value type is correct but binding is wrong",
-          "before": "let x: Int = string.trim(s)",
-          "after": "let x: String = string.trim(s)",
-          "confidence": "medium"
-        }
-      ],
-      "related_docs": "docs/errors/type-mismatch.md",
-      "test_file": "spec/errors/type_mismatch_fixes_test.almd"
-    }
-  ]
-}
-```
+Every error message should feel like a senior engineer sitting next to you:
+- Not annoyed that you made a mistake
+- Explains what they see and what they expected
+- Shows you exactly how to fix it
+- If relevant, teaches the underlying concept
 
-### Key Fields
-
-| Field | Purpose |
-|-------|---------|
-| `id` | Stable identifier for the error |
-| `pattern` | Regex-like pattern matching the error message (with placeholders) |
-| `category` | type-check, parse, codegen, resolve, runtime |
-| `fixes[]` | Ordered list of fix suggestions (most likely first) |
-| `fixes[].conditions` | When this fix applies (natural language for LLM) |
-| `fixes[].before/after` | Complete, compilable code examples |
-| `fixes[].confidence` | high / medium / low — how likely this fix is correct |
-| `test_file` | Almide test that verifies the fix |
-
-### Error Categories
-
-| Category | Source | Example |
-|----------|--------|---------|
-| `parse` | parser/hints/ | `expected 'then' after 'if'` |
-| `type-check` | check/ | `type mismatch: expected Int, got String` |
-| `resolve` | resolve.rs | `module 'xyz' not found` |
-| `codegen` | emit_rust/ | Internal compiler errors |
-| `runtime` | generated code | `index out of bounds` |
-
-## Data Source: Extract from Existing Hints
-
-The compiler already has rich hint data scattered across:
+### Target Format
 
 ```
-src/parser/hints/catalog.rs      — 61 parse error patterns
-src/parser/hints/keyword_typo.rs — keyword typo → suggestion
-src/parser/hints/operator.rs     — operator misuse hints
-src/parser/hints/delimiter.rs    — bracket mismatch
-src/check/mod.rs                 — type error hints
-src/check/calls.rs               — function call error hints
-src/check/expressions.rs         — expression type hints
-src/diagnostic.rs                — hint rendering
+── TYPE MISMATCH ── src/main.almd:4:20
+
+The 1st argument to `add` is a String, but it needs to be an Int:
+
+4|   let result = add("hello", 2)
+                      ^^^^^^^
+
+`add` expects this:
+
+    add(a: Int, b: Int) -> Int
+
+Hint: To convert a String to Int, use:
+
+    int.parse("hello") |> result.unwrap_or(0)
 ```
 
-Phase 1 extracts these into the JSON database. Phase 2 adds before/after examples.
+### Rules
+
+1. **Never show two errors for the same problem**
+2. **Caret must cover the exact source expression, never adjacent tokens**
+3. **Always show the expected signature when a call fails**
+4. **Always show corrected code when a fix is known**
+5. **Use "I/you" language, not passive voice**
+6. **Category headers (TYPE MISMATCH, NAMING, SYNTAX) instead of error codes in display**
 
 ## Phases
 
-### Phase 1: Extract and Structure
+### Phase 1: Deduplicate and Align
 
-- [ ] Catalog all error messages in the compiler (grep for diagnostic/hint/error)
-- [ ] Create `docs/errors/error-db.json` with id, pattern, category, description
-- [ ] Estimate: ~100-150 distinct error patterns
+- [ ] Suppress E001 when E005 already fired for the same call
+- [ ] Fix caret positions to cover the argument expression span, not trailing tokens
+- [ ] Audit all E001-E008 for caret accuracy
 
-### Phase 2: Add Fix Suggestions
+### Phase 2: Show Fix Code
 
-- [ ] For each error, write 1-3 fix suggestions with conditions
-- [ ] Add before/after code examples (compilable Almide)
-- [ ] Prioritize by frequency (common errors first)
+- [ ] Type mismatch: show conversion expression (`int.parse`, `int.to_string`, etc.)
+- [ ] Undefined variable: show corrected line with suggestion applied
+- [ ] Undefined function: show corrected call with module prefix
+- [ ] Mut parameter: show corrected declaration (`var` instead of `let`)
+- [ ] Opaque type: show the module's public API to construct the type
 
-### Phase 3: Add Tests
+### Phase 3: Conversational Tone
 
-- [ ] For each fix, create a test: `spec/errors/<id>_fix_test.almd`
-- [ ] Test verifies: (1) the "before" code produces the error, (2) the "after" code compiles
-- [ ] CI runs these tests
+- [ ] Rewrite all error messages to "I expected / you gave" format
+- [ ] Add category headers (TYPE MISMATCH, NAMING, SYNTAX, MUTATION)
+- [ ] Remove error codes from user-facing display (keep in `--json` output)
+- [ ] Add signature display for all call-related errors
 
-### Phase 4: Integration
+### Phase 4: Teaching Hints
 
-- [ ] `almide fix <file>` — reads error, looks up DB, applies most likely fix
-- [ ] `almide explain <error>` — shows all fixes for an error
-- [ ] LLM prompt injection: include relevant error-db entries in context
-- [ ] Measure auto-repair rate against PRODUCTION_READY.md target (70%+)
+- [ ] Common patterns: "Almide uses `var` for mutable, `let` for immutable"
+- [ ] Link to CHEATSHEET.md sections from relevant errors
+- [ ] First-time hints: detect if this is likely a user's first encounter with a concept
 
-### Phase 5: Feedback Loop
+### Phase 5: LLM Integration
 
-- [ ] Track which fixes succeed/fail when applied
-- [ ] Adjust confidence scores based on data
-- [ ] Add new fixes for errors that LLMs frequently fail on
-
-## File Structure
-
-```
-docs/errors/
-├── error-db.json           — The database
-├── categories.md           — Category definitions
-└── contributing.md         — How to add new entries
-
-spec/errors/
-├── type_mismatch_fix_test.almd
-├── unknown_function_fix_test.almd
-└── ...
-```
+- [ ] `--json` output includes structured fix suggestions (before/after AST patches)
+- [ ] `almide fix <file>` applies the most likely fix automatically
+- [ ] `almide explain E007` shows the full teaching page for an error
+- [ ] Measure auto-repair rate (target: 70%+)
 
 ## Metrics
 
 | Metric | Target |
 |--------|--------|
-| Error patterns covered | 100% of compiler errors |
-| Fix suggestions per error | ≥ 1 |
-| Fixes with before/after examples | 100% |
-| Fixes with tests | 80%+ |
-| LLM auto-repair rate using DB | 70%+ |
+| Duplicate errors per problem | 0 |
+| Caret accuracy (covers exact expression) | 100% |
+| Errors with fix code shown | 80%+ |
+| Errors with conversational message | 100% |
+| "This compiler is helpful" in user feedback | Yes |
 
-## Relationship to Other Work
+## References
 
-- **llms.txt** (infra-llms-txt): error-db feeds into llms-full.txt
-- **compiler warnings** (phase-b-warnings): new warning types get DB entries
-- **LLM integration** (ongoing-llm-fix): `almide fix` consumes this DB
-- **PRODUCTION_READY.md**: 70%+ auto-repair rate metric
+- [Elm Compiler Errors](https://elm-lang.org/news/compiler-errors-for-humans)
+- [Rust Error Index](https://doc.rust-lang.org/error_codes/)
+- [Zig's Compile Errors](https://ziglang.org/documentation/master/#Compile-Errors)
