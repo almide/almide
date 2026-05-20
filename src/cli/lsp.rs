@@ -83,7 +83,7 @@ impl AnalyzedDoc {
 enum Located {
     Keyword { info: &'static str },
     FnDecl { name: String, params: String, ret: String },
-    TypeDecl { name: String },
+    TypeDecl { name: String, display: String },
     TopLet { name: String, ty: String },
     VariantConstructor { name: String, type_name: String, fields: Vec<String> },
     StdlibCall { module: String, func: String, params: String, ret: String },
@@ -144,6 +144,25 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
         return Some(Located::Keyword { info });
     }
 
+    // 1b. Primitive / built-in types
+    let builtin = match word {
+        "Int" => Some("64-bit signed integer"),
+        "Float" => Some("64-bit floating point (IEEE 754)"),
+        "String" => Some("UTF-8 string (immutable, reference-counted)"),
+        "Bool" => Some("Boolean (`true` or `false`)"),
+        "Unit" => Some("Unit type — no meaningful value (like void)"),
+        "Bytes" => Some("Byte array (`List[Int]` of 0–255 values)"),
+        "List" => Some("Ordered collection: `List[T]`"),
+        "Map" => Some("Key-value map: `Map[K, V]`"),
+        "Set" => Some("Unique value set: `Set[T]`"),
+        "Option" => Some("Optional value: `Option[T]` = `Some(T)` | `None`"),
+        "Result" => Some("Success or failure: `Result[T, E]` = `Ok(T)` | `Err(E)`"),
+        _ => None,
+    };
+    if let Some(info) = builtin {
+        return Some(Located::Keyword { info });
+    }
+
     // 2. module.func — cursor on module name
     if end < line_text.len() && line_text.as_bytes()[end] == b'.' {
         let func_start = end + 1;
@@ -191,7 +210,31 @@ fn find_node(doc: &AnalyzedDoc, line: u32, col: u32) -> Option<Located> {
         }
     }
 
-    // 4b. Function declarations
+    // 4b. Type declarations — show variants/fields
+    for decl in &doc.program.decls {
+        if let crate::ast::Decl::Type { name, ty, .. } = decl {
+            if name.as_str() == word {
+                let detail = match ty {
+                    crate::ast::TypeExpr::Variant { cases } => {
+                        let case_strs: Vec<String> = cases.iter().map(|c| match c {
+                            crate::ast::VariantCase::Unit { name } => format!("| {}", name.as_str()),
+                            crate::ast::VariantCase::Tuple { name, fields } => format!("| {}({})", name.as_str(), fields.iter().map(|f| format_type_expr(f)).collect::<Vec<_>>().join(", ")),
+                            crate::ast::VariantCase::Record { name, fields } => format!("| {} {{ {} }}", name.as_str(), fields.iter().map(|f| format!("{}: {}", f.name.as_str(), format_type_expr(&f.ty))).collect::<Vec<_>>().join(", ")),
+                        }).collect();
+                        format!("type {} =\n  {}", word, case_strs.join("\n  "))
+                    }
+                    crate::ast::TypeExpr::Record { fields } => {
+                        let fs: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name.as_str(), format_type_expr(&f.ty))).collect();
+                        format!("type {} = {{ {} }}", word, fs.join(", "))
+                    }
+                    _ => format!("type {} = {}", word, format_type_expr(ty)),
+                };
+                return Some(Located::TypeDecl { name: word.to_string(), display: detail });
+            }
+        }
+    }
+
+    // 4c. Function declarations
     if let Some(sig) = doc.checker.env.functions.get(&sym) {
         let params = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
         return Some(Located::FnDecl { name: word.to_string(), params, ret: sig.ret.display().to_string() });
@@ -494,8 +537,8 @@ fn compute_hover(doc: &AnalyzedDoc, pos: Position) -> Option<Hover> {
                 format!("```almide\n{}({}) (variant of {})\n```", name, fields.join(", "), type_name)
             }
         }
-        Located::TypeDecl { name } =>
-            format!("```almide\ntype {}\n```", name),
+        Located::TypeDecl { display, .. } =>
+            format!("```almide\n{}\n```", display),
         Located::UserIdent { name, ty } =>
             format!("```almide\n{}: {}\n```", name, ty),
         Located::Param { name, ty } =>
@@ -545,6 +588,29 @@ fn compute_definition(doc: &AnalyzedDoc, pos: Position, uri: &Uri) -> Option<Loc
                     return span_to_location(span, uri);
                 }
             }
+        }
+    }
+
+    // Stdlib module jump: type name → stdlib source, module.func → stdlib source
+    let module_name = type_to_module(word)
+        .or_else(|| {
+            // module.func — cursor on module name
+            if end < line.len() && line.as_bytes()[end] == b'.' { return Some(word.to_string()); }
+            // module.func — cursor on func name
+            if start > 0 && line.as_bytes()[start - 1] == b'.' {
+                let mod_end = start - 1;
+                let mod_start = line[..mod_end].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
+                return Some(line[mod_start..mod_end].to_string());
+            }
+            None
+        });
+    if let Some(module) = module_name {
+        if let Some(path) = find_stdlib_path(&module) {
+            let file_uri = Uri::from_str(&format!("file://{}", path.display())).ok()?;
+            return Some(Location {
+                uri: file_uri,
+                range: Range { start: Position { line: 0, character: 0 }, end: Position { line: 0, character: 0 } },
+            });
         }
     }
     None
@@ -915,6 +981,45 @@ fn resolve_imports_for_lsp(file_path: &str, program: &crate::ast::Program) -> Ve
         Ok(r) => r.modules.into_iter().map(|(n, p, _, s)| (n, p, s)).collect(),
         Err(_) => vec![],
     }
+}
+
+fn type_to_module(type_name: &str) -> Option<String> {
+    match type_name {
+        "Int" => Some("int".to_string()),
+        "Float" => Some("float".to_string()),
+        "String" => Some("string".to_string()),
+        "Bool" => Some("bool".to_string()),
+        "List" => Some("list".to_string()),
+        "Map" => Some("map".to_string()),
+        "Set" => Some("set".to_string()),
+        "Option" => Some("option".to_string()),
+        "Result" => Some("result".to_string()),
+        "Bytes" => Some("bytes".to_string()),
+        _ => None,
+    }
+}
+
+fn find_stdlib_path(module: &str) -> Option<std::path::PathBuf> {
+    // Walk up from the almide binary to find stdlib/
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.as_path();
+        for _ in 0..6 {
+            let stdlib = dir.join("stdlib").join(format!("{}.almd", module));
+            if stdlib.exists() { return Some(stdlib); }
+            dir = dir.parent()?;
+        }
+    }
+    // Fallback: check known install locations
+    let home = std::env::var("HOME").ok()?;
+    let candidates = [
+        format!("{}/.local/almide/stdlib/{}.almd", home, module),
+        format!("{}/.almide/stdlib/{}.almd", home, module),
+    ];
+    for c in &candidates {
+        let p = std::path::PathBuf::from(c);
+        if p.exists() { return Some(p); }
+    }
+    None
 }
 
 fn empty_program() -> crate::ast::Program {
