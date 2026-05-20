@@ -21,6 +21,7 @@ pub fn run_lsp() {
             retrigger_characters: None,
             work_done_progress_options: Default::default(),
         }),
+        workspace_symbol_provider: Some(OneOf::Left(true)),
         ..Default::default()
     }).unwrap();
 
@@ -31,7 +32,11 @@ pub fn run_lsp() {
             return;
         }
     };
-    let _init: InitializeParams = serde_json::from_value(init_params).unwrap();
+    let init: InitializeParams = serde_json::from_value(init_params).unwrap();
+    let workspace_root = init.root_uri
+        .as_ref()
+        .and_then(|u| u.path().to_string().strip_prefix('/').or(Some(u.path().as_str())).map(|s| std::path::PathBuf::from(s.to_string())))
+        .or_else(|| std::env::current_dir().ok());
 
     let mut documents: HashMap<Uri, String> = HashMap::new();
 
@@ -41,7 +46,7 @@ pub fn run_lsp() {
                 if connection.handle_shutdown(&req).unwrap_or(false) {
                     return;
                 }
-                let resp = handle_request(&req, &documents);
+                let resp = handle_request(&req, &documents, &workspace_root);
                 if let Some(r) = resp {
                     connection.sender.send(Message::Response(r)).ok();
                 }
@@ -79,7 +84,7 @@ pub fn run_lsp() {
     io_threads.join().ok();
 }
 
-fn handle_request(req: &Request, documents: &HashMap<Uri, String>) -> Option<Response> {
+fn handle_request(req: &Request, documents: &HashMap<Uri, String>, workspace_root: &Option<std::path::PathBuf>) -> Option<Response> {
     match req.method.as_str() {
         "textDocument/hover" => {
             let params: HoverParams = serde_json::from_value(req.params.clone()).ok()?;
@@ -130,6 +135,12 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>) -> Option<Res
             let source = documents.get(uri)?;
             let help = compute_signature_help(source, pos);
             let result = help.map(|h| serde_json::to_value(h).unwrap()).unwrap_or(serde_json::Value::Null);
+            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+        }
+        "workspace/symbol" => {
+            let params: WorkspaceSymbolParams = serde_json::from_value(req.params.clone()).ok()?;
+            let symbols = compute_workspace_symbols(&params.query, workspace_root);
+            let result = serde_json::to_value(symbols).unwrap();
             Some(Response { id: req.id.clone(), result: Some(result), error: None })
         }
         _ => None,
@@ -525,5 +536,82 @@ fn format_type_expr(te: &crate::ast::TypeExpr) -> String {
             format!("({}) -> {}", s, format_type_expr(ret))
         }
         _ => "?".to_string(),
+    }
+}
+
+// ── Phase 3: Workspace Symbols ──
+
+fn compute_workspace_symbols(query: &str, workspace_root: &Option<std::path::PathBuf>) -> Vec<SymbolInformation> {
+    let root = match workspace_root {
+        Some(r) => r.clone(),
+        None => return vec![],
+    };
+    let mut results = Vec::new();
+    let mut files = Vec::new();
+    collect_almd_files(&root, &mut files);
+
+    let query_lower = query.to_lowercase();
+    for file_path in &files {
+        let source = match std::fs::read_to_string(file_path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let tokens = crate::lexer::Lexer::tokenize(&source);
+        let mut parser = crate::parser::Parser::new(tokens);
+        let prog = match parser.parse() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let file_uri = Uri::from_str(&format!("file://{}", file_path.display())).ok();
+        let file_uri = match file_uri {
+            Some(u) => u,
+            None => continue,
+        };
+        for decl in &prog.decls {
+            let (name, kind, span) = match decl {
+                crate::ast::Decl::Fn { name, span, .. } => (name.as_str(), SymbolKind::FUNCTION, span),
+                crate::ast::Decl::Type { name, span, .. } => (name.as_str(), SymbolKind::STRUCT, span),
+                crate::ast::Decl::TopLet { name, span, .. } => (name.as_str(), SymbolKind::VARIABLE, span),
+                _ => continue,
+            };
+            if !query.is_empty() && !name.to_lowercase().contains(&query_lower) {
+                continue;
+            }
+            let line = span.as_ref().map(|s| s.line.saturating_sub(1) as u32).unwrap_or(0);
+            let col = span.as_ref().map(|s| s.col.saturating_sub(1) as u32).unwrap_or(0);
+            #[allow(deprecated)]
+            results.push(SymbolInformation {
+                name: name.to_string(),
+                kind,
+                location: Location {
+                    uri: file_uri.clone(),
+                    range: Range {
+                        start: Position { line, character: col },
+                        end: Position { line, character: col + name.len() as u32 },
+                    },
+                },
+                tags: None,
+                deprecated: None,
+                container_name: file_path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()),
+            });
+        }
+    }
+    results
+}
+
+fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if dir_name.starts_with('.') || dir_name == "target" || dir_name == "node_modules" {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_almd_files(&path, out);
+            } else if path.extension().map_or(false, |e| e == "almd") {
+                out.push(path);
+            }
+        }
     }
 }
