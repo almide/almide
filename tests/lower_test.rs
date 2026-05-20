@@ -305,7 +305,7 @@ fn lower_for_in() {
 #[test]
 fn lower_stdlib_call() {
     let ir = lower("fn f(s: String) -> String = string.trim(s)");
-    if let IrExprKind::Call { target: CallTarget::Module { module, func }, .. } = &ir.functions[0].body.kind {
+    if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &ir.functions[0].body.kind {
         assert_eq!(module, "string");
         assert_eq!(func, "trim");
     } else {
@@ -448,7 +448,7 @@ fn lower_guard() {
 #[test]
 fn lower_list_map_call() {
     let ir = lower("fn f(xs: List[Int]) -> List[Int] = list.map(xs, (x) => x + 1)");
-    if let IrExprKind::Call { target: CallTarget::Module { module, func }, .. } = &ir.functions[0].body.kind {
+    if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &ir.functions[0].body.kind {
         assert_eq!(module, "list");
         assert_eq!(func, "map");
     } else {
@@ -459,7 +459,7 @@ fn lower_list_map_call() {
 #[test]
 fn lower_int_to_string_call() {
     let ir = lower("fn f(n: Int) -> String = int.to_string(n)");
-    if let IrExprKind::Call { target: CallTarget::Module { module, func }, .. } = &ir.functions[0].body.kind {
+    if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &ir.functions[0].body.kind {
         assert_eq!(module, "int");
         assert_eq!(func, "to_string");
     } else {

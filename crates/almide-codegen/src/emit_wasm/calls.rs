@@ -285,7 +285,7 @@ impl FuncCompiler<'_> {
                         if let Some(dot) = name.find('.') {
                             let module = &name[..dot];
                             let func = &name[dot+1..];
-                            let target = CallTarget::Module { module: almide_base::intern::sym(module), func: almide_base::intern::sym(func) };
+                            let target = CallTarget::Module { module: almide_base::intern::sym(module), func: almide_base::intern::sym(func), def_id: None };
                             self.emit_call(&target, args, _ret_ty);
                             return;
                         }
@@ -373,7 +373,7 @@ impl FuncCompiler<'_> {
                 }
             }
 
-            CallTarget::Module { module, func } => {
+            CallTarget::Module { module, func, .. } => {
                 // Sized numeric conversion modules (`int8`, ..., `uint64`,
                 // `float32`) live in bundled `.almd` + `@inline_rust` only.
                 // On WASM they surface as `CallTarget::Module` here and get
@@ -749,22 +749,22 @@ impl FuncCompiler<'_> {
                     }
                     "sort" | "list.sort" if matches!(&object.ty, Ty::Applied(_, _)) => {
                         let fake = [(**object).clone()];
-                        let target = CallTarget::Module { module: "list".into(), func: "sort".into() };
+                        let target = CallTarget::Module { module: "list".into(), func: "sort".into(), def_id: None };
                         self.emit_call(&target, &fake, _ret_ty);
                     }
                     "reverse" | "list.reverse" if matches!(&object.ty, Ty::Applied(_, _)) => {
                         let fake = [(**object).clone()];
-                        let target = CallTarget::Module { module: "list".into(), func: "reverse".into() };
+                        let target = CallTarget::Module { module: "list".into(), func: "reverse".into(), def_id: None };
                         self.emit_call(&target, &fake, _ret_ty);
                     }
                     "filter" | "list.filter" if matches!(&object.ty, Ty::Applied(_, _)) => {
                         let fake = [(**object).clone(), args[0].clone()];
-                        let target = CallTarget::Module { module: "list".into(), func: "filter".into() };
+                        let target = CallTarget::Module { module: "list".into(), func: "filter".into(), def_id: None };
                         self.emit_call(&target, &fake, _ret_ty);
                     }
                     "fold" | "list.fold" if matches!(&object.ty, Ty::Applied(_, _)) => {
                         let fake = [(**object).clone(), args[0].clone(), args[1].clone()];
-                        let target = CallTarget::Module { module: "list".into(), func: "fold".into() };
+                        let target = CallTarget::Module { module: "list".into(), func: "fold".into(), def_id: None };
                         self.emit_call(&target, &fake, _ret_ty);
                     }
                     "map" | "list.map" if matches!(&object.ty, Ty::Applied(_, _)) => {
@@ -841,6 +841,7 @@ impl FuncCompiler<'_> {
                         let target = CallTarget::Module {
                             module: almide_base::intern::sym(src_module),
                             func: almide_base::intern::sym(bare_method),
+                            def_id: None,
                         };
                         self.emit_call(&target, &fake_args, _ret_ty);
                     }
@@ -892,6 +893,7 @@ impl FuncCompiler<'_> {
                         let target = CallTarget::Module {
                             module: almide_base::intern::sym(src_module),
                             func: almide_base::intern::sym(bare_method),
+                            def_id: None,
                         };
                         self.emit_call(&target, &fake_args, _ret_ty);
                     }
@@ -1056,6 +1058,7 @@ impl FuncCompiler<'_> {
                 let target = CallTarget::Module {
                     module: almide_base::intern::sym("error"),
                     func: almide_base::intern::sym(func),
+                    def_id: None,
                 };
                 self.emit_call(&target, args, ret_ty);
                 true

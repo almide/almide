@@ -346,7 +346,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
     let span = expr.span;
 
     let kind = match expr.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, type_args } => {
             // Stage 3c: list operations migrate to bundled `@inline_rust`
             // like every other module, BUT the Rust target needs the
             // fused-iterator lowering (`IterChain`) for isolated closure
@@ -442,7 +442,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                 let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
                 return IrExpr {
                     kind: IrExprKind::Call {
-                        target: CallTarget::Module { module, func },
+                        target: CallTarget::Module { module, func, def_id: None },
                         args,
                         type_args,
                     },
@@ -473,7 +473,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             // stale alias that should remain visible to the walker.
             return IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Module { module, func },
+                    target: CallTarget::Module { module, func, def_id: None },
                     args,
                     type_args,
                 },
@@ -495,7 +495,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             call_args.extend(args);
                             let module_call = IrExpr {
                                 kind: IrExprKind::Call {
-                                    target: CallTarget::Module { module: module.to_string().into(), func: method },
+                                    target: CallTarget::Module { module: module.to_string().into(), func: method, def_id: None },
                                     args: call_args, type_args,
                                 },
                                 ty: ty.clone(), span, def_id: None,
@@ -529,7 +529,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         call_args.extend(args);
                         let module_call = IrExpr {
                             kind: IrExprKind::Call {
-                                target: CallTarget::Module { module: mod_name.into(), func: func_name.into() },
+                                target: CallTarget::Module { module: mod_name.into(), func: func_name.into(), def_id: None },
                                 args: call_args, type_args,
                             },
                             ty: ty.clone(), span, def_id: None,
@@ -743,7 +743,7 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
             if let Some(module) = module {
                 return rewrite_expr(IrExpr {
                     kind: IrExprKind::Call {
-                        target: CallTarget::Module { module: module.to_string().into(), func: name },
+                        target: CallTarget::Module { module: module.to_string().into(), func: name, def_id: None },
                         args, type_args,
                     },
                     ty, span, def_id: None,
@@ -769,7 +769,7 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
                 call_args.extend(args);
                 return rewrite_expr(IrExpr {
                     kind: IrExprKind::Call {
-                        target: CallTarget::Module { module: module.to_string().into(), func: method },
+                        target: CallTarget::Module { module: module.to_string().into(), func: method, def_id: None },
                         args: call_args, type_args,
                     },
                     ty, span, def_id: None,
@@ -1170,11 +1170,11 @@ fn rewrite_module_names(expr: IrExpr, map: &std::collections::HashMap<String, St
     // Only CallTarget::Module needs special handling; everything else just recurses.
     if let IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } = &expr.kind {
         if map.contains_key(&**module) {
-            let IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } = expr.kind else { unreachable!() };
+            let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, type_args } = expr.kind else { unreachable!() };
             let new_module = map.get(&*module).map(|v| sym(v)).unwrap_or(module);
             let args = args.into_iter().map(|a| rewrite_module_names(a, map)).collect();
             return IrExpr {
-                kind: IrExprKind::Call { target: CallTarget::Module { module: new_module, func }, args, type_args },
+                kind: IrExprKind::Call { target: CallTarget::Module { module: new_module, func, def_id: None }, args, type_args },
                 ty: expr.ty, span: expr.span, def_id: None,
             };
         }

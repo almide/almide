@@ -90,7 +90,7 @@ impl Bridge {
 
     fn lift_node(&mut self, expr: &IrExpr, rec: &mut RecExpr<AlmideExpr>) -> Id {
         if let IrExprKind::Call { target, args, .. } = &expr.kind {
-            if let CallTarget::Module { module, func } = target {
+            if let CallTarget::Module { module, func, .. } = target {
                 let m = module.as_str();
                 let f = func.as_str();
 
@@ -340,6 +340,7 @@ impl Bridge {
                         target: CallTarget::Module {
                             module: sym("list"),
                             func: sym("map"),
+                            def_id: None,
                         },
                         args: vec![xs, f],
                         type_args: vec![],
@@ -357,6 +358,7 @@ impl Bridge {
                         target: CallTarget::Module {
                             module: sym("list"),
                             func: sym("filter"),
+                            def_id: None,
                         },
                         args: vec![xs, p],
                         type_args: vec![],
@@ -377,6 +379,7 @@ impl Bridge {
                         target: CallTarget::Module {
                             module: sym("list"),
                             func: sym("fold"),
+                            def_id: None,
                         },
                         args: vec![xs, init, f],
                         type_args: vec![],
@@ -436,6 +439,7 @@ impl Bridge {
                         target: CallTarget::Module {
                             module: sym("list"),
                             func: sym("flat_map"),
+                            def_id: None,
                         },
                         args: vec![xs, f],
                         type_args: vec![],
@@ -458,6 +462,7 @@ impl Bridge {
                         target: CallTarget::Module {
                             module: sym("list"),
                             func: sym("filter_map"),
+                            def_id: None,
                         },
                         args: vec![xs, f],
                         type_args: vec![],
@@ -502,6 +507,7 @@ impl Bridge {
                 target: CallTarget::Module {
                     module: sym("matrix"),
                     func: sym(func),
+                    def_id: None,
                 },
                 args: lowered,
                 type_args: vec![],
@@ -1017,6 +1023,7 @@ fn compose_flatmaps_fresh(
             target: CallTarget::Module {
                 module: sym("list"),
                 func: sym("flat_map"),
+                def_id: None,
             },
             args: vec![f_body.clone(), g.clone()],
             type_args: vec![],

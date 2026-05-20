@@ -301,7 +301,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Calls ──
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
             match target {
-                CallTarget::Module { module, func } => {
+                CallTarget::Module { module, func, .. } => {
                     // Module calls: use template (TS/JS) or runtime function (Rust)
                     let args_str = args.iter().map(|a| render_expr_owned(ctx, a)).collect::<Vec<_>>().join(", ");
                     let mod_ident = module.replace('.', "_");

@@ -37,7 +37,7 @@ pub(super) fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &T
 
     let body = IrExpr {
         kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym("value"), func: sym("object") },
+            target: CallTarget::Module { module: sym("value"), func: sym("object"), def_id: None },
             args: vec![pairs_list],
             type_args: vec![],
         },
@@ -109,7 +109,7 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
     };
     IrExpr {
         kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym(module), func: sym(func) },
+            target: CallTarget::Module { module: sym(module), func: sym(func), def_id: None },
             args: vec![field_expr.clone()],
             type_args: vec![],
         },
@@ -136,7 +136,7 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
         // value.field(_v, "key") — returns Result[Value, String]
         let get_field_call = IrExpr {
             kind: IrExprKind::Call {
-                target: CallTarget::Module { module: sym("value"), func: sym("field") },
+                target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
                 args: vec![
                     IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
                     IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None, def_id: None },
@@ -290,7 +290,7 @@ fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, _value_ty: &Ty) -> 
     IrExpr {
         kind: IrExprKind::Try { expr: Box::new(IrExpr {
             kind: IrExprKind::Call {
-                target: CallTarget::Module { module: sym(module), func: sym(func) },
+                target: CallTarget::Module { module: sym(module), func: sym(func), def_id: None },
                 args: vec![get_field_expr],
                 type_args: vec![],
             },

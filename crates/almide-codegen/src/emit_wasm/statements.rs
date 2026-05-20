@@ -589,7 +589,7 @@ fn infer_bind_type(expr: &IrExpr) -> Ty {
         // Call: infer return type from module+func name
         IrExprKind::Call { target, .. } => {
             match target {
-                almide_ir::CallTarget::Module { module, func } => {
+                almide_ir::CallTarget::Module { module, func, .. } => {
                     match (module.as_str(), func.as_str()) {
                         ("random", "int") | ("datetime", _)
                         | ("env", "unix_timestamp") | ("env", "millis")

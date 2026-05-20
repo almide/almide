@@ -240,7 +240,7 @@ pub enum CallTarget {
     /// Free function: `foo(x)`, `println(x)`, variant constructor `Some(x)`
     Named { name: Sym },
     /// Resolved module function: stdlib `string.trim(s)` or UFCS `s.trim()`
-    Module { module: Sym, func: Sym },
+    Module { module: Sym, func: Sym, #[serde(default, skip_serializing_if = "Option::is_none")] def_id: Option<DefId> },
     /// Unresolved method call: `obj.method(args)` — emitter decides UFCS vs method
     Method { object: Box<IrExpr>, method: Sym },
     /// Computed callee: `(fn_expr)(args)`

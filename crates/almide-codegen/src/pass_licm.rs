@@ -303,7 +303,7 @@ fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &M
         // param in place (`list.push`, `map.insert`, ...). Mark the
         // caller-side Var as defined so LICM doesn't wrongly hoist
         // something that depends on it.
-        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } => {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
             for (i, arg) in args.iter().enumerate() {
                 if let IrExprKind::Var { id } = &arg.kind {
                     if mm.get(&(*module, *func)).map_or(false, |mp| mp.contains(&i)) {
@@ -622,7 +622,7 @@ fn is_pure(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
         // Function calls: pure if target is known-pure and all args are pure.
         IrExprKind::Call { target, args, .. } => {
             let call_pure = match target {
-                CallTarget::Module { module, func } => {
+                CallTarget::Module { module, func, .. } => {
                     let key = almide_base::intern::sym(&format!("{}.{}", module, func));
                     pure_fns.contains(&key)
                 }
@@ -854,7 +854,7 @@ fn expr_is_pure_with(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
 
         IrExprKind::Call { target, args, .. } => {
             let call_pure = match target {
-                CallTarget::Module { module, func } => {
+                CallTarget::Module { module, func, .. } => {
                     let key = almide_base::intern::sym(&format!("{}.{}", module, func));
                     pure_fns.contains(&key)
                 }

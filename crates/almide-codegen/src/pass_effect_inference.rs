@@ -365,7 +365,7 @@ fn collect_callees(expr: &IrExpr, callees: &mut HashSet<String>) {
                 collect_callees(arg, callees);
             }
         }
-        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } => {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
             callees.insert(format!("{}.{}", module, func));
             for arg in args {
                 collect_callees(arg, callees);

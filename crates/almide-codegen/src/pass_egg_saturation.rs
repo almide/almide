@@ -92,7 +92,7 @@ impl<'a> IrMutVisitor for EggVisitor<'a> {
 /// Other list calls (e.g. `list.len`) lift as opaque slots — cheap
 /// but skippable, so we avoid paying saturation cost for them.
 fn is_saturation_target(expr: &IrExpr) -> bool {
-    let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func }, .. } = &expr.kind else {
+    let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. } = &expr.kind else {
         return false;
     };
     match module.as_str() {

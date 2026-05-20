@@ -1048,6 +1048,7 @@ impl FuncCompiler<'_> {
                 let target = almide_ir::CallTarget::Module {
                     module: almide_base::intern::sym("matrix"),
                     func: almide_base::intern::sym(func_name),
+                    def_id: None,
                 };
                 self.emit_call(&target, &[left.clone(), right.clone()], &Ty::Matrix);
             }

@@ -372,7 +372,7 @@ fn lower_map_map_fuses_into_single_map_with_composed_lambda() {
         panic!("expected Call, got {:?}", lowered.kind);
     };
     match target {
-        CallTarget::Module { module, func } => {
+        CallTarget::Module { module, func, .. } => {
             assert_eq!(module.as_str(), "list");
             assert_eq!(func.as_str(), "map");
         }
@@ -459,7 +459,7 @@ fn lower_filter_filter_fuses_into_conjunctive_predicate() {
         panic!("expected Call, got {:?}", lowered.kind);
     };
     match target {
-        CallTarget::Module { module, func } => {
+        CallTarget::Module { module, func, .. } => {
             assert_eq!(module.as_str(), "list");
             assert_eq!(func.as_str(), "filter");
         }
@@ -589,7 +589,7 @@ fn matrix_mul_lifts_and_lowers_verbatim() {
     let mut vt = seeded_var_table(1);
     let lowered = bridge.lower(&rec, &mut vt).expect("lower succeeds");
     match &lowered.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } => {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
             assert_eq!(module.as_str(), "matrix");
             assert_eq!(func.as_str(), "mul");
             assert_eq!(args.len(), 2);
@@ -630,7 +630,7 @@ fn matrix_gemm_chain_fuses_on_real_ir() {
     let mut vt = seeded_var_table(3);
     let lowered = bridge.lower(&best, &mut vt).expect("lower succeeds");
     match &lowered.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } => {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
             assert_eq!(module.as_str(), "matrix");
             assert_eq!(func.as_str(), "fused_gemm_bias_scale_gelu");
             assert_eq!(args.len(), 4);

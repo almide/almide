@@ -192,7 +192,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
         impl<'a> IrMutVisitor for Discover<'a> {
             fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
                 walk_expr_mut(self, expr);
-                if let IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } = &expr.kind {
+                if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &expr.kind {
                     let m = module.as_str();
                     let f = func.as_str();
                     for (gi, g) in self.generics.iter().enumerate() {
@@ -312,7 +312,7 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
     impl<'a> IrMutVisitor for Rewriter<'a> {
         fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
             walk_expr_mut(self, expr);
-            if let IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. } = &mut expr.kind {
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &mut expr.kind {
                 let m = module.as_str().to_string();
                 let f = func.as_str().to_string();
                 for (gi, g) in self.generics.iter().enumerate() {

@@ -72,7 +72,7 @@ impl NanoPass for IntrinsicLoweringPass {
                 walk_expr_mut(self, expr);
                 let IrExprKind::Call { target, args, .. } = &mut expr.kind else { return };
                 match target {
-                    CallTarget::Module { module, func } => {
+                    CallTarget::Module { module, func, .. } => {
                         let Some(&symbol) = self.map.get(&(*module, *func)) else { return };
                         let mut args = std::mem::take(args);
                         self.fill_defaults(symbol, &mut args);

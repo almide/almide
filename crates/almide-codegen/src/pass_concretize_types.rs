@@ -432,7 +432,7 @@ fn propagate_pattern_ty(pat: &mut IrPattern, subj_ty: &Ty, vt: &mut VarTable) {
 
 fn is_fold_like_call(expr: &IrExpr) -> bool {
     match &expr.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func }, .. } => {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
             module.as_str() == "list" && matches!(func.as_str(), "fold" | "scan")
         }
         _ => false,
@@ -829,7 +829,7 @@ fn resolve_call_ret_ty(
 
     // 1. User-defined function lookup
     match target {
-        CallTarget::Module { module, func } => {
+        CallTarget::Module { module, func, .. } => {
             if let Some(ret) = symbols.lookup_module(module.as_str(), func.as_str()) {
                 if !ret.has_unresolved_deep() {
                     return Some(ret.clone());
@@ -851,7 +851,7 @@ fn resolve_call_ret_ty(
     //   - `Named { "almide_rt_list_map" }`       — post-ResolveCalls or
     //                                              frontend mangling
     let (module_owned, func_owned): (String, String) = match target {
-        CallTarget::Module { module, func } => (module.as_str().to_string(), func.as_str().to_string()),
+        CallTarget::Module { module, func, .. } => (module.as_str().to_string(), func.as_str().to_string()),
         CallTarget::Named { name } => {
             let s = name.as_str();
             if let Some(rest) = s.strip_prefix("almide_rt_") {

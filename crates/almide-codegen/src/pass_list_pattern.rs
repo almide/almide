@@ -183,7 +183,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
             // Build condition: list.len(subject) == N
             let len_call = IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Module { module: sym("list"), func: sym("len") },
+                    target: CallTarget::Module { module: sym("list"), func: sym("len"), def_id: None },
                     args: vec![subject.clone()],
                     type_args: vec![],
                 },
@@ -341,7 +341,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                         // Length check
                         let len_call = IrExpr {
                             kind: IrExprKind::Call {
-                                target: CallTarget::Module { module: sym("list"), func: sym("len") },
+                                target: CallTarget::Module { module: sym("list"), func: sym("len"), def_id: None },
                                 args: vec![elem_access.clone()],
                                 type_args: vec![],
                             },

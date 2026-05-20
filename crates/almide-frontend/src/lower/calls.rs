@@ -21,7 +21,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
                         args: vec![ir_arg], type_args: vec![],
                     }, Ty::Named("Value".into(), vec![]), span);
                     return ctx.mk(IrExprKind::Call {
-                        target: CallTarget::Module { module: sym(module), func: sym("stringify") },
+                        target: CallTarget::Module { module: sym(module), func: sym("stringify"), def_id: ctx.def_map.get(&sym(&format!("{}.stringify", module))).copied() },
                         args: vec![encoded], type_args: vec![],
                     }, Ty::String, span);
                 }
@@ -33,7 +33,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
                 let ir_arg = lower_expr(ctx, &args[0]);
                 // json.decode[T](text) → T.decode(json.parse(text)?)
                 let parsed = ctx.mk(IrExprKind::Try { expr: Box::new(ctx.mk(IrExprKind::Call {
-                    target: CallTarget::Module { module: sym(module), func: sym("parse") },
+                    target: CallTarget::Module { module: sym(module), func: sym("parse"), def_id: ctx.def_map.get(&sym(&format!("{}.parse", module))).copied() },
                     args: vec![ir_arg], type_args: vec![],
                 }, Ty::result(Ty::Named("Value".into(), vec![]), Ty::String), span)) },
                 Ty::Named("Value".into(), vec![]), span);
@@ -74,7 +74,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
             if mod_str.chars().next().map_or(false, |c| c.is_lowercase()) {
                 let obj_expr = (**object).clone();
                 ir_args.insert(0, obj_expr);
-                target = CallTarget::Module { module: sym(mod_str), func: sym(func_str) };
+                target = CallTarget::Module { module: sym(mod_str), func: sym(func_str), def_id: ctx.def_map.get(&sym(&format!("{}.{}", mod_str, func_str))).copied() };
             }
         }
     }
@@ -139,7 +139,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
                 }
             }
         }
-    } else if let CallTarget::Module { module, func } = &target {
+    } else if let CallTarget::Module { module, func, .. } = &target {
         if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
             for (i, (_, param_ty)) in sig.params.iter().enumerate() {
                 if let Some(arg) = ir_args.get_mut(i) {
@@ -168,7 +168,7 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             // Selective import: bare `from_string` → Module { json, from_string }.
             // (used-mark happens in checker pass; lowering only rewrites.)
             if let Some(module) = ctx.env.import_table.direct.get(name).copied() {
-                return CallTarget::Module { module, func: *name };
+                return CallTarget::Module { module, func: *name, def_id: ctx.def_map.get(&sym(&format!("{}.{}", module, name))).copied() };
             }
             CallTarget::Named { name: *name }
         }
@@ -192,7 +192,7 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                     }
                     let resolved = ctx.env.import_table.aliases.get(module).copied()
                         .unwrap_or(*module);
-                    return CallTarget::Module { module: resolved, func: *field };
+                    return CallTarget::Module { module: resolved, func: *field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", resolved, field))).copied() };
                 }
                 // Ident that's not a module: check if Type.method (protocol impl, e.g. Val.double)
                 if ctx.lookup_var(module).is_none() {
@@ -207,7 +207,7 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             // Dot-chain submodule fallback: still resolve so codegen doesn't break
             // (checker emits error for these, but lowering must still produce valid IR)
             if let Some(dotted) = ctx.env.import_table.resolve_dotted_path(&object.kind) {
-                return CallTarget::Module { module: sym(&dotted), func: *field };
+                return CallTarget::Module { module: sym(&dotted), func: *field, def_id: ctx.def_map.get(&sym(&format!("{}.{}", dotted, field))).copied() };
             }
             // TypeName.method(args) → direct named call (not UFCS, no object prepend)
             if let ast::ExprKind::TypeName { name: type_name, .. } = &object.kind {

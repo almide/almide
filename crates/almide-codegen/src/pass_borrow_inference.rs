@@ -475,7 +475,7 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             // Bytes-only stdlib-aware: only skip ownership for Bytes args in
             // stdlib Module calls. Lists/Strings keep the old conservative
             // behaviour to avoid lambda-typing regressions in filter/map.
-            if let CallTarget::Module { module, func } = target {
+            if let CallTarget::Module { module, func, .. } = target {
                 if almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
                     for (i, arg) in args.iter().enumerate() {
                         let borrowed = bundled_borrow_at(module.as_str(), func.as_str(), i)
@@ -749,7 +749,7 @@ fn check_needs_refmut(expr: &IrExpr, var: VarId, needs: &mut bool) {
         IrExprKind::Call { target, args, .. } => {
             let callee_sig: Option<Vec<ParamBorrow>> = match target {
                 CallTarget::Named { name } => lookup_user_borrows(name.as_str()),
-                CallTarget::Module { module, func } => {
+                CallTarget::Module { module, func, .. } => {
                     let key = format!("{}::{}", module, func);
                     SIGS_SNAPSHOT.with(|s| s.borrow().get(&key).cloned())
                 }
@@ -942,7 +942,7 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
             // and the IR `args` align to params 1..N (not 0..N).
             let (callee_name, is_method_with_self) = match &target {
                 CallTarget::Named { name } => (Some(name.to_string()), false),
-                CallTarget::Module { module, func } => (Some(format!("{}::{}", module, func)), false),
+                CallTarget::Module { module, func, .. } => (Some(format!("{}::{}", module, func)), false),
                 CallTarget::Method { method, .. } if method.contains('.') => (Some(method.to_string()), true),
                 _ => (None, false),
             };
