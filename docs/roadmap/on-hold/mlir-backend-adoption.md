@@ -1,9 +1,10 @@
 <!-- description: Stage 2 progressive lowering — dialect walker passes all 227 spec tests -->
 # MLIR Backend + Egg Rewrite Engine
 
-> **Active scope: Stage 2** — dialect walker が全 spec テストを通過すること。
-> Stage 1 (egg rewriter + dialect PoC) は ✅ 完了 (0.16.0)。
-> Stage 3-4 (GPU/PGO) は on-hold。
+> **Status: On Hold** — egg rewriter shipped (Stage 1 done), dialect backend deferred.
+> Stage 1 (egg equality saturation): ✅ Done (0.16.0). Default-enabled, -1183 lines, MatrixFusion/StreamFusion replaced.
+> Stage 2 (dialect): PoC complete (SSA lowering, Rust/LLVM emit, 7 equiv tests). Full walker migration deferred.
+> Stage 3-4 (GPU/PGO): on-hold.
 
 ## Decision
 
