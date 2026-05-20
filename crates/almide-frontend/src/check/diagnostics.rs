@@ -4,6 +4,21 @@ use crate::types::Ty;
 use super::Checker;
 
 impl Checker {
+    /// Returns (description, template) where template uses `{}` for the source expression.
+    /// e.g. ("Int to String", "int.to_string({})")
+    pub(crate) fn conversion_template(expected: &Ty, actual: &Ty) -> Option<(&'static str, &'static str)> {
+        match (actual, expected) {
+            (Ty::Int, Ty::String) => Some(("Int to String", "int.to_string({})")),
+            (Ty::Float, Ty::String) => Some(("Float to String", "float.to_string({})")),
+            (Ty::Bool, Ty::String) => Some(("Bool to String", "to_string({})")),
+            (Ty::String, Ty::Int) => Some(("String to Int", "int.parse({})")),
+            (Ty::String, Ty::Float) => Some(("String to Float", "float.parse({})")),
+            (Ty::Float, Ty::Int) => Some(("Float to Int", "float.to_int({})")),
+            (Ty::Int, Ty::Float) => Some(("Int to Float", "int.to_float({})")),
+            _ => None,
+        }
+    }
+
     pub(crate) fn suggest_conversion(expected: &Ty, actual: &Ty) -> Option<String> {
         match (actual, expected) {
             (Ty::Int, Ty::String) => Some("use `int.to_string(x)` to convert Int to String".to_string()),
@@ -11,8 +26,8 @@ impl Checker {
             (Ty::Bool, Ty::String) => Some("use `to_string(x)` to convert Bool to String".to_string()),
             (Ty::String, Ty::Int) => Some("use `int.parse(s)` to convert String to Int (returns Result[Int, String])".to_string()),
             (Ty::String, Ty::Float) => Some("use `float.parse(s)` to convert String to Float (returns Result[Float, String])".to_string()),
-            (Ty::Float, Ty::Int) => Some("use `to_int(x)` to convert Float to Int (truncates)".to_string()),
-            (Ty::Int, Ty::Float) => Some("use `to_float(x)` to convert Int to Float".to_string()),
+            (Ty::Float, Ty::Int) => Some("use `float.to_int(x)` to convert Float to Int (truncates)".to_string()),
+            (Ty::Int, Ty::Float) => Some("use `int.to_float(x)` to convert Int to Float".to_string()),
             // Unit where a List was expected: three common causes.
             // - `list.push/pop/clear` mutate and return Unit
             // - `for x in xs { ... }` is a side-effect loop returning Unit

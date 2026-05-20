@@ -729,6 +729,15 @@ impl Checker {
                 if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
                     diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
                 }
+                // Show fix code: replace argument with conversion expression
+                if let Some(span) = self.current_span {
+                    if let Some((_, template)) = Self::conversion_template(&expected, arg_ty) {
+                        if let Some(src) = self.source_slice(span) {
+                            let fixed = template.replace("{}", &src);
+                            diag = diag.with_try(format!("// Try:\n{}", fixed));
+                        }
+                    }
+                }
                 self.emit(diag);
                 return true;
             }
