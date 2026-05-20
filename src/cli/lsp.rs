@@ -594,25 +594,34 @@ fn compute_definition(doc: &AnalyzedDoc, pos: Position, uri: &Uri) -> Option<Loc
         }
     }
 
-    // Stdlib module jump: type name → stdlib source, module.func → stdlib source
-    let module_name = type_to_module(word)
-        .or_else(|| {
-            // module.func — cursor on module name
-            if end < line.len() && line.as_bytes()[end] == b'.' { return Some(word.to_string()); }
-            // module.func — cursor on func name
-            if start > 0 && line.as_bytes()[start - 1] == b'.' {
-                let mod_end = start - 1;
-                let mod_start = line[..mod_end].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
-                return Some(line[mod_start..mod_end].to_string());
-            }
-            None
-        });
+    // Stdlib module jump: type name → stdlib source, module.func → specific fn line
+    let (module_name, func_name) = if let Some(m) = type_to_module(word) {
+        (Some(m), None)
+    } else if end < line.len() && line.as_bytes()[end] == b'.' {
+        // cursor on module name in module.func
+        let func_start = end + 1;
+        let func_end = func_start + line[func_start..].find(|c: char| !c.is_alphanumeric() && c != '_' && c != '?').unwrap_or(line.len() - func_start);
+        (Some(word.to_string()), Some(line[func_start..func_end].to_string()))
+    } else if start > 0 && line.as_bytes()[start - 1] == b'.' {
+        // cursor on func name in module.func
+        let mod_end = start - 1;
+        let mod_start = line[..mod_end].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
+        (Some(line[mod_start..mod_end].to_string()), Some(word.to_string()))
+    } else {
+        (None, None)
+    };
     if let Some(module) = module_name {
         if let Some(path) = find_stdlib_path(&module) {
+            let target_line = func_name.as_ref()
+                .and_then(|f| find_fn_line_in_file(&path, f))
+                .unwrap_or(0);
             let file_uri = Uri::from_str(&format!("file://{}", path.display())).ok()?;
             return Some(Location {
                 uri: file_uri,
-                range: Range { start: Position { line: 0, character: 0 }, end: Position { line: 0, character: 0 } },
+                range: Range {
+                    start: Position { line: target_line, character: 0 },
+                    end: Position { line: target_line, character: 0 },
+                },
             });
         }
     }
@@ -1023,6 +1032,20 @@ fn find_stdlib_path(module: &str) -> Option<std::path::PathBuf> {
     for c in &candidates {
         let p = std::path::PathBuf::from(c);
         if p.exists() { return Some(p); }
+    }
+    None
+}
+
+fn find_fn_line_in_file(path: &std::path::Path, func_name: &str) -> Option<u32> {
+    let source = std::fs::read_to_string(path).ok()?;
+    let pattern = format!("fn {}(", func_name);
+    for (i, line) in source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with(&pattern)
+            || trimmed.starts_with(&format!("effect fn {}(", func_name))
+        {
+            return Some(i as u32);
+        }
     }
     None
 }
