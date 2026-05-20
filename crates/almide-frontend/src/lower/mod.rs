@@ -64,8 +64,8 @@ impl<'a> LowerCtx<'a> {
             protocol_bounds: HashMap::new(),
             lambda_id_counter: 0,
             const_param_vars: HashMap::new(),
-            def_table: almide_ir::DefTable::new(),
-            def_map: HashMap::new(),
+            def_table: env.def_table.clone(),
+            def_map: env.def_map.iter().map(|(k, v)| (*k, *v)).collect(),
         }
     }
 

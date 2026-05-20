@@ -90,6 +90,12 @@ pub struct TypeEnv {
     /// Used by expression lowering to generate correct cross-module constant names.
     pub module_versioned_names: std::collections::HashMap<Sym, Sym>,
 
+    /// DefTable: canonical definitions for all symbols (functions, types, top-lets).
+    /// Populated during register_decls, used for cross-package name resolution.
+    pub def_table: almide_ir::DefTable,
+    /// Qualified name → DefId lookup: "list.push" → DefId(42), "SafeHtml" → DefId(99)
+    pub def_map: std::collections::HashMap<Sym, almide_ir::DefId>,
+
     /// Opaque type aliases: `mod type SafeHtml = String` → stores inner target type.
     pub opaque_alias_targets: std::collections::HashMap<Sym, Ty>,
     /// Opaque type alias constructor visibility.
@@ -135,6 +141,8 @@ impl TypeEnv {
             in_test_block: false,
             failed_fn_names: std::collections::HashSet::new(),
             module_versioned_names: std::collections::HashMap::new(),
+            def_table: almide_ir::DefTable::new(),
+            def_map: std::collections::HashMap::new(),
             opaque_alias_targets: std::collections::HashMap::new(),
             opaque_alias_visibility: std::collections::HashMap::new(),
             opaque_alias_module: std::collections::HashMap::new(),
