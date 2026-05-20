@@ -360,21 +360,28 @@ impl Checker {
         } else {
             None
         };
-        let sig = self.env.functions.get(&sym(name)).cloned().or_else(|| {
-            if let Some(ref rn) = resolved_name {
-                self.env.functions.get(&sym(rn)).cloned()
-            } else {
-                None
-            }
-        }).or_else(|| {
-            let (module, func) = name.split_once('.')?;
-            crate::stdlib::lookup_sig(module, func)
-        }).or_else(|| {
-            let q = qualified_via_direct.as_ref()?;
-            let (module, func) = q.split_once('.')?;
-            crate::stdlib::lookup_sig(module, func)
-                .or_else(|| self.env.functions.get(&sym(q)).cloned())
-        });
+        // DefId-based resolution: try def_map first for canonical lookup
+        let sig = self.env.def_map.get(&sym(name))
+            .and_then(|_did| self.env.functions.get(&sym(name)).cloned())
+            .or_else(|| {
+                if let Some(ref rn) = resolved_name {
+                    self.env.def_map.get(&sym(rn))
+                        .and_then(|_did| self.env.functions.get(&sym(rn)).cloned())
+                        .or_else(|| self.env.functions.get(&sym(rn)).cloned())
+                } else {
+                    None
+                }
+            })
+            .or_else(|| self.env.functions.get(&sym(name)).cloned())
+            .or_else(|| {
+                let (module, func) = name.split_once('.')?;
+                crate::stdlib::lookup_sig(module, func)
+            }).or_else(|| {
+                let q = qualified_via_direct.as_ref()?;
+                let (module, func) = q.split_once('.')?;
+                crate::stdlib::lookup_sig(module, func)
+                    .or_else(|| self.env.functions.get(&sym(q)).cloned())
+            });
 
         // Mark the source module as used (for unused-import diagnostic).
         if qualified_via_direct.is_some() {
