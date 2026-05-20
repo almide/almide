@@ -8,6 +8,7 @@ mod check;
 mod commands;
 mod install;
 mod selfupdate;
+pub mod lsp;
 mod ide;
 mod fix;
 mod docs_gen;

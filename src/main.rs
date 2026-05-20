@@ -101,6 +101,8 @@ enum Commands {
         #[arg(long)]
         effects: bool,
     },
+    /// Start the Language Server Protocol server (for editor integration)
+    Lsp,
     /// Explain a diagnostic code (e.g., almide explain E001)
     Explain {
         /// Diagnostic code such as E001
@@ -606,6 +608,9 @@ fn dispatch(cli: Cli) {
         }
         Commands::DocsGen { check } => {
             cli::cmd_docs_gen(check);
+        }
+        Commands::Lsp => {
+            cli::lsp::run_lsp();
         }
         Commands::Explain { code } => {
             print_error_explanation(&code);

@@ -24,6 +24,8 @@ semver = "1"
 toml = "0.8"
 wasm-encoder = "0.225"
 lasso = { version = "0.7", features = ["multi-threaded"] }
+lsp-server = "0.7"
+lsp-types = "0.97"
 
 
 [dev-dependencies]
