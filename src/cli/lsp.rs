@@ -62,8 +62,11 @@ impl AnalyzedDoc {
         }
 
         let check_diags = checker.infer_program(&mut program);
+        let is_stdlib = file_path.map_or(false, |fp| fp.contains("/stdlib/"));
         let mut diags = parse_errors;
         for d in &check_diags {
+            // Suppress E015 (reimpl-lint) for stdlib source files
+            if is_stdlib && d.code.as_deref() == Some("E015") { continue; }
             diags.push(diag_from_almide(d));
         }
 
@@ -1000,13 +1003,15 @@ fn type_to_module(type_name: &str) -> Option<String> {
 }
 
 fn find_stdlib_path(module: &str) -> Option<std::path::PathBuf> {
+    let filename = format!("{}.almd", module);
     // Walk up from the almide binary to find stdlib/
     if let Ok(exe) = std::env::current_exe() {
-        let mut dir = exe.as_path();
+        let mut dir = exe.parent();
         for _ in 0..6 {
-            let stdlib = dir.join("stdlib").join(format!("{}.almd", module));
+            let Some(d) = dir else { break };
+            let stdlib = d.join("stdlib").join(&filename);
             if stdlib.exists() { return Some(stdlib); }
-            dir = dir.parent()?;
+            dir = d.parent();
         }
     }
     // Fallback: check known install locations
