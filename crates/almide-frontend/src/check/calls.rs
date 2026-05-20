@@ -525,8 +525,10 @@ impl Checker {
             }
         }
         let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_ty(a, &self.uf)).collect();
+        let mut e005_fired: Vec<bool> = Vec::new();
         for ((pname, pty), aty) in sig.params.iter().zip(concrete_args.iter()) {
-            self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, &mut bindings);
+            let fired = self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, &mut bindings);
+            e005_fired.push(fired);
         }
         // Verify protocol bounds on generic type parameters
         for (tv_name, proto_names) in &sig.protocol_bounds {
@@ -548,7 +550,9 @@ impl Checker {
             }
         }
         // Propagate resolved types back to inference variables
-        for ((_, pty), aty) in sig.params.iter().zip(arg_tys.iter()) {
+        // Skip constraint for args where E005 already fired (avoids duplicate E001)
+        for (i, ((_, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
+            if e005_fired.get(i).copied().unwrap_or(false) { continue; }
             let expected = if bindings.is_empty() { pty.clone() } else { crate::types::substitute(pty, &bindings) };
             if expected != Ty::Unknown {
                 self.constrain(expected, aty.clone(), format!("call to {}()", name));
@@ -664,25 +668,29 @@ impl Checker {
 
     /// Unify a single call argument against its parameter type, updating bindings.
     /// Reports diagnostics for structural bound violations and type mismatches.
+    /// Returns true if E005 was emitted (caller should skip redundant E001 constraint).
     fn unify_call_arg(
         &mut self, fn_name: &str, param_name: &Sym,
         param_ty: &Ty, arg_ty: &Ty,
         structural_bounds: &HashMap<Sym, Ty>,
         bindings: &mut HashMap<Sym, Ty>,
-    ) {
+    ) -> bool {
         if let Ty::TypeVar(tv) = param_ty {
             if let Some(bound) = structural_bounds.get(tv) {
                 let resolved = self.env.resolve_named(arg_ty);
                 if bound.compatible(&resolved) || bound.compatible(arg_ty) {
                     bindings.insert(*tv, arg_ty.clone());
+                    return false;
                 } else {
                     self.emit(super::err(
                         format!("argument '{}' does not satisfy bound {}: got {}", param_name, bound.display(), arg_ty.display()),
                         "The argument must have the required fields",
                         format!("call to {}()", fn_name)));
+                    return true;
                 }
             } else {
                 crate::types::unify(param_ty, arg_ty, bindings);
+                return false;
             }
         } else {
             crate::types::unify(param_ty, arg_ty, bindings);
@@ -713,7 +721,9 @@ impl Checker {
                     diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
                 }
                 self.emit(diag);
+                return true;
             }
+            false
         }
     }
 
