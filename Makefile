@@ -17,6 +17,10 @@ install: build
 	@mkdir -p $(HOME)/.local/bin
 	rm -f $(HOME)/.local/bin/almide
 	cp $(BIN) $(HOME)/.local/bin/almide
+	@# Install stdlib sources (read-only, for LSP go-to-definition)
+	@rm -rf $(INSTALL_DIR)/stdlib
+	@cp -r stdlib $(INSTALL_DIR)/stdlib
+	@chmod -R a-w $(INSTALL_DIR)/stdlib
 	@echo "Installed almide $(VERSION) to $(INSTALL_DIR)/almide and ~/.local/bin/almide"
 	@almide --version
 
