@@ -1,6 +1,12 @@
 # Name Resolution Pass — Unified Cross-Package Symbol Resolution
 
-## Status: Active (blocker for ceangal/snaidhm integration)
+## Status: Active (partially implemented)
+
+### Progress
+- Phase 1 (DefId/DefTable infrastructure): ✅ `DefId`, `DefTable`, `DefInfo`, `DefKind` exist in `almide-ir`. Cross-module TopLet alloc works.
+- v0.17.10 workaround: `module_versioned_names` in TypeEnv resolves versioned constant names (e.g. `snaidhm_v0.web.gpu`). Parent-path fallback for submodules.
+- ceangal/snaidhm blocker: **mitigated** (versioned name workaround), not structurally resolved.
+- Phase 2-4: not started.
 
 ## Problem
 
