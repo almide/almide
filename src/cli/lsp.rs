@@ -22,6 +22,8 @@ pub fn run_lsp() {
             work_done_progress_options: Default::default(),
         }),
         workspace_symbol_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Left(true)),
+        code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
         ..Default::default()
     }).unwrap();
 
@@ -143,12 +145,35 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, workspace_roo
             let result = serde_json::to_value(symbols).unwrap();
             Some(Response { id: req.id.clone(), result: Some(result), error: None })
         }
+        "textDocument/rename" => {
+            let params: RenameParams = serde_json::from_value(req.params.clone()).ok()?;
+            let uri = &params.text_document_position.text_document.uri;
+            let pos = params.text_document_position.position;
+            let source = documents.get(uri)?;
+            let edit = compute_rename(source, pos, uri, &params.new_name);
+            let result = edit.map(|e| serde_json::to_value(e).unwrap()).unwrap_or(serde_json::Value::Null);
+            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+        }
+        "textDocument/codeAction" => {
+            let params: CodeActionParams = serde_json::from_value(req.params.clone()).ok()?;
+            let uri = &params.text_document.uri;
+            let source = documents.get(uri)?;
+            let actions = compute_code_actions(source, &params.context.diagnostics, uri);
+            let result = serde_json::to_value(actions).unwrap();
+            Some(Response { id: req.id.clone(), result: Some(result), error: None })
+        }
         _ => None,
     }
 }
 
+fn uri_to_path(uri: &Uri) -> Option<String> {
+    let s = uri.as_str();
+    s.strip_prefix("file://").map(|p| p.to_string())
+}
+
 fn publish_diagnostics(connection: &Connection, uri: &Uri, source: &str) {
-    let diags = check_source(source);
+    let file_path = uri_to_path(uri);
+    let diags = check_source(source, file_path.as_deref());
     let params = PublishDiagnosticsParams {
         uri: uri.clone(),
         diagnostics: diags,
@@ -161,7 +186,7 @@ fn publish_diagnostics(connection: &Connection, uri: &Uri, source: &str) {
     connection.sender.send(Message::Notification(notif)).ok();
 }
 
-fn check_source(source: &str) -> Vec<Diagnostic> {
+fn check_source(source: &str, file_path: Option<&str>) -> Vec<Diagnostic> {
     let tokens = crate::lexer::Lexer::tokenize(source);
     let mut parser = crate::parser::Parser::new(tokens);
     let prog = match parser.parse() {
@@ -175,13 +200,28 @@ fn check_source(source: &str) -> Vec<Diagnostic> {
     }
 
     let mut program = prog;
+
+    // Try cross-file import resolution when file path is available
+    let resolved_modules = if let Some(fp) = file_path {
+        resolve_imports_for_lsp(fp, &program)
+    } else {
+        vec![]
+    };
+
     let canon = crate::canonicalize::canonicalize_program(
         &program,
-        std::iter::empty::<(&str, &crate::ast::Program, bool)>(),
+        resolved_modules.iter().map(|(n, p, s)| (n.as_str(), p, *s)),
     );
     let mut checker = crate::check::Checker::from_env(canon.env);
     checker.source_text = Some(source.to_string());
     checker.diagnostics = canon.diagnostics;
+
+    // Register imported module types
+    for (name, mod_prog, _) in &resolved_modules {
+        let mut mod_prog_clone = mod_prog.clone();
+        checker.infer_module(&mut mod_prog_clone, name);
+    }
+
     let check_diags = checker.infer_program(&mut program);
 
     let mut result = parse_errors;
@@ -189,6 +229,32 @@ fn check_source(source: &str) -> Vec<Diagnostic> {
         result.push(diag_from_almide(d));
     }
     result
+}
+
+fn resolve_imports_for_lsp(file_path: &str, program: &crate::ast::Program) -> Vec<(String, crate::ast::Program, bool)> {
+    // Find project root by looking for almide.toml
+    let file = std::path::Path::new(file_path);
+    let project_dir = file.parent();
+
+    let dep_paths: Vec<(crate::project::PkgId, std::path::PathBuf)> = project_dir
+        .and_then(|dir| {
+            let toml = dir.join("almide.toml");
+            if !toml.exists() { return None; }
+            let proj = crate::project::parse_toml(&toml).ok()?;
+            crate::project_fetch::fetch_all_deps(&proj).ok().map(|deps| {
+                deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect()
+            })
+        })
+        .unwrap_or_default();
+
+    match crate::resolve::resolve_imports_with_deps(file_path, program, &dep_paths) {
+        Ok(resolved) => {
+            resolved.modules.into_iter()
+                .map(|(name, prog, _, is_stdlib)| (name, prog, is_stdlib))
+                .collect()
+        }
+        Err(_) => vec![],
+    }
 }
 
 fn diag_from_almide(d: &crate::diagnostic::Diagnostic) -> Diagnostic {
@@ -537,6 +603,153 @@ fn format_type_expr(te: &crate::ast::TypeExpr) -> String {
         }
         _ => "?".to_string(),
     }
+}
+
+// ── Rename ──
+
+fn compute_rename(source: &str, pos: Position, uri: &Uri, new_name: &str) -> Option<WorkspaceEdit> {
+    let lines: Vec<&str> = source.lines().collect();
+    let line = lines.get(pos.line as usize)?;
+    let col = pos.character as usize;
+    if col >= line.len() { return None; }
+
+    let start = line[..col].rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
+    let end = col + line[col..].find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(line.len() - col);
+    let old_name = &line[start..end];
+    if old_name.is_empty() { return None; }
+
+    // Find all word-boundary occurrences of old_name in the source
+    let mut edits = Vec::new();
+    for (line_idx, line_text) in lines.iter().enumerate() {
+        let mut search_from = 0;
+        while let Some(found) = line_text[search_from..].find(old_name) {
+            let abs_pos = search_from + found;
+            let before_ok = abs_pos == 0 || !line_text.as_bytes()[abs_pos - 1].is_ascii_alphanumeric() && line_text.as_bytes()[abs_pos - 1] != b'_';
+            let after_pos = abs_pos + old_name.len();
+            let after_ok = after_pos >= line_text.len() || !line_text.as_bytes()[after_pos].is_ascii_alphanumeric() && line_text.as_bytes()[after_pos] != b'_';
+            if before_ok && after_ok {
+                edits.push(TextEdit {
+                    range: Range {
+                        start: Position { line: line_idx as u32, character: abs_pos as u32 },
+                        end: Position { line: line_idx as u32, character: after_pos as u32 },
+                    },
+                    new_text: new_name.to_string(),
+                });
+            }
+            search_from = abs_pos + old_name.len();
+        }
+    }
+
+    if edits.is_empty() { return None; }
+    let mut changes = HashMap::new();
+    changes.insert(uri.clone(), edits);
+    Some(WorkspaceEdit { changes: Some(changes), ..Default::default() })
+}
+
+// ── Code Actions ──
+
+fn compute_code_actions(source: &str, diagnostics: &[Diagnostic], uri: &Uri) -> Vec<CodeActionOrCommand> {
+    let mut actions = Vec::new();
+    let lines: Vec<&str> = source.lines().collect();
+
+    for diag in diagnostics {
+        let code = diag.code.as_ref().and_then(|c| match c {
+            NumberOrString::String(s) => Some(s.as_str()),
+            _ => None,
+        });
+
+        match code {
+            // E003: undefined variable — suggest import if it's a known module
+            Some("E003") => {
+                let word = extract_word_from_diag(&diag.message);
+                if let Some(module) = word {
+                    let known_modules = ["io", "json", "env", "fs", "http", "regex", "random",
+                                         "testing", "datetime", "bytes", "html", "path", "channel"];
+                    if known_modules.contains(&module.as_str()) {
+                        let import_line = format!("import {}\n", module);
+                        // Insert at line 0 (or after existing imports)
+                        let insert_line = find_import_insert_line(&lines);
+                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                            title: format!("Import '{}'", module),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            diagnostics: Some(vec![diag.clone()]),
+                            edit: Some(WorkspaceEdit {
+                                changes: Some(HashMap::from([(uri.clone(), vec![TextEdit {
+                                    range: Range {
+                                        start: Position { line: insert_line, character: 0 },
+                                        end: Position { line: insert_line, character: 0 },
+                                    },
+                                    new_text: import_line,
+                                }])])),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }));
+                    }
+                }
+            }
+            // E006: effect isolation — suggest marking function as effect fn
+            Some("E006") => {
+                if let Some(fn_line) = find_enclosing_fn_line(&lines, diag.range.start.line) {
+                    let line_text = lines[fn_line as usize];
+                    if line_text.contains("fn ") && !line_text.contains("effect fn") {
+                        let col = line_text.find("fn ").unwrap() as u32;
+                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                            title: "Mark as effect fn".to_string(),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            diagnostics: Some(vec![diag.clone()]),
+                            edit: Some(WorkspaceEdit {
+                                changes: Some(HashMap::from([(uri.clone(), vec![TextEdit {
+                                    range: Range {
+                                        start: Position { line: fn_line, character: col },
+                                        end: Position { line: fn_line, character: col + 2 },
+                                    },
+                                    new_text: "effect fn".to_string(),
+                                }])])),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    actions
+}
+
+fn extract_word_from_diag(message: &str) -> Option<String> {
+    // Extract 'name' from "undefined variable 'name'" or similar
+    if let Some(start) = message.find('\'') {
+        let rest = &message[start + 1..];
+        if let Some(end) = rest.find('\'') {
+            return Some(rest[..end].to_string());
+        }
+    }
+    None
+}
+
+fn find_import_insert_line(lines: &[&str]) -> u32 {
+    let mut last_import = 0u32;
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("import ") {
+            last_import = (i + 1) as u32;
+        }
+    }
+    last_import
+}
+
+fn find_enclosing_fn_line(lines: &[&str], diag_line: u32) -> Option<u32> {
+    for i in (0..=diag_line as usize).rev() {
+        let trimmed = lines.get(i)?.trim();
+        if trimmed.starts_with("fn ") || trimmed.starts_with("effect fn ")
+            || trimmed.contains(" fn ") {
+            return Some(i as u32);
+        }
+    }
+    None
 }
 
 // ── Phase 3: Workspace Symbols ──
