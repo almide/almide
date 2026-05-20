@@ -1,7 +1,7 @@
 <!-- description: Language Server Protocol for editor completion, diagnostics, and navigation -->
 # LSP Server
 
-> **Status: Phase 1 done** (v0.18.x). Diagnostics, hover, completion shipped.
+> **Status: Phase 1 done** (v0.19.0). Diagnostics, hover, completion shipped.
 > Phase 2 (signature help, rename, formatting) and Phase 3 (cross-file) pending.
 
 Language Server Protocol implementation for editor integration.
