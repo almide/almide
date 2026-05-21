@@ -1,8 +1,8 @@
-<!-- description: Separate compilation: each package → independent compilation unit, linked by Cargo (Rust) or IR linker (WASM) -->
+<!-- description: Separate compilation with unified IR linker for all targets -->
 # Separate Compilation
 
 > **Target: v0.21**
-> **Status: Design**
+> **Status: Design → Implementation**
 
 ## Problem
 
@@ -14,151 +14,126 @@ Almide emits all packages into a single flat Rust file. This causes:
 - Runtime inclusion by text search → fragile, breaks on transitive deps
 - top_let prefix mismatches → cross-package constants not found
 
-Every one of these was patched in v0.20.0. They'll keep recurring as the ecosystem grows. The root cause is single-file output.
+Every one of these was patched in v0.20.0. They'll keep recurring as the ecosystem grows. The root cause is single-file output without proper linking.
 
 ## Design
 
 ### Principle
 
-**Each Almide package is an independent compilation unit.** Type checking and lowering are already per-package. Only codegen merges everything — that's what changes.
+**One linker for all targets.** The IR linker is the only linking strategy. Each target's emitter receives a merged IrProgram. No target-specific linking.
 
 ### Architecture
 
 ```
-                      ┌─ Rust:  each IrProgram → crate → Cargo links
-Package A → IR ───────┤
-Package B → IR ───────┤
-Package C → IR ───────┤─ WASM:  IR linker merges → emit_wasm → .wasm
-                      └─ (future) LLVM: each IR → .o → lld links
+Package A → parse → check → lower → IrProgram ─┐
+Package B → parse → check → lower → IrProgram ─┤→ IR linker → merged IrProgram
+Package C → parse → check → lower → IrProgram ─┘         │
+                                                           ├→ emit_rust → .rs → rustc
+                                                           ├→ emit_wasm → .wasm
+                                                           └→ (future) emit_llvm → .o
 ```
 
-Common pipeline up to IR. Divergence is only in the linking strategy.
+**No Cargo workspace. No wasm-ld.** The IR linker resolves everything. Emitters receive a single complete program.
 
-### Rust Target
+### IR Linker
 
-Each package becomes a Rust crate in a Cargo workspace.
-
-```
-.almide-build/
-├── Cargo.toml              (workspace)
-├── almide_runtime/         (shared runtime crate)
-│   ├── Cargo.toml
-│   └── src/lib.rs          (runtime/rs/src/*.rs consolidated)
-├── mc_protocol/            (dependency package)
-│   ├── Cargo.toml          (depends on almide_runtime)
-│   └── src/lib.rs          (generated from mc_protocol IR)
-├── mc_bot/                 (dependency package)
-│   ├── Cargo.toml          (depends on almide_runtime, mc_protocol)
-│   └── src/lib.rs
-└── mc_bot_cli/             (root package)
-    ├── Cargo.toml          (depends on all above)
-    └── src/main.rs
-```
-
-**What this eliminates:**
-- `almide_rt_{mod}_{name}` prefix → `pub fn name()` in its own crate
-- `use` deduplication → each crate has its own imports
-- Type alias shadowing → separate namespaces
-- Runtime text search → `almide_runtime` crate always available
-- top_let prefix → `pub const NAME` in the crate, imported via `use`
-- Transitive dep resolution → Cargo handles it
-
-**Generated Cargo.toml for a dependency crate:**
-```toml
-[package]
-name = "almide-gen-mc_protocol"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-almide-runtime = { path = "../almide_runtime" }
-```
-
-**Generated lib.rs:**
 ```rust
-use almide_runtime::*;
+fn ir_link(packages: Vec<(PkgId, IrProgram)>) -> IrProgram
+```
 
-pub const DEFAULT_THRESHOLD: i64 = 256;
+Responsibilities:
+1. **Merge function tables** — each package's functions are namespaced by package
+2. **Merge type declarations** — deduplicate shared types
+3. **Merge top_lets** — namespaced constants
+4. **Resolve cross-package references** — DefTable already tracks these
+5. **Merge VarTables** — reindex VarIds to avoid collisions
+6. **Collect used_stdlib_modules** — union across all packages
 
-pub fn connect(host: &str, port: i64) -> Result<Connection, String> {
-    let s = almide_rt_net_tcp_connect(host, port)?;
-    Ok(Connection { stream: s, threshold: DEFAULT_THRESHOLD })
+What it does NOT do:
+- Type checking (already done per-package)
+- Optimization (done per-package or on merged IR)
+- Target-specific decisions (emitters handle that)
+
+### IrProgram: imports and exports
+
+Each package's IrProgram gains explicit boundaries:
+
+```rust
+struct IrProgram {
+    // ... existing fields ...
+    exports: Vec<Export>,   // public functions, types, constants
+    imports: Vec<Import>,   // what this package needs from dependencies
+}
+
+enum Export {
+    Function { name: Sym, sig: FnSig },
+    Type { name: Sym, kind: IrTypeDeclKind },
+    Constant { name: Sym, ty: Ty },
+}
+
+enum Import {
+    Function { name: Sym, from_package: PkgId },
+    Type { name: Sym, from_package: PkgId },
+    Constant { name: Sym, from_package: PkgId },
 }
 ```
 
-No prefix. No deduplication. No shadow. Cargo does the rest.
+The IR linker matches imports against exports and produces a flat merged program.
 
-### WASM Target
+### Runtime
 
-WASM has no linker ecosystem. Use an **IR linker** instead:
+The runtime (`runtime/rs/src/*.rs`) is a special "package" that the linker always includes. For Rust, its source is inlined into the merged output (as today). For WASM, it's compiled inline (as today).
 
-1. Each package is compiled to `IrProgram` independently (same as Rust path)
-2. **IR linker** merges all `IrProgram`s into one (resolve cross-package DefIds)
-3. `emit_wasm` takes the merged `IrProgram` and emits a single `.wasm`
+Future: the runtime becomes a real crate for Rust, and a precompiled WASM module for WASM. But that's an optimization, not a correctness requirement.
 
-This is what we do today, but formalized:
-- Currently: packages are merged implicitly in `program.modules`
-- After: explicit `ir_link(programs: Vec<IrProgram>) -> IrProgram`
+### What the Rust emitter receives
 
-The IR linker is simple because cross-package references are already tracked via `DefTable`.
+A merged IrProgram where:
+- All cross-package references are resolved to concrete function/type/constant definitions
+- No package boundaries remain — it's one flat program
+- The emitter generates one .rs file and calls rustc (same as today)
 
-### Runtime Crate
+The difference from today: the merge is done correctly by the IR linker instead of ad-hoc concatenation with prefix hacks.
 
-The `almide_runtime` crate contains all `runtime/rs/src/*.rs` modules. It's always available to generated crates.
+### What the WASM emitter receives
 
-```rust
-// almide_runtime/src/lib.rs
-pub mod string;
-pub mod list;
-pub mod bytes;
-pub mod net;
-pub mod zlib;
-pub mod fs;
-// ...
-```
-
-Each generated crate does `use almide_runtime::net::*;` only for the modules it needs. No text search, no inclusion heuristics.
-
-For WASM: the runtime stays inline (compiled into the single .wasm).
+Same merged IrProgram. No change from today's emit_wasm input.
 
 ## Migration Plan
 
-### Phase 1: Runtime crate extraction
+### Phase 1: IR linker + formalize `program.modules`
 
-- Move `runtime/rs/src/*.rs` into a real `almide-runtime` crate
-- Generated code does `use almide_runtime::*;`
-- Still single-file output, but runtime is external
-- This alone fixes: `use` deduplication, type alias shadowing
+What exists today: dependencies are loaded into `program.modules` during resolution. The codegen iterates over modules and prefixes their symbols.
 
-### Phase 2: Dependency crates
+What Phase 1 does:
+1. Extract the implicit merge logic into an explicit `ir_link()` function
+2. `ir_link()` takes the root IrProgram + dependency IrPrograms
+3. Produces a merged IrProgram with all symbols properly namespaced
+4. Codegen receives the merged result — no more per-module iteration with ad-hoc prefixing
 
-- Each dependency package → generated lib crate
-- Workspace Cargo.toml with dependency graph
-- Eliminates: prefix naming, top_let prefix, transitive dep resolution
+### Phase 2: Remove prefix machinery
 
-### Phase 3: Prefix removal
+Once ir_link handles namespacing:
+1. Remove `almide_rt_{mod}_{name}` prefixing from walker
+2. Remove runtime text-search inclusion (IR linker provides used_stdlib_modules)
+3. Remove `use` deduplication logic
+4. Remove type alias shadow workarounds
 
-- Remove `almide_rt_{mod}_{name}` from codegen
-- Function names become `pub fn {name}()`
-- StdlibLowering simplified
+### Phase 3: Import/export model
 
-### Phase 4: IR linker for WASM
+Add explicit imports/exports to IrProgram. This enables:
+- Better error messages for missing exports
+- Unused import detection at the package level
+- Foundation for incremental compilation (only recompile changed packages)
 
-- `ir_link()` function that merges IrPrograms
-- `emit_wasm` takes merged IR
-- Formalize what `program.modules` does today
+### Phase 4: Incremental compilation (future)
 
-## What Stays The Same
-
-- Parser, checker, lowering — unchanged
-- IR structure — unchanged
-- Most codegen passes — unchanged
-- WASM emit_wasm — unchanged (takes merged IR)
-- `almide run` / `almide test` UX — unchanged (build system is internal)
+Cache per-package IrPrograms. Only re-lower changed packages. Re-link all. This gives Cargo-level incrementality without Cargo.
 
 ## Exit Criteria
 
-- `mc-bot-cli → mc-bot → mc_protocol` 3-level dep chain builds without any of today's workarounds
-- No `almide_rt_` prefix in generated Rust code (crate boundaries handle namespacing)
-- Runtime inclusion is a Cargo.toml dependency, not text search
+- `mc-bot-cli → mc-bot → mc_protocol` 3-level dep chain builds correctly
+- No `almide_rt_` prefix in generated Rust code
+- No text-search runtime inclusion
+- Same IR linker used for Rust and WASM targets
 - 235+ tests pass
