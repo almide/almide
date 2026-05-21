@@ -126,14 +126,8 @@ impl Parser {
             self.advance();
             return self.parse_fan_block();
         }
-        // Keywords used as module names: protocol.parse(...), etc.
-        if self.check(TokenType::Protocol) {
-            if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot) {
-                let span = Some(self.current_span());
-                self.advance();
-                return Ok(Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("protocol") }));
-            }
-        }
+        // Backtick-escaped keywords are lexed as Ident, so they reach
+        // the normal Ident path below. No special handling needed here.
         if self.check(TokenType::LBrace) {
             return self.parse_brace_expr();
         }
