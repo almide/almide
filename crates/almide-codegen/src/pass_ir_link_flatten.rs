@@ -50,8 +50,15 @@ impl NanoPass for IrLinkFlattenPass {
                 program.functions.push(func);
             }
 
-            // Merge top_lets (already prefixed by lower_module)
+            // Merge top_lets with prefixed names (single owner of prefix logic)
+            let mod_upper = mod_ident.to_uppercase();
             for tl in module.top_lets {
+                let old_name = program.var_table.get(tl.var).name;
+                let expected_prefix = format!("ALMIDE_RT_{}_", mod_upper);
+                if !old_name.as_str().to_uppercase().starts_with(&expected_prefix) {
+                    let new_name = format!("ALMIDE_RT_{}_{}", mod_upper, old_name.as_str().to_uppercase());
+                    program.var_table.entries[tl.var.0 as usize].name = sym(&new_name);
+                }
                 program.top_lets.push(tl);
             }
         }
