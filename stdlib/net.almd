@@ -3,6 +3,9 @@
 // TcpStream and TcpListener are opaque Int handles.
 // Requires `import net`.
 
+type TcpStream = Int
+type TcpListener = Int
+
 // ── Connect ──
 
 @intrinsic("almide_rt_net_tcp_connect")
