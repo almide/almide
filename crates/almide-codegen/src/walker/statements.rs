@@ -116,7 +116,21 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             // Val-wrap: var of non-Copy type → RcCow<T> with RcCow::new(value) for COW
             if ctx.ann.is_rc_cow(var) {
                 let val_type = format!("RcCow<{}>", type_s);
-                let val_value = format!("RcCow::new({})", value_s);
+                // If the value is a fn param passed by reference (&Vec<u8>, &[T]),
+                // clone it to get an owned value for RcCow::new().
+                let needs_clone = match &value.kind {
+                    IrExprKind::Var { id } => ctx.ref_params.contains(id),
+                    IrExprKind::Clone { expr: inner } => match &inner.kind {
+                        IrExprKind::Var { id } => ctx.ref_params.contains(id),
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                let val_value = if needs_clone {
+                    format!("RcCow::new({}.clone())", value_s)
+                } else {
+                    format!("RcCow::new({})", value_s)
+                };
                 return ctx.templates.render_with("var_binding", None, &[], &[("name", name_s.as_str()), ("type", val_type.as_str()), ("value", val_value.as_str())])
                     .unwrap_or_else(|| format!("let mut {} = {};", name_s, val_value));
             }
