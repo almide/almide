@@ -149,6 +149,16 @@ impl Lexer {
                 continue;
             }
 
+            // Backtick-escaped identifier: `protocol`, `type`, etc.
+            // Allows keywords to be used as identifiers (Swift-style).
+            if ch == '`' {
+                let (tok, new_pos) = lex_backtick_ident(&chars, pos, line, col);
+                let len = new_pos - pos;
+                tokens.push(tok);
+                pos = new_pos; col += len;
+                continue;
+            }
+
             // Identifier or keyword (lone `_` falls through to operator lexing → Underscore)
             if ch.is_ascii_alphabetic() || (ch == '_' && pos + 1 < chars.len() && (chars[pos + 1].is_ascii_alphanumeric() || chars[pos + 1] == '_')) {
                 let (tok, new_pos) = lex_ident(&chars, pos, line, col);
@@ -443,6 +453,29 @@ fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, u
         else { TokenType::Ident }
     });
 
+    let end_col = col + (pos - start);
+    (Token { token_type, value, line, col, end_col }, pos)
+}
+
+/// Lex a backtick-escaped identifier: `protocol`, `type`, etc.
+/// The backticks are consumed but not included in the token value.
+/// The result is always TokenType::Ident regardless of keyword status.
+fn lex_backtick_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+    let mut pos = start + 1; // skip opening backtick
+    let ident_start = pos;
+    while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') {
+        pos += 1;
+    }
+    let value: String = chars[ident_start..pos].iter().collect();
+    // Consume closing backtick if present
+    if pos < chars.len() && chars[pos] == '`' {
+        pos += 1;
+    }
+    let token_type = if value.chars().next().map_or(false, |c| c.is_uppercase()) {
+        TokenType::TypeName
+    } else {
+        TokenType::Ident
+    };
     let end_col = col + (pos - start);
     (Token { token_type, value, line, col, end_col }, pos)
 }
