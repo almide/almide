@@ -37,6 +37,7 @@ use super::pass_resolve_calls::ResolveCallsPass;
 use super::pass_list_pattern::ListPatternLoweringPass;
 use super::pass_tail_call_mark::TailCallMarkPass;
 use super::pass_unify_var_tables::UnifyVarTablesPass;
+use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -141,6 +142,8 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // into `RuntimeCall { symbol }`. Establishes the walker
                 // invariant `Named.name does NOT start with "almide_rt_"`.
                 .add(NormalizeRuntimeCallsPass)
+                // Final: flatten modules into root (after UnifyVarTables)
+                .add(IrLinkFlattenPass)
         }
 
         Target::Wgsl => Pipeline::new()

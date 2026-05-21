@@ -1,21 +1,15 @@
-// ── IR Linker (Phase 1) ──────────────────────────────────────────────
+// ── IR Linker ────────────────────────────────────────────────────────
 //
-// Explicit merge point for dependency modules. Currently performs:
-// 1. Collect used_stdlib_modules across all modules (for runtime inclusion)
-// 2. Validate module structure
-//
-// Phase 2 (future): flatten modules into root program, removing the need
-// for walker's per-module prefix rendering. Requires updating all call
-// targets and the walker simultaneously.
+// Phase 1: Collect used_stdlib_modules across all modules.
+// Phase 2: Flatten modules into root (called inside codegen, after
+//          UnifyVarTablesPass has merged VarTables).
 
 use almide_ir::*;
+use almide_base::intern::sym;
 use std::collections::HashSet;
 
-/// Prepare the IR for codegen. Currently collects cross-module metadata.
-/// Future: merge modules into root (flatten).
+/// Phase 1: Collect stdlib modules from deps. Called before codegen.
 pub fn ir_link(program: &mut IrProgram) {
-    // Collect stdlib modules used across root + all dependency modules.
-    // This replaces the text-search runtime inclusion in codegen.
     let mut stdlib_modules = std::mem::take(&mut program.used_stdlib_modules);
     for module in &program.modules {
         for func in &module.functions {
@@ -26,6 +20,50 @@ pub fn ir_link(program: &mut IrProgram) {
         }
     }
     program.used_stdlib_modules = stdlib_modules;
+}
+
+/// Phase 2: Flatten modules into root program.
+/// MUST run after UnifyVarTablesPass (VarIds already unified).
+/// After this, program.modules is empty. Walker renders flat functions.
+pub fn ir_link_flatten(program: &mut IrProgram) {
+    if program.modules.is_empty() {
+        return;
+    }
+
+    let modules = std::mem::take(&mut program.modules);
+
+    let mut emitted_types: HashSet<String> = program.type_decls.iter()
+        .map(|td| td.name.as_str().to_string())
+        .collect();
+
+    for module in modules {
+        let mod_ident = module.versioned_name
+            .map(|v| v.to_string().replace('.', "_"))
+            .unwrap_or_else(|| module.name.to_string().replace('.', "_"));
+
+        // Merge type declarations (deduplicate by name)
+        for td in module.type_decls {
+            let name = td.name.as_str().to_string();
+            if !emitted_types.contains(&name) {
+                emitted_types.insert(name);
+                program.type_decls.push(td);
+            }
+        }
+
+        // Merge functions with prefixed names
+        for mut func in module.functions {
+            let clean_name = func.name.as_str()
+                .replace(' ', "_").replace('-', "_").replace('.', "_");
+            let prefixed = format!("almide_rt_{}_{}", mod_ident, clean_name);
+            func.name = sym(&prefixed);
+            program.functions.push(func);
+        }
+
+        // Merge top_lets (already prefixed by lower_module)
+        for tl in module.top_lets {
+            program.top_lets.push(tl);
+        }
+    }
 }
 
 /// Scan an expression tree for stdlib module references.
