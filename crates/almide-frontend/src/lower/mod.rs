@@ -565,7 +565,15 @@ pub fn lower_module(
     versioned_name: Option<String>,
 ) -> IrModule {
     let mut ir_prog = lower_program_with_prefix(prog, env, type_map, Some(name));
-    // top_let prefixing moved to IrLinkFlattenPass (single owner of prefix logic)
+    // top_let prefix must happen here (not IrLinkFlattenPass) because
+    // cross-module synthetic Vars reference the var_table entry by VarId.
+    // If we prefix later, the reference VarId has a different name.
+    let mod_ident = versioned_name.as_deref().unwrap_or(name).replace('.', "_");
+    for tl in &ir_prog.top_lets {
+        let old_name = ir_prog.var_table.get(tl.var).name;
+        let new_name = format!("ALMIDE_RT_{}_{}", mod_ident.to_uppercase(), old_name.as_str().to_uppercase());
+        ir_prog.var_table.entries[tl.var.0 as usize].name = sym(&new_name);
+    }
     // Collect exports: public functions, types, constants
     let mut exports = Vec::new();
     for func in &ir_prog.functions {
