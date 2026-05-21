@@ -28,6 +28,7 @@ mod statements;
 mod types;
 mod derive;
 mod derive_codec;
+mod auto_try;
 
 use expressions::lower_expr;
 use types::resolve_type_expr;
@@ -337,6 +338,11 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
 
     // Resolve any remaining inference TypeVars to Unknown (prevents codegen ICE)
     resolve_inference_typevars(&mut program);
+
+    // Auto-? insertion: wrap Result-typed calls in Try nodes.
+    // This bridges the gap between checker (auto_unwrap strips Result
+    // from bindings) and IR (Call nodes carry Result types).
+    auto_try::insert_auto_try(&mut program);
 
     program
 }
