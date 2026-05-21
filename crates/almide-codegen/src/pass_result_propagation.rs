@@ -99,19 +99,21 @@ impl NanoPass for ResultPropagationPass {
             }
         }
 
-        // ── Phase 3: Rewrite call sites ─────────────────────────────
+        // ── Phase 3: Insert auto-? at call sites ──────────────────
         //
-        // 1. update_call_types: set Call expr types to Result for lifted fns.
-        // 2. insert_try_body: wrap Result-returning calls in Try (non-test fns).
-        // 3. insert_try_in_fan: wrap Result-returning calls in fan blocks (test fns).
+        // The checker now types user effect fn calls as Result[T, String].
+        // auto_unwrap strips Result in let/var bindings and match arms.
+        // But the IR still has a gap: Call.ty = Result[T, String] while
+        // Bind.ty = T. insert_try_body bridges this by wrapping Result-
+        // typed calls in Try nodes.
+        //
+        // NOTE: update_call_types is gone — the checker provides correct
+        // types. insert_try_body should eventually move to lowering.
 
         for func in &mut program.functions {
-            if !lifted_fns.is_empty() {
-                func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
-                if !func.is_test {
-                    let returns_result = func.ret_ty.is_result();
-                    func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
-                }
+            if !func.is_test {
+                let returns_result = func.ret_ty.is_result();
+                func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
             }
             if func.is_test {
                 func.body = insert_try_in_fan(std::mem::take(&mut func.body));
@@ -119,11 +121,8 @@ impl NanoPass for ResultPropagationPass {
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
-                if !lifted_fns.is_empty() {
-                    func.body = update_call_types(std::mem::take(&mut func.body), &lifted_fns);
-                    let returns_result = func.ret_ty.is_result();
-                    func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
-                }
+                let returns_result = func.ret_ty.is_result();
+                func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
             }
         }
 
@@ -316,141 +315,23 @@ fn is_divergent(expr: &IrExpr) -> bool {
     }
 }
 
-// ── Phase 3: Call site rewriting ──────────────────────────────────────
-
-/// Update Call expression types for functions whose return type was lifted.
-fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
-    let ty = expr.ty;
-    let span = expr.span;
-    let kind = match expr.kind {
-        IrExprKind::Call { target, args, type_args } => {
-            let fn_name: Option<String> = match &target {
-                CallTarget::Named { name } => Some(name.to_string()),
-                CallTarget::Module { func, .. } => Some(func.to_string()),
-                CallTarget::Method { method, .. } => Some(method.to_string()),
-                _ => None,
-            };
-            let args = args.into_iter().map(|a| update_call_types(a, lifted)).collect();
-            let final_ty = fn_name.as_ref().and_then(|n| lifted.get(n)).cloned().unwrap_or(ty);
-            return IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty: final_ty, span, def_id: None };
-        }
-        IrExprKind::RuntimeCall { symbol, args } => {
-            let args = args.into_iter().map(|a| update_call_types(a, lifted)).collect();
-            return IrExpr { kind: IrExprKind::RuntimeCall { symbol, args }, ty, span, def_id: None };
-        }
-        IrExprKind::Block { stmts, expr: e } => IrExprKind::Block {
-            stmts: stmts.into_iter().map(|s| update_call_types_stmt(s, lifted)).collect(),
-            expr: e.map(|e| Box::new(update_call_types(*e, lifted))),
-        },
-        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(update_call_types(*cond, lifted)),
-            then: Box::new(update_call_types(*then, lifted)),
-            else_: Box::new(update_call_types(*else_, lifted)),
-        },
-        IrExprKind::Match { subject, arms } => {
-            let arms: Vec<_> = arms.into_iter().map(|arm| IrMatchArm {
-                pattern: arm.pattern,
-                guard: arm.guard.map(|g| update_call_types(g, lifted)),
-                body: update_call_types(arm.body, lifted),
-            }).collect();
-            // Auto-Try for match arms: when match type is T but arm body
-            // is Result<T> from a lifted effect fn, wrap in Try.
-            let arms = arms.into_iter().map(|arm| {
-                if !ty.is_result() && arm.body.ty.is_result()
-                    && matches!(&arm.body.kind, IrExprKind::Call { .. })
-                {
-                    let inner_ty = match &arm.body.ty {
-                        Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => args[0].clone(),
-                        _ => ty.clone(),
-                    };
-                    let body_span = arm.body.span;
-                    IrMatchArm {
-                        pattern: arm.pattern,
-                        guard: arm.guard,
-                        body: IrExpr {
-                            kind: IrExprKind::Try { expr: Box::new(arm.body) },
-                            ty: inner_ty,
-                            span: body_span,
-                            def_id: None,
-                        },
-                    }
-                } else {
-                    arm
-                }
-            }).collect();
-            IrExprKind::Match { subject: Box::new(update_call_types(*subject, lifted)), arms }
-        },
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
-            var, var_tuple,
-            iterable: Box::new(update_call_types(*iterable, lifted)),
-            body: body.into_iter().map(|s| update_call_types_stmt(s, lifted)).collect(),
-        },
-        IrExprKind::While { cond, body } => IrExprKind::While {
-            cond: Box::new(update_call_types(*cond, lifted)),
-            body: body.into_iter().map(|s| update_call_types_stmt(s, lifted)).collect(),
-        },
-        IrExprKind::ResultOk { expr: inner } => IrExprKind::ResultOk {
-            expr: Box::new(update_call_types(*inner, lifted)),
-        },
-        IrExprKind::ResultErr { expr: inner } => IrExprKind::ResultErr {
-            expr: Box::new(update_call_types(*inner, lifted)),
-        },
-        IrExprKind::Try { expr: inner } => IrExprKind::Try {
-            expr: Box::new(update_call_types(*inner, lifted)),
-        },
-        IrExprKind::Unwrap { expr: inner } => IrExprKind::Unwrap {
-            expr: Box::new(update_call_types(*inner, lifted)),
-        },
-        IrExprKind::ToOption { expr: inner } => IrExprKind::ToOption {
-            expr: Box::new(update_call_types(*inner, lifted)),
-        },
-        IrExprKind::UnwrapOr { expr: inner, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(update_call_types(*inner, lifted)),
-            fallback: Box::new(update_call_types(*fallback, lifted)),
-        },
-        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
-            parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: update_call_types(expr, lifted) },
-                other => other,
-            }).collect(),
-        },
-        IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| update_call_types(e, lifted)).collect(),
-        },
-        IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name,
-            fields: fields.into_iter().map(|(k, v)| (k, update_call_types(v, lifted))).collect(),
-        },
-        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op,
-            left: Box::new(update_call_types(*left, lifted)),
-            right: Box::new(update_call_types(*right, lifted)),
-        },
-        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op,
-            operand: Box::new(update_call_types(*operand, lifted)),
-        },
-        other => other,
-    };
-    IrExpr { kind, ty, span, def_id: None }
-}
-
-fn update_call_types_stmt(stmt: IrStmt, lifted: &HashMap<String, Ty>) -> IrStmt {
-    let kind = match stmt.kind {
-        IrStmtKind::Bind { var, mutability, ty, value } =>
-            IrStmtKind::Bind { var, mutability, ty, value: update_call_types(value, lifted) },
-        IrStmtKind::Expr { expr } =>
-            IrStmtKind::Expr { expr: update_call_types(expr, lifted) },
-        IrStmtKind::Assign { var, value } =>
-            IrStmtKind::Assign { var, value: update_call_types(value, lifted) },
-        IrStmtKind::Guard { cond, else_ } =>
-            IrStmtKind::Guard { cond: update_call_types(cond, lifted), else_: update_call_types(else_, lifted) },
-        other => other,
-    };
-    IrStmt { kind, span: stmt.span }
-}
-
-// ── Try insertion ────────────────────────────────────────────────────
+// ── Try insertion ─────────────────────────────────────────────────────
+//
+// The checker types user effect fn calls as Result[T, String] and
+// auto_unwrap strips Result in let/var bindings. But the IR value
+// expression still carries Result — insert_try bridges the gap by
+// wrapping Result-typed calls in Try { expr }, producing the T that
+// the binding expects.
+//
+// ── Try insertion ─────────────────────────────────────────────────────
+//
+// The checker types user effect fn calls as Result[T, String] and
+// auto_unwrap strips Result in let/var/match. The IR value expression
+// still carries Result — insert_try bridges the gap by wrapping
+// Result-typed calls in Try, producing the T that bindings expect.
+//
+// This should eventually move to lowering (desugaring layer).
+// update_call_types was deleted — the checker provides correct types.
 
 fn match_has_result_arms(arms: &[IrMatchArm]) -> bool {
     arms.iter().any(|arm| matches!(&arm.pattern, IrPattern::Ok { .. } | IrPattern::Err { .. }))
