@@ -392,11 +392,15 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         }
     }
     for module in &program.modules {
+        let mi = module.versioned_name
+            .map(|v| v.replace('.', "_"))
+            .unwrap_or_else(|| module.name.replace('.', "_"));
+        let expected_prefix = format!("ALMIDE_RT_{}_", mi.to_uppercase());
         for tl in &module.top_lets {
             if matches!(tl.kind, TopLetKind::Lazy) {
-                ann.lazy_top_let_names.insert(
-                    ctx.var_table.get(tl.var).name.to_uppercase()
-                );
+                let raw = ctx.var_table.get(tl.var).name.to_uppercase();
+                let full = if raw.starts_with(&expected_prefix) { raw } else { format!("{}{}", expected_prefix, raw) };
+                ann.lazy_top_let_names.insert(full);
             }
         }
     }
@@ -663,9 +667,16 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         let mod_ident = module.versioned_name
             .map(|v| v.replace('.', "_"))
             .unwrap_or_else(|| module.name.replace('.', "_"));
-        // Module top-level lets and vars
+        // Module top-level lets and vars — prefixed like functions
+        // so cross-package references resolve to unique symbols.
         for tl in &module.top_lets {
-            let name = mod_ctx.var_table.get(tl.var).name.to_string();
+            let raw_name = mod_ctx.var_table.get(tl.var).name.to_string();
+            let expected_prefix = format!("ALMIDE_RT_{}_", mod_ident.to_uppercase());
+            let name = if raw_name.to_uppercase().starts_with(&expected_prefix) {
+                raw_name.to_uppercase()
+            } else {
+                format!("{}{}", expected_prefix, raw_name.to_uppercase())
+            };
             let ty_str = render_type_fn(&mod_ctx, &tl.ty);
             let val_str = render_expr_fn(&mod_ctx, &tl.value);
             if matches!(tl.kind, TopLetKind::Lazy) {
