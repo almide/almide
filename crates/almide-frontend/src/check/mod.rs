@@ -792,6 +792,37 @@ impl Checker {
 }
 
 impl Checker {
+    /// Check if an expression is a call to a user-defined effect fn.
+    /// Used by `!` to accept effect fn calls whose return type will be
+    /// lifted to Result by ResultPropagation.
+    pub(crate) fn is_effect_fn_call(&self, expr: &ast::Expr) -> bool {
+        let fn_name: Option<String> = match &expr.kind {
+            ast::ExprKind::Call { callee, .. } => match &callee.kind {
+                ast::ExprKind::Ident { name, .. } => Some(name.to_string()),
+                ast::ExprKind::Member { object, field, .. } => {
+                    if let ast::ExprKind::Ident { name: mod_name, .. } = &object.kind {
+                        let resolved = self.env.import_table.resolve(mod_name)
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| mod_name.to_string());
+                        Some(format!("{}.{}", resolved, field))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(name) = fn_name {
+            if let Some(sig) = self.env.functions.get(&almide_base::intern::sym(&name)) {
+                return sig.is_effect;
+            }
+        }
+        false
+    }
+}
+
+impl Checker {
     /// Validate that all Map literal key types are hashable (post-solve).
     fn validate_map_key_types(&mut self) {
         let checks = std::mem::take(&mut self.deferred_map_key_checks);

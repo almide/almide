@@ -655,6 +655,11 @@ impl Checker {
                     inner_ty
                 } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
                     self.fresh_var()
+                } else if self.is_effect_fn_call(inner) {
+                    // User effect fn call: ResultPropagation will lift to
+                    // Result[T, String] and insert `?`. At checker level,
+                    // `!` is a transparent pass-through — return T as-is.
+                    resolved
                 } else {
                     self.emit(super::err(
                         format!("operator '!' requires Option or Result type but got {}", resolved.display()),
