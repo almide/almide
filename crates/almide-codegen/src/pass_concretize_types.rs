@@ -1044,18 +1044,11 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
                 // no bearing on runtime behavior.
                 || matches!(&expr.kind,
                     IrExprKind::List { elements } if elements.is_empty())
-                // `Unwrap { ResultErr(...) }` in the `guard x else err(_)!`
-                // idiom: the inner expression is a compile-time-known `err`
-                // literal, so the "ok path" value the Unwrap would produce
-                // is unreachable. The checker leaves the Unwrap's ty
-                // `Unknown` for the same reason (`err()` doesn't fix the
-                // Ok type). Leaving the Unwrap's ty concrete would
-                // desynchronise the WASM emit — the "ok path" branch in
-                // `emit_wasm/expressions.rs::Unwrap` would try to
-                // `emit_load_at` an i64 value into a function whose sig
-                // returns i32 (the Result pointer), tripping the
-                // validator on otherwise-dead code. Accept the Unknown
-                // here as "harmless: ok branch unreachable".
+                // `ResultErr(...)` or `Unwrap { ResultErr(...) }` in guard-else:
+                // the Ok slot may remain Unknown because the checker can't
+                // determine it from `err()` alone. The ok-path is unreachable
+                // at runtime so the Unknown is harmless.
+                || matches!(&expr.kind, IrExprKind::ResultErr { .. })
                 || matches!(&expr.kind,
                     IrExprKind::Unwrap { expr: inner }
                         if matches!(inner.kind, IrExprKind::ResultErr { .. }))

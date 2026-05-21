@@ -8,6 +8,17 @@ pub use unify::{unify, substitute, contains_typevar};
 pub use constructor::{TypeConstructorId, TypeConstructorRegistry, Kind, AlgebraicLaw};
 use crate::intern::Sym;
 
+/// Strip module prefix from a type name: `"patcher.PatchResult"` → `"PatchResult"`.
+/// Returns the original string if no prefix is present.
+fn bare_type_name(name: &str) -> &str {
+    name.rsplit_once('.').map(|(_, bare)| bare).unwrap_or(name)
+}
+
+/// Compare two type name Syms ignoring module qualification.
+pub(crate) fn names_match(a: Sym, b: Sym) -> bool {
+    a == b || bare_type_name(a.as_str()) == bare_type_name(b.as_str())
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Ty {
@@ -396,10 +407,10 @@ impl Ty {
             (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
                 args1.iter().zip(args2.iter()).all(|(a, b)| a.compatible(b))
             }
-            (Ty::Named(a, _), Ty::Named(b, _)) => a == b,
-            (Ty::Variant { name: a, .. }, Ty::Variant { name: b, .. }) => a == b,
-            (Ty::Named(a, _), Ty::Variant { name: b, .. }) => a == b,
-            (Ty::Variant { name: a, .. }, Ty::Named(b, _)) => a == b,
+            (Ty::Named(a, _), Ty::Named(b, _)) => names_match(*a, *b),
+            (Ty::Variant { name: a, .. }, Ty::Variant { name: b, .. }) => names_match(*a, *b),
+            (Ty::Named(a, _), Ty::Variant { name: b, .. }) => names_match(*a, *b),
+            (Ty::Variant { name: a, .. }, Ty::Named(b, _)) => names_match(*a, *b),
             (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
                 p1.len() == p2.len()
                     && p1.iter().zip(p2.iter()).all(|(a, b)| a.compatible(b))

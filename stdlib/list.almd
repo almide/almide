@@ -15,6 +15,9 @@
 @intrinsic("almide_rt_list_len")
 fn len[A](xs: List[A]) -> Int = _
 
+@intrinsic("almide_rt_list_len")
+fn length[A](xs: List[A]) -> Int = _
+
 @intrinsic("almide_rt_list_get")
 fn get[A](xs: List[A], i: Int) -> Option[A] = _
 

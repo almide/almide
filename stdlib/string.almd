@@ -26,6 +26,9 @@ fn join(list: List[String], sep: String) -> String = _
 @intrinsic("almide_rt_string_len")
 fn len(s: String) -> Int = _
 
+@intrinsic("almide_rt_string_len")
+fn length(s: String) -> Int = _
+
 @intrinsic("almide_rt_string_contains")
 fn contains(s: String, sub: String) -> Bool = _
 

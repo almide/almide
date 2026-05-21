@@ -61,7 +61,11 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| unify(x, y, bindings))
         }
         // Named types with type args: unify each arg to bind TypeVars
-        (Ty::Named(a, a_args), Ty::Named(b, b_args)) if a == b && a_args.len() == b_args.len() => {
+        // Use bare name comparison to handle cross-module qualified names
+        // (e.g. "patcher.PatchResult" vs "PatchResult")
+        (Ty::Named(a, a_args), Ty::Named(b, b_args))
+            if super::names_match(*a, *b) && a_args.len() == b_args.len() =>
+        {
             a_args.iter().zip(b_args.iter()).all(|(x, y)| unify(x, y, bindings))
         }
         // Union: try each member with snapshotted bindings, commit first success

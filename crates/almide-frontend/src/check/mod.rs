@@ -731,6 +731,8 @@ impl Checker {
                 }
                 // Deduplicate: prefixed (`mod.Todo`) and unprefixed (`Todo`)
                 // aliases resolve to the same record definition; keep one.
+                // Sort first so dedup_by can catch non-adjacent duplicates.
+                candidates.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
                 candidates.dedup_by(|a, b| {
                     self.env.types.get(&a.0) == self.env.types.get(&b.0)
                 });

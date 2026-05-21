@@ -1,4 +1,4 @@
-use crate::lexer::TokenType;
+use crate::lexer::{Token, TokenType};
 use crate::ast::*;
 use crate::ast::ExprKind;
 use crate::intern::{Sym, sym};
@@ -117,14 +117,37 @@ impl Parser {
 
     fn parse_module_path(&mut self) -> Result<Vec<Sym>, String> {
         let mut parts = Vec::new();
-        parts.push(self.expect_ident()?);
+        parts.push(self.expect_module_segment()?);
         while self.check(TokenType::Dot)
-            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Ident)
+            && self.peek_at(1).map(|t| Self::is_module_segment(t)).unwrap_or(false)
         {
             self.advance();
-            parts.push(self.expect_ident()?);
+            parts.push(self.expect_module_segment()?);
         }
         Ok(parts)
+    }
+
+    /// Accept an identifier or keyword as a module path segment.
+    /// Allows `import self.protocol` where `protocol` is a keyword.
+    fn expect_module_segment(&mut self) -> Result<Sym, String> {
+        if self.check(TokenType::Ident) {
+            return Ok(self.advance_and_get_sym());
+        }
+        let tok = self.current();
+        if tok.value.chars().next().map_or(false, |c| c.is_ascii_lowercase() || c == '_')
+            && tok.value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            let name = sym(&tok.value);
+            self.advance();
+            return Ok(name);
+        }
+        self.expect_ident() // delegate for error message
+    }
+
+    fn is_module_segment(tok: &Token) -> bool {
+        tok.token_type == TokenType::Ident
+            || (tok.value.chars().next().map_or(false, |c| c.is_ascii_lowercase() || c == '_')
+                && tok.value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
     }
 
     // ── Top-level Declarations ────────────────────────────────────
