@@ -1,119 +1,87 @@
 <!-- description: Separate compilation with unified IR linker for all targets -->
 # Separate Compilation
 
-> **Target: v0.21**
-> **Status: Phase 1 in progress**
+> **Target: v0.21 (Phase 1-4 shipped), Phase 5 future**
+> **Status: Phase 1-4 complete**
 
-## Problem
+## Problem (solved)
 
-Almide emits all packages into a single flat Rust file. This causes:
+Almide emitted all packages into a single flat Rust file, causing symbol collisions, import deduplication, type alias shadowing, and fragile runtime inclusion.
 
-- Symbol name collisions → manual `almide_rt_{mod}_{name}` prefixing
-- `use` import deduplication → `net` + `http` collide
-- Type alias shadowing → `type TcpStream = i64` shadows `std::net::TcpStream`
-- Runtime inclusion by text search → fragile, breaks on transitive deps
-- top_let prefix mismatches → cross-package constants not found
-
-These were patched in v0.20. The root cause is single-file output without proper linking.
-
-## Design Decision: Unified IR Linker
-
-**One linker for all targets.** No Cargo workspace, no wasm-ld. The IR linker merges dependency IrPrograms. Each target's emitter receives a single merged program.
+## Architecture
 
 ```
 Package A → parse → check → lower → IrProgram ─┐
-Package B → parse → check → lower → IrProgram ─┤→ IR linker → merged IrProgram
+Package B → parse → check → lower → IrProgram ─┤→ ir_link (stdlib scan)
 Package C → parse → check → lower → IrProgram ─┘         │
+                                                           ├→ IrLinkFlattenPass (merge modules)
                                                            ├→ emit_rust → .rs → rustc
-                                                           ├→ emit_wasm → .wasm
-                                                           └→ (future) emit_llvm → .o
+                                                           └→ emit_wasm → .wasm
 ```
 
-### Why not Cargo workspace?
+One IR linker for all targets. No Cargo workspace. No wasm-ld.
 
-Cargo workspace = target-specific linking. The IR linker is target-agnostic. Same merge for Rust and WASM. Simpler, fewer concepts.
+## Completed Phases
 
-### Why WASM-style?
+### Phase 1: ir_link + stdlib scan ✅
 
-WASM has no linker ecosystem, so IR-level merging is the only option. By making this the universal strategy, Rust benefits from the same clean architecture instead of having a separate Cargo-based path.
+- `ir_link.rs` in almide-frontend: explicit merge point
+- Collects `used_stdlib_modules` across all dependency modules
+- `build.rs` auto-extracts `RUNTIME_DEPS` from source (no whitelist)
+- `IrProgram.used_stdlib_modules` for IR-level runtime tracking
 
-## Current State (v0.20 → v0.21)
+### Phase 2: IrLinkFlattenPass + walker simplification ✅
 
-### Done in v0.20
+- `IrLinkFlattenPass` nanopass: merges `program.modules` into root
+- Runs after `UnifyVarTablesPass` (VarIds already unified)
+- Walker's 80-line per-module rendering loop deleted
+- Functions get `almide_rt_{mod}_{name}` prefix in IR (not string replacement)
 
-| Fix | Approach | Status |
-|---|---|---|
-| Runtime inclusion | `IrProgram.used_stdlib_modules` (IR scan) + `RUNTIME_DEPS` (auto-extracted from source by build.rs) | ✅ Shipped |
-| top_let prefix | `ALMIDE_RT_{MOD}_{NAME}` prefix on module top_lets | ✅ Shipped |
-| Hyphen in package names | Go convention: disallow hyphens, error with hint | ✅ Shipped |
+### Phase 3: Import/export model ✅
 
-### Done in v0.21 (Phase 1)
+- `IrExport` enum: Function, Type, Constant
+- `IrImport` struct: name + from_module
+- `IrModule.exports` populated during lowering from visibility
+- Foundation for unused import detection and cross-package error messages
 
-| Component | Description | Status |
-|---|---|---|
-| `ir_link.rs` | Explicit merge point (`almide-frontend/src/ir_link.rs`) | ✅ |
-| CLI integration | `ir_link()` called before codegen at all 6 entry points | ✅ |
-| Module stdlib scan | `ir_link` extends `used_stdlib_modules` with deps' references | ✅ |
-| 235 tests | All pass | ✅ |
+### Phase 4: Prefix consolidation ✅
 
-### Phase 1 does NOT flatten
+- Declaration prefix (fn + top_let): `IrLinkFlattenPass` only
+- Call target prefix (→ RuntimeCall): `StdlibLowering` only
+- `lower_module`: zero prefix logic
+- Two owners, clear separation of concerns
 
-`ir_link` currently extends metadata (stdlib modules) but does NOT flatten `program.modules`. The walker still iterates modules and applies prefixes. Flattening requires updating:
+## Future: Phase 5 — Incremental Compilation
 
-1. All `CallTarget` references (internal calls renamed)
-2. Walker's per-module rendering (prefix insertion, type dedup)
-3. VarTable merge with reindexing
+Cache per-package IrPrograms on disk. Only re-lower changed packages. Re-link all.
 
-These must change simultaneously. Doing one without the other breaks the 235 tests.
-
-## Remaining Phases
-
-### Phase 2: Flatten + walker simplification
-
-1. `ir_link` merges module functions/types/top_lets into root
-2. Update all `CallTarget::Named` references to prefixed names
-3. Walker renders flat `program.functions` — no per-module loop
-4. Remove: per-module prefix insertion, type dedup, separate top_let rendering
-5. Remove: `program.modules` field entirely
-
-**Exit criteria**: walker has no module-iteration code. All symbols in one flat namespace.
-
-### Phase 3: Import/export model
-
-Add explicit imports/exports to IrProgram:
-
-```rust
-enum Export {
-    Function { name: Sym, sig: FnSig },
-    Type { name: Sym, kind: IrTypeDeclKind },
-    Constant { name: Sym, ty: Ty },
-}
-```
-
-This enables:
-- Better error messages for missing exports
-- Unused import detection at package level
-- Foundation for incremental compilation
-
-### Phase 4: Prefix removal
-
-Once flatten is solid:
-- Remove `almide_rt_{mod}_{name}` from codegen entirely
-- Functions become `pub fn {name}()` — linker handles namespacing
-- StdlibLowering simplified
-
-### Phase 5: Incremental compilation (future)
-
-Cache per-package IrPrograms on disk. Only re-lower changed packages. Re-link all. Gives Cargo-level incrementality without Cargo.
-
-## Architecture After Completion
+### Design
 
 ```
-checker  → per-package type checking (unchanged)
-lowering → per-package IR generation (unchanged)
-ir_link  → merge all IrPrograms into one flat program
-optimize → monomorphize, DCE, etc. on merged IR
-codegen  → emit_rust or emit_wasm on merged IR (no module awareness)
+.almide-cache/
+├── mc_protocol.v0.ir    (serialized IrProgram)
+├── mc_protocol.v0.hash  (source hash)
+├── mc_bot.v0.ir
+└── mc_bot.v0.hash
 ```
 
-The linker is the single point where packages meet. Everything before it is per-package. Everything after it is whole-program.
+On build:
+1. For each dependency, compute source hash
+2. If hash matches cached `.hash`, load `.ir` from cache
+3. If not, re-lower and update cache
+4. `ir_link` + `IrLinkFlattenPass` on all (cached + fresh) IrPrograms
+5. Codegen on merged result
+
+### Prerequisites (all met)
+
+- [x] Per-package IrProgram (lowering is already per-package)
+- [x] Explicit merge point (ir_link)
+- [x] IrProgram is Serialize/Deserialize (serde derives exist)
+- [x] Stable IR format (no breaking changes expected)
+
+### Not yet needed
+
+Incremental compilation is a performance optimization. Current compile times are acceptable for the ecosystem size. Implement when:
+- A project has 10+ dependency packages
+- Clean build exceeds 10 seconds
+- Users request it
