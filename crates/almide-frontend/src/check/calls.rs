@@ -592,11 +592,16 @@ impl Checker {
         // Bundled stdlib effect fns are excluded — their `@inline_rust` /
         // `@intrinsic` templates carry their own propagation and never get
         // lifted by ResultPropagation, so their callers see raw `T`.
+        // User-defined effect fns are lifted to Result[T, String] by
+        // ResultPropagation. Make the checker's type match: callers always
+        // see Result[T, String]. auto_unwrap in let/var bindings and
+        // match arms transparently extracts T.
+        // Bundled stdlib effect fns (@intrinsic/@inline_rust) are NOT
+        // lifted — they carry their own Result/Option types already.
         let is_bundled_stdlib_call = name.split_once('.')
             .map(|(m, _)| almide_lang::stdlib_info::is_bundled_module(m))
             .unwrap_or(false);
-        let in_lifting_context = self.env.in_test_block || self.env.lambda_depth > 0;
-        if in_lifting_context && sig.is_effect && !ret.is_result()
+        if sig.is_effect && !ret.is_result()
             && self.env.functions.contains_key(&sym(name))
             && !is_bundled_stdlib_call
         {

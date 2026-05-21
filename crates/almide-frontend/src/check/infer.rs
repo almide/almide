@@ -486,6 +486,15 @@ impl Checker {
                     // so it doesn't constrain sibling arm types.
                     let arm_ty = if matches!(&arm.body.kind, ExprKind::Err { .. }) {
                         Ty::Never
+                    } else if self.env.auto_unwrap {
+                        // In effect fn bodies, auto-unwrap Result[T, E] → T
+                        // so match arms mixing effect fn calls (Result) with
+                        // pure expressions (T) unify correctly.
+                        let resolved = resolve_ty(&arm_ty, &self.uf);
+                        match resolved {
+                            Ty::Applied(TypeConstructorId::Result, ref args) if args.len() == 2 => args[0].clone(),
+                            _ => arm_ty,
+                        }
                     } else {
                         arm_ty
                     };
@@ -655,11 +664,6 @@ impl Checker {
                     inner_ty
                 } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
                     self.fresh_var()
-                } else if self.is_effect_fn_call(inner) {
-                    // User effect fn call: ResultPropagation will lift to
-                    // Result[T, String] and insert `?`. At checker level,
-                    // `!` is a transparent pass-through — return T as-is.
-                    resolved
                 } else {
                     self.emit(super::err(
                         format!("operator '!' requires Option or Result type but got {}", resolved.display()),
