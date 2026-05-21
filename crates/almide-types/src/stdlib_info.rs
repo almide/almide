@@ -207,6 +207,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── ambiguous: string + list + map + set ──
         "len" => vec!["string", "list", "map", "set"],
+        "length" => vec!["string", "list"],
         "contains" => vec!["string", "list", "map", "set"],
         "is_empty" => vec!["string", "list", "map", "set"],
 

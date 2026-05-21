@@ -1,5 +1,6 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
+assertion_line: 34
 expression: "run_outline(&[\"@stdlib/string\"])"
 ---
 fn string.capitalize(s: String) -> String
@@ -26,6 +27,7 @@ fn string.join(list: List[String], sep: String) -> String
 fn string.last(s: String) -> Option[String]
 fn string.last_index_of(s: String, needle: String) -> Option[Int]
 fn string.len(s: String) -> Int
+fn string.length(s: String) -> Int
 fn string.lines(s: String) -> List[String]
 fn string.pad_end(s: String, n: Int, ch: String) -> String
 fn string.pad_start(s: String, n: Int, ch: String) -> String

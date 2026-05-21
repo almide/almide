@@ -35,3 +35,10 @@ test "list.* TOML fns coexist with bundled fns" {
   assert_eq(list.sum([1, 2, 3]), 6)
   assert_eq(list.len([1, 2, 3]), 3)
 }
+
+test "list.length alias" {
+  assert_eq(list.length([1, 2, 3]), 3);
+  let xs: List[Int] = [];
+  assert_eq(list.length(xs), 0);
+  assert_eq(list.length([1, 2, 3]), list.len([1, 2, 3]))
+}

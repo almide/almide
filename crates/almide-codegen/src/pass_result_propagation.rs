@@ -172,12 +172,13 @@ fn resolve_err_types(body: &mut IrExpr, ok_ty: &Ty) {
                 _ => {}
             }
 
-            // Block wrapping a single Try/Unwrap { ResultErr }
+            // Block wrapping a single Try/Unwrap { ResultErr } or bare ResultErr
             if let IrExprKind::Block { stmts, expr: Some(tail) } = &expr.kind {
                 if stmts.is_empty() && expr.ty.has_unresolved_deep() {
                     let is_err_wrapper = match &tail.kind {
                         IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
                             => matches!(&inner.kind, IrExprKind::ResultErr { .. }),
+                        IrExprKind::ResultErr { .. } => true,
                         _ => false,
                     };
                     if is_err_wrapper {
