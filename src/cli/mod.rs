@@ -271,12 +271,17 @@ fn cargo_build_generated_with_native(
 ) -> Result<std::path::PathBuf, String> {
     let uses_matrix = rs_code.contains("almide_rt_matrix_");
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
+    let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
 
-    // Build Cargo.toml: start with base template, append native deps
+    // Build Cargo.toml: start with base template, append native deps + auto-detected deps
     let base_toml = if uses_matrix { GENERATED_CARGO_TOML_ML } else if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
-    let cargo_toml = build_cargo_toml(base_toml, native_deps);
+    let mut all_deps = native_deps.to_vec();
+    if uses_zlib {
+        all_deps.push(crate::project::NativeDep { name: "flate2".into(), spec: "1".into() });
+    }
+    let cargo_toml = build_cargo_toml(base_toml, &all_deps);
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
@@ -355,8 +360,13 @@ fn cargo_build_test_with_native(
     source_root: Option<&std::path::Path>,
 ) -> Result<std::path::PathBuf, String> {
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
+    let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
     let base_toml = if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
-    let cargo_toml = build_cargo_toml(base_toml, native_deps);
+    let mut all_deps = native_deps.to_vec();
+    if uses_zlib {
+        all_deps.push(crate::project::NativeDep { name: "flate2".into(), spec: "1".into() });
+    }
+    let cargo_toml = build_cargo_toml(base_toml, &all_deps);
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)

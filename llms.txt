@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.19.2 (prev v0.19.1). Cross-module type inference fix, keyword module names, guard-else err fix, string.length/list.length aliases. Prev: Full LSP, REPL, Elm-grade errors.
+- Current stable: v0.20.0 (prev v0.19.2). New stdlib modules: `net` (TCP sockets), `zlib` (compress/decompress/deflate/gzip). Prev: cross-module type fix, backtick escaping, Bytes param fix.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.

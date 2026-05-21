@@ -1,0 +1,34 @@
+// zlib — compression/decompression module.
+//
+// Supports zlib (with header), deflate (raw), and gzip formats.
+// Requires `import zlib`.
+
+// ── Zlib (with header) ──
+
+@intrinsic("almide_rt_zlib_compress")
+effect fn compress(data: Bytes) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_zlib_compress_level")
+effect fn compress_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_zlib_decompress")
+effect fn decompress(data: Bytes) -> Result[Bytes, String] = _
+
+// ── Deflate (raw, no header — used by Minecraft protocol) ──
+
+@intrinsic("almide_rt_zlib_deflate")
+effect fn deflate(data: Bytes) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_zlib_deflate_level")
+effect fn deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_zlib_inflate")
+effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
+
+// ── Gzip ──
+
+@intrinsic("almide_rt_zlib_gzip")
+effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_zlib_gunzip")
+effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _

@@ -1,0 +1,37 @@
+import net
+
+test "tcp loopback: listen, connect, write, read, close" {
+  let server = net.tcp_listen("127.0.0.1", 39183)!
+  let client = net.tcp_connect("127.0.0.1", 39183)!
+  let peer = net.tcp_accept(server)!
+
+  let msg = bytes.from_string("hello")
+  net.tcp_write(client, msg)!
+  let received = net.tcp_read_exact(peer, 5)!
+  assert_eq(bytes.to_list(received), bytes.to_list(msg));
+
+  net.tcp_close(client)!
+  net.tcp_close(peer)!
+  net.tcp_close_listener(server)!
+}
+
+test "tcp_is_open returns false for invalid handle" {
+  assert_eq(net.tcp_is_open(-1), false)
+}
+
+test "tcp_is_open returns false after close" {
+  let server = net.tcp_listen("127.0.0.1", 39184)!
+  let client = net.tcp_connect("127.0.0.1", 39184)!
+  assert_eq(net.tcp_is_open(client), true);
+  net.tcp_close(client)!
+  assert_eq(net.tcp_is_open(client), false);
+  net.tcp_close_listener(server)!
+}
+
+test "tcp connect to closed port returns error" {
+  let result = net.tcp_connect("127.0.0.1", 19999)
+  match result {
+    ok(_) => assert(false)
+    err(_) => assert(true)
+  }
+}
