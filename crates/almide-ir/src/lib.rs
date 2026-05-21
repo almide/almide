@@ -951,4 +951,9 @@ pub struct IrProgram {
     /// Read by the walker during template rendering.
     #[serde(skip)]
     pub codegen_annotations: crate::annotations::CodegenAnnotations,
+    /// Stdlib modules used across all functions and transitive deps.
+    /// Populated during lowering by scanning CallTarget::Module references.
+    /// Used by codegen to include only needed runtime modules.
+    #[serde(skip)]
+    pub used_stdlib_modules: std::collections::HashSet<String>,
 }

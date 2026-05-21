@@ -325,7 +325,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         .map(|(name, _)| *name)
         .collect();
 
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
@@ -344,7 +344,108 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     // from bindings) and IR (Call nodes carry Result types).
     auto_try::insert_auto_try(&mut program);
 
+    // Collect stdlib modules used across all functions and transitive
+    // deps. Codegen uses this to include only needed runtime modules
+    // — no text search on generated code.
+    program.used_stdlib_modules = collect_stdlib_modules(&program);
+
     program
+}
+
+/// Collect stdlib module names referenced by CallTarget::Module in the IR.
+/// Scans all functions and modules (including transitive deps).
+fn collect_stdlib_modules(program: &IrProgram) -> std::collections::HashSet<String> {
+    let mut used = std::collections::HashSet::new();
+
+    fn scan_expr(expr: &IrExpr, used: &mut std::collections::HashSet<String>) {
+        match &expr.kind {
+            IrExprKind::Call { target, args, .. } => {
+                if let CallTarget::Module { module, .. } = target {
+                    used.insert(module.to_string());
+                }
+                if let CallTarget::Method { object, .. } = target {
+                    scan_expr(object, used);
+                }
+                for a in args { scan_expr(a, used); }
+            }
+            IrExprKind::RuntimeCall { symbol, args } => {
+                // Extract module from runtime symbol: almide_rt_{module}_{fn}
+                if let Some(rest) = symbol.as_str().strip_prefix("almide_rt_") {
+                    if let Some(pos) = rest.find('_') {
+                        used.insert(rest[..pos].to_string());
+                    }
+                }
+                for a in args { scan_expr(a, used); }
+            }
+            IrExprKind::Block { stmts, expr: tail } => {
+                for s in stmts { scan_stmt(s, used); }
+                if let Some(e) = tail { scan_expr(e, used); }
+            }
+            IrExprKind::If { cond, then, else_ } => {
+                scan_expr(cond, used); scan_expr(then, used); scan_expr(else_, used);
+            }
+            IrExprKind::Match { subject, arms } => {
+                scan_expr(subject, used);
+                for arm in arms {
+                    if let Some(g) = &arm.guard { scan_expr(g, used); }
+                    scan_expr(&arm.body, used);
+                }
+            }
+            IrExprKind::Lambda { body, .. } => scan_expr(body, used),
+            IrExprKind::ForIn { iterable, body, .. } => {
+                scan_expr(iterable, used);
+                for s in body { scan_stmt(s, used); }
+            }
+            IrExprKind::While { cond, body } => {
+                scan_expr(cond, used);
+                for s in body { scan_stmt(s, used); }
+            }
+            IrExprKind::BinOp { left, right, .. } => { scan_expr(left, used); scan_expr(right, used); }
+            IrExprKind::UnOp { operand, .. } => scan_expr(operand, used),
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+                for e in elements { scan_expr(e, used); }
+            }
+            IrExprKind::Record { fields, .. } => { for (_, v) in fields { scan_expr(v, used); } }
+            IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+            | IrExprKind::OptionSome { expr: e } | IrExprKind::Unwrap { expr: e }
+            | IrExprKind::Try { expr: e } | IrExprKind::ToOption { expr: e }
+            | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+            | IrExprKind::Member { object: e, .. } => scan_expr(e, used),
+            IrExprKind::UnwrapOr { expr: e, fallback } => { scan_expr(e, used); scan_expr(fallback, used); }
+            IrExprKind::StringInterp { parts } => {
+                for p in parts { if let IrStringPart::Expr { expr } = p { scan_expr(expr, used); } }
+            }
+            IrExprKind::SpreadRecord { base, fields } => {
+                scan_expr(base, used);
+                for (_, v) in fields { scan_expr(v, used); }
+            }
+            IrExprKind::IndexAccess { object, index } => { scan_expr(object, used); scan_expr(index, used); }
+            IrExprKind::MapLiteral { entries } => {
+                for (k, v) in entries { scan_expr(k, used); scan_expr(v, used); }
+            }
+            IrExprKind::Range { start, end, .. } => { scan_expr(start, used); scan_expr(end, used); }
+            _ => {}
+        }
+    }
+    fn scan_stmt(stmt: &IrStmt, used: &mut std::collections::HashSet<String>) {
+        match &stmt.kind {
+            IrStmtKind::Bind { value, .. } => scan_expr(value, used),
+            IrStmtKind::Expr { expr } => scan_expr(expr, used),
+            IrStmtKind::Assign { value, .. } => scan_expr(value, used),
+            IrStmtKind::Guard { cond, else_ } => { scan_expr(cond, used); scan_expr(else_, used); }
+            _ => {}
+        }
+    }
+
+    for func in &program.functions { scan_expr(&func.body, &mut used); }
+    for tl in &program.top_lets { scan_expr(&tl.value, &mut used); }
+    for module in &program.modules {
+        used.insert(module.name.to_string());
+        for func in &module.functions { scan_expr(&func.body, &mut used); }
+        for tl in &module.top_lets { scan_expr(&tl.value, &mut used); }
+    }
+
+    used
 }
 
 /// Verify no inference TypeVars (?N) remain in the IR.
