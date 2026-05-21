@@ -1,0 +1,57 @@
+// net — TCP networking module.
+//
+// TcpStream and TcpListener are opaque Int handles.
+// Requires `import net`.
+
+type TcpStream = Int
+type TcpListener = Int
+
+// ── Connect ──
+
+@intrinsic("almide_rt_net_tcp_connect")
+effect fn tcp_connect(host: String, port: Int) -> Result[Int, String] = _
+
+// ── Read / Write ──
+
+@intrinsic("almide_rt_net_tcp_read")
+effect fn tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_net_tcp_write")
+effect fn tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_tcp_read_exact")
+effect fn tcp_read_exact(stream: Int, len: Int) -> Result[Bytes, String] = _
+
+// ── Close ──
+
+@intrinsic("almide_rt_net_tcp_close")
+effect fn tcp_close(stream: Int) -> Result[Unit, String] = _
+
+// ── Status ──
+
+@intrinsic("almide_rt_net_tcp_is_open")
+fn tcp_is_open(stream: Int) -> Bool = _
+
+// ── Timeout ──
+
+@intrinsic("almide_rt_net_tcp_read_timeout")
+effect fn tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_net_tcp_set_timeout")
+effect fn tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
+
+// ── Available bytes ──
+
+@intrinsic("almide_rt_net_tcp_available")
+effect fn tcp_available(stream: Int) -> Result[Int, String] = _
+
+// ── Server ──
+
+@intrinsic("almide_rt_net_tcp_listen")
+effect fn tcp_listen(host: String, port: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net_tcp_accept")
+effect fn tcp_accept(listener: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net_tcp_close_listener")
+effect fn tcp_close_listener(listener: Int) -> Result[Unit, String] = _

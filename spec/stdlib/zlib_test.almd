@@ -1,0 +1,42 @@
+import zlib
+
+test "zlib compress/decompress roundtrip" {
+  let data = bytes.from_string("Hello, compressed world! This is a test of zlib compression.")
+  let compressed = zlib.compress(data)!
+  let restored = zlib.decompress(compressed)!
+  assert_eq(bytes.to_list(data), bytes.to_list(restored))
+}
+
+test "zlib deflate/inflate roundtrip" {
+  let data = bytes.from_string("Minecraft protocol uses raw deflate")
+  let deflated = zlib.deflate(data)!
+  let inflated = zlib.inflate(deflated)!
+  assert_eq(bytes.to_list(data), bytes.to_list(inflated))
+}
+
+test "zlib gzip/gunzip roundtrip" {
+  let data = bytes.from_string("gzip format test")
+  let gzipped = zlib.gzip(data)!
+  let restored = zlib.gunzip(gzipped)!
+  assert_eq(bytes.to_list(data), bytes.to_list(restored))
+}
+
+test "zlib compress reduces size on repetitive data" {
+  let repeated = bytes.from_string("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+  let compressed = zlib.compress(repeated)!
+  assert(bytes.len(compressed) < bytes.len(repeated))
+}
+
+test "zlib compress_level 0 (no compression)" {
+  let data = bytes.from_string("test data")
+  let stored = zlib.compress_level(data, 0)!
+  let restored = zlib.decompress(stored)!
+  assert_eq(bytes.to_list(data), bytes.to_list(restored))
+}
+
+test "zlib compress_level 9 (max compression)" {
+  let data = bytes.from_string("test data for max compression level nine")
+  let best = zlib.compress_level(data, 9)!
+  let restored = zlib.decompress(best)!
+  assert_eq(bytes.to_list(data), bytes.to_list(restored))
+}

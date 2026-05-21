@@ -7,7 +7,7 @@ pub const STDLIB_MODULES: &[&str] = &[
     "string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map",
     "json", "http", "process", "math", "random", "regex", "io", "result",
     "option", "error", "datetime", "testing", "value", "set",
-    "base64", "hex",
+    "base64", "hex", "net", "zlib",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
     // Each hosts UFCS conversion methods (`.to_int64()`,
     // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
@@ -23,7 +23,7 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "error", "math", "datetime", "value", "option", "result",
     "map", "set", "string",
     "env", "io", "random", "regex", "testing",
-    "process", "fs", "http", "html", "json", "matrix",
+    "process", "fs", "http", "html", "json", "matrix", "net", "zlib",
     "int8", "int16", "int32",
     "uint8", "uint16", "uint32", "uint64",
     "float32",
@@ -118,6 +118,8 @@ pub fn bundled_source(name: &str) -> Option<&'static str> {
         "uint32" => Some(include_str!("../../../stdlib/uint32.almd")),
         "uint64" => Some(include_str!("../../../stdlib/uint64.almd")),
         "float32" => Some(include_str!("../../../stdlib/float32.almd")),
+        "net" => Some(include_str!("../../../stdlib/net.almd")),
+        "zlib" => Some(include_str!("../../../stdlib/zlib.almd")),
         _ => None,
     }
 }

@@ -135,6 +135,13 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                     td.name, type_s
                 );
             }
+            // Transparent aliases to primitives are expanded at use sites
+            // by render_type via type_aliases. Don't emit a Rust `type`
+            // declaration — it would shadow runtime `use` imports
+            // (e.g. `type TcpStream = i64` shadows `std::net::TcpStream`).
+            if ctx.type_aliases.contains_key(&td.name) {
+                return String::new();
+            }
             let type_s = render_type(ctx, target);
             ctx.templates.render_with("type_alias", None, &[], &[("name", td.name.as_str()), ("type", type_s.as_str())])
                 .unwrap_or_else(|| format!("type {} = {};", td.name, render_type(ctx, target)))

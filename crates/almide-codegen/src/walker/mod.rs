@@ -350,7 +350,11 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Build type alias map for transparent expansion
     let mut type_aliases = std::collections::HashMap::new();
     let mut generic_types = std::collections::HashSet::new();
-    for td in &program.type_decls {
+    // Collect type aliases and generic types from ALL sources
+    // (top-level + modules) so render_type can expand them everywhere.
+    let all_type_decls = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
+    for td in all_type_decls {
         match &td.kind {
             IrTypeDeclKind::Alias { target } => {
                 // Opaque (mod/local) aliases are newtypes — don't expand transparently
