@@ -153,6 +153,17 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
         }
     }
 
+    // Validate package name: must be a valid Almide identifier (no hyphens).
+    // Like Go, the package name IS the import name. No implicit conversion.
+    if name.contains('-') {
+        return Err(format!(
+            "package name '{}' contains hyphens — use underscores instead\n  \
+             hint: rename to '{}' in [package] name. The package name is the import name.",
+            name,
+            name.replace('-', "_"),
+        ));
+    }
+
     Ok(Project {
         package: Package { name, version, almide_min },
         dependencies: deps,

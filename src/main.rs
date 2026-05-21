@@ -495,6 +495,14 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
 fn resolve_file(file: Option<String>) -> String {
     file.unwrap_or_else(|| {
         if std::path::Path::new("almide.toml").exists() {
+            // Early-validate package name before looking for entry point
+            match crate::project::parse_toml(std::path::Path::new("almide.toml")) {
+                Err(e) if e.contains("hyphens") => {
+                    eprintln!("error: {}", e);
+                    std::process::exit(1);
+                }
+                _ => {}
+            }
             // src/mod.almd = package entry point, src/main.almd = executable entry point
             for entry in &["src/mod.almd", "src/main.almd"] {
                 if std::path::Path::new(entry).exists() {
