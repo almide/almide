@@ -44,5 +44,8 @@ effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
 @intrinsic("almide_rt_process_kill")
 effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 
+@intrinsic("almide_rt_process_sleep")
+fn sleep(ms: Int) -> Unit = _
+
 @intrinsic("almide_rt_process_is_alive")
 fn is_alive(pid: Int) -> Bool = _

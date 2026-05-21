@@ -130,6 +130,10 @@ pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), String> {
     }
 }
 
+pub fn almide_rt_process_sleep(ms: i64) {
+    std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
+}
+
 pub fn almide_rt_process_is_alive(pid: i64) -> bool {
     #[cfg(unix)]
     {

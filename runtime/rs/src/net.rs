@@ -1,17 +1,20 @@
 // net — TCP networking runtime for Almide.
 // TcpStream/TcpListener are opaque i64 handles backed by a thread-local registry.
+//
+// NOTE: No top-level `use` for std::io / std::net — avoids duplicate
+// import errors when both `net` and `http` runtimes are linked.
 
 use std::cell::RefCell;
-use std::io::{Read, Write};
-use std::net::{TcpStream, TcpListener, Shutdown};
+#[allow(unused_imports)]
+use std::io::{Read as _, Write as _};
 use std::time::Duration;
 
 thread_local! {
-    static STREAMS: RefCell<Vec<Option<TcpStream>>> = RefCell::new(Vec::new());
-    static LISTENERS: RefCell<Vec<Option<TcpListener>>> = RefCell::new(Vec::new());
+    static STREAMS: RefCell<Vec<Option<std::net::TcpStream>>> = RefCell::new(Vec::new());
+    static LISTENERS: RefCell<Vec<Option<std::net::TcpListener>>> = RefCell::new(Vec::new());
 }
 
-fn alloc_stream(s: TcpStream) -> i64 {
+fn alloc_stream(s: std::net::TcpStream) -> i64 {
     STREAMS.with(|cell| {
         let mut v = cell.borrow_mut();
         // Reuse freed slots
@@ -27,7 +30,7 @@ fn alloc_stream(s: TcpStream) -> i64 {
     })
 }
 
-fn alloc_listener(l: TcpListener) -> i64 {
+fn alloc_listener(l: std::net::TcpListener) -> i64 {
     LISTENERS.with(|cell| {
         let mut v = cell.borrow_mut();
         for (i, slot) in v.iter_mut().enumerate() {
@@ -43,7 +46,7 @@ fn alloc_listener(l: TcpListener) -> i64 {
 }
 
 fn with_stream<F, R>(handle: i64, f: F) -> Result<R, String>
-where F: FnOnce(&mut TcpStream) -> Result<R, String>
+where F: FnOnce(&mut std::net::TcpStream) -> Result<R, String>
 {
     STREAMS.with(|cell| {
         let mut v = cell.borrow_mut();
@@ -62,7 +65,7 @@ where F: FnOnce(&mut TcpStream) -> Result<R, String>
 
 pub fn almide_rt_net_tcp_connect(host: &str, port: i64) -> Result<i64, String> {
     let addr = format!("{}:{}", host, port);
-    let stream = TcpStream::connect(&addr)
+    let stream = std::net::TcpStream::connect(&addr)
         .map_err(|e| format!("tcp_connect({}): {}", addr, e))?;
     Ok(alloc_stream(stream))
 }
@@ -108,7 +111,7 @@ pub fn almide_rt_net_tcp_close(handle: i64) -> Result<(), String> {
             return Err(format!("invalid TcpStream handle: {}", handle));
         }
         if let Some(stream) = v[idx].take() {
-            let _ = stream.shutdown(Shutdown::Both);
+            let _ = stream.shutdown(std::net::Shutdown::Both);
         }
         Ok(())
     })
@@ -162,7 +165,7 @@ pub fn almide_rt_net_tcp_available(handle: i64) -> Result<i64, String> {
 
 pub fn almide_rt_net_tcp_listen(host: &str, port: i64) -> Result<i64, String> {
     let addr = format!("{}:{}", host, port);
-    let listener = TcpListener::bind(&addr)
+    let listener = std::net::TcpListener::bind(&addr)
         .map_err(|e| format!("tcp_listen({}): {}", addr, e))?;
     Ok(alloc_listener(listener))
 }
