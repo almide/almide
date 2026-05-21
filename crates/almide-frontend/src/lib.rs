@@ -1,6 +1,7 @@
 pub mod check;
 pub mod canonicalize;
 pub mod lower;
+pub mod ir_link;
 pub mod import_table;
 pub mod stdlib;
 mod bundled_sigs;

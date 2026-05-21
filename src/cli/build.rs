@@ -220,6 +220,9 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         ir_program.modules.push(mod_ir_module);
     }
 
+    // IR link: merge dependency modules into root
+    almide::ir_link::ir_link(&mut ir_program);
+
     // Optimize
     almide::optimize::optimize_program(&mut ir_program);
 

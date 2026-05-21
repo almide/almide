@@ -119,6 +119,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
         println!("{}", json);
     } else {
         let ir = ir_program.as_mut().expect("IR required for codegen");
+        almide::ir_link::ir_link(ir);
         {
             let t = match target {
                 "rust" | "rs" => codegen::pass::Target::Rust,

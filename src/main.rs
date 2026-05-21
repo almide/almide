@@ -462,6 +462,11 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         almide::mono::monomorphize(ir);
     }
 
+    // IR link: merge dependency modules into root program
+    if let Some(ref mut ir) = ir_program {
+        almide::ir_link::ir_link(ir);
+    }
+
     // Codegen v3: three-layer pipeline (Nanopass + Templates)
     let ir = ir_program.as_mut().expect("IR required for codegen");
     let code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, codegen_opts) {

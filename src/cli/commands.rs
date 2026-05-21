@@ -257,6 +257,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
             checker.env.self_module_name = saved_self;
             ir_program.modules.push(mod_ir_module);
         }
+        almide::ir_link::ir_link(&mut ir_program);
         almide::optimize::optimize_program(&mut ir_program);
         almide::mono::monomorphize(&mut ir_program);
         let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -474,6 +475,7 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
             ir_program.modules.push(mod_ir_module);
         }
 
+        almide::ir_link::ir_link(&mut ir_program);
         almide::optimize::optimize_program(&mut ir_program);
         almide::mono::monomorphize(&mut ir_program);
 

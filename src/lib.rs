@@ -25,6 +25,7 @@ pub use almide_codegen as codegen;
 pub use almide_frontend::check;
 pub use almide_frontend::canonicalize;
 pub use almide_frontend::lower;
+pub use almide_frontend::ir_link;
 pub use almide_frontend::import_table;
 pub use almide_frontend::stdlib;
 

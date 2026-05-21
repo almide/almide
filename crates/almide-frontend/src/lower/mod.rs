@@ -344,9 +344,8 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     // from bindings) and IR (Call nodes carry Result types).
     auto_try::insert_auto_try(&mut program);
 
-    // Collect stdlib modules used across all functions and transitive
-    // deps. Codegen uses this to include only needed runtime modules
-    // — no text search on generated code.
+    // Collect stdlib modules used in root functions/top_lets.
+    // ir_link extends this with modules from dependencies.
     program.used_stdlib_modules = collect_stdlib_modules(&program);
 
     program
