@@ -23,7 +23,7 @@ impl FuncCompiler<'_> {
             "trim_start" => Some(StdlibOp::Call1(rt.trim_start)),
             "trim_end"   => Some(StdlibOp::Call1(rt.trim_end)),
             "reverse"    => Some(StdlibOp::Call1(rt.reverse)),
-            "len"        => {
+            "len" | "length" => {
                 // O(1): read byte-length header directly
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { i32_load(0); i64_extend_i32_u; });
