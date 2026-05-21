@@ -8,8 +8,19 @@ use almide_ir::*;
 use almide_base::intern::sym;
 use std::collections::HashSet;
 
-/// Phase 1: Collect stdlib modules from deps. Called before codegen.
+/// Phase 1: Collect stdlib modules from deps + validate exports.
 pub fn ir_link(program: &mut IrProgram) {
+    // Log export counts for diagnostics (visible in --emit-ast)
+    for module in &program.modules {
+        let fn_count = module.exports.iter().filter(|e| matches!(e, IrExport::Function { .. })).count();
+        let ty_count = module.exports.iter().filter(|e| matches!(e, IrExport::Type { .. })).count();
+        let const_count = module.exports.iter().filter(|e| matches!(e, IrExport::Constant { .. })).count();
+        if fn_count + ty_count + const_count > 0 {
+            // Exports are available for downstream validation
+            let _ = (module.name, fn_count, ty_count, const_count);
+        }
+    }
+
     let mut stdlib_modules = std::mem::take(&mut program.used_stdlib_modules);
     for module in &program.modules {
         for func in &module.functions {

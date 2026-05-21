@@ -571,6 +571,23 @@ pub fn lower_module(
         let new_name = format!("ALMIDE_RT_{}_{}", mod_ident.to_uppercase(), old_name.as_str().to_uppercase());
         ir_prog.var_table.entries[tl.var.0 as usize].name = sym(&new_name);
     }
+    // Collect exports: public functions, types, constants
+    let mut exports = Vec::new();
+    for func in &ir_prog.functions {
+        if matches!(func.visibility, IrVisibility::Public) && !func.is_test {
+            exports.push(IrExport::Function { name: func.name, is_effect: func.is_effect });
+        }
+    }
+    for td in &ir_prog.type_decls {
+        if matches!(td.visibility, IrVisibility::Public) {
+            exports.push(IrExport::Type { name: td.name });
+        }
+    }
+    for tl in &ir_prog.top_lets {
+        let tl_name = ir_prog.var_table.get(tl.var).name;
+        exports.push(IrExport::Constant { name: tl_name });
+    }
+
     IrModule {
         name: sym(name),
         versioned_name: versioned_name.map(|v| sym(&v)),
@@ -578,6 +595,8 @@ pub fn lower_module(
         functions: std::mem::take(&mut ir_prog.functions),
         top_lets: std::mem::take(&mut ir_prog.top_lets),
         var_table: std::mem::take(&mut ir_prog.var_table),
+        exports,
+        imports: Vec::new(), // populated during import resolution (future)
     }
 }
 

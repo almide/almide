@@ -904,6 +904,21 @@ pub struct IrTopLet {
 
 fn default_top_let_kind() -> TopLetKind { TopLetKind::Lazy }
 
+/// An exported symbol from a module.
+#[derive(Debug, Clone)]
+pub enum IrExport {
+    Function { name: Sym, is_effect: bool },
+    Type { name: Sym },
+    Constant { name: Sym },
+}
+
+/// An imported symbol required by a module.
+#[derive(Debug, Clone)]
+pub struct IrImport {
+    pub name: Sym,
+    pub from_module: Sym,
+}
+
 /// An imported module lowered to IR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrModule {
@@ -920,6 +935,12 @@ pub struct IrModule {
     pub top_lets: Vec<IrTopLet>,
     /// Variable table for this module
     pub var_table: VarTable,
+    /// Public symbols this module exports
+    #[serde(skip)]
+    pub exports: Vec<IrExport>,
+    /// Symbols this module requires from other modules
+    #[serde(skip)]
+    pub imports: Vec<IrImport>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
