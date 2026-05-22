@@ -23,6 +23,12 @@ pub fn fetch_dep(dep: &Dependency) -> Result<PathBuf, String> {
 
 /// Fetch a dependency, optionally pinned to a locked commit hash.
 pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Result<PathBuf, String> {
+    // Path dependency: use local directory directly, no fetch needed.
+    if let Some(ref path) = dep.path {
+        let p = PathBuf::from(path);
+        if p.exists() { return Ok(p); }
+        return Err(format!("path dependency '{}' not found: {}", dep.name, path));
+    }
     let cache = cache_dir();
     let ref_name = dep.tag.as_deref()
         .or(dep.branch.as_deref())
@@ -186,7 +192,11 @@ fn fetch_deps_recursive(
             eprintln!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major);
         }
 
-        let visit_key = format!("{}@{}", dep.git, version_str);
+        let visit_key = if let Some(ref p) = dep.path {
+            format!("path:{}@{}", p, version_str)
+        } else {
+            format!("{}@{}", dep.git, version_str)
+        };
         if visited.contains(&visit_key) {
             continue;
         }

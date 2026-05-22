@@ -162,6 +162,7 @@ fn resolve_source(
         tag: tag.map(String::from).or(default_tag),
         branch: branch.map(String::from),
         version: None,
+        path: None,
     };
     project_fetch::fetch_dep(&dep)
 }

@@ -244,8 +244,8 @@ impl NanoPass for StdlibLoweringPass {
         // fully loaded, we take its IR-level signature (param names,
         // attribute values). Source fallback only fills in modules
         // that IR didn't provide.
+        // Scan ALL modules (bundled + packages) for @inline_rust templates.
         let mut inline_rust: HashMap<(Sym, Sym), InlineRustSpec> = program.modules.iter()
-            .filter(|m| almide_lang::stdlib_info::is_bundled_module(m.name.as_str()))
             .flat_map(|m| {
                 let mname = m.name;
                 m.functions.iter().filter_map(move |f| {
@@ -432,13 +432,12 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                 };
             }
 
-            // Non-stdlib modules (bundled .almd + user packages): leave as Module calls.
-            // They are rendered by the walker directly, not converted to Named calls.
-            // Bundled-only stdlib fns (defined in stdlib/<module>.almd with no TOML
-            // runtime template) take the same path — there is no almide_rt_*
-            // function to call, so the walker renders them as a normal user-fn call.
+            // Modules without @inline_rust (user packages without native,
+            // bundled-only stdlib fns): leave as Module calls, rendered by
+            // walker directly.
             let is_stdlib = almide_lang::stdlib_info::is_stdlib_module(&module);
-            if !is_stdlib || is_bundled_only(module, func) {
+            let has_inline = inline_rust_spec(module, func).is_some();
+            if (!is_stdlib && !has_inline) || is_bundled_only(module, func) {
                 let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
                 return IrExpr {
                     kind: IrExprKind::Call {
