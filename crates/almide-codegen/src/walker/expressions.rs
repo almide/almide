@@ -463,7 +463,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .map(|(id, _ty)| ctx.var_name(*id).to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            let mut body_str = render_expr(ctx, body);
+            let mut body_str = if let IrExprKind::Var { id } = &body.kind {
+                if ctx.ann.is_rc_cow(id) {
+                    format!("(*{}).clone()", ctx.var_name(*id))
+                } else { render_expr(ctx, body) }
+            } else { render_expr(ctx, body) };
             // Nested lambda: wrap in Box for languages that need it (template returns identity in TS)
             if matches!(&body.kind, IrExprKind::Lambda { .. }) {
                 body_str = ctx.templates.render_with("box_wrap", None, &[], &[("inner", body_str.as_str())])
@@ -1073,14 +1077,8 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
             && (ty_contains_name(&a.ty, enum_name)
                 || ctx.ann.boxed_fields.contains(&(ctor_name.to_string(), format!("{}", i))));
         // Unwrap RcCow for var bindings used as variant constructor args.
-        // `var xs: List[T]` produces RcCow<Vec<T>> but variant fields expect Vec<T>.
-        let is_mut_var = matches!(&a.kind, IrExprKind::Var { id } if {
-            let info = ctx.var_table.get(*id);
-            matches!(info.mutability, almide_ir::Mutability::Var)
-                && (info.ty.is_list() || matches!(info.ty, Ty::Applied(TypeConstructorId::List, _) | Ty::Bytes)
-                    || matches!(&info.ty, Ty::Record { .. } | Ty::Variant { .. } | Ty::Applied(_, _)))
-        });
-        let rendered = if is_mut_var {
+        let is_rc_cow_var = matches!(&a.kind, IrExprKind::Var { id } if ctx.ann.is_rc_cow(id));
+        let rendered = if is_rc_cow_var {
             format!("{}.into_inner()", rendered)
         } else { rendered };
         if needs_box {
