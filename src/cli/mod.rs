@@ -207,21 +207,16 @@ fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path
 /// Inject native modules and native-deps from all dependency packages.
 fn inject_dep_natives(code: &mut String, source_root: Option<&std::path::Path>, src_dir: &std::path::Path, project_dir: &std::path::Path) -> Result<(), String> {
     let root = match source_root { Some(r) => r, None => return Ok(()) };
-    eprintln!("[dep-native] source_root={}", root.display());
     let toml_path = root.join("almide.toml");
-    eprintln!("[dep-native] toml exists={}", toml_path.exists());
     let toml_path = root.join("almide.toml");
     if !toml_path.exists() { return Ok(()); }
     let proj = crate::project::parse_toml(&toml_path).map_err(|e| format!("parse almide.toml: {}", e))?;
-    eprintln!("[dep-native] deps={}", proj.dependencies.len());
     for dep in &proj.dependencies {
-        eprintln!("[dep-native] dep={} git={} path={:?}", dep.name, dep.git, dep.path);
         let dep_dir = if let Some(ref p) = dep.path {
             std::path::PathBuf::from(p)
         } else if let Ok(d) = crate::project_fetch::fetch_dep(dep) {
             d
         } else { continue };
-        eprintln!("[dep-native] injecting from {}", dep_dir.display());
         inject_native_modules(code, Some(&dep_dir), src_dir)?;
         // Propagate native-deps from dependency's almide.toml into Cargo.toml
         let dep_toml = dep_dir.join("almide.toml");
