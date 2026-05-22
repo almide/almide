@@ -319,6 +319,11 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         safe_name = ctx.templates.render_with("keyword_escape", None, &[], &[("name", safe_name.as_str())])
             .unwrap_or(safe_name);
     }
+    // Emit-time prefix: module_origin → "almide_rt_{origin}_{name}"
+    // IR name stays clean; prefix is a rendering concern.
+    if let Some(ref origin) = func.module_origin {
+        safe_name = format!("almide_rt_{}_{}", origin, safe_name);
+    }
     let safe_name = format!("{}{}", safe_name, fn_generics);
 
     let construct = if func.is_test {
@@ -386,9 +391,13 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // fresh VarId — `lazy_vars` misses them, so we match by name.
     for tl in &program.top_lets {
         if matches!(tl.kind, TopLetKind::Lazy) {
-            ann.lazy_top_let_names.insert(
-                ctx.var_table.get(tl.var).name.to_uppercase()
-            );
+            let vi = ctx.var_table.get(tl.var);
+            let full_name = if let Some(ref origin) = vi.module_origin {
+                format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), vi.name.as_str().to_uppercase())
+            } else {
+                vi.name.to_uppercase()
+            };
+            ann.lazy_top_let_names.insert(full_name);
         }
     }
     // Module top_lets are flattened into program.top_lets by ir_link_flatten.
@@ -560,13 +569,20 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 
     // Top-level lets and vars
     for tl in &program.top_lets {
-        let name = ctx.var_table.get(tl.var).name.clone();
+        let raw_name = ctx.var_table.get(tl.var).name.clone();
         let ty_str = render_type_fn(&ctx, &tl.ty);
         let val_str = render_expr_fn(&ctx, &tl.value);
         if matches!(tl.kind, TopLetKind::Lazy) {
             ctx.ann.lazy_vars.insert(tl.var);
         }
-        let name_upper = name.to_uppercase();
+        // Emit-time prefix from module_origin
+        let var_info = ctx.var_table.get(tl.var);
+        let name_upper = if let Some(ref origin) = var_info.module_origin {
+            format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), raw_name.as_str().to_uppercase())
+        } else {
+            raw_name.to_uppercase()
+        };
+        let name = raw_name;
         let mut rendered = if tl.mutable && matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
             format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str)
         } else if tl.mutable {

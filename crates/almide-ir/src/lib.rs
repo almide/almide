@@ -159,6 +159,11 @@ pub struct VarInfo {
     /// Computed as a post-pass after lowering.
     #[serde(default)]
     pub use_count: u32,
+    /// Module this var originates from (for emit-time prefixing).
+    /// None = root program. Some("mc_bot_v0") = dependency module.
+    /// The IR name stays clean; the walker adds the prefix at render time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_origin: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -172,7 +177,7 @@ impl VarTable {
     pub fn alloc(&mut self, name: Sym, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
         debug_assert!(self.entries.len() < u32::MAX as usize, "too many variables");
         let id = VarId(self.entries.len() as u32);
-        self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0 });
+        self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0, module_origin: None });
         id
     }
 
@@ -853,6 +858,10 @@ pub struct IrFunction {
     /// Consumed by LICM to track loop-modified variables.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mutated_params: Vec<usize>,
+    /// Module this function originates from (for emit-time prefixing).
+    /// None = root program. Some("mc_bot_v0") = dependency module.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_origin: Option<String>,
 }
 
 /// Prefix applied to test function names in lowering to guarantee

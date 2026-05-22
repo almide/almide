@@ -48,6 +48,18 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
         checker_opt = Some(checker);
     }
 
+    // Pre-register versioned names before root lowering
+    if let Some(checker) = &mut checker_opt {
+        for (name, _, pkg_id, _) in &resolved.modules {
+            if let Some(pid) = pkg_id.as_ref() {
+                let base = pid.mod_name();
+                let versioned = if let Some(suffix) = name.strip_prefix(&pid.name) {
+                    format!("{}{}", base, suffix)
+                } else { base };
+                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&versioned));
+            }
+        }
+    }
     // Lower to IR if checker ran
     let mut ir_program = checker_opt.as_ref().map(|checker| {
         almide::lower::lower_program(&program, &checker.env, &checker.type_map)

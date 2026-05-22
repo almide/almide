@@ -50,12 +50,9 @@ impl NanoPass for IrLinkFlattenPass {
                 }
             }
 
-            // Merge functions with prefixed names
+            // Merge functions with module_origin (no renaming in IR)
             for mut func in module.functions {
-                let clean_name = func.name.as_str()
-                    .replace(' ', "_").replace('-', "_").replace('.', "_");
-                let prefixed = format!("almide_rt_{}_{}", mod_ident, clean_name);
-                func.name = sym(&prefixed);
+                func.module_origin = Some(mod_ident.clone());
                 program.functions.push(func);
             }
 

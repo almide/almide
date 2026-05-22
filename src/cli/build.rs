@@ -186,7 +186,14 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         std::process::exit(1);
     }
 
-    // Lower to IR
+    // Pre-register versioned names before root lowering
+    for (name, _, pkg_id, _) in &resolved.modules {
+        if let Some(pid) = pkg_id.as_ref() {
+            let base = pid.mod_name();
+            let v = if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base };
+            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
+        }
+    }
     let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
 
     // Lower user modules to IR. Bundled stdlib modules (stdlib/<m>.almd) are
@@ -324,7 +331,14 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
         std::process::exit(1);
     }
 
-    // Lower to IR
+    // Pre-register versioned names before root lowering
+    for (name, _, pkg_id, _) in &resolved.modules {
+        if let Some(pid) = pkg_id.as_ref() {
+            let base = pid.mod_name();
+            let v = if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base };
+            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
+        }
+    }
     let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
     for (name, mod_prog, pkg_id, _) in &resolved.modules {
         if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
