@@ -339,11 +339,17 @@ impl Checker {
             ExprKind::IndexAccess { object, index, .. } => {
                 let obj_ty = self.infer_expr(object);
                 self.infer_expr(index);
+                let is_range = matches!(&index.kind, ExprKind::Range { .. });
                 let concrete = resolve_ty(&obj_ty, &self.uf);
-                match &concrete {
-                    Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
-                    Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::option(args[1].clone()),
-                    _ => Ty::Unknown,
+                if is_range {
+                    concrete
+                } else {
+                    match &concrete {
+                        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::option(args[1].clone()),
+                        Ty::Bytes => Ty::Int,
+                        _ => Ty::Unknown,
+                    }
                 }
             }
 
@@ -1023,7 +1029,20 @@ impl Checker {
                     }
                 }
             }
-            ast::Stmt::IndexAssign { index, value, .. } => { self.infer_expr(index); self.infer_expr(value); }
+            ast::Stmt::IndexAssign { target, index, value, .. } => {
+                self.infer_expr(index);
+                self.infer_expr(value);
+                if self.env.lookup_var(target.as_str()).is_some() && !self.env.mutable_vars.contains(target) {
+                    let mut diag = super::err(
+                        format!("cannot mutate immutable binding '{}'", target),
+                        format!("Use 'var {} = ...' to declare a mutable variable", target),
+                        format!("{}[...] = ...", target)).with_code("E009");
+                    if let Some(&(line, col)) = self.env.var_decl_locs.get(target) {
+                        diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", target));
+                    }
+                    self.emit(diag);
+                }
+            }
             ast::Stmt::FieldAssign { value, .. } => { self.infer_expr(value); }
             ast::Stmt::Guard { cond, else_, .. } => { self.infer_expr(cond); self.infer_expr(else_); }
             ast::Stmt::Expr { expr, .. } => { self.infer_expr(expr); }

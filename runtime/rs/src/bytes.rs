@@ -17,6 +17,15 @@ pub fn almide_rt_bytes_concat(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> { let mut r =
 pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> { b.repeat(n.max(0) as usize) }
 pub fn almide_rt_bytes_new(len: i64) -> Vec<u8> { vec![0u8; len.max(0) as usize] }
 pub fn almide_rt_bytes_push(b: &mut Vec<u8>, val: i64) { b.push(val as u8); }
+pub fn almide_rt_bytes_set_at(b: &mut Vec<u8>, i: i64, val: i64) { if (i as usize) < b.len() { b[i as usize] = val as u8; } }
+pub fn almide_rt_bytes_copy_within(b: &mut Vec<u8>, src_start: i64, src_end: i64, dst: i64) {
+    let s = src_start as usize;
+    let e = (src_end as usize).min(b.len());
+    let d = dst as usize;
+    if s < e && d + (e - s) <= b.len() {
+        b.copy_within(s..e, d);
+    }
+}
 pub fn almide_rt_bytes_clear(b: &mut Vec<u8>) { b.clear(); }
 pub fn almide_rt_bytes_from_string(s: &str) -> Vec<u8> { s.as_bytes().to_vec() }
 
