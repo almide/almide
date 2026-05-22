@@ -192,7 +192,11 @@ fn fetch_deps_recursive(
             eprintln!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major);
         }
 
-        let visit_key = format!("{}@{}", dep.git, version_str);
+        let visit_key = if let Some(ref p) = dep.path {
+            format!("path:{}@{}", p, version_str)
+        } else {
+            format!("{}@{}", dep.git, version_str)
+        };
         if visited.contains(&visit_key) {
             continue;
         }
