@@ -1,8 +1,8 @@
 <!-- description: with effect — intercept, mock, and sandbox effects -->
 # Effect Firewall
 
-> **Target: v0.23**
-> **Status: Design**
+> **Target: v0.23+**
+> **Status: Requirements confirmed, syntax open**
 
 ## Problem
 
@@ -120,6 +120,48 @@ All three use the same mental model: declare which effects are permitted.
 1. Effect inference pass: annotate each function with its effect set
 2. Static check: `_ => deny` + function calls effect not in arms → compile error
 3. Auto-doc: generate effect dependency list per function
+
+## Hard requirements
+
+1. **Test 内で effect の返り値を指定できる** — ネットワーク不要で effect fn をテスト
+2. **未指定の effect はテスト失敗** — 暗黙の外部通信を防ぐ（デフォルト deny）
+3. **新キーワード最小** — 既存構文（match arm, effect）の再利用
+4. **「mock」という語を使わない** — match arm で値を返すだけ。テスト用語の mock/stub/spy の区別は不要
+
+## Syntax candidates (open)
+
+構文は未確定。実戦（mc-bot, mc-auth のテスト）で「ここで欲しい」が溜まってから決める。
+
+```almide
+// Candidate A: effect block as statement
+test "auth" {
+  effect {
+    http.get(_) => ok("{\"name\":\"Steve\"}"),
+    _ => deny,
+  }
+  let profile = authenticate()!
+  assert_eq(profile.name, "Steve")
+}
+
+// Candidate B: test + effect clause
+test "auth" effect {
+  http.get(_) => ok("{\"name\":\"Steve\"}"),
+  _ => deny,
+} {
+  let profile = authenticate()!
+  assert_eq(profile.name, "Steve")
+}
+
+// Candidate C: with effect (Koka-style)
+test "auth" with effect {
+  http.get(_) => ok("{\"name\":\"Steve\"}"),
+  _ => deny,
+} {
+  ...
+}
+```
+
+決定基準: LLM が最も正確に書ける構文を選ぶ（MSR で検証）。
 
 ## Prior art
 
