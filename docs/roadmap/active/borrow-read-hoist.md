@@ -2,7 +2,7 @@
 # Borrow Read Hoisting
 
 > **Target: v0.22**
-> **Status: Design**
+> **Status: Done**
 
 ## Problem
 

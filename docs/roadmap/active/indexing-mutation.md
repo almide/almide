@@ -2,7 +2,7 @@
 # Indexing Mutation Syntax
 
 > **Target: v0.22**
-> **Status: Design**
+> **Status: Done**
 
 ## Problem
 

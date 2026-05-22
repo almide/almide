@@ -889,6 +889,7 @@ fn uses_var(expr: &IrExpr, var: VarId) -> bool {
             }
         }
         IrExprKind::RustMacro { args, .. } => args.iter().any(|a| uses_var(a, var)),
+        IrExprKind::RuntimeCall { args, .. } => args.iter().any(|a| uses_var(a, var)),
         IrExprKind::Range { start, end, .. } => uses_var(start, var) || uses_var(end, var),
         IrExprKind::MapLiteral { entries } => entries.iter().any(|(k, v)| uses_var(k, var) || uses_var(v, var)),
         _ => false,
@@ -1165,6 +1166,200 @@ fn rewrite_calls_stmt(stmt: IrStmt, sigs: &HashMap<String, Vec<ParamBorrow>>, mo
         },
         IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
             pattern, value: rewrite_calls(value, sigs, mod_scope),
+        },
+        other => other,
+    };
+    IrStmt { kind, span: stmt.span }
+}
+
+// ── Phase 3: Hoist conflicting reads from &mut call args ──────────
+
+/// When a call has `&mut var_x` as one arg and another arg reads `var_x`,
+/// Rust's borrow checker rejects the overlapping borrows. This phase hoists
+/// the conflicting read args into `let __hoist = <expr>` bindings before the
+/// call, replacing them with `Var(__hoist)`.
+pub fn hoist_conflicting_reads(program: &mut IrProgram) {
+    for func in &mut program.functions {
+        func.body = hoist_expr(std::mem::take(&mut func.body), &mut program.var_table);
+    }
+    for module in &mut program.modules {
+        for func in &mut module.functions {
+            func.body = hoist_expr(std::mem::take(&mut func.body), &mut program.var_table);
+        }
+    }
+}
+
+/// Find VarId of a `&mut Var(x)` argument.
+fn find_mut_borrow_var(arg: &IrExpr) -> Option<VarId> {
+    if let IrExprKind::Borrow { expr, mutable: true, .. } = &arg.kind {
+        if let IrExprKind::Var { id } = &expr.kind {
+            return Some(*id);
+        }
+    }
+    None
+}
+
+fn hoist_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+
+    let kind = match expr.kind {
+        IrExprKind::Call { target, args, type_args } => {
+            let args: Vec<IrExpr> = args.into_iter().map(|a| hoist_expr(a, vt)).collect();
+            let target = match target {
+                CallTarget::Method { object, method } =>
+                    CallTarget::Method { object: Box::new(hoist_expr(*object, vt)), method },
+                CallTarget::Computed { callee } =>
+                    CallTarget::Computed { callee: Box::new(hoist_expr(*callee, vt)) },
+                other => other,
+            };
+            return hoist_call_if_needed(target, args, type_args, ty, span, vt);
+        }
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let args: Vec<IrExpr> = args.into_iter().map(|a| hoist_expr(a, vt)).collect();
+            // Check for &mut conflict
+            let mut_var = args.iter().find_map(find_mut_borrow_var);
+            if let Some(mut_id) = mut_var {
+                let mut hoisted_stmts: Vec<IrStmt> = Vec::new();
+                let new_args: Vec<IrExpr> = args.into_iter().map(|arg| {
+                    if find_mut_borrow_var(&arg).is_some() {
+                        arg // keep the &mut arg as-is
+                    } else if uses_var(&arg, mut_id) {
+                        let tmp = vt.alloc(sym("__hoist"), arg.ty.clone(), Mutability::Let, None);
+                        let tmp_ty = arg.ty.clone();
+                        hoisted_stmts.push(IrStmt {
+                            kind: IrStmtKind::Bind { var: tmp, mutability: Mutability::Let, ty: tmp_ty.clone(), value: arg },
+                            span: None,
+                        });
+                        IrExpr { kind: IrExprKind::Var { id: tmp }, ty: tmp_ty, span: None, def_id: None }
+                    } else {
+                        arg
+                    }
+                }).collect();
+                if !hoisted_stmts.is_empty() {
+                    let call = IrExpr {
+                        kind: IrExprKind::RuntimeCall { symbol, args: new_args },
+                        ty: ty.clone(), span, def_id: None,
+                    };
+                    return IrExpr {
+                        kind: IrExprKind::Block { stmts: hoisted_stmts, expr: Some(Box::new(call)) },
+                        ty, span, def_id: None,
+                    };
+                }
+                IrExprKind::RuntimeCall { symbol, args: new_args }
+            } else {
+                IrExprKind::RuntimeCall { symbol, args }
+            }
+        }
+
+        // Recurse into all compound expressions
+        IrExprKind::Block { stmts, expr } => IrExprKind::Block {
+            stmts: stmts.into_iter().map(|s| hoist_stmt(s, vt)).collect(),
+            expr: expr.map(|e| Box::new(hoist_expr(*e, vt))),
+        },
+        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
+            cond: Box::new(hoist_expr(*cond, vt)),
+            then: Box::new(hoist_expr(*then, vt)),
+            else_: Box::new(hoist_expr(*else_, vt)),
+        },
+        IrExprKind::Match { subject, arms } => IrExprKind::Match {
+            subject: Box::new(hoist_expr(*subject, vt)),
+            arms: arms.into_iter().map(|a| IrMatchArm {
+                pattern: a.pattern,
+                guard: a.guard.map(|g| hoist_expr(g, vt)),
+                body: hoist_expr(a.body, vt),
+            }).collect(),
+        },
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
+            var, var_tuple,
+            iterable: Box::new(hoist_expr(*iterable, vt)),
+            body: body.into_iter().map(|s| hoist_stmt(s, vt)).collect(),
+        },
+        IrExprKind::While { cond, body } => IrExprKind::While {
+            cond: Box::new(hoist_expr(*cond, vt)),
+            body: body.into_iter().map(|s| hoist_stmt(s, vt)).collect(),
+        },
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(hoist_expr(*body, vt)), lambda_id,
+        },
+        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
+            op, left: Box::new(hoist_expr(*left, vt)), right: Box::new(hoist_expr(*right, vt)),
+        },
+        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
+            op, operand: Box::new(hoist_expr(*operand, vt)),
+        },
+        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(hoist_expr(*expr, vt)) },
+        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(hoist_expr(*expr, vt)) },
+        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(hoist_expr(*expr, vt)) },
+        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(hoist_expr(*expr, vt)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(hoist_expr(*expr, vt)) },
+        IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
+            expr: Box::new(hoist_expr(*expr, vt)), fallback: Box::new(hoist_expr(*fallback, vt)),
+        },
+        other => other,
+    };
+
+    IrExpr { kind, ty, span, def_id: None }
+}
+
+fn hoist_call_if_needed(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<almide_lang::types::Ty>,
+    ty: almide_lang::types::Ty, span: Option<almide_base::span::Span>, vt: &mut VarTable) -> IrExpr
+{
+    let mut_var = args.iter().find_map(find_mut_borrow_var);
+    if let Some(mut_id) = mut_var {
+        let mut hoisted_stmts: Vec<IrStmt> = Vec::new();
+        let new_args: Vec<IrExpr> = args.into_iter().map(|arg| {
+            if find_mut_borrow_var(&arg).is_some() {
+                arg
+            } else if uses_var(&arg, mut_id) {
+                let tmp = vt.alloc(sym("__hoist"), arg.ty.clone(), Mutability::Let, None);
+                let tmp_ty = arg.ty.clone();
+                hoisted_stmts.push(IrStmt {
+                    kind: IrStmtKind::Bind { var: tmp, mutability: Mutability::Let, ty: tmp_ty.clone(), value: arg },
+                    span: None,
+                });
+                IrExpr { kind: IrExprKind::Var { id: tmp }, ty: tmp_ty, span: None, def_id: None }
+            } else {
+                arg
+            }
+        }).collect();
+        if !hoisted_stmts.is_empty() {
+            let call = IrExpr {
+                kind: IrExprKind::Call { target, args: new_args, type_args },
+                ty: ty.clone(), span, def_id: None,
+            };
+            return IrExpr {
+                kind: IrExprKind::Block { stmts: hoisted_stmts, expr: Some(Box::new(call)) },
+                ty, span, def_id: None,
+            };
+        }
+        IrExpr { kind: IrExprKind::Call { target, args: new_args, type_args }, ty, span, def_id: None }
+    } else {
+        IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty, span, def_id: None }
+    }
+}
+
+fn hoist_stmt(stmt: IrStmt, vt: &mut VarTable) -> IrStmt {
+    let kind = match stmt.kind {
+        IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
+            var, mutability, ty, value: hoist_expr(value, vt),
+        },
+        IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: hoist_expr(value, vt) },
+        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: hoist_expr(expr, vt) },
+        IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
+            cond: hoist_expr(cond, vt), else_: hoist_expr(else_, vt),
+        },
+        IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
+            pattern, value: hoist_expr(value, vt),
+        },
+        IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
+            target, index: hoist_expr(index, vt), value: hoist_expr(value, vt),
+        },
+        IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
+            target, key: hoist_expr(key, vt), value: hoist_expr(value, vt),
+        },
+        IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
+            target, field, value: hoist_expr(value, vt),
         },
         other => other,
     };
