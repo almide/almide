@@ -142,10 +142,9 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // so same-module calls (tests, internal) have a callable function.
     let has_codegen_attr = func.attrs.iter().any(|a|
         matches!(a.name.as_str(), "inline_rust" | "intrinsic"));
-    if matches!(ctx.target, Target::Rust)
-        && has_codegen_attr
-        && matches!(func.body.kind, IrExprKind::Hole)
-    {
+    let body_is_dispatch_only = matches!(func.body.kind, IrExprKind::Hole | IrExprKind::Todo { .. })
+        || matches!(&func.body.kind, IrExprKind::ResultOk { expr } if matches!(expr.kind, IrExprKind::Hole | IrExprKind::Todo { .. }));
+    if matches!(ctx.target, Target::Rust) && has_codegen_attr && body_is_dispatch_only {
         return String::new();
     }
 
