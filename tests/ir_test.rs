@@ -323,7 +323,7 @@ fn ir_function_construction() {
         visibility: IrVisibility::Public,
         doc: None,
         blank_lines_before: 0,
-        def_id: None, mutated_params: vec![],
+        def_id: None, mutated_params: vec![], module_origin: None,
     };
     assert_eq!(f.name, "add");
     assert_eq!(f.params.len(), 2);
@@ -348,7 +348,7 @@ fn ir_function_effect() {
         visibility: IrVisibility::Public,
         doc: None,
         blank_lines_before: 0,
-        def_id: None, mutated_params: vec![],
+        def_id: None, mutated_params: vec![], module_origin: None,
     };
     assert!(f.is_effect);
 }
@@ -367,7 +367,7 @@ fn ir_program_construction() {
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
         effect_map: Default::default(),
-        codegen_annotations: Default::default(),
+        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(),
     };
     assert!(prog.functions.is_empty());
     assert!(prog.top_lets.is_empty());
@@ -537,7 +537,7 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
             visibility: IrVisibility::Public,
             doc: None,
             blank_lines_before: 0,
-            def_id: None, mutated_params: vec![],
+            def_id: None, mutated_params: vec![], module_origin: None,
         }],
         top_lets: vec![],
         type_decls: vec![],
@@ -547,7 +547,7 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
         effect_map: Default::default(),
-        codegen_annotations: Default::default(),
+        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(),
     }
 }
 
@@ -616,7 +616,7 @@ fn unused_var_warning_used_var_no_warning() {
             visibility: IrVisibility::Public,
             doc: None,
             blank_lines_before: 0,
-            def_id: None, mutated_params: vec![],
+            def_id: None, mutated_params: vec![], module_origin: None,
         }],
         top_lets: vec![],
         type_decls: vec![],
@@ -626,7 +626,7 @@ fn unused_var_warning_used_var_no_warning() {
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
         effect_map: Default::default(),
-        codegen_annotations: Default::default(),
+        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(),
     };
     compute_use_counts(&mut prog);
     let warnings = collect_unused_var_warnings(&prog, "test.almd");

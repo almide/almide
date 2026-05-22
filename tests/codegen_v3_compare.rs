@@ -110,7 +110,7 @@ fn make_test_program() -> IrProgram {
         doc: None,
         blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![],
+        mutated_params: vec![], module_origin: None,
     };
 
     IrProgram {
@@ -123,7 +123,7 @@ fn make_test_program() -> IrProgram {
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
         effect_map: Default::default(),
-        codegen_annotations: Default::default(),
+        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(),
     }
 }
 

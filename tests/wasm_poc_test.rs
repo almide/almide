@@ -11,6 +11,7 @@ fn test_wasm_empty_program_valid() {
         effect_fn_names: Default::default(),
         effect_map: Default::default(),
         codegen_annotations: Default::default(),
+        used_stdlib_modules: Default::default(),
     };
     let bytes = almide::codegen::emit_wasm::emit(&empty_ir);
 
