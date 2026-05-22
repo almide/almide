@@ -339,12 +339,17 @@ impl Checker {
             ExprKind::IndexAccess { object, index, .. } => {
                 let obj_ty = self.infer_expr(object);
                 self.infer_expr(index);
+                let is_range = matches!(&index.kind, ExprKind::Range { .. });
                 let concrete = resolve_ty(&obj_ty, &self.uf);
-                match &concrete {
-                    Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
-                    Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::option(args[1].clone()),
-                    Ty::Bytes => Ty::Int,
-                    _ => Ty::Unknown,
+                if is_range {
+                    concrete
+                } else {
+                    match &concrete {
+                        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::option(args[1].clone()),
+                        Ty::Bytes => Ty::Int,
+                        _ => Ty::Unknown,
+                    }
                 }
             }
 

@@ -520,12 +520,38 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             ctx.mk(IrExprKind::TupleIndex { object: Box::new(obj), index: *index }, ty, span)
         }
         ast::ExprKind::IndexAccess { object, index, .. } => {
-            let obj = lower_expr(ctx, object);
-            let idx = lower_expr(ctx, index);
-            if obj.ty.is_map() {
-                ctx.mk(IrExprKind::MapAccess { object: Box::new(obj), key: Box::new(idx) }, ty, span)
+            // Range index → slice desugaring
+            if let ast::ExprKind::Range { start, end, inclusive } = &index.kind {
+                let obj = lower_expr(ctx, object);
+                let start_expr = lower_expr(ctx, start);
+                let end_expr = lower_expr(ctx, end);
+                let end_final = if *inclusive {
+                    // ..= inclusive: end + 1 for exclusive slice
+                    ctx.mk(IrExprKind::BinOp {
+                        op: BinOp::AddInt,
+                        left: Box::new(end_expr),
+                        right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
+                    }, Ty::Int, span)
+                } else {
+                    end_expr
+                };
+                let symbol = if matches!(obj.ty, Ty::Bytes) {
+                    "almide_rt_bytes_slice"
+                } else {
+                    "almide_rt_list_slice"
+                };
+                ctx.mk(IrExprKind::RuntimeCall {
+                    symbol: sym(symbol),
+                    args: vec![obj, start_expr, end_final],
+                }, ty, span)
             } else {
-                ctx.mk(IrExprKind::IndexAccess { object: Box::new(obj), index: Box::new(idx) }, ty, span)
+                let obj = lower_expr(ctx, object);
+                let idx = lower_expr(ctx, index);
+                if obj.ty.is_map() {
+                    ctx.mk(IrExprKind::MapAccess { object: Box::new(obj), key: Box::new(idx) }, ty, span)
+                } else {
+                    ctx.mk(IrExprKind::IndexAccess { object: Box::new(obj), index: Box::new(idx) }, ty, span)
+                }
             }
         }
 
