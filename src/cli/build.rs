@@ -87,7 +87,8 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
     let toml_dir = toml_path.parent()
         .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let source_root = if native_deps.is_empty() { None } else { Some(toml_dir.as_path()) };
+    let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
+    let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir.as_path()) } else { None };
     match super::cargo_build_generated_with_native(&rs_code, &project_dir, use_release, native_deps, source_root) {
         Ok(bin_path) => {
             // Copy the built binary to the desired output location

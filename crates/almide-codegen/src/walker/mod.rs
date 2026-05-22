@@ -136,15 +136,15 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         ref_mut_params,
     };
 
-    // Stdlib Unification: fns declared with `@inline_rust(...)` or
-    // `@intrinsic("...")` are dispatch-only. Their body is never emitted
-    // as a Rust fn; the template / symbol is inlined at each call site
-    // by `pass_stdlib_lowering` / `pass_intrinsic_lowering`. Skipping
-    // emission here also avoids duplicate-definition clashes with the
-    // Rust runtime fn the template / symbol refers to.
+    // Dispatch-only fns (body is Hole): `@inline_rust` / `@intrinsic`
+    // templates are inlined at call sites. No Rust fn emitted.
+    // Package fns with `@inline_rust` + real fallback body: emit the body
+    // so same-module calls (tests, internal) have a callable function.
+    let has_codegen_attr = func.attrs.iter().any(|a|
+        matches!(a.name.as_str(), "inline_rust" | "intrinsic"));
     if matches!(ctx.target, Target::Rust)
-        && func.attrs.iter().any(|a|
-            matches!(a.name.as_str(), "inline_rust" | "intrinsic"))
+        && has_codegen_attr
+        && matches!(func.body.kind, IrExprKind::Hole)
     {
         return String::new();
     }

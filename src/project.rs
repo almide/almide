@@ -62,6 +62,7 @@ pub struct Dependency {
     pub tag: Option<String>,
     pub branch: Option<String>,
     pub version: Option<String>,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,6 +216,7 @@ fn parse_dep_line(line: &str) -> Option<Dependency> {
     let mut tag: Option<String> = None;
     let mut branch: Option<String> = None;
     let mut version: Option<String> = None;
+    let mut path: Option<String> = None;
 
     for item in inner.split(',') {
         if let Some((k, v)) = parse_kv(item) {
@@ -223,16 +225,17 @@ fn parse_dep_line(line: &str) -> Option<Dependency> {
                 "tag" => tag = Some(v),
                 "branch" => branch = Some(v),
                 "version" => version = Some(v),
+                "path" => path = Some(v),
                 _ => {}
             }
         }
     }
 
-    if git.is_empty() {
+    if git.is_empty() && path.is_none() {
         return None;
     }
 
-    Some(Dependency { name, git, tag, branch, version })
+    Some(Dependency { name, git, tag, branch, version, path })
 }
 
 /// Cache directory for dependencies

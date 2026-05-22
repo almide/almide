@@ -711,6 +711,7 @@ fn dispatch(cli: Cli) {
                 tag,
                 branch: None,
                 version: None,
+                path: None,
             };
             project_fetch::fetch_dep(&dep)
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });

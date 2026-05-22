@@ -204,6 +204,50 @@ fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path
     Ok(())
 }
 
+/// Inject native modules and native-deps from all dependency packages.
+fn inject_dep_natives(code: &mut String, source_root: Option<&std::path::Path>, src_dir: &std::path::Path, project_dir: &std::path::Path) -> Result<(), String> {
+    let root = match source_root { Some(r) => r, None => return Ok(()) };
+    eprintln!("[dep-native] source_root={}", root.display());
+    let toml_path = root.join("almide.toml");
+    eprintln!("[dep-native] toml exists={}", toml_path.exists());
+    let toml_path = root.join("almide.toml");
+    if !toml_path.exists() { return Ok(()); }
+    let proj = crate::project::parse_toml(&toml_path).map_err(|e| format!("parse almide.toml: {}", e))?;
+    eprintln!("[dep-native] deps={}", proj.dependencies.len());
+    for dep in &proj.dependencies {
+        eprintln!("[dep-native] dep={} git={} path={:?}", dep.name, dep.git, dep.path);
+        let dep_dir = if let Some(ref p) = dep.path {
+            std::path::PathBuf::from(p)
+        } else if let Ok(d) = crate::project_fetch::fetch_dep(dep) {
+            d
+        } else { continue };
+        eprintln!("[dep-native] injecting from {}", dep_dir.display());
+        inject_native_modules(code, Some(&dep_dir), src_dir)?;
+        // Propagate native-deps from dependency's almide.toml into Cargo.toml
+        let dep_toml = dep_dir.join("almide.toml");
+        if !dep_toml.exists() { continue; }
+        let dep_proj = match crate::project::parse_toml(&dep_toml) { Ok(p) => p, Err(_) => continue };
+        let cargo_path = project_dir.join("Cargo.toml");
+        let mut cargo = std::fs::read_to_string(&cargo_path).unwrap_or_default();
+        for nd in &dep_proj.native_deps {
+            if cargo.contains(&nd.name) { continue; }
+            let line = if nd.spec.starts_with('{') {
+                format!("{} = {}\n", nd.name, nd.spec)
+            } else {
+                format!("{} = \"{}\"\n", nd.name, nd.spec)
+            };
+            if let Some(pos) = cargo.find("[dependencies]") {
+                let insert = cargo[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(cargo.len());
+                cargo.insert_str(insert, &line);
+            } else {
+                cargo.push_str(&format!("\n[dependencies]\n{}", line));
+            }
+        }
+        let _ = std::fs::write(&cargo_path, &cargo);
+    }
+    Ok(())
+}
+
 /// Build generated Rust code as a cdylib shared library (.dylib/.so).
 fn cargo_build_cdylib(rs_code: &str, project_dir: &std::path::Path, lib_name: &str, release: bool) -> Result<std::path::PathBuf, String> {
     let src_dir = project_dir.join("src");
@@ -292,6 +336,8 @@ fn cargo_build_generated_with_native(
     };
 
     inject_native_modules(&mut final_code, source_root, &src_dir)?;
+    // Inject native modules + native-deps from dependency packages
+    inject_dep_natives(&mut final_code, source_root, &src_dir, project_dir)?;
 
     // Library modules may not define main — auto-generate an empty one
     if !final_code.contains("fn main(") && !final_code.contains("fn almide_main(") {
@@ -374,6 +420,7 @@ fn cargo_build_test_with_native(
 
     let mut final_code = rs_code.to_string();
     inject_native_modules(&mut final_code, source_root, &src_dir)?;
+    inject_dep_natives(&mut final_code, source_root, &src_dir, project_dir)?;
 
     // Library modules may not define main — auto-generate an empty one for test builds
     if !final_code.contains("fn main(") && !final_code.contains("fn almide_main(") {
