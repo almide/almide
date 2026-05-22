@@ -342,7 +342,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
     let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .map_err(|e| { eprintln!("{}", e); e.clone() })?;
 
-    let mut ir_program = None;
+    let mut ir_program: Option<almide::ir::IrProgram> = None;
     let mut module_irs = std::collections::HashMap::new();
     if !no_check {
         let canon = canonicalize::canonicalize_program(
@@ -371,10 +371,23 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
                 eprintln!("{}", diagnostic_render::display_with_source(d, &source_text));
             }
         }
-        // Lower to IR only if no parse errors (partial AST can't produce valid IR)
+        // Pre-register versioned names BEFORE root lowering so cross-module
+        // top_let references (mc_bot.DEFAULT_CONFIG) get correct V0 prefix.
+        for (name, _, pkg_id, _) in &resolved.modules {
+            if let Some(pid) = pkg_id.as_ref() {
+                let base = pid.mod_name();
+                let versioned = if let Some(suffix) = name.strip_prefix(&pid.name) {
+                    format!("{}{}", base, suffix)
+                } else {
+                    base
+                };
+                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&versioned));
+            }
+        }
+
+        // Lower root program (versioned names now available)
         if !has_parse_errors {
             let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-            // Emit unused variable warnings
             if !warnings_suppressed() {
                 let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
                 for d in &unused_warnings {
@@ -383,10 +396,8 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
             }
             ir_program = Some(ir);
         }
-        // Lower user modules to IR (skip TOML-only stdlib — they use generated
-        // codegen). Bundled .almd stdlib modules MUST be lowered: their fns
-        // need to land in IR so callers resolve to a real function instead of
-        // a non-existent almide_rt_<m>_<f>.
+
+        // Lower user modules
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
             // For dependency modules, temporarily set self_module_name to the package root
