@@ -34,7 +34,8 @@ Every major language uses `buf[i] = val` for byte/array mutation. Almide should 
 
 - `var` binding: `buf[i] = val` → in-place mutation via `RcCow::make_mut` (COW, like Swift)
 - `let` binding: `buf[i] = val` → compile error (E009: cannot mutate immutable binding)
-- Read: `buf[i]` → `bytes.get(buf, i)` (returns `Option[Int]`)
+- Read: `buf[i]` → `Int` (direct access, panic on OOB — matches Rust/Go/Swift/Zig/Python/Kotlin/Elixir)
+- Safe read: `bytes.get(buf, i)` → `Option[Int]` (bounds-checked, no panic)
 
 ### Desugaring
 

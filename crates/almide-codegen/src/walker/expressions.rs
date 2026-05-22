@@ -500,8 +500,13 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::IndexAccess { object, index } => {
             let obj_str = render_expr(ctx, object);
             let idx = render_expr(ctx, index);
-            ctx.templates.render_with("index_access", None, &[], &[("object", obj_str.as_str()), ("index", idx.as_str())])
-                .unwrap_or_else(|| "idx[...]".into())
+            let base = ctx.templates.render_with("index_access", None, &[], &[("object", obj_str.as_str()), ("index", idx.as_str())])
+                .unwrap_or_else(|| "idx[...]".into());
+            if matches!(object.ty, Ty::Bytes) {
+                format!("{} as i64", base)
+            } else {
+                base
+            }
         }
         IrExprKind::MapAccess { object, key } => {
             let obj_str = render_expr(ctx, object);

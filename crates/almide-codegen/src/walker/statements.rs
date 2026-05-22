@@ -198,12 +198,14 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let upper = target_str.to_uppercase();
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
+            let var_ty = &ctx.var_table.get(*target).ty;
+            let is_bytes = matches!(var_ty, Ty::Bytes);
+            let cast_val = if is_bytes { format!("{} as u8", val_str) } else { val_str };
             match ctx.ann.get_var_storage(target, &target_str) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[{} as usize] = {});", upper, idx_str, val_str),
+                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[{} as usize] = {});", upper, idx_str, cast_val),
                 VarStorage::ModuleCell => format!("{}.with(|c| c.get());", upper),
-                VarStorage::RcCow => format!("{}.make_mut()[{} as usize] = {};", target_str, idx_str, val_str),
-                VarStorage::Local => ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
-                    .unwrap_or_else(|| "idx[...] = ...;".into()),
+                VarStorage::RcCow => format!("{}.make_mut()[{} as usize] = {};", target_str, idx_str, cast_val),
+                VarStorage::Local => format!("{}[{} as usize] = {};", target_str, idx_str, cast_val),
             }
         }
         IrStmtKind::MapInsert { target, key, value } => {
