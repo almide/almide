@@ -204,10 +204,14 @@ fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path
     Ok(())
 }
 
-/// Inject native modules and native-deps from all dependency packages.
+/// Inject native modules and native-deps from all dependency packages (recursive).
 fn inject_dep_natives(code: &mut String, source_root: Option<&std::path::Path>, src_dir: &std::path::Path, project_dir: &std::path::Path) -> Result<(), String> {
+    let mut visited = std::collections::HashSet::new();
+    inject_dep_natives_rec(code, source_root, src_dir, project_dir, &mut visited)
+}
+
+fn inject_dep_natives_rec(code: &mut String, source_root: Option<&std::path::Path>, src_dir: &std::path::Path, project_dir: &std::path::Path, visited: &mut std::collections::HashSet<String>) -> Result<(), String> {
     let root = match source_root { Some(r) => r, None => return Ok(()) };
-    let toml_path = root.join("almide.toml");
     let toml_path = root.join("almide.toml");
     if !toml_path.exists() { return Ok(()); }
     let proj = crate::project::parse_toml(&toml_path).map_err(|e| format!("parse almide.toml: {}", e))?;
@@ -217,28 +221,35 @@ fn inject_dep_natives(code: &mut String, source_root: Option<&std::path::Path>, 
         } else if let Ok(d) = crate::project_fetch::fetch_dep(dep) {
             d
         } else { continue };
+        let key = dep_dir.to_string_lossy().to_string();
+        if visited.contains(&key) { continue; }
+        visited.insert(key);
         inject_native_modules(code, Some(&dep_dir), src_dir)?;
         // Propagate native-deps from dependency's almide.toml into Cargo.toml
         let dep_toml = dep_dir.join("almide.toml");
-        if !dep_toml.exists() { continue; }
-        let dep_proj = match crate::project::parse_toml(&dep_toml) { Ok(p) => p, Err(_) => continue };
-        let cargo_path = project_dir.join("Cargo.toml");
-        let mut cargo = std::fs::read_to_string(&cargo_path).unwrap_or_default();
-        for nd in &dep_proj.native_deps {
-            if cargo.contains(&nd.name) { continue; }
-            let line = if nd.spec.starts_with('{') {
-                format!("{} = {}\n", nd.name, nd.spec)
-            } else {
-                format!("{} = \"{}\"\n", nd.name, nd.spec)
-            };
-            if let Some(pos) = cargo.find("[dependencies]") {
-                let insert = cargo[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(cargo.len());
-                cargo.insert_str(insert, &line);
-            } else {
-                cargo.push_str(&format!("\n[dependencies]\n{}", line));
+        if dep_toml.exists() {
+            if let Ok(dep_proj) = crate::project::parse_toml(&dep_toml) {
+                let cargo_path = project_dir.join("Cargo.toml");
+                let mut cargo = std::fs::read_to_string(&cargo_path).unwrap_or_default();
+                for nd in &dep_proj.native_deps {
+                    if cargo.contains(&nd.name) { continue; }
+                    let line = if nd.spec.starts_with('{') {
+                        format!("{} = {}\n", nd.name, nd.spec)
+                    } else {
+                        format!("{} = \"{}\"\n", nd.name, nd.spec)
+                    };
+                    if let Some(pos) = cargo.find("[dependencies]") {
+                        let insert = cargo[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(cargo.len());
+                        cargo.insert_str(insert, &line);
+                    } else {
+                        cargo.push_str(&format!("\n[dependencies]\n{}", line));
+                    }
+                }
+                let _ = std::fs::write(&cargo_path, &cargo);
             }
         }
-        let _ = std::fs::write(&cargo_path, &cargo);
+        // Recurse into transitive dependencies
+        inject_dep_natives_rec(code, Some(&dep_dir), src_dir, project_dir, visited)?;
     }
     Ok(())
 }
