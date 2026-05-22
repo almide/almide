@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.22.0 (prev v0.21.0). Bytes/List indexing: `buf[i]`, `buf[i] = val`, `buf[1..3]` range slice. Borrow read hoist: auto-separates reads from `&mut` args. bytes.set_at/copy_within for in-place mutation. E009 on immutable IndexAssign.
+- Current stable: v0.22.1 (prev v0.22.0). Package native dispatch: `@inline_rust` for packages with `native/*.rs` + `[native-deps]`. Path dependencies. Transitive native injection. SHA-1/AES-CFB8 now hardware-accelerated via AES-NI.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.
