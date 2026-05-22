@@ -183,3 +183,23 @@ fn build_fn_sig(
         mut_params,
     }
 }
+
+/// Register type declarations from a bundled stdlib module into the TypeEnv.
+/// Ensures aliases like `type TcpStream = Int` (from net.almd) are available
+/// for lowering's type resolution.
+pub fn register_bundled_types(module: &str, env: &mut crate::types::TypeEnv) {
+    if !almide_lang::stdlib_info::is_bundled_module(module) {
+        return;
+    }
+    let Some(source) = super::stdlib::get_bundled_source(module) else { return };
+    let Some(program) = almide_lang::parse_cached(source) else { return };
+
+    let mut diags = Vec::new();
+    for decl in &program.decls {
+        if let ast::Decl::Type { name, ty, deriving, visibility, generics, .. } = decl {
+            crate::canonicalize::registration::register_type_decl(
+                env, &mut diags, name, ty, deriving, generics, Some(module), *visibility,
+            );
+        }
+    }
+}

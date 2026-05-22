@@ -232,8 +232,14 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
             continue;
         }
 
+        for (name, _, pkg_id, _) in &resolved.modules {
+            if let Some(pid) = pkg_id.as_ref() {
+                let base = pid.mod_name();
+                let v = if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base };
+                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
+            }
+        }
         let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-        // Lower user modules to IR (bundled stdlib included; TOML duplicates pruned)
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
             let saved_self = checker.env.self_module_name;
@@ -257,6 +263,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
             checker.env.self_module_name = saved_self;
             ir_program.modules.push(mod_ir_module);
         }
+        almide::ir_link::ir_link(&mut ir_program);
         almide::optimize::optimize_program(&mut ir_program);
         almide::mono::monomorphize(&mut ir_program);
         let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -450,9 +457,14 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
             continue;
         }
 
+        for (name, _, pkg_id, _) in &resolved.modules {
+            if let Some(pid) = pkg_id.as_ref() {
+                let base = pid.mod_name();
+                let v = if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base };
+                checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
+            }
+        }
         let mut ir_program = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-
-        // Lower user modules to IR (bundled stdlib included; TOML duplicates pruned)
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
             let saved_self = checker.env.self_module_name;
@@ -474,6 +486,7 @@ pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
             ir_program.modules.push(mod_ir_module);
         }
 
+        almide::ir_link::ir_link(&mut ir_program);
         almide::optimize::optimize_program(&mut ir_program);
         almide::mono::monomorphize(&mut ir_program);
 

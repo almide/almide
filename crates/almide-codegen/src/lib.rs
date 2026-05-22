@@ -55,6 +55,7 @@ pub mod pass_concretize_types;
 pub mod pass_resolve_calls;
 pub mod pass_closure_conversion;
 pub mod pass_unify_var_tables;
+pub mod pass_ir_link_flatten;
 pub mod template;
 pub mod target;
 pub mod walker;
@@ -170,10 +171,17 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             output.push_str("impl<T: std::hash::Hash> std::hash::Hash for RcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
             // Blanket AlmideConcat: RcCow<T> + Rhs and RcCow<T> + Val<U> — 2 impls cover all combos.
             output.push_str("impl<T: Clone, Rhs> AlmideConcat<Rhs> for RcCow<T> where T: AlmideConcat<Rhs> { type Output = RcCow<<T as AlmideConcat<Rhs>>::Output>; #[inline(always)] fn concat(self, rhs: Rhs) -> Self::Output { RcCow::new((*self).clone().concat(rhs)) } }\n");
-            // Include only runtime modules referenced by the user code.
-            // Scan user_code for `almide_rt_<module>_` or `almide_json_` patterns.
+            // Include runtime modules referenced in the IR.
+            // The IrProgram tracks which stdlib modules are used across
+            // all functions and transitive dependencies — no text search.
             let mut needed: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for m in &program.used_stdlib_modules {
+                needed.insert(m.as_str());
+            }
+            // Fallback: also scan generated code for runtime symbols not
+            // tracked by the IR (e.g., auto-derived convention methods).
             for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
+                if needed.contains(name) { continue; }
                 let prefix = format!("almide_rt_{}_", name);
                 let alt_prefix = format!("almide_{}_", name);
                 if user_code.contains(&prefix) || user_code.contains(&alt_prefix) {
@@ -191,13 +199,18 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             if user_code.contains("AlmideJsonPath") || user_code.contains("JsonPath") {
                 needed.insert("json");
             }
-            // Runtime dependency: json depends on value
-            if needed.contains("json") { needed.insert("value"); }
-            // sse pulls in http (almide_http_request_stream) + value/json helpers
-            if needed.contains("sse") {
-                needed.insert("value");
-                needed.insert("json");
-                needed.insert("http");
+            // Resolve inter-module runtime dependencies (auto-extracted
+            // from source by build.rs — no manual whitelist).
+            let mut added = true;
+            while added {
+                added = false;
+                for (module, deps) in crate::generated::rust_runtime::RUNTIME_DEPS {
+                    if needed.contains(module) {
+                        for dep in *deps {
+                            if needed.insert(dep) { added = true; }
+                        }
+                    }
+                }
             }
             // Auto-emit struct definitions required by runtime functions.
             // Runtime functions reference these types but codegen only emits them

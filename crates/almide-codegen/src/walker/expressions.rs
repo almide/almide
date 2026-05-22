@@ -106,28 +106,33 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Variables ──
         IrExprKind::Var { id } => {
-            let name = ctx.var_name(*id).to_string();
-            let upper = name.to_uppercase();
+            let raw_name = ctx.var_name(*id).to_string();
+            let var_info = ctx.var_table.get(*id);
+            // Emit-time prefix: module_origin → "ALMIDE_RT_{ORIGIN}_{NAME}"
+            let (name, upper) = if let Some(ref origin) = var_info.module_origin {
+                let prefixed = format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), raw_name.to_uppercase());
+                (prefixed.clone(), prefixed)
+            } else {
+                (raw_name.clone(), raw_name.to_uppercase())
+            };
+            let has_module = var_info.module_origin.is_some();
             // Module-level mutable var: dispatch by storage type
             match ctx.ann.get_var_storage(id, &name) {
                 VarStorage::ModuleCell => return format!("{}.with(|c| c.get())", upper),
                 VarStorage::ModuleRc => return format!("{}.with(|c| (**c.borrow()).clone())", upper),
                 _ => {}
             }
-            // Lazy vars need deref via template. Cross-module top_let synthetic
-            // vars carry an `ALMIDE_RT_<MOD>_<NAME>` name and reference a static
-            // LazyLock — auto-deref them too, BUT only if the target top_let's
-            // kind is Lazy. Scalar `Const` top_lets (plain `const NAME: i64 = 42;`)
-            // must NOT be dereferenced.
-            let is_synthetic_lazy = name.starts_with("ALMIDE_RT_")
+            // Lazy vars need deref. Cross-module vars with module_origin
+            // reference a static LazyLock — auto-deref if the top_let is Lazy.
+            let is_module_lazy = has_module
                 && ctx.ann.lazy_top_let_names.contains(&upper);
-            if ctx.ann.lazy_vars.contains(id) || is_synthetic_lazy {
+            if ctx.ann.lazy_vars.contains(id) || is_module_lazy {
                 ctx.templates.render_with("deref_lazy", None, &[], &[("name", upper.as_str())])
                     .unwrap_or_else(|| upper.clone())
-            } else if name.starts_with("ALMIDE_RT_") {
+            } else if has_module {
                 upper
             } else {
-                name
+                raw_name
             }
         }
         IrExprKind::FnRef { name } => name.to_string(),
@@ -525,7 +530,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── SpreadRecord ──
         IrExprKind::SpreadRecord { base, fields } => {
-            let base_str = render_expr(ctx, base);
+            let mut base_str = render_expr(ctx, base);
+            // Spread requires an owned value. If base is a LazyLock deref
+            // (module top_let), clone to get owned.
+            if let IrExprKind::Var { id } = &base.kind {
+                let vi = ctx.var_table.get(*id);
+                if vi.module_origin.is_some() || ctx.ann.lazy_vars.contains(id) {
+                    if !base_str.ends_with(".clone()") {
+                        base_str = format!("{}.clone()", base_str);
+                    }
+                }
+            }
             let fields_str = fields.iter()
                 .map(|(k, v)| format!("{}: {}", k, render_expr(ctx, v)))
                 .collect::<Vec<_>>()

@@ -159,6 +159,11 @@ pub struct VarInfo {
     /// Computed as a post-pass after lowering.
     #[serde(default)]
     pub use_count: u32,
+    /// Module this var originates from (for emit-time prefixing).
+    /// None = root program. Some("mc_bot_v0") = dependency module.
+    /// The IR name stays clean; the walker adds the prefix at render time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_origin: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -172,7 +177,7 @@ impl VarTable {
     pub fn alloc(&mut self, name: Sym, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
         debug_assert!(self.entries.len() < u32::MAX as usize, "too many variables");
         let id = VarId(self.entries.len() as u32);
-        self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0 });
+        self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0, module_origin: None });
         id
     }
 
@@ -853,6 +858,10 @@ pub struct IrFunction {
     /// Consumed by LICM to track loop-modified variables.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mutated_params: Vec<usize>,
+    /// Module this function originates from (for emit-time prefixing).
+    /// None = root program. Some("mc_bot_v0") = dependency module.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_origin: Option<String>,
 }
 
 /// Prefix applied to test function names in lowering to guarantee
@@ -904,6 +913,21 @@ pub struct IrTopLet {
 
 fn default_top_let_kind() -> TopLetKind { TopLetKind::Lazy }
 
+/// An exported symbol from a module.
+#[derive(Debug, Clone)]
+pub enum IrExport {
+    Function { name: Sym, is_effect: bool },
+    Type { name: Sym },
+    Constant { name: Sym },
+}
+
+/// An imported symbol required by a module.
+#[derive(Debug, Clone)]
+pub struct IrImport {
+    pub name: Sym,
+    pub from_module: Sym,
+}
+
 /// An imported module lowered to IR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrModule {
@@ -920,6 +944,12 @@ pub struct IrModule {
     pub top_lets: Vec<IrTopLet>,
     /// Variable table for this module
     pub var_table: VarTable,
+    /// Public symbols this module exports
+    #[serde(skip)]
+    pub exports: Vec<IrExport>,
+    /// Symbols this module requires from other modules
+    #[serde(skip)]
+    pub imports: Vec<IrImport>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -951,4 +981,9 @@ pub struct IrProgram {
     /// Read by the walker during template rendering.
     #[serde(skip)]
     pub codegen_annotations: crate::annotations::CodegenAnnotations,
+    /// Stdlib modules used across all functions and transitive deps.
+    /// Populated during lowering by scanning CallTarget::Module references.
+    /// Used by codegen to include only needed runtime modules.
+    #[serde(skip)]
+    pub used_stdlib_modules: std::collections::HashSet<String>,
 }

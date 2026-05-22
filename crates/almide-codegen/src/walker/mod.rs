@@ -319,6 +319,11 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         safe_name = ctx.templates.render_with("keyword_escape", None, &[], &[("name", safe_name.as_str())])
             .unwrap_or(safe_name);
     }
+    // Emit-time prefix: module_origin → "almide_rt_{origin}_{name}"
+    // IR name stays clean; prefix is a rendering concern.
+    if let Some(ref origin) = func.module_origin {
+        safe_name = format!("almide_rt_{}_{}", origin, safe_name);
+    }
     let safe_name = format!("{}{}", safe_name, fn_generics);
 
     let construct = if func.is_test {
@@ -386,20 +391,17 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // fresh VarId — `lazy_vars` misses them, so we match by name.
     for tl in &program.top_lets {
         if matches!(tl.kind, TopLetKind::Lazy) {
-            ann.lazy_top_let_names.insert(
-                ctx.var_table.get(tl.var).name.to_uppercase()
-            );
+            let vi = ctx.var_table.get(tl.var);
+            let full_name = if let Some(ref origin) = vi.module_origin {
+                format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), vi.name.as_str().to_uppercase())
+            } else {
+                vi.name.to_uppercase()
+            };
+            ann.lazy_top_let_names.insert(full_name);
         }
     }
-    for module in &program.modules {
-        for tl in &module.top_lets {
-            if matches!(tl.kind, TopLetKind::Lazy) {
-                ann.lazy_top_let_names.insert(
-                    ctx.var_table.get(tl.var).name.to_uppercase()
-                );
-            }
-        }
-    }
+    // Module top_lets are flattened into program.top_lets by ir_link_flatten.
+    // No separate module iteration needed.
     // Classify mutable top-lets into VarStorage. Copy types (Int, Float, Bool)
     // → ModuleCell (thread_local Cell<T>); non-Copy → ModuleRc (thread_local RefCell<Rc<T>>).
     {
@@ -567,13 +569,20 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 
     // Top-level lets and vars
     for tl in &program.top_lets {
-        let name = ctx.var_table.get(tl.var).name.clone();
+        let raw_name = ctx.var_table.get(tl.var).name.clone();
         let ty_str = render_type_fn(&ctx, &tl.ty);
         let val_str = render_expr_fn(&ctx, &tl.value);
         if matches!(tl.kind, TopLetKind::Lazy) {
             ctx.ann.lazy_vars.insert(tl.var);
         }
-        let name_upper = name.to_uppercase();
+        // Emit-time prefix from module_origin
+        let var_info = ctx.var_table.get(tl.var);
+        let name_upper = if let Some(ref origin) = var_info.module_origin {
+            format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), raw_name.as_str().to_uppercase())
+        } else {
+            raw_name.to_uppercase()
+        };
+        let name = raw_name;
         let mut rendered = if tl.mutable && matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
             format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str)
         } else if tl.mutable {
@@ -626,84 +635,9 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         parts.push(wrapped);
     }
 
-    // Imported modules: render their type decls and functions
-    for module in &program.modules {
-        // Bundled .almd modules use minimal generic bounds (Clone only)
-        // because their functions don't require PartialEq/PartialOrd/Debug.
-        let is_bundled = almide_lang::stdlib_info::is_bundled_module(&module.name);
-        let mut mod_ann = ctx.ann.clone();
-        // Post `UnifyVarTablesPass` every module function references
-        // `program.var_table`; we still clear the parent's lazy_vars
-        // because module top-lets' lazy bindings are appended below.
-        mod_ann.lazy_vars.clear();
-        let mut mod_ctx = RenderContext {
-            templates: ctx.templates,
-            var_table: ctx.var_table,
-            indent: ctx.indent,
-            target: ctx.target,
-            auto_unwrap: false,
-            is_test: false,
-            ann: mod_ann,
-            type_aliases: ctx.type_aliases.clone(),
-            generic_types: ctx.generic_types.clone(),
-            minimal_generic_bounds: is_bundled,
-            repr_c: ctx.repr_c,
-            ref_params: std::collections::HashSet::new(),
-            ref_mut_params: std::collections::HashSet::new(),
-        };
-        // Module type decls — skip if already emitted by parent or another module
-        for td in &module.type_decls {
-            let name = td.name.as_str().to_string();
-            if !emitted_types.contains(&name) {
-                emitted_types.insert(name);
-                parts.push(render_type_decl(&mod_ctx, td));
-            }
-        }
-        // Module functions (prefixed with module name or versioned name)
-        let mod_ident = module.versioned_name
-            .map(|v| v.replace('.', "_"))
-            .unwrap_or_else(|| module.name.replace('.', "_"));
-        // Module top-level lets and vars
-        for tl in &module.top_lets {
-            let name = mod_ctx.var_table.get(tl.var).name.to_string();
-            let ty_str = render_type_fn(&mod_ctx, &tl.ty);
-            let val_str = render_expr_fn(&mod_ctx, &tl.value);
-            if matches!(tl.kind, TopLetKind::Lazy) {
-                mod_ctx.ann.lazy_vars.insert(tl.var);
-            }
-            let rendered = if tl.mutable && matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
-                format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name, ty_str, val_str)
-            } else if tl.mutable {
-                format!("thread_local! {{ static {}: std::cell::RefCell<std::rc::Rc<{}>> = std::cell::RefCell::new(std::rc::Rc::new({})); }}", name, ty_str, val_str)
-            } else {
-                let construct = match tl.kind {
-                    TopLetKind::Const => "top_let_const",
-                    TopLetKind::Lazy => "top_let_lazy",
-                };
-                mod_ctx.templates.render_with(construct, None, &[], &[("name", name.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
-                    .unwrap_or_else(|| format!("const {} = {};", name, val_str))
-            };
-            parts.push(rendered);
-        }
-        for func in &module.functions {
-            let rendered = render_function(&mod_ctx, func);
-            let clean_name = func.name.replace(' ', "_").replace('-', "_").replace('.', "_");
-            let prefixed_name = format!("almide_rt_{}_{}", mod_ident, clean_name);
-            let prefixed = rendered
-                .replacen(
-                    &format!("fn {}", clean_name),
-                    &format!("fn {}", prefixed_name),
-                    1
-                )
-                // Also rename @extern(rs) use-as aliases to match the prefixed name
-                .replacen(
-                    &format!(" as {};", clean_name),
-                    &format!(" as {};", prefixed_name),
-                    1
-                );
-            parts.push(prefixed);
-        }
-    }
+    // Modules are flattened by ir_link_flatten into root functions/types/top_lets.
+    // No per-module iteration needed.
+    debug_assert!(program.modules.is_empty(), "ir_link_flatten should have emptied modules");
 
     parts.join("\n\n")
 }

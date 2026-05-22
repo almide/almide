@@ -8,11 +8,14 @@ use super::LowerCtx;
 use super::expressions::lower_expr;
 
 pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>, visibility: &ast::Visibility, generics: Option<&Vec<ast::GenericParam>>) -> IrTypeDecl {
+    // Use TypeEnv for field type resolution so aliases (TcpStream → Int)
+    // are expanded at lowering time, not left as Ty::Named for codegen.
+    let resolve = |te: &ast::TypeExpr| resolve_type_expr_with_env(te, ctx.env);
     let kind = match ty {
         ast::TypeExpr::Record { fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name, ty: resolve_type_expr(&f.ty), default, alias: f.alias, attrs: f.attrs.clone() }
+                IrFieldDecl { name: f.name, ty: resolve(&f.ty), default, alias: f.alias, attrs: f.attrs.clone() }
             }).collect();
             IrTypeDeclKind::Record { fields: fs }
         }
@@ -25,7 +28,7 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
                 boxed_record_fields: std::collections::HashSet::new(),
             }
         }
-        _ => IrTypeDeclKind::Alias { target: resolve_type_expr(ty) },
+        _ => IrTypeDeclKind::Alias { target: resolve(ty) },
     };
     let vis = match visibility {
         ast::Visibility::Public => IrVisibility::Public,
@@ -56,4 +59,9 @@ fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str
 
 pub(super) fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
     crate::canonicalize::resolve::resolve_type_expr(te, None)
+}
+
+/// Resolve with TypeEnv lookup — expands type aliases like TcpStream → Int.
+pub(super) fn resolve_type_expr_with_env(te: &ast::TypeExpr, env: &crate::types::TypeEnv) -> Ty {
+    crate::canonicalize::resolve::resolve_type_expr(te, Some(&env.types))
 }

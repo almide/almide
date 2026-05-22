@@ -462,23 +462,16 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                             None
                         })
                         .unwrap_or_else(|| resolved_mod.clone());
-                    // DefId-based resolution (preferred): direct mapping to codegen global
+                    // Clean name in IR; module_origin carries the module for emit-time prefixing.
+                    let clean_name = field.as_str().to_uppercase();
+                    let origin = mod_ident.replace('.', "_");
                     if let Some(&def_id) = ctx.def_map.get(&sym(&qual_let_key)) {
-                        let symbol = format!(
-                            "ALMIDE_RT_{}_{}",
-                            mod_ident.to_uppercase().replace('.', "_"),
-                            field.as_str().to_uppercase(),
-                        );
-                        let var_id = ctx.var_table.alloc(sym(&symbol), ty.clone(), Mutability::Let, None);
+                        let var_id = ctx.var_table.alloc(sym(&clean_name), ty.clone(), Mutability::Let, None);
+                        ctx.var_table.entries[var_id.0 as usize].module_origin = Some(origin);
                         return ctx.mk_def(IrExprKind::Var { id: var_id }, ty, span, def_id);
                     }
-                    // Fallback: synthetic name (legacy path, to be removed)
-                    let symbol = format!(
-                        "ALMIDE_RT_{}_{}",
-                        mod_ident.to_uppercase().replace('.', "_"),
-                        field.as_str().to_uppercase(),
-                    );
-                    let var_id = ctx.var_table.alloc(sym(&symbol), ty.clone(), Mutability::Let, None);
+                    let var_id = ctx.var_table.alloc(sym(&clean_name), ty.clone(), Mutability::Let, None);
+                    ctx.var_table.entries[var_id.0 as usize].module_origin = Some(origin);
                     return ctx.mk(IrExprKind::Var { id: var_id }, ty, span);
                 }
 

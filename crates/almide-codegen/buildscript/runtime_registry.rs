@@ -29,6 +29,33 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) {
         let content = fs::read_to_string(entry.path()).unwrap();
         rust_out.push_str(&format!("    (\"{stem}\", {content:?}),\n"));
     }
+    rust_out.push_str("];\n\n");
+
+    // Auto-extract inter-module dependencies by scanning each module's
+    // source for `almide_rt_{other}_` references. No manual whitelist.
+    let module_names: Vec<String> = rust_entries.iter().map(|e| {
+        e.path().file_stem().unwrap().to_str().unwrap().to_string()
+    }).collect();
+
+    rust_out.push_str("/// Inter-module runtime dependencies, auto-extracted from source.\n");
+    rust_out.push_str("/// If module A's source references `almide_rt_B_*`, A depends on B.\n");
+    rust_out.push_str("pub const RUNTIME_DEPS: &[(&str, &[&str])] = &[\n");
+    for entry in &rust_entries {
+        let stem = entry.path().file_stem().unwrap().to_str().unwrap().to_string();
+        let content = fs::read_to_string(entry.path()).unwrap();
+        let mut deps: Vec<&str> = Vec::new();
+        for other in &module_names {
+            if *other == stem { continue; }
+            let prefix = format!("almide_rt_{}_", other);
+            if content.contains(&prefix) {
+                deps.push(other);
+            }
+        }
+        if !deps.is_empty() {
+            rust_out.push_str(&format!("    (\"{}\", &[{}]),\n", stem,
+                deps.iter().map(|d| format!("\"{}\"", d)).collect::<Vec<_>>().join(", ")));
+        }
+    }
     rust_out.push_str("];\n");
 
     fs::write(out_dir.join("rust_runtime.rs"), &rust_out).unwrap();

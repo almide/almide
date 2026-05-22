@@ -256,6 +256,17 @@ pub fn resolve_package_spec(spec: &str) -> (String, String, Option<String>) {
 
 /// Add a dependency to almide.toml
 pub fn add_dep_to_toml(name: &str, git: &str, tag: Option<&str>) -> Result<(), String> {
+    // Package names must be valid Almide identifiers (no hyphens).
+    // The package name IS the import name — no implicit conversion.
+    if name.contains('-') {
+        return Err(format!(
+            "package name '{}' contains hyphens — use underscores instead\n  \
+             hint: use '{}' as the package name (rename in the dependency's almide.toml)",
+            name,
+            name.replace('-', "_"),
+        ));
+    }
+
     let toml_path = Path::new("almide.toml");
     if !toml_path.exists() {
         return Err("almide.toml not found. Run 'almide init' first.".into());

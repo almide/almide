@@ -52,6 +52,13 @@ pub fn canonicalize_program<'a>(
     // 1. Built-in protocols
     protocols::register_builtin_protocols(&mut env);
 
+    // 1b. Register type declarations from ALL bundled stdlib modules.
+    // Ensures aliases like `type TcpStream = Int` from net.almd are
+    // available when user modules reference them in type declarations.
+    for module_name in almide_lang::stdlib_info::BUNDLED_MODULES {
+        crate::bundled_sigs::register_bundled_types(module_name, &mut env);
+    }
+
     // 2. Register user modules (with prefix)
     for (name, mod_prog, is_self) in modules {
         register_module(&mut env, &mut diagnostics, name, mod_prog, is_self);
