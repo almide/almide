@@ -142,6 +142,12 @@ fn pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = _
 @intrinsic("almide_rt_bytes_push")
 fn push(mut b: Bytes, val: Int) -> Unit = _
 
+@intrinsic("almide_rt_bytes_set_at")
+fn set_at(mut b: Bytes, i: Int, val: Int) -> Unit = _
+
+@intrinsic("almide_rt_bytes_copy_within")
+fn copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit = _
+
 @intrinsic("almide_rt_bytes_read_bool")
 fn read_bool(b: Bytes, pos: Int) -> Bool = _
 
