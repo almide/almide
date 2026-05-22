@@ -1072,6 +1072,17 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
         let needs_box = ctx.ann.recursive_enums.contains(enum_name)
             && (ty_contains_name(&a.ty, enum_name)
                 || ctx.ann.boxed_fields.contains(&(ctor_name.to_string(), format!("{}", i))));
+        // Unwrap RcCow for var bindings used as variant constructor args.
+        // `var xs: List[T]` produces RcCow<Vec<T>> but variant fields expect Vec<T>.
+        let is_mut_var = matches!(&a.kind, IrExprKind::Var { id } if {
+            let info = ctx.var_table.get(*id);
+            matches!(info.mutability, almide_ir::Mutability::Var)
+                && (info.ty.is_list() || matches!(info.ty, Ty::Applied(TypeConstructorId::List, _) | Ty::Bytes)
+                    || matches!(&info.ty, Ty::Record { .. } | Ty::Variant { .. } | Ty::Applied(_, _)))
+        });
+        let rendered = if is_mut_var {
+            format!("{}.into_inner()", rendered)
+        } else { rendered };
         if needs_box {
             format!("Box::new({})", rendered)
         } else {
