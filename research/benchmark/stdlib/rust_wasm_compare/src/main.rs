@@ -63,7 +63,11 @@ fn main() {
     });
 
     bench("int_parse_100k", || {
-        for _ in 0..100000 { std::hint::black_box("12345".parse::<i64>().unwrap()); }
+        let mut sum = 0i64;
+        for i in 0..100000i64 {
+            sum += i.to_string().parse::<i64>().unwrap();
+        }
+        std::hint::black_box(sum);
     });
 
     bench("int_tostring_100k", || {

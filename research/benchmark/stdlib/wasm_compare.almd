@@ -59,7 +59,8 @@ fn main() -> Unit = {
 
   bench("int_parse_100k", () => {
     var i = 0
-    while i < 100000 { let _r = int.parse("12345"); i = i + 1 }
+    var sum = 0
+    while i < 100000 { sum = sum + (int.parse(int.to_string(i)) ?? 0); i = i + 1 }
   })
 
   bench("int_tostring_100k", () => {
