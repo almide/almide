@@ -9,6 +9,12 @@ use almide_ir::{IrExpr, IrExprKind};
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
+/// A pipeline stage for stream fusion.
+enum PipelineStage<'a> {
+    Map(&'a IrExpr),    // lambda expr
+    Filter(&'a IrExpr), // lambda expr
+}
+
 impl FuncCompiler<'_> {
     /// Dispatch list closure calls (second half). Returns true if handled.
     pub(super) fn emit_list_closure_call2(&mut self, method: &str, args: &[IrExpr]) -> bool {
@@ -889,6 +895,101 @@ impl FuncCompiler<'_> {
                 let idx = self.scratch.alloc_i32();
                 let acc = self.scratch.alloc(acc_vt);
                 let is_inline_lambda = matches!(&args[2].kind, almide_ir::IrExprKind::Lambda { .. });
+
+                // ── Stream Fusion: detect map/filter pipeline feeding into fold ──
+                let pipeline = self.detect_pipeline(&args[0]);
+                if !pipeline.is_empty() && is_inline_lambda {
+                    // Fused pipeline: iterate source, apply stages inline, fold
+                    let (source_expr, stages) = self.extract_pipeline(&args[0]);
+                    self.emit_expr(source_expr);
+                    wasm!(self.func, { local_set(list_ptr); });
+                    let source_elem_ty = self.resolve_list_elem(source_expr, None);
+                    let source_elem_size = values::byte_size(&source_elem_ty);
+                    self.emit_expr(&args[1]);
+                    wasm!(self.func, { local_set(acc); });
+                    wasm!(self.func, {
+                        local_get(list_ptr); i32_load(0); local_set(len);
+                        i32_const(0); local_set(idx);
+                        block_empty; loop_empty;
+                    });
+                    let depth_guard = self.depth_push_n(2);
+                    wasm!(self.func, {
+                        local_get(idx); local_get(len); i32_ge_u; br_if(1);
+                    });
+                    // Load source element
+                    let mut cur_ty = source_elem_ty.clone();
+                    let cur_vt = values::ty_to_valtype(&cur_ty).unwrap_or(ValType::I32);
+                    let cur_local = self.scratch.alloc(cur_vt);
+                    wasm!(self.func, {
+                        local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_get(idx); i32_const(source_elem_size as i32); i32_mul; i32_add;
+                    });
+                    self.emit_load_at(&cur_ty, 0);
+                    wasm!(self.func, { local_set(cur_local); });
+                    // Apply each pipeline stage
+                    let mut skip_label_depth = 0u32;
+                    for stage in &stages {
+                        match stage {
+                            PipelineStage::Map(lambda) => {
+                                if let almide_ir::IrExprKind::Lambda { params, body, .. } = &lambda.kind {
+                                    if let Some((vid, _)) = params.first() {
+                                        self.var_map.insert(vid.0, cur_local);
+                                    }
+                                    self.emit_expr(body);
+                                    wasm!(self.func, { local_set(cur_local); });
+                                    if let Some((vid, _)) = params.first() {
+                                        self.var_map.remove(&vid.0);
+                                    }
+                                    cur_ty = body.ty.clone();
+                                }
+                            }
+                            PipelineStage::Filter(lambda) => {
+                                if let almide_ir::IrExprKind::Lambda { params, body, .. } = &lambda.kind {
+                                    if let Some((vid, _)) = params.first() {
+                                        self.var_map.insert(vid.0, cur_local);
+                                    }
+                                    self.emit_expr(body);
+                                    if let Some((vid, _)) = params.first() {
+                                        self.var_map.remove(&vid.0);
+                                    }
+                                    // If false, skip to next iteration (idx++ then br to loop)
+                                    wasm!(self.func, {
+                                        i32_eqz;
+                                        if_empty;
+                                          local_get(idx); i32_const(1); i32_add; local_set(idx);
+                                          br(1); // br to loop_empty (if=@0, loop=@1)
+                                        end;
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    // Apply fold body with cur_local as element
+                    if let almide_ir::IrExprKind::Lambda { params, body, .. } = &args[2].kind {
+                        let acc_param = params.first().map(|(v, _)| *v);
+                        let elem_param = params.get(1).map(|(v, _)| *v);
+                        if let Some(vid) = acc_param { self.var_map.insert(vid.0, acc); }
+                        if let Some(vid) = elem_param { self.var_map.insert(vid.0, cur_local); }
+                        self.emit_expr(body);
+                        wasm!(self.func, { local_set(acc); });
+                        if let Some(vid) = acc_param { self.var_map.remove(&vid.0); }
+                        if let Some(vid) = elem_param { self.var_map.remove(&vid.0); }
+                    }
+                    self.scratch.free(cur_local, cur_vt);
+                    wasm!(self.func, {
+                        local_get(idx); i32_const(1); i32_add; local_set(idx);
+                        br(0);
+                    });
+                    self.depth_pop(depth_guard);
+                    wasm!(self.func, { end; end; local_get(acc); });
+                    self.scratch.free(acc, acc_vt);
+                    self.scratch.free_i32(idx);
+                    self.scratch.free_i32(len);
+                    self.scratch.free_i32(closure);
+                    self.scratch.free_i32(list_ptr);
+                    return true; // early return — fused pipeline handled
+                }
+
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(list_ptr); });
                 self.emit_expr(&args[1]);
@@ -970,6 +1071,76 @@ impl FuncCompiler<'_> {
             _ => return false,
         }
         true
+    }
+
+    // ── Stream Fusion helpers ──
+
+    /// Detect fusible pipeline stages in a list expression.
+    /// Returns non-empty vec if the expr is a chain of list.map/filter calls.
+    fn detect_pipeline(&self, expr: &IrExpr) -> Vec<&str> {
+        let mut stages = Vec::new();
+        let mut cur = expr;
+        loop {
+            if let Some((op, fn_arg, source)) = self.match_list_pipeline_stage(cur) {
+                if !matches!(&fn_arg.kind, IrExprKind::Lambda { .. }) {
+                    break;
+                }
+                stages.push(op);
+                cur = source;
+            } else {
+                break;
+            }
+        }
+        stages
+    }
+
+    fn extract_pipeline<'b>(&self, expr: &'b IrExpr) -> (&'b IrExpr, Vec<PipelineStage<'b>>) {
+        let mut stages = Vec::new();
+        let mut cur = expr;
+        loop {
+            if let Some((op, fn_arg, source)) = self.match_list_pipeline_stage(cur) {
+                if !matches!(&fn_arg.kind, IrExprKind::Lambda { .. }) {
+                    break;
+                }
+                match op {
+                    "map" => stages.push(PipelineStage::Map(fn_arg)),
+                    "filter" => stages.push(PipelineStage::Filter(fn_arg)),
+                    _ => break,
+                }
+                cur = source;
+            } else {
+                break;
+            }
+        }
+        stages.reverse();
+        (cur, stages)
+    }
+
+    /// Match a list.map or list.filter call, handling both Module and RuntimeCall forms.
+    /// Returns (op_name, fn_arg, source_list) if matched.
+    fn match_list_pipeline_stage<'b>(&self, expr: &'b IrExpr) -> Option<(&'static str, &'b IrExpr, &'b IrExpr)> {
+        match &expr.kind {
+            IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. }
+                if module.as_str() == "list" && args.len() >= 2 =>
+            {
+                match func.as_str() {
+                    "map" => Some(("map", &args[1], &args[0])),
+                    "filter" => Some(("filter", &args[1], &args[0])),
+                    _ => None,
+                }
+            }
+            IrExprKind::RuntimeCall { symbol, args } if args.len() >= 2 => {
+                let s = symbol.as_str();
+                if s.contains("list_map") {
+                    Some(("map", &args[1], &args[0]))
+                } else if s.contains("list_filter") {
+                    Some(("filter", &args[1], &args[0]))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Emit list.map(list, fn) → new list with fn applied to each element.
