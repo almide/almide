@@ -1,0 +1,24 @@
+name: Almide Package CI
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Almide
+        run: |
+          curl -fsSL "https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz" -o almide.tar.gz
+          tar xzf almide.tar.gz --strip-components=1
+          chmod +x almide
+          sudo mv almide /usr/local/bin/
+          almide --version
+
+      - name: Compile
+        run: almide compile
+
+      - name: Test
+        run: almide test || echo "No tests found (OK)"

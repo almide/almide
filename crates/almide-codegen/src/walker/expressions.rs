@@ -463,7 +463,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .map(|(id, _ty)| ctx.var_name(*id).to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            let mut body_str = render_expr(ctx, body);
+            let mut body_str = if let IrExprKind::Var { id } = &body.kind {
+                if ctx.ann.is_rc_cow(id) {
+                    format!("(*{}).clone()", ctx.var_name(*id))
+                } else { render_expr(ctx, body) }
+            } else { render_expr(ctx, body) };
             // Nested lambda: wrap in Box for languages that need it (template returns identity in TS)
             if matches!(&body.kind, IrExprKind::Lambda { .. }) {
                 body_str = ctx.templates.render_with("box_wrap", None, &[], &[("inner", body_str.as_str())])
@@ -1072,6 +1076,11 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
         let needs_box = ctx.ann.recursive_enums.contains(enum_name)
             && (ty_contains_name(&a.ty, enum_name)
                 || ctx.ann.boxed_fields.contains(&(ctor_name.to_string(), format!("{}", i))));
+        // Unwrap RcCow for var bindings used as variant constructor args.
+        let is_rc_cow_var = matches!(&a.kind, IrExprKind::Var { id } if ctx.ann.is_rc_cow(id));
+        let rendered = if is_rc_cow_var {
+            format!("{}.into_inner()", rendered)
+        } else { rendered };
         if needs_box {
             format!("Box::new({})", rendered)
         } else {

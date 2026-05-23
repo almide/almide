@@ -432,13 +432,15 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             }
         }
     }
-    // Classify function-local `var` bindings of non-Copy types as RcCow.
-    // Scan IR Bind statements (not VarTable) because use_count demotes
-    // unused-assigned vars from Var to Let. We need the original mutability.
+    // Classify function-local `var` bindings:
+    //   LocalMut (let mut T)  — not captured by closures, no RcCow overhead
+    //   RcCow                 — captured by a lambda, needs COW semantics
+    //
+    // Scan IR Bind statements for `var` of non-Copy types, then check if
+    // any lambda in the same function captures that var.
     {
         use almide_ir::annotations::VarStorage;
         let mut exclude: std::collections::HashSet<u32> = std::collections::HashSet::new();
-        // Exclude module-level vars and function params
         for tl in &program.top_lets {
             if tl.mutable { exclude.insert(tl.var.0); }
         }
@@ -455,6 +457,8 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                 for p in &func.params { exclude.insert(p.var.0); }
             }
         }
+
+        // Phase 1: Collect all non-Copy `var` bindings
         struct VarBindCollector { vars: std::collections::HashSet<u32> }
         impl almide_ir::visit::IrVisitor for VarBindCollector {
             fn visit_stmt(&mut self, stmt: &IrStmt) {
@@ -479,10 +483,60 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                 collector.visit_expr(&func.body);
             }
         }
+
+        // Phase 2: Find vars captured by lambdas
+        struct CaptureCollector {
+            captured: std::collections::HashSet<u32>,
+            lambda_depth: u32,
+            lambda_locals: Vec<std::collections::HashSet<u32>>,
+        }
+        impl almide_ir::visit::IrVisitor for CaptureCollector {
+            fn visit_expr(&mut self, expr: &IrExpr) {
+                match &expr.kind {
+                    IrExprKind::Lambda { params, body, .. } => {
+                        self.lambda_depth += 1;
+                        let mut locals = std::collections::HashSet::new();
+                        for (id, _) in params { locals.insert(id.0); }
+                        self.lambda_locals.push(locals);
+                        almide_ir::visit::walk_expr(self, body);
+                        self.lambda_locals.pop();
+                        self.lambda_depth -= 1;
+                    }
+                    IrExprKind::Var { id } if self.lambda_depth > 0 => {
+                        // Only capture if var is NOT defined inside the current lambda
+                        let is_local = self.lambda_locals.iter().any(|s| s.contains(&id.0));
+                        if !is_local {
+                            self.captured.insert(id.0);
+                        }
+                    }
+                    _ => almide_ir::visit::walk_expr(self, expr),
+                }
+            }
+            fn visit_stmt(&mut self, stmt: &IrStmt) {
+                // Track vars defined inside lambdas
+                if self.lambda_depth > 0 {
+                    if let IrStmtKind::Bind { var, .. } = &stmt.kind {
+                        if let Some(locals) = self.lambda_locals.last_mut() {
+                            locals.insert(var.0);
+                        }
+                    }
+                }
+                almide_ir::visit::walk_stmt(self, stmt);
+            }
+        }
+        let mut cap = CaptureCollector { captured: std::collections::HashSet::new(), lambda_depth: 0, lambda_locals: Vec::new() };
+        for func in &program.functions { cap.visit_expr(&func.body); }
+        for module in &program.modules {
+            for func in &module.functions { cap.visit_expr(&func.body); }
+        }
+
+        // Phase 3: Only vars captured by lambdas get RcCow; rest are LocalMut (let mut)
         for var_id in collector.vars {
-            if !exclude.contains(&var_id) {
+            if exclude.contains(&var_id) { continue; }
+            if cap.captured.contains(&var_id) {
                 ann.var_storage.insert(VarId(var_id), VarStorage::RcCow);
             }
+            // LocalMut: no entry in var_storage → walker emits plain `let mut T`
         }
     }
     let mut ctx = RenderContext {
