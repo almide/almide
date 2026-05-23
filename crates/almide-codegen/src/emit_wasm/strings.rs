@@ -18,8 +18,9 @@ impl WasmEmitter {
         let bytes = s.as_bytes();
         let len = bytes.len() as u32;
 
-        // Write [len:i32 LE][data:u8...]
+        // Write [len:i32 LE][cap:i32 LE][data:u8...]
         self.data_bytes.extend_from_slice(&len.to_le_bytes());
+        self.data_bytes.extend_from_slice(&len.to_le_bytes()); // cap = len for interned strings
         self.data_bytes.extend_from_slice(bytes);
 
         self.strings.insert(s.to_string(), offset);

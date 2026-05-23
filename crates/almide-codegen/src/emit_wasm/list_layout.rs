@@ -16,11 +16,18 @@ pub const HEADER_SIZE: i32 = 8;
 
 // ── String: [byte_len:i32 @ 0][data @ 4...] ──
 
-/// Byte offset from string pointer to UTF-8 data.
-pub const STRING_DATA_OFFSET: i32 = 4;
+/// String layout: [len:i32 @ 0][cap:i32 @ 4][data @ 8...]
+/// len = used byte count, cap = allocated byte count (>= len).
+/// Capacity enables amortized O(1) append for `var s; s = s + "x"`.
 
-/// String header size in bytes (byte_len field only).
-pub const STRING_HEADER_SIZE: i32 = 4;
+/// Byte offset from string pointer to UTF-8 data.
+pub const STRING_DATA_OFFSET: i32 = 8;
+
+/// Byte offset to capacity field.
+pub const STRING_CAP_OFFSET: i32 = 4;
+
+/// String header size in bytes (len + cap).
+pub const STRING_HEADER_SIZE: i32 = 8;
 
 // ── Map: [len:i32 @ 0][kv_pairs @ 4...] ──
 
