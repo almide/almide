@@ -16,3 +16,15 @@ sort 10k:
 
 Root cause: WASM list.sort uses insertion sort O(n²).
 Fix: implement merge sort or quick sort in emit_wasm/calls_list_helpers.rs
+
+=== WASM comparison v0.23.1 (post merge sort fix) ===
+
+Almide WASM vs Rust WASM (wasmtime):
+  fib(35) + sort 100k + map 100k: Almide ~0.15s vs Rust ~0.1s (1.5x — OK)
+  
+Remaining WASM bottlenecks:
+  string concat: O(n²) — WASM has no string.push(mut) in-place mutation
+  map insert: O(n²) — WASM has no map.insert(mut) in-place mutation
+  
+Root cause: WASM emitter uses immutable data structures.
+mut operations (string.push, map.insert) need WASM-level COW or mutable heap.
