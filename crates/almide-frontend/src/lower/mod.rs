@@ -255,6 +255,11 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         }
     }
 
+    // Pre-pass: collect file-scoped test where clauses
+    let file_test_wheres: Vec<ast::TestWhere> = prog.decls.iter().filter_map(|d| {
+        if let ast::Decl::TestWhereDef { clauses, .. } = d { Some(clauses.clone()) } else { None }
+    }).flatten().collect();
+
     for (decl_idx, decl) in prog.decls.iter().enumerate() {
         let doc = prog.doc_map.get(decl_idx).cloned().flatten();
         let blank_lines = prog.blank_lines_map.get(decl_idx).copied().unwrap_or(0);
@@ -297,14 +302,15 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                 let tl_def_id = ctx.def_map.get(&sym(name)).copied();
                 top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, mutable: *mutable, doc, blank_lines_before: blank_lines, def_id: tl_def_id });
             }
+            ast::Decl::TestWhereDef { .. } => {} // collected in pre-pass below
             ast::Decl::Test { name, body, where_clauses, .. } => {
                 let cases: Vec<_> = where_clauses.iter()
                     .filter_map(|wc| match wc { ast::TestWhere::Case { name, bindings } => Some((name.clone(), bindings.clone())), _ => None })
                     .collect();
-                let top_binds: Vec<_> = where_clauses.iter()
+                let mut top_binds: Vec<_> = file_test_wheres.clone();
+                top_binds.extend(where_clauses.iter()
                     .filter(|wc| !matches!(wc, ast::TestWhere::Case { .. }))
-                    .cloned()
-                    .collect();
+                    .cloned());
                 if cases.is_empty() {
                     let test_fn = lower_test_with_where(&mut ctx, name, body, &top_binds);
                     functions.push(test_fn);
@@ -822,16 +828,18 @@ fn lower_where_override(ctx: &mut LowerCtx, path: &[Sym], value: &ast::Expr, stm
     if let IrExprKind::Lambda { params: ir_params, body, .. } = &mut ir_val.kind {
         if ir_params.iter().any(|(_, ty)| matches!(ty, Ty::Unknown)) {
             if let Some(Ty::Fn { params: sig_tys, ret }) = resolve_target_fn_type(ctx, path) {
+                let erased: Vec<Ty> = sig_tys.iter().map(erase_typevars).collect();
                 for (i, (var_id, var_ty)) in ir_params.iter_mut().enumerate() {
-                    if let Some(concrete) = sig_tys.get(i) {
+                    if let Some(concrete) = erased.get(i) {
                         if !matches!(concrete, Ty::Unknown) {
                             *var_ty = concrete.clone();
                             ctx.var_table.entries[var_id.0 as usize].ty = concrete.clone();
                         }
                     }
                 }
-                if matches!(body.ty, Ty::Unknown) { body.ty = *ret; }
-                ir_val.ty = Ty::Fn { params: sig_tys, ret: Box::new(body.ty.clone()) };
+                let erased_ret = erase_typevars(&ret);
+                if matches!(body.ty, Ty::Unknown) { body.ty = erased_ret.clone(); }
+                ir_val.ty = Ty::Fn { params: erased, ret: Box::new(body.ty.clone()) };
             }
         }
     }
@@ -858,11 +866,11 @@ fn lower_where_call_response(ctx: &mut LowerCtx, target: &[Sym], params: &[ast::
     // the lambda's IR param VarIds so WASM codegen gets correct types.
     let original_fn_ty = resolve_target_fn_type(ctx, target);
     let sig_param_tys: Vec<Ty> = match &original_fn_ty {
-        Some(Ty::Fn { params: ptys, .. }) => ptys.clone(),
+        Some(Ty::Fn { params: ptys, .. }) => ptys.iter().map(erase_typevars).collect(),
         _ => params.iter().map(|_| Ty::Unknown).collect(),
     };
     let sig_ret_ty = match &original_fn_ty {
-        Some(Ty::Fn { ret, .. }) => (**ret).clone(),
+        Some(Ty::Fn { ret, .. }) => erase_typevars(ret),
         _ => Ty::Unknown,
     };
     // Patch lambda IR: update param VarIds in var_table with concrete types
@@ -912,6 +920,19 @@ fn resolve_target_fn_type(ctx: &LowerCtx, target: &[Sym]) -> Option<Ty> {
         }
     }
     None
+}
+
+/// Erase TypeVars from a type — replace with Unknown so Rust emits `_` instead of `A`.
+fn erase_typevars(ty: &Ty) -> Ty {
+    match ty {
+        Ty::TypeVar(_) => Ty::Unknown,
+        Ty::Fn { params, ret } => Ty::Fn {
+            params: params.iter().map(erase_typevars).collect(),
+            ret: Box::new(erase_typevars(ret)),
+        },
+        Ty::Applied(tc, args) => Ty::Applied(tc.clone(), args.iter().map(erase_typevars).collect()),
+        other => other.clone(),
+    }
 }
 
 fn where_override_name(path: &[Sym]) -> String {

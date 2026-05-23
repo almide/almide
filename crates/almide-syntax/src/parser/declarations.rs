@@ -180,6 +180,10 @@ impl Parser {
                 return self.parse_top_let(Visibility::Public, true);
             }
             if self.check(TokenType::Local) || self.check(TokenType::Mod) {
+                // local test where { ... } / mod test where { ... }
+                if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Test) {
+                    return self.parse_test_where_def();
+                }
                 if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Type) {
                     return self.parse_type_decl();
                 }
@@ -610,6 +614,31 @@ impl Parser {
         self.expect(TokenType::Strict)?;
         let mode = self.expect_ident()?.to_string();
         Ok(Decl::Strict { mode, span: Some(span) })
+    }
+
+    fn parse_test_where_def(&mut self) -> Result<Decl, String> {
+        use crate::ast::{TestWhereScope, TestWhere};
+        let span = self.current_span();
+        let scope = if self.check(TokenType::Local) { self.advance(); TestWhereScope::Local }
+            else { self.advance(); TestWhereScope::Module }; // Mod
+        self.expect(TokenType::Test)?;
+        // consume contextual 'where'
+        if self.current().token_type == TokenType::Ident && self.current().value == "where" {
+            self.advance();
+        }
+        self.expect(TokenType::LBrace)?;
+        let mut clauses = Vec::new();
+        self.skip_newlines();
+        while self.current().token_type != TokenType::RBrace && self.current().token_type != TokenType::EOF {
+            let clause = self.parse_test_where_binding()?;
+            clauses.push(clause);
+            while self.current().token_type == TokenType::Semicolon
+                || self.current().token_type == TokenType::Comma
+                || self.current().token_type == TokenType::Newline
+            { self.advance(); }
+        }
+        self.expect(TokenType::RBrace)?;
+        Ok(Decl::TestWhereDef { scope, clauses, span: Some(span) })
     }
 
     fn parse_test_decl(&mut self) -> Result<Decl, String> {

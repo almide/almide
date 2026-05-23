@@ -555,6 +555,10 @@ impl Checker {
                 self.env.can_call_effect = prev_call;
                 self.env.pop_scope();
             }
+            ast::Decl::TestWhereDef { clauses, .. } => {
+                let wcs = clauses.clone();
+                for wc in &wcs { self.infer_test_where_inner(wc); }
+            }
             ast::Decl::TopLet { name, value, mutable, .. } => {
                 if *mutable { self.env.mutable_vars.insert(sym(name)); }
                 let ity = self.infer_expr(value);
