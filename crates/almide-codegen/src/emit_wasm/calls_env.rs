@@ -21,10 +21,13 @@ impl FuncCompiler<'_> {
             }
             "unix_timestamp" => {
                 // WASI clock_time_get(id=0 realtime, precision=0, time_ptr)
-                // Returns nanoseconds as i64, convert to seconds
+                // Returns nanoseconds as i64, convert to seconds.
+                // alloc returns (8n+4), need 8-byte aligned for i64 store.
                 let time_ptr = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
+                    i32_const(16); call(self.emitter.rt.alloc);
+                    i32_const(7); i32_add; i32_const(-8); i32_and;
+                    local_set(time_ptr);
                     i32_const(0); // clock_id: realtime
                     i64_const(0); // precision
                     local_get(time_ptr);
@@ -37,10 +40,13 @@ impl FuncCompiler<'_> {
             }
             "millis" => {
                 // WASI clock_time_get(id=0 realtime, precision=0, time_ptr)
-                // Returns nanoseconds as i64, convert to milliseconds
+                // Returns nanoseconds as i64, convert to milliseconds.
+                // alloc returns (8n+4), need 8-byte aligned for i64 store.
                 let time_ptr = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
+                    i32_const(16); call(self.emitter.rt.alloc);
+                    i32_const(7); i32_add; i32_const(-8); i32_and;
+                    local_set(time_ptr);
                     i32_const(0); // clock_id: realtime
                     i64_const(0); // precision
                     local_get(time_ptr);

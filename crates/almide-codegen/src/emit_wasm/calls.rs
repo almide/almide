@@ -588,11 +588,12 @@ impl FuncCompiler<'_> {
                         self.emit_expr(&args[1]); // context msg
                         wasm!(self.func, {
                               local_set(s2);
-                              // Build ": " separator
-                              i32_const(6); call(self.emitter.rt.alloc); local_set(s3);
+                              // Build ": " separator [len=2][cap=2][':'][' ']
+                              i32_const(super::list_layout::STRING_HEADER_SIZE + 2); call(self.emitter.rt.alloc); local_set(s3);
                               local_get(s3); i32_const(2); i32_store(0);
-                              local_get(s3); i32_const(58); i32_store8(4);
-                              local_get(s3); i32_const(32); i32_store8(5);
+                              local_get(s3); i32_const(2); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
+                              local_get(s3); i32_const(58); i32_store8(super::list_layout::STRING_DATA_OFFSET as u32);
+                              local_get(s3); i32_const(32); i32_store8(super::list_layout::STRING_DATA_OFFSET as u32 + 1);
                               // concat: msg + ": " + original
                               local_get(s2); local_get(s3); call(self.emitter.rt.concat_str);
                               local_get(s1); call(self.emitter.rt.concat_str);
@@ -618,10 +619,11 @@ impl FuncCompiler<'_> {
                         let s1 = self.scratch.alloc_i32();
                         wasm!(self.func, {
                             local_set(s);
-                            i32_const(6); call(self.emitter.rt.alloc); local_set(s1);
+                            i32_const(super::list_layout::STRING_HEADER_SIZE + 2); call(self.emitter.rt.alloc); local_set(s1);
                             local_get(s1); i32_const(2); i32_store(0);
-                            local_get(s1); i32_const(58); i32_store8(4); // ':'
-                            local_get(s1); i32_const(32); i32_store8(5); // ' '
+                            local_get(s1); i32_const(2); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
+                            local_get(s1); i32_const(58); i32_store8(super::list_layout::STRING_DATA_OFFSET as u32); // ':'
+                            local_get(s1); i32_const(32); i32_store8(super::list_layout::STRING_DATA_OFFSET as u32 + 1); // ' '
                             local_get(s); local_get(s1); call(self.emitter.rt.concat_str);
                         });
                         self.emit_expr(&args[1]);

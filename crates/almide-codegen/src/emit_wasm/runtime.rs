@@ -481,17 +481,17 @@ fn compile_heap_restore(emitter: &mut WasmEmitter) {
 }
 
 /// __println_str(ptr: i32)
-/// Prints string at ptr ([len:i32][data:u8...]) followed by newline via WASI fd_write.
+/// Prints string at ptr ([len:i32][cap:i32][data@8]) followed by newline via WASI fd_write.
 fn compile_println_str(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.println_str];
     let mut f = Function::new([]);
 
     // --- Write the string ---
-    // iov[0].buf = ptr + 4  (skip length prefix)
+    // iov[0].buf = ptr + STRING_DATA_OFFSET  (skip len+cap header)
     wasm!(f, {
         i32_const(0);
         local_get(0);
-        i32_const(4);
+        i32_const(super::list_layout::STRING_DATA_OFFSET);
         i32_add;
         i32_store(0);
     });
@@ -657,23 +657,27 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         local_set(5);
     });
 
-    // $result = __alloc(4 + $len)
+    // $result = __alloc(STRING_HEADER_SIZE + $len)
+    // String layout: [len:i32][cap:i32][data@8]
     wasm!(f, {
         local_get(5);
-        i32_const(4);
+        i32_const(super::list_layout::STRING_HEADER_SIZE);
         i32_add;
         call(emitter.rt.alloc);
         local_set(6);
     });
 
-    // mem32[$result] = $len
+    // mem32[$result+0] = $len, mem32[$result+4] = $len (cap = len)
     wasm!(f, {
         local_get(6);
         local_get(5);
         i32_store(0);
+        local_get(6);
+        local_get(5);
+        i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
     });
 
-    // memcpy: copy $len bytes from $start to $result+4
+    // memcpy: copy $len bytes from $start to $result+STRING_DATA_OFFSET
     wasm!(f, {
         i32_const(0);
         local_set(7);
@@ -684,10 +688,10 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         i32_ge_u;
         br_if(1);
     });
-    // mem[$result + 4 + $i] = mem[$start + $i]
+    // mem[$result + STRING_DATA_OFFSET + $i] = mem[$start + $i]
     wasm!(f, {
         local_get(6);
-        i32_const(4);
+        i32_const(super::list_layout::STRING_DATA_OFFSET);
         i32_add;
         local_get(7);
         i32_add;
@@ -777,15 +781,17 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
         end; end;
     });
     // Build frac string from buf[0..count]
+    // String layout: [len:i32][cap:i32][data@8]
     wasm!(f, {
-        i32_const(4); local_get(5); i32_add;
+        i32_const(super::list_layout::STRING_HEADER_SIZE); local_get(5); i32_add;
         call(emitter.rt.alloc); local_set(2);
         local_get(2); local_get(5); i32_store(0);
+        local_get(2); local_get(5); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
         // Copy digits
         i32_const(0); local_set(6);
         block_empty; loop_empty;
           local_get(6); local_get(5); i32_ge_u; br_if(1);
-          local_get(2); i32_const(4); i32_add; local_get(6); i32_add;
+          local_get(2); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(6); i32_add;
           local_get(4); local_get(6); i32_add; i32_load8_u(0);
           i32_store8(0);
           local_get(6); i32_const(1); i32_add; local_set(6);

@@ -160,15 +160,16 @@ impl FuncCompiler<'_> {
             }
             "now" => {
                 // Call WASI clock_time_get(id=0 realtime, precision=0, time_ptr)
-                // Returns nanoseconds as i64 at time_ptr, convert to seconds
+                // Returns nanoseconds as i64 at time_ptr, convert to seconds.
+                // alloc returns (8n+4), need 8-byte aligned for i64 store.
                 let time_ptr = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    // Allocate 8 bytes for i64 result (allocator guarantees 8-byte alignment)
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
-                    // clock_time_get(id=0, precision=0, time_ptr)
+                    i32_const(16); call(self.emitter.rt.alloc);
+                    i32_const(7); i32_add; i32_const(-8); i32_and;
+                    local_set(time_ptr);
                     i32_const(0); // clock_id: realtime
                     i64_const(0); // precision
-                    local_get(time_ptr); // output pointer (8-byte aligned)
+                    local_get(time_ptr);
                     call(self.emitter.rt.clock_time_get);
                     drop; // discard error code
                     // Load i64 nanoseconds, convert to seconds
@@ -438,6 +439,26 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(yr);
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(s);
+            }
+            "monotonic_ns" => {
+                // WASI clock_time_get(id=1 monotonic, precision=1, time_ptr)
+                // Returns nanoseconds as i64.
+                // alloc returns (8n+4) which is 4-byte aligned, but
+                // clock_time_get needs 8-byte aligned output ptr.
+                // Allocate 16 bytes so we can round up to 8-byte boundary.
+                let time_ptr = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(16); call(self.emitter.rt.alloc);
+                    i32_const(7); i32_add; i32_const(-8); i32_and;
+                    local_set(time_ptr);
+                    i32_const(1); // clock_id: monotonic
+                    i64_const(1); // precision: 1ns
+                    local_get(time_ptr);
+                    call(self.emitter.rt.clock_time_get);
+                    drop; // discard error code
+                    local_get(time_ptr); i64_load(0);
+                });
+                self.scratch.free_i32(time_ptr);
             }
             _ => panic!(
                 "[ICE] emit_wasm: no WASM dispatch for `datetime.{}` — \

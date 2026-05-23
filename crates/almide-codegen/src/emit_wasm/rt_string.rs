@@ -5,7 +5,7 @@
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
-use super::list_layout::{DATA_OFFSET, HEADER_SIZE, STRING_DATA_OFFSET, STRING_HEADER_SIZE};
+use super::list_layout::{DATA_OFFSET, HEADER_SIZE, STRING_DATA_OFFSET, STRING_HEADER_SIZE, STRING_CAP_OFFSET};
 
 /// Register all string runtime function signatures.
 pub fn register(emitter: &mut WasmEmitter) {
@@ -676,11 +676,12 @@ fn compile_chars(emitter: &mut WasmEmitter) {
         i32_const(0); local_set(3);
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          i32_const(5); call(emitter.rt.alloc); local_set(4);
+          i32_const(STRING_HEADER_SIZE + 1); call(emitter.rt.alloc); local_set(4);
           local_get(4); i32_const(1); i32_store(0);
+          local_get(4); i32_const(1); i32_store(STRING_CAP_OFFSET as u32, 0);
           local_get(4);
           local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add; i32_load8_u(0);
-          i32_store8(4);
+          i32_store8(STRING_DATA_OFFSET as u32);
           local_get(2); i32_const(DATA_OFFSET); i32_add; local_get(3); i32_const(4); i32_mul; i32_add;
           local_get(4); i32_store(0);
           local_get(3); i32_const(1); i32_add; local_set(3);
@@ -702,9 +703,10 @@ fn compile_lines(emitter: &mut WasmEmitter) {
           local_get(1); i32_const(0); i32_store(0);
           local_get(1);
         else_;
-          i32_const(5); call(emitter.rt.alloc); local_set(1);
+          i32_const(STRING_HEADER_SIZE + 1); call(emitter.rt.alloc); local_set(1);
           local_get(1); i32_const(1); i32_store(0);
-          local_get(1); i32_const(10); i32_store8(4);
+          local_get(1); i32_const(1); i32_store(STRING_CAP_OFFSET as u32, 0);
+          local_get(1); i32_const(10); i32_store8(STRING_DATA_OFFSET as u32);
           local_get(0); local_get(1); call(emitter.rt.string.split);
         end;
         end;
