@@ -292,17 +292,11 @@ impl FuncCompiler<'_> {
             // alloc tmp (same size, no header needed — just data)
             local_get(len); i32_const(es as i32); i32_mul;
             call(self.emitter.rt.alloc); local_set(tmp);
-            // copy data
-            i32_const(0); local_set(i);
-            block_empty; loop_empty;
-              local_get(i); local_get(len); i32_ge_u; br_if(1);
-              local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
-              local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
-        });
-        kind.emit_copy_one(&mut self.func);
-        wasm!(self.func, {
-              local_get(i); i32_const(1); i32_add; local_set(i); br(0);
-            end; end;
+            // bulk copy data with memory.copy
+            local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+            local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+            local_get(len); i32_const(es as i32); i32_mul;
+            memory_copy;
         });
 
         // 2. Bottom-up merge sort.
