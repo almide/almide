@@ -13,11 +13,12 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_map_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
         match method {
             "new" => {
-                // map.new() → empty map [len=0]
+                // map.new() → empty map [len=0][cap=0]
                 let result = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(super::list_layout::MAP_HEADER_SIZE); call(self.emitter.rt.alloc); local_set(result);
-                    local_get(result); i32_const(0); i32_store(0);
+                    local_get(result); i32_const(0); i32_store(0);    // len=0
+                    local_get(result); i32_const(0); i32_store(super::list_layout::MAP_CAP_OFFSET as u32); // cap=0
                     local_get(result);
                 });
                 self.scratch.free_i32(result);
@@ -243,7 +244,8 @@ impl FuncCompiler<'_> {
                     // Alloc new map
                     i32_const(super::list_layout::MAP_HEADER_SIZE); local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(new_map);
-                    local_get(new_map); local_get(i); i32_store(0);
+                    local_get(new_map); local_get(i); i32_store(0);  // len
+                    local_get(new_map); local_get(i); i32_store(super::list_layout::MAP_CAP_OFFSET as u32); // cap = len
                 });
                 // Copy old entries, replacing found_idx
                 wasm!(self.func, {
@@ -318,6 +320,144 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(new_map);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(found_idx);
+                self.scratch.free_i32(old_len);
+                self.scratch.free(val_scratch, vt);
+                self.scratch.free_i64(sk_i64);
+                self.scratch.free_i32(sk_i32);
+                self.scratch.free_i32(map_ptr);
+            }
+            "set_inplace" => {
+                // In-place upsert: no alloc if key exists or capacity allows.
+                // Returns the (possibly grown) map pointer.
+                let (ks, vs) = self.map_kv_sizes(&args[0].ty);
+                let key_ty = self.map_key_ty(&args[0].ty);
+                let val_ty = self.map_val_ty(&args[0].ty);
+                let entry = ks + vs;
+                let vt = values::ty_to_valtype(&val_ty).unwrap_or(ValType::I32);
+                let map_ptr = self.scratch.alloc_i32();
+                let sk_i32 = self.scratch.alloc_i32();
+                let sk_i64 = self.scratch.alloc_i64();
+                let val_scratch = self.scratch.alloc(vt);
+                let old_len = self.scratch.alloc_i32();
+                let cap = self.scratch.alloc_i32();
+                let found_idx = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let new_map = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(map_ptr); });
+                self.emit_expr(&args[1]);
+                self.emit_search_key_store(&key_ty, sk_i32, sk_i64);
+                self.emit_expr(&args[2]);
+                wasm!(self.func, { local_set(val_scratch); });
+                wasm!(self.func, {
+                    local_get(map_ptr); i32_load(0); local_set(old_len);
+                    local_get(map_ptr); i32_load(super::list_layout::MAP_CAP_OFFSET as u32); local_set(cap);
+                    i32_const(-1); local_set(found_idx);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(old_len); i32_ge_u; br_if(1);
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
+                      local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
+                self.emit_key_eq(&key_ty);
+                wasm!(self.func, {
+                      if_empty; local_get(i); local_set(found_idx); end;
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(found_idx); i32_const(0); i32_ge_s;
+                    if_i32;
+                      // Key exists: overwrite value in-place
+                      local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
+                      local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
+                      i32_const(ks as i32); i32_add;
+                      local_get(val_scratch);
+                });
+                match vt {
+                    ValType::I64 => { wasm!(self.func, { i64_store(0); }); }
+                    ValType::F64 => { wasm!(self.func, { f64_store(0); }); }
+                    _ => { wasm!(self.func, { i32_store(0); }); }
+                }
+                wasm!(self.func, {
+                      local_get(map_ptr); // return same pointer
+                    else_;
+                      // Key not found: check capacity
+                      local_get(old_len); local_get(cap); i32_lt_u;
+                      if_i32;
+                        // Has room: append in-place
+                        local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
+                        local_get(old_len); i32_const(entry as i32); i32_mul; i32_add;
+                });
+                self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
+                self.emit_key_store(&key_ty, 0);
+                wasm!(self.func, {
+                        local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
+                        local_get(old_len); i32_const(entry as i32); i32_mul; i32_add;
+                        i32_const(ks as i32); i32_add;
+                        local_get(val_scratch);
+                });
+                match vt {
+                    ValType::I64 => { wasm!(self.func, { i64_store(0); }); }
+                    ValType::F64 => { wasm!(self.func, { f64_store(0); }); }
+                    _ => { wasm!(self.func, { i32_store(0); }); }
+                }
+                wasm!(self.func, {
+                        local_get(map_ptr);
+                        local_get(old_len); i32_const(1); i32_add;
+                        i32_store(0); // len++
+                        local_get(map_ptr);
+                      else_;
+                        // No room: grow (alloc new with 2x cap, copy, append)
+                        local_get(cap); i32_const(2); i32_mul; local_set(cap);
+                        local_get(cap); local_get(old_len); i32_const(1); i32_add; i32_lt_u;
+                        if_empty; local_get(old_len); i32_const(1); i32_add; local_set(cap); end;
+                        i32_const(super::list_layout::MAP_HEADER_SIZE);
+                        local_get(cap); i32_const(entry as i32); i32_mul; i32_add;
+                        call(self.emitter.rt.alloc); local_set(new_map);
+                        local_get(new_map); local_get(old_len); i32_const(1); i32_add; i32_store(0); // len
+                        local_get(new_map); local_get(cap); i32_store(super::list_layout::MAP_CAP_OFFSET as u32); // cap
+                        // Copy old entries
+                        i32_const(0); local_set(i);
+                        block_empty; loop_empty;
+                          local_get(i); local_get(old_len); i32_ge_u; br_if(1);
+                          local_get(new_map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
+                          local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                          local_get(map_ptr); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
+                          local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                });
+                self.emit_elem_copy_sized(entry);
+                wasm!(self.func, {
+                          local_get(i); i32_const(1); i32_add; local_set(i);
+                          br(0);
+                        end; end;
+                        // Append new entry
+                        local_get(new_map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
+                        local_get(old_len); i32_const(entry as i32); i32_mul; i32_add;
+                });
+                self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
+                self.emit_key_store(&key_ty, 0);
+                wasm!(self.func, {
+                        local_get(new_map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
+                        local_get(old_len); i32_const(entry as i32); i32_mul; i32_add;
+                        i32_const(ks as i32); i32_add;
+                        local_get(val_scratch);
+                });
+                match vt {
+                    ValType::I64 => { wasm!(self.func, { i64_store(0); }); }
+                    ValType::F64 => { wasm!(self.func, { f64_store(0); }); }
+                    _ => { wasm!(self.func, { i32_store(0); }); }
+                }
+                wasm!(self.func, {
+                        local_get(new_map);
+                      end;
+                    end;
+                });
+                self.scratch.free_i32(new_map);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(found_idx);
+                self.scratch.free_i32(cap);
                 self.scratch.free_i32(old_len);
                 self.scratch.free(val_scratch, vt);
                 self.scratch.free_i64(sk_i64);

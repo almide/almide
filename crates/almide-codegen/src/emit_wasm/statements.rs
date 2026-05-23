@@ -112,6 +112,16 @@ impl FuncCompiler<'_> {
             }
 
             IrStmtKind::Assign { var, value } => {
+                // Peephole: m = map.set(m, k, v) → in-place map upsert
+                if let Some(args) = Self::match_map_set_self(var, value) {
+                    if let Some(&local_idx) = self.var_map.get(&var.0) {
+                        let set_args = vec![args.0.clone(), args.1.clone(), args.2.clone()];
+                        self.emit_map_call("set_inplace", &set_args);
+                        wasm!(self.func, { local_set(local_idx); });
+                        return;
+                    }
+                }
+
                 // Peephole: s = s + "x" → string_append(s, "x") for O(1) amortized
                 if let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, left, right } = &value.kind {
                     if let IrExprKind::Var { id } = &left.kind {
@@ -929,5 +939,21 @@ fn scan_pattern(
             }
         }
         _ => {}
+    }
+}
+
+impl FuncCompiler<'_> {
+    /// Match `map.set(m, k, v)` where m is the same var being assigned.
+    fn match_map_set_self<'a>(var: &VarId, value: &'a IrExpr) -> Option<(&'a IrExpr, &'a IrExpr, &'a IrExpr)> {
+        let args = match &value.kind {
+            IrExprKind::RuntimeCall { symbol, args }
+                if symbol.as_str().contains("map_set") && args.len() == 3 => args,
+            IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. }
+                if module.as_str() == "map" && func.as_str() == "set" && args.len() == 3 => args,
+            _ => return None,
+        };
+        if matches!(&args[0].kind, IrExprKind::Var { id } if id == var) {
+            Some((&args[0], &args[1], &args[2]))
+        } else { None }
     }
 }
