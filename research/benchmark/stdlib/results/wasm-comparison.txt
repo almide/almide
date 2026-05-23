@@ -50,3 +50,17 @@ Options to fix:
    - Already done for Rust target (string.push)
 
 Recommendation: Option 1 (capacity-based layout) is the ideal long-term fix.
+
+=== Loop 2 results ===
+WASM map: still O(n) per set (full copy). Both map.set and map.insert
+use the same copy path in WASM. Needs WASM-level in-place upsert with
+capacity-based layout (already added header but no in-place logic yet).
+This is a large refactor — map.set WASM implementation needs capacity-aware
+rewrite (scan for existing key → overwrite or append with growth).
+Tracked as future work.
+
+Current WASM status:
+  ✅ fib: 1.4x Rust WASM
+  ✅ sort: 1.7x Rust WASM (merge sort)  
+  ✅ string concat: same as Rust WASM (capacity-based append)
+  ❌ map: ~13x Rust WASM (needs in-place upsert)

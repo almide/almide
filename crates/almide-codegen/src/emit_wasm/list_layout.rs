@@ -29,13 +29,17 @@ pub const STRING_CAP_OFFSET: i32 = 4;
 /// String header size in bytes (len + cap).
 pub const STRING_HEADER_SIZE: i32 = 8;
 
-// ── Map: [len:i32 @ 0][kv_pairs @ 4...] ──
+// ── Map: [len:i32 @ 0][cap:i32 @ 4][kv_pairs @ 8...] ──
+// cap = number of allocated kv slots (not bytes).
 
 /// Byte offset from map pointer to first key-value pair.
-pub const MAP_DATA_OFFSET: i32 = 4;
+pub const MAP_DATA_OFFSET: i32 = 8;
 
-/// Map header size in bytes (len field only).
-pub const MAP_HEADER_SIZE: i32 = 4;
+/// Byte offset to capacity field (number of kv slots).
+pub const MAP_CAP_OFFSET: i32 = 4;
+
+/// Map header size in bytes (len + cap).
+pub const MAP_HEADER_SIZE: i32 = 8;
 
 // ── Set: same layout as List (to_list returns identity) ──
 
