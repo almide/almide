@@ -708,6 +708,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
                 format!("&mut {}", render_expr(ctx, inner))
             } else if *as_str {
+                // String literal → bare &str in Rust, skip .to_string() allocation
+                if let IrExprKind::LitStr { value } = &inner.kind {
+                    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"")
+                        .replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r");
+                    return format!("\"{}\"", escaped);
+                }
                 format!("&*{}", render_expr(ctx, inner))
             } else {
                 format!("&{}", render_expr(ctx, inner))

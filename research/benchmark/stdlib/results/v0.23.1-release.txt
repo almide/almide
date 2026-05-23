@@ -1,0 +1,59 @@
+== Compute ==
+  fib(35): 22ms
+  sort 100k: 0ms
+
+== List ==
+  list.map 100k: 0ms
+  list.filter 100k: 0ms
+  list.fold 100k: 0ms
+  list.reverse 100k: 0ms
+  list.flatten 1k×100: 0ms
+
+== String ==
+  string.push 100k: 0ms
+  string.split 10k lines: 0ms
+  string.replace 10k: 0ms
+  string.contains 10k: 45ms
+  string interpolation 100k: 13ms
+
+== Bytes ==
+  bytes.push 100k: 0ms
+  bytes index r/w 100k: 0ms
+  bytes.slice 10k: 0ms
+
+== Map ==
+  map.insert 100k: 5ms
+  map.get 100k: 5ms
+  map.keys 100k: 5ms
+
+== Set ==
+  set.insert 100k: 7ms
+  set.contains 100k: 7ms
+
+== JSON ==
+  json.parse 10k: 9ms
+  json.stringify 10k: 18ms
+
+=== Summary ===
+  [ok] fib(35): 22ms
+  [OK] sort 100k: 0ms
+  [OK] list.map 100k: 0ms
+  [OK] list.filter 100k: 0ms
+  [OK] list.fold 100k: 0ms
+  [OK] list.reverse 100k: 0ms
+  [OK] list.flatten 1k×100: 0ms
+  [OK] string.push 100k: 0ms
+  [OK] string.split 10k lines: 0ms
+  [OK] string.replace 10k: 0ms
+  [ok] string.contains 10k: 45ms
+  [ok] string interpolation 100k: 13ms
+  [OK] bytes.push 100k: 0ms
+  [OK] bytes index r/w 100k: 0ms
+  [OK] bytes.slice 10k: 0ms
+  [ok] map.insert 100k: 5ms
+  [ok] map.get 100k: 5ms
+  [ok] map.keys 100k: 5ms
+  [ok] set.insert 100k: 7ms
+  [ok] set.contains 100k: 7ms
+  [ok] json.parse 10k: 9ms
+  [ok] json.stringify 10k: 18ms
