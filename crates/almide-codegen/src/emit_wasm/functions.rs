@@ -11,29 +11,31 @@ use super::statements::collect_locals;
 /// Check if a function body uses stdlib calls, closures, or complex operations
 /// that require the full scratch local pool.
 fn body_needs_scratch(body: &IrExpr) -> bool {
+    // Conservative: only return false for leaf expressions that definitely
+    // don't use scratch locals. Everything else gets full scratch capacity.
     match &body.kind {
-        IrExprKind::RuntimeCall { .. }
-        | IrExprKind::ClosureCreate { .. } | IrExprKind::Lambda { .. }
-        | IrExprKind::List { .. } | IrExprKind::EmptyMap | IrExprKind::MapLiteral { .. }
-        | IrExprKind::Match { .. } | IrExprKind::StringInterp { .. }
-        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. } => true,
-        IrExprKind::Block { stmts, expr } => {
-            stmts.iter().any(|s| stmt_needs_scratch(s)) || expr.as_ref().is_some_and(|e| body_needs_scratch(e))
-        }
+        // Leaves: no scratch needed
+        IrExprKind::Var { .. } | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::LitStr { .. } | IrExprKind::Unit => false,
+        // Simple operations: recurse into children
+        IrExprKind::BinOp { left, right, .. } => body_needs_scratch(left) || body_needs_scratch(right),
+        IrExprKind::UnOp { operand, .. } => body_needs_scratch(operand),
         IrExprKind::If { cond, then, else_ } => {
             body_needs_scratch(cond) || body_needs_scratch(then) || body_needs_scratch(else_)
         }
-        IrExprKind::BinOp { left, right, .. } => body_needs_scratch(left) || body_needs_scratch(right),
-        IrExprKind::UnOp { operand, .. } => body_needs_scratch(operand),
+        IrExprKind::Block { stmts, expr } => {
+            stmts.iter().any(|s| stmt_needs_scratch(s)) || expr.as_ref().is_some_and(|e| body_needs_scratch(e))
+        }
         IrExprKind::While { cond, body: stmts } => {
             body_needs_scratch(cond) || stmts.iter().any(|s| stmt_needs_scratch(s))
         }
-        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            // Method calls (stdlib) need scratch; direct function calls may not
-            matches!(target, almide_ir::CallTarget::Method { .. } | almide_ir::CallTarget::Module { .. })
-            || args.iter().any(|a| body_needs_scratch(a))
+        // Direct function calls: only need scratch if args do
+        IrExprKind::Call { target: almide_ir::CallTarget::Named { .. }, args, .. }
+        | IrExprKind::TailCall { target: almide_ir::CallTarget::Named { .. }, args } => {
+            args.iter().any(|a| body_needs_scratch(a))
         }
-        _ => false,
+        // Everything else: conservatively assume scratch needed
+        _ => true,
     }
 }
 
