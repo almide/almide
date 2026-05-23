@@ -636,9 +636,10 @@ mod closure_conversion {
         let program = mk_program(vec![func], vt);
         let result = run_pass(&ClosureConversionPass, program, Target::Wasm);
 
-        // Closure conversion should lift the lambda to a top-level function
-        assert!(result.functions.len() > 1,
-            "Closure conversion should create new top-level functions, got {}", result.functions.len());
+        // Capture-free lambdas stay as Lambda (not lifted) for inline expansion
+        // in the WASM emitter — only lambdas with captures get lifted.
+        assert_eq!(result.functions.len(), 1,
+            "Capture-free lambda should NOT be lifted, got {} functions", result.functions.len());
     }
 }
 
