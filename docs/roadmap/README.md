@@ -6,26 +6,17 @@
 
 ## Active
 
-12 items
+3 items
 
 | Item | Description |
 |------|-------------|
-| [Ceangal Widget System](active/ceangal-widget-system.md) | Ceangal UI framework — widget system, reactive state, GPU rendering pipeline |
-| [DX: `almide test` stderr & `almide explain`](active/dx-testing-explain.md) | almide test stderr passthrough + almide explain <code> subcommand |
+| [Effect Firewall](active/effect-firewall.md) | test + effect — intercept effect calls in tests for deterministic testing |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
-| [Error-Fix Database](active/error-fix-db.md) | Structured error-to-fix mapping for LLM auto-repair of compiler errors |
-| [Llama Inference Demo](active/llama-inference-demo.md) | End-to-end Llama inference demo on Almide, from 1-block to full token generation |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
-| [LLM Integration](active/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
-| [LSP Server](active/lsp.md) | Language Server Protocol for editor completion, diagnostics, and navigation |
-| [MLIR Backend + Egg Rewrite Engine](active/mlir-backend-adoption.md) | Stage 2 progressive lowering — dialect walker passes all 227 spec tests |
-| [Name Resolution Pass — Unified Cross-Package Symbol Resolution](active/name-resolution-pass.md) |  |
-| [Package Version Resolution](active/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
-| [Secure by Design](active/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
 
 ## On Hold
 
-26 items
+30 items
 
 | Item | Description |
 |------|-------------|
@@ -39,15 +30,19 @@
 | [Flow[T] — User Specification (Draft)](on-hold/flow-spec-draft.md) | Draft user-facing spec for Flow[T] — to be promoted to docs/specs/flow.md after Phase 1 |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
+| [LLM Integration](on-hold/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
 | [LSP Code Actions](on-hold/lsp-code-actions.md) | LSP code actions for auto-fix, refactoring, and import management |
 | [Tiny ML Inference Runtime](on-hold/ml-inference.md) | Tiny ML inference runtime using compile-time model specialization |
+| [MLIR Backend + Egg Rewrite Engine](on-hold/mlir-backend-adoption.md) | Stage 2 progressive lowering — dialect walker passes all 227 spec tests |
 | [`almide update` — Dependency Update Command](on-hold/package-manager-update.md) | Add almide update command to refresh dependencies and rewrite lock file |
 | [Package Registry](on-hold/package-registry.md) | Lock file, semver resolution, and central package registry |
+| [Package Version Resolution](on-hold/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
 | [Porta Embedded — Sub-10KB Almide IoT Agents on WASI Hosts](on-hold/porta-embedded.md) | Porta-style WASI agent runtime for IoT: <10KB Almide guests on tiny hosts |
 | [Rainbow Bridge — Wrap External Code as Almide Packages](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
 | [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy |
+| [Secure by Design](on-hold/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
 | [Shell Completions](on-hold/shell-completions.md) | almide completions subcommand for bash/zsh/fish auto-completion |
 | [Snapshot Testing](on-hold/snapshot-testing.md) | Built-in snapshot testing for output regression detection |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
@@ -58,10 +53,10 @@
 
 ## Done
 
-232 items
+242 items
 
 <details>
-<summary>Show all 232 completed items</summary>
+<summary>Show all 242 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
