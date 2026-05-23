@@ -899,7 +899,7 @@ impl FuncCompiler<'_> {
                 // ── Stream Fusion: detect map/filter pipeline feeding into fold ──
                 let pipeline = self.detect_pipeline(&args[0]);
                 if !pipeline.is_empty() && is_inline_lambda {
-                    // Fused pipeline: iterate source, apply stages inline, fold
+                    // Fused pipeline: iterate source with pointer-based iteration
                     let (source_expr, stages) = self.extract_pipeline(&args[0]);
                     self.emit_expr(source_expr);
                     wasm!(self.func, { local_set(list_ptr); });
@@ -907,23 +907,28 @@ impl FuncCompiler<'_> {
                     let source_elem_size = values::byte_size(&source_elem_ty);
                     self.emit_expr(&args[1]);
                     wasm!(self.func, { local_set(acc); });
+                    // Pointer-based iteration: ptr and end instead of idx
+                    let ptr = self.scratch.alloc_i32();
+                    let end_ptr = self.scratch.alloc_i32();
                     wasm!(self.func, {
-                        local_get(list_ptr); i32_load(0); local_set(len);
-                        i32_const(0); local_set(idx);
+                        // ptr = list_ptr + DATA_OFFSET
+                        local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_set(ptr);
+                        // end = ptr + len * elem_size
+                        local_get(ptr);
+                        local_get(list_ptr); i32_load(0); i32_const(source_elem_size as i32); i32_mul;
+                        i32_add; local_set(end_ptr);
                         block_empty; loop_empty;
                     });
                     let depth_guard = self.depth_push_n(2);
                     wasm!(self.func, {
-                        local_get(idx); local_get(len); i32_ge_u; br_if(1);
+                        local_get(ptr); local_get(end_ptr); i32_ge_u; br_if(1);
                     });
-                    // Load source element
+                    // Load source element via pointer
                     let mut cur_ty = source_elem_ty.clone();
                     let cur_vt = values::ty_to_valtype(&cur_ty).unwrap_or(ValType::I32);
                     let cur_local = self.scratch.alloc(cur_vt);
-                    wasm!(self.func, {
-                        local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                        local_get(idx); i32_const(source_elem_size as i32); i32_mul; i32_add;
-                    });
+                    wasm!(self.func, { local_get(ptr); });
                     self.emit_load_at(&cur_ty, 0);
                     wasm!(self.func, { local_set(cur_local); });
                     // Apply each pipeline stage
@@ -952,12 +957,12 @@ impl FuncCompiler<'_> {
                                     if let Some((vid, _)) = params.first() {
                                         self.var_map.remove(&vid.0);
                                     }
-                                    // If false, skip to next iteration (idx++ then br to loop)
+                                    // If false, skip to next iteration (ptr += elem_size then br to loop)
                                     wasm!(self.func, {
                                         i32_eqz;
                                         if_empty;
-                                          local_get(idx); i32_const(1); i32_add; local_set(idx);
-                                          br(1); // br to loop_empty (if=@0, loop=@1)
+                                          local_get(ptr); i32_const(source_elem_size as i32); i32_add; local_set(ptr);
+                                          br(1); // br to loop_empty
                                         end;
                                     });
                                 }
@@ -977,17 +982,19 @@ impl FuncCompiler<'_> {
                     }
                     self.scratch.free(cur_local, cur_vt);
                     wasm!(self.func, {
-                        local_get(idx); i32_const(1); i32_add; local_set(idx);
+                        local_get(ptr); i32_const(source_elem_size as i32); i32_add; local_set(ptr);
                         br(0);
                     });
                     self.depth_pop(depth_guard);
                     wasm!(self.func, { end; end; local_get(acc); });
+                    self.scratch.free_i32(end_ptr);
+                    self.scratch.free_i32(ptr);
                     self.scratch.free(acc, acc_vt);
                     self.scratch.free_i32(idx);
                     self.scratch.free_i32(len);
                     self.scratch.free_i32(closure);
                     self.scratch.free_i32(list_ptr);
-                    return true; // early return — fused pipeline handled
+                    return true;
                 }
 
                 self.emit_expr(&args[0]);
