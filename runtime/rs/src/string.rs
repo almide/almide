@@ -127,3 +127,9 @@ pub fn almide_rt_string_run_length_encode(s: &str) -> Vec<(String, i64)> {
     }
     result
 }
+
+// ── Mutable string operations ──
+
+pub fn almide_rt_string_push(s: &mut String, suffix: &str) { s.push_str(suffix); }
+pub fn almide_rt_string_push_char(s: &mut String, ch: &str) { s.push_str(ch); }
+pub fn almide_rt_string_clear(s: &mut String) { s.clear(); }

@@ -151,3 +151,11 @@ fn drop_end(s: String, n: Int) -> String = _
 
 @intrinsic("almide_rt_string_run_length_encode")
 fn run_length_encode(s: String) -> List[(String, Int)] = _
+
+// ── Mutable string operations ──
+
+@intrinsic("almide_rt_string_push")
+fn push(mut s: String, suffix: String) -> Unit = _
+
+@intrinsic("almide_rt_string_clear")
+fn clear(mut s: String) -> Unit = _
