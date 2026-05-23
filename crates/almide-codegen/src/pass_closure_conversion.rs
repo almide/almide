@@ -101,8 +101,17 @@ fn convert_expr(
             let mut free = HashSet::new();
             collect_free_vars(&body, &param_ids, &mut free);
 
-            // 3. Skip conversion for mutable captures (WASM emitter handles
-            //    those via heap cells in the Lambda-based path)
+            // 3a. No captures → keep as Lambda for potential inline expansion
+            //     in the WASM emitter (avoids call_indirect overhead).
+            if free.is_empty() {
+                return IrExpr {
+                    kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },
+                    ty, span, def_id: None,
+                };
+            }
+
+            // 3b. Skip conversion for mutable captures (WASM emitter handles
+            //     those via heap cells in the Lambda-based path)
             if free.iter().any(|vid| body_assigns_to(&body, *vid)) {
                 return IrExpr {
                     kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },

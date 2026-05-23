@@ -253,6 +253,17 @@ impl FuncCompiler<'_> {
         self.emit_call_indirect(ct, rt);
     }
 
+    /// Try to resolve a direct function call index from a closure expression.
+    /// Returns Some(func_idx) if the closure is a no-capture ClosureCreate.
+    pub(super) fn try_resolve_direct_call(&self, fn_arg: &IrExpr) -> Option<u32> {
+        if let almide_ir::IrExprKind::ClosureCreate { func_name, captures } = &fn_arg.kind {
+            if captures.is_empty() {
+                return self.emitter.func_map.get(func_name.as_str()).copied();
+            }
+        }
+        None
+    }
+
     /// Emit list.sort (insertion sort for List[Int], List[String], and
     /// List[List[String]] via lexicographic inner-list comparison).
     pub(super) fn emit_list_sort(&mut self, args: &[IrExpr]) {
