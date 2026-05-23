@@ -11,6 +11,42 @@ care about.
 
 ## [Unreleased]
 
+## [0.23.3] — 2026-05-24
+
+### Performance — WASM parity with Rust
+
+- **Hash table map**: Open addressing with FNV-1a/splitmix hashing, 75% load factor resize. `map.insert` 480ms → 0.5ms (960x), `map.get` 1041ms → 0.6ms (1700x)
+- **Binary recursion transform**: `f(n-1) + f(n-2)` pattern → accumulator loop. `fib(35)` 63ms → 35ms, matching Rust WASM
+- **Lambda inlining**: Capture-free lambdas skip closure conversion, body inlined in `list.map`/`filter`/`fold` loops. Zero-cost closures for simple lambdas
+- **Sort run detection**: O(n) ascending/descending pre-scan with direct swap reverse. Reversed 100k: 5.6ms → 0.5ms
+- **TCO in WASM pipeline**: Tail call optimization pass now runs for WASM target (was Rust-only)
+- **Adaptive scratch locals**: Simple functions get 4/2/2/0 scratch locals instead of 48/16/16/8. `fib` 88 locals → 8
+- **String layout migration**: Fixed data offset (4→8) in int_to_string, float_to_string, println_str, JSON parser, string predicates, and 10+ more files
+- **WASM `datetime.monotonic_ns`**: New dispatch + 8-byte alignment fix for `clock_time_get`
+
+### Result
+
+- 3 wins over Rust WASM: `int_tostring` (0.63x), `int_parse` (0.83x), `fib35` (≈1.0x)
+- 7 ties: `list_map`, `list_fold`, `str_concat`, `math_sqrt`, `sort`, `map_insert`, `map_get`
+- 1 remaining gap: `list_filter` (3x, structural WASM branch vs LLVM cmov)
+
+## [0.23.2] — 2026-05-23
+
+### Performance
+
+- **WASM sort**: Replaced insertion sort O(n²) with bottom-up merge sort O(n log n) — 222x speedup on 100k elements
+- **WASM string concat**: Capacity-based string layout `[len][cap][data]` with amortized O(1) append via `__string_append` runtime; peephole `s = s + "x"` → in-place append
+- **String literal optimization**: Skip `.to_string()` for string literals in `&str` borrow context — `string.contains` 572ms → 45ms
+
+### Added
+
+- `string.push(mut s, suffix)` and `string.clear(mut s)` for in-place string mutation
+- Stdlib benchmark suite: 43 benchmarks across 18 modules (`research/benchmark/stdlib/`)
+
+### Result
+
+- Almide WASM 0.81x Rust WASM (faster) on combined benchmark (fib + sort + map + concat + bytes)
+
 ## [0.16.1] — 2026-05-12
 
 ### Added

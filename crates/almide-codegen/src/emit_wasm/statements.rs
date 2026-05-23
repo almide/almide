@@ -112,6 +112,22 @@ impl FuncCompiler<'_> {
             }
 
             IrStmtKind::Assign { var, value } => {
+                // Peephole: s = s + "x" → string_append(s, "x") for O(1) amortized
+                if let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, left, right } = &value.kind {
+                    if let IrExprKind::Var { id } = &left.kind {
+                        if *id == *var {
+                            if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                wasm!(self.func, { local_get(local_idx); });
+                                self.emit_expr(right);
+                                wasm!(self.func, {
+                                    call(self.emitter.rt.string_append);
+                                    local_set(local_idx);
+                                });
+                                return;
+                            }
+                        }
+                    }
+                }
                 let is_cell = self.emitter.mutable_captures.contains(&var.0);
                 let local_idx = match self.var_map.get(&var.0) {
                     Some(&idx) => idx,

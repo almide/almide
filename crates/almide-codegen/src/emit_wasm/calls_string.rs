@@ -56,8 +56,8 @@ impl FuncCompiler<'_> {
                     i32_gt_u;
                     if_i32; i32_const(0);
                     else_;
-                      local_get(s0); i32_const(4); i32_add;
-                      local_get(s1); i32_const(4); i32_add;
+                      local_get(s0); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+                      local_get(s1); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
                       local_get(s1); i32_load(0);
                       call(self.emitter.rt.mem_eq);
                     end;
@@ -78,10 +78,10 @@ impl FuncCompiler<'_> {
                     i32_gt_u;
                     if_i32; i32_const(0);
                     else_;
-                      local_get(s0); i32_const(4); i32_add;
+                      local_get(s0); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
                       local_get(s0); i32_load(0); i32_add;
                       local_get(s1); i32_load(0); i32_sub;
-                      local_get(s1); i32_const(4); i32_add;
+                      local_get(s1); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
                       local_get(s1); i32_load(0);
                       call(self.emitter.rt.mem_eq);
                     end;
@@ -107,13 +107,14 @@ impl FuncCompiler<'_> {
                     if_i32;
                       i32_const(0); // none
                     else_;
-                      // Build 1-char string
-                      i32_const(5); call(self.emitter.rt.alloc); local_set(s2);
+                      // Build 1-char string [len=1][cap=1][byte]
+                      i32_const(super::list_layout::STRING_HEADER_SIZE + 1); call(self.emitter.rt.alloc); local_set(s2);
                       local_get(s2); i32_const(1); i32_store(0);
+                      local_get(s2); i32_const(1); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
                       local_get(s2);
-                      local_get(s); i32_const(4); i32_add;
+                      local_get(s); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
                       local_get(s1); i32_add; i32_load8_u(0);
-                      i32_store8(4);
+                      i32_store8(super::list_layout::STRING_DATA_OFFSET as u32);
                       // Wrap in some: alloc ptr, store string ptr
                       i32_const(4); call(self.emitter.rt.alloc); local_set(s1);
                       local_get(s1); local_get(s2); i32_store(0);
@@ -300,7 +301,7 @@ impl FuncCompiler<'_> {
                     else_;
                       i32_const(8); call(self.emitter.rt.alloc); local_set(s1);
                       local_get(s1);
-                      local_get(s); i32_load8_u(4); i64_extend_i32_u;
+                      local_get(s); i32_load8_u(super::list_layout::STRING_DATA_OFFSET as u32); i64_extend_i32_u;
                       i64_store(0);
                       local_get(s1);
                     end;
@@ -314,9 +315,10 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(s);
-                    i32_const(5); call(self.emitter.rt.alloc); local_set(s1);
+                    i32_const(super::list_layout::STRING_HEADER_SIZE + 1); call(self.emitter.rt.alloc); local_set(s1);
                     local_get(s1); i32_const(1); i32_store(0);
-                    local_get(s1); local_get(s); i32_store8(4);
+                    local_get(s1); i32_const(1); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
+                    local_get(s1); local_get(s); i32_store8(super::list_layout::STRING_DATA_OFFSET as u32);
                     local_get(s1);
                 });
                 self.scratch.free_i32(s1);
@@ -349,10 +351,11 @@ impl FuncCompiler<'_> {
                     local_get(s); i32_load(0); i32_eqz; // empty?
                     if_i32; i32_const(0); // none
                     else_;
-                      // alloc 1-char string
-                      i32_const(5); call(self.emitter.rt.alloc); local_set(s1);
+                      // alloc 1-char string [len=1][cap=1][byte]
+                      i32_const(super::list_layout::STRING_HEADER_SIZE + 1); call(self.emitter.rt.alloc); local_set(s1);
                       local_get(s1); i32_const(1); i32_store(0);
-                      local_get(s1); local_get(s); i32_load8_u(4); i32_store8(4);
+                      local_get(s1); i32_const(1); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
+                      local_get(s1); local_get(s); i32_load8_u(super::list_layout::STRING_DATA_OFFSET as u32); i32_store8(super::list_layout::STRING_DATA_OFFSET as u32);
                       // wrap in some: alloc ptr
                       i32_const(4); call(self.emitter.rt.alloc); local_set(s2);
                       local_get(s2); local_get(s1); i32_store(0);
@@ -373,12 +376,13 @@ impl FuncCompiler<'_> {
                     local_get(s); i32_load(0); i32_eqz;
                     if_i32; i32_const(0);
                     else_;
-                      i32_const(5); call(self.emitter.rt.alloc); local_set(s1);
+                      i32_const(super::list_layout::STRING_HEADER_SIZE + 1); call(self.emitter.rt.alloc); local_set(s1);
                       local_get(s1); i32_const(1); i32_store(0);
+                      local_get(s1); i32_const(1); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
                       local_get(s1);
-                      local_get(s); i32_const(4); i32_add;
+                      local_get(s); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
                       local_get(s); i32_load(0); i32_const(1); i32_sub; i32_add;
-                      i32_load8_u(0); i32_store8(4);
+                      i32_load8_u(0); i32_store8(super::list_layout::STRING_DATA_OFFSET as u32);
                       i32_const(4); call(self.emitter.rt.alloc); local_set(s2);
                       local_get(s2); local_get(s1); i32_store(0);
                       local_get(s2);

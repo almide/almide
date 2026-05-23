@@ -158,7 +158,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
                         .unwrap_or(false);
                     if !is_borrow_ref {
                         if let Some(b) = borrows.get_mut(idx) {
-                            if matches!(b, ParamBorrow::Ref | ParamBorrow::RefSlice) {
+                            if matches!(b, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr) {
                                 *b = ParamBorrow::RefMut;
                             }
                         }

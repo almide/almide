@@ -6,6 +6,7 @@
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
+use super::list_layout::STRING_DATA_OFFSET;
 
 // ── Replace/search variants ──
 
@@ -51,8 +52,8 @@ pub(super) fn compile_last_index_of(emitter: &mut WasmEmitter) {
           block_empty; loop_empty;
             local_get(4); local_get(2); local_get(3); i32_sub; i32_const(1); i32_add;
             i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(4); i32_add;
-            local_get(1); i32_const(4); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(4); i32_add;
+            local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
             local_get(3);
             call(emitter.rt.mem_eq);
             if_empty;
@@ -78,8 +79,8 @@ pub(super) fn compile_strip_prefix(emitter: &mut WasmEmitter) {
         local_get(3); local_get(2); i32_gt_u;
         if_i32; i32_const(0); // none
         else_;
-          local_get(0); i32_const(4); i32_add;
-          local_get(1); i32_const(4); i32_add;
+          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
           local_get(3);
           call(emitter.rt.mem_eq);
           if_i32;
@@ -109,8 +110,8 @@ pub(super) fn compile_strip_suffix(emitter: &mut WasmEmitter) {
         local_get(3); local_get(2); i32_gt_u;
         if_i32; i32_const(0);
         else_;
-          local_get(0); i32_const(4); i32_add; local_get(2); i32_add; local_get(3); i32_sub;
-          local_get(1); i32_const(4); i32_add;
+          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; local_get(3); i32_sub;
+          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
           local_get(3);
           call(emitter.rt.mem_eq);
           if_i32;
@@ -144,7 +145,7 @@ pub(super) fn compile_byte_predicate_range(emitter: &mut WasmEmitter, func_idx: 
           i32_const(0); local_set(2);
           block_empty; loop_empty;
             local_get(2); local_get(1); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(2); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0);
             local_tee(1);
             i32_const(lo); i32_lt_u;
             local_get(1); i32_const(hi); i32_gt_u;
@@ -179,7 +180,7 @@ pub(super) fn compile_is_alpha(emitter: &mut WasmEmitter) {
           i32_const(0); local_set(2);
           block_empty; loop_empty;
             local_get(2); local_get(1); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(2); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0);
             local_tee(1);
             // (65..90) or (97..122)
             i32_const(65); i32_ge_u;
@@ -213,7 +214,7 @@ pub(super) fn compile_is_alnum(emitter: &mut WasmEmitter) {
           i32_const(0); local_set(2);
           block_empty; loop_empty;
             local_get(2); local_get(1); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(2); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0);
             local_tee(1);
             i32_const(65); i32_ge_u; local_get(1); i32_const(90); i32_le_u; i32_and;
             local_get(1); i32_const(97); i32_ge_u; local_get(1); i32_const(122); i32_le_u; i32_and;
@@ -246,7 +247,7 @@ pub(super) fn compile_is_whitespace(emitter: &mut WasmEmitter) {
           i32_const(0); local_set(2);
           block_empty; loop_empty;
             local_get(2); local_get(1); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(2); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0);
             local_tee(1);
             i32_const(32); i32_eq;
             local_get(1); i32_const(9); i32_eq; i32_or;
@@ -286,7 +287,7 @@ fn compile_case_predicate(emitter: &mut WasmEmitter, func_idx: u32, lo: i32, hi:
           i32_const(0); local_set(2);
           block_empty; loop_empty;
             local_get(2); local_get(1); i32_ge_u; br_if(1);
-            local_get(0); i32_const(4); i32_add; local_get(2); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0);
             local_tee(1);
             // in_range = (lo..hi)
             i32_const(lo); i32_ge_u; local_get(1); i32_const(hi); i32_le_u; i32_and;

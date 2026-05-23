@@ -4,7 +4,7 @@
 
 use super::FuncCompiler;
 use almide_ir::IrExpr;
-use super::list_layout::{STRING_DATA_OFFSET, STRING_HEADER_SIZE};
+use super::list_layout::{STRING_DATA_OFFSET, STRING_HEADER_SIZE, STRING_CAP_OFFSET};
 
 /// Requested primitive load for the typed byte-read family.
 #[derive(Clone, Copy)]
@@ -1733,7 +1733,7 @@ impl FuncCompiler<'_> {
             local_get(pos); local_get(len); i32_gt_u;
             if_empty; local_get(len); local_set(pos); end;
             // alloc len + 5
-            local_get(len); i32_const(5); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+            local_get(len); i32_const(STRING_HEADER_SIZE + 1); i32_add; call(self.emitter.rt.alloc); local_set(dst);
             local_get(dst); local_get(len); i32_const(1); i32_add; i32_store(0);
             // memcpy [0, pos)
             local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add;
@@ -1880,9 +1880,10 @@ impl FuncCompiler<'_> {
         if lf {
             // sep is implicit "\n" — alloc a 1-byte sep buffer at runtime.
             wasm!(self.func, {
-                i32_const(5); call(self.emitter.rt.alloc); local_set(sep);
+                i32_const(STRING_HEADER_SIZE + 1); call(self.emitter.rt.alloc); local_set(sep);
                 local_get(sep); i32_const(1); i32_store(0);
-                local_get(sep); i32_const(10); i32_store8(4);
+                local_get(sep); i32_const(1); i32_store(STRING_CAP_OFFSET as u32, 0);
+                local_get(sep); i32_const(10); i32_store8(STRING_DATA_OFFSET as u32);
             });
         } else {
             self.emit_expr(&args[1]);

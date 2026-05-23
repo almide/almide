@@ -45,6 +45,35 @@ impl SortKind {
         self.emit_load(f);
         self.emit_store(f);
     }
+    /// Emit swap: *left_addr ↔ *right_addr using tmp_ptr as scratch.
+    fn emit_swap(&self, f: &mut super::TrackedFunction, left: u32, right: u32, tmp: u32) {
+        match self {
+            SortKind::Int => {
+                // tmp_i64 = *left; *left = *right; *right = tmp_i64
+                // Use tmp memory for i64
+                wasm!(f, {
+                    local_get(tmp); local_get(left); i64_load(0); i64_store(0);
+                    local_get(left); local_get(right); i64_load(0); i64_store(0);
+                    local_get(right); local_get(tmp); i64_load(0); i64_store(0);
+                });
+            }
+            SortKind::Float => {
+                wasm!(f, {
+                    local_get(tmp); local_get(left); f64_load(0); f64_store(0);
+                    local_get(left); local_get(right); f64_load(0); f64_store(0);
+                    local_get(right); local_get(tmp); f64_load(0); f64_store(0);
+                });
+            }
+            _ => {
+                wasm!(f, {
+                    local_get(tmp); local_get(left); i32_load(0); i32_store(0);
+                    local_get(left); local_get(right); i32_load(0); i32_store(0);
+                    local_get(right); local_get(tmp); i32_load(0); i32_store(0);
+                });
+            }
+        }
+    }
+
     /// Emit `dst[j] <= key` comparison, leaving an i32 boolean on the stack.
     fn emit_le_cmp(&self, f: &mut super::TrackedFunction, emitter: &WasmEmitter) {
         match self {
@@ -224,6 +253,17 @@ impl FuncCompiler<'_> {
         self.emit_call_indirect(ct, rt);
     }
 
+    /// Try to resolve a direct function call index from a closure expression.
+    /// Returns Some(func_idx) if the closure is a no-capture ClosureCreate.
+    pub(super) fn try_resolve_direct_call(&self, fn_arg: &IrExpr) -> Option<u32> {
+        if let almide_ir::IrExprKind::ClosureCreate { func_name, captures } = &fn_arg.kind {
+            if captures.is_empty() {
+                return self.emitter.func_map.get(func_name.as_str()).copied();
+            }
+        }
+        None
+    }
+
     /// Emit list.sort (insertion sort for List[Int], List[String], and
     /// List[List[String]] via lexicographic inner-list comparison).
     pub(super) fn emit_list_sort(&mut self, args: &[IrExpr]) {
@@ -270,87 +310,227 @@ impl FuncCompiler<'_> {
         let xs_ptr = self.scratch.alloc_i32();
         let len = self.scratch.alloc_i32();
         let dst = self.scratch.alloc_i32();
+        let tmp = self.scratch.alloc_i32(); // merge temp buffer
+        let width = self.scratch.alloc_i32();
         let i = self.scratch.alloc_i32();
-        let j = self.scratch.alloc_i32();
-        let key = match kind {
-            SortKind::Int => self.scratch.alloc_i64(),
-            SortKind::Float => self.scratch.alloc_f64(),
-            _ => self.scratch.alloc_i32(),
-        };
+        let left = self.scratch.alloc_i32();
+        let mid = self.scratch.alloc_i32();
+        let right = self.scratch.alloc_i32();
+        let li = self.scratch.alloc_i32();
+        let ri = self.scratch.alloc_i32();
+        let k = self.scratch.alloc_i32();
 
-        // 1. Copy list header + payload.
+        // 1. Copy list header + payload into dst.
         self.emit_expr(&args[0]);
         wasm!(self.func, {
             local_set(xs_ptr);
             local_get(xs_ptr); i32_load(0); local_set(len);
+            // alloc dst
             i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(es as i32); i32_mul; i32_add;
             call(self.emitter.rt.alloc); local_set(dst);
             local_get(dst); local_get(len); i32_store(0);
-            i32_const(0); local_set(i);
-            block_empty; loop_empty;
-              local_get(i); local_get(len); i32_ge_u; br_if(1);
-              local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
-              local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
-        });
-        kind.emit_copy_one(&mut self.func);
-        wasm!(self.func, {
-              local_get(i); i32_const(1); i32_add; local_set(i); br(0);
-            end; end;
+            // alloc tmp (same size, no header needed — just data)
+            local_get(len); i32_const(es as i32); i32_mul;
+            call(self.emitter.rt.alloc); local_set(tmp);
+            // bulk copy data with memory.copy
+            local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+            local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+            local_get(len); i32_const(es as i32); i32_mul;
+            memory_copy;
         });
 
-        // 2. Insertion sort.
+        // 2. Pre-scan: detect sorted (asc) or reverse-sorted (desc).
+        //    If asc → skip sort. If desc → reverse in O(n). Else → merge sort.
+        //    This handles TimSort-like run detection for the common cases.
+        let is_asc = self.scratch.alloc_i32();
+        let is_desc = self.scratch.alloc_i32();
+        let scan_done = self.scratch.alloc_i32();
         wasm!(self.func, {
-            i32_const(1); local_set(i);
-            block_empty; loop_empty;
-              local_get(i); local_get(len); i32_ge_u; br_if(1);
-              // key = dst[4 + i*es]
-              local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(i); i32_const(es as i32); i32_mul; i32_add;
-        });
-        kind.emit_load(&mut self.func);
-        wasm!(self.func, {
-              local_set(key);
-              local_get(i); i32_const(1); i32_sub; local_set(j);
-              // inner loop: shift while dst[j] > key
+            local_get(len); i32_const(2); i32_lt_u;
+            if_empty;
+              i32_const(1); local_set(scan_done); // trivially sorted
+            else_;
+              i32_const(1); local_set(is_asc);
+              i32_const(1); local_set(is_desc);
+              i32_const(0); local_set(i);
               block_empty; loop_empty;
-                local_get(j); i32_const(0); i32_lt_s; br_if(1);
-                // compare dst[j] with key
-                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(j); i32_const(es as i32); i32_mul; i32_add;
+                local_get(i); local_get(len); i32_const(1); i32_sub; i32_ge_u; br_if(1);
+                // Load dst[i] and dst[i+1], compare
+                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                local_get(i); i32_const(es as i32); i32_mul; i32_add;
         });
-        kind.emit_load(&mut self.func);     // load dst[j]
-        wasm!(self.func, { local_get(key); }); // push key
-        kind.emit_le_cmp(&mut self.func, self.emitter);
+        kind.emit_load(&mut self.func); // dst[i]
         wasm!(self.func, {
-                br_if(1); // dst[j] <= key → stop
-                // shift: dst[j+1] = dst[j]
                 local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                local_get(j); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
+                local_get(i); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
+        });
+        kind.emit_load(&mut self.func); // dst[i+1]
+        // Check: if dst[i] > dst[i+1] → not ascending
+        // We need both values for two comparisons. Duplicate via locals.
+        // Actually, emit_le_cmp consumes both. Let me do two separate scans? No, too slow.
+        // Simpler: just check dst[i] <= dst[i+1] for ascending.
+        kind.emit_le_cmp(&mut self.func, self.emitter); // dst[i] <= dst[i+1]
+        wasm!(self.func, {
+                i32_eqz;
+                if_empty; i32_const(0); local_set(is_asc); end;
+                // Check descending: dst[i] >= dst[i+1]
+                // Reload and compare reverse
                 local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                local_get(j); i32_const(es as i32); i32_mul; i32_add;
+                local_get(i); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
+        });
+        kind.emit_load(&mut self.func); // dst[i+1]
+        wasm!(self.func, {
+                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                local_get(i); i32_const(es as i32); i32_mul; i32_add;
+        });
+        kind.emit_load(&mut self.func); // dst[i]
+        kind.emit_le_cmp(&mut self.func, self.emitter); // dst[i+1] <= dst[i]
+        wasm!(self.func, {
+                i32_eqz;
+                if_empty; i32_const(0); local_set(is_desc); end;
+                // Early exit if neither
+                local_get(is_asc); local_get(is_desc); i32_or; i32_eqz;
+                br_if(1); // break scan loop
+                local_get(i); i32_const(1); i32_add; local_set(i); br(0);
+              end; end;
+              // Determine result
+              local_get(is_asc);
+              if_empty;
+                i32_const(1); local_set(scan_done); // already sorted
+              else_;
+                local_get(is_desc);
+                if_empty;
+                  // Reverse in place: swap dst[j] and dst[len-1-j] for j in 0..len/2
+                  i32_const(0); local_set(i);
+                  block_empty; loop_empty;
+                    local_get(i); local_get(len); i32_const(1); i32_shr_u; i32_ge_u; br_if(1);
+                    // swap dst[i] and dst[len-1-i]
+                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                    local_get(i); i32_const(es as i32); i32_mul; i32_add;
+                    local_set(left);
+                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                    local_get(len); i32_const(1); i32_sub; local_get(i); i32_sub;
+                    i32_const(es as i32); i32_mul; i32_add;
+                    local_set(right);
+        });
+        // Emit type-specific swap: tmp = *left; *left = *right; *right = tmp
+        kind.emit_swap(&mut self.func, left, right, tmp);
+        wasm!(self.func, {
+                    local_get(i); i32_const(1); i32_add; local_set(i); br(0);
+                  end; end;
+                  i32_const(1); local_set(scan_done);
+                else_;
+                  i32_const(0); local_set(scan_done);
+                end;
+              end;
+            end;
+        });
+        self.scratch.free_i32(is_desc);
+        self.scratch.free_i32(is_asc);
+
+        // 3. Bottom-up merge sort (only if scan_done == 0).
+        // width = 1; while width < len { merge passes; width *= 2 }
+        wasm!(self.func, {
+            local_get(scan_done); i32_eqz;
+            if_empty;
+            i32_const(1); local_set(width);
+            block_empty; loop_empty;
+              local_get(width); local_get(len); i32_ge_u; br_if(1);
+              // for i = 0; i < len; i += width*2
+              i32_const(0); local_set(i);
+              block_empty; loop_empty;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                // left = i, mid = min(i+width, len), right = min(i+2*width, len)
+                local_get(i); local_set(left);
+                local_get(i); local_get(width); i32_add; local_set(mid);
+                local_get(mid); local_get(len); i32_gt_u;
+                if_empty; local_get(len); local_set(mid); end;
+                local_get(i); local_get(width); i32_const(2); i32_mul; i32_add; local_set(right);
+                local_get(right); local_get(len); i32_gt_u;
+                if_empty; local_get(len); local_set(right); end;
+                // merge dst[left..mid] and dst[mid..right] into tmp[left..right]
+                local_get(left); local_set(li);
+                local_get(mid); local_set(ri);
+                local_get(left); local_set(k);
+                block_empty; loop_empty;
+                  local_get(k); local_get(right); i32_ge_u; br_if(1);
+                  // if li < mid && (ri >= right || dst[li] <= dst[ri])
+                  local_get(li); local_get(mid); i32_lt_u;
+                  if_i32;
+                    local_get(ri); local_get(right); i32_ge_u;
+                    if_i32;
+                      i32_const(1); // ri exhausted, use left
+                    else_;
+                      // compare dst[li] <= dst[ri]
+                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(li); i32_const(es as i32); i32_mul; i32_add;
+        });
+        kind.emit_load(&mut self.func); // load dst[li]
+        wasm!(self.func, {
+                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(ri); i32_const(es as i32); i32_mul; i32_add;
+        });
+        kind.emit_load(&mut self.func); // load dst[ri]
+        kind.emit_le_cmp(&mut self.func, self.emitter); // dst[li] <= dst[ri]
+        wasm!(self.func, {
+                    end;
+                  else_;
+                    i32_const(0); // li exhausted, use right
+                  end;
+                  // if result: copy from left (li), else copy from right (ri)
+                  if_empty;
+                    // tmp[k] = dst[li]; li++
+                    local_get(tmp); local_get(k); i32_const(es as i32); i32_mul; i32_add;
+                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(li); i32_const(es as i32); i32_mul; i32_add;
         });
         kind.emit_copy_one(&mut self.func);
         wasm!(self.func, {
-                local_get(j); i32_const(1); i32_sub; local_set(j); br(0);
-              end; end;
-              // place key at dst[j+1]
-              local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-              local_get(j); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
-              local_get(key);
+                    local_get(li); i32_const(1); i32_add; local_set(li);
+                  else_;
+                    // tmp[k] = dst[ri]; ri++
+                    local_get(tmp); local_get(k); i32_const(es as i32); i32_mul; i32_add;
+                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(ri); i32_const(es as i32); i32_mul; i32_add;
         });
-        kind.emit_store(&mut self.func);
+        kind.emit_copy_one(&mut self.func);
         wasm!(self.func, {
-              local_get(i); i32_const(1); i32_add; local_set(i); br(0);
+                    local_get(ri); i32_const(1); i32_add; local_set(ri);
+                  end;
+                  local_get(k); i32_const(1); i32_add; local_set(k);
+                  br(0);
+                end; end;
+                // copy tmp[left..right] back to dst[left..right]
+                local_get(left); local_set(k);
+                block_empty; loop_empty;
+                  local_get(k); local_get(right); i32_ge_u; br_if(1);
+                  local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(k); i32_const(es as i32); i32_mul; i32_add;
+                  local_get(tmp); local_get(k); i32_const(es as i32); i32_mul; i32_add;
+        });
+        kind.emit_copy_one(&mut self.func);
+        wasm!(self.func, {
+                  local_get(k); i32_const(1); i32_add; local_set(k);
+                  br(0);
+                end; end;
+                // i += width * 2
+                local_get(i); local_get(width); i32_const(2); i32_mul; i32_add; local_set(i);
+                br(0);
+              end; end;
+              // width *= 2
+              local_get(width); i32_const(2); i32_mul; local_set(width);
+              br(0);
             end; end;
+            end; // end if scan_done == 0
             local_get(dst);
         });
 
-        // 3. Free scratch.
-        match kind {
-            SortKind::Int => self.scratch.free_i64(key),
-            SortKind::Float => self.scratch.free_f64(key),
-            _ => self.scratch.free_i32(key),
-        }
-        self.scratch.free_i32(j);
+        // 4. Free scratch.
+        self.scratch.free_i32(scan_done);
+        self.scratch.free_i32(k);
+        self.scratch.free_i32(ri);
+        self.scratch.free_i32(li);
+        self.scratch.free_i32(right);
+        self.scratch.free_i32(mid);
+        self.scratch.free_i32(left);
         self.scratch.free_i32(i);
+        self.scratch.free_i32(width);
+        self.scratch.free_i32(tmp);
         self.scratch.free_i32(dst);
         self.scratch.free_i32(len);
         self.scratch.free_i32(xs_ptr);

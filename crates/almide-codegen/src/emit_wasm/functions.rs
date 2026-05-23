@@ -3,10 +3,50 @@
 use std::collections::HashMap;
 use wasm_encoder::{Function, ValType};
 
-use almide_ir::{IrFunction, VarTable};
+use almide_ir::{IrFunction, IrExpr, IrExprKind, IrStmt, IrStmtKind, VarTable};
 
 use super::{CompiledFunc, FuncCompiler, WasmEmitter};
 use super::statements::collect_locals;
+
+/// Check if a function body uses stdlib calls, closures, or complex operations
+/// that require the full scratch local pool.
+fn body_needs_scratch(body: &IrExpr) -> bool {
+    // Conservative: only return false for leaf expressions that definitely
+    // don't use scratch locals. Everything else gets full scratch capacity.
+    match &body.kind {
+        // Leaves: no scratch needed
+        IrExprKind::Var { .. } | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::LitStr { .. } | IrExprKind::Unit => false,
+        // Simple operations: recurse into children
+        IrExprKind::BinOp { left, right, .. } => body_needs_scratch(left) || body_needs_scratch(right),
+        IrExprKind::UnOp { operand, .. } => body_needs_scratch(operand),
+        IrExprKind::If { cond, then, else_ } => {
+            body_needs_scratch(cond) || body_needs_scratch(then) || body_needs_scratch(else_)
+        }
+        IrExprKind::Block { stmts, expr } => {
+            stmts.iter().any(|s| stmt_needs_scratch(s)) || expr.as_ref().is_some_and(|e| body_needs_scratch(e))
+        }
+        IrExprKind::While { cond, body: stmts } => {
+            body_needs_scratch(cond) || stmts.iter().any(|s| stmt_needs_scratch(s))
+        }
+        // Direct function calls: only need scratch if args do
+        IrExprKind::Call { target: almide_ir::CallTarget::Named { .. }, args, .. }
+        | IrExprKind::TailCall { target: almide_ir::CallTarget::Named { .. }, args } => {
+            args.iter().any(|a| body_needs_scratch(a))
+        }
+        // Everything else: conservatively assume scratch needed
+        _ => true,
+    }
+}
+
+fn stmt_needs_scratch(stmt: &IrStmt) -> bool {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } => body_needs_scratch(value),
+        IrStmtKind::Assign { value, .. } => body_needs_scratch(value),
+        IrStmtKind::Expr { expr } => body_needs_scratch(expr),
+        _ => false,
+    }
+}
 
 /// Compile an IR function into a WASM function body.
 pub fn compile_function(
@@ -71,14 +111,16 @@ fn compile_function_inner(
         }
     }
 
-    // ScratchAllocator locals — must be large enough for deepest nested call chain
-    // (e.g. sum(map(filter([...], λ), λ)) needs ~14 simultaneous i32 scratch).
-    // `matrix.attention_weights` nested inside an outer matrix pipeline peaks
-    // at ~33 i32 slots — raise the ceiling so sdpa / llama-block compile.
-    let scratch_i32_cap = 48usize;
-    let scratch_i64_cap = 16usize;
-    let scratch_f64_cap = 16usize;
-    let scratch_v128_cap = 8usize;
+    // ScratchAllocator locals — sized per function complexity.
+    // Simple functions (pure recursion, no stdlib calls) get minimal scratch.
+    // Complex functions (stdlib pipelines) get full capacity.
+    let needs_full_scratch = body_needs_scratch(&func.body);
+    let (scratch_i32_cap, scratch_i64_cap, scratch_f64_cap, scratch_v128_cap) = if needs_full_scratch {
+        (48usize, 16usize, 16usize, 8usize)
+    } else {
+        // Minimal: enough for basic match/if temporaries
+        (4usize, 2usize, 2usize, 0usize)
+    };
     let scratch_i32_base = param_count + local_decls.len() as u32;
     for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
     let scratch_i64_base = param_count + local_decls.len() as u32;

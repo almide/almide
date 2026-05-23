@@ -1,0 +1,78 @@
+=== Almide stdlib benchmark v0.23.1 (release, full) ===
+
+== Bytes ==
+  [OK] bytes.push 100k: 0ms
+  [OK] bytes.index r/w 100k: 0ms
+  [OK] bytes.slice 10k: 0ms
+
+== Datetime ==
+  [ok] datetime.now 100k: 3ms
+  [ok] datetime.format 10k: 10ms
+  [ok] datetime.parse_iso 10k: 3ms
+
+== Regex ==
+  [ok] regex.is_match 10k: 6ms
+  [ok] regex.replace 10k: 8ms
+== Base64 ==
+== Hex ==
+  [OK] hex.encode 10k: 0ms
+
+== JSON ==
+  [ok] json.parse 10k: 11ms
+  [ok] json.stringify 10k: 18ms
+== Value ==
+  [ok] value.object 10k: 3ms
+  [ok] value.get 100k: 6ms
+
+== Compute + List ==
+  [ok] fib(35): 25ms
+  [OK] sort 100k: 1ms
+  [OK] list.map 100k: 0ms
+  [OK] list.filter 100k: 0ms
+  [OK] list.fold 100k: 0ms
+  [OK] list.reverse 100k: 0ms
+  [OK] list.flatten 1k×100: 1ms
+
+== Map ==
+  [ok] map.insert 100k: 4ms
+  [ok] map.get 100k: 6ms
+  [ok] map.keys 100k: 5ms
+== Set ==
+  [ok] set.insert 100k: 7ms
+  [ok] set.contains 100k: 7ms
+
+== Matrix ==
+  [ok] matrix 100x100 add 1k: 3ms
+  [ok] matrix 100x100 mul 100: 6ms
+
+== Math ==
+  [OK] math.sqrt 100k: 0ms
+  [OK] math.sin 100k: 0ms
+  [OK] math.pow 100k: 0ms
+== Int ==
+  [OK] int.parse 100k: 0ms
+  [ok] int.to_string 100k: 5ms
+  [OK] int.bxor 100k: 0ms
+== Float ==
+  [OK] float.parse 100k: 1ms
+  [ok] float.to_string 100k: 16ms
+
+== Random ==
+  [OK] random.int 100k: 0ms
+  [OK] random.float 100k: 0ms
+
+== Option + Result ==
+  [OK] option unwrap_or 100k: 0ms
+  [OK] result unwrap_or 100k: 0ms
+
+== String ==
+  [OK] string.push 100k: 0ms
+  [OK] string.split 10k: 0ms
+  [OK] string.replace 10k: 0ms
+  [ok] string.contains 10k: 47ms
+  [ok] string.interpolation 100k: 12ms
+
+== Zlib ==
+  [SLOW] zlib.compress 1k: 112ms
+  [ok] zlib.decompress 1k: 34ms
+

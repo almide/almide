@@ -372,51 +372,106 @@ impl FuncCompiler<'_> {
 
             // ── Map ──
             IrExprKind::EmptyMap => {
-                // Empty map: just [len=0:i32]
+                // Empty hash map: [len=0][cap=0]
                 let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(4);
+                    i32_const(super::list_layout::MAP_HEADER_SIZE);
                     call(self.emitter.rt.alloc);
                     local_set(scratch);
-                    local_get(scratch);
-                    i32_const(0);
-                    i32_store(0);
+                    local_get(scratch); i32_const(0); i32_store(0); // len = 0
+                    local_get(scratch); i32_const(0); i32_store(super::list_layout::MAP_CAP_OFFSET as u32); // cap = 0
                     local_get(scratch);
                 });
                 self.scratch.free_i32(scratch);
             }
             IrExprKind::MapLiteral { entries } => {
-                // Map literal: [len:i32][key0][val0][key1][val1]...
-                // For now, just allocate and store entries sequentially
+                // Map literal: build hash table from entries.
+                // Allocate hash table with capacity = next power of 2 >= n * 2 (min 16).
                 let n = entries.len() as u32;
-                let entry_size = if let Some((k, v)) = entries.first() {
-                    values::byte_size(&k.ty) + values::byte_size(&v.ty)
-                } else { 8 };
-                let total = 4 + n * entry_size;
-                let scratch = self.scratch.alloc_i32();
-                wasm!(self.func, {
-                    i32_const(total as i32);
-                    call(self.emitter.rt.alloc);
-                    local_set(scratch);
-                    // Store length
-                    local_get(scratch);
-                    i32_const(n as i32);
-                    i32_store(0);
-                });
-                // Store entries
-                let mut offset = 4u32;
-                for (key, val) in entries {
-                    wasm!(self.func, { local_get(scratch); });
-                    self.emit_expr(key);
-                    self.emit_store_at(&key.ty, offset);
-                    offset += values::byte_size(&key.ty);
-                    wasm!(self.func, { local_get(scratch); });
-                    self.emit_expr(val);
-                    self.emit_store_at(&val.ty, offset);
-                    offset += values::byte_size(&val.ty);
+                if n == 0 {
+                    // Empty map
+                    let scratch = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        i32_const(super::list_layout::MAP_HEADER_SIZE);
+                        call(self.emitter.rt.alloc);
+                        local_set(scratch);
+                        local_get(scratch); i32_const(0); i32_store(0);
+                        local_get(scratch); i32_const(0); i32_store(super::list_layout::MAP_CAP_OFFSET as u32);
+                        local_get(scratch);
+                    });
+                    self.scratch.free_i32(scratch);
+                } else {
+                    let ks = if let Some((k, _)) = entries.first() { values::byte_size(&k.ty) } else { 4 };
+                    let vs = if let Some((_, v)) = entries.first() { values::byte_size(&v.ty) } else { 4 };
+                    let slot_size = 4 + ks + vs; // tag + key + val
+                    let key_ty = if let Some((k, _)) = entries.first() { k.ty.clone() } else { Ty::String };
+                    // cap = next_pow2(n * 2), min 16
+                    let mut cap = 16u32;
+                    while cap < n * 2 { cap *= 2; }
+                    let total = super::list_layout::MAP_HEADER_SIZE as u32 + cap * slot_size;
+
+                    let map = self.scratch.alloc_i32();
+                    let idx = self.scratch.alloc_i32();
+                    let slot = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        i32_const(total as i32);
+                        call(self.emitter.rt.alloc);
+                        local_set(map);
+                        local_get(map); i32_const(n as i32); i32_store(0); // len = n
+                        local_get(map); i32_const(cap as i32); i32_store(super::list_layout::MAP_CAP_OFFSET as u32);
+                    });
+
+                    // For each entry: hash key, probe, insert
+                    for (key, val) in entries {
+                        // Emit key, hash it
+                        wasm!(self.func, { local_get(map); });
+                        self.emit_expr(key);
+                        // Duplicate key on stack for storing later — need scratch
+                        let sk = if matches!(key_ty, Ty::Int) {
+                            let sk = self.scratch.alloc_i64();
+                            wasm!(self.func, { local_tee(sk); });
+                            sk
+                        } else {
+                            let sk = self.scratch.alloc_i32();
+                            wasm!(self.func, { local_tee(sk); });
+                            sk
+                        };
+                        self.emit_hash_key(&key_ty);
+                        wasm!(self.func, {
+                            i32_const(cap as i32 - 1); i32_and; local_set(idx);
+                            drop; // drop map from stack (we use local)
+                            // Probe for empty slot (no duplicates in literals)
+                            block_empty; loop_empty;
+                              local_get(map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
+                              local_get(idx); i32_const(slot_size as i32); i32_mul; i32_add;
+                              local_set(slot);
+                              local_get(slot); i32_load(0); i32_eqz; br_if(1);
+                              local_get(idx); i32_const(1); i32_add;
+                              i32_const(cap as i32 - 1); i32_and;
+                              local_set(idx); br(0);
+                            end; end;
+                            // Set tag = 1
+                            local_get(slot); i32_const(1); i32_store(0);
+                            // Store key at slot + 4
+                            local_get(slot); i32_const(4); i32_add;
+                        });
+                        if matches!(key_ty, Ty::Int) {
+                            wasm!(self.func, { local_get(sk); i64_store(0); });
+                            self.scratch.free_i64(sk);
+                        } else {
+                            wasm!(self.func, { local_get(sk); i32_store(0); });
+                            self.scratch.free_i32(sk);
+                        }
+                        // Store value at slot + 4 + ks
+                        wasm!(self.func, { local_get(slot); i32_const(4 + ks as i32); i32_add; });
+                        self.emit_expr(val);
+                        self.emit_store_at(&val.ty, 0);
+                    }
+                    wasm!(self.func, { local_get(map); });
+                    self.scratch.free_i32(slot);
+                    self.scratch.free_i32(idx);
+                    self.scratch.free_i32(map);
                 }
-                wasm!(self.func, { local_get(scratch); });
-                self.scratch.free_i32(scratch);
             }
 
             // ── Option/Result ──

@@ -174,6 +174,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     let concat_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.concat_str = emitter.register_func("__concat_str", concat_ty);
 
+    // __string_append(left: i32, right: i32) -> i32
+    // Capacity-aware: if left has room, append in-place; else realloc 2x.
+    emitter.rt.string_append = emitter.register_func("__string_append", concat_ty);
+
     // Note: string interpolation is now emitted inline at the call site
     // (see `calls_string::emit_string_interp`). No scratch runtime helpers.
 
@@ -299,6 +303,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_float_to_string(emitter);
     compile_println_int(emitter);
     compile_concat_str(emitter);
+    compile_string_append(emitter);
     super::runtime_eq::compile_option_eq_i64(emitter);
     super::runtime_eq::compile_option_eq_str(emitter);
     super::runtime_eq::compile_result_eq_i64_str(emitter);
@@ -476,17 +481,17 @@ fn compile_heap_restore(emitter: &mut WasmEmitter) {
 }
 
 /// __println_str(ptr: i32)
-/// Prints string at ptr ([len:i32][data:u8...]) followed by newline via WASI fd_write.
+/// Prints string at ptr ([len:i32][cap:i32][data@8]) followed by newline via WASI fd_write.
 fn compile_println_str(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.println_str];
     let mut f = Function::new([]);
 
     // --- Write the string ---
-    // iov[0].buf = ptr + 4  (skip length prefix)
+    // iov[0].buf = ptr + STRING_DATA_OFFSET  (skip len+cap header)
     wasm!(f, {
         i32_const(0);
         local_get(0);
-        i32_const(4);
+        i32_const(super::list_layout::STRING_DATA_OFFSET);
         i32_add;
         i32_store(0);
     });
@@ -652,23 +657,27 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         local_set(5);
     });
 
-    // $result = __alloc(4 + $len)
+    // $result = __alloc(STRING_HEADER_SIZE + $len)
+    // String layout: [len:i32][cap:i32][data@8]
     wasm!(f, {
         local_get(5);
-        i32_const(4);
+        i32_const(super::list_layout::STRING_HEADER_SIZE);
         i32_add;
         call(emitter.rt.alloc);
         local_set(6);
     });
 
-    // mem32[$result] = $len
+    // mem32[$result+0] = $len, mem32[$result+4] = $len (cap = len)
     wasm!(f, {
         local_get(6);
         local_get(5);
         i32_store(0);
+        local_get(6);
+        local_get(5);
+        i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
     });
 
-    // memcpy: copy $len bytes from $start to $result+4
+    // memcpy: copy $len bytes from $start to $result+STRING_DATA_OFFSET
     wasm!(f, {
         i32_const(0);
         local_set(7);
@@ -679,10 +688,10 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         i32_ge_u;
         br_if(1);
     });
-    // mem[$result + 4 + $i] = mem[$start + $i]
+    // mem[$result + STRING_DATA_OFFSET + $i] = mem[$start + $i]
     wasm!(f, {
         local_get(6);
-        i32_const(4);
+        i32_const(super::list_layout::STRING_DATA_OFFSET);
         i32_add;
         local_get(7);
         i32_add;
@@ -772,15 +781,17 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
         end; end;
     });
     // Build frac string from buf[0..count]
+    // String layout: [len:i32][cap:i32][data@8]
     wasm!(f, {
-        i32_const(4); local_get(5); i32_add;
+        i32_const(super::list_layout::STRING_HEADER_SIZE); local_get(5); i32_add;
         call(emitter.rt.alloc); local_set(2);
         local_get(2); local_get(5); i32_store(0);
+        local_get(2); local_get(5); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
         // Copy digits
         i32_const(0); local_set(6);
         block_empty; loop_empty;
           local_get(6); local_get(5); i32_ge_u; br_if(1);
-          local_get(2); i32_const(4); i32_add; local_get(6); i32_add;
+          local_get(2); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(6); i32_add;
           local_get(4); local_get(6); i32_add; i32_load8_u(0);
           i32_store8(0);
           local_get(6); i32_const(1); i32_add; local_set(6);
@@ -820,6 +831,7 @@ fn compile_println_int(emitter: &mut WasmEmitter) {
 /// __concat_str(left: i32, right: i32) -> i32
 /// Concatenates two strings. Each is [len:i32][data:u8...].
 fn compile_concat_str(emitter: &mut WasmEmitter) {
+    use super::list_layout::{STRING_DATA_OFFSET, STRING_CAP_OFFSET, STRING_HEADER_SIZE};
     let type_idx = emitter.func_type_indices[&emitter.rt.concat_str];
     // params: 0=$left, 1=$right
     // locals: 2=$left_len, 3=$right_len, 4=$new_len, 5=$result, 6=$i
@@ -833,29 +845,33 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
 
     wasm!(f, {
         local_get(0);
-        i32_load(0);
+        i32_load(0);        // left.len
         local_set(2);
         local_get(1);
-        i32_load(0);
+        i32_load(0);        // right.len
         local_set(3);
         local_get(2);
         local_get(3);
         i32_add;
-        local_set(4);
+        local_set(4);       // new_len = left_len + right_len
         local_get(4);
-        i32_const(4);
+        i32_const(STRING_HEADER_SIZE);
         i32_add;
         call(emitter.rt.alloc);
         local_set(5);
         local_get(5);
         local_get(4);
-        i32_store(0);
+        i32_store(0);       // result.len = new_len
+        local_get(5);
+        local_get(4);
+        i32_store(STRING_CAP_OFFSET as u32); // result.cap = new_len
     });
 
-    // Copy left data
-    emit_memcpy_loop(&mut f, 5, 0, 2, 6, 4, 4);
+    // Copy left data: dst=result+DATA_OFFSET, src=left+DATA_OFFSET
+    emit_memcpy_loop(&mut f, 5, 0, 2, 6,
+        STRING_DATA_OFFSET as u32, STRING_DATA_OFFSET as u32);
 
-    // Copy right data: dst=$result+4+$left_len, src=$right+4
+    // Copy right data: dst=result+DATA_OFFSET+left_len, src=right+DATA_OFFSET
     wasm!(f, {
         i32_const(0);
         local_set(6);
@@ -866,14 +882,14 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
         i32_ge_u;
         br_if(1);
         local_get(5);
-        i32_const(4);
+        i32_const(STRING_DATA_OFFSET);
         i32_add;
         local_get(2);
         i32_add;
         local_get(6);
         i32_add;
         local_get(1);
-        i32_const(4);
+        i32_const(STRING_DATA_OFFSET);
         i32_add;
         local_get(6);
         i32_add;
@@ -889,6 +905,84 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
     });
 
     wasm!(f, { local_get(5); end; });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// Capacity-aware string append: if left has room, append in-place; else grow 2x.
+fn compile_string_append(emitter: &mut WasmEmitter) {
+    use super::list_layout::{STRING_DATA_OFFSET, STRING_CAP_OFFSET};
+    let type_idx = emitter.func_type_indices[&emitter.rt.string_append];
+    // params: 0=$left, 1=$right
+    // locals: 2=$left_len, 3=$right_len, 4=$new_len, 5=$left_cap, 6=$result, 7=$i
+    let mut f = Function::new([
+        (1, ValType::I32), // 2: $left_len
+        (1, ValType::I32), // 3: $right_len
+        (1, ValType::I32), // 4: $new_len
+        (1, ValType::I32), // 5: $left_cap
+        (1, ValType::I32), // 6: $result
+        (1, ValType::I32), // 7: $i (counter)
+    ]);
+
+    wasm!(f, {
+        local_get(0); i32_load(0); local_set(2);               // left_len
+        local_get(1); i32_load(0); local_set(3);               // right_len
+        local_get(2); local_get(3); i32_add; local_set(4);     // new_len
+        local_get(0); i32_load(STRING_CAP_OFFSET as u32); local_set(5); // left_cap
+
+        // if left_cap >= new_len: append in-place
+        local_get(5); local_get(4); i32_ge_u;
+        if_i32;
+          // In-place: copy right data after left data
+          i32_const(0); local_set(7);
+          block_empty; loop_empty;
+            local_get(7); local_get(3); i32_ge_u; br_if(1);
+            // dst = left + DATA_OFFSET + left_len + i
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
+            local_get(2); i32_add; local_get(7); i32_add;
+            // src = right + DATA_OFFSET + i
+            local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
+            local_get(7); i32_add;
+            i32_load8_u(0); i32_store8(0);
+            local_get(7); i32_const(1); i32_add; local_set(7);
+            br(0);
+          end; end;
+          // Update left.len
+          local_get(0); local_get(4); i32_store(0);
+          local_get(0);  // return left (same pointer)
+        else_;
+          // Grow: alloc new buffer with cap = max(left_cap*2, new_len)
+          local_get(5); i32_const(2); i32_mul; local_set(5); // cap *= 2
+          local_get(5); local_get(4); i32_lt_u;
+          if_empty; local_get(4); local_set(5); end;          // cap = max(cap*2, new_len)
+          // Alloc
+          local_get(5); i32_const(STRING_DATA_OFFSET); i32_add;
+          call(emitter.rt.alloc); local_set(6);
+          local_get(6); local_get(4); i32_store(0);           // result.len = new_len
+          local_get(6); local_get(5); i32_store(STRING_CAP_OFFSET as u32); // result.cap
+          // Copy left data
+          i32_const(0); local_set(7);
+          block_empty; loop_empty;
+            local_get(7); local_get(2); i32_ge_u; br_if(1);
+            local_get(6); i32_const(STRING_DATA_OFFSET); i32_add; local_get(7); i32_add;
+            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(7); i32_add;
+            i32_load8_u(0); i32_store8(0);
+            local_get(7); i32_const(1); i32_add; local_set(7);
+            br(0);
+          end; end;
+          // Copy right data
+          i32_const(0); local_set(7);
+          block_empty; loop_empty;
+            local_get(7); local_get(3); i32_ge_u; br_if(1);
+            local_get(6); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; local_get(7); i32_add;
+            local_get(1); i32_const(STRING_DATA_OFFSET); i32_add; local_get(7); i32_add;
+            i32_load8_u(0); i32_store8(0);
+            local_get(7); i32_const(1); i32_add; local_set(7);
+            br(0);
+          end; end;
+          local_get(6);  // return new pointer
+        end;
+    });
+    wasm!(f, { end; });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 

@@ -1,0 +1,13 @@
+import datetime
+import regex
+import hex
+import bytes
+fn bench(name: String, f: () -> Unit) -> Unit = { let s = datetime.monotonic_ns(); f(); let ms = (datetime.monotonic_ns() - s) / 1000000; let st = if ms <= 1 then "OK" else if ms <= 50 then "ok" else "SLOW"; println("  [${st}] ${name}: ${int.to_string(ms)}ms") }
+fn main() -> Unit = {
+  println("== Regex ==")
+  bench("regex.is_match 10k", () => { var i = 0; while i < 10000 { let _r = regex.is_match("\\d+", "hello 123 world"); i = i + 1 } })
+  bench("regex.replace 10k", () => { var i = 0; while i < 10000 { let _r = regex.replace("\\d+", "hello 123 world 456", "N"); i = i + 1 } })
+  println("== Base64 ==")
+  println("== Hex ==")
+  bench("hex.encode 10k", () => { let data = bytes.from_list([0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE]); var i = 0; while i < 10000 { let _r = hex.encode(data); i = i + 1 } })
+}

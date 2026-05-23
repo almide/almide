@@ -1,0 +1,15 @@
+import datetime
+fn bench(name: String, f: () -> Unit) -> Unit = { let s = datetime.monotonic_ns(); f(); let ms = (datetime.monotonic_ns() - s) / 1000000; let st = if ms <= 1 then "OK" else if ms <= 50 then "ok" else "SLOW"; println("  [${st}] ${name}: ${int.to_string(ms)}ms") }
+fn main() -> Unit = {
+  println("== Math ==")
+  bench("math.sqrt 100k", () => { var i = 0; while i < 100000 { let _r = math.sqrt(float.from_int(i)); i = i + 1 } })
+  bench("math.sin 100k", () => { var i = 0; while i < 100000 { let _r = math.sin(float.from_int(i) * 0.001); i = i + 1 } })
+  bench("math.pow 100k", () => { var i = 0; while i < 100000 { let _r = math.pow(2, i % 30); i = i + 1 } })
+  println("== Int ==")
+  bench("int.parse 100k", () => { var i = 0; while i < 100000 { let _r = int.parse("12345"); i = i + 1 } })
+  bench("int.to_string 100k", () => { var i = 0; while i < 100000 { let _r = int.to_string(i); i = i + 1 } })
+  bench("int.bxor 100k", () => { var i = 0; var acc = 0; while i < 100000 { acc = int.bxor(acc, i); i = i + 1 } })
+  println("== Float ==")
+  bench("float.parse 100k", () => { var i = 0; while i < 100000 { let _r = float.parse("3.14159"); i = i + 1 } })
+  bench("float.to_string 100k", () => { var i = 0; while i < 100000 { let _r = float.to_string(float.from_int(i) * 0.001); i = i + 1 } })
+}

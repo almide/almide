@@ -1,0 +1,6 @@
+[package]
+name = "stdlib_bench"
+version = "0.1.0"
+
+[dependencies]
+base64 = { git = "https://github.com/almide/base64" }
