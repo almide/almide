@@ -11,6 +11,23 @@ care about.
 
 ## [Unreleased]
 
+## [0.23.2] — 2026-05-23
+
+### Performance
+
+- **WASM sort**: Replaced insertion sort O(n²) with bottom-up merge sort O(n log n) — 222x speedup on 100k elements
+- **WASM string concat**: Capacity-based string layout `[len][cap][data]` with amortized O(1) append via `__string_append` runtime; peephole `s = s + "x"` → in-place append
+- **String literal optimization**: Skip `.to_string()` for string literals in `&str` borrow context — `string.contains` 572ms → 45ms
+
+### Added
+
+- `string.push(mut s, suffix)` and `string.clear(mut s)` for in-place string mutation
+- Stdlib benchmark suite: 43 benchmarks across 18 modules (`research/benchmark/stdlib/`)
+
+### Result
+
+- Almide WASM 0.81x Rust WASM (faster) on combined benchmark (fib + sort + map + concat + bytes)
+
 ## [0.16.1] — 2026-05-12
 
 ### Added

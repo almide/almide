@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.23.1 (prev v0.23.0). Fix: almide test/run injects dep natives when dependencies exist (not just native-deps).
+- Current stable: v0.23.2 (prev v0.23.1). WASM perf: merge sort O(n log n), capacity-based string append O(1), string literal optimization. New: string.push/clear in-place mutation.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.
