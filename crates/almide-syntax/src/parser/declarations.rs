@@ -629,8 +629,22 @@ impl Parser {
             if self.current().token_type == TokenType::Ident && self.current().value == "where" {
                 self.advance(); // consume 'where'
                 self.skip_newlines();
-                let clause = self.parse_single_test_where()?;
-                clauses.push(clause);
+                // Table syntax: where [ "case" [...], "case" [...] ]
+                if self.current().token_type == TokenType::LBracket {
+                    self.advance();
+                    self.skip_newlines();
+                    while self.current().token_type != TokenType::RBracket && self.current().token_type != TokenType::EOF {
+                        let case = self.parse_test_where_case()?;
+                        clauses.push(case);
+                        self.skip_newlines();
+                        if self.current().token_type == TokenType::Comma { self.advance(); }
+                        self.skip_newlines();
+                    }
+                    self.expect(TokenType::RBracket)?;
+                } else {
+                    let clause = self.parse_single_test_where()?;
+                    clauses.push(clause);
+                }
             } else {
                 break;
             }
@@ -640,25 +654,33 @@ impl Parser {
 
     fn parse_single_test_where(&mut self) -> Result<crate::ast::TestWhere, String> {
         use crate::ast::TestWhere;
-        // Case: where "case name" { bindings }
+        // Table-driven [...] is handled in parse_test_where_clauses directly
+        // where "case name" [...] — standalone case (outside table)
         if self.current().token_type == TokenType::String {
-            let case_name = self.current().value.clone();
-            self.advance();
-            self.expect(TokenType::LBrace)?;
-            let mut bindings = Vec::new();
-            self.skip_newlines();
-            while self.current().token_type != TokenType::RBrace && self.current().token_type != TokenType::EOF {
-                let binding = self.parse_test_where_binding()?;
-                bindings.push(binding);
-                // Skip semicolons and newlines between bindings
-                while self.current().token_type == TokenType::Semicolon || self.current().token_type == TokenType::Newline {
-                    self.advance();
-                }
+            let next_tt = self.peek_at(1).map(|t| t.token_type);
+            if matches!(next_tt, Some(TokenType::LBracket)) {
+                return self.parse_test_where_case();
             }
-            self.expect(TokenType::RBrace)?;
-            return Ok(TestWhere::Case { name: case_name, bindings });
         }
         self.parse_test_where_binding()
+    }
+
+    fn parse_test_where_case(&mut self) -> Result<crate::ast::TestWhere, String> {
+        use crate::ast::TestWhere;
+        let case_name = self.current().value.clone();
+        self.expect(TokenType::String)?;
+        self.expect(TokenType::LBracket)?;
+        let mut bindings = Vec::new();
+        self.skip_newlines();
+        while self.current().token_type != TokenType::RBracket && self.current().token_type != TokenType::EOF {
+            let binding = self.parse_test_where_binding()?;
+            bindings.push(binding);
+            while self.current().token_type == TokenType::Comma || self.current().token_type == TokenType::Newline {
+                self.advance();
+            }
+        }
+        self.expect(TokenType::RBracket)?;
+        Ok(TestWhere::Case { name: case_name, bindings })
     }
 
     fn parse_test_where_binding(&mut self) -> Result<crate::ast::TestWhere, String> {

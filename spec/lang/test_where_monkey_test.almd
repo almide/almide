@@ -87,11 +87,11 @@ test "string override"
 // ── Edge: table-driven with many cases ──
 
 test "many cases"
-  where "a" { x = 1; want = 2 }
-  where "b" { x = 2; want = 4 }
-  where "c" { x = 3; want = 6 }
-  where "d" { x = 4; want = 8 }
-  where "e" { x = 5; want = 10 }
+  where "a" [x = 1,want = 2]
+  where "b" [x = 2,want = 4]
+  where "c" [x = 3,want = 6]
+  where "d" [x = 4,want = 8]
+  where "e" [x = 5,want = 10]
 {
   assert_eq(multiply(x, 2), want)
 }
@@ -99,9 +99,9 @@ test "many cases"
 // ── Edge: table case with override ──
 
 test "case override"
-  where "double" { negate(x) => x * 2; input = 5; want = 10 }
-  where "triple" { negate(x) => x * 3; input = 5; want = 15 }
-  where "original" { input = 5; want = -5 }
+  where "double" [negate(x) => x * 2,input = 5,want = 10]
+  where "triple" [negate(x) => x * 3,input = 5,want = 15]
+  where "original" [input = 5,want = -5]
 {
   assert_eq(negate(input), want)
 }
@@ -137,8 +137,8 @@ test "nested override"
 // ── Edge: table with no shared bindings ──
 
 test "independent cases"
-  where "ints" { a = 1; b = 2; want = 3 }
-  where "strings" { a = 10; b = 20; want = 30 }
+  where "ints" [a = 1,b = 2,want = 3]
+  where "strings" [a = 10,b = 20,want = 30]
 {
   assert_eq(a + b, want)
 }
@@ -173,9 +173,9 @@ test "option binding"
 // ── Edge: deeply nested table cases ──
 
 test "math operations"
-  where "add 1+1" { op = (a, b) => a + b; a = 1; b = 1; want = 2 }
-  where "mul 3*4" { op = (a, b) => a * b; a = 3; b = 4; want = 12 }
-  where "sub 10-3" { op = (a, b) => a - b; a = 10; b = 3; want = 7 }
+  where "add 1+1" [op = (a, b) => a + b, a = 1, b = 1, want = 2]
+  where "mul 3*4" [op = (a, b) => a * b, a = 3, b = 4, want = 12]
+  where "sub 10-3" [op = (a, b) => a - b, a = 10, b = 3, want = 7]
 {
   assert_eq(op(a, b), want)
 }
