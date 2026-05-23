@@ -178,6 +178,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(EffectInferencePass)
             // StreamFusion not included: WASM emitter has its own lowering paths
             .add(ResultPropagationPass)
+        // TCO: convert self-recursive tail calls and binary recursion to loops
+        .add(TailCallOptPass)
         // Peephole: swap/reverse/rotate/copy → specialized IR nodes
         .add(PeepholePass)
         // Concretize types: sync every IrExpr.ty with VarTable / parent context,
