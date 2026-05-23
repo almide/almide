@@ -606,13 +606,19 @@ impl Checker {
                 self.env.define_var(&override_name, resolved);
             }
             ast::TestWhere::CallResponse { target, params, response } => {
+                // Resolve param types from original function signature
+                let target_name = if target.len() == 1 { *target.first().unwrap() }
+                    else { sym(&target.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")) };
+                let sig_params: Vec<Ty> = self.env.functions.get(&target_name)
+                    .map(|sig| sig.params.iter().map(|(_, t)| t.clone()).collect())
+                    .unwrap_or_default();
                 let param_vars: Vec<_> = params.iter().filter_map(|pat| {
                     if let ast::Pattern::Ident { name } = pat { Some(*name) } else { None }
                 }).collect();
-                let param_tys: Vec<_> = param_vars.iter().map(|pname| {
-                    let tv = self.fresh_var();
-                    self.env.define_var(pname.as_str(), tv.clone());
-                    tv
+                let param_tys: Vec<_> = param_vars.iter().enumerate().map(|(i, pname)| {
+                    let ty = sig_params.get(i).cloned().unwrap_or_else(|| self.fresh_var());
+                    self.env.define_var(pname.as_str(), ty.clone());
+                    ty
                 }).collect();
                 let mut r = response.clone();
                 let ret_ty = self.infer_expr(&mut r);

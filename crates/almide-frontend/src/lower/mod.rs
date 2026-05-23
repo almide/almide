@@ -814,15 +814,46 @@ fn lower_where_call_response(ctx: &mut LowerCtx, target: &[Sym], params: &[ast::
         params: lambda_params, body: Box::new(response.clone()),
     });
     let mut ir_val = lower_expr(ctx, &lambda);
+    // Resolve param types from the original function's signature
+    let original_fn_ty = resolve_target_fn_type(ctx, target);
     let ty = match &ir_val.ty {
         Ty::Fn { .. } => ir_val.ty.clone(),
-        _ => Ty::Fn { params: params.iter().map(|_| Ty::Unknown).collect(), ret: Box::new(Ty::Unknown) },
+        _ => original_fn_ty.unwrap_or_else(|| Ty::Fn {
+            params: params.iter().map(|_| Ty::Unknown).collect(),
+            ret: Box::new(Ty::Unknown),
+        }),
     };
     ir_val.ty = ty.clone();
     let var = ctx.define_var(&override_name, ty.clone(), Mutability::Let, None);
     ctx.var_table.entries[var.0 as usize].ty = ty.clone();
     stmts.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val }, span: None });
     overrides.push((target.to_vec(), override_name));
+}
+
+/// Look up the Fn type of a target path (e.g. ["double"] or ["http","get"]) from the environment.
+fn resolve_target_fn_type(ctx: &LowerCtx, target: &[Sym]) -> Option<Ty> {
+    let name = if target.len() == 1 {
+        target[0]
+    } else {
+        sym(&target.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
+    };
+    // Check local scope first (function defined in same file)
+    if let Some(var_id) = ctx.lookup_var(name.as_str()) {
+        let ty = &ctx.var_table.get(var_id).ty;
+        if matches!(ty, Ty::Fn { .. }) { return Some(ty.clone()); }
+    }
+    // Check environment functions
+    if let Some(sig) = ctx.env.functions.get(&name) {
+        return Some(Ty::Fn { params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
+    }
+    // For module.func, check module functions
+    if target.len() == 2 {
+        let qual = sym(&format!("{}.{}", target[0], target[1]));
+        if let Some(sig) = ctx.env.functions.get(&qual) {
+            return Some(Ty::Fn { params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
+        }
+    }
+    None
 }
 
 fn where_override_name(path: &[Sym]) -> String {

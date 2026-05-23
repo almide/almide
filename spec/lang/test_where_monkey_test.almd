@@ -50,7 +50,7 @@ test "chained bindings"
 // ── Edge: override with identity (no-op) ──
 
 test "identity override"
-  where multiply = (a, b) => a * b
+  where multiply(a, b) => a * b
 {
   assert_eq(multiply(3, 4), 12)
 }
@@ -128,8 +128,10 @@ test "multiline string where"
 
 // ── Edge: nested function call in override ──
 
+fn square(x: Int) -> Int = x * x
+
 test "nested override"
-  where identity(x) => multiply(x, x)
+  where identity(x) => square(x)
 {
   assert_eq(identity(5), 25)
 }
@@ -172,10 +174,15 @@ test "option binding"
 
 // ── Edge: deeply nested table cases ──
 
-test "math operations"
-  where "add 1+1" [op = (a, b) => a + b, a = 1, b = 1, want = 2]
-  where "mul 3*4" [op = (a, b) => a * b, a = 3, b = 4, want = 12]
-  where "sub 10-3" [op = (a, b) => a - b, a = 10, b = 3, want = 7]
+fn do_add(a: Int, b: Int) -> Int = a + b
+fn do_mul(a: Int, b: Int) -> Int = a * b
+fn do_sub(a: Int, b: Int) -> Int = a - b
+
+test "math operations" where [
+  "add 1+1" [op = do_add, a = 1, b = 1, want = 2],
+  "mul 3*4" [op = do_mul, a = 3, b = 4, want = 12],
+  "sub 10-3" [op = do_sub, a = 10, b = 3, want = 7],
+]
 {
   assert_eq(op(a, b), want)
 }
