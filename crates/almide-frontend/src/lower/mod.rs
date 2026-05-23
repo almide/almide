@@ -297,9 +297,26 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                 let tl_def_id = ctx.def_map.get(&sym(name)).copied();
                 top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, mutable: *mutable, doc, blank_lines_before: blank_lines, def_id: tl_def_id });
             }
-            ast::Decl::Test { name, body, .. } => {
-                let test_fn = lower_test(&mut ctx, name, body);
-                functions.push(test_fn);
+            ast::Decl::Test { name, body, where_clauses, .. } => {
+                let cases: Vec<_> = where_clauses.iter()
+                    .filter_map(|wc| match wc { ast::TestWhere::Case { name, bindings } => Some((name.clone(), bindings.clone())), _ => None })
+                    .collect();
+                let top_binds: Vec<_> = where_clauses.iter()
+                    .filter(|wc| !matches!(wc, ast::TestWhere::Case { .. }))
+                    .cloned()
+                    .collect();
+                if cases.is_empty() {
+                    let test_fn = lower_test_with_where(&mut ctx, name, body, &top_binds);
+                    functions.push(test_fn);
+                } else {
+                    for (case_name, case_binds) in &cases {
+                        let full_name = format!("{} / {}", name, case_name);
+                        let mut merged = top_binds.clone();
+                        merged.extend(case_binds.iter().cloned());
+                        let test_fn = lower_test_with_where(&mut ctx, &full_name, body, &merged);
+                        functions.push(test_fn);
+                    }
+                }
             }
             ast::Decl::Impl { for_, methods, .. } => {
                 for m in methods {
@@ -734,12 +751,44 @@ fn lower_fn(
 }
 
 fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
+    lower_test_with_where(ctx, name, body, &[])
+}
+
+fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where_clauses: &[ast::TestWhere]) -> IrFunction {
     ctx.push_scope();
+    // Lower where bindings as let statements before the body
+    let mut stmts: Vec<IrStmt> = Vec::new();
+    for wc in where_clauses {
+        match wc {
+            ast::TestWhere::Bind { name: bind_name, value } => {
+                let ir_val = lower_expr(ctx, value);
+                let ty = ir_val.ty.clone();
+                let var = ctx.define_var(bind_name.as_str(), ty.clone(), Mutability::Let, None);
+                stmts.push(IrStmt {
+                    kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val },
+                    span: None,
+                });
+            }
+            // Override and CallResponse: Phase 2/3 — emit a warning for now
+            ast::TestWhere::Override { .. } | ast::TestWhere::CallResponse { .. } => {
+                // TODO: implement in Phase 2/3
+            }
+            ast::TestWhere::Case { .. } => {} // already expanded
+        }
+    }
     let ir_body = lower_expr(ctx, body);
+    let final_body = if stmts.is_empty() {
+        ir_body
+    } else {
+        // Wrap: { let bindings...; body }
+        let ty = ir_body.ty.clone();
+        let span = ir_body.span;
+        IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(ir_body)) }, ty, span, def_id: None }
+    };
     ctx.pop_scope();
     IrFunction {
         name: sym(&format!("{}{}", almide_ir::TEST_NAME_PREFIX, name)),
-        params: vec![], ret_ty: Ty::Unit, body: ir_body,
+        params: vec![], ret_ty: Ty::Unit, body: final_body,
         is_effect: true, is_async: false, is_test: true,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
         visibility: IrVisibility::Public,

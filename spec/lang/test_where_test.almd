@@ -1,0 +1,62 @@
+// Phase 1: test where — value binding + table-driven tests
+
+fn parse_age(s: String) -> Result[Int, String] =
+  match int.parse(s) {
+    ok(n) => if n >= 0 then ok(n) else err("negative"),
+    err(_) => err("invalid"),
+  }
+
+fn add(a: Int, b: Int) -> Int = a + b
+
+// ── Value binding ──
+
+test "parse age with where"
+  where input = "20"
+  where want = 20
+{
+  assert_eq(parse_age(input) ?? -1, want)
+}
+
+test "add with where"
+  where a = 3
+  where b = 7
+{
+  assert_eq(add(a, b), 10)
+}
+
+// ── Table-driven ──
+
+test "parse age table"
+  where "valid" {
+    input = "20"
+    want = 20
+  }
+  where "zero" {
+    input = "0"
+    want = 0
+  }
+  where "large" {
+    input = "999"
+    want = 999
+  }
+{
+  assert_eq(parse_age(input) ?? -1, want)
+}
+
+test "add table"
+  where "positive" { a = 1; b = 2; want = 3 }
+  where "zero" { a = 0; b = 0; want = 0 }
+  where "negative" { a = -5; b = 3; want = -2 }
+{
+  assert_eq(add(a, b), want)
+}
+
+// ── Mixed: top-level where + cases ──
+
+test "string ops"
+  where prefix = "hello"
+  where "world" { suffix = " world"; want = "hello world" }
+  where "almide" { suffix = " almide"; want = "hello almide" }
+{
+  assert_eq(prefix + suffix, want)
+}

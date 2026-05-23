@@ -544,10 +544,12 @@ impl Checker {
             ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, .. } => {
                 self.check_fn_decl(name, params, return_type, body, effect, generics);
             }
-            ast::Decl::Test { body, .. } => {
+            ast::Decl::Test { body, where_clauses, .. } => {
+                let wcs = where_clauses.clone();
                 self.env.push_scope();
                 let prev_call = self.env.can_call_effect; self.env.can_call_effect = true;
                 let prev_test = self.env.in_test_block; self.env.in_test_block = true;
+                for wc in &wcs { self.infer_test_where_inner(wc); }
                 self.infer_expr(body);
                 self.env.in_test_block = prev_test;
                 self.env.can_call_effect = prev_call;
@@ -588,6 +590,21 @@ impl Checker {
 
     // ── Exhaustiveness ──
 
+    fn infer_test_where_inner(&mut self, wc: &ast::TestWhere) {
+        match wc {
+            ast::TestWhere::Bind { name, value } => {
+                let mut val = value.clone();
+                let ty = self.infer_expr(&mut val);
+                let resolved = resolve_ty(&ty, &self.uf);
+                self.env.define_var(name.as_str(), resolved);
+            }
+            ast::TestWhere::Override { value, .. } => { let mut v = value.clone(); self.infer_expr(&mut v); }
+            ast::TestWhere::CallResponse { response, .. } => { let mut r = response.clone(); self.infer_expr(&mut r); }
+            ast::TestWhere::Case { bindings, .. } => {
+                for b in bindings { self.infer_test_where_inner(b); }
+            }
+        }
+    }
 }
 
 /// Infer types for default value expressions in type declarations.
@@ -604,6 +621,7 @@ fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
             }
         }
     }
+
 }
 
 impl Checker {
