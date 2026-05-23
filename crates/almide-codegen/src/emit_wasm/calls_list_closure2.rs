@@ -869,13 +869,16 @@ impl FuncCompiler<'_> {
                 let len = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
                 let acc = self.scratch.alloc(acc_vt);
+                let is_inline_lambda = matches!(&args[2].kind, almide_ir::IrExprKind::Lambda { .. });
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(list_ptr); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { local_set(acc); });
-                self.emit_expr(&args[2]);
+                if !is_inline_lambda {
+                    self.emit_expr(&args[2]);
+                    wasm!(self.func, { local_set(closure); });
+                }
                 wasm!(self.func, {
-                    local_set(closure);
                     local_get(list_ptr); i32_load(0); local_set(len);
                     i32_const(0); local_set(idx);
                     block_empty; loop_empty;
@@ -883,19 +886,50 @@ impl FuncCompiler<'_> {
                 let depth_guard = self.depth_push_n(2);
                 wasm!(self.func, {
                     local_get(idx); local_get(len); i32_ge_u; br_if(1);
-                    local_get(closure); i32_load(4); // env
-                    local_get(acc);
-                    local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                    local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
                 });
-                self.emit_load_at(&elem_ty, 0);
-                wasm!(self.func, { local_get(closure); i32_load(0); }); // table_idx
-                {
-                    // Build call_indirect type from resolved acc/elem types
-                    let mut ct = vec![ValType::I32]; // env
-                    if let Some(vt) = values::ty_to_valtype(&acc_ty_resolved) { ct.push(vt); }
-                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    self.emit_call_indirect(ct, values::ret_type(&acc_ty_resolved));
+                if let almide_ir::IrExprKind::Lambda { params, body, .. } = &args[2].kind {
+                    // Inline fold lambda: bind acc param and elem param, emit body
+                    let acc_param = params.first().map(|(v, _)| *v);
+                    let elem_param = params.get(1).map(|(v, _)| *v);
+                    let elem_local = self.scratch.alloc(values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32));
+                    // Load element into local
+                    wasm!(self.func, {
+                        local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
+                    });
+                    self.emit_load_at(&elem_ty, 0);
+                    wasm!(self.func, { local_set(elem_local); });
+                    // Bind params to locals
+                    if let Some(vid) = acc_param {
+                        self.var_map.insert(vid.0, acc);
+                    }
+                    if let Some(vid) = elem_param {
+                        self.var_map.insert(vid.0, elem_local);
+                    }
+                    self.emit_expr(body);
+                    // Clean up bindings
+                    if let Some(vid) = acc_param {
+                        self.var_map.remove(&vid.0);
+                    }
+                    if let Some(vid) = elem_param {
+                        self.var_map.remove(&vid.0);
+                    }
+                    self.scratch.free(elem_local, values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32));
+                } else {
+                    wasm!(self.func, {
+                        local_get(closure); i32_load(4); // env
+                        local_get(acc);
+                        local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
+                    });
+                    self.emit_load_at(&elem_ty, 0);
+                    wasm!(self.func, { local_get(closure); i32_load(0); }); // table_idx
+                    {
+                        let mut ct = vec![ValType::I32]; // env
+                        if let Some(vt) = values::ty_to_valtype(&acc_ty_resolved) { ct.push(vt); }
+                        if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
+                        self.emit_call_indirect(ct, values::ret_type(&acc_ty_resolved));
+                    }
                 }
                 wasm!(self.func, {
                     local_set(acc);
