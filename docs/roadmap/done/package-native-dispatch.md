@@ -1,8 +1,8 @@
 <!-- description: First-class @inline_rust for packages, remove bundled-only walls -->
 # Package Native Dispatch
 
-> **Target: v0.23**
-> **Status: Design**
+> **Shipped: v0.22.1**
+> **Status: Done**
 
 ## Problem
 
