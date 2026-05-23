@@ -799,14 +799,17 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { local_get(closure); i32_load(0); }); // table_idx
                     self.emit_closure_call(&elem_ty, &Ty::Bool);
                 }
+                // Branchless filter: always write element, conditionally advance out_idx.
+                // Eliminates branch misprediction — beats LLVM's cmov in some cases.
+                // predicate result is on stack as i32 (0 or 1)
+                let pred_result = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    if_empty;
-                    // dst[out_idx] = src[idx] (use param_local if available to avoid re-read)
+                    local_set(pred_result);
+                    // Always write: dst[out_idx] = elem
                     local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(out_idx); i32_const(elem_size as i32); i32_mul; i32_add;
                 });
                 if let Some((pl, _)) = filter_param_local {
-                    // Use cached param_local — avoid re-reading from memory
                     wasm!(self.func, { local_get(pl); });
                 } else {
                     wasm!(self.func, {
@@ -817,11 +820,12 @@ impl FuncCompiler<'_> {
                 }
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, {
-                    local_get(out_idx); i32_const(1); i32_add; local_set(out_idx);
-                    end; // end if
+                    // out_idx += predicate (0 or 1) — branchless
+                    local_get(out_idx); local_get(pred_result); i32_add; local_set(out_idx);
                     local_get(idx); i32_const(1); i32_add; local_set(idx);
                     br(0);
                 });
+                self.scratch.free_i32(pred_result);
                 self.depth_pop(depth_guard);
                 wasm!(self.func, {
                     end; end;
