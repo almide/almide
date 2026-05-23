@@ -52,7 +52,8 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
     let toml_dir = toml_path.parent()
         .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let source_root = if native_deps.is_empty() { None } else { Some(toml_dir.as_path()) };
+    let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
+    let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir.as_path()) } else { None };
 
     let result = if use_test_harness {
         cargo_build_test_with_native(&rs_code, &project_dir, native_deps, source_root)
