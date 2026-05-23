@@ -465,7 +465,7 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     // Check leading '-'
     wasm!(f, {
         local_get(0);
-        i32_load8_u(4);
+        i32_load8_u(super::list_layout::STRING_DATA_OFFSET as u32);
         i32_const(45);
         i32_eq;
         if_empty;
@@ -479,7 +479,7 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     // Check leading '+'
     wasm!(f, {
         local_get(0);
-        i32_load8_u(4);
+        i32_load8_u(super::list_layout::STRING_DATA_OFFSET as u32);
         i32_const(43);
         i32_eq;
         local_get(4);
