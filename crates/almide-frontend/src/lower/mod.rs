@@ -786,15 +786,55 @@ fn rewrite_calls_in_expr(expr: &mut ast::Expr, path: &[Sym], override_name: &str
 }
 
 fn lower_where_bind(ctx: &mut LowerCtx, bind_name: &Sym, value: &ast::Expr) -> IrStmt {
-    let ir_val = lower_expr(ctx, value);
+    let mut ir_val = lower_expr(ctx, value);
+    // Patch lambda params from checker's inferred Fn type
+    patch_lambda_params_from_checker(ctx, &mut ir_val, bind_name);
     let ty = ir_val.ty.clone();
     let var = ctx.define_var(bind_name.as_str(), ty.clone(), Mutability::Let, None);
     IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val }, span: None }
 }
 
+/// If ir_val is a Lambda with Unknown params, try to resolve from checker's env.
+fn patch_lambda_params_from_checker(ctx: &mut LowerCtx, ir_val: &mut IrExpr, bind_name: &Sym) {
+    let IrExprKind::Lambda { params: ir_params, body, .. } = &mut ir_val.kind else { return };
+    if !ir_params.iter().any(|(_, ty)| matches!(ty, Ty::Unknown)) { return; }
+    // Check if checker stored a Fn type for this binding
+    let fn_ty = ctx.env.lookup_var(bind_name.as_str()).cloned();
+    let Some(Ty::Fn { params: sig_tys, ret }) = fn_ty else { return };
+    for (i, (var_id, var_ty)) in ir_params.iter_mut().enumerate() {
+        if let Some(concrete) = sig_tys.get(i) {
+            if !matches!(concrete, Ty::Unknown) && !matches!(concrete, Ty::TypeVar(_)) {
+                *var_ty = concrete.clone();
+                ctx.var_table.entries[var_id.0 as usize].ty = concrete.clone();
+            }
+        }
+    }
+    if matches!(body.ty, Ty::Unknown) && !matches!(*ret, Ty::Unknown) {
+        body.ty = *ret.clone();
+    }
+    ir_val.ty = Ty::Fn { params: sig_tys, ret };
+}
+
 fn lower_where_override(ctx: &mut LowerCtx, path: &[Sym], value: &ast::Expr, stmts: &mut Vec<IrStmt>, overrides: &mut Vec<(Vec<Sym>, String)>) {
     let override_name = where_override_name(path);
-    let ir_val = lower_expr(ctx, value);
+    let mut ir_val = lower_expr(ctx, value);
+    // If value is a lambda with Unknown params, patch from original function sig
+    if let IrExprKind::Lambda { params: ir_params, body, .. } = &mut ir_val.kind {
+        if ir_params.iter().any(|(_, ty)| matches!(ty, Ty::Unknown)) {
+            if let Some(Ty::Fn { params: sig_tys, ret }) = resolve_target_fn_type(ctx, path) {
+                for (i, (var_id, var_ty)) in ir_params.iter_mut().enumerate() {
+                    if let Some(concrete) = sig_tys.get(i) {
+                        if !matches!(concrete, Ty::Unknown) {
+                            *var_ty = concrete.clone();
+                            ctx.var_table.entries[var_id.0 as usize].ty = concrete.clone();
+                        }
+                    }
+                }
+                if matches!(body.ty, Ty::Unknown) { body.ty = *ret; }
+                ir_val.ty = Ty::Fn { params: sig_tys, ret: Box::new(body.ty.clone()) };
+            }
+        }
+    }
     let ty = ir_val.ty.clone();
     let var = ctx.define_var(&override_name, ty.clone(), Mutability::Let, None);
     stmts.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val }, span: None });
@@ -814,15 +854,33 @@ fn lower_where_call_response(ctx: &mut LowerCtx, target: &[Sym], params: &[ast::
         params: lambda_params, body: Box::new(response.clone()),
     });
     let mut ir_val = lower_expr(ctx, &lambda);
-    // Resolve param types from the original function's signature
+    // Resolve param types from the original function's signature and patch
+    // the lambda's IR param VarIds so WASM codegen gets correct types.
     let original_fn_ty = resolve_target_fn_type(ctx, target);
-    let ty = match &ir_val.ty {
-        Ty::Fn { .. } => ir_val.ty.clone(),
-        _ => original_fn_ty.unwrap_or_else(|| Ty::Fn {
-            params: params.iter().map(|_| Ty::Unknown).collect(),
-            ret: Box::new(Ty::Unknown),
-        }),
+    let sig_param_tys: Vec<Ty> = match &original_fn_ty {
+        Some(Ty::Fn { params: ptys, .. }) => ptys.clone(),
+        _ => params.iter().map(|_| Ty::Unknown).collect(),
     };
+    let sig_ret_ty = match &original_fn_ty {
+        Some(Ty::Fn { ret, .. }) => (**ret).clone(),
+        _ => Ty::Unknown,
+    };
+    // Patch lambda IR: update param VarIds in var_table with concrete types
+    if let IrExprKind::Lambda { params: ir_params, body, .. } = &mut ir_val.kind {
+        for (i, (var_id, var_ty)) in ir_params.iter_mut().enumerate() {
+            if let Some(concrete) = sig_param_tys.get(i) {
+                if !matches!(concrete, Ty::Unknown) {
+                    *var_ty = concrete.clone();
+                    ctx.var_table.entries[var_id.0 as usize].ty = concrete.clone();
+                }
+            }
+        }
+        // Patch body return type if it's Unknown
+        if matches!(body.ty, Ty::Unknown) && !matches!(sig_ret_ty, Ty::Unknown) {
+            body.ty = sig_ret_ty.clone();
+        }
+    }
+    let ty = Ty::Fn { params: sig_param_tys, ret: Box::new(sig_ret_ty) };
     ir_val.ty = ty.clone();
     let var = ctx.define_var(&override_name, ty.clone(), Mutability::Let, None);
     ctx.var_table.entries[var.0 as usize].ty = ty.clone();

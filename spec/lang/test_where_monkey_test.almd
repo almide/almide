@@ -55,6 +55,16 @@ test "identity override"
   assert_eq(multiply(3, 4), 12)
 }
 
+// ── Edge: override with lambda value ──
+
+fn add_ints(a: Int, b: Int) -> Int = a + b
+
+test "lambda value override"
+  where add_ints = (a, b) => a * b
+{
+  assert_eq(add_ints(3, 4), 12)
+}
+
 // ── Edge: override returns constant ──
 
 test "constant override"
