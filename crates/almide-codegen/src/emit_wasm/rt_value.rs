@@ -332,11 +332,11 @@ fn compile_json_parse_at(emitter: &mut WasmEmitter) {
         if_empty;
           // Validate remaining chars: u(117), l(108), l(108)
           local_get(1); i32_const(3); i32_add; local_get(3); i32_lt_u; // need 3 more chars
-          local_get(0); i32_const(5); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(117); i32_eq;
+          local_get(0); i32_const(STRING_DATA_OFFSET + 1); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(117); i32_eq;
           i32_and;
-          local_get(0); i32_const(6); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(108); i32_eq;
+          local_get(0); i32_const(STRING_DATA_OFFSET + 2); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(108); i32_eq;
           i32_and;
-          local_get(0); i32_const(7); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(108); i32_eq;
+          local_get(0); i32_const(STRING_DATA_OFFSET + 3); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(108); i32_eq;
           i32_and;
     });
     wasm!(f, {
@@ -357,11 +357,11 @@ fn compile_json_parse_at(emitter: &mut WasmEmitter) {
         local_get(4); i32_const(116); i32_eq; // 't'
         if_empty;
           local_get(1); i32_const(3); i32_add; local_get(3); i32_lt_u;
-          local_get(0); i32_const(5); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(114); i32_eq;
+          local_get(0); i32_const(STRING_DATA_OFFSET + 1); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(114); i32_eq;
           i32_and;
-          local_get(0); i32_const(6); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(117); i32_eq;
+          local_get(0); i32_const(STRING_DATA_OFFSET + 2); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(117); i32_eq;
           i32_and;
-          local_get(0); i32_const(7); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(101); i32_eq;
+          local_get(0); i32_const(STRING_DATA_OFFSET + 3); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(101); i32_eq;
           i32_and;
     });
     wasm!(f, {
@@ -383,13 +383,13 @@ fn compile_json_parse_at(emitter: &mut WasmEmitter) {
         local_get(4); i32_const(102); i32_eq; // 'f'
         if_empty;
           local_get(1); i32_const(4); i32_add; local_get(3); i32_lt_u;
-          local_get(0); i32_const(5); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(97); i32_eq;
+          local_get(0); i32_const(STRING_DATA_OFFSET + 1); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(97); i32_eq;
           i32_and;
-          local_get(0); i32_const(6); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(108); i32_eq;
+          local_get(0); i32_const(STRING_DATA_OFFSET + 2); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(108); i32_eq;
           i32_and;
-          local_get(0); i32_const(7); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(115); i32_eq;
+          local_get(0); i32_const(STRING_DATA_OFFSET + 3); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(115); i32_eq;
           i32_and;
-          local_get(0); i32_const(8); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(101); i32_eq;
+          local_get(0); i32_const(STRING_DATA_OFFSET + 4); i32_add; local_get(1); i32_add; i32_load8_u(0); i32_const(101); i32_eq;
           i32_and;
     });
     wasm!(f, {
