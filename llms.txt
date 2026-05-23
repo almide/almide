@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.23.0 (prev v0.22.2). test where: unified test context syntax — value binding, table-driven `where [...]`, reference override, call response `where fn(x) => expr`, `local test where`, `mod test where`. WASM lambda param type inference from body usage. TypeVar erase for generic fn override.
+- Current stable: v0.23.1 (prev v0.23.0). Fix: almide test/run injects dep natives when dependencies exist (not just native-deps).
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.
