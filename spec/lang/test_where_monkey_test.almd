@@ -184,14 +184,10 @@ test "option binding"
 
 // ── Edge: deeply nested table cases ──
 
-fn do_add(a: Int, b: Int) -> Int = a + b
-fn do_mul(a: Int, b: Int) -> Int = a * b
-fn do_sub(a: Int, b: Int) -> Int = a - b
-
 test "math operations" where [
-  "add 1+1" [op = do_add, a = 1, b = 1, want = 2],
-  "mul 3*4" [op = do_mul, a = 3, b = 4, want = 12],
-  "sub 10-3" [op = do_sub, a = 10, b = 3, want = 7],
+  "add 1+1" [op = (a, b) => a + b, a = 1, b = 1, want = 2],
+  "mul 3*4" [op = (a, b) => a * b, a = 3, b = 4, want = 12],
+  "sub 10-3" [op = (a, b) => a - b, a = 10, b = 3, want = 7],
 ]
 {
   assert_eq(op(a, b), want)

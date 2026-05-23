@@ -575,6 +575,22 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
         // concrete before we use them here.
         walk_expr_mut(self, expr);
 
+        // Resolve Unknown lambda params from body usage (e.g. `(a,b) => a + b` → Int)
+        if let IrExprKind::Lambda { params, body, .. } = &mut expr.kind {
+            let mut patched = false;
+            for (var_id, var_ty) in params.iter_mut() {
+                if matches!(var_ty, Ty::Unknown) {
+                    if let Some(inferred) = infer_var_type_from_body(body, *var_id) {
+                        *var_ty = inferred.clone();
+                        self.vt.entries[var_id.0 as usize].ty = inferred;
+                        patched = true;
+                    }
+                }
+            }
+            // Re-visit body to propagate patched param types into Var nodes
+            if patched { walk_expr_mut(self, body); }
+        }
+
         // Rewrite BinOp when operand types disagree with the op kind.
         // Type checker may have picked `AddInt` for polymorphic code that
         // later specialized to Float (e.g. via list element type). Without
@@ -695,6 +711,62 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
 
 // ── Resolution logic ───────────────────────────────────────────────
 
+/// Infer a lambda param's type by scanning how it's used in the body.
+/// e.g., `(a, b) => a + b` where body is BinOp::AddInt → a: Int, b: Int
+fn infer_var_type_from_body(body: &IrExpr, var: VarId) -> Option<Ty> {
+    match &body.kind {
+        // BinOp: if operand is our var, infer from the op's expected type
+        IrExprKind::BinOp { op, left, right } => {
+            let operand_ty = match op {
+                BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt | BinOp::ModInt | BinOp::PowInt => Some(Ty::Int),
+                BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat => Some(Ty::Float),
+                BinOp::ConcatStr => Some(Ty::String),
+                BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte => {
+                    // Comparison: both sides same type, check the other side
+                    if matches!(&left.kind, IrExprKind::Var { id } if *id == var) {
+                        if !right.ty.has_unresolved_deep() { Some(right.ty.clone()) } else { None }
+                    } else if matches!(&right.kind, IrExprKind::Var { id } if *id == var) {
+                        if !left.ty.has_unresolved_deep() { Some(left.ty.clone()) } else { None }
+                    } else { None }
+                }
+                _ => None,
+            };
+            if let Some(ref ty) = operand_ty {
+                if matches!(&left.kind, IrExprKind::Var { id } if *id == var) { return Some(ty.clone()); }
+                if matches!(&right.kind, IrExprKind::Var { id } if *id == var) { return Some(ty.clone()); }
+            }
+            infer_var_type_from_body(left, var).or_else(|| infer_var_type_from_body(right, var))
+        }
+        // Call: if arg is our var, infer from call's param type
+        IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
+            for arg in args {
+                if let Some(ty) = infer_var_type_from_body(arg, var) { return Some(ty); }
+            }
+            None
+        }
+        // Block: check stmts and tail
+        IrExprKind::Block { stmts, expr } => {
+            for s in stmts {
+                if let IrStmtKind::Bind { value, .. } | IrStmtKind::Expr { expr: value } = &s.kind {
+                    if let Some(ty) = infer_var_type_from_body(value, var) { return Some(ty); }
+                }
+            }
+            expr.as_ref().and_then(|e| infer_var_type_from_body(e, var))
+        }
+        // If/Match: recurse
+        IrExprKind::If { cond, then, else_ } => {
+            infer_var_type_from_body(cond, var)
+                .or_else(|| infer_var_type_from_body(then, var))
+                .or_else(|| infer_var_type_from_body(else_, var))
+        }
+        IrExprKind::Match { subject, arms } => {
+            infer_var_type_from_body(subject, var)
+                .or_else(|| arms.iter().find_map(|a| infer_var_type_from_body(&a.body, var)))
+        }
+        _ => None,
+    }
+}
+
 fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Option<Ty> {
     match &expr.kind {
         IrExprKind::Var { id } => {
@@ -752,7 +824,6 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
                 .find_map(|arm| if !(arm.body.ty).has_unresolved_deep() { Some(arm.body.ty.clone()) } else { None })
         }
         IrExprKind::Lambda { params, body, .. } => {
-            // Build Ty::Fn from resolved params + body.ty (if concrete)
             let fparams: Vec<Ty> = params.iter().map(|(_, t)| t.clone()).collect();
             if fparams.iter().any(Ty::has_unresolved_deep) || (body.ty).has_unresolved_deep() {
                 return None;
