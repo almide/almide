@@ -28,3 +28,25 @@ Remaining WASM bottlenecks:
   
 Root cause: WASM emitter uses immutable data structures.
 mut operations (string.push, map.insert) need WASM-level COW or mutable heap.
+
+=== WASM string/map analysis ===
+
+Root cause: WASM string layout is [len:i32][data...] — fixed-size allocation.
+Every concat allocates a new buffer. No in-place growth possible.
+
+Options to fix:
+1. Capacity-based layout: [len:i32][cap:i32][data...] — amortized O(1) append
+   - Requires changing string layout across entire WASM emitter
+   - All string operations need to respect len vs cap
+   - list_layout.rs already has this pattern for lists
+
+2. Peephole optimization: detect `s = s + expr` in while loop → accumulate in list + join
+   - IR-level transformation, WASM target only
+   - Doesn't require layout change
+   - Limited to specific pattern
+
+3. StringBuilder type: explicit mutable string buffer
+   - User-visible API change
+   - Already done for Rust target (string.push)
+
+Recommendation: Option 1 (capacity-based layout) is the ideal long-term fix.
