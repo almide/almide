@@ -358,7 +358,25 @@ pub enum Decl {
     Protocol { name: Sym, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<ProtocolMethod>, #[serde(skip)] span: Option<Span> },
     Impl { trait_: Sym, for_: Sym, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<Decl>, #[serde(skip)] span: Option<Span> },
     Strict { mode: String, #[serde(skip)] span: Option<Span> },
-    Test { name: String, body: Expr, #[serde(skip)] span: Option<Span> },
+    Test { name: String, body: Expr, #[serde(default)] where_clauses: Vec<TestWhere>, #[serde(skip)] span: Option<Span> },
+    /// `local test where { ... }` — file-scoped test environment
+    TestWhereDef { scope: TestWhereScope, clauses: Vec<TestWhere>, #[serde(skip)] span: Option<Span> },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum TestWhereScope { Local, Module }
+
+/// A `where` clause in a test declaration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TestWhere {
+    /// `where name = expr` — value binding
+    Bind { name: Sym, value: Expr },
+    /// `where path.to.name = expr` — reference override
+    Override { path: Vec<Sym>, value: Expr },
+    /// `where target(args...) => expr` — call pattern response
+    CallResponse { target: Vec<Sym>, params: Vec<Pattern>, response: Expr },
+    /// `where "case name" { bindings... }` — table-driven test case
+    Case { name: String, bindings: Vec<TestWhere> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -400,10 +418,24 @@ pub fn visit_decl_exprs_mut(decl: &mut Decl, f: &mut impl FnMut(&mut Expr)) {
             if let Some(b) = body { visit_expr_mut(b, f); }
         }
         Decl::TopLet { value, .. } => visit_expr_mut(value, f),
-        Decl::Test { body, .. } => visit_expr_mut(body, f),
+        Decl::Test { body, where_clauses, .. } => {
+            for wc in where_clauses.iter_mut() { visit_test_where_exprs_mut(wc, f); }
+            visit_expr_mut(body, f);
+        }
+        Decl::TestWhereDef { clauses, .. } => {
+            for wc in clauses.iter_mut() { visit_test_where_exprs_mut(wc, f); }
+        }
         Decl::Impl { methods, .. } => { for m in methods.iter_mut() { visit_decl_exprs_mut(m, f); } }
         Decl::Module { .. } | Decl::Import { .. } | Decl::Type { .. } |
         Decl::Protocol { .. } | Decl::Strict { .. } => {}
+    }
+}
+
+fn visit_test_where_exprs_mut(wc: &mut TestWhere, f: &mut impl FnMut(&mut Expr)) {
+    match wc {
+        TestWhere::Bind { value, .. } | TestWhere::Override { value, .. } => visit_expr_mut(value, f),
+        TestWhere::CallResponse { response, .. } => visit_expr_mut(response, f),
+        TestWhere::Case { bindings, .. } => { for b in bindings.iter_mut() { visit_test_where_exprs_mut(b, f); } }
     }
 }
 

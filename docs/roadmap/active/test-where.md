@@ -1,8 +1,8 @@
 <!-- description: test where syntax — unified value/type/mock/table-driven test context -->
 # Test Where Syntax
 
-> **Target: v0.23+**
-> **Status: Spec**
+> **Target: v0.23.0**
+> **Status: Done**
 
 ## Problem
 

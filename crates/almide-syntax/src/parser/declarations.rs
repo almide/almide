@@ -180,6 +180,10 @@ impl Parser {
                 return self.parse_top_let(Visibility::Public, true);
             }
             if self.check(TokenType::Local) || self.check(TokenType::Mod) {
+                // local test where { ... } / mod test where { ... }
+                if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Test) {
+                    return self.parse_test_where_def();
+                }
                 if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Type) {
                     return self.parse_type_decl();
                 }
@@ -612,13 +616,135 @@ impl Parser {
         Ok(Decl::Strict { mode, span: Some(span) })
     }
 
+    fn parse_test_where_def(&mut self) -> Result<Decl, String> {
+        use crate::ast::{TestWhereScope, TestWhere};
+        let span = self.current_span();
+        let scope = if self.check(TokenType::Local) { self.advance(); TestWhereScope::Local }
+            else { self.advance(); TestWhereScope::Module }; // Mod
+        self.expect(TokenType::Test)?;
+        // consume contextual 'where'
+        if self.current().token_type == TokenType::Ident && self.current().value == "where" {
+            self.advance();
+        }
+        self.expect(TokenType::LBrace)?;
+        let mut clauses = Vec::new();
+        self.skip_newlines();
+        while self.current().token_type != TokenType::RBrace && self.current().token_type != TokenType::EOF {
+            let clause = self.parse_test_where_binding()?;
+            clauses.push(clause);
+            while self.current().token_type == TokenType::Semicolon
+                || self.current().token_type == TokenType::Comma
+                || self.current().token_type == TokenType::Newline
+            { self.advance(); }
+        }
+        self.expect(TokenType::RBrace)?;
+        Ok(Decl::TestWhereDef { scope, clauses, span: Some(span) })
+    }
+
     fn parse_test_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
         self.expect(TokenType::Test)?;
         let name = self.current().value.clone();
         self.expect(TokenType::String)?;
+        let where_clauses = self.parse_test_where_clauses()?;
         let body = self.parse_brace_expr()?;
-        Ok(Decl::Test { name, body, span: Some(span) })
+        Ok(Decl::Test { name, body, where_clauses, span: Some(span) })
+    }
+
+    fn parse_test_where_clauses(&mut self) -> Result<Vec<crate::ast::TestWhere>, String> {
+        let mut clauses = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.current().token_type == TokenType::Ident && self.current().value == "where" {
+                self.advance(); // consume 'where'
+                self.skip_newlines();
+                // Table syntax: where [ "case" [...], "case" [...] ]
+                if self.current().token_type == TokenType::LBracket {
+                    self.advance();
+                    self.skip_newlines();
+                    while self.current().token_type != TokenType::RBracket && self.current().token_type != TokenType::EOF {
+                        let case = self.parse_test_where_case()?;
+                        clauses.push(case);
+                        self.skip_newlines();
+                        if self.current().token_type == TokenType::Comma { self.advance(); }
+                        self.skip_newlines();
+                    }
+                    self.expect(TokenType::RBracket)?;
+                } else {
+                    let clause = self.parse_single_test_where()?;
+                    clauses.push(clause);
+                }
+            } else {
+                break;
+            }
+        }
+        Ok(clauses)
+    }
+
+    fn parse_single_test_where(&mut self) -> Result<crate::ast::TestWhere, String> {
+        use crate::ast::TestWhere;
+        // Table-driven [...] is handled in parse_test_where_clauses directly
+        // where "case name" [...] — standalone case (outside table)
+        if self.current().token_type == TokenType::String {
+            let next_tt = self.peek_at(1).map(|t| t.token_type);
+            if matches!(next_tt, Some(TokenType::LBracket)) {
+                return self.parse_test_where_case();
+            }
+        }
+        self.parse_test_where_binding()
+    }
+
+    fn parse_test_where_case(&mut self) -> Result<crate::ast::TestWhere, String> {
+        use crate::ast::TestWhere;
+        let case_name = self.current().value.clone();
+        self.expect(TokenType::String)?;
+        self.expect(TokenType::LBracket)?;
+        let mut bindings = Vec::new();
+        self.skip_newlines();
+        while self.current().token_type != TokenType::RBracket && self.current().token_type != TokenType::EOF {
+            let binding = self.parse_test_where_binding()?;
+            bindings.push(binding);
+            while self.current().token_type == TokenType::Comma || self.current().token_type == TokenType::Newline {
+                self.advance();
+            }
+        }
+        self.expect(TokenType::RBracket)?;
+        Ok(TestWhere::Case { name: case_name, bindings })
+    }
+
+    fn parse_test_where_binding(&mut self) -> Result<crate::ast::TestWhere, String> {
+        use crate::ast::TestWhere;
+        use almide_base::intern::sym;
+        // Collect path segments: name or name.name.name
+        let first = self.expect_ident()?;
+        let mut path = vec![sym(&first)];
+        while self.current().token_type == TokenType::Dot {
+            self.advance();
+            let seg = self.expect_ident()?;
+            path.push(sym(&seg));
+        }
+        // Call response: path(args) => expr
+        if self.current().token_type == TokenType::LParen {
+            self.advance();
+            let mut params = Vec::new();
+            while self.current().token_type != TokenType::RParen && self.current().token_type != TokenType::EOF {
+                let pat = self.parse_pattern()?;
+                params.push(pat);
+                if self.current().token_type == TokenType::Comma { self.advance(); }
+            }
+            self.expect(TokenType::RParen)?;
+            self.expect(TokenType::FatArrow)?;
+            let response = self.parse_expr()?;
+            return Ok(TestWhere::CallResponse { target: path, params, response });
+        }
+        // Value binding or override: path = expr
+        self.expect(TokenType::Eq)?;
+        let value = self.parse_expr()?;
+        if path.len() == 1 {
+            Ok(TestWhere::Bind { name: path[0], value })
+        } else {
+            Ok(TestWhere::Override { path, value })
+        }
     }
 
     fn parse_visibility(&mut self) -> Visibility {

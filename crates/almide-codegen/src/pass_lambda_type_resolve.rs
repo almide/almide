@@ -151,6 +151,18 @@ fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
             if let IrExprKind::Lambda { body, .. } = &mut expr.kind {
                 resolve_expr(body, vt);
             }
+            // Bottom-up: infer still-Unknown params from body usage
+            if let IrExprKind::Lambda { params, body, .. } = &mut expr.kind {
+                for (vid, pty) in params.iter_mut() {
+                    if pty.has_unresolved_deep() {
+                        if let Some(inferred) = super::pass_concretize_types::infer_var_type_from_body(body, *vid) {
+                            *pty = inferred.clone();
+                            vt.entries[vid.0 as usize].ty = inferred;
+                        }
+                    }
+                }
+                refresh_lambda_fn_ty(expr, vt);
+            }
         }
         IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts.iter_mut() { resolve_stmt(s, vt); }

@@ -544,14 +544,20 @@ impl Checker {
             ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, .. } => {
                 self.check_fn_decl(name, params, return_type, body, effect, generics);
             }
-            ast::Decl::Test { body, .. } => {
+            ast::Decl::Test { body, where_clauses, .. } => {
+                let wcs = where_clauses.clone();
                 self.env.push_scope();
                 let prev_call = self.env.can_call_effect; self.env.can_call_effect = true;
                 let prev_test = self.env.in_test_block; self.env.in_test_block = true;
+                for wc in &wcs { self.infer_test_where_inner(wc); }
                 self.infer_expr(body);
                 self.env.in_test_block = prev_test;
                 self.env.can_call_effect = prev_call;
                 self.env.pop_scope();
+            }
+            ast::Decl::TestWhereDef { clauses, .. } => {
+                let wcs = clauses.clone();
+                for wc in &wcs { self.infer_test_where_inner(wc); }
             }
             ast::Decl::TopLet { name, value, mutable, .. } => {
                 if *mutable { self.env.mutable_vars.insert(sym(name)); }
@@ -588,6 +594,48 @@ impl Checker {
 
     // ── Exhaustiveness ──
 
+    fn infer_test_where_inner(&mut self, wc: &ast::TestWhere) {
+        match wc {
+            ast::TestWhere::Bind { name, value } => {
+                let mut val = value.clone();
+                let ty = self.infer_expr(&mut val);
+                let resolved = resolve_ty(&ty, &self.uf);
+                self.env.define_var(name.as_str(), resolved);
+            }
+            ast::TestWhere::Override { path, value } => {
+                let mut v = value.clone();
+                let ty = self.infer_expr(&mut v);
+                let resolved = resolve_ty(&ty, &self.uf);
+                let override_name = format!("__where_{}", path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("_"));
+                self.env.define_var(&override_name, resolved);
+            }
+            ast::TestWhere::CallResponse { target, params, response } => {
+                // Resolve param types from original function signature
+                let target_name = if target.len() == 1 { *target.first().unwrap() }
+                    else { sym(&target.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")) };
+                let sig_params: Vec<Ty> = self.env.functions.get(&target_name)
+                    .map(|sig| sig.params.iter().map(|(_, t)| t.clone()).collect())
+                    .unwrap_or_default();
+                let param_vars: Vec<_> = params.iter().filter_map(|pat| {
+                    if let ast::Pattern::Ident { name } = pat { Some(*name) } else { None }
+                }).collect();
+                let param_tys: Vec<_> = param_vars.iter().enumerate().map(|(i, pname)| {
+                    let ty = sig_params.get(i).cloned().unwrap_or_else(|| self.fresh_var());
+                    self.env.define_var(pname.as_str(), ty.clone());
+                    ty
+                }).collect();
+                let mut r = response.clone();
+                let ret_ty = self.infer_expr(&mut r);
+                let ret_resolved = resolve_ty(&ret_ty, &self.uf);
+                let fn_ty = Ty::Fn { params: param_tys, ret: Box::new(ret_resolved) };
+                let override_name = format!("__where_{}", target.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("_"));
+                self.env.define_var(&override_name, fn_ty);
+            }
+            ast::TestWhere::Case { bindings, .. } => {
+                for b in bindings { self.infer_test_where_inner(b); }
+            }
+        }
+    }
 }
 
 /// Infer types for default value expressions in type declarations.
@@ -604,6 +652,7 @@ fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
             }
         }
     }
+
 }
 
 impl Checker {

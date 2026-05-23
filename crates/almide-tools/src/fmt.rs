@@ -360,6 +360,7 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
         }
         Decl::Test { name, body, .. } => { w!(out, "{i}test \"{name}\" "); fmt_expr(out, body, depth); }
+        Decl::TestWhereDef { .. } => {} // test where defs don't need formatting (internal)
         Decl::Protocol { name, methods, .. } => {
             wln!(out, "{i}protocol {name} {{");
             let inner = "  ".repeat(depth + 1);

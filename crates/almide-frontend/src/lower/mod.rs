@@ -255,6 +255,11 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         }
     }
 
+    // Pre-pass: collect file-scoped test where clauses
+    let file_test_wheres: Vec<ast::TestWhere> = prog.decls.iter().filter_map(|d| {
+        if let ast::Decl::TestWhereDef { clauses, .. } = d { Some(clauses.clone()) } else { None }
+    }).flatten().collect();
+
     for (decl_idx, decl) in prog.decls.iter().enumerate() {
         let doc = prog.doc_map.get(decl_idx).cloned().flatten();
         let blank_lines = prog.blank_lines_map.get(decl_idx).copied().unwrap_or(0);
@@ -297,9 +302,27 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                 let tl_def_id = ctx.def_map.get(&sym(name)).copied();
                 top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, mutable: *mutable, doc, blank_lines_before: blank_lines, def_id: tl_def_id });
             }
-            ast::Decl::Test { name, body, .. } => {
-                let test_fn = lower_test(&mut ctx, name, body);
-                functions.push(test_fn);
+            ast::Decl::TestWhereDef { .. } => {} // collected in pre-pass below
+            ast::Decl::Test { name, body, where_clauses, .. } => {
+                let cases: Vec<_> = where_clauses.iter()
+                    .filter_map(|wc| match wc { ast::TestWhere::Case { name, bindings } => Some((name.clone(), bindings.clone())), _ => None })
+                    .collect();
+                let mut top_binds: Vec<_> = file_test_wheres.clone();
+                top_binds.extend(where_clauses.iter()
+                    .filter(|wc| !matches!(wc, ast::TestWhere::Case { .. }))
+                    .cloned());
+                if cases.is_empty() {
+                    let test_fn = lower_test_with_where(&mut ctx, name, body, &top_binds);
+                    functions.push(test_fn);
+                } else {
+                    for (case_name, case_binds) in &cases {
+                        let full_name = format!("{} / {}", name, case_name);
+                        let mut merged = top_binds.clone();
+                        merged.extend(case_binds.iter().cloned());
+                        let test_fn = lower_test_with_where(&mut ctx, &full_name, body, &merged);
+                        functions.push(test_fn);
+                    }
+                }
             }
             ast::Decl::Impl { for_, methods, .. } => {
                 for m in methods {
@@ -733,13 +756,226 @@ fn lower_fn(
     }
 }
 
+/// Check if a Call expression's callee matches a path (e.g. ["http","get"] or ["double"]).
+fn call_matches_path(expr: &ast::Expr, path: &[Sym]) -> bool {
+    let ast::ExprKind::Call { callee, .. } = &expr.kind else { return false };
+    match path.len() {
+        1 => matches!(&callee.kind, ast::ExprKind::Ident { name } if *name == path[0]),
+        2 => matches!(&callee.kind, ast::ExprKind::Member { object, field, .. }
+            if matches!(&object.kind, ast::ExprKind::Ident { name } if *name == path[0]) && *field == path[1]),
+        _ => false,
+    }
+}
+
+/// Replace the callee of a Call expression with an override variable.
+fn rewrite_call_callee(expr: &mut ast::Expr, override_name: &str) {
+    if let ast::ExprKind::Call { args, named_args, .. } = &mut expr.kind {
+        let new_callee = ast::Expr::new(ast::ExprId(0), None, ast::ExprKind::Ident { name: sym(override_name) });
+        expr.kind = ast::ExprKind::Call {
+            callee: Box::new(new_callee),
+            args: std::mem::take(args),
+            named_args: std::mem::take(named_args),
+            type_args: None,
+        };
+    }
+}
+
+/// Rewrite calls in an AST expression: replace matching calls with override var.
+fn rewrite_calls_in_expr(expr: &mut ast::Expr, path: &[Sym], override_name: &str) {
+    if call_matches_path(expr, path) {
+        rewrite_call_callee(expr, override_name);
+        return;
+    }
+    ast::visit_expr_mut(expr, &mut |e| {
+        if call_matches_path(e, path) { rewrite_call_callee(e, override_name); }
+    });
+}
+
+fn lower_where_bind(ctx: &mut LowerCtx, bind_name: &Sym, value: &ast::Expr) -> IrStmt {
+    let mut ir_val = lower_expr(ctx, value);
+    // Patch lambda params from checker's inferred Fn type
+    patch_lambda_params_from_checker(ctx, &mut ir_val, bind_name);
+    let ty = ir_val.ty.clone();
+    let var = ctx.define_var(bind_name.as_str(), ty.clone(), Mutability::Let, None);
+    IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val }, span: None }
+}
+
+/// If ir_val is a Lambda with Unknown params, try to resolve from checker's env.
+fn patch_lambda_params_from_checker(ctx: &mut LowerCtx, ir_val: &mut IrExpr, bind_name: &Sym) {
+    let IrExprKind::Lambda { params: ir_params, body, .. } = &mut ir_val.kind else { return };
+    if !ir_params.iter().any(|(_, ty)| matches!(ty, Ty::Unknown)) { return; }
+    // Check if checker stored a Fn type for this binding
+    let fn_ty = ctx.env.lookup_var(bind_name.as_str()).cloned();
+    let Some(Ty::Fn { params: sig_tys, ret }) = fn_ty else { return };
+    for (i, (var_id, var_ty)) in ir_params.iter_mut().enumerate() {
+        if let Some(concrete) = sig_tys.get(i) {
+            if !matches!(concrete, Ty::Unknown) && !matches!(concrete, Ty::TypeVar(_)) {
+                *var_ty = concrete.clone();
+                ctx.var_table.entries[var_id.0 as usize].ty = concrete.clone();
+            }
+        }
+    }
+    if matches!(body.ty, Ty::Unknown) && !matches!(*ret, Ty::Unknown) {
+        body.ty = *ret.clone();
+    }
+    ir_val.ty = Ty::Fn { params: sig_tys, ret };
+}
+
+fn lower_where_override(ctx: &mut LowerCtx, path: &[Sym], value: &ast::Expr, stmts: &mut Vec<IrStmt>, overrides: &mut Vec<(Vec<Sym>, String)>) {
+    let override_name = where_override_name(path);
+    let mut ir_val = lower_expr(ctx, value);
+    patch_lambda_from_fn_sig(ctx, &mut ir_val, path);
+    let ty = ir_val.ty.clone();
+    let var = ctx.define_var(&override_name, ty.clone(), Mutability::Let, None);
+    stmts.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val }, span: None });
+    overrides.push((path.to_vec(), override_name));
+}
+
+fn patch_lambda_from_fn_sig(ctx: &mut LowerCtx, ir_val: &mut IrExpr, path: &[Sym]) {
+    let IrExprKind::Lambda { params: ir_params, body, .. } = &mut ir_val.kind else { return };
+    if !ir_params.iter().any(|(_, ty)| matches!(ty, Ty::Unknown)) { return; }
+    let Some(Ty::Fn { params: sig_tys, ret }) = resolve_target_fn_type(ctx, path) else { return };
+    let erased: Vec<Ty> = sig_tys.iter().map(erase_typevars).collect();
+    for (i, (var_id, var_ty)) in ir_params.iter_mut().enumerate() {
+        if let Some(concrete) = erased.get(i) {
+            if !matches!(concrete, Ty::Unknown) {
+                *var_ty = concrete.clone();
+                ctx.var_table.entries[var_id.0 as usize].ty = concrete.clone();
+            }
+        }
+    }
+    let erased_ret = erase_typevars(&ret);
+    if matches!(body.ty, Ty::Unknown) { body.ty = erased_ret.clone(); }
+    ir_val.ty = Ty::Fn { params: erased, ret: Box::new(body.ty.clone()) };
+}
+
+fn lower_where_call_response(ctx: &mut LowerCtx, target: &[Sym], params: &[ast::Pattern], response: &ast::Expr, stmts: &mut Vec<IrStmt>, overrides: &mut Vec<(Vec<Sym>, String)>) {
+    let override_name = where_override_name(target);
+    let lambda_params: Vec<ast::LambdaParam> = params.iter().enumerate().map(|(i, pat)| {
+        let pname = match pat {
+            ast::Pattern::Ident { name } => name.as_str().to_string(),
+            _ => format!("_arg{}", i),
+        };
+        ast::LambdaParam { name: sym(&pname), tuple_names: None, ty: None }
+    }).collect();
+    let lambda = ast::Expr::new(ast::ExprId(0), None, ast::ExprKind::Lambda {
+        params: lambda_params, body: Box::new(response.clone()),
+    });
+    let mut ir_val = lower_expr(ctx, &lambda);
+    // Resolve param types from the original function's signature and patch
+    // the lambda's IR param VarIds so WASM codegen gets correct types.
+    let original_fn_ty = resolve_target_fn_type(ctx, target);
+    let sig_param_tys: Vec<Ty> = match &original_fn_ty {
+        Some(Ty::Fn { params: ptys, .. }) => ptys.iter().map(erase_typevars).collect(),
+        _ => params.iter().map(|_| Ty::Unknown).collect(),
+    };
+    let sig_ret_ty = match &original_fn_ty {
+        Some(Ty::Fn { ret, .. }) => erase_typevars(ret),
+        _ => Ty::Unknown,
+    };
+    // Patch lambda IR: update param VarIds in var_table with concrete types
+    if let IrExprKind::Lambda { params: ir_params, body, .. } = &mut ir_val.kind {
+        for (i, (var_id, var_ty)) in ir_params.iter_mut().enumerate() {
+            if let Some(concrete) = sig_param_tys.get(i) {
+                if !matches!(concrete, Ty::Unknown) {
+                    *var_ty = concrete.clone();
+                    ctx.var_table.entries[var_id.0 as usize].ty = concrete.clone();
+                }
+            }
+        }
+        // Patch body return type if it's Unknown
+        if matches!(body.ty, Ty::Unknown) && !matches!(sig_ret_ty, Ty::Unknown) {
+            body.ty = sig_ret_ty.clone();
+        }
+    }
+    let ty = Ty::Fn { params: sig_param_tys, ret: Box::new(sig_ret_ty) };
+    ir_val.ty = ty.clone();
+    let var = ctx.define_var(&override_name, ty.clone(), Mutability::Let, None);
+    ctx.var_table.entries[var.0 as usize].ty = ty.clone();
+    stmts.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val }, span: None });
+    overrides.push((target.to_vec(), override_name));
+}
+
+/// Look up the Fn type of a target path (e.g. ["double"] or ["http","get"]) from the environment.
+fn resolve_target_fn_type(ctx: &LowerCtx, target: &[Sym]) -> Option<Ty> {
+    let name = if target.len() == 1 {
+        target[0]
+    } else {
+        sym(&target.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
+    };
+    // Check local scope first (function defined in same file)
+    if let Some(var_id) = ctx.lookup_var(name.as_str()) {
+        let ty = &ctx.var_table.get(var_id).ty;
+        if matches!(ty, Ty::Fn { .. }) { return Some(ty.clone()); }
+    }
+    // Check environment functions
+    if let Some(sig) = ctx.env.functions.get(&name) {
+        return Some(Ty::Fn { params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
+    }
+    // For module.func, check module functions
+    if target.len() == 2 {
+        let qual = sym(&format!("{}.{}", target[0], target[1]));
+        if let Some(sig) = ctx.env.functions.get(&qual) {
+            return Some(Ty::Fn { params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) });
+        }
+    }
+    None
+}
+
+/// Erase TypeVars from a type — replace with Unknown so Rust emits `_` instead of `A`.
+fn erase_typevars(ty: &Ty) -> Ty {
+    match ty {
+        Ty::TypeVar(_) => Ty::Unknown,
+        Ty::Fn { params, ret } => Ty::Fn {
+            params: params.iter().map(erase_typevars).collect(),
+            ret: Box::new(erase_typevars(ret)),
+        },
+        Ty::Applied(tc, args) => Ty::Applied(tc.clone(), args.iter().map(erase_typevars).collect()),
+        other => other.clone(),
+    }
+}
+
+fn where_override_name(path: &[Sym]) -> String {
+    format!("__where_{}", path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("_"))
+}
+
 fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
+    lower_test_with_where(ctx, name, body, &[])
+}
+
+fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where_clauses: &[ast::TestWhere]) -> IrFunction {
     ctx.push_scope();
-    let ir_body = lower_expr(ctx, body);
+    let mut stmts: Vec<IrStmt> = Vec::new();
+    let mut overrides: Vec<(Vec<Sym>, String)> = Vec::new();
+    for wc in where_clauses {
+        match wc {
+            ast::TestWhere::Bind { name: bind_name, value } =>
+                stmts.push(lower_where_bind(ctx, bind_name, value)),
+            ast::TestWhere::Override { path, value } =>
+                lower_where_override(ctx, path, value, &mut stmts, &mut overrides),
+            ast::TestWhere::CallResponse { target, params, response } =>
+                lower_where_call_response(ctx, target, params, response, &mut stmts, &mut overrides),
+            ast::TestWhere::Case { .. } => {}
+        }
+    }
+    // Rewrite test body AST: replace overridden calls
+    let mut body_rewritten = body.clone();
+    for (path, override_name) in &overrides {
+        rewrite_calls_in_expr(&mut body_rewritten, path, override_name);
+    }
+    let ir_body = lower_expr(ctx, &body_rewritten);
+    let final_body = if stmts.is_empty() {
+        ir_body
+    } else {
+        // Wrap: { let bindings...; body }
+        let ty = ir_body.ty.clone();
+        let span = ir_body.span;
+        IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(ir_body)) }, ty, span, def_id: None }
+    };
     ctx.pop_scope();
     IrFunction {
         name: sym(&format!("{}{}", almide_ir::TEST_NAME_PREFIX, name)),
-        params: vec![], ret_ty: Ty::Unit, body: ir_body,
+        params: vec![], ret_ty: Ty::Unit, body: final_body,
         is_effect: true, is_async: false, is_test: true,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
         visibility: IrVisibility::Public,
