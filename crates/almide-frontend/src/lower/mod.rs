@@ -856,16 +856,17 @@ fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where
                 let lambda = ast::Expr::new(ast::ExprId(0), None, ast::ExprKind::Lambda {
                     params: lambda_params, body: Box::new(response.clone()),
                 });
-                let ir_val = lower_expr(ctx, &lambda);
-                // Ensure the type is Fn (lambda lowering may produce Unknown if type_map is empty)
-                let ty = match &ir_val.ty {
-                    Ty::Fn { .. } => ir_val.ty.clone(),
-                    _ => {
-                        let param_tys: Vec<Ty> = params.iter().map(|_| Ty::Unknown).collect();
-                        Ty::Fn { params: param_tys, ret: Box::new(Ty::Unknown) }
-                    }
+                let mut ir_val = lower_expr(ctx, &lambda);
+                // Force Fn type — lambda lowering may produce Unknown if type_map has no entry
+                let fn_ty = {
+                    let param_tys: Vec<Ty> = params.iter().map(|_| Ty::Unknown).collect();
+                    Ty::Fn { params: param_tys, ret: Box::new(Ty::Unknown) }
                 };
+                let ty = if matches!(&ir_val.ty, Ty::Fn { .. }) { ir_val.ty.clone() } else { fn_ty };
+                ir_val.ty = ty.clone();
                 let var = ctx.define_var(&override_name, ty.clone(), Mutability::Let, None);
+                // Also update the var_table entry to ensure Fn type
+                ctx.var_table.entries[var.0 as usize].ty = ty.clone();
                 stmts.push(IrStmt {
                     kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val },
                     span: None,

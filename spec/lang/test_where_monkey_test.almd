@@ -1,0 +1,181 @@
+// Monkey test: test where edge cases and complex scenarios
+
+// ── Helper functions ──
+
+fn multiply(a: Int, b: Int) -> Int = a * b
+fn divide(a: Int, b: Int) -> Int = if b == 0 then 0 else a / b
+fn concat(a: String, b: String) -> String = a + b
+fn negate(x: Int) -> Int = 0 - x
+fn identity(x: Int) -> Int = x
+
+fn pipeline(x: Int) -> Int = identity(multiply(x, 2))
+
+fn greet(name: String) -> String = "Hello, ${name}!"
+fn farewell(name: String) -> String = "Goodbye, ${name}!"
+fn format_msg(greeting: String, name: String) -> String = "${greeting} ${name}"
+
+// ── Edge: empty where (should still work) ──
+
+test "no where clauses" {
+  assert_eq(multiply(3, 4), 12)
+}
+
+// ── Edge: single value binding ──
+
+test "single binding"
+  where x = 42
+{
+  assert_eq(x, 42)
+}
+
+// ── Edge: binding shadows outer scope ──
+
+let GLOBAL = 100
+
+test "binding uses global"
+  where x = GLOBAL + 1
+{
+  assert_eq(x, 101)
+}
+
+// ── Edge: binding references another binding ──
+
+test "chained bindings"
+  where a = 10
+  where b = 20
+{
+  assert_eq(a + b, 30)
+}
+
+// ── Edge: override with identity (no-op) ──
+
+test "identity override"
+  where multiply = (a, b) => a * b
+{
+  assert_eq(multiply(3, 4), 12)
+}
+
+// ── Edge: override returns constant ──
+
+test "constant override"
+  where multiply(_, _) => 999
+{
+  assert_eq(multiply(3, 4), 999)
+  assert_eq(multiply(0, 0), 999)
+}
+
+// ── Edge: call response with complex match ──
+
+test "complex call response"
+  where divide(a, b) => match b {
+    0 => -1,
+    _ => a / b,
+  }
+{
+  assert_eq(divide(10, 2), 5)
+  assert_eq(divide(10, 0), -1)
+}
+
+// ── Edge: override string function ──
+
+test "string override"
+  where greet(name) => "Yo, ${name}!"
+{
+  assert_eq(greet("Alice"), "Yo, Alice!")
+}
+
+// ── Edge: table-driven with many cases ──
+
+test "many cases"
+  where "a" { x = 1; want = 2 }
+  where "b" { x = 2; want = 4 }
+  where "c" { x = 3; want = 6 }
+  where "d" { x = 4; want = 8 }
+  where "e" { x = 5; want = 10 }
+{
+  assert_eq(multiply(x, 2), want)
+}
+
+// ── Edge: table case with override ──
+
+test "case override"
+  where "double" { negate(x) => x * 2; input = 5; want = 10 }
+  where "triple" { negate(x) => x * 3; input = 5; want = 15 }
+  where "original" { input = 5; want = -5 }
+{
+  assert_eq(negate(input), want)
+}
+
+// ── Edge: where with list operations ──
+
+test "list where"
+  where items = [1, 2, 3, 4, 5]
+  where doubled = items |> list.map((x) => x * 2)
+{
+  assert_eq(list.len(doubled), 5)
+  assert_eq(list.get(doubled, 0) ?? 0, 2)
+  assert_eq(list.get(doubled, 4) ?? 0, 10)
+}
+
+// ── Edge: where with string ──
+
+test "multiline string where"
+  where msg = "hello\nworld"
+{
+  assert(string.contains(msg, "hello"))
+  assert(string.contains(msg, "world"))
+}
+
+// ── Edge: nested function call in override ──
+
+test "nested override"
+  where identity(x) => multiply(x, x)
+{
+  assert_eq(identity(5), 25)
+}
+
+// ── Edge: table with no shared bindings ──
+
+test "independent cases"
+  where "ints" { a = 1; b = 2; want = 3 }
+  where "strings" { a = 10; b = 20; want = 30 }
+{
+  assert_eq(a + b, want)
+}
+
+// ── Edge: where with bool ──
+
+test "bool binding"
+  where flag = true
+  where name = if flag then "yes" else "no"
+{
+  assert_eq(name, "yes")
+}
+
+// ── Edge: where with record ──
+
+type Point = { x: Int, y: Int }
+
+test "record binding"
+  where p = Point { x: 10, y: 20 }
+{
+  assert_eq(p.x + p.y, 30)
+}
+
+// ── Edge: where with option ──
+
+test "option binding"
+  where val = some(42)
+{
+  assert_eq(val ?? 0, 42)
+}
+
+// ── Edge: deeply nested table cases ──
+
+test "math operations"
+  where "add 1+1" { op = (a, b) => a + b; a = 1; b = 1; want = 2 }
+  where "mul 3*4" { op = (a, b) => a * b; a = 3; b = 4; want = 12 }
+  where "sub 10-3" { op = (a, b) => a - b; a = 10; b = 3; want = 7 }
+{
+  assert_eq(op(a, b), want)
+}
