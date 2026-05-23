@@ -713,7 +713,7 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
 
 /// Infer a lambda param's type by scanning how it's used in the body.
 /// e.g., `(a, b) => a + b` where body is BinOp::AddInt → a: Int, b: Int
-fn infer_var_type_from_body(body: &IrExpr, var: VarId) -> Option<Ty> {
+pub fn infer_var_type_from_body(body: &IrExpr, var: VarId) -> Option<Ty> {
     match &body.kind {
         // BinOp: if operand is our var, infer from the op's expected type
         IrExprKind::BinOp { op, left, right } => {
