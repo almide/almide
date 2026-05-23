@@ -1,11 +1,11 @@
 ---
 source: tests/ide_outline_snapshot_test.rs
-assertion_line: 108
 expression: text
 ---
 # @stdlib/string
 fn string.capitalize(s: String) -> String
 fn string.chars(s: String) -> List[String]
+fn string.clear(s: String) -> Unit
 fn string.codepoint(s: String) -> Option[Int]
 fn string.contains(s: String, sub: String) -> Bool
 fn string.count(s: String, sub: String) -> Int
@@ -32,6 +32,7 @@ fn string.length(s: String) -> Int
 fn string.lines(s: String) -> List[String]
 fn string.pad_end(s: String, n: Int, ch: String) -> String
 fn string.pad_start(s: String, n: Int, ch: String) -> String
+fn string.push(s: String, suffix: String) -> Unit
 fn string.repeat(s: String, n: Int) -> String
 fn string.replace(s: String, from: String, to: String) -> String
 fn string.replace_first(s: String, from: String, to: String) -> String
