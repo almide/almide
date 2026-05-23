@@ -767,25 +767,29 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_get(idx); local_get(len); i32_ge_u; br_if(1);
                 });
+                let filter_param_local;
                 if let almide_ir::IrExprKind::Lambda { params, body, .. } = &args[1].kind {
-                    // Inline lambda: bind param, emit body
+                    // Inline lambda: bind param, emit body. Keep param_local alive for dst copy.
                     let param_var = params.first().map(|(v, _)| *v);
-                    let param_local = self.scratch.alloc(values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32));
+                    let pvt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
+                    filter_param_local = Some((self.scratch.alloc(pvt), pvt));
+                    let pl = filter_param_local.unwrap().0;
                     wasm!(self.func, {
                         local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                         local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
                     });
                     self.emit_load_at(&elem_ty, 0);
-                    wasm!(self.func, { local_set(param_local); });
+                    wasm!(self.func, { local_set(pl); });
                     if let Some(vid) = param_var {
-                        self.var_map.insert(vid.0, param_local);
+                        self.var_map.insert(vid.0, pl);
                     }
                     self.emit_expr(body);
                     if let Some(vid) = param_var {
                         self.var_map.remove(&vid.0);
                     }
-                    self.scratch.free(param_local, values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32));
+                    // Don't free param_local yet — used below for dst copy
                 } else {
+                    filter_param_local = None;
                     wasm!(self.func, {
                         local_get(closure); i32_load(4); // env
                         local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
@@ -797,13 +801,20 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                     if_empty;
-                    // dst[out_idx] = src[idx]
+                    // dst[out_idx] = src[idx] (use param_local if available to avoid re-read)
                     local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(out_idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                    local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                    local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
                 });
-                self.emit_load_at(&elem_ty, 0);
+                if let Some((pl, _)) = filter_param_local {
+                    // Use cached param_local — avoid re-reading from memory
+                    wasm!(self.func, { local_get(pl); });
+                } else {
+                    wasm!(self.func, {
+                        local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
+                    });
+                    self.emit_load_at(&elem_ty, 0);
+                }
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, {
                     local_get(out_idx); i32_const(1); i32_add; local_set(out_idx);
@@ -817,6 +828,10 @@ impl FuncCompiler<'_> {
                     local_get(dst); local_get(out_idx); i32_store(0);
                     local_get(dst);
                 });
+                // Free param_local if it was used for inline lambda
+                if let Some((pl, pvt)) = filter_param_local {
+                    self.scratch.free(pl, pvt);
+                }
                 self.scratch.free_i32(out_idx);
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(idx);
