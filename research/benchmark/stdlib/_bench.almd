@@ -1,0 +1,9 @@
+import datetime
+
+fn bench(name: String, f: () -> Unit) -> Unit = {
+  let start = datetime.monotonic_ns()
+  f()
+  let ms = (datetime.monotonic_ns() - start) / 1000000
+  let status = if ms <= 1 then "OK" else if ms <= 50 then "ok" else "SLOW"
+  println("  [${status}] ${name}: ${int.to_string(ms)}ms")
+}

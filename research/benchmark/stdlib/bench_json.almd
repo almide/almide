@@ -1,0 +1,11 @@
+import datetime
+import json
+fn bench(name: String, f: () -> Unit) -> Unit = { let s = datetime.monotonic_ns(); f(); let ms = (datetime.monotonic_ns() - s) / 1000000; let st = if ms <= 1 then "OK" else if ms <= 50 then "ok" else "SLOW"; println("  [${st}] ${name}: ${int.to_string(ms)}ms") }
+fn main() -> Unit = {
+  println("== JSON ==")
+  bench("json.parse 10k", () => { var i = 0; while i < 10000 { let _v = json.parse("{\"name\":\"test\",\"value\":42,\"items\":[1,2,3]}"); i = i + 1 } })
+  bench("json.stringify 10k", () => { let obj = value.object([("name", value.str("test")), ("value", value.int(42))]); var i = 0; while i < 10000 { let _s = value.stringify(obj); i = i + 1 } })
+  println("== Value ==")
+  bench("value.object 10k", () => { var i = 0; while i < 10000 { let _v = value.object([("name", value.str("test")), ("age", value.int(i))]); i = i + 1 } })
+  bench("value.get 100k", () => { let obj = value.object([("name", value.str("test")), ("age", value.int(42))]); var i = 0; while i < 100000 { let _v = value.get(obj, "name"); i = i + 1 } })
+}

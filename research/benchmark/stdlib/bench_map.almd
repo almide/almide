@@ -1,0 +1,11 @@
+import datetime
+fn bench(name: String, f: () -> Unit) -> Unit = { let s = datetime.monotonic_ns(); f(); let ms = (datetime.monotonic_ns() - s) / 1000000; let st = if ms <= 1 then "OK" else if ms <= 50 then "ok" else "SLOW"; println("  [${st}] ${name}: ${int.to_string(ms)}ms") }
+fn main() -> Unit = {
+  println("== Map ==")
+  bench("map.insert 100k", () => { var m: Map[Int, Int] = map.new(); var i = 0; while i < 100000 { map.insert(m, i, i * 2); i = i + 1 } })
+  bench("map.get 100k", () => { var m: Map[Int, Int] = map.new(); var i = 0; while i < 100000 { map.insert(m, i, i); i = i + 1 }; var s = 0; var j = 0; while j < 100000 { s = s + (map.get(m, j) ?? 0); j = j + 1 } })
+  bench("map.keys 100k", () => { var m: Map[Int, Int] = map.new(); var i = 0; while i < 100000 { map.insert(m, i, i); i = i + 1 }; let _k = map.keys(m) })
+  println("== Set ==")
+  bench("set.insert 100k", () => { var s: Set[Int] = set.new(); var i = 0; while i < 100000 { set.insert(s, i); i = i + 1 } })
+  bench("set.contains 100k", () => { var s: Set[Int] = set.new(); var i = 0; while i < 100000 { set.insert(s, i); i = i + 1 }; var c = 0; var j = 0; while j < 100000 { if set.contains(s, j) then c = c + 1; j = j + 1 } })
+}
