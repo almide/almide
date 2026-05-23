@@ -750,14 +750,76 @@ fn lower_fn(
     }
 }
 
+/// Rewrite calls in an AST expression: replace `module.func(args)` with `override_var(args)`.
+fn rewrite_calls_in_expr(expr: &mut ast::Expr, path: &[Sym], override_name: &str) {
+    // Match: Call { callee: Member { object: Ident(module), field: func }, args }
+    // where [module, func] matches path
+    let is_match = if let ast::ExprKind::Call { callee, .. } = &expr.kind {
+        match path.len() {
+            1 => matches!(&callee.kind, ast::ExprKind::Ident { name } if *name == path[0]),
+            2 => {
+                if let ast::ExprKind::Member { object, field, .. } = &callee.kind {
+                    if let ast::ExprKind::Ident { name } = &object.kind {
+                        *name == path[0] && *field == path[1]
+                    } else { false }
+                } else { false }
+            }
+            _ => false,
+        }
+    } else { false };
+
+    if is_match {
+        if let ast::ExprKind::Call { args, named_args, .. } = &mut expr.kind {
+            let new_callee = ast::Expr::new(ast::ExprId(0), None, ast::ExprKind::Ident { name: sym(override_name) });
+            expr.kind = ast::ExprKind::Call {
+                callee: Box::new(new_callee),
+                args: std::mem::take(args),
+                named_args: std::mem::take(named_args),
+                type_args: None,
+            };
+        }
+        return; // already rewritten, don't recurse into the replacement
+    }
+
+    // Recurse into all sub-expressions
+    ast::visit_expr_mut(expr, &mut |e| {
+        // Check and rewrite each sub-expression
+        let sub_match = if let ast::ExprKind::Call { callee, .. } = &e.kind {
+            match path.len() {
+                1 => matches!(&callee.kind, ast::ExprKind::Ident { name } if *name == path[0]),
+                2 => {
+                    if let ast::ExprKind::Member { object, field, .. } = &callee.kind {
+                        if let ast::ExprKind::Ident { name } = &object.kind {
+                            *name == path[0] && *field == path[1]
+                        } else { false }
+                    } else { false }
+                }
+                _ => false,
+            }
+        } else { false };
+        if sub_match {
+            if let ast::ExprKind::Call { args, named_args, .. } = &mut e.kind {
+                let new_callee = ast::Expr::new(ast::ExprId(0), None, ast::ExprKind::Ident { name: sym(override_name) });
+                e.kind = ast::ExprKind::Call {
+                    callee: Box::new(new_callee),
+                    args: std::mem::take(args),
+                    named_args: std::mem::take(named_args),
+                    type_args: None,
+                };
+            }
+        }
+    });
+}
+
 fn lower_test(ctx: &mut LowerCtx, name: &str, body: &ast::Expr) -> IrFunction {
     lower_test_with_where(ctx, name, body, &[])
 }
 
 fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where_clauses: &[ast::TestWhere]) -> IrFunction {
     ctx.push_scope();
-    // Lower where bindings as let statements before the body
     let mut stmts: Vec<IrStmt> = Vec::new();
+    // Collect override targets for AST rewriting
+    let mut overrides: Vec<(Vec<Sym>, String)> = Vec::new(); // (path, override_var_name)
     for wc in where_clauses {
         match wc {
             ast::TestWhere::Bind { name: bind_name, value } => {
@@ -769,14 +831,56 @@ fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where
                     span: None,
                 });
             }
-            // Override and CallResponse: Phase 2/3 — emit a warning for now
-            ast::TestWhere::Override { .. } | ast::TestWhere::CallResponse { .. } => {
-                // TODO: implement in Phase 2/3
+            ast::TestWhere::Override { path, value } => {
+                let override_name = format!("__where_{}", path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("_"));
+                let ir_val = lower_expr(ctx, value);
+                let ty = ir_val.ty.clone();
+                let var = ctx.define_var(&override_name, ty.clone(), Mutability::Let, None);
+                stmts.push(IrStmt {
+                    kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val },
+                    span: None,
+                });
+                overrides.push((path.clone(), override_name));
+            }
+            ast::TestWhere::CallResponse { target, params, response } => {
+                let override_name = format!("__where_{}", target.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("_"));
+                // Build lambda: (params...) => response
+                let lambda_params: Vec<ast::LambdaParam> = params.iter().enumerate().map(|(i, pat)| {
+                    let pname = match pat {
+                        ast::Pattern::Ident { name } => name.as_str().to_string(),
+                        ast::Pattern::Wildcard => format!("_arg{}", i),
+                        _ => format!("_arg{}", i),
+                    };
+                    ast::LambdaParam { name: sym(&pname), tuple_names: None, ty: None }
+                }).collect();
+                let lambda = ast::Expr::new(ast::ExprId(0), None, ast::ExprKind::Lambda {
+                    params: lambda_params, body: Box::new(response.clone()),
+                });
+                let ir_val = lower_expr(ctx, &lambda);
+                // Ensure the type is Fn (lambda lowering may produce Unknown if type_map is empty)
+                let ty = match &ir_val.ty {
+                    Ty::Fn { .. } => ir_val.ty.clone(),
+                    _ => {
+                        let param_tys: Vec<Ty> = params.iter().map(|_| Ty::Unknown).collect();
+                        Ty::Fn { params: param_tys, ret: Box::new(Ty::Unknown) }
+                    }
+                };
+                let var = ctx.define_var(&override_name, ty.clone(), Mutability::Let, None);
+                stmts.push(IrStmt {
+                    kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val },
+                    span: None,
+                });
+                overrides.push((target.clone(), override_name));
             }
             ast::TestWhere::Case { .. } => {} // already expanded
         }
     }
-    let ir_body = lower_expr(ctx, body);
+    // Rewrite test body AST: replace overridden calls
+    let mut body_rewritten = body.clone();
+    for (path, override_name) in &overrides {
+        rewrite_calls_in_expr(&mut body_rewritten, path, override_name);
+    }
+    let ir_body = lower_expr(ctx, &body_rewritten);
     let final_body = if stmts.is_empty() {
         ir_body
     } else {

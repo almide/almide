@@ -1,4 +1,4 @@
-// Phase 1: test where — value binding + table-driven tests
+// Phase 1+2: test where — value binding, table-driven, reference override, call response
 
 fn parse_age(s: String) -> Result[Int, String] =
   match int.parse(s) {
@@ -59,4 +59,33 @@ test "string ops"
   where "almide" { suffix = " almide"; want = "hello almide" }
 {
   assert_eq(prefix + suffix, want)
+}
+
+// ── Phase 2: reference override + call response ──
+
+fn greet(name: String) -> String = "Hello, ${name}!"
+
+fn get_greeting() -> String = greet("World")
+
+test "override function"
+  where greet = (name) => "Hi, ${name}!"
+{
+  // greet is overridden, but get_greeting calls the original
+  // Direct call uses override:
+  assert_eq(greet("Alice"), "Hi, Alice!")
+}
+
+fn double(x: Int) -> Int = x * 2
+
+test "override with call response"
+  where double(x) => x * 10
+{
+  assert_eq(double(3), 30)
+}
+
+test "call response table"
+  where "times 10" { double(x) => x * 10; input = 5; want = 50 }
+  where "times 100" { double(x) => x * 100; input = 5; want = 500 }
+{
+  assert_eq(double(input), want)
 }
