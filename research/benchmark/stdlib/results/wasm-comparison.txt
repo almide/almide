@@ -1,0 +1,18 @@
+=== WASM vs Native vs Node.js comparison ===
+Test: fib(35) + sort 100k + map 100k + concat 10k
+
+Almide Native (--release):  0.03s user
+Node.js:                    0.20s user (6.7x vs native)
+Almide WASM (wasmtime):     6.66s user (222x vs native)
+
+=== Breakdown ===
+fib(35) alone:
+  WASM:   0.12s (6x vs native — wasmtime overhead, acceptable)
+  Native: 0.02s
+
+sort 10k:
+  WASM:   0.09s
+  sort 100k extrapolated: ~6s (insertion sort O(n²))
+
+Root cause: WASM list.sort uses insertion sort O(n²).
+Fix: implement merge sort or quick sort in emit_wasm/calls_list_helpers.rs
