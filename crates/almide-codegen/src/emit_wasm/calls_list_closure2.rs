@@ -1010,11 +1010,6 @@ impl FuncCompiler<'_> {
                 }
 
                 // Pointer-based iteration for fold
-                // SIMD detection: Int accumulator with AddInt body
-                let simd_fold = if is_inline_lambda && matches!(&elem_ty, Ty::Int) && matches!(&acc_ty_resolved, Ty::Int) {
-                    Self::detect_simd_fold_op(&args[2])
-                } else { None };
-
                 let ptr = self.scratch.alloc_i32();
                 let end_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
@@ -1032,52 +1027,6 @@ impl FuncCompiler<'_> {
                     // end_ptr = ptr + len * elem_size
                     local_get(list_ptr); i32_load(0); i32_const(elem_size as i32); i32_mul;
                     i32_add; local_set(end_ptr);
-                });
-
-                // SIMD fast path for fold: i64x2 accumulator, 4× unrolled
-                if simd_fold.is_some() {
-                    let simd_end = self.scratch.alloc_i32();
-                    let acc_v128 = self.scratch.alloc_v128();
-                    // 4× v128 unrolled: 8 i64 elements per iteration
-                    const FOLD_UNROLL: i32 = 4;      // v128 ops per iteration
-                    const FOLD_ELEMS: i32 = FOLD_UNROLL * 2;  // 8 i64 elements
-                    const FOLD_BYTES: i32 = FOLD_ELEMS * 8;   // 64 bytes
-                    const FOLD_SHIFT: i32 = 3;       // log2(8)
-
-                    wasm!(self.func, {
-                        local_get(ptr);
-                        local_get(list_ptr); i32_load(0); i32_const(FOLD_SHIFT); i32_shr_u;
-                        i32_const(FOLD_BYTES); i32_mul;
-                        i32_add; local_set(simd_end);
-                        i64_const(0); i64x2_splat; local_set(acc_v128);
-                        block_empty; loop_empty;
-                          local_get(ptr); local_get(simd_end); i32_ge_u; br_if(1);
-                          local_get(acc_v128);
-                          local_get(ptr); v128_load(0); i64x2_add;
-                          local_get(ptr); v128_load(16); i64x2_add;
-                          local_get(ptr); v128_load(32); i64x2_add;
-                          local_get(ptr); v128_load(48); i64x2_add;
-                          local_set(acc_v128);
-                          local_get(ptr); i32_const(FOLD_BYTES); i32_add; local_set(ptr);
-                          br(0);
-                        end; end;
-                        // Horizontal add: lane0 + lane1 + scalar acc
-                        local_get(acc);
-                    });
-                    self.func.instruction(&wasm_encoder::Instruction::LocalGet(acc_v128));
-                    self.func.instruction(&wasm_encoder::Instruction::I64x2ExtractLane(0));
-                    wasm!(self.func, { i64_add; });
-                    self.func.instruction(&wasm_encoder::Instruction::LocalGet(acc_v128));
-                    self.func.instruction(&wasm_encoder::Instruction::I64x2ExtractLane(1));
-                    wasm!(self.func, {
-                        i64_add;
-                        local_set(acc);
-                    });
-                    self.scratch.free_v128(acc_v128);
-                    self.scratch.free_i32(simd_end);
-                }
-
-                wasm!(self.func, {
                     block_empty; loop_empty;
                 });
                 let depth_guard = self.depth_push_n(2);
@@ -1301,6 +1250,13 @@ impl FuncCompiler<'_> {
                 && simd_const_val > 0
                 && (simd_const_val as u64).is_power_of_two();
             let simd_vec = if !use_shift { Some(self.scratch.alloc_v128()) } else { None };
+            // simd_end = src_ptr + (len / 8) * 64  (round down to multiple of 8)
+            wasm!(self.func, {
+                local_get(src_ptr);
+                local_get(len_local); i32_const(3); i32_shr_u; // len / 8
+                i32_const(64); i32_mul;
+                i32_add; local_set(simd_end);
+            });
             if let Some(sv) = simd_vec {
                 wasm!(self.func, {
                     i64_const(simd_const_val);
@@ -1309,67 +1265,44 @@ impl FuncCompiler<'_> {
                 });
             }
 
-            // Scalar 4× unrolled: Rust-style single-index loop.
-            // wasmtime JITs scalar i64 ops more efficiently than v128 SIMD.
-            let idx_local = self.scratch.alloc_i32();
-            const SCALAR_UNROLL: i32 = 4;
-            const SCALAR_BYTES: i32 = SCALAR_UNROLL * 8; // 32 bytes per iteration
-
-            wasm!(self.func, {
-                i32_const(0); local_set(idx_local);
-                // unroll_end = (len / UNROLL) * BYTES_PER_ITER
-                local_get(len_local); i32_const(2); i32_shr_u; // len / 4
-                i32_const(SCALAR_BYTES); i32_mul;
-                local_set(simd_end);
-                block_empty; loop_empty;
-                  local_get(idx_local); local_get(simd_end); i32_ge_u; br_if(1);
-            });
-            // 4× unrolled: compute base addrs once, reuse with +8/+16/+24
-            let dst_addr = self.scratch.alloc_i32();
-            let src_addr = self.scratch.alloc_i32();
-            wasm!(self.func, {
-                local_get(dst_ptr); local_get(idx_local); i32_add; local_set(dst_addr);
-                local_get(src_ptr); local_get(idx_local); i32_add; local_set(src_addr);
-            });
-            for i in 0..SCALAR_UNROLL {
-                // dst addr
-                if i == 0 {
-                    wasm!(self.func, { local_get(dst_addr); });
-                } else {
-                    wasm!(self.func, { local_get(dst_addr); i32_const((i * 8) as i32); i32_add; });
-                }
-                // load from src
-                if i == 0 {
-                    wasm!(self.func, { local_get(src_addr); i64_load(0); });
-                } else {
-                    wasm!(self.func, { local_get(src_addr); i64_load((i * 8) as u32); });
-                }
-                // op
+            // Emit a single SIMD operation: load from src_ptr+offset, apply op, store to dst_ptr+offset
+            let emit_simd_op = |fc: &mut FuncCompiler, offset: u64, sv: Option<u32>| {
+                wasm!(fc.func, {
+                    local_get(dst_ptr);
+                    local_get(src_ptr);
+                    v128_load(offset);
+                });
                 if use_shift {
-                    wasm!(self.func, { i64_const(1); i64_shl; });
+                    let shift = (simd_const_val as u64).trailing_zeros();
+                    wasm!(fc.func, { i32_const(shift as i32); });
+                    fc.func.instruction(&wasm_encoder::Instruction::I64x2Shl);
                 } else {
-                    wasm!(self.func, { i64_const(simd_const_val); });
+                    let sv = sv.unwrap();
+                    wasm!(fc.func, { local_get(sv); });
                     match simd_kind {
-                        SimdMapOp::Mul => { wasm!(self.func, { i64_mul; }); }
-                        SimdMapOp::Add => { wasm!(self.func, { i64_add; }); }
-                        SimdMapOp::Sub => { wasm!(self.func, { i64_sub; }); }
+                        SimdMapOp::Mul => { wasm!(fc.func, { i64x2_mul; }); }
+                        SimdMapOp::Add => { wasm!(fc.func, { i64x2_add; }); }
+                        SimdMapOp::Sub => { wasm!(fc.func, { i64x2_sub; }); }
                     }
                 }
-                // store
-                wasm!(self.func, { i64_store(0); });
-            }
-            self.scratch.free_i32(src_addr);
-            self.scratch.free_i32(dst_addr);
+                wasm!(fc.func, { v128_store(offset); });
+            };
+
             wasm!(self.func, {
-                  // Only advance idx (src_ptr/dst_ptr stay as base pointers)
-                  local_get(idx_local); i32_const(SCALAR_BYTES); i32_add; local_set(idx_local);
+                block_empty; loop_empty;
+                  local_get(src_ptr); local_get(simd_end); i32_ge_u; br_if(1);
+            });
+            // 4× unrolled: process 8 elements (64 bytes) per iteration
+            emit_simd_op(self, 0, simd_vec);
+            emit_simd_op(self, 16, simd_vec);
+            emit_simd_op(self, 32, simd_vec);
+            emit_simd_op(self, 48, simd_vec);
+            wasm!(self.func, {
+                  local_get(src_ptr); i32_const(64); i32_add; local_set(src_ptr);
+                  local_get(dst_ptr); i32_const(64); i32_add; local_set(dst_ptr);
                   br(0);
                 end; end;
-                // Advance src_ptr/dst_ptr past unrolled section for scalar tail
-                local_get(src_ptr); local_get(simd_end); i32_add; local_set(src_ptr);
-                local_get(dst_ptr); local_get(simd_end); i32_add; local_set(dst_ptr);
             });
-            self.scratch.free_i32(idx_local);
             if let Some(sv) = simd_vec { self.scratch.free_v128(sv); }
             self.scratch.free_i32(simd_end);
         }
@@ -1425,7 +1358,15 @@ impl FuncCompiler<'_> {
             br(0);
         });
         self.depth_pop(depth_guard);
-        wasm!(self.func, { end; end; local_get(dst_local); });
+        wasm!(self.func, { end; end; });
+
+        // Perceus: if source was single-use, free it via rc_dec.
+        // Safe because the map loop is complete — source data is no longer accessed.
+        if self.is_single_use_var(list_arg) {
+            wasm!(self.func, { local_get(src_local); call(self.emitter.rt.rc_dec); });
+        }
+
+        wasm!(self.func, { local_get(dst_local); });
 
         self.scratch.free_i32(len_local);
         self.scratch.free_i32(end_ptr);
@@ -1436,26 +1377,16 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(src_local);
     }
 
-    /// Detect if a fold lambda is SIMD-eligible: `(a, x) => a + x` with Int.
-    fn detect_simd_fold_op(fn_arg: &IrExpr) -> Option<()> {
-        if let IrExprKind::Lambda { params, body, .. } = &fn_arg.kind {
-            let acc_id = params.first().map(|(v, _)| v.0)?;
-            let elem_id = params.get(1).map(|(v, _)| v.0)?;
-            if let IrExprKind::BinOp { op: BinOp::AddInt, left, right } = &body.kind {
-                let (l, r) = match (&left.kind, &right.kind) {
-                    (IrExprKind::Var { id: a }, IrExprKind::Var { id: b }) => (a.0, b.0),
-                    _ => return None,
-                };
-                if (l == acc_id && r == elem_id) || (l == elem_id && r == acc_id) {
-                    return Some(());
-                }
-            }
-        }
-        None
-    }
-
     /// Detect if a lambda body is a simple SIMD-eligible operation on Int elements.
     /// Returns (op, constant) if the body is `x * k`, `x + k`, or `x - k`.
+    /// Check if an expression is a single-use variable (use_count == 1).
+    /// Safe for Perceus: the value is consumed here and can be freed after.
+    fn is_single_use_var(&self, expr: &IrExpr) -> bool {
+        if let IrExprKind::Var { id } = &expr.kind {
+            self.var_table.get(*id).use_count == 1
+        } else { false }
+    }
+
     fn detect_simd_map_op(fn_arg: &IrExpr) -> Option<(SimdMapOp, i64)> {
         if let IrExprKind::Lambda { params, body, .. } = &fn_arg.kind {
             let param_id = params.first().map(|(v, _)| v.0)?;

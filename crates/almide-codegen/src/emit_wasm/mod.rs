@@ -184,6 +184,7 @@ pub struct RuntimeFuncs {
     pub fd_write: u32,
     pub alloc: u32,
     pub rc_inc: u32,
+    pub rc_dec: u32,
     pub cow_check: u32,
     pub heap_save: u32,
     pub heap_restore: u32,
@@ -298,7 +299,9 @@ pub struct WasmEmitter {
 
     // Globals
     pub heap_ptr_global: u32,
-    /// Preopened dir table pointer (heap-allocated array of [fd:i32, path_ptr:i32, path_len:i32] entries)
+    /// Free list head for Perceus-style reuse (0 = empty).
+    pub free_list_global: u32,
+    /// Preopened dir table pointer
     pub preopen_table_global: u32,
     /// Number of preopened directories discovered
     pub preopen_count_global: u32,
@@ -378,7 +381,7 @@ impl WasmEmitter {
             // First byte is newline at NEWLINE_OFFSET
             data_bytes: vec![0x0A],
             rt: RuntimeFuncs {
-                fd_write: 0, alloc: 0, rc_inc: 0, cow_check: 0,
+                fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
                 heap_save: 0, heap_restore: 0,
                 println_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
@@ -439,13 +442,14 @@ impl WasmEmitter {
                 init_preopen_dirs: 0,
             },
             heap_ptr_global: 0,
-            preopen_table_global: 1,
-            preopen_count_global: 2,
+            free_list_global: 1,
+            preopen_table_global: 2,
+            preopen_count_global: 3,
             top_let_globals: HashMap::new(),
             def_globals: HashMap::new(),
             top_let_globals_by_name: HashMap::new(),
             top_let_init: Vec::new(),
-            next_global: 3, // 0 = heap_ptr, 1 = preopen_table, 2 = preopen_count
+            next_global: 4, // 0 = heap_ptr, 1 = free_list, 2 = preopen_table, 3 = preopen_count
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
             record_fields: HashMap::new(),
@@ -1324,7 +1328,16 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
         },
         &wasm_encoder::ConstExpr::i32_const(heap_start_aligned as i32),
     );
-    // Global 1: preopen table pointer (set by __init_preopen_dirs at startup)
+    // Global 1: free list head (Perceus reuse, 0 = empty)
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+            shared: false,
+        },
+        &wasm_encoder::ConstExpr::i32_const(0),
+    );
+    // Global 2: preopen table pointer
     globals.global(
         GlobalType {
             val_type: ValType::I32,

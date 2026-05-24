@@ -54,6 +54,13 @@ pub const MAP_INITIAL_CAP: i32 = 16;
 /// Full slots store h2 (0x01..0x7F, never 0x00).
 pub const MAP_TAG_EMPTY: i32 = 0;
 
+// ── Alloc header: [size:i32][RC:i32][data...] ──
+// Sits BEFORE the pointer returned by alloc.
+// ptr-4 = RC, ptr-8 = block size (for Perceus free list).
+
+/// Total alloc header size (size field + RC field).
+pub const ALLOC_HEADER_SIZE: i32 = 8;
+
 // ── Set: same layout as List (to_list returns identity) ──
 
 /// Byte offset from set pointer to data. Same as list.
