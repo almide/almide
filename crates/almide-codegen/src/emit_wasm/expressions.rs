@@ -212,6 +212,24 @@ impl FuncCompiler<'_> {
                     return;
                 }
 
+                // Phase 2a: iteration-level region scope.
+                // If the loop body doesn't assign heap values to outer-scope
+                // variables, scope each iteration to reclaim temporaries.
+                let loop_body_expr = almide_ir::IrExpr {
+                    kind: almide_ir::IrExprKind::Block {
+                        stmts: body.to_vec(),
+                        expr: None,
+                    },
+                    ty: almide_lang::types::Ty::Unit,
+                    span: None,
+                    def_id: None,
+                };
+                let iter_scope = !body.is_empty()
+                    && !self.expr_writes_outer_heap(&loop_body_expr);
+                let iter_scope_local = if iter_scope {
+                    Some(self.scratch.alloc_i32())
+                } else { None };
+
                 wasm!(self.func, { block_empty; });
                 let _g3 = self.depth_push();
                 let break_depth = _g3.saved();
@@ -231,9 +249,19 @@ impl FuncCompiler<'_> {
                     });
                 }
 
+                // Save heap at iteration start
+                if let Some(sl) = iter_scope_local {
+                    wasm!(self.func, { global_get(self.emitter.heap_ptr_global); local_set(sl); });
+                }
+
                 // body
                 for stmt in body {
                     self.emit_stmt(stmt);
+                }
+
+                // Restore heap at iteration end
+                if let Some(sl) = iter_scope_local {
+                    wasm!(self.func, { local_get(sl); global_set(self.emitter.heap_ptr_global); });
                 }
 
                 // continue (jump to loop start)

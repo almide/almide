@@ -643,7 +643,7 @@ impl FuncCompiler<'_> {
 
     /// Check if an expression writes to outer-scope mutable variables with heap types.
     /// Used by auto-scope to determine if heap_restore is safe.
-    fn expr_writes_outer_heap(&self, expr: &IrExpr) -> bool {
+    pub(super) fn expr_writes_outer_heap(&self, expr: &IrExpr) -> bool {
         struct HeapWriteScanner<'a> {
             var_table: &'a almide_ir::VarTable,
             found: bool,
