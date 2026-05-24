@@ -653,7 +653,9 @@ impl FuncCompiler<'_> {
                 if self.found { return; }
                 match &stmt.kind {
                     IrStmtKind::Assign { var, .. }
-                    | IrStmtKind::MapInsert { target: var, .. } => {
+                    | IrStmtKind::MapInsert { target: var, .. }
+                    | IrStmtKind::IndexAssign { target: var, .. }
+                    | IrStmtKind::FieldAssign { target: var, .. } => {
                         let ty = &self.var_table.get(*var).ty;
                         if Self::is_heap_type(ty) {
                             self.found = true;

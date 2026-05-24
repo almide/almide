@@ -4,19 +4,9 @@ use std::collections::HashMap;
 use wasm_encoder::{Function, ValType};
 
 use almide_ir::{IrFunction, IrExpr, IrExprKind, IrStmt, IrStmtKind, VarTable};
-use almide_lang::types::Ty;
 
 use super::{CompiledFunc, FuncCompiler, WasmEmitter};
 use super::statements::collect_locals;
-
-/// Returns true if the type is heap-allocated (String, List, Map, Record, etc.).
-/// Non-heap types (Unit, Int, Float, Bool, Never) can have their function's
-/// allocations automatically reclaimed via region scoping.
-pub(super) fn is_heap_return_type(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. }
-        | Ty::Variant { .. } | Ty::Named(_, _) | Ty::Tuple(_)
-        | Ty::Unknown | Ty::Fn { .. })
-}
 
 /// Check if a function body uses stdlib calls, closures, or complex operations
 /// that require the full scratch local pool.
@@ -165,22 +155,6 @@ fn compile_function_inner(
         wasm!(compiler.func, { call(compiler.emitter.rt.init_preopen_dirs); });
     }
 
-    // Function-level region: if return type is non-heap (Unit, Int, Float, Bool),
-    // all heap allocations inside this function are temporary. Save/restore the
-    // heap pointer at entry/exit to reclaim them automatically.
-    // Skip main (its allocations persist for the program lifetime).
-    let region_scope = func.name != "main"
-        && !func.is_test
-        && matches!(&func.ret_ty, Ty::Unit);
-    let region_local = if region_scope {
-        let sl = compiler.scratch.alloc_i32();
-        wasm!(compiler.func, {
-            global_get(compiler.emitter.heap_ptr_global);
-            local_set(sl);
-        });
-        Some(sl)
-    } else { None };
-
     compiler.emit_expr(&func.body);
 
     // If function returns a value but body produces Unit (e.g., while loop with guard returns),
@@ -189,15 +163,6 @@ fn compile_function_inner(
     let func_expects = super::values::ty_to_valtype(&func.ret_ty);
     if func_expects.is_some() && body_produces.is_none() {
         wasm!(compiler.func, { unreachable; });
-    }
-
-    // Restore heap pointer (region exit)
-    if let Some(sl) = region_local {
-        wasm!(compiler.func, {
-            local_get(sl);
-            global_set(compiler.emitter.heap_ptr_global);
-        });
-        compiler.scratch.free_i32(sl);
     }
 
     wasm!(compiler.func, { end; });

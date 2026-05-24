@@ -1462,6 +1462,19 @@ impl FuncCompiler<'_> {
 
 }
 
+/// Check if an expression tree references a specific variable.
+fn expr_references_var(expr: &almide_ir::IrExpr, var: almide_ir::VarId) -> bool {
+    match &expr.kind {
+        IrExprKind::Var { id } => *id == var,
+        IrExprKind::BinOp { left, right, .. } => expr_references_var(left, var) || expr_references_var(right, var),
+        IrExprKind::UnOp { operand, .. } => expr_references_var(operand, var),
+        IrExprKind::Call { args, .. } => args.iter().any(|a| expr_references_var(a, var)),
+        IrExprKind::Member { object, .. } => expr_references_var(object, var),
+        IrExprKind::If { cond, then, else_ } => expr_references_var(cond, var) || expr_references_var(then, var) || expr_references_var(else_, var),
+        _ => false,
+    }
+}
+
 impl FuncCompiler<'_> {
     /// Detect and emit optimized while loop for string append:
     ///   while i < N { s = s + "x"; i = i + 1 }
@@ -1491,6 +1504,9 @@ impl FuncCompiler<'_> {
                 } else { return false; }
             } else { return false; }
         } else { return false; };
+
+        // Guard: condition must not reference the string variable (its len is hoisted into a local)
+        if expr_references_var(cond, str_var) { return false; }
 
         // Get local indices
         let str_local = match self.var_map.get(&str_var.0) { Some(&v) => v, None => return false };

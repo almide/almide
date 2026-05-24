@@ -278,30 +278,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
                 stub_ret_ty: Ty::Unit,
                 current_module_name: None,
             };
-            // Function-level region for Unit-returning lambdas:
-            // reclaim all heap allocations when the lambda returns.
-            let region_scope = matches!(&body.ty, Ty::Unit)
-                || (!super::functions::is_heap_return_type(&body.ty)
-                    && super::values::ty_to_valtype(&body.ty).is_none());
-            let region_local = if region_scope {
-                let sl = compiler.scratch.alloc_i32();
-                wasm!(compiler.func, {
-                    global_get(compiler.emitter.heap_ptr_global);
-                    local_set(sl);
-                });
-                Some(sl)
-            } else { None };
-
             compiler.emit_expr(body);
-
-            if let Some(sl) = region_local {
-                wasm!(compiler.func, {
-                    local_get(sl);
-                    global_set(compiler.emitter.heap_ptr_global);
-                });
-                compiler.scratch.free_i32(sl);
-            }
-
             compiler.func.instruction(&wasm_encoder::Instruction::End);
             compiler.func
         };
