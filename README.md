@@ -172,7 +172,7 @@ Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self
 
 | Program | Size |
 |---------|-----:|
-| Hello World | **332 B** |
+| Hello World | **336 B** |
 | FizzBuzz | **605 B** |
 | Fibonacci (recursive) | **558 B** |
 | Closure + call_indirect | **590 B** |
