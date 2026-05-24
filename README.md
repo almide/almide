@@ -172,11 +172,11 @@ Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self
 
 | Program | Size |
 |---------|-----:|
-| Hello World | **336 B** |
-| FizzBuzz | **605 B** |
-| Fibonacci (recursive) | **558 B** |
-| Closure + call_indirect | **590 B** |
-| Variant (match + float) | **1,081 B** |
+| Hello World | **441 B** |
+| FizzBuzz | **705 B** |
+| Fibonacci (recursive) | **664 B** |
+| Closure + call_indirect | **748 B** |
+| Variant (match + float) | **1,271 B** |
 
 These are raw `almide build --target wasm` output — no post-processing. `wasm-opt -O3` saves only 1–5 more bytes because the compiler's built-in dead code and dead data elimination already strips everything unused.
 
