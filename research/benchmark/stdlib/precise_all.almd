@@ -1,9 +1,12 @@
 import datetime
+import mem
 
 fn bench(name: String, f: () -> Unit) -> Unit = {
+  let mark = mem.save()
   let s = datetime.monotonic_ns()
   f()
   let us = (datetime.monotonic_ns() - s) / 1000
+  mem.restore(mark)
   let ms = us / 1000
   let frac = (us % 1000) / 100
   println("  " + name + ": " + int.to_string(ms) + "." + int.to_string(frac) + "ms")

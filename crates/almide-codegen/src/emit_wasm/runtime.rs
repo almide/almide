@@ -477,9 +477,20 @@ fn compile_heap_save(emitter: &mut WasmEmitter) {
 fn compile_heap_restore(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.heap_restore];
     let mut f = Function::new([]);
-    f.instruction(&wasm_encoder::Instruction::LocalGet(0));
-    f.instruction(&wasm_encoder::Instruction::GlobalSet(emitter.heap_ptr_global));
-    f.instruction(&wasm_encoder::Instruction::End);
+    // Zero-fill the region [mark, heap_ptr) so reused memory has clean
+    // zero bytes (required by Swiss Table tags, refcount headers, etc.)
+    wasm!(f, {
+        local_get(0);                       // dst = mark
+        i32_const(0);                       // val = 0
+        global_get(emitter.heap_ptr_global);
+        local_get(0);
+        i32_sub;                            // len = heap_ptr - mark
+        memory_fill(0);
+        // Reset heap pointer
+        local_get(0);
+        global_set(emitter.heap_ptr_global);
+        end;
+    });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 

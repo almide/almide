@@ -1,0 +1,11 @@
+// mem — heap scope management for bump allocator.
+//
+// save() snapshots the heap pointer. restore(mark) resets it,
+// freeing all allocations made after the snapshot. Use for
+// arena-style temporary allocation in tight loops.
+
+@intrinsic("almide_rt_mem_save")
+fn save() -> Int = _
+
+@intrinsic("almide_rt_mem_restore")
+fn restore(mark: Int) -> Unit = _

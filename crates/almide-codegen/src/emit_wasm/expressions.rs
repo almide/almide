@@ -282,7 +282,13 @@ impl FuncCompiler<'_> {
                 // inline-emitted variant (`int.abs` as i64 ops, etc.)
                 // keeps working until the runtime fn lands.
                 let sym = symbol.as_str();
-                if let Some(&idx) = self.emitter.func_map.get(sym) {
+                // mem.save / mem.restore: direct runtime calls
+                if sym == "almide_rt_mem_save" {
+                    wasm!(self.func, { call(self.emitter.rt.heap_save); i64_extend_i32_u; });
+                } else if sym == "almide_rt_mem_restore" {
+                    self.emit_expr(&args[0]);
+                    wasm!(self.func, { i32_wrap_i64; call(self.emitter.rt.heap_restore); });
+                } else if let Some(&idx) = self.emitter.func_map.get(sym) {
                     for a in args { self.emit_expr(a); }
                     wasm!(self.func, { call(idx); });
                 } else if let Some((module, func)) = self.emitter.intrinsic_symbol_to_fn.get(sym).cloned() {
