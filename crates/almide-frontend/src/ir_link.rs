@@ -23,6 +23,15 @@ pub fn ir_link(program: &mut IrProgram) {
 
     let mut stdlib_modules = std::mem::take(&mut program.used_stdlib_modules);
     for module in &program.modules {
+        // A module in program.modules was imported (explicitly or auto-import).
+        // Its functions will be merged into root by IrLinkFlattenPass, so the
+        // corresponding runtime module is needed.  Register the module name
+        // so that codegen includes the runtime source without falling back to
+        // generated-code text scanning.
+        let name = module.name.as_str().to_string();
+        if almide_lang::stdlib_info::is_any_stdlib(&name) {
+            stdlib_modules.insert(name);
+        }
         for func in &module.functions {
             scan_expr_stdlib(&func.body, &mut stdlib_modules);
         }

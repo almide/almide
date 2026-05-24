@@ -178,27 +178,6 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             for m in &program.used_stdlib_modules {
                 needed.insert(m.as_str());
             }
-            // Fallback: also scan generated code for runtime symbols not
-            // tracked by the IR (e.g., auto-derived convention methods).
-            for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-                if needed.contains(name) { continue; }
-                let prefix = format!("almide_rt_{}_", name);
-                let alt_prefix = format!("almide_{}_", name);
-                if user_code.contains(&prefix) || user_code.contains(&alt_prefix) {
-                    needed.insert(name);
-                }
-            }
-            // testing module uses almide_rt_test_ prefix (not almide_rt_testing_)
-            if user_code.contains("almide_rt_test_") {
-                needed.insert("testing");
-            }
-            // Also check for direct type references (Value, AlmideJsonPath, etc.)
-            if user_code.contains("Value::") || user_code.contains(": Value") || user_code.contains("<Value") {
-                needed.insert("value");
-            }
-            if user_code.contains("AlmideJsonPath") || user_code.contains("JsonPath") {
-                needed.insert("json");
-            }
             // Resolve inter-module runtime dependencies (auto-extracted
             // from source by build.rs — no manual whitelist).
             let mut added = true;
