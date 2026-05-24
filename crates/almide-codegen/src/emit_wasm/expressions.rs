@@ -196,33 +196,11 @@ impl FuncCompiler<'_> {
 
             // ── Block ──
             IrExprKind::Block { stmts, expr: tail } => {
-                // Phase 2b: liveness-based region scope.
-                // For each heap-typed let binding, find its last use in the
-                // remaining stmts + tail. After the last use, restore heap
-                // to reclaim the binding's allocation.
-                let scope_info = self.compute_block_scopes(stmts, tail.as_deref());
-
-                for (i, stmt) in stmts.iter().enumerate() {
-                    // Save heap before a scoped binding
-                    if let Some(sl) = scope_info.save_before.get(&i) {
-                        wasm!(self.func, { global_get(self.emitter.heap_ptr_global); local_set(*sl); });
-                    }
-
+                for stmt in stmts {
                     self.emit_stmt(stmt);
-
-                    // Restore heap after the last use of a scoped binding
-                    if let Some(sl) = scope_info.restore_after.get(&i) {
-                        wasm!(self.func, { local_get(*sl); global_set(self.emitter.heap_ptr_global); });
-                        self.scratch.free_i32(*sl);
-                    }
                 }
                 if let Some(e) = tail {
                     self.emit_expr(e);
-                }
-                // Restore any bindings whose last use was in the tail expr
-                for &sl in scope_info.restore_after_tail.iter() {
-                    wasm!(self.func, { local_get(sl); global_set(self.emitter.heap_ptr_global); });
-                    self.scratch.free_i32(sl);
                 }
             }
 
@@ -1481,114 +1459,7 @@ impl FuncCompiler<'_> {
 
 }
 
-/// Block-level liveness scope info for Phase 2b.
-struct BlockScopeInfo {
-        /// stmt_index → scratch local for heap save (insert save BEFORE this stmt)
-        save_before: std::collections::HashMap<usize, u32>,
-        /// stmt_index → scratch local for heap restore (insert restore AFTER this stmt)
-        restore_after: std::collections::HashMap<usize, u32>,
-        /// scratch locals for restore after tail expression
-        restore_after_tail: Vec<u32>,
-    }
-
 impl FuncCompiler<'_> {
-    /// Analyze a block's statements to find heap-typed let bindings
-    /// whose last use is within the same block. Returns save/restore points.
-    fn compute_block_scopes(&mut self, stmts: &[almide_ir::IrStmt], tail: Option<&IrExpr>) -> BlockScopeInfo {
-        use almide_ir::IrStmtKind;
-        use std::collections::HashMap;
-
-        let mut info = BlockScopeInfo {
-            save_before: HashMap::new(),
-            restore_after: HashMap::new(),
-            restore_after_tail: Vec::new(),
-        };
-
-        // Collect heap-typed let bindings: (var_id, bind_stmt_index)
-        let mut heap_binds: Vec<(u32, usize)> = Vec::new();
-        for (i, stmt) in stmts.iter().enumerate() {
-            if let IrStmtKind::Bind { var, ty, .. } = &stmt.kind {
-                if Self::is_scopeable_heap_type(ty) {
-                    heap_binds.push((var.0, i));
-                }
-            }
-        }
-        if heap_binds.is_empty() { return info; }
-
-        // For each binding, find the last stmt/tail that references it
-        for &(var_id, bind_idx) in &heap_binds {
-            let mut last_use: Option<usize> = None;
-            let mut used_in_tail = false;
-
-            // Scan stmts after bind
-            for j in (bind_idx + 1)..stmts.len() {
-                if Self::stmt_references_var(&stmts[j], var_id) {
-                    last_use = Some(j);
-                }
-            }
-            // Check tail
-            if let Some(t) = tail {
-                if Self::expr_references_var(t, var_id) {
-                    used_in_tail = true;
-                }
-            }
-
-            // Only scope if we found a last use (variable is actually used AND dies in this block)
-            if used_in_tail {
-                let sl = self.scratch.alloc_i32();
-                info.save_before.insert(bind_idx, sl);
-                info.restore_after_tail.push(sl);
-            } else if let Some(last_idx) = last_use {
-                // Don't scope if last use is the very next stmt (no benefit)
-                if last_idx > bind_idx + 1 || stmts.len() > last_idx + 1 {
-                    let sl = self.scratch.alloc_i32();
-                    info.save_before.insert(bind_idx, sl);
-                    info.restore_after.insert(last_idx, sl);
-                }
-            }
-        }
-
-        info
-    }
-
-    fn is_scopeable_heap_type(ty: &almide_lang::types::Ty) -> bool {
-        matches!(ty, almide_lang::types::Ty::String
-            | almide_lang::types::Ty::Applied(_, _)
-            | almide_lang::types::Ty::Record { .. })
-    }
-
-    fn stmt_references_var(stmt: &almide_ir::IrStmt, var_id: u32) -> bool {
-        struct VarRefScanner { target: u32, found: bool }
-        impl almide_ir::visit::IrVisitor for VarRefScanner {
-            fn visit_expr(&mut self, expr: &IrExpr) {
-                if self.found { return; }
-                if let IrExprKind::Var { id } = &expr.kind {
-                    if id.0 == self.target { self.found = true; return; }
-                }
-                almide_ir::visit::walk_expr(self, expr);
-            }
-        }
-        let mut scanner = VarRefScanner { target: var_id, found: false };
-        almide_ir::visit::IrVisitor::visit_stmt(&mut scanner, stmt);
-        scanner.found
-    }
-
-    fn expr_references_var(expr: &IrExpr, var_id: u32) -> bool {
-        struct VarRefScanner { target: u32, found: bool }
-        impl almide_ir::visit::IrVisitor for VarRefScanner {
-            fn visit_expr(&mut self, expr: &IrExpr) {
-                if self.found { return; }
-                if let IrExprKind::Var { id } = &expr.kind {
-                    if id.0 == self.target { self.found = true; return; }
-                }
-                almide_ir::visit::walk_expr(self, expr);
-            }
-        }
-        let mut scanner = VarRefScanner { target: var_id, found: false };
-        almide_ir::visit::IrVisitor::visit_expr(&mut scanner, expr);
-        scanner.found
-    }
-
     /// Detect and emit optimized while loop for string append:
     ///   while i < N { s = s + "x"; i = i + 1 }
     /// Hoists len/cap into locals for zero-reload tight loop.
