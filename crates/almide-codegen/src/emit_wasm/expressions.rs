@@ -206,6 +206,12 @@ impl FuncCompiler<'_> {
 
             // ── While loop ──
             IrExprKind::While { cond, body } => {
+                // Peephole: while i < N { s = s + "x"; i = i + 1 }
+                // Hoist len/cap into locals for zero-reload tight loop.
+                if self.try_emit_string_append_loop(cond, body) {
+                    return;
+                }
+
                 wasm!(self.func, { block_empty; });
                 let _g3 = self.depth_push();
                 let break_depth = _g3.saved();
@@ -1415,6 +1421,132 @@ impl FuncCompiler<'_> {
             }
             _ => false,
         }
+    }
+
+    /// Detect and emit optimized while loop for string append:
+    ///   while i < N { s = s + "x"; i = i + 1 }
+    /// Hoists len/cap into locals for zero-reload tight loop.
+    fn try_emit_string_append_loop(&mut self, cond: &IrExpr, body: &[almide_ir::IrStmt]) -> bool {
+        use almide_ir::{IrStmtKind, BinOp, VarId};
+
+        // Match body: exactly 2 statements
+        if body.len() != 2 { return false; }
+
+        // Statement 0: s = s + LitStr(1-char)
+        let (str_var, byte_val) = if let IrStmtKind::Assign { var, value } = &body[0].kind {
+            if let IrExprKind::BinOp { op: BinOp::ConcatStr, left, right } = &value.kind {
+                if let (IrExprKind::Var { id }, IrExprKind::LitStr { value: lit }) = (&left.kind, &right.kind) {
+                    if *id == *var && lit.len() == 1 {
+                        (*var, lit.as_bytes()[0])
+                    } else { return false; }
+                } else { return false; }
+            } else { return false; }
+        } else { return false; };
+
+        // Statement 1: i = i + 1
+        let counter_var = if let IrStmtKind::Assign { var, value } = &body[1].kind {
+            if let IrExprKind::BinOp { op: BinOp::AddInt, left, right } = &value.kind {
+                if let (IrExprKind::Var { id }, IrExprKind::LitInt { value: 1 }) = (&left.kind, &right.kind) {
+                    if *id == *var { *var } else { return false; }
+                } else { return false; }
+            } else { return false; }
+        } else { return false; };
+
+        // Get local indices
+        let str_local = match self.var_map.get(&str_var.0) { Some(&v) => v, None => return false };
+        let counter_local = match self.var_map.get(&counter_var.0) { Some(&v) => v, None => return false };
+
+        // Emit optimized loop with hoisted len/cap
+        let s = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let cap = self.scratch.alloc_i32();
+
+        // Hoist: load len and cap from string header
+        wasm!(self.func, {
+            local_get(str_local); local_tee(s);
+            i32_load(0); local_set(len);
+            local_get(s);
+            i32_load(super::list_layout::STRING_CAP_OFFSET as u32);
+            local_set(cap);
+            // Loop
+            block_empty; loop_empty;
+        });
+        let _g3 = self.depth_push();
+        let break_depth = _g3.saved();
+        let _g4 = self.depth_push(); // for loop_empty above (we're inside block+loop)
+
+        // Condition check
+        self.emit_expr(cond);
+        wasm!(self.func, {
+            i32_eqz;
+            br_if(self.depth - break_depth - 1);
+        });
+
+        // Fast path: len < cap → inline byte store (NO memory read for len/cap)
+        wasm!(self.func, {
+            local_get(len); local_get(cap); i32_lt_u;
+            if_empty;
+              local_get(s);
+              i32_const(super::list_layout::STRING_DATA_OFFSET);
+              i32_add;
+              local_get(len); i32_add;
+              i32_const(byte_val as i32);
+              i32_store8(0);
+              local_get(len); i32_const(1); i32_add; local_set(len);
+            else_;
+              // Slow: write len back, grow, reload s/cap
+              local_get(s); local_get(len); i32_store(0);
+              // new_cap = max(cap*2, 16)
+              local_get(cap); i32_const(1); i32_shl; local_tee(cap);
+              i32_const(16); i32_lt_u;
+              if_empty; i32_const(16); local_set(cap); end;
+              // Alloc
+              local_get(cap);
+              i32_const(super::list_layout::STRING_DATA_OFFSET);
+              i32_add;
+              call(self.emitter.rt.alloc); local_tee(s);
+              // Copy old data
+              i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+              local_get(str_local);
+              i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+              local_get(len);
+              memory_copy;
+              // Write cap
+              local_get(s); local_get(cap);
+              i32_store(super::list_layout::STRING_CAP_OFFSET as u32);
+              // Update str local
+              local_get(s); local_set(str_local);
+              // Write byte
+              local_get(s);
+              i32_const(super::list_layout::STRING_DATA_OFFSET);
+              i32_add;
+              local_get(len); i32_add;
+              i32_const(byte_val as i32);
+              i32_store8(0);
+              local_get(len); i32_const(1); i32_add; local_set(len);
+            end;
+            // i++
+            local_get(counter_local);
+            i64_const(1); i64_add;
+            local_set(counter_local);
+        });
+
+        // Continue
+        wasm!(self.func, { br(0); });
+
+        self.depth_pop(_g4);
+        self.depth_pop(_g3);
+        wasm!(self.func, { end; end; });
+
+        // Write final len back to memory
+        wasm!(self.func, {
+            local_get(s); local_get(len); i32_store(0);
+        });
+
+        self.scratch.free_i32(cap);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(s);
+        true
     }
 
     /// Check if `maybe_mod` is `x % n` with power-of-2 n and `maybe_zero` is `0`.
