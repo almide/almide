@@ -932,20 +932,11 @@ fn compile_string_append(emitter: &mut WasmEmitter) {
         // if left_cap >= new_len: append in-place
         local_get(5); local_get(4); i32_ge_u;
         if_i32;
-          // In-place: copy right data after left data
-          i32_const(0); local_set(7);
-          block_empty; loop_empty;
-            local_get(7); local_get(3); i32_ge_u; br_if(1);
-            // dst = left + DATA_OFFSET + left_len + i
-            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
-            local_get(2); i32_add; local_get(7); i32_add;
-            // src = right + DATA_OFFSET + i
-            local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
-            local_get(7); i32_add;
-            i32_load8_u(0); i32_store8(0);
-            local_get(7); i32_const(1); i32_add; local_set(7);
-            br(0);
-          end; end;
+          // In-place: memory_copy right data after left data
+          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add;
+          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(3);
+          memory_copy;
           // Update left.len
           local_get(0); local_get(4); i32_store(0);
           local_get(0);  // return left (same pointer)
@@ -960,25 +951,15 @@ fn compile_string_append(emitter: &mut WasmEmitter) {
           local_get(6); local_get(4); i32_store(0);           // result.len = new_len
           local_get(6); local_get(5); i32_store(STRING_CAP_OFFSET as u32); // result.cap
           // Copy left data
-          i32_const(0); local_set(7);
-          block_empty; loop_empty;
-            local_get(7); local_get(2); i32_ge_u; br_if(1);
-            local_get(6); i32_const(STRING_DATA_OFFSET); i32_add; local_get(7); i32_add;
-            local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(7); i32_add;
-            i32_load8_u(0); i32_store8(0);
-            local_get(7); i32_const(1); i32_add; local_set(7);
-            br(0);
-          end; end;
+          local_get(6); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(2);
+          memory_copy;
           // Copy right data
-          i32_const(0); local_set(7);
-          block_empty; loop_empty;
-            local_get(7); local_get(3); i32_ge_u; br_if(1);
-            local_get(6); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; local_get(7); i32_add;
-            local_get(1); i32_const(STRING_DATA_OFFSET); i32_add; local_get(7); i32_add;
-            i32_load8_u(0); i32_store8(0);
-            local_get(7); i32_const(1); i32_add; local_set(7);
-            br(0);
-          end; end;
+          local_get(6); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add;
+          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(3);
+          memory_copy;
           local_get(6);  // return new pointer
         end;
     });

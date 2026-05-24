@@ -1036,8 +1036,29 @@ impl FuncCompiler<'_> {
             }
 
             // ── Comparison (type-dispatched via operand type) ──
-            BinOp::Eq => self.emit_eq(left, right, false),
-            BinOp::Neq => self.emit_eq(left, right, true),
+            BinOp::Eq => {
+                // Peephole: x % (power-of-2) == 0 → (x & (n-1)) == 0
+                // Safe because for any sign of x: x%n==0 ⟺ x&(n-1)==0
+                let modint_zero = Self::extract_mod_pow2_eq_zero(left, right)
+                    .or_else(|| Self::extract_mod_pow2_eq_zero(right, left));
+                if let Some((mod_expr, mask)) = modint_zero {
+                    self.emit_expr(mod_expr);
+                    wasm!(self.func, { i64_const(mask); i64_and; i64_eqz; });
+                } else {
+                    self.emit_eq(left, right, false);
+                }
+            }
+            BinOp::Neq => {
+                // Peephole: x % (power-of-2) != 0 → (x & (n-1)) != 0
+                let modint_zero = Self::extract_mod_pow2_eq_zero(left, right)
+                    .or_else(|| Self::extract_mod_pow2_eq_zero(right, left));
+                if let Some((mod_expr, mask)) = modint_zero {
+                    self.emit_expr(mod_expr);
+                    wasm!(self.func, { i64_const(mask); i64_and; i64_const(0); i64_ne; });
+                } else {
+                    self.emit_eq(left, right, true);
+                }
+            }
             BinOp::Lt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
@@ -1396,4 +1417,19 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Check if `maybe_mod` is `x % n` with power-of-2 n and `maybe_zero` is `0`.
+    /// Returns `(x_expr, n-1)` for emitting `x & (n-1)` instead.
+    fn extract_mod_pow2_eq_zero<'b>(maybe_mod: &'b IrExpr, maybe_zero: &'b IrExpr) -> Option<(&'b IrExpr, i64)> {
+        if let IrExprKind::LitInt { value: 0 } = &maybe_zero.kind {
+            if let IrExprKind::BinOp { op: BinOp::ModInt, left, right } = &maybe_mod.kind {
+                if let IrExprKind::LitInt { value: n } = &right.kind {
+                    let n = *n;
+                    if n > 0 && (n as u64).is_power_of_two() {
+                        return Some((left, n - 1));
+                    }
+                }
+            }
+        }
+        None
+    }
 }

@@ -117,6 +117,46 @@ impl FuncCompiler<'_> {
                     if let IrExprKind::Var { id } = &left.kind {
                         if *id == *var {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                // 1-char literal: inline capacity check + byte store
+                                if let IrExprKind::LitStr { value: lit } = &right.kind {
+                                    if lit.len() == 1 {
+                                        let byte = lit.as_bytes()[0];
+                                        let s = self.scratch.alloc_i32();
+                                        let len_l = self.scratch.alloc_i32();
+                                        wasm!(self.func, {
+                                            local_get(local_idx); local_tee(s);
+                                            i32_load(0); local_tee(len_l);
+                                            local_get(s);
+                                            i32_load(super::list_layout::STRING_CAP_OFFSET as u32);
+                                            i32_lt_u;
+                                            if_i32;
+                                              // Fast: in-place byte store
+                                              local_get(s);
+                                              i32_const(super::list_layout::STRING_DATA_OFFSET);
+                                              i32_add;
+                                              local_get(len_l);
+                                              i32_add;
+                                              i32_const(byte as i32);
+                                              i32_store8(0);
+                                              local_get(s);
+                                              local_get(len_l); i32_const(1); i32_add;
+                                              i32_store(0);
+                                              local_get(s);
+                                            else_;
+                                              local_get(s);
+                                        });
+                                        self.emit_expr(right);
+                                        wasm!(self.func, {
+                                              call(self.emitter.rt.string_append);
+                                            end;
+                                            local_set(local_idx);
+                                        });
+                                        self.scratch.free_i32(len_l);
+                                        self.scratch.free_i32(s);
+                                        return;
+                                    }
+                                }
+                                // General case
                                 wasm!(self.func, { local_get(local_idx); });
                                 self.emit_expr(right);
                                 wasm!(self.func, {

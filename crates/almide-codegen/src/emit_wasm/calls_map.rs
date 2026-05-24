@@ -960,7 +960,7 @@ impl FuncCompiler<'_> {
         let h2r = self.scratch.alloc_i32();
 
         wasm!(self.func, {
-            local_get(cap); i32_const(1); i32_shl; local_set(nc);
+            local_get(cap); i32_const(2); i32_shl; local_set(nc); // 4x growth
         });
         self.emit_alloc_table(nm, nc, es);
         wasm!(self.func, {

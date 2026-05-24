@@ -1293,7 +1293,7 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // heap (see `calls_string::emit_string_interp`).
     let mut memory = MemorySection::new();
     memory.memory(MemoryType {
-        minimum: 64,            // 4MB initial
+        minimum: 256,           // 16MB initial — covers typical list/string workloads
         maximum: Some(65536),   // 4GB max (WASM32 hard limit) — explicit so V8 doesn't apply a smaller default
         memory64: false,
         shared: false,
