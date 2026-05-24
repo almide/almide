@@ -168,31 +168,17 @@ almide clean                     # Clear build + dependency cache
 
 ## WASM Binary Size
 
-Almide emits WASM bytecode directly (no Rust/C intermediary). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency.
+Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency. Aggressive DCE strips unused runtime functions and data automatically.
 
-Sizes below are with `ALMIDE_WASM_OPT=1` (post-build `wasm-opt -O3`, opt-in for now).
+| Program | Size |
+|---------|-----:|
+| Hello World | **332 B** |
+| FizzBuzz | **605 B** |
+| Fibonacci (recursive) | **558 B** |
+| Closure + call_indirect | **590 B** |
+| Variant (match + float) | **1,081 B** |
 
-| Program | Default | `wasm-opt -O3` |
-|---------|--------:|---------------:|
-| Hello World | 2,587 B | **889 B** |
-| FizzBuzz | 2,880 B | **1,135 B** |
-| Fibonacci | 2,942 B | **1,086 B** |
-| Closure | 3,161 B | **1,193 B** |
-| Variant | 3,628 B | **1,680 B** |
-
-### vs Rust + wasm-bindgen
-
-For trivial programs the two are tied. For numerical / stdlib-heavy code, Almide stays small while wasm-bindgen grows with API surface:
-
-| Workload | Almide | Rust + wasm-bindgen | Ratio |
-|---|--------:|--------:|:------:|
-| Hello World (`println`) | **889 B** | 852 B | tie |
-| Matmul + scale (matrix stdlib) | **1,492 B** | 10,701 B | **Almide 7.17× smaller** |
-| Elementwise chain (scale + scale + add) | **2,108 B** | 10,701 B | **Almide 5.07× smaller** |
-
-Why: wasm-bindgen's type-marshalling glue grows with each exported API; Almide's stdlib lives in a single coherent runtime that doesn't bloat as the call surface expands.
-
-Bench source: [almide-wasm-bindgen/examples/bench](https://github.com/almide/almide-wasm-bindgen/tree/main/examples/bench).
+These are raw `almide build --target wasm` output — no post-processing. `wasm-opt -O3` saves only 1–5 more bytes because the compiler's built-in dead code and dead data elimination already strips everything unused.
 
 ## Native Performance
 
