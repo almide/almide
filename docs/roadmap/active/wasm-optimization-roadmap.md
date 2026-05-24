@@ -1,89 +1,111 @@
 # WASM Optimization Roadmap
 
-> Almide's WASM emitter beats Rust+LLVM on 7/11 benchmarks (v0.23.3+develop).
-> This roadmap targets winning **all 11** through double-specialization:
-> language semantics × WASM target knowledge.
+> Almide's WASM emitter: 336B hello world, 5 wins / 2 ties / 4 losses vs Rust+LLVM (v0.23.4).
+> This roadmap targets winning **all 11** benchmarks.
 
-## Precision Benchmark (1M scale, 2026-05-24)
+## Precision Benchmark (1M scale, v0.23.4)
 
 | Benchmark          | Almide  | Rust   | Ratio      | Status     |
 |--------------------|---------|--------|------------|------------|
-| fib38              | 152.0ms |157.7ms | **0.96x**  | ✓ WIN      |
-| sort_1M            |   6.2ms |  7.0ms | **0.89x**  | ✓ WIN      |
-| list_map_1M        |   3.7ms |  1.6ms | 2.3x       | ✗ LOSING   |
-| list_filter_1M     |   2.8ms |  3.8ms | **0.74x**  | ✓ WIN      |
-| list_fold_1M       |   0.8ms |  0.9ms | **0.89x**  | ✓ WIN      |
-| str_concat_100k    |   0.5ms |  0.3ms | 1.7x       | ✗ LOSING   |
-| map_insert_100k    |   9.1ms |  5.7ms | 1.6x       | ✗ LOSING   |
-| map_get_100k       |   1.8ms |  1.7ms | 1.06x      | ≈ (fused)  |
-| int_parse_1M       |  53.5ms | 64.7ms | **0.83x**  | ✓ WIN      |
-| int_tostring_1M    |  34.0ms | 52.8ms | **0.64x**  | ✓ WIN      |
-| math_sqrt_1M       |   0.5ms |  1.4ms | **0.36x**  | ✓ WIN      |
+| fib38              | 163ms   | 164ms  | ~1.0x      | ≈ TIE      |
+| sort_1M            |   6.1ms |  6.7ms | **0.91x**  | ✓ WIN      |
+| list_map_1M        |   3.9ms |  1.6ms | 3.9x       | ✗ LOSING   |
+| list_filter_1M     |   2.6ms |  2.2ms | 1.5x       | ✗ LOSING   |
+| list_fold_1M       |   1.1ms |  0.4ms | 2.8x       | ✗ LOSING   |
+| str_concat_1M      |   2.6ms |  1.4ms | 2.2x       | ✗ LOSING   |
+| map_insert_100k    |   3.8ms |  4.2ms | **0.90x**  | ≈ TIE      |
+| map_get_100k       |   5.0ms |  6.3ms | **0.79x**  | ✓ WIN      |
+| int_parse_1M       |  57ms   | 66ms   | **0.86x**  | ✓ WIN      |
+| int_tostring_1M    |  35ms   | 59ms   | **0.59x**  | ✓ WIN      |
+| math_sqrt_1M       |   0.4ms |  1.5ms | **0.27x**  | ✓ WIN      |
 
-**Score: 7 wins, 1 tie, 3 losses**
-
----
-
-## Remaining Losses — Root Cause Analysis
-
-### list_map (2.3x slower)
-
-**Root cause**: LLVM vectorizes `iter().map(|x| x*2).collect()` with SIMD.
-Our loop does 1 element per iteration (i64_load → i64_mul → i64_store).
-Rust/LLVM processes 2-4 elements per iteration via auto-vectorization.
-
-**Evidence**: `map_identity` (no-op body) takes same time as `map_x2`,
-proving the bottleneck is memory throughput, not lambda body cost.
-Pointer-based iteration already implemented (no multiply per element).
-
-**Fix**: WASM SIMD — emit `v128.load` + `i64x2.mul` + `v128.store` for
-Int/Float element types. Process 2 i64 elements per iteration. Scalar
-tail for remainder. wasmtime supports WASM SIMD.
-
-**Effort**: Large. New emit path for SIMD-eligible list ops.
-
-### str_concat (1.7x slower)
-
-**Root cause**: `s = s + "x"` → peephole rewrites to `__string_append(s, "x")`
-runtime function call. 100k calls × function call overhead.
-Rust's `String::push('x')` is inlined by LLVM to direct buffer write.
-
-**Fix**: Inline string append for 1-byte literals. When the RHS of
-`s = s + lit` is a 1-char string literal, emit inline WASM:
-```
-if len < cap:
-  mem[ptr + STRING_DATA_OFFSET + len] = byte
-  mem[ptr] = len + 1  // update len
-else:
-  call __string_append  // fallback for grow
-```
-Eliminates function call overhead for the common case (cap sufficient).
-
-**Effort**: Medium. Peephole pattern in statements.rs WASM emit.
-
-### map_insert (1.6x slower)
-
-**Root cause**: 13 resizes from cap=16 to cap=131072. Each resize
-rehashes all existing entries (hash + probe + copy per entry).
-Rust HashMap has the same resize count but LLVM optimizes the
-rehash loop (vectorized memcpy, inlined hash).
-
-**Potential fixes** (pick one or combine):
-1. **Initial capacity hint**: `map.with_capacity(n)` stdlib fn.
-   Eliminates most resizes for known-size inserts.
-2. **Faster resize**: `memory.copy` bulk transfer of tag+entry arrays
-   (already partially implemented in Swiss Table layout).
-3. **Growth factor 4x**: Grow by 4x instead of 2x. Fewer resizes
-   (7 instead of 13) at cost of memory waste.
-4. **Inline hash for Int keys**: Currently `emit_hash_key` generates
-   ~8 WASM instructions. Could reduce to 4 with simpler hash
-   (e.g., multiply-shift instead of splitmix).
-
-**Effort**: Small (capacity hint) to Medium (inline hash).
+**Score: 5 wins, 2 ties, 4 losses**
 
 ---
 
-## Completed Optimizations (this session)
+## Remaining Losses — Root Cause & Fix Plan
+
+All 4 losses are "our emit is less efficient than LLVM's" — not WASM limitations.
+Both Almide and Rust output WASM and run on the same wasmtime JIT.
+LLVM uses the same v128 instructions we do — it just emits tighter loops.
+
+### 1. list_fold (2.8x) — SIMD accumulator not implemented
+
+**Root cause**: We emit a scalar loop. LLVM emits i64x2.add accumulator.
+
+```
+Almide (scalar):
+  loop: i64.load → i64.add acc → ptr += 8
+
+LLVM (SIMD):
+  loop: v128.load → i64x2.add acc_v128 → ptr += 16
+  end:  extract_lane 0 + extract_lane 1 → final sum
+```
+
+**Fix**: Detect `fold(init, (a, x) => a + x)` with Int element.
+Emit i64x2 accumulator with horizontal add at end. 4× unroll.
+
+**Effort**: Small. Pattern match on fold lambda body, same approach as map SIMD.
+**Expected**: 1.1ms → ~0.4ms (match Rust)
+
+### 2. list_map (3.9x) — SIMD loop overhead
+
+**Root cause**: SIMD is implemented but each v128 op has redundant
+`local.get dst_ptr` / `local.get src_ptr`. LLVM avoids this by using
+`offset` in load/store instructions relative to a single base pointer.
+
+```
+Almide:
+  local.get dst_ptr          ;; redundant per-op
+  local.get src_ptr          ;; redundant per-op
+  v128.load offset=0
+  ...
+  v128.store offset=0
+
+LLVM:
+  v128.load offset=0 (base=src)   ;; no extra local.get
+  ...
+  v128.store offset=0 (base=dst)
+```
+
+**Fix**: Hoist `local.get src_ptr` and `local.get dst_ptr` outside
+the unrolled block. Use `local.tee` to keep base on stack.
+Each unrolled op uses only `v128.load offset=N` with N=0,16,32,48.
+
+**Effort**: Medium. Restructure SIMD emit to stack-based addressing.
+**Expected**: 3.9ms → ~2ms
+
+### 3. str_concat (2.2x) — initial cap=0 causes 20 grows
+
+**Root cause**: `var s = ""` creates cap=0 string. Each grow calls
+`__string_append` (function call overhead). 1M appends = 20 grows.
+Rust also grows from 0 but LLVM fully inlines the grow path.
+
+**Fix**: Emit `var s = ""` with initial cap=16 (or 64). First 16
+appends are pure inline byte stores with zero function calls.
+Also: inline the grow path entirely (avoid string_append call).
+
+**Effort**: Small. Change empty string emit to include capacity.
+**Expected**: 2.6ms → ~1.5ms
+
+### 4. list_filter (1.5x) — scalar predicate
+
+**Root cause**: Our branchless filter is good but scalar.
+LLVM may batch predicate checks via SIMD.
+
+**Fix**: For simple predicates like `x % 2 == 0` (now `x & 1 == 0`
+via ModInt peephole), emit SIMD batch check:
+`v128.load` → `v128.and(mask)` → `i64x2.eq(zero)` → conditional copy.
+Challenging because WASM SIMD lacks compress-store.
+
+**Effort**: Large. SIMD filter requires creative approach.
+**Expected**: 2.6ms → ~2.0ms (modest gain, SIMD filter is hard)
+
+---
+
+## Completed Optimizations (v0.23.3 + v0.23.4)
+
+### Session 1 (v0.23.3): 14 optimizations
 
 | # | Optimization | Impact | Files |
 |---|---|---|---|
@@ -102,29 +124,30 @@ rehash loop (vectorized memcpy, inlined hash).
 | 13 | 1-pass reverse copy for sort | sort matched Rust | calls_list_helpers.rs |
 | 14 | Pointer-based list.map | eliminate idx multiply | calls_list_closure2.rs |
 
-## Tier 1 — Next Steps (days)
+### Session 2 (v0.23.4): 13 optimizations
 
-### 1.1 Inline String Append for Literals
+| # | Optimization | Impact | Files |
+|---|---|---|---|
+| 15 | SIMD v128 list.map (4× unrolled) | map SIMD path | calls_list_closure2.rs, wasm_macro.rs |
+| 16 | Inline 1-char string append | skip function call | statements.rs |
+| 17 | string_append memory.copy | 3 byte loops eliminated | runtime.rs |
+| 18 | Pointer-based filter/fold | eliminate idx multiply | calls_list_closure2.rs |
+| 19 | ModInt peephole (x%n==0 → x&(n-1)==0) | avoid i64.rem_s | expressions.rs |
+| 20 | Map growth factor 4× | 13→7 resizes | calls_map.rs |
+| 21 | Exponential growth allocator | amortized O(1) grow | runtime.rs |
+| 22 | Initial memory 128KB | minimal footprint | mod.rs |
+| 23 | Conditional fs init | skip preopen for non-fs | mod.rs, functions.rs, dce.rs |
+| 24 | Aggressive function DCE | element table cleanup | mod.rs |
+| 25 | Dead data elimination | strip unused strings | dce.rs |
+| 26 | String pool at offset 4096 | safe data DCE | mod.rs |
+| 27 | Binary size: 25KB → 336B | -98.7% hello world | all above |
 
-Detect `s = s + "x"` where RHS is 1-char literal. Emit inline
-capacity check + byte store instead of `__string_append` call.
+## Tier 2 — Medium-term
 
-### 1.2 Map Initial Capacity Hint
-
-Add `map.with_capacity(n)` that pre-allocates for n entries.
-Eliminates resize cascade for bulk insert patterns.
-
-### 1.3 Escape Analysis for Option/Result
+### 2.1 Escape Analysis for Option/Result
 
 Detect non-escaping Option/Result and return as WASM multi-value
 `(i32, i64)` instead of heap-allocating a wrapper.
-
-## Tier 2 — Medium-term (weeks)
-
-### 2.1 WASM SIMD for Numeric List Ops
-
-Emit `v128.load` + `i64x2.mul` + `v128.store` for Int/Float
-list.map/filter. 2x throughput per iteration.
 
 ### 2.2 Arena Allocator
 
@@ -134,6 +157,18 @@ Pairs with escape analysis.
 ### 2.3 Partial Evaluation
 
 Specialize higher-order functions at known call sites.
+
+### 2.4 wasm-opt integration (optional)
+
+Post-build `wasm-opt -Oz` as opt-in flag. Current built-in DCE
+makes this nearly redundant (saves <1% additional).
+
+### 2.5 Memory layout type safety
+
+Replace magic constants (SCRATCH_ITOA, NEWLINE_OFFSET) with
+newtype wrappers (MemOffset, StringPoolOffset, HeapPtr).
+Prevents the class of bugs where integer constants collide
+with data section offsets.
 
 ## Tier 3 — Long-term
 
@@ -145,11 +180,12 @@ Specialize higher-order functions at known call sites.
 
 ## Principles
 
-1. **Language knowledge > generic optimization.** Every Almide-specific
-   transform outperforms LLVM's generic equivalent.
-2. **Measure the real bottleneck.** map.get's problem was Option heap
+1. **Same WASM, same runtime.** Both Almide and Rust produce WASM
+   bytecode for the same wasmtime JIT. Performance gaps are emit
+   quality, not platform limitations.
+2. **Language knowledge > generic optimization.** Every Almide-specific
+   transform (get_or fusion, itoa, sqrt) outperforms LLVM's generic equivalent.
+3. **Measure the real bottleneck.** map.get's problem was Option heap
    alloc, not hash table layout. Always profile before optimizing.
-3. **WASM ≠ native.** Swiss Table tag separation hurt perf on WASM
-   (extra address computation) despite helping on native CPUs.
 4. **1M scale reveals truth.** 100k benchmarks are noise-dominated.
    Always verify at 1M+ scale.
