@@ -178,27 +178,6 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             for m in &program.used_stdlib_modules {
                 needed.insert(m.as_str());
             }
-            // Fallback: also scan generated code for runtime symbols not
-            // tracked by the IR (e.g., auto-derived convention methods).
-            for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-                if needed.contains(name) { continue; }
-                let prefix = format!("almide_rt_{}_", name);
-                let alt_prefix = format!("almide_{}_", name);
-                if user_code.contains(&prefix) || user_code.contains(&alt_prefix) {
-                    needed.insert(name);
-                }
-            }
-            // testing module uses almide_rt_test_ prefix (not almide_rt_testing_)
-            if user_code.contains("almide_rt_test_") {
-                needed.insert("testing");
-            }
-            // Also check for direct type references (Value, AlmideJsonPath, etc.)
-            if user_code.contains("Value::") || user_code.contains(": Value") || user_code.contains("<Value") {
-                needed.insert("value");
-            }
-            if user_code.contains("AlmideJsonPath") || user_code.contains("JsonPath") {
-                needed.insert("json");
-            }
             // Resolve inter-module runtime dependencies (auto-extracted
             // from source by build.rs — no manual whitelist).
             let mut added = true;
@@ -212,22 +191,19 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
                     }
                 }
             }
-            // Auto-emit struct definitions required by runtime functions.
-            // Runtime functions reference these types but codegen only emits them
-            // when the user's code explicitly uses the corresponding stdlib function.
-            // When the runtime module is needed but the struct isn't in user_code,
-            // inject it so rustc finds the definition.
-            if needed.contains("fs") && !user_code.contains("struct FileStat") {
-                output.push_str("#[derive(Clone, Debug, PartialEq)]\npub struct FileStat {\n    pub size: i64,\n    pub is_dir: bool,\n    pub is_file: bool,\n    pub modified: i64,\n}\n\n");
-            }
-
-            // Collect runtime modules, hoist top-level `use` to front and deduplicate
+            // Collect runtime modules, hoist top-level `use` to front and deduplicate.
+            // Struct definitions in runtime sources that the walker already emitted
+            // (from stdlib/*.almd type declarations) are skipped to avoid E0428.
             let mut use_set = std::collections::HashSet::new();
             let mut use_lines = Vec::new();
             let mut body_lines = Vec::new();
             for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
                 if needed.contains(name) {
-                    for line in strip_test_blocks(source).lines() {
+                    let stripped = strip_test_blocks(source);
+                    let lines: Vec<&str> = stripped.lines().collect();
+                    let mut i = 0;
+                    while i < lines.len() {
+                        let line = lines[i];
                         let trimmed = line.trim();
                         // Top-level use: not indented and starts with "use "
                         if !line.starts_with(' ') && !line.starts_with('\t')
@@ -236,9 +212,37 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
                             if use_set.insert(trimmed.to_string()) {
                                 use_lines.push(trimmed.to_string());
                             }
-                        } else {
-                            body_lines.push(line.to_string());
+                            i += 1;
+                            continue;
                         }
+                        // Detect struct definitions: #[derive(...)] followed by pub struct Name
+                        // Skip the block if user_code already contains that struct (walker emitted it).
+                        if trimmed.starts_with("#[derive(") {
+                            if let Some(next) = lines.get(i + 1) {
+                                if let Some(struct_name) = next.trim().strip_prefix("pub struct ")
+                                    .and_then(|s| s.split_whitespace().next())
+                                    .map(|s| s.trim_end_matches('{').trim())
+                                {
+                                    let needle = format!("struct {}", struct_name);
+                                    if user_code.contains(&needle) {
+                                        // Skip derive + struct + fields + closing brace
+                                        i += 1; // skip #[derive]
+                                        let mut depth = 0u32;
+                                        while i < lines.len() {
+                                            if lines[i].contains('{') { depth += 1; }
+                                            if lines[i].contains('}') {
+                                                depth = depth.saturating_sub(1);
+                                                if depth == 0 { i += 1; break; }
+                                            }
+                                            i += 1;
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                        body_lines.push(line.to_string());
+                        i += 1;
                     }
                     body_lines.push(String::new());
                 }

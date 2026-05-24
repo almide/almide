@@ -1358,7 +1358,15 @@ impl FuncCompiler<'_> {
             br(0);
         });
         self.depth_pop(depth_guard);
-        wasm!(self.func, { end; end; local_get(dst_local); });
+        wasm!(self.func, { end; end; });
+
+        // Perceus: if source was single-use, free it via rc_dec.
+        // Safe because the map loop is complete — source data is no longer accessed.
+        if self.is_single_use_var(list_arg) {
+            wasm!(self.func, { local_get(src_local); call(self.emitter.rt.rc_dec); });
+        }
+
+        wasm!(self.func, { local_get(dst_local); });
 
         self.scratch.free_i32(len_local);
         self.scratch.free_i32(end_ptr);
@@ -1371,6 +1379,14 @@ impl FuncCompiler<'_> {
 
     /// Detect if a lambda body is a simple SIMD-eligible operation on Int elements.
     /// Returns (op, constant) if the body is `x * k`, `x + k`, or `x - k`.
+    /// Check if an expression is a single-use variable (use_count == 1).
+    /// Safe for Perceus: the value is consumed here and can be freed after.
+    fn is_single_use_var(&self, expr: &IrExpr) -> bool {
+        if let IrExprKind::Var { id } = &expr.kind {
+            self.var_table.get(*id).use_count == 1
+        } else { false }
+    }
+
     fn detect_simd_map_op(fn_arg: &IrExpr) -> Option<(SimdMapOp, i64)> {
         if let IrExprKind::Lambda { params, body, .. } = &fn_arg.kind {
             let param_id = params.first().map(|(v, _)| v.0)?;

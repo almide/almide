@@ -883,6 +883,12 @@ impl FuncCompiler<'_> {
             call(self.emitter.rt.alloc); local_set(out);
             local_get(out); i32_const(0); i32_store(0); // len = 0
             local_get(out); local_get(cap); i32_store(list_layout::MAP_CAP_OFFSET as u32);
+            // Zero-fill tag array so reused memory has clean empty slots.
+            // Required for region-based memory reuse (heap_restore).
+            local_get(out); i32_const(list_layout::MAP_TAGS_OFFSET); i32_add;
+            i32_const(0);
+            local_get(cap);
+            memory_fill(0);
         });
     }
 

@@ -366,7 +366,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", k.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| format!("{}: {}", k, val_str)));
             }
-            // Fill in default fields that were not explicitly provided
+            // Fill in default fields that were not explicitly provided.
+            // default_fields is keyed by both bare name ("Msg") and module-qualified
+            // name ("dep_pkg.Msg"), so we try the exact ctor_name_str first.
             let default_keys: Vec<(String, String)> = ctx.ann.default_fields.keys()
                 .filter(|(cn, _)| cn == ctor_name_str)
                 .cloned()

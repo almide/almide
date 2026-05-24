@@ -139,6 +139,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // __rc_inc(ptr: i32) -> i32 — increment refcount at ptr-4, return ptr
     emitter.rt.rc_inc = emitter.register_func("__rc_inc", alloc_ty);
 
+    // __rc_dec(ptr: i32) → () — decrement RC; if 0, push to free list
+    let rc_dec_ty = emitter.register_type(vec![ValType::I32], vec![]);
+    emitter.rt.rc_dec = emitter.register_func("__rc_dec", rc_dec_ty);
+
     // __cow_check(ptr: i32, size: i32) -> i32 — if rc>1, copy data, dec old rc, return new ptr
     let cow_check_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.cow_check = emitter.register_func("__cow_check", cow_check_ty);
@@ -295,6 +299,7 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_alloc(emitter);
     compile_rc_inc(emitter);
+    compile_rc_dec(emitter);
     compile_cow_check(emitter);
     compile_heap_save(emitter);
     compile_heap_restore(emitter);
@@ -348,52 +353,95 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
 /// and Emscripten conventions. This ensures i64 loads/stores never trap on alignment.
 fn compile_alloc(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.alloc];
-    // locals: 1=$ptr, 2=$grow_pages
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
+    // locals: 1=$ptr, 2=$grow_pages, 3=$prev, 4=$cur
+    let mut f = Function::new([
+        (1, ValType::I32), (1, ValType::I32),
+        (1, ValType::I32), (1, ValType::I32),
+    ]);
+
+    // Header layout: [size:i32][RC:i32][data...].
+    // alloc(request_size) returns pointer to data (ptr+8).
+    // ptr-4 = RC, ptr-8 = size (for Perceus rc_dec/free).
+    use super::list_layout::ALLOC_HEADER_SIZE;
+    let header_size: i32 = ALLOC_HEADER_SIZE;
 
     wasm!(f, {
-        // Align heap_ptr up to 8-byte boundary: ptr = (heap_ptr + 7) & ~7
+        // --- Free list check: walk list for block >= requested size ---
+        i32_const(0); local_set(3);                       // prev = null
+        global_get(emitter.free_list_global); local_set(4); // cur = free_list_head
+        block_empty; loop_empty;
+          local_get(4); i32_eqz; br_if(1);                // cur == null → bump path
+          // Check size: *(cur) >= request_size?
+          local_get(4); i32_load(0);                       // cur.size
+          local_get(0);                                    // request_size
+          i32_ge_u;
+          if_empty;
+            // Found: unlink from free list
+            local_get(3); i32_eqz;
+            if_empty;
+              // prev == null → cur is head
+              local_get(4); i32_const(header_size); i32_add; i32_load(0); // cur.next
+              global_set(emitter.free_list_global);
+            else_;
+              // prev.next = cur.next
+              local_get(3); i32_const(header_size); i32_add;
+              local_get(4); i32_const(header_size); i32_add; i32_load(0);
+              i32_store(0);
+            end;
+            // Write RC=1, return cur+8
+            local_get(4); i32_const(1); i32_store(4);     // RC = 1
+            local_get(4); i32_const(header_size); i32_add;
+            return_;
+          end;
+          // Advance: prev = cur, cur = cur.next
+          local_get(4); local_set(3);
+          local_get(4); i32_const(header_size); i32_add; i32_load(0);
+          local_set(4);
+          br(0);
+        end; end;
+
+        // --- Bump path (no suitable free block found) ---
+        // Align heap_ptr to 8-byte boundary
         global_get(emitter.heap_ptr_global);
         i32_const(7); i32_add; i32_const(-8); i32_and;
         local_set(1);
-        // Advance heap_ptr past the allocation: heap_ptr = ptr + size + 4 (refcount)
+        // Advance heap_ptr: ptr + size + header
         local_get(1);
         local_get(0);
         i32_add;
-        i32_const(4); i32_add;
+        i32_const(header_size); i32_add;
         global_set(emitter.heap_ptr_global);
-        // Grow memory if needed — single grow with exponential sizing.
-        // grow_pages = ceil(heap_ptr / 65536) - memory.size
-        // If grow_pages > 0: grow by max(grow_pages, memory.size) for O(1) amortized.
+        // Grow memory if needed
         global_get(emitter.heap_ptr_global); i64_extend_i32_u;
         i64_const(65535); i64_add;
-        i64_const(16); i64_shr_u;           // ceil(heap_ptr / 65536) as i64
-        i32_wrap_i64;                        // safe: max 65536 pages
+        i64_const(16); i64_shr_u;
+        i32_wrap_i64;
         memory_size(0);
-        i32_sub;                             // grow_pages = needed - current
+        i32_sub;
         local_tee(2);
         i32_const(0);
         i32_gt_s;
         if_empty;
-          // Exponential: grow by max(grow_pages, memory.size)
-          // This at least doubles total memory, giving amortized O(1).
-          memory_size(0);                    // current_pages
-          local_get(2);                      // grow_pages
-          memory_size(0);                    // current_pages (for select)
-          local_get(2);                      // grow_pages     (for select)
-          i32_gt_u;                          // current > grow_pages?
-          select;                            // yes: current, no: grow_pages
+          memory_size(0);
+          local_get(2);
+          memory_size(0);
+          local_get(2);
+          i32_gt_u;
+          select;
           memory_grow(0);
           i32_const(-1); i32_eq;
           if_empty; unreachable; end;
         end;
-        // Write refcount = 1 at ptr
+        // Write header: size + RC
+        local_get(1);
+        local_get(0);
+        i32_store(0);                // *(ptr) = size
         local_get(1);
         i32_const(1);
-        i32_store(2, 0);
-        // Return ptr + 4 (data starts after refcount header)
+        i32_store(4);                // *(ptr+4) = RC = 1
+        // Return ptr + 8 (data starts after size+RC header)
         local_get(1);
-        i32_const(4); i32_add;
+        i32_const(header_size); i32_add;
         end;
     });
 
@@ -416,6 +464,41 @@ fn compile_rc_inc(emitter: &mut WasmEmitter) {
         i32_store(2, 0);
         // return ptr
         local_get(0);
+        end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+// __rc_dec(ptr: i32) → ()
+// Decrement RC. If RC drops to 0, push block to free list for reuse.
+// Free list entry: block_base = ptr - ALLOC_HEADER_SIZE. Reuse data area
+// for [next_ptr:i32] linked list.
+fn compile_rc_dec(emitter: &mut WasmEmitter) {
+    use super::list_layout::{ALLOC_HEADER_SIZE, RC_OFFSET};
+    let type_idx = emitter.func_type_indices[&emitter.rt.rc_dec];
+    let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
+    wasm!(f, {
+        // rc = *(ptr - RC_OFFSET)   [header: size@-8, RC@-4, data@0]
+        local_get(0); i32_const(RC_OFFSET); i32_sub;
+        i32_load(0);
+        local_tee(1);
+        i32_const(1);
+        i32_gt_u;
+        if_empty;
+          // rc > 1: decrement
+          local_get(0); i32_const(RC_OFFSET); i32_sub;
+          local_get(1); i32_const(1); i32_sub;
+          i32_store(0);
+        else_;
+          // rc <= 1: push to free list
+          // Store next pointer in data area: *(ptr) = free_list_head
+          local_get(0);
+          global_get(emitter.free_list_global);
+          i32_store(0);
+          // free_list_head = block_base = ptr - ALLOC_HEADER_SIZE
+          local_get(0); i32_const(ALLOC_HEADER_SIZE); i32_sub;
+          global_set(emitter.free_list_global);
+        end;
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
@@ -477,9 +560,13 @@ fn compile_heap_save(emitter: &mut WasmEmitter) {
 fn compile_heap_restore(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.heap_restore];
     let mut f = Function::new([]);
-    f.instruction(&wasm_encoder::Instruction::LocalGet(0));
-    f.instruction(&wasm_encoder::Instruction::GlobalSet(emitter.heap_ptr_global));
-    f.instruction(&wasm_encoder::Instruction::End);
+    // Reset heap pointer (no zero-fill — alloc writes refcount header,
+    // and Swiss Table init zeroes tags via bump allocator's fresh pages).
+    wasm!(f, {
+        local_get(0);
+        global_set(emitter.heap_ptr_global);
+        end;
+    });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 

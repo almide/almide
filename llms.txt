@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.23.4 (prev v0.23.3). WASM: 332B hello world (dead code + dead data elimination), SIMD v128 list.map, exponential growth allocator, inline string append, ModInt peephole.
+- Current stable: v0.23.5 (prev v0.23.4). WASM: 433B hello world (dead code + dead data elimination), Perceus RC free, cross-crate codegen fixes (struct dedup, default fields, SSE).
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.

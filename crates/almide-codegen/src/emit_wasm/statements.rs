@@ -123,14 +123,16 @@ impl FuncCompiler<'_> {
                                         let byte = lit.as_bytes()[0];
                                         let s = self.scratch.alloc_i32();
                                         let len_l = self.scratch.alloc_i32();
+                                        let cap_l = self.scratch.alloc_i32();
                                         wasm!(self.func, {
                                             local_get(local_idx); local_tee(s);
                                             i32_load(0); local_tee(len_l);
                                             local_get(s);
                                             i32_load(super::list_layout::STRING_CAP_OFFSET as u32);
+                                            local_tee(cap_l);
                                             i32_lt_u;
-                                            if_i32;
-                                              // Fast: in-place byte store
+                                            if_empty;
+                                              // Fast: in-place byte store (ptr unchanged, no local_set needed)
                                               local_get(s);
                                               i32_const(super::list_layout::STRING_DATA_OFFSET);
                                               i32_add;
@@ -141,16 +143,41 @@ impl FuncCompiler<'_> {
                                               local_get(s);
                                               local_get(len_l); i32_const(1); i32_add;
                                               i32_store(0);
-                                              local_get(s);
                                             else_;
+                                              // Inline grow: new_cap = max(cap*2, 16)
+                                              local_get(cap_l); i32_const(1); i32_shl; local_tee(cap_l);
+                                              i32_const(16); i32_lt_u;
+                                              if_empty; i32_const(16); local_set(cap_l); end;
+                                              // Alloc new buffer
+                                              local_get(cap_l);
+                                              i32_const(super::list_layout::STRING_DATA_OFFSET);
+                                              i32_add;
+                                              call(self.emitter.rt.alloc); local_tee(s);
+                                              // Copy old data
+                                              i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+                                              local_get(local_idx);
+                                              i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+                                              local_get(len_l);
+                                              memory_copy;
+                                              // Write new byte
                                               local_get(s);
-                                        });
-                                        self.emit_expr(right);
-                                        wasm!(self.func, {
-                                              call(self.emitter.rt.string_append);
+                                              i32_const(super::list_layout::STRING_DATA_OFFSET);
+                                              i32_add;
+                                              local_get(len_l); i32_add;
+                                              i32_const(byte as i32);
+                                              i32_store8(0);
+                                              // Set len and cap
+                                              local_get(s);
+                                              local_get(len_l); i32_const(1); i32_add;
+                                              i32_store(0);
+                                              local_get(s);
+                                              local_get(cap_l);
+                                              i32_store(super::list_layout::STRING_CAP_OFFSET as u32);
+                                              // Update local (ptr changed)
+                                              local_get(s); local_set(local_idx);
                                             end;
-                                            local_set(local_idx);
                                         });
+                                        self.scratch.free_i32(cap_l);
                                         self.scratch.free_i32(len_l);
                                         self.scratch.free_i32(s);
                                         return;
@@ -612,6 +639,49 @@ impl FuncCompiler<'_> {
                 }
             }
         }
+    }
+
+    /// Check if an expression writes to outer-scope mutable variables with heap types.
+    /// Used by auto-scope to determine if heap_restore is safe.
+    pub(super) fn expr_writes_outer_heap(&self, expr: &IrExpr) -> bool {
+        struct HeapWriteScanner<'a> {
+            var_table: &'a almide_ir::VarTable,
+            found: bool,
+        }
+        impl IrVisitor for HeapWriteScanner<'_> {
+            fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+                if self.found { return; }
+                match &stmt.kind {
+                    IrStmtKind::Assign { var, .. }
+                    | IrStmtKind::MapInsert { target: var, .. }
+                    | IrStmtKind::IndexAssign { target: var, .. }
+                    | IrStmtKind::FieldAssign { target: var, .. } => {
+                        let ty = &self.var_table.get(*var).ty;
+                        if Self::is_heap_type(ty) {
+                            self.found = true;
+                        }
+                    }
+                    _ => {}
+                }
+                walk_stmt(self, stmt);
+            }
+            fn visit_expr(&mut self, expr: &IrExpr) {
+                if self.found { return; }
+                walk_expr(self, expr);
+            }
+        }
+        impl HeapWriteScanner<'_> {
+            fn is_heap_type(ty: &Ty) -> bool {
+                matches!(ty, Ty::String
+                    | Ty::Applied(_, _)
+                    | Ty::Record { .. }
+                    | Ty::Unknown
+                )
+            }
+        }
+        let mut scanner = HeapWriteScanner { var_table: self.var_table, found: false };
+        scanner.visit_expr(expr);
+        scanner.found
     }
 }
 

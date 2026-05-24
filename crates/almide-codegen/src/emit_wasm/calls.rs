@@ -651,6 +651,16 @@ impl FuncCompiler<'_> {
                     _ if module == "json" => {
                         self.emit_json_call(func, args);
                     }
+                    _ if module == "mem" => {
+                        match func.as_str() {
+                            "save" => { wasm!(self.func, { call(self.emitter.rt.heap_save); i64_extend_i32_u; }); }
+                            "restore" => {
+                                self.emit_expr(&args[0]);
+                                wasm!(self.func, { i32_wrap_i64; call(self.emitter.rt.heap_restore); });
+                            }
+                            _ => {}
+                        }
+                    }
                     _ if module == "env" => {
                         self.emit_env_call(func, args);
                     }

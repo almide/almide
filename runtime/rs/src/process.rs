@@ -1,5 +1,12 @@
 // process extern — Rust native implementations
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProcessStatus {
+    pub code: i64,
+    pub stdout: String,
+    pub stderr: String,
+}
+
 pub fn almide_rt_process_exec(cmd: &str, args: &Vec<String>) -> Result<String, String> {
     match std::process::Command::new(cmd).args(args).output() {
         Ok(out) => {
