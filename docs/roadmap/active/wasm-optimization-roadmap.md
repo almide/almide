@@ -1,222 +1,155 @@
 # WASM Optimization Roadmap
 
-> Almide's WASM emitter matches Rust+LLVM on 11/11 benchmarks (v0.23.3).
-> This roadmap targets **surpassing** LLVM through double-specialization:
+> Almide's WASM emitter beats Rust+LLVM on 7/11 benchmarks (v0.23.3+develop).
+> This roadmap targets winning **all 11** through double-specialization:
 > language semantics × WASM target knowledge.
 
-## Status Baseline (v0.23.3)
+## Precision Benchmark (1M scale, 2026-05-24)
 
-| Benchmark       | Almide | Rust  | Ratio |
-|-----------------|--------|-------|-------|
-| fib35           | 35ms   | 34ms  | ≈1.0x |
-| sort_100k       | 0.5ms  | 0.4ms | 1.25x |
-| list_map_100k   | 0.3ms  | 0.3ms | 1.0x  |
-| list_filter_100k| 0.2ms  | 0.1ms | ≈1.5x |
-| list_fold_100k  | 0.0ms  | 0.0ms | ~1x   |
-| map_insert_10k  | 0.5ms  | 0.4ms | 1.25x |
-| map_get_10k     | 0.6ms  | 0.5ms | 1.2x  |
-| int_parse_100k  | 4.9ms  | 5.9ms | 0.83x WIN |
-| int_tostring    | 3.0ms  | 4.9ms | 0.63x WIN |
+| Benchmark          | Almide  | Rust   | Ratio      | Status     |
+|--------------------|---------|--------|------------|------------|
+| fib38              | 152.0ms |157.7ms | **0.96x**  | ✓ WIN      |
+| sort_1M            |   6.2ms |  7.0ms | **0.89x**  | ✓ WIN      |
+| list_map_1M        |   3.7ms |  1.6ms | 2.3x       | ✗ LOSING   |
+| list_filter_1M     |   2.8ms |  3.8ms | **0.74x**  | ✓ WIN      |
+| list_fold_1M       |   0.8ms |  0.9ms | **0.89x**  | ✓ WIN      |
+| str_concat_100k    |   0.5ms |  0.3ms | 1.7x       | ✗ LOSING   |
+| map_insert_100k    |   9.1ms |  5.7ms | 1.6x       | ✗ LOSING   |
+| map_get_100k       |   1.8ms |  1.7ms | 1.06x      | ≈ (fused)  |
+| int_parse_1M       |  53.5ms | 64.7ms | **0.83x**  | ✓ WIN      |
+| int_tostring_1M    |  34.0ms | 52.8ms | **0.64x**  | ✓ WIN      |
+| math_sqrt_1M       |   0.5ms |  1.4ms | **0.36x**  | ✓ WIN      |
 
-Optimizations already applied: hash table map, binary recursion transform,
-lambda inlining, branchless filter, run-detection sort, adaptive scratch locals,
-TCO in WASM pipeline.
+**Score: 7 wins, 1 tie, 3 losses**
+
+---
+
+## Remaining Losses — Root Cause Analysis
+
+### list_map (2.3x slower)
+
+**Root cause**: LLVM vectorizes `iter().map(|x| x*2).collect()` with SIMD.
+Our loop does 1 element per iteration (i64_load → i64_mul → i64_store).
+Rust/LLVM processes 2-4 elements per iteration via auto-vectorization.
+
+**Evidence**: `map_identity` (no-op body) takes same time as `map_x2`,
+proving the bottleneck is memory throughput, not lambda body cost.
+Pointer-based iteration already implemented (no multiply per element).
+
+**Fix**: WASM SIMD — emit `v128.load` + `i64x2.mul` + `v128.store` for
+Int/Float element types. Process 2 i64 elements per iteration. Scalar
+tail for remainder. wasmtime supports WASM SIMD.
+
+**Effort**: Large. New emit path for SIMD-eligible list ops.
+
+### str_concat (1.7x slower)
+
+**Root cause**: `s = s + "x"` → peephole rewrites to `__string_append(s, "x")`
+runtime function call. 100k calls × function call overhead.
+Rust's `String::push('x')` is inlined by LLVM to direct buffer write.
+
+**Fix**: Inline string append for 1-byte literals. When the RHS of
+`s = s + lit` is a 1-char string literal, emit inline WASM:
+```
+if len < cap:
+  mem[ptr + STRING_DATA_OFFSET + len] = byte
+  mem[ptr] = len + 1  // update len
+else:
+  call __string_append  // fallback for grow
+```
+Eliminates function call overhead for the common case (cap sufficient).
+
+**Effort**: Medium. Peephole pattern in statements.rs WASM emit.
+
+### map_insert (1.6x slower)
+
+**Root cause**: 13 resizes from cap=16 to cap=131072. Each resize
+rehashes all existing entries (hash + probe + copy per entry).
+Rust HashMap has the same resize count but LLVM optimizes the
+rehash loop (vectorized memcpy, inlined hash).
+
+**Potential fixes** (pick one or combine):
+1. **Initial capacity hint**: `map.with_capacity(n)` stdlib fn.
+   Eliminates most resizes for known-size inserts.
+2. **Faster resize**: `memory.copy` bulk transfer of tag+entry arrays
+   (already partially implemented in Swiss Table layout).
+3. **Growth factor 4x**: Grow by 4x instead of 2x. Fewer resizes
+   (7 instead of 13) at cost of memory waste.
+4. **Inline hash for Int keys**: Currently `emit_hash_key` generates
+   ~8 WASM instructions. Could reduce to 4 with simpler hash
+   (e.g., multiply-shift instead of splitmix).
+
+**Effort**: Small (capacity hint) to Medium (inline hash).
 
 ---
 
-## Tier 1 — Immediate (days)
+## Completed Optimizations (this session)
 
-### 1.1 Stream Fusion (Loop Fusion)
+| # | Optimization | Impact | Files |
+|---|---|---|---|
+| 1 | Hash table map (open addressing) | map 1000x faster | calls_map.rs, list_layout.rs |
+| 2 | Sort run detection (asc/desc) | sort 5x faster | calls_list_helpers.rs |
+| 3 | Lambda inlining (capture-free) | map/filter/fold ~2x | calls_list_closure2.rs, pass_closure_conversion.rs |
+| 4 | Binary recursion transform | fib 2x faster | pass_tco.rs, target.rs |
+| 5 | Stream fusion (map→filter→fold) | pipeline 4x faster | calls_list_closure2.rs |
+| 6 | Branchless filter | filter 1.5x faster | calls_list_closure2.rs |
+| 7 | Pointer-based iteration | loop overhead reduced | calls_list_closure2.rs, calls_list_helpers.rs |
+| 8 | TCO in WASM pipeline | tail recursion → loop | target.rs |
+| 9 | Adaptive scratch locals | fib 88→8 locals | functions.rs |
+| 10 | String layout migration (data@8) | fixed 10+ files | runtime.rs, rt_*.rs, calls_*.rs |
+| 11 | Swiss Table layout (1-byte tags) | cache-friendlier probing | calls_map.rs, expressions.rs |
+| 12 | map.get??default → get_or fusion | eliminate Option heap alloc | pass_peephole.rs |
+| 13 | 1-pass reverse copy for sort | sort matched Rust | calls_list_helpers.rs |
+| 14 | Pointer-based list.map | eliminate idx multiply | calls_list_closure2.rs |
 
-**Impact**: 2-5x on chained list operations
-**Effort**: Medium (IR nanopass)
+## Tier 1 — Next Steps (days)
 
-```almide
-// Before: 2 intermediate lists, 3 loops
-data |> list.map((x) => x * 2) |> list.filter((x) => x > 10) |> list.fold(0, (a, x) => a + x)
+### 1.1 Inline String Append for Literals
 
-// After: 1 loop, 0 intermediate allocations
-var acc = 0
-for x in data:
-  let mapped = x * 2
-  if mapped > 10: acc += mapped
-```
+Detect `s = s + "x"` where RHS is 1-char literal. Emit inline
+capacity check + byte store instead of `__string_append` call.
 
-**Implementation**:
-- New IR node: `FusedPipeline { source, stages: Vec<PipelineStage> }`
-- `PipelineStage`: `Map(body)`, `Filter(body)`, `Fold(init, body)`, `Take(n)`, `TakeWhile(pred)`
-- Nanopass `StreamFusionPass` detects `MethodCall(list.X, MethodCall(list.Y, ...))` chains
-- WASM emitter: single loop with inlined stage bodies
-- Lambda inline infrastructure already exists — reuse `emit_expr(body)` with bound params
+### 1.2 Map Initial Capacity Hint
 
-**Prerequisite**: Lambda inlining (done)
+Add `map.with_capacity(n)` that pre-allocates for n entries.
+Eliminates resize cascade for bulk insert patterns.
 
-### 1.2 Escape Analysis + Stack Allocation
+### 1.3 Escape Analysis for Option/Result
 
-**Impact**: 10x+ on int.parse, option/result-heavy code
-**Effort**: Medium (IR analysis + WASM emit change)
-
-```almide
-let x = int.parse("123") ?? 0
-// Currently: heap alloc Result (12 bytes), unwrap, discard
-// After: WASM multi-value return (i32 tag, i64 value), zero alloc
-```
-
-**Implementation**:
-- IR analysis pass: track which Result/Option values escape the current scope
-- Non-escaping Results → WASM multi-value return `(i32, i64)` instead of heap ptr
-- Non-escaping Options → WASM `(i32, T)` where i32=0 means none
-- Requires: per-function return type specialization for runtime fns (int_parse etc.)
-- Fallback: heap alloc for escaping values (unchanged)
-
-**Key insight**: Most Result/Option usage is `let x = f() ?? default` or `match f() { ... }` — the wrapper never escapes.
-
-### 1.3 Constant Folding Enhancement
-
-**Impact**: Eliminates dead computation, improves JIT
-**Effort**: Small (extend existing ConstFoldPass)
-
-```almide
-let x = 3 * 4 + 1       // → LitInt(13)
-string.len("hello")     // → LitInt(5)
-list.len([1, 2, 3])     // → LitInt(3)
-int.to_string(42)       // → LitStr("42") (pure fn, known input)
-```
-
-**Implementation**:
-- Extend `ConstFoldPass` to fold stdlib calls with literal args
-- Whitelist of pure stdlib fns: `string.len`, `list.len`, `int.to_string`, `string.to_upper`, etc.
-- Evaluate at compile time when all args are literals
-
-### 1.4 Loop Unrolling for Small Known-Size Lists
-
-**Impact**: 2-3x on small list operations (≤8 elements)
-**Effort**: Small (WASM emitter pattern)
-
-```almide
-[1, 2, 3, 4] |> list.map((x) => x * 2)
-// Currently: alloc + loop with idx check per iteration
-// After: alloc + 4 inline stores (no loop, no branch)
-```
-
-**Implementation**:
-- In `emit_list_map`, detect when source is `IrExprKind::List { elements }` with known len
-- For len ≤ 8: unroll loop, emit inline body for each element
-- Eliminates: loop counter, bounds check, branch per element
-
----
+Detect non-escaping Option/Result and return as WASM multi-value
+`(i32, i64)` instead of heap-allocating a wrapper.
 
 ## Tier 2 — Medium-term (weeks)
 
-### 2.1 WASM SIMD for Numeric Lists
+### 2.1 WASM SIMD for Numeric List Ops
 
-**Impact**: 2-4x on list.map/filter/fold with Int/Float
-**Effort**: Large (new WASM emit path)
+Emit `v128.load` + `i64x2.mul` + `v128.store` for Int/Float
+list.map/filter. 2x throughput per iteration.
 
-```wasm
-;; Current: 1 element per iteration
-i64.load  ; load element
-i64.const 2
-i64.mul
-i64.store ; store result
+### 2.2 Arena Allocator
 
-;; SIMD: 2 i64 elements per iteration
-v128.load           ; load 2 elements
-i64x2.mul (const 2) ; multiply both
-v128.store          ; store both
-```
+Region-based memory management for non-escaping allocations.
+Pairs with escape analysis.
 
-**Implementation**:
-- Detect numeric list ops (Int/Float only)
-- Emit SIMD loop for bulk of elements + scalar tail for remainder
-- Requires: WASM SIMD proposal support in wasmtime (already available)
-- Guard: `elem_size == 8` (i64/f64) for v128 = 2 lanes
+### 2.3 Partial Evaluation
 
-### 2.2 Arena / Region-Based Allocator
+Specialize higher-order functions at known call sites.
 
-**Impact**: Enables long-running WASM programs
-**Effort**: Large (runtime redesign)
-
-Current bump allocator never frees memory. For benchmarks this is fine, but production
-WASM programs will OOM. Options:
-
-1. **Arena per function call**: alloc arena on entry, free on return. Works for
-   non-escaping allocations (pairs well with escape analysis from 1.2).
-2. **Generational GC**: Young gen (bump) + old gen (mark-sweep). Complex but general.
-3. **Reference counting**: Already have COW refcount header. Enable actual RC with
-   free-on-zero. Simplest path from current architecture.
-
-**Recommended**: Start with arena per function call (leverages escape analysis), add RC later.
-
-### 2.3 Partial Evaluation / Function Specialization
-
-**Impact**: Eliminates polymorphic dispatch overhead
-**Effort**: Large (IR transform)
-
-```almide
-fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
-apply((n) => n + 1, 5)
-// Specialize: apply_add1(5) → 5 + 1 = 6 (no call_indirect)
-```
-
-**Implementation**:
-- At call sites where function args are known lambdas, clone + specialize
-- Inline the lambda body into the specialized function
-- Combined with stream fusion for maximum effect
-
-### 2.4 Improved Sort (Introsort / pdqsort)
-
-**Impact**: 2-3x on random data sort
-**Effort**: Medium (WASM runtime)
-
-Current: merge sort + run detection.
-Target: quicksort with median-of-3 pivot + insertion sort for small partitions.
-Falls back to merge sort on pathological input (introsort pattern).
-
----
-
-## Tier 3 — Long-term (architecture)
+## Tier 3 — Long-term
 
 ### 3.1 WASM GC Proposal
-
-When WASM GC (struct/array/ref types) is widely supported:
-- Replace linear-memory heap with WASM-native managed objects
-- Eliminate manual alloc/free, let the engine's GC handle it
-- Struct field access becomes `struct.get` (single instruction) instead of `i32.load(offset)`
-- Array operations become `array.get`/`array.set`
-- Massive simplification of the emitter + potential perf gains from engine-level optimization
-
 ### 3.2 WASM Component Model
-
-- Inter-module calls without serialization
-- Expose Almide libraries as WASM components consumable by any language
-- Import components from other languages (Rust, Go, Python) natively
-
-### 3.3 Profile-Guided Optimization (PGO)
-
-- Collect runtime profiles from wasmtime/browser
-- Feed back into compiler: inline hot functions, optimize hot loops
-- Specialize polymorphic call sites based on observed types
-- Requires: PGO infrastructure (profile format, feedback pipeline)
-
-### 3.4 Ahead-of-Time Compilation Cache
-
-- Cache compiled WASM modules for instant startup
-- Compile-time specialization for known deployment targets (wasmtime vs V8 vs SpiderMonkey)
-- Pre-compute JIT hints based on target engine
+### 3.3 Profile-Guided Optimization
 
 ---
 
 ## Principles
 
-1. **Language knowledge beats generic optimization.** Every Almide-specific transform
-   (binary rec, lambda inline, branchless filter) outperforms LLVM's generic equivalent.
-
-2. **WASM knowledge beats portability.** Targeting one output format lets us exploit
-   its specific characteristics (bump alloc zero-fill, memory.copy, select instruction).
-
-3. **Measure before optimizing.** Every change must show improvement on the benchmark
-   suite. No speculative optimization without data.
-
-4. **Correctness first.** All 239 tests must pass after every change. CI must be green
-   before merge.
+1. **Language knowledge > generic optimization.** Every Almide-specific
+   transform outperforms LLVM's generic equivalent.
+2. **Measure the real bottleneck.** map.get's problem was Option heap
+   alloc, not hash table layout. Always profile before optimizing.
+3. **WASM ≠ native.** Swiss Table tag separation hurt perf on WASM
+   (extra address computation) despite helping on native CPUs.
+4. **1M scale reveals truth.** 100k benchmarks are noise-dominated.
+   Always verify at 1M+ scale.
