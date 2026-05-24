@@ -1038,25 +1038,27 @@ impl FuncCompiler<'_> {
                 if simd_fold.is_some() {
                     let simd_end = self.scratch.alloc_i32();
                     let acc_v128 = self.scratch.alloc_v128();
+                    // 4× v128 unrolled: 8 i64 elements per iteration
+                    const FOLD_UNROLL: i32 = 4;      // v128 ops per iteration
+                    const FOLD_ELEMS: i32 = FOLD_UNROLL * 2;  // 8 i64 elements
+                    const FOLD_BYTES: i32 = FOLD_ELEMS * 8;   // 64 bytes
+                    const FOLD_SHIFT: i32 = 3;       // log2(8)
+
                     wasm!(self.func, {
-                        // simd_end = ptr + (len / 8) * 64
                         local_get(ptr);
-                        local_get(list_ptr); i32_load(0); i32_const(3); i32_shr_u;
-                        i32_const(64); i32_mul;
+                        local_get(list_ptr); i32_load(0); i32_const(FOLD_SHIFT); i32_shr_u;
+                        i32_const(FOLD_BYTES); i32_mul;
                         i32_add; local_set(simd_end);
-                        // acc_v128 = [0, 0]
                         i64_const(0); i64x2_splat; local_set(acc_v128);
-                        // SIMD loop
                         block_empty; loop_empty;
                           local_get(ptr); local_get(simd_end); i32_ge_u; br_if(1);
-                          // 4× unrolled: accumulate 8 i64 elements
                           local_get(acc_v128);
                           local_get(ptr); v128_load(0); i64x2_add;
                           local_get(ptr); v128_load(16); i64x2_add;
                           local_get(ptr); v128_load(32); i64x2_add;
                           local_get(ptr); v128_load(48); i64x2_add;
                           local_set(acc_v128);
-                          local_get(ptr); i32_const(64); i32_add; local_set(ptr);
+                          local_get(ptr); i32_const(FOLD_BYTES); i32_add; local_set(ptr);
                           br(0);
                         end; end;
                         // Horizontal add: lane0 + lane1 + scalar acc
@@ -1299,13 +1301,6 @@ impl FuncCompiler<'_> {
                 && simd_const_val > 0
                 && (simd_const_val as u64).is_power_of_two();
             let simd_vec = if !use_shift { Some(self.scratch.alloc_v128()) } else { None };
-            // simd_end = src_ptr + (len / 8) * 64  (round down to multiple of 8)
-            wasm!(self.func, {
-                local_get(src_ptr);
-                local_get(len_local); i32_const(3); i32_shr_u; // len / 8
-                i32_const(64); i32_mul;
-                i32_add; local_set(simd_end);
-            });
             if let Some(sv) = simd_vec {
                 wasm!(self.func, {
                     i64_const(simd_const_val);
@@ -1314,20 +1309,15 @@ impl FuncCompiler<'_> {
                 });
             }
 
-            // Emit a single SIMD operation: load from src_ptr+offset, apply op, store to dst_ptr+offset
+            // Emit SIMD op: dst[offset] = op(src[offset])
             let emit_simd_op = |fc: &mut FuncCompiler, offset: u64, sv: Option<u32>| {
-                wasm!(fc.func, {
-                    local_get(dst_ptr);
-                    local_get(src_ptr);
-                    v128_load(offset);
-                });
+                wasm!(fc.func, { local_get(dst_ptr); local_get(src_ptr); v128_load(offset); });
                 if use_shift {
                     let shift = (simd_const_val as u64).trailing_zeros();
                     wasm!(fc.func, { i32_const(shift as i32); });
                     fc.func.instruction(&wasm_encoder::Instruction::I64x2Shl);
                 } else {
-                    let sv = sv.unwrap();
-                    wasm!(fc.func, { local_get(sv); });
+                    wasm!(fc.func, { local_get(sv.unwrap()); });
                     match simd_kind {
                         SimdMapOp::Mul => { wasm!(fc.func, { i64x2_mul; }); }
                         SimdMapOp::Add => { wasm!(fc.func, { i64x2_add; }); }
@@ -1337,18 +1327,27 @@ impl FuncCompiler<'_> {
                 wasm!(fc.func, { v128_store(offset); });
             };
 
+            // 8× v128 unrolled: 16 i64 elements per iteration
+            const SIMD_UNROLL: u64 = 8;          // v128 ops per iteration
+            const ELEMS_PER_V128: u64 = 2;       // i64 lanes per v128
+            const ELEMS_PER_ITER: u64 = SIMD_UNROLL * ELEMS_PER_V128; // 16
+            const BYTES_PER_ITER: i32 = (ELEMS_PER_ITER * 8) as i32;  // 128
+            const ELEMS_SHIFT: i32 = ELEMS_PER_ITER.trailing_zeros() as i32; // 4 (log2(16))
+
             wasm!(self.func, {
+                local_get(src_ptr);
+                local_get(len_local); i32_const(ELEMS_SHIFT); i32_shr_u;
+                i32_const(BYTES_PER_ITER); i32_mul;
+                i32_add; local_set(simd_end);
                 block_empty; loop_empty;
                   local_get(src_ptr); local_get(simd_end); i32_ge_u; br_if(1);
             });
-            // 4× unrolled: process 8 elements (64 bytes) per iteration
-            emit_simd_op(self, 0, simd_vec);
-            emit_simd_op(self, 16, simd_vec);
-            emit_simd_op(self, 32, simd_vec);
-            emit_simd_op(self, 48, simd_vec);
+            for i in 0..SIMD_UNROLL {
+                emit_simd_op(self, i * 16, simd_vec);
+            }
             wasm!(self.func, {
-                  local_get(src_ptr); i32_const(64); i32_add; local_set(src_ptr);
-                  local_get(dst_ptr); i32_const(64); i32_add; local_set(dst_ptr);
+                  local_get(src_ptr); i32_const(BYTES_PER_ITER); i32_add; local_set(src_ptr);
+                  local_get(dst_ptr); i32_const(BYTES_PER_ITER); i32_add; local_set(dst_ptr);
                   br(0);
                 end; end;
             });
