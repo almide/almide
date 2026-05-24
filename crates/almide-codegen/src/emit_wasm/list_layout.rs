@@ -47,6 +47,10 @@ pub const MAP_SLOT_TAG_SIZE: i32 = 4;
 /// Initial hash table capacity (must be power of 2).
 pub const MAP_INITIAL_CAP: i32 = 16;
 
+/// Tag value for empty slot (0x00, matches bump allocator zero-fill).
+/// Full slots store h2 (0x01..0x7F, never 0x00).
+pub const MAP_TAG_EMPTY: i32 = 0;
+
 // ── Set: same layout as List (to_list returns identity) ──
 
 /// Byte offset from set pointer to data. Same as list.

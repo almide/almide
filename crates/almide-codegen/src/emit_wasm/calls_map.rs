@@ -52,37 +52,50 @@ impl FuncCompiler<'_> {
                     else_;
                 });
 
-                // Hash key
+                // Hash key → h2 + bucket index
+                let h2 = self.scratch.alloc_i32();
+                let tag_local = self.scratch.alloc_i32();
                 self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
                 self.emit_hash_key(&key_ty);
+                let hash_tmp = self.scratch.alloc_i32();
                 wasm!(self.func, {
+                    local_tee(hash_tmp);
                     local_get(cap); i32_const(1); i32_sub; i32_and;
                     local_set(idx);
-                    // Probe loop
+                    local_get(hash_tmp);
+                });
+                self.emit_h2_from_hash();
+                wasm!(self.func, { local_set(h2); });
+                self.scratch.free_i32(hash_tmp);
+                // Probe loop with h2 filter
+                wasm!(self.func, {
                     block_empty; loop_empty;
                       local_get(map_ptr); i32_const(list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(idx); i32_const(slot_size); i32_mul; i32_add;
                       local_set(slot_ptr);
-                      local_get(slot_ptr); i32_load(0); i32_eqz; br_if(1); // empty → not found
-                      // Compare key
-                      local_get(slot_ptr); i32_const(4); i32_add;
+                      local_get(slot_ptr); i32_load(0); local_set(tag_local);
+                      local_get(tag_local); i32_eqz; br_if(1); // empty → not found
+                      // h2 filter
+                      local_get(tag_local); local_get(h2); i32_eq;
+                      if_empty;
+                        local_get(slot_ptr); i32_const(4); i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
                 self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
                 self.emit_key_eq(&key_ty);
                 wasm!(self.func, {
-                      if_empty;
-                        // Found: copy value
-                        i32_const(vs as i32); call(self.emitter.rt.alloc); local_set(val_copy);
-                        local_get(val_copy);
-                        local_get(slot_ptr); i32_const(4 + ks as i32); i32_add;
+                        if_empty;
+                          // Found
+                          i32_const(vs as i32); call(self.emitter.rt.alloc); local_set(val_copy);
+                          local_get(val_copy);
+                          local_get(slot_ptr); i32_const(4 + ks as i32); i32_add;
                 });
                 self.emit_elem_copy_sized(vs);
                 wasm!(self.func, {
-                        local_get(val_copy); local_set(result);
-                        br(2); // exit probe loop
-                      end;
-                      // Advance
+                          local_get(val_copy); local_set(result);
+                          br(3); // exit: if→if→loop→block
+                        end;
+                      end; // end h2 check
                       local_get(idx); i32_const(1); i32_add;
                       local_get(cap); i32_const(1); i32_sub; i32_and;
                       local_set(idx);
@@ -92,6 +105,8 @@ impl FuncCompiler<'_> {
                     local_get(result);
                 });
 
+                self.scratch.free_i32(tag_local);
+                self.scratch.free_i32(h2);
                 self.scratch.free_i32(val_copy);
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(slot_ptr);
@@ -372,25 +387,40 @@ impl FuncCompiler<'_> {
                     end;
                 });
 
-                // Hash key, probe
+                // Hash key → h2 + bucket index
+                let h2 = self.scratch.alloc_i32();
                 self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
                 self.emit_hash_key(&key_ty);
+                // Stack: hash. Dup for h2 and idx.
+                let hash_tmp = self.scratch.alloc_i32();
                 wasm!(self.func, {
+                    local_tee(hash_tmp);
                     local_get(cap); i32_const(1); i32_sub; i32_and;
                     local_set(idx);
+                    local_get(hash_tmp);
+                });
+                self.emit_h2_from_hash();
+                wasm!(self.func, { local_set(h2); });
+                self.scratch.free_i32(hash_tmp);
+                // Probe loop
+                wasm!(self.func, {
                     block_empty; loop_empty;
                       local_get(map_ptr); i32_const(list_layout::MAP_DATA_OFFSET); i32_add;
                       local_get(idx); i32_const(slot_size); i32_mul; i32_add;
                       local_set(slot_ptr);
                       local_get(slot_ptr); i32_load(0); local_set(tag);
-                      local_get(tag); i32_eqz; br_if(1);
-                      local_get(slot_ptr); i32_const(4); i32_add;
+                      local_get(tag); i32_eqz; br_if(1); // tag == 0 → empty
+                      // h2 filter: only compare key if tag == h2
+                      local_get(tag); local_get(h2); i32_eq;
+                      if_empty;
+                        local_get(slot_ptr); i32_const(4); i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
                 self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
                 self.emit_key_eq(&key_ty);
                 wasm!(self.func, {
-                      br_if(1); // found → update
+                        br_if(2); // found → exit probe loop (if=0, loop=1, block=2)
+                      end; // end h2 check
                       local_get(idx); i32_const(1); i32_add;
                       local_get(cap); i32_const(1); i32_sub; i32_and;
                       local_set(idx); br(0);
@@ -406,11 +436,11 @@ impl FuncCompiler<'_> {
                     ValType::F64 => { wasm!(self.func, { f64_store(0); }); }
                     _ => { wasm!(self.func, { i32_store(0); }); }
                 }
-                // If new entry (tag was 0)
+                // If new entry (tag was 0 = empty)
                 wasm!(self.func, {
                     local_get(tag); i32_eqz;
                     if_empty;
-                      local_get(slot_ptr); i32_const(1); i32_store(0); // tag = 1
+                      local_get(slot_ptr); local_get(h2); i32_store(0); // tag = h2
                       local_get(slot_ptr); i32_const(4); i32_add;
                 });
                 self.emit_search_key_load(&key_ty, sk_i32, sk_i64);
@@ -439,6 +469,7 @@ impl FuncCompiler<'_> {
                     }
                 }
 
+                self.scratch.free_i32(h2);
                 self.scratch.free_i32(tag);
                 self.scratch.free_i32(slot_ptr);
                 self.scratch.free_i32(idx);
@@ -991,6 +1022,21 @@ impl FuncCompiler<'_> {
         // have the caller compute total_size and allocate directly.
         // This method is a placeholder.
         panic!("emit_map_new_hash_for_len should not be called directly");
+    }
+
+    /// Emit: compute h2 tag (upper 7 bits of hash) from i32 hash on stack.
+    /// Leaves i32 h2 (0x01..0x7F) on stack. Never 0 (0 = empty tag).
+    fn emit_h2_from_hash(&mut self) {
+        let h2 = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            i32_const(25); i32_shr_u; i32_const(0x7F); i32_and;
+            local_tee(h2);
+            i32_eqz;
+            if_i32; i32_const(1); // 0 → 1 (avoid collision with empty tag)
+            else_; local_get(h2);
+            end;
+        });
+        self.scratch.free_i32(h2);
     }
 
     /// Emit: hash a key value on the WASM stack, producing i32 hash.
