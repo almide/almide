@@ -1010,6 +1010,11 @@ impl FuncCompiler<'_> {
                 }
 
                 // Pointer-based iteration for fold
+                // SIMD detection: Int accumulator with AddInt body
+                let simd_fold = if is_inline_lambda && matches!(&elem_ty, Ty::Int) && matches!(&acc_ty_resolved, Ty::Int) {
+                    Self::detect_simd_fold_op(&args[2])
+                } else { None };
+
                 let ptr = self.scratch.alloc_i32();
                 let end_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
@@ -1027,6 +1032,50 @@ impl FuncCompiler<'_> {
                     // end_ptr = ptr + len * elem_size
                     local_get(list_ptr); i32_load(0); i32_const(elem_size as i32); i32_mul;
                     i32_add; local_set(end_ptr);
+                });
+
+                // SIMD fast path for fold: i64x2 accumulator, 4× unrolled
+                if simd_fold.is_some() {
+                    let simd_end = self.scratch.alloc_i32();
+                    let acc_v128 = self.scratch.alloc_v128();
+                    wasm!(self.func, {
+                        // simd_end = ptr + (len / 8) * 64
+                        local_get(ptr);
+                        local_get(list_ptr); i32_load(0); i32_const(3); i32_shr_u;
+                        i32_const(64); i32_mul;
+                        i32_add; local_set(simd_end);
+                        // acc_v128 = [0, 0]
+                        i64_const(0); i64x2_splat; local_set(acc_v128);
+                        // SIMD loop
+                        block_empty; loop_empty;
+                          local_get(ptr); local_get(simd_end); i32_ge_u; br_if(1);
+                          // 4× unrolled: accumulate 8 i64 elements
+                          local_get(acc_v128);
+                          local_get(ptr); v128_load(0); i64x2_add;
+                          local_get(ptr); v128_load(16); i64x2_add;
+                          local_get(ptr); v128_load(32); i64x2_add;
+                          local_get(ptr); v128_load(48); i64x2_add;
+                          local_set(acc_v128);
+                          local_get(ptr); i32_const(64); i32_add; local_set(ptr);
+                          br(0);
+                        end; end;
+                        // Horizontal add: lane0 + lane1 + scalar acc
+                        local_get(acc);
+                    });
+                    self.func.instruction(&wasm_encoder::Instruction::LocalGet(acc_v128));
+                    self.func.instruction(&wasm_encoder::Instruction::I64x2ExtractLane(0));
+                    wasm!(self.func, { i64_add; });
+                    self.func.instruction(&wasm_encoder::Instruction::LocalGet(acc_v128));
+                    self.func.instruction(&wasm_encoder::Instruction::I64x2ExtractLane(1));
+                    wasm!(self.func, {
+                        i64_add;
+                        local_set(acc);
+                    });
+                    self.scratch.free_v128(acc_v128);
+                    self.scratch.free_i32(simd_end);
+                }
+
+                wasm!(self.func, {
                     block_empty; loop_empty;
                 });
                 let depth_guard = self.depth_push_n(2);
@@ -1367,6 +1416,24 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(dst_local);
         self.scratch.free_i32(closure_local);
         self.scratch.free_i32(src_local);
+    }
+
+    /// Detect if a fold lambda is SIMD-eligible: `(a, x) => a + x` with Int.
+    fn detect_simd_fold_op(fn_arg: &IrExpr) -> Option<()> {
+        if let IrExprKind::Lambda { params, body, .. } = &fn_arg.kind {
+            let acc_id = params.first().map(|(v, _)| v.0)?;
+            let elem_id = params.get(1).map(|(v, _)| v.0)?;
+            if let IrExprKind::BinOp { op: BinOp::AddInt, left, right } = &body.kind {
+                let (l, r) = match (&left.kind, &right.kind) {
+                    (IrExprKind::Var { id: a }, IrExprKind::Var { id: b }) => (a.0, b.0),
+                    _ => return None,
+                };
+                if (l == acc_id && r == elem_id) || (l == elem_id && r == acc_id) {
+                    return Some(());
+                }
+            }
+        }
+        None
     }
 
     /// Detect if a lambda body is a simple SIMD-eligible operation on Int elements.
