@@ -65,7 +65,72 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
         IrExprKind::Lambda { body, .. } => {
             if rewrite_expr(body) { changed = true; }
         }
+        IrExprKind::BinOp { left, right, .. } => {
+            if rewrite_expr(left) { changed = true; }
+            if rewrite_expr(right) { changed = true; }
+        }
+        IrExprKind::UnOp { operand, .. } => {
+            if rewrite_expr(operand) { changed = true; }
+        }
+        IrExprKind::UnwrapOr { expr: inner, fallback } => {
+            if rewrite_expr(inner) { changed = true; }
+            if rewrite_expr(fallback) { changed = true; }
+        }
+        IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
+            for a in args { if rewrite_expr(a) { changed = true; } }
+        }
         _ => {}
+    }
+
+    // ── Fusion: unwrap_or(map.get(m, k), default) → map.get_or(m, k, default) ──
+    // Eliminates heap allocation for Option return in the common ?? pattern.
+    if let IrExprKind::UnwrapOr { expr: inner, fallback } = &expr.kind {
+        if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &inner.kind {
+            if module.as_str() == "map" && func.as_str() == "get" && args.len() == 2 {
+                let mut new_args = args.clone();
+                new_args.push(*fallback.clone());
+                let ret_ty = expr.ty.clone();
+                *expr = IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Module {
+                            module: almide_base::intern::sym("map"),
+                            func: almide_base::intern::sym("get_or"),
+                            def_id: None,
+                        },
+                        args: new_args,
+                        type_args: vec![],
+                    },
+                    ty: ret_ty,
+                    span: expr.span,
+                    def_id: None,
+                };
+                return true;
+            }
+        }
+        // Also handle RuntimeCall form (post-IntrinsicLowering)
+        if let IrExprKind::RuntimeCall { symbol, args } = &inner.kind {
+            let s = symbol.as_str();
+            if (s == "almide_rt_map_get" || s.contains("map_get")) && !s.contains("get_or") && args.len() == 2 {
+                let mut new_args = args.clone();
+                new_args.push(*fallback.clone());
+                let ret_ty = expr.ty.clone();
+                *expr = IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Module {
+                            module: almide_base::intern::sym("map"),
+                            func: almide_base::intern::sym("get_or"),
+                            def_id: None,
+                        },
+                        args: new_args,
+                        type_args: vec![],
+                    },
+                    ty: ret_ty,
+                    span: expr.span,
+                    def_id: None,
+                };
+                return true;
+            }
+        }
     }
 
     // Detect: for i in 0..n { xs[i] = ys[i] } → ListCopySlice
