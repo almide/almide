@@ -150,8 +150,8 @@ fn compile_function_inner(
     if let Some(init_idx) = init_globals_idx {
         wasm!(compiler.func, { call(init_idx); });
     }
-    // Initialize preopened directory table for fs path resolution
-    if func.name == "main" && !func.is_test {
+    // Initialize preopened directory table for fs path resolution (only if program uses fs)
+    if func.name == "main" && !func.is_test && compiler.emitter.needs_fs {
         wasm!(compiler.func, { call(compiler.emitter.rt.init_preopen_dirs); });
     }
 

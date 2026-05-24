@@ -335,6 +335,8 @@ pub struct WasmEmitter {
     pub mutable_captures: HashSet<u32>,
     // Deep-equality functions per variant type: type_name → func_idx
     pub eq_funcs: HashMap<String, u32>,
+    // Whether the program uses filesystem operations (fs.read_text, etc.)
+    pub needs_fs: bool,
 }
 
 /// A single case of a variant type.
@@ -451,6 +453,7 @@ impl WasmEmitter {
             mutable_captures: HashSet::new(),
             eq_funcs: HashMap::new(),
             user_exports: Vec::new(),
+            needs_fs: false,
         }
     }
 
@@ -554,6 +557,9 @@ impl FuncCompiler<'_> {
 /// Emit a WASM binary from an IR program (WASI mode).
 pub fn emit(program: &IrProgram) -> Vec<u8> {
     let mut emitter = WasmEmitter::new();
+
+    // Pre-scan: detect filesystem usage to conditionally include init_preopen_dirs
+    emitter.needs_fs = program_uses_fs(program);
 
     // Phase 0: Collect `@intrinsic(symbol)` → (module, fn_name) from every
     // bundled stdlib source so the `RuntimeCall` fallback path can route
@@ -1919,4 +1925,35 @@ mod tests {
         assert_eq!(&bytes[0..4], b"\0asm");
         assert_eq!(&bytes[4..8], &[1, 0, 0, 0]);
     }
+}
+
+/// Scan IR program for filesystem module calls (fs.read_text, fs.write_text, etc.).
+fn program_uses_fs(program: &IrProgram) -> bool {
+    use almide_ir::{IrExprKind, IrStmtKind, CallTarget};
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+
+    struct FsScanner { found: bool }
+    impl IrVisitor for FsScanner {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if self.found { return; }
+            if let IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } = &expr.kind {
+                if module == "fs" { self.found = true; return; }
+            }
+            if let IrExprKind::RuntimeCall { symbol, .. } = &expr.kind {
+                if symbol.starts_with("almide_rt_fs_") { self.found = true; return; }
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+            if self.found { return; }
+            walk_stmt(self, stmt);
+        }
+    }
+
+    let mut scanner = FsScanner { found: false };
+    for func in &program.functions {
+        scanner.visit_expr(&func.body);
+        if scanner.found { return true; }
+    }
+    false
 }

@@ -36,9 +36,11 @@ pub fn eliminate_dead_code(emitter: &mut WasmEmitter) -> usize {
     // they have no callers inside the wasm but the JS side relies on them.
     entry_points.insert(emitter.rt.heap_save);
     entry_points.insert(emitter.rt.heap_restore);
-    // __init_preopen_dirs and __resolve_path are called from main at startup
-    entry_points.insert(emitter.rt.init_preopen_dirs);
-    entry_points.insert(emitter.rt.resolve_path);
+    // __init_preopen_dirs and __resolve_path only needed if program uses filesystem
+    if emitter.needs_fs {
+        entry_points.insert(emitter.rt.init_preopen_dirs);
+        entry_points.insert(emitter.rt.resolve_path);
+    }
 
     // Functions in the element table (called via call_indirect)
     for &func_idx in &emitter.func_table {
