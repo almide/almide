@@ -212,27 +212,19 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
                     }
                 }
             }
-            // Auto-emit struct definitions required by runtime functions.
-            // These types are declared in stdlib/*.almd and the walker emits them
-            // when the program directly uses the type.  In cross-crate codegen the
-            // walker may not re-emit the struct (it belongs to the dependency), so
-            // we inject it when the runtime module is needed but the struct is absent.
-            // Opaque types (AlmideHttpResponse, etc.) live in runtime/rs/src/*.rs
-            // and travel with the runtime module — no injection needed.
-            if needed.contains("fs") && !user_code.contains("struct FileStat") {
-                output.push_str("#[derive(Clone, Debug, PartialEq)]\npub struct FileStat {\n    pub size: i64,\n    pub is_dir: bool,\n    pub is_file: bool,\n    pub modified: i64,\n}\n\n");
-            }
-            if needed.contains("process") && !user_code.contains("struct ProcessStatus") {
-                output.push_str("#[derive(Clone, Debug, PartialEq)]\npub struct ProcessStatus {\n    pub code: i64,\n    pub stdout: String,\n    pub stderr: String,\n}\n\n");
-            }
-
-            // Collect runtime modules, hoist top-level `use` to front and deduplicate
+            // Collect runtime modules, hoist top-level `use` to front and deduplicate.
+            // Struct definitions in runtime sources that the walker already emitted
+            // (from stdlib/*.almd type declarations) are skipped to avoid E0428.
             let mut use_set = std::collections::HashSet::new();
             let mut use_lines = Vec::new();
             let mut body_lines = Vec::new();
             for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
                 if needed.contains(name) {
-                    for line in strip_test_blocks(source).lines() {
+                    let stripped = strip_test_blocks(source);
+                    let lines: Vec<&str> = stripped.lines().collect();
+                    let mut i = 0;
+                    while i < lines.len() {
+                        let line = lines[i];
                         let trimmed = line.trim();
                         // Top-level use: not indented and starts with "use "
                         if !line.starts_with(' ') && !line.starts_with('\t')
@@ -241,9 +233,37 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
                             if use_set.insert(trimmed.to_string()) {
                                 use_lines.push(trimmed.to_string());
                             }
-                        } else {
-                            body_lines.push(line.to_string());
+                            i += 1;
+                            continue;
                         }
+                        // Detect struct definitions: #[derive(...)] followed by pub struct Name
+                        // Skip the block if user_code already contains that struct (walker emitted it).
+                        if trimmed.starts_with("#[derive(") {
+                            if let Some(next) = lines.get(i + 1) {
+                                if let Some(struct_name) = next.trim().strip_prefix("pub struct ")
+                                    .and_then(|s| s.split_whitespace().next())
+                                    .map(|s| s.trim_end_matches('{').trim())
+                                {
+                                    let needle = format!("struct {}", struct_name);
+                                    if user_code.contains(&needle) {
+                                        // Skip derive + struct + fields + closing brace
+                                        i += 1; // skip #[derive]
+                                        let mut depth = 0u32;
+                                        while i < lines.len() {
+                                            if lines[i].contains('{') { depth += 1; }
+                                            if lines[i].contains('}') {
+                                                depth = depth.saturating_sub(1);
+                                                if depth == 0 { i += 1; break; }
+                                            }
+                                            i += 1;
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                        body_lines.push(line.to_string());
+                        i += 1;
                     }
                     body_lines.push(String::new());
                 }
