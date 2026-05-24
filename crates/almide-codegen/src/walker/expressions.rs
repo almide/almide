@@ -367,16 +367,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     .unwrap_or_else(|| format!("{}: {}", k, val_str)));
             }
             // Fill in default fields that were not explicitly provided.
-            // Strip module qualifier ("dep_pkg.Msg" → "Msg") so cross-crate
-            // constructors match default_fields which are keyed by bare name.
-            let bare_ctor = ctor_name_str.rsplit('.').next().unwrap_or(ctor_name_str);
+            // default_fields is keyed by both bare name ("Msg") and module-qualified
+            // name ("dep_pkg.Msg"), so we try the exact ctor_name_str first.
             let default_keys: Vec<(String, String)> = ctx.ann.default_fields.keys()
-                .filter(|(cn, _)| cn == bare_ctor)
+                .filter(|(cn, _)| cn == ctor_name_str)
                 .cloned()
                 .collect();
             for (_, field_name) in &default_keys {
                 if explicit_names.contains(field_name.as_str()) { continue; }
-                let Some(default_expr) = ctx.ann.default_fields.get(&(bare_ctor.to_string(), field_name.clone())) else { continue; };
+                let Some(default_expr) = ctx.ann.default_fields.get(&(ctor_name_str.to_string(), field_name.clone())) else { continue; };
                 let mut val_str = render_expr(ctx, default_expr);
                 let needs_box = name.as_ref()
                     .map_or(false, |cn| ctx.ann.boxed_fields.contains(&(cn.to_string(), field_name.clone())));

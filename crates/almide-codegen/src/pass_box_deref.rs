@@ -71,24 +71,39 @@ impl NanoPass for BoxDerefPass {
         // Build default_fields: for each variant/record constructor with default field values.
         // Chain module type_decls so types declared in submodules also fill defaults at
         // construction sites in cross-module callers.
-        program.codegen_annotations.default_fields = program.type_decls.iter()
-            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
-            .flat_map(|td| match &td.kind {
-                IrTypeDeclKind::Variant { cases, .. } => cases.iter()
-                    .filter_map(|c| match &c.kind {
-                        IrVariantKind::Record { fields } => Some(fields.iter()
-                            .filter_map(|f| f.default.as_ref().map(|def| ((c.name.to_string(), f.name.to_string()), def.clone())))
-                            .collect::<Vec<_>>()),
-                        _ => None,
-                    })
-                    .flatten()
-                    .collect::<Vec<_>>(),
-                IrTypeDeclKind::Record { fields } => fields.iter()
-                    .filter_map(|f| f.default.as_ref().map(|def| ((td.name.to_string(), f.name.to_string()), def.clone())))
-                    .collect(),
-                _ => vec![],
-            })
-            .collect();
+        // Keys use BOTH bare name and module-qualified name so lookups from
+        // either form succeed (same-module uses bare, cross-module uses qualified).
+        let mut defaults = std::collections::HashMap::new();
+        for (mod_prefix, td_iter) in std::iter::once((None, program.type_decls.iter()))
+            .chain(program.modules.iter().map(|m| (Some(m.name.as_str()), m.type_decls.iter())))
+        {
+            for td in td_iter {
+                let entries: Vec<((String, String), IrExpr)> = match &td.kind {
+                    IrTypeDeclKind::Variant { cases, .. } => cases.iter()
+                        .filter_map(|c| match &c.kind {
+                            IrVariantKind::Record { fields } => Some(fields.iter()
+                                .filter_map(|f| f.default.as_ref().map(|def| ((c.name.to_string(), f.name.to_string()), def.clone())))
+                                .collect::<Vec<_>>()),
+                            _ => None,
+                        })
+                        .flatten()
+                        .collect(),
+                    IrTypeDeclKind::Record { fields } => fields.iter()
+                        .filter_map(|f| f.default.as_ref().map(|def| ((td.name.to_string(), f.name.to_string()), def.clone())))
+                        .collect(),
+                    _ => vec![],
+                };
+                for ((type_name, field_name), expr) in entries {
+                    // Always register bare name
+                    defaults.insert((type_name.clone(), field_name.clone()), expr.clone());
+                    // Also register module-qualified name for cross-crate lookup
+                    if let Some(prefix) = mod_prefix {
+                        defaults.insert((format!("{}.{}", prefix, type_name), field_name), expr);
+                    }
+                }
+            }
+        }
+        program.codegen_annotations.default_fields = defaults;
 
         PassResult { program, changed: true }
     }
