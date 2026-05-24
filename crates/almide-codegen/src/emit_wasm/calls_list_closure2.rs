@@ -1309,48 +1309,67 @@ impl FuncCompiler<'_> {
                 });
             }
 
-            // Emit SIMD op: dst[offset] = op(src[offset])
-            let emit_simd_op = |fc: &mut FuncCompiler, offset: u64, sv: Option<u32>| {
-                wasm!(fc.func, { local_get(dst_ptr); local_get(src_ptr); v128_load(offset); });
-                if use_shift {
-                    let shift = (simd_const_val as u64).trailing_zeros();
-                    wasm!(fc.func, { i32_const(shift as i32); });
-                    fc.func.instruction(&wasm_encoder::Instruction::I64x2Shl);
+            // Scalar 4× unrolled: Rust-style single-index loop.
+            // wasmtime JITs scalar i64 ops more efficiently than v128 SIMD.
+            let idx_local = self.scratch.alloc_i32();
+            const SCALAR_UNROLL: i32 = 4;
+            const SCALAR_BYTES: i32 = SCALAR_UNROLL * 8; // 32 bytes per iteration
+
+            wasm!(self.func, {
+                i32_const(0); local_set(idx_local);
+                // unroll_end = (len / UNROLL) * BYTES_PER_ITER
+                local_get(len_local); i32_const(2); i32_shr_u; // len / 4
+                i32_const(SCALAR_BYTES); i32_mul;
+                local_set(simd_end);
+                block_empty; loop_empty;
+                  local_get(idx_local); local_get(simd_end); i32_ge_u; br_if(1);
+            });
+            // 4× unrolled: compute base addrs once, reuse with +8/+16/+24
+            let dst_addr = self.scratch.alloc_i32();
+            let src_addr = self.scratch.alloc_i32();
+            wasm!(self.func, {
+                local_get(dst_ptr); local_get(idx_local); i32_add; local_set(dst_addr);
+                local_get(src_ptr); local_get(idx_local); i32_add; local_set(src_addr);
+            });
+            for i in 0..SCALAR_UNROLL {
+                // dst addr
+                if i == 0 {
+                    wasm!(self.func, { local_get(dst_addr); });
                 } else {
-                    wasm!(fc.func, { local_get(sv.unwrap()); });
+                    wasm!(self.func, { local_get(dst_addr); i32_const((i * 8) as i32); i32_add; });
+                }
+                // load from src
+                if i == 0 {
+                    wasm!(self.func, { local_get(src_addr); i64_load(0); });
+                } else {
+                    wasm!(self.func, { local_get(src_addr); i64_load((i * 8) as u32); });
+                }
+                // op
+                if use_shift {
+                    wasm!(self.func, { i64_const(1); i64_shl; });
+                } else {
+                    wasm!(self.func, { i64_const(simd_const_val); });
                     match simd_kind {
-                        SimdMapOp::Mul => { wasm!(fc.func, { i64x2_mul; }); }
-                        SimdMapOp::Add => { wasm!(fc.func, { i64x2_add; }); }
-                        SimdMapOp::Sub => { wasm!(fc.func, { i64x2_sub; }); }
+                        SimdMapOp::Mul => { wasm!(self.func, { i64_mul; }); }
+                        SimdMapOp::Add => { wasm!(self.func, { i64_add; }); }
+                        SimdMapOp::Sub => { wasm!(self.func, { i64_sub; }); }
                     }
                 }
-                wasm!(fc.func, { v128_store(offset); });
-            };
-
-            // 8× v128 unrolled: 16 i64 elements per iteration
-            const SIMD_UNROLL: u64 = 8;          // v128 ops per iteration
-            const ELEMS_PER_V128: u64 = 2;       // i64 lanes per v128
-            const ELEMS_PER_ITER: u64 = SIMD_UNROLL * ELEMS_PER_V128; // 16
-            const BYTES_PER_ITER: i32 = (ELEMS_PER_ITER * 8) as i32;  // 128
-            const ELEMS_SHIFT: i32 = ELEMS_PER_ITER.trailing_zeros() as i32; // 4 (log2(16))
-
-            wasm!(self.func, {
-                local_get(src_ptr);
-                local_get(len_local); i32_const(ELEMS_SHIFT); i32_shr_u;
-                i32_const(BYTES_PER_ITER); i32_mul;
-                i32_add; local_set(simd_end);
-                block_empty; loop_empty;
-                  local_get(src_ptr); local_get(simd_end); i32_ge_u; br_if(1);
-            });
-            for i in 0..SIMD_UNROLL {
-                emit_simd_op(self, i * 16, simd_vec);
+                // store
+                wasm!(self.func, { i64_store(0); });
             }
+            self.scratch.free_i32(src_addr);
+            self.scratch.free_i32(dst_addr);
             wasm!(self.func, {
-                  local_get(src_ptr); i32_const(BYTES_PER_ITER); i32_add; local_set(src_ptr);
-                  local_get(dst_ptr); i32_const(BYTES_PER_ITER); i32_add; local_set(dst_ptr);
+                  // Only advance idx (src_ptr/dst_ptr stay as base pointers)
+                  local_get(idx_local); i32_const(SCALAR_BYTES); i32_add; local_set(idx_local);
                   br(0);
                 end; end;
+                // Advance src_ptr/dst_ptr past unrolled section for scalar tail
+                local_get(src_ptr); local_get(simd_end); i32_add; local_set(src_ptr);
+                local_get(dst_ptr); local_get(simd_end); i32_add; local_set(dst_ptr);
             });
+            self.scratch.free_i32(idx_local);
             if let Some(sv) = simd_vec { self.scratch.free_v128(sv); }
             self.scratch.free_i32(simd_end);
         }
