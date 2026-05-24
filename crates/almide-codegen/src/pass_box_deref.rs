@@ -94,12 +94,12 @@ impl NanoPass for BoxDerefPass {
                     _ => vec![],
                 };
                 for ((type_name, field_name), expr) in entries {
-                    // Always register bare name
-                    defaults.insert((type_name.clone(), field_name.clone()), expr.clone());
-                    // Also register module-qualified name for cross-crate lookup
+                    // Register module-qualified name first (needs clone)
                     if let Some(prefix) = mod_prefix {
-                        defaults.insert((format!("{}.{}", prefix, type_name), field_name), expr);
+                        defaults.insert((format!("{}.{}", prefix, &type_name), field_name.clone()), expr.clone());
                     }
+                    // Bare name (move, no clone)
+                    defaults.insert((type_name, field_name), expr);
                 }
             }
         }
