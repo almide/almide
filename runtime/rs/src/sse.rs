@@ -27,7 +27,7 @@
 // The almide caller `json.parse`s this and slots fields into
 // `almai.LLMResponse`.
 
-pub fn almide_sse_openai_chat(
+pub fn almide_rt_sse_openai_chat(
     base_url: &str,
     api_key: &str,
     body_json: &str,
@@ -260,7 +260,7 @@ fn json_escape(s: &str) -> String {
 // Returns the same LLMResponse-shaped JSON the OpenAI helper produces,
 // so almai callers can treat both transports uniformly.
 
-pub fn almide_sse_anthropic_messages(
+pub fn almide_rt_sse_anthropic_messages(
     api_key: &str,
     body_json: &str,
     mut on_text_delta: impl FnMut(String),
