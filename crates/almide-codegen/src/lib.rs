@@ -213,12 +213,17 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
                 }
             }
             // Auto-emit struct definitions required by runtime functions.
-            // Runtime functions reference these types but codegen only emits them
-            // when the user's code explicitly uses the corresponding stdlib function.
-            // When the runtime module is needed but the struct isn't in user_code,
-            // inject it so rustc finds the definition.
+            // These types are declared in stdlib/*.almd and the walker emits them
+            // when the program directly uses the type.  In cross-crate codegen the
+            // walker may not re-emit the struct (it belongs to the dependency), so
+            // we inject it when the runtime module is needed but the struct is absent.
+            // Opaque types (AlmideHttpResponse, etc.) live in runtime/rs/src/*.rs
+            // and travel with the runtime module — no injection needed.
             if needed.contains("fs") && !user_code.contains("struct FileStat") {
                 output.push_str("#[derive(Clone, Debug, PartialEq)]\npub struct FileStat {\n    pub size: i64,\n    pub is_dir: bool,\n    pub is_file: bool,\n    pub modified: i64,\n}\n\n");
+            }
+            if needed.contains("process") && !user_code.contains("struct ProcessStatus") {
+                output.push_str("#[derive(Clone, Debug, PartialEq)]\npub struct ProcessStatus {\n    pub code: i64,\n    pub stdout: String,\n    pub stderr: String,\n}\n\n");
             }
 
             // Collect runtime modules, hoist top-level `use` to front and deduplicate
