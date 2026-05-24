@@ -127,13 +127,16 @@ pub struct CompiledFunc {
     /// no bytecode scanning needed. Guaranteed non-empty by construction
     /// (TrackedFunction records all `call` instructions automatically).
     pub call_targets: Vec<u32>,
+    /// Patched raw body bytes (set by data section DCE). If Some, used
+    /// instead of `func` during assembly to reflect compacted data offsets.
+    pub patched_body: Option<Vec<u8>>,
 }
 
 impl CompiledFunc {
     /// Construct from a TrackedFunction. This is the ONLY constructor —
     /// enforces that call_targets is always populated.
     pub fn tracked(type_idx: u32, tf: TrackedFunction) -> Self {
-        Self { type_idx, func: tf.inner, call_targets: tf.call_targets }
+        Self { type_idx, func: tf.inner, call_targets: tf.call_targets, patched_body: None }
     }
 }
 
@@ -1223,6 +1226,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     // Phase 2.5: Dead Code Elimination
     let dce_count = dce::eliminate_dead_code(&mut emitter);
 
+    // Phase 2.6: Dead Data Elimination — remove unreferenced string constants
+    let _data_dce_bytes = dce::eliminate_dead_data(&mut emitter);
+
     // Collect public user functions for WASM export (skip imports).
     // @export(wasm, "symbol") overrides the export name; otherwise use fn name.
     for (func_enum_idx, func) in program.functions.iter().enumerate() {
@@ -1394,7 +1400,11 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // ── Code section ──
     let mut codes = CodeSection::new();
     for cf in &emitter.compiled {
-        codes.function(&cf.func);
+        if let Some(ref patched) = cf.patched_body {
+            codes.raw(patched);
+        } else {
+            codes.function(&cf.func);
+        }
     }
     module.section(&codes);
 
