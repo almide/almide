@@ -1165,14 +1165,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         None
     };
 
-    // Build function table (for call_indirect / FnRef)
-    for &func_idx in &user_func_indices {
-        let table_idx = emitter.func_table.len() as u32;
-        emitter.func_table.push(func_idx);
-        emitter.func_to_table_idx.insert(func_idx, table_idx);
-    }
-
-    // Pre-scan for lambdas and FnRefs, register them
+    // Pre-scan for lambdas and FnRefs — only these need element table entries.
+    // (Previously all user functions were added unconditionally, bloating the
+    // element table and preventing DCE from eliminating unused functions.)
     closures::pre_scan_closures(program, &mut emitter);
 
     // Pre-register variant deep-equality functions (must be before compilation starts)
