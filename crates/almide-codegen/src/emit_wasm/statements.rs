@@ -640,6 +640,47 @@ impl FuncCompiler<'_> {
             }
         }
     }
+
+    /// Check if an expression writes to outer-scope mutable variables with heap types.
+    /// Used by auto-scope to determine if heap_restore is safe.
+    fn expr_writes_outer_heap(&self, expr: &IrExpr) -> bool {
+        struct HeapWriteScanner<'a> {
+            var_table: &'a almide_ir::VarTable,
+            found: bool,
+        }
+        impl IrVisitor for HeapWriteScanner<'_> {
+            fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+                if self.found { return; }
+                match &stmt.kind {
+                    IrStmtKind::Assign { var, .. }
+                    | IrStmtKind::MapInsert { target: var, .. } => {
+                        let ty = &self.var_table.get(*var).ty;
+                        if Self::is_heap_type(ty) {
+                            self.found = true;
+                        }
+                    }
+                    _ => {}
+                }
+                walk_stmt(self, stmt);
+            }
+            fn visit_expr(&mut self, expr: &IrExpr) {
+                if self.found { return; }
+                walk_expr(self, expr);
+            }
+        }
+        impl HeapWriteScanner<'_> {
+            fn is_heap_type(ty: &Ty) -> bool {
+                matches!(ty, Ty::String
+                    | Ty::Applied(_, _)
+                    | Ty::Record { .. }
+                    | Ty::Unknown
+                )
+            }
+        }
+        let mut scanner = HeapWriteScanner { var_table: self.var_table, found: false };
+        scanner.visit_expr(expr);
+        scanner.found
+    }
 }
 
 /// Infer the type of a bind value from its IR expression structure.
