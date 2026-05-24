@@ -73,7 +73,9 @@ use almide_lang::types::Ty;
 
 // Memory layout constants
 const SCRATCH_ITOA: u32 = 16;
-const NEWLINE_OFFSET: u32 = 48;
+/// String pool base address. Must be above ASCII range (0-127) so that
+/// data section DCE can distinguish string offsets from character codes.
+const NEWLINE_OFFSET: u32 = 4096;
 
 /// Wrapper around `wasm_encoder::Function` that automatically records
 /// `call` targets as instructions are emitted. Used by `FuncCompiler`
