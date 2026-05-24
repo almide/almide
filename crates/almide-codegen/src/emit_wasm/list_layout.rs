@@ -32,8 +32,11 @@ pub const STRING_HEADER_SIZE: i32 = 8;
 // ── Map (hash table): [len:i32 @ 0][cap:i32 @ 4][slots @ 8...] ──
 // Each slot: [tag:i32][key:K][val:V]  tag: 0=empty, 1=occupied
 
-/// Byte offset from map pointer to first slot.
+/// Byte offset from map pointer to first slot (legacy) / tag array (Swiss Table).
 pub const MAP_DATA_OFFSET: i32 = 8;
+
+/// Byte offset from map pointer to tag array (Swiss Table layout).
+pub const MAP_TAGS_OFFSET: i32 = 8;
 
 /// Byte offset to capacity field.
 pub const MAP_CAP_OFFSET: i32 = 4;
@@ -46,6 +49,10 @@ pub const MAP_SLOT_TAG_SIZE: i32 = 4;
 
 /// Initial hash table capacity (must be power of 2).
 pub const MAP_INITIAL_CAP: i32 = 16;
+
+/// Tag value for empty slot (0x00, matches bump allocator zero-fill).
+/// Full slots store h2 (0x01..0x7F, never 0x00).
+pub const MAP_TAG_EMPTY: i32 = 0;
 
 // ── Set: same layout as List (to_list returns identity) ──
 

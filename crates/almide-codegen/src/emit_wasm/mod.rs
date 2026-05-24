@@ -73,7 +73,9 @@ use almide_lang::types::Ty;
 
 // Memory layout constants
 const SCRATCH_ITOA: u32 = 16;
-const NEWLINE_OFFSET: u32 = 48;
+/// String pool base address. Must be above ASCII range (0-127) so that
+/// data section DCE can distinguish string offsets from character codes.
+const NEWLINE_OFFSET: u32 = 4096;
 
 /// Wrapper around `wasm_encoder::Function` that automatically records
 /// `call` targets as instructions are emitted. Used by `FuncCompiler`
@@ -127,13 +129,16 @@ pub struct CompiledFunc {
     /// no bytecode scanning needed. Guaranteed non-empty by construction
     /// (TrackedFunction records all `call` instructions automatically).
     pub call_targets: Vec<u32>,
+    /// Patched raw body bytes (set by data section DCE). If Some, used
+    /// instead of `func` during assembly to reflect compacted data offsets.
+    pub patched_body: Option<Vec<u8>>,
 }
 
 impl CompiledFunc {
     /// Construct from a TrackedFunction. This is the ONLY constructor —
     /// enforces that call_targets is always populated.
     pub fn tracked(type_idx: u32, tf: TrackedFunction) -> Self {
-        Self { type_idx, func: tf.inner, call_targets: tf.call_targets }
+        Self { type_idx, func: tf.inner, call_targets: tf.call_targets, patched_body: None }
     }
 }
 
@@ -335,6 +340,8 @@ pub struct WasmEmitter {
     pub mutable_captures: HashSet<u32>,
     // Deep-equality functions per variant type: type_name → func_idx
     pub eq_funcs: HashMap<String, u32>,
+    // Whether the program uses filesystem operations (fs.read_text, etc.)
+    pub needs_fs: bool,
 }
 
 /// A single case of a variant type.
@@ -451,6 +458,7 @@ impl WasmEmitter {
             mutable_captures: HashSet::new(),
             eq_funcs: HashMap::new(),
             user_exports: Vec::new(),
+            needs_fs: false,
         }
     }
 
@@ -554,6 +562,9 @@ impl FuncCompiler<'_> {
 /// Emit a WASM binary from an IR program (WASI mode).
 pub fn emit(program: &IrProgram) -> Vec<u8> {
     let mut emitter = WasmEmitter::new();
+
+    // Pre-scan: detect filesystem usage to conditionally include init_preopen_dirs
+    emitter.needs_fs = program_uses_fs(program);
 
     // Phase 0: Collect `@intrinsic(symbol)` → (module, fn_name) from every
     // bundled stdlib source so the `RuntimeCall` fallback path can route
@@ -1159,14 +1170,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         None
     };
 
-    // Build function table (for call_indirect / FnRef)
-    for &func_idx in &user_func_indices {
-        let table_idx = emitter.func_table.len() as u32;
-        emitter.func_table.push(func_idx);
-        emitter.func_to_table_idx.insert(func_idx, table_idx);
-    }
-
-    // Pre-scan for lambdas and FnRefs, register them
+    // Pre-scan for lambdas and FnRefs — only these need element table entries.
+    // (Previously all user functions were added unconditionally, bloating the
+    // element table and preventing DCE from eliminating unused functions.)
     closures::pre_scan_closures(program, &mut emitter);
 
     // Pre-register variant deep-equality functions (must be before compilation starts)
@@ -1221,6 +1227,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Phase 2.5: Dead Code Elimination
     let dce_count = dce::eliminate_dead_code(&mut emitter);
+
+    // Phase 2.6: Dead Data Elimination — remove unreferenced string constants
+    let _data_dce_bytes = dce::eliminate_dead_data(&mut emitter);
 
     // Collect public user functions for WASM export (skip imports).
     // @export(wasm, "symbol") overrides the export name; otherwise use fn name.
@@ -1293,7 +1302,7 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // heap (see `calls_string::emit_string_interp`).
     let mut memory = MemorySection::new();
     memory.memory(MemoryType {
-        minimum: 64,            // 4MB initial
+        minimum: 2,             // 128KB initial — minimal footprint; allocator grows exponentially
         maximum: Some(65536),   // 4GB max (WASM32 hard limit) — explicit so V8 doesn't apply a smaller default
         memory64: false,
         shared: false,
@@ -1393,7 +1402,11 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // ── Code section ──
     let mut codes = CodeSection::new();
     for cf in &emitter.compiled {
-        codes.function(&cf.func);
+        if let Some(ref patched) = cf.patched_body {
+            codes.raw(patched);
+        } else {
+            codes.function(&cf.func);
+        }
     }
     module.section(&codes);
 
@@ -1919,4 +1932,35 @@ mod tests {
         assert_eq!(&bytes[0..4], b"\0asm");
         assert_eq!(&bytes[4..8], &[1, 0, 0, 0]);
     }
+}
+
+/// Scan IR program for filesystem module calls (fs.read_text, fs.write_text, etc.).
+fn program_uses_fs(program: &IrProgram) -> bool {
+    use almide_ir::{IrExprKind, IrStmtKind, CallTarget};
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+
+    struct FsScanner { found: bool }
+    impl IrVisitor for FsScanner {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if self.found { return; }
+            if let IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } = &expr.kind {
+                if module == "fs" { self.found = true; return; }
+            }
+            if let IrExprKind::RuntimeCall { symbol, .. } = &expr.kind {
+                if symbol.starts_with("almide_rt_fs_") { self.found = true; return; }
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+            if self.found { return; }
+            walk_stmt(self, stmt);
+        }
+    }
+
+    let mut scanner = FsScanner { found: false };
+    for func in &program.functions {
+        scanner.visit_expr(&func.body);
+        if scanner.found { return true; }
+    }
+    false
 }

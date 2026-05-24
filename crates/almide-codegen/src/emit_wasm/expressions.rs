@@ -403,30 +403,30 @@ impl FuncCompiler<'_> {
                 } else {
                     let ks = if let Some((k, _)) = entries.first() { values::byte_size(&k.ty) } else { 4 };
                     let vs = if let Some((_, v)) = entries.first() { values::byte_size(&v.ty) } else { 4 };
-                    let slot_size = 4 + ks + vs; // tag + key + val
+                    let entry_size = ks + vs; // no tag per entry
                     let key_ty = if let Some((k, _)) = entries.first() { k.ty.clone() } else { Ty::String };
-                    // cap = next_pow2(n * 2), min 16
                     let mut cap = 16u32;
                     while cap < n * 2 { cap *= 2; }
-                    let total = super::list_layout::MAP_HEADER_SIZE as u32 + cap * slot_size;
+                    // Swiss Table: [header][tags: cap bytes][entries: cap * entry_size]
+                    let total = super::list_layout::MAP_HEADER_SIZE as u32 + cap + cap * entry_size;
 
                     let map = self.scratch.alloc_i32();
                     let idx = self.scratch.alloc_i32();
-                    let slot = self.scratch.alloc_i32();
+                    let eb = self.scratch.alloc_i32(); // entries_base
+                    let h2_lit = self.scratch.alloc_i32();
                     wasm!(self.func, {
                         i32_const(total as i32);
                         call(self.emitter.rt.alloc);
                         local_set(map);
-                        local_get(map); i32_const(n as i32); i32_store(0); // len = n
+                        local_get(map); i32_const(n as i32); i32_store(0);
                         local_get(map); i32_const(cap as i32); i32_store(super::list_layout::MAP_CAP_OFFSET as u32);
+                        // entries_base = map + 8 + cap
+                        local_get(map); i32_const(super::list_layout::MAP_TAGS_OFFSET); i32_add;
+                        i32_const(cap as i32); i32_add; local_set(eb);
                     });
 
-                    // For each entry: hash key, probe, insert
                     for (key, val) in entries {
-                        // Emit key, hash it
-                        wasm!(self.func, { local_get(map); });
                         self.emit_expr(key);
-                        // Duplicate key on stack for storing later — need scratch
                         let sk = if matches!(key_ty, Ty::Int) {
                             let sk = self.scratch.alloc_i64();
                             wasm!(self.func, { local_tee(sk); });
@@ -437,23 +437,33 @@ impl FuncCompiler<'_> {
                             sk
                         };
                         self.emit_hash_key(&key_ty);
+                        // Split into h1 + h2
+                        let ht = self.scratch.alloc_i32();
                         wasm!(self.func, {
+                            local_tee(ht);
                             i32_const(cap as i32 - 1); i32_and; local_set(idx);
-                            drop; // drop map from stack (we use local)
-                            // Probe for empty slot (no duplicates in literals)
+                            local_get(ht);
+                            i32_const(25); i32_shr_u; i32_const(0x7F); i32_and;
+                            local_tee(h2_lit);
+                            i32_eqz;
+                            if_empty; i32_const(1); local_set(h2_lit); end;
+                        });
+                        self.scratch.free_i32(ht);
+                        // Probe for empty tag
+                        wasm!(self.func, {
                             block_empty; loop_empty;
-                              local_get(map); i32_const(super::list_layout::MAP_DATA_OFFSET); i32_add;
-                              local_get(idx); i32_const(slot_size as i32); i32_mul; i32_add;
-                              local_set(slot);
-                              local_get(slot); i32_load(0); i32_eqz; br_if(1);
+                              local_get(map); i32_const(super::list_layout::MAP_TAGS_OFFSET); i32_add;
+                              local_get(idx); i32_add; i32_load8_u(0);
+                              i32_eqz; br_if(1);
                               local_get(idx); i32_const(1); i32_add;
                               i32_const(cap as i32 - 1); i32_and;
                               local_set(idx); br(0);
                             end; end;
-                            // Set tag = 1
-                            local_get(slot); i32_const(1); i32_store(0);
-                            // Store key at slot + 4
-                            local_get(slot); i32_const(4); i32_add;
+                            // Store tag (1 byte)
+                            local_get(map); i32_const(super::list_layout::MAP_TAGS_OFFSET); i32_add;
+                            local_get(idx); i32_add; local_get(h2_lit); i32_store8(0);
+                            // Store key at entries_base + idx * entry_size
+                            local_get(eb); local_get(idx); i32_const(entry_size as i32); i32_mul; i32_add;
                         });
                         if matches!(key_ty, Ty::Int) {
                             wasm!(self.func, { local_get(sk); i64_store(0); });
@@ -462,13 +472,17 @@ impl FuncCompiler<'_> {
                             wasm!(self.func, { local_get(sk); i32_store(0); });
                             self.scratch.free_i32(sk);
                         }
-                        // Store value at slot + 4 + ks
-                        wasm!(self.func, { local_get(slot); i32_const(4 + ks as i32); i32_add; });
+                        // Store value at entries_base + idx * entry_size + ks
+                        wasm!(self.func, {
+                            local_get(eb); local_get(idx); i32_const(entry_size as i32); i32_mul; i32_add;
+                            i32_const(ks as i32); i32_add;
+                        });
                         self.emit_expr(val);
                         self.emit_store_at(&val.ty, 0);
                     }
                     wasm!(self.func, { local_get(map); });
-                    self.scratch.free_i32(slot);
+                    self.scratch.free_i32(h2_lit);
+                    self.scratch.free_i32(eb);
                     self.scratch.free_i32(idx);
                     self.scratch.free_i32(map);
                 }
@@ -1022,8 +1036,29 @@ impl FuncCompiler<'_> {
             }
 
             // ── Comparison (type-dispatched via operand type) ──
-            BinOp::Eq => self.emit_eq(left, right, false),
-            BinOp::Neq => self.emit_eq(left, right, true),
+            BinOp::Eq => {
+                // Peephole: x % (power-of-2) == 0 → (x & (n-1)) == 0
+                // Safe because for any sign of x: x%n==0 ⟺ x&(n-1)==0
+                let modint_zero = Self::extract_mod_pow2_eq_zero(left, right)
+                    .or_else(|| Self::extract_mod_pow2_eq_zero(right, left));
+                if let Some((mod_expr, mask)) = modint_zero {
+                    self.emit_expr(mod_expr);
+                    wasm!(self.func, { i64_const(mask); i64_and; i64_eqz; });
+                } else {
+                    self.emit_eq(left, right, false);
+                }
+            }
+            BinOp::Neq => {
+                // Peephole: x % (power-of-2) != 0 → (x & (n-1)) != 0
+                let modint_zero = Self::extract_mod_pow2_eq_zero(left, right)
+                    .or_else(|| Self::extract_mod_pow2_eq_zero(right, left));
+                if let Some((mod_expr, mask)) = modint_zero {
+                    self.emit_expr(mod_expr);
+                    wasm!(self.func, { i64_const(mask); i64_and; i64_const(0); i64_ne; });
+                } else {
+                    self.emit_eq(left, right, true);
+                }
+            }
             BinOp::Lt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
@@ -1382,4 +1417,19 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Check if `maybe_mod` is `x % n` with power-of-2 n and `maybe_zero` is `0`.
+    /// Returns `(x_expr, n-1)` for emitting `x & (n-1)` instead.
+    fn extract_mod_pow2_eq_zero<'b>(maybe_mod: &'b IrExpr, maybe_zero: &'b IrExpr) -> Option<(&'b IrExpr, i64)> {
+        if let IrExprKind::LitInt { value: 0 } = &maybe_zero.kind {
+            if let IrExprKind::BinOp { op: BinOp::ModInt, left, right } = &maybe_mod.kind {
+                if let IrExprKind::LitInt { value: n } = &right.kind {
+                    let n = *n;
+                    if n > 0 && (n as u64).is_power_of_two() {
+                        return Some((left, n - 1));
+                    }
+                }
+            }
+        }
+        None
+    }
 }

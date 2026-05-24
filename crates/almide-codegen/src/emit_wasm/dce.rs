@@ -36,9 +36,11 @@ pub fn eliminate_dead_code(emitter: &mut WasmEmitter) -> usize {
     // they have no callers inside the wasm but the JS side relies on them.
     entry_points.insert(emitter.rt.heap_save);
     entry_points.insert(emitter.rt.heap_restore);
-    // __init_preopen_dirs and __resolve_path are called from main at startup
-    entry_points.insert(emitter.rt.init_preopen_dirs);
-    entry_points.insert(emitter.rt.resolve_path);
+    // __init_preopen_dirs and __resolve_path only needed if program uses filesystem
+    if emitter.needs_fs {
+        entry_points.insert(emitter.rt.init_preopen_dirs);
+        entry_points.insert(emitter.rt.resolve_path);
+    }
 
     // Functions in the element table (called via call_indirect)
     for &func_idx in &emitter.func_table {
@@ -97,6 +99,194 @@ pub fn eliminate_dead_code(emitter: &mut WasmEmitter) -> usize {
     }
 
     eliminated
+}
+
+/// Dead data elimination: remove unreferenced strings from the data section.
+/// Scans live function bodies for i32.const references into the data region,
+/// compacts data_bytes to only keep referenced strings, and patches all
+/// i32.const values in live functions to use the new offsets.
+pub fn eliminate_dead_data(emitter: &mut WasmEmitter) -> usize {
+    let data_start = super::NEWLINE_OFFSET;
+    let data_end = data_start + emitter.data_bytes.len() as u32;
+    if emitter.data_bytes.len() <= 1 { return 0; } // only newline byte
+
+    // Build set of known string offsets from the intern table.
+    // ONLY these exact offsets are valid data references — prevents false
+    // positives from integer constants that happen to fall in the data range.
+    let known_string_offsets: HashSet<u32> = emitter.strings.values().copied().collect();
+
+    // Step 1: Collect i32.const values that match known string offsets
+    let mut referenced_offsets: HashSet<u32> = HashSet::new();
+    // Always keep the newline byte
+    referenced_offsets.insert(data_start);
+
+    for cf in &emitter.compiled {
+        for (val, _pos) in scan_i32_consts(&cf.func) {
+            let uval = val as u32;
+            if uval == data_start || known_string_offsets.contains(&uval) {
+                referenced_offsets.insert(uval);
+            }
+        }
+    }
+
+    // Step 2: Determine which string entries to keep
+    // Strings are stored as [len:i32][cap:i32][data...] at known offsets
+    let mut old_to_new: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    let mut new_data: Vec<u8> = Vec::new();
+
+    // First byte is newline (0x0A)
+    new_data.push(emitter.data_bytes[0]);
+    old_to_new.insert(data_start, data_start); // newline stays at same offset
+
+    let mut read_pos = 1usize; // skip newline
+    while read_pos + 8 <= emitter.data_bytes.len() {
+        let old_offset = data_start + read_pos as u32;
+        let slen = u32::from_le_bytes([
+            emitter.data_bytes[read_pos],
+            emitter.data_bytes[read_pos + 1],
+            emitter.data_bytes[read_pos + 2],
+            emitter.data_bytes[read_pos + 3],
+        ]);
+        let entry_size = 8 + slen as usize; // len + cap + data
+        if read_pos + entry_size > emitter.data_bytes.len() { break; }
+
+        if referenced_offsets.contains(&old_offset) {
+            let new_offset = data_start + new_data.len() as u32;
+            old_to_new.insert(old_offset, new_offset);
+            new_data.extend_from_slice(&emitter.data_bytes[read_pos..read_pos + entry_size]);
+        }
+        read_pos += entry_size;
+    }
+
+    let removed = emitter.data_bytes.len() - new_data.len();
+    if removed == 0 { return 0; }
+
+    // Step 3: Patch i32.const values that are known string offsets
+    for cf in &mut emitter.compiled {
+        let consts = scan_i32_consts(&cf.func);
+        let needs_patch = consts.iter().any(|(val, _)| {
+            let uval = *val as u32;
+            known_string_offsets.contains(&uval)
+                && old_to_new.get(&uval).map_or(false, |&nv| nv != uval)
+        });
+        if !needs_patch { continue; }
+        let bytes = cf.func.clone().into_raw_body();
+        let mut patched = bytes.clone();
+        let mut did_patch = false;
+        for (val, byte_pos) in &consts {
+            let uval = *val as u32;
+            if !known_string_offsets.contains(&uval) { continue; }
+            if let Some(&new_offset) = old_to_new.get(&uval) {
+                if new_offset != uval {
+                    let (_, consumed) = read_leb128_i32(&bytes[*byte_pos..]);
+                    encode_i32_leb128_fixed(&mut patched[*byte_pos..*byte_pos + consumed], new_offset as i32);
+                    did_patch = true;
+                }
+            }
+        }
+        if did_patch {
+            cf.patched_body = Some(patched);
+        }
+    }
+
+    // Step 4: Replace data_bytes
+    emitter.data_bytes = new_data;
+
+    // Update string offset table
+    for (_key, offset) in emitter.strings.iter_mut() {
+        if let Some(&new_off) = old_to_new.get(offset) {
+            *offset = new_off;
+        }
+    }
+
+    removed
+}
+
+/// Encode i32 as signed LEB128 into exactly `buf.len()` bytes (padded).
+fn encode_i32_leb128_fixed(buf: &mut [u8], value: i32) {
+    let mut val = value;
+    let len = buf.len();
+    for i in 0..len {
+        let mut byte = (val & 0x7F) as u8;
+        val >>= 7;
+        if i < len - 1 {
+            byte |= 0x80; // continuation bit
+        }
+        buf[i] = byte;
+    }
+}
+
+/// Scan a compiled Function for i32.const instructions.
+/// Returns `(value, byte_position_of_leb128_value)` for each i32.const found.
+/// Uses proper instruction parsing (not naive byte scanning) to avoid false matches.
+fn scan_i32_consts(func: &Function) -> Vec<(i32, usize)> {
+    let bytes = func.clone().into_raw_body();
+    let mut results = Vec::new();
+    let mut pos = skip_locals(&bytes);
+    while pos < bytes.len() {
+        let opcode = bytes[pos];
+        pos += 1;
+        match opcode {
+            0x41 => {
+                // i32.const — this IS what we're looking for
+                let value_start = pos;
+                let (val, consumed) = read_leb128_i32(&bytes[pos..]);
+                pos += consumed;
+                results.push((val, value_start));
+            }
+            // All other opcodes: skip using the same logic as extract_call_targets
+            0x10 => { let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; }
+            0x11 => { let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; let (_, c2) = read_leb128_u32(&bytes[pos..]); pos += c2; }
+            0x02 | 0x03 | 0x04 | 0x06 => { pos += block_type_size(&bytes[pos..]); }
+            0x0C | 0x0D => { let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; }
+            0x0E => {
+                let (count, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                for _ in 0..=count { if pos >= bytes.len() { break; } let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; }
+            }
+            0x20 | 0x21 | 0x22 | 0x23 | 0x24 => { let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; }
+            0x28..=0x3E => { let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; let (_, c2) = read_leb128_u32(&bytes[pos..]); pos += c2; }
+            0x3F | 0x40 => { let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; }
+            0x42 => { let (_, c) = read_leb128_i64(&bytes[pos..]); pos += c; }
+            0x43 => { pos += 4; }
+            0x44 => { pos += 8; }
+            0xD0 => { pos += 1; }
+            0xD2 => { let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; }
+            0xFC => {
+                let (sub, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                match sub {
+                    0x08 | 0x0A | 0x0C | 0x0E => { let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; let (_, c2) = read_leb128_u32(&bytes[pos..]); pos += c2; }
+                    0x09 | 0x0B | 0x0D | 0x0F | 0x10 | 0x11 => { let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; }
+                    _ => {}
+                }
+            }
+            0xFD => {
+                let (sub, c) = read_leb128_u32(&bytes[pos..]); pos += c;
+                if sub <= 11 || (sub >= 84 && sub <= 95) {
+                    let (_, c) = read_leb128_u32(&bytes[pos..]); pos += c; let (_, c2) = read_leb128_u32(&bytes[pos..]); pos += c2;
+                } else if sub == 12 { pos += 16; }
+                else if sub == 13 { pos += 16; }
+                else if sub >= 21 && sub <= 34 { pos += 1; }
+            }
+            _ => {}
+        }
+    }
+    results
+}
+
+/// Skip local declarations at the start of a function body, return position after locals.
+fn skip_locals(bytes: &[u8]) -> usize {
+    let mut pos = 0;
+    if pos < bytes.len() {
+        let (num_groups, consumed) = read_leb128_u32(&bytes[pos..]);
+        pos += consumed;
+        for _ in 0..num_groups {
+            if pos >= bytes.len() { break; }
+            let (_, consumed) = read_leb128_u32(&bytes[pos..]);
+            pos += consumed;
+            if pos < bytes.len() { pos += 1; }
+        }
+    }
+    pos
 }
 
 /// Extract all `call` instruction targets from a compiled Function.

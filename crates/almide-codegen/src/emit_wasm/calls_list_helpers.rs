@@ -320,7 +320,7 @@ impl FuncCompiler<'_> {
         let ri = self.scratch.alloc_i32();
         let k = self.scratch.alloc_i32();
 
-        // 1. Copy list header + payload into dst.
+        // 1. Alloc dst + pre-scan source for asc/desc detection.
         self.emit_expr(&args[0]);
         wasm!(self.func, {
             local_set(xs_ptr);
@@ -329,42 +329,32 @@ impl FuncCompiler<'_> {
             i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(es as i32); i32_mul; i32_add;
             call(self.emitter.rt.alloc); local_set(dst);
             local_get(dst); local_get(len); i32_store(0);
-            // alloc tmp (same size, no header needed — just data)
-            local_get(len); i32_const(es as i32); i32_mul;
-            call(self.emitter.rt.alloc); local_set(tmp);
-            // bulk copy data with memory.copy
-            local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-            local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-            local_get(len); i32_const(es as i32); i32_mul;
-            memory_copy;
         });
 
-        // 2. Pre-scan: detect sorted (asc) or reverse-sorted (desc).
-        //    If asc → skip sort. If desc → reverse in O(n). Else → merge sort.
-        //    This handles TimSort-like run detection for the common cases.
+        // 2. Pre-scan SOURCE (xs_ptr) for asc/desc before copying.
         let is_asc = self.scratch.alloc_i32();
         let is_desc = self.scratch.alloc_i32();
         let scan_done = self.scratch.alloc_i32();
         wasm!(self.func, {
             local_get(len); i32_const(2); i32_lt_u;
             if_empty;
-              i32_const(1); local_set(scan_done); // trivially sorted
+              i32_const(1); local_set(scan_done);
             else_;
               i32_const(1); local_set(is_asc);
               i32_const(1); local_set(is_desc);
               i32_const(0); local_set(i);
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_const(1); i32_sub; i32_ge_u; br_if(1);
-                // Load dst[i] and dst[i+1], compare
-                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                // Load xs[i] and xs[i+1]
+                local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(es as i32); i32_mul; i32_add;
         });
-        kind.emit_load(&mut self.func); // dst[i]
+        kind.emit_load(&mut self.func); // xs[i]
         wasm!(self.func, {
-                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
         });
-        kind.emit_load(&mut self.func); // dst[i+1]
+        kind.emit_load(&mut self.func); // xs[i+1]
         // Check: if dst[i] > dst[i+1] → not ascending
         // We need both values for two comparisons. Duplicate via locals.
         // Actually, emit_le_cmp consumes both. Let me do two separate scans? No, too slow.
@@ -373,17 +363,16 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
                 i32_eqz;
                 if_empty; i32_const(0); local_set(is_asc); end;
-                // Check descending: dst[i] >= dst[i+1]
-                // Reload and compare reverse
-                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                // Check descending: xs[i] >= xs[i+1]
+                local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
         });
-        kind.emit_load(&mut self.func); // dst[i+1]
+        kind.emit_load(&mut self.func); // xs[i+1]
         wasm!(self.func, {
-                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                 local_get(i); i32_const(es as i32); i32_mul; i32_add;
         });
-        kind.emit_load(&mut self.func); // dst[i]
+        kind.emit_load(&mut self.func); // xs[i]
         kind.emit_le_cmp(&mut self.func, self.emitter); // dst[i+1] <= dst[i]
         wasm!(self.func, {
                 i32_eqz;
@@ -396,25 +385,26 @@ impl FuncCompiler<'_> {
               // Determine result
               local_get(is_asc);
               if_empty;
-                i32_const(1); local_set(scan_done); // already sorted
+                // Already sorted: just bulk copy
+                local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                local_get(len); i32_const(es as i32); i32_mul;
+                memory_copy;
+                i32_const(1); local_set(scan_done);
               else_;
                 local_get(is_desc);
                 if_empty;
-                  // Reverse in place: swap dst[j] and dst[len-1-j] for j in 0..len/2
+                  // Reverse copy: dst[i] = src[len-1-i] (1 pass, no swap)
                   i32_const(0); local_set(i);
                   block_empty; loop_empty;
-                    local_get(i); local_get(len); i32_const(1); i32_shr_u; i32_ge_u; br_if(1);
-                    // swap dst[i] and dst[len-1-i]
+                    local_get(i); local_get(len); i32_ge_u; br_if(1);
                     local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(i); i32_const(es as i32); i32_mul; i32_add;
-                    local_set(left);
-                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                    local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
                     local_get(len); i32_const(1); i32_sub; local_get(i); i32_sub;
                     i32_const(es as i32); i32_mul; i32_add;
-                    local_set(right);
         });
-        // Emit type-specific swap: tmp = *left; *left = *right; *right = tmp
-        kind.emit_swap(&mut self.func, left, right, tmp);
+        kind.emit_copy_one(&mut self.func);
         wasm!(self.func, {
                     local_get(i); i32_const(1); i32_add; local_set(i); br(0);
                   end; end;
@@ -429,10 +419,16 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(is_asc);
 
         // 3. Bottom-up merge sort (only if scan_done == 0).
-        // width = 1; while width < len { merge passes; width *= 2 }
         wasm!(self.func, {
             local_get(scan_done); i32_eqz;
             if_empty;
+            // Copy source to dst + alloc tmp for merge
+            local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+            local_get(xs_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+            local_get(len); i32_const(es as i32); i32_mul;
+            memory_copy;
+            local_get(len); i32_const(es as i32); i32_mul;
+            call(self.emitter.rt.alloc); local_set(tmp);
             i32_const(1); local_set(width);
             block_empty; loop_empty;
               local_get(width); local_get(len); i32_ge_u; br_if(1);

@@ -5,9 +5,23 @@
 
 use super::FuncCompiler;
 use super::values;
-use almide_ir::{IrExpr, IrExprKind};
+use almide_ir::{BinOp, IrExpr, IrExprKind};
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
+
+/// A pipeline stage for stream fusion.
+enum PipelineStage<'a> {
+    Map(&'a IrExpr),    // lambda expr
+    Filter(&'a IrExpr), // lambda expr
+}
+
+/// SIMD-eligible map operation for Int→Int.
+#[derive(Clone, Copy)]
+enum SimdMapOp {
+    Mul,
+    Add,
+    Sub,
+}
 
 impl FuncCompiler<'_> {
     /// Dispatch list closure calls (second half). Returns true if handled.
@@ -740,14 +754,16 @@ impl FuncCompiler<'_> {
             }
             "filter" => {
                 // filter(list, fn) → new list with matching elements
+                // Pointer-based iteration + branchless write
                 let elem_ty = self.resolve_list_elem(&args[0], args.get(1));
                 let elem_size = values::byte_size(&elem_ty);
                 let src = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
-                let len = self.scratch.alloc_i32();
-                let idx = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
-                let out_idx = self.scratch.alloc_i32();
+                let src_ptr = self.scratch.alloc_i32();
+                let end_ptr = self.scratch.alloc_i32();
+                let dst_ptr = self.scratch.alloc_i32();
+                let out_count = self.scratch.alloc_i32();
                 let is_inline_lambda = matches!(&args[1].kind, almide_ir::IrExprKind::Lambda { .. });
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(src); });
@@ -756,28 +772,34 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { local_set(closure); });
                 }
                 wasm!(self.func, {
-                    local_get(src); i32_load(0); local_set(len);
-                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(elem_size as i32); i32_mul; i32_add;
+                    // Alloc max-size output
+                    i32_const(super::list_layout::HEADER_SIZE);
+                    local_get(src); i32_load(0);
+                    i32_const(elem_size as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
-                    i32_const(0); local_set(out_idx);
-                    i32_const(0); local_set(idx);
+                    i32_const(0); local_set(out_count);
+                    // src_ptr = src + DATA_OFFSET
+                    local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                    local_tee(src_ptr);
+                    // end_ptr = src_ptr + len * elem_size
+                    local_get(src); i32_load(0); i32_const(elem_size as i32); i32_mul;
+                    i32_add; local_set(end_ptr);
+                    // dst_ptr = dst + DATA_OFFSET
+                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                    local_set(dst_ptr);
                     block_empty; loop_empty;
                 });
                 let depth_guard = self.depth_push_n(2);
                 wasm!(self.func, {
-                    local_get(idx); local_get(len); i32_ge_u; br_if(1);
+                    local_get(src_ptr); local_get(end_ptr); i32_ge_u; br_if(1);
                 });
                 let filter_param_local;
                 if let almide_ir::IrExprKind::Lambda { params, body, .. } = &args[1].kind {
-                    // Inline lambda: bind param, emit body. Keep param_local alive for dst copy.
                     let param_var = params.first().map(|(v, _)| *v);
                     let pvt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                     filter_param_local = Some((self.scratch.alloc(pvt), pvt));
                     let pl = filter_param_local.unwrap().0;
-                    wasm!(self.func, {
-                        local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                        local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                    });
+                    wasm!(self.func, { local_get(src_ptr); });
                     self.emit_load_at(&elem_ty, 0);
                     wasm!(self.func, { local_set(pl); });
                     if let Some(vid) = param_var {
@@ -787,55 +809,55 @@ impl FuncCompiler<'_> {
                     if let Some(vid) = param_var {
                         self.var_map.remove(&vid.0);
                     }
-                    // Don't free param_local yet — used below for dst copy
                 } else {
                     filter_param_local = None;
                     wasm!(self.func, {
                         local_get(closure); i32_load(4); // env
-                        local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                        local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
+                        local_get(src_ptr);
                     });
                     self.emit_load_at(&elem_ty, 0);
                     wasm!(self.func, { local_get(closure); i32_load(0); }); // table_idx
                     self.emit_closure_call(&elem_ty, &Ty::Bool);
                 }
+                // Branchless: always write, conditionally advance dst_ptr
+                let pred_result = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    if_empty;
-                    // dst[out_idx] = src[idx] (use param_local if available to avoid re-read)
-                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                    local_get(out_idx); i32_const(elem_size as i32); i32_mul; i32_add;
+                    local_set(pred_result);
+                    local_get(dst_ptr);
                 });
                 if let Some((pl, _)) = filter_param_local {
-                    // Use cached param_local — avoid re-reading from memory
                     wasm!(self.func, { local_get(pl); });
                 } else {
-                    wasm!(self.func, {
-                        local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                        local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                    });
+                    wasm!(self.func, { local_get(src_ptr); });
                     self.emit_load_at(&elem_ty, 0);
                 }
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, {
-                    local_get(out_idx); i32_const(1); i32_add; local_set(out_idx);
-                    end; // end if
-                    local_get(idx); i32_const(1); i32_add; local_set(idx);
+                    // dst_ptr += pred_result * elem_size (branchless)
+                    local_get(dst_ptr);
+                    local_get(pred_result); i32_const(elem_size as i32); i32_mul;
+                    i32_add; local_set(dst_ptr);
+                    // out_count += pred_result
+                    local_get(out_count); local_get(pred_result); i32_add; local_set(out_count);
+                    // src_ptr += elem_size
+                    local_get(src_ptr); i32_const(elem_size as i32); i32_add; local_set(src_ptr);
                     br(0);
                 });
+                self.scratch.free_i32(pred_result);
                 self.depth_pop(depth_guard);
                 wasm!(self.func, {
                     end; end;
-                    local_get(dst); local_get(out_idx); i32_store(0);
+                    local_get(dst); local_get(out_count); i32_store(0);
                     local_get(dst);
                 });
-                // Free param_local if it was used for inline lambda
                 if let Some((pl, pvt)) = filter_param_local {
                     self.scratch.free(pl, pvt);
                 }
-                self.scratch.free_i32(out_idx);
+                self.scratch.free_i32(out_count);
+                self.scratch.free_i32(dst_ptr);
+                self.scratch.free_i32(end_ptr);
+                self.scratch.free_i32(src_ptr);
                 self.scratch.free_i32(dst);
-                self.scratch.free_i32(idx);
-                self.scratch.free_i32(len);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(src);
             }
@@ -885,6 +907,111 @@ impl FuncCompiler<'_> {
                 let idx = self.scratch.alloc_i32();
                 let acc = self.scratch.alloc(acc_vt);
                 let is_inline_lambda = matches!(&args[2].kind, almide_ir::IrExprKind::Lambda { .. });
+
+                // ── Stream Fusion: detect map/filter pipeline feeding into fold ──
+                let pipeline = self.detect_pipeline(&args[0]);
+                if !pipeline.is_empty() && is_inline_lambda {
+                    // Fused pipeline: iterate source with pointer-based iteration
+                    let (source_expr, stages) = self.extract_pipeline(&args[0]);
+                    self.emit_expr(source_expr);
+                    wasm!(self.func, { local_set(list_ptr); });
+                    let source_elem_ty = self.resolve_list_elem(source_expr, None);
+                    let source_elem_size = values::byte_size(&source_elem_ty);
+                    self.emit_expr(&args[1]);
+                    wasm!(self.func, { local_set(acc); });
+                    // Pointer-based iteration: ptr and end instead of idx
+                    let ptr = self.scratch.alloc_i32();
+                    let end_ptr = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        // ptr = list_ptr + DATA_OFFSET
+                        local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_set(ptr);
+                        // end = ptr + len * elem_size
+                        local_get(ptr);
+                        local_get(list_ptr); i32_load(0); i32_const(source_elem_size as i32); i32_mul;
+                        i32_add; local_set(end_ptr);
+                        block_empty; loop_empty;
+                    });
+                    let depth_guard = self.depth_push_n(2);
+                    wasm!(self.func, {
+                        local_get(ptr); local_get(end_ptr); i32_ge_u; br_if(1);
+                    });
+                    // Load source element via pointer
+                    let mut cur_ty = source_elem_ty.clone();
+                    let cur_vt = values::ty_to_valtype(&cur_ty).unwrap_or(ValType::I32);
+                    let cur_local = self.scratch.alloc(cur_vt);
+                    wasm!(self.func, { local_get(ptr); });
+                    self.emit_load_at(&cur_ty, 0);
+                    wasm!(self.func, { local_set(cur_local); });
+                    // Apply each pipeline stage
+                    let mut skip_label_depth = 0u32;
+                    for stage in &stages {
+                        match stage {
+                            PipelineStage::Map(lambda) => {
+                                if let almide_ir::IrExprKind::Lambda { params, body, .. } = &lambda.kind {
+                                    if let Some((vid, _)) = params.first() {
+                                        self.var_map.insert(vid.0, cur_local);
+                                    }
+                                    self.emit_expr(body);
+                                    wasm!(self.func, { local_set(cur_local); });
+                                    if let Some((vid, _)) = params.first() {
+                                        self.var_map.remove(&vid.0);
+                                    }
+                                    cur_ty = body.ty.clone();
+                                }
+                            }
+                            PipelineStage::Filter(lambda) => {
+                                if let almide_ir::IrExprKind::Lambda { params, body, .. } = &lambda.kind {
+                                    if let Some((vid, _)) = params.first() {
+                                        self.var_map.insert(vid.0, cur_local);
+                                    }
+                                    self.emit_expr(body);
+                                    if let Some((vid, _)) = params.first() {
+                                        self.var_map.remove(&vid.0);
+                                    }
+                                    // If false, skip to next iteration (ptr += elem_size then br to loop)
+                                    wasm!(self.func, {
+                                        i32_eqz;
+                                        if_empty;
+                                          local_get(ptr); i32_const(source_elem_size as i32); i32_add; local_set(ptr);
+                                          br(1); // br to loop_empty
+                                        end;
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    // Apply fold body with cur_local as element
+                    if let almide_ir::IrExprKind::Lambda { params, body, .. } = &args[2].kind {
+                        let acc_param = params.first().map(|(v, _)| *v);
+                        let elem_param = params.get(1).map(|(v, _)| *v);
+                        if let Some(vid) = acc_param { self.var_map.insert(vid.0, acc); }
+                        if let Some(vid) = elem_param { self.var_map.insert(vid.0, cur_local); }
+                        self.emit_expr(body);
+                        wasm!(self.func, { local_set(acc); });
+                        if let Some(vid) = acc_param { self.var_map.remove(&vid.0); }
+                        if let Some(vid) = elem_param { self.var_map.remove(&vid.0); }
+                    }
+                    self.scratch.free(cur_local, cur_vt);
+                    wasm!(self.func, {
+                        local_get(ptr); i32_const(source_elem_size as i32); i32_add; local_set(ptr);
+                        br(0);
+                    });
+                    self.depth_pop(depth_guard);
+                    wasm!(self.func, { end; end; local_get(acc); });
+                    self.scratch.free_i32(end_ptr);
+                    self.scratch.free_i32(ptr);
+                    self.scratch.free(acc, acc_vt);
+                    self.scratch.free_i32(idx);
+                    self.scratch.free_i32(len);
+                    self.scratch.free_i32(closure);
+                    self.scratch.free_i32(list_ptr);
+                    return true;
+                }
+
+                // Pointer-based iteration for fold
+                let ptr = self.scratch.alloc_i32();
+                let end_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(list_ptr); });
                 self.emit_expr(&args[1]);
@@ -894,27 +1021,25 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { local_set(closure); });
                 }
                 wasm!(self.func, {
-                    local_get(list_ptr); i32_load(0); local_set(len);
-                    i32_const(0); local_set(idx);
+                    // ptr = list_ptr + DATA_OFFSET
+                    local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                    local_tee(ptr);
+                    // end_ptr = ptr + len * elem_size
+                    local_get(list_ptr); i32_load(0); i32_const(elem_size as i32); i32_mul;
+                    i32_add; local_set(end_ptr);
                     block_empty; loop_empty;
                 });
                 let depth_guard = self.depth_push_n(2);
                 wasm!(self.func, {
-                    local_get(idx); local_get(len); i32_ge_u; br_if(1);
+                    local_get(ptr); local_get(end_ptr); i32_ge_u; br_if(1);
                 });
                 if let almide_ir::IrExprKind::Lambda { params, body, .. } = &args[2].kind {
-                    // Inline fold lambda: bind acc param and elem param, emit body
                     let acc_param = params.first().map(|(v, _)| *v);
                     let elem_param = params.get(1).map(|(v, _)| *v);
                     let elem_local = self.scratch.alloc(values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32));
-                    // Load element into local
-                    wasm!(self.func, {
-                        local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                        local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                    });
+                    wasm!(self.func, { local_get(ptr); });
                     self.emit_load_at(&elem_ty, 0);
                     wasm!(self.func, { local_set(elem_local); });
-                    // Bind params to locals
                     if let Some(vid) = acc_param {
                         self.var_map.insert(vid.0, acc);
                     }
@@ -922,7 +1047,6 @@ impl FuncCompiler<'_> {
                         self.var_map.insert(vid.0, elem_local);
                     }
                     self.emit_expr(body);
-                    // Clean up bindings
                     if let Some(vid) = acc_param {
                         self.var_map.remove(&vid.0);
                     }
@@ -934,8 +1058,7 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, {
                         local_get(closure); i32_load(4); // env
                         local_get(acc);
-                        local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                        local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
+                        local_get(ptr);
                     });
                     self.emit_load_at(&elem_ty, 0);
                     wasm!(self.func, { local_get(closure); i32_load(0); }); // table_idx
@@ -948,11 +1071,13 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                     local_set(acc);
-                    local_get(idx); i32_const(1); i32_add; local_set(idx);
+                    local_get(ptr); i32_const(elem_size as i32); i32_add; local_set(ptr);
                     br(0);
                 });
                 self.depth_pop(depth_guard);
                 wasm!(self.func, { end; end; local_get(acc); });
+                self.scratch.free_i32(end_ptr);
+                self.scratch.free_i32(ptr);
                 self.scratch.free(acc, acc_vt);
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(len);
@@ -966,6 +1091,76 @@ impl FuncCompiler<'_> {
             _ => return false,
         }
         true
+    }
+
+    // ── Stream Fusion helpers ──
+
+    /// Detect fusible pipeline stages in a list expression.
+    /// Returns non-empty vec if the expr is a chain of list.map/filter calls.
+    fn detect_pipeline(&self, expr: &IrExpr) -> Vec<&str> {
+        let mut stages = Vec::new();
+        let mut cur = expr;
+        loop {
+            if let Some((op, fn_arg, source)) = self.match_list_pipeline_stage(cur) {
+                if !matches!(&fn_arg.kind, IrExprKind::Lambda { .. }) {
+                    break;
+                }
+                stages.push(op);
+                cur = source;
+            } else {
+                break;
+            }
+        }
+        stages
+    }
+
+    fn extract_pipeline<'b>(&self, expr: &'b IrExpr) -> (&'b IrExpr, Vec<PipelineStage<'b>>) {
+        let mut stages = Vec::new();
+        let mut cur = expr;
+        loop {
+            if let Some((op, fn_arg, source)) = self.match_list_pipeline_stage(cur) {
+                if !matches!(&fn_arg.kind, IrExprKind::Lambda { .. }) {
+                    break;
+                }
+                match op {
+                    "map" => stages.push(PipelineStage::Map(fn_arg)),
+                    "filter" => stages.push(PipelineStage::Filter(fn_arg)),
+                    _ => break,
+                }
+                cur = source;
+            } else {
+                break;
+            }
+        }
+        stages.reverse();
+        (cur, stages)
+    }
+
+    /// Match a list.map or list.filter call, handling both Module and RuntimeCall forms.
+    /// Returns (op_name, fn_arg, source_list) if matched.
+    fn match_list_pipeline_stage<'b>(&self, expr: &'b IrExpr) -> Option<(&'static str, &'b IrExpr, &'b IrExpr)> {
+        match &expr.kind {
+            IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. }
+                if module.as_str() == "list" && args.len() >= 2 =>
+            {
+                match func.as_str() {
+                    "map" => Some(("map", &args[1], &args[0])),
+                    "filter" => Some(("filter", &args[1], &args[0])),
+                    _ => None,
+                }
+            }
+            IrExprKind::RuntimeCall { symbol, args } if args.len() >= 2 => {
+                let s = symbol.as_str();
+                if s.contains("list_map") {
+                    Some(("map", &args[1], &args[0]))
+                } else if s.contains("list_filter") {
+                    Some(("filter", &args[1], &args[0]))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Emit list.map(list, fn) → new list with fn applied to each element.
@@ -1014,46 +1209,119 @@ impl FuncCompiler<'_> {
         let in_size = values::byte_size(&in_elem_ty);
         let out_size = values::byte_size(&out_elem_ty);
 
-        let len_local = self.scratch.alloc_i32();
-        let idx_local = self.scratch.alloc_i32();
+        // SIMD detection: Int→Int with simple arithmetic lambda
+        let simd_op = if matches!(&in_elem_ty, Ty::Int) && matches!(&out_elem_ty, Ty::Int) {
+            Self::detect_simd_map_op(fn_arg)
+        } else { None };
+
         let src_local = self.scratch.alloc_i32();
         let closure_local = self.scratch.alloc_i32();
         let dst_local = self.scratch.alloc_i32();
+        let src_ptr = self.scratch.alloc_i32();
+        let dst_ptr = self.scratch.alloc_i32();
+        let end_ptr = self.scratch.alloc_i32();
 
-        // Check if fn_arg is a no-capture closure → use direct call instead of call_indirect
         let direct_fn = self.try_resolve_direct_call(fn_arg);
 
         self.emit_expr(list_arg);
         wasm!(self.func, { local_set(src_local); });
-        if direct_fn.is_none() {
+        if direct_fn.is_none() && !matches!(&fn_arg.kind, almide_ir::IrExprKind::Lambda { .. }) {
             self.emit_expr(fn_arg);
             wasm!(self.func, { local_set(closure_local); });
         }
+        let len_local = self.scratch.alloc_i32();
         wasm!(self.func, {
             local_get(src_local); i32_load(0); local_set(len_local);
-            i32_const(super::list_layout::HEADER_SIZE); local_get(len_local); i32_const(out_size as i32); i32_mul; i32_add;
+            // alloc dst
+            i32_const(super::list_layout::HEADER_SIZE);
+            local_get(len_local); i32_const(out_size as i32); i32_mul; i32_add;
             call(self.emitter.rt.alloc); local_set(dst_local);
             local_get(dst_local); local_get(len_local); i32_store(0);
-            i32_const(0); local_set(idx_local);
+            // Pointer-based iteration
+            local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(src_ptr);
+            local_get(dst_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(dst_ptr);
+            local_get(src_ptr); local_get(len_local); i32_const(in_size as i32); i32_mul; i32_add; local_set(end_ptr);
+        });
+
+        // SIMD fast path: process 8 i64 elements per iteration (4× v128 unrolled)
+        if let Some((simd_kind, simd_const_val)) = simd_op {
+            let simd_end = self.scratch.alloc_i32();
+            let use_shift = matches!(simd_kind, SimdMapOp::Mul)
+                && simd_const_val > 0
+                && (simd_const_val as u64).is_power_of_two();
+            let simd_vec = if !use_shift { Some(self.scratch.alloc_v128()) } else { None };
+            // simd_end = src_ptr + (len / 8) * 64  (round down to multiple of 8)
+            wasm!(self.func, {
+                local_get(src_ptr);
+                local_get(len_local); i32_const(3); i32_shr_u; // len / 8
+                i32_const(64); i32_mul;
+                i32_add; local_set(simd_end);
+            });
+            if let Some(sv) = simd_vec {
+                wasm!(self.func, {
+                    i64_const(simd_const_val);
+                    i64x2_splat;
+                    local_set(sv);
+                });
+            }
+
+            // Emit a single SIMD operation: load from src_ptr+offset, apply op, store to dst_ptr+offset
+            let emit_simd_op = |fc: &mut FuncCompiler, offset: u64, sv: Option<u32>| {
+                wasm!(fc.func, {
+                    local_get(dst_ptr);
+                    local_get(src_ptr);
+                    v128_load(offset);
+                });
+                if use_shift {
+                    let shift = (simd_const_val as u64).trailing_zeros();
+                    wasm!(fc.func, { i32_const(shift as i32); });
+                    fc.func.instruction(&wasm_encoder::Instruction::I64x2Shl);
+                } else {
+                    let sv = sv.unwrap();
+                    wasm!(fc.func, { local_get(sv); });
+                    match simd_kind {
+                        SimdMapOp::Mul => { wasm!(fc.func, { i64x2_mul; }); }
+                        SimdMapOp::Add => { wasm!(fc.func, { i64x2_add; }); }
+                        SimdMapOp::Sub => { wasm!(fc.func, { i64x2_sub; }); }
+                    }
+                }
+                wasm!(fc.func, { v128_store(offset); });
+            };
+
+            wasm!(self.func, {
+                block_empty; loop_empty;
+                  local_get(src_ptr); local_get(simd_end); i32_ge_u; br_if(1);
+            });
+            // 4× unrolled: process 8 elements (64 bytes) per iteration
+            emit_simd_op(self, 0, simd_vec);
+            emit_simd_op(self, 16, simd_vec);
+            emit_simd_op(self, 32, simd_vec);
+            emit_simd_op(self, 48, simd_vec);
+            wasm!(self.func, {
+                  local_get(src_ptr); i32_const(64); i32_add; local_set(src_ptr);
+                  local_get(dst_ptr); i32_const(64); i32_add; local_set(dst_ptr);
+                  br(0);
+                end; end;
+            });
+            if let Some(sv) = simd_vec { self.scratch.free_v128(sv); }
+            self.scratch.free_i32(simd_end);
+        }
+
+        // Scalar loop (handles tail after SIMD, or all elements if no SIMD)
+        wasm!(self.func, {
             block_empty; loop_empty;
         });
         let depth_guard = self.depth_push_n(2);
 
         wasm!(self.func, {
-            local_get(idx_local); local_get(len_local); i32_ge_u; br_if(1);
-            // dst addr
-            local_get(dst_local); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-            local_get(idx_local); i32_const(out_size as i32); i32_mul; i32_add;
+            local_get(src_ptr); local_get(end_ptr); i32_ge_u; br_if(1);
+            // dst addr on stack
+            local_get(dst_ptr);
         });
         if let almide_ir::IrExprKind::Lambda { params, body, .. } = &fn_arg.kind {
-            // Inline lambda: bind param to current element, emit body directly
             let param_var = params.first().map(|(v, _)| *v);
             let param_local = self.scratch.alloc(values::ty_to_valtype(&in_elem_ty).unwrap_or(ValType::I32));
-            // Load src element into param local
-            wasm!(self.func, {
-                local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                local_get(idx_local); i32_const(in_size as i32); i32_mul; i32_add;
-            });
+            wasm!(self.func, { local_get(src_ptr); });
             self.emit_load_at(&in_elem_ty, 0);
             wasm!(self.func, { local_set(param_local); });
             // Bind param var to local
@@ -1067,40 +1335,76 @@ impl FuncCompiler<'_> {
             }
             self.scratch.free(param_local, values::ty_to_valtype(&in_elem_ty).unwrap_or(ValType::I32));
         } else if let Some(fn_idx) = direct_fn {
-            // Direct call: no env_ptr, no call_indirect
             wasm!(self.func, {
-                i32_const(0); // dummy env_ptr
-                // src element
-                local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                local_get(idx_local); i32_const(in_size as i32); i32_mul; i32_add;
+                i32_const(0);
+                local_get(src_ptr);
             });
             self.emit_load_at(&in_elem_ty, 0);
             wasm!(self.func, { call(fn_idx); });
         } else {
             wasm!(self.func, {
-                // env_ptr
                 local_get(closure_local); i32_load(4);
-                // src element
-                local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                local_get(idx_local); i32_const(in_size as i32); i32_mul; i32_add;
+                local_get(src_ptr);
             });
             self.emit_load_at(&in_elem_ty, 0);
-            wasm!(self.func, { local_get(closure_local); i32_load(0); }); // table_idx
+            wasm!(self.func, { local_get(closure_local); i32_load(0); });
             self.emit_closure_call(&in_elem_ty, &out_elem_ty);
         }
         self.emit_store_at(&out_elem_ty, 0);
 
         wasm!(self.func, {
-            local_get(idx_local); i32_const(1); i32_add; local_set(idx_local);
+            local_get(src_ptr); i32_const(in_size as i32); i32_add; local_set(src_ptr);
+            local_get(dst_ptr); i32_const(out_size as i32); i32_add; local_set(dst_ptr);
             br(0);
         });
         self.depth_pop(depth_guard);
         wasm!(self.func, { end; end; local_get(dst_local); });
 
+        self.scratch.free_i32(len_local);
+        self.scratch.free_i32(end_ptr);
+        self.scratch.free_i32(dst_ptr);
+        self.scratch.free_i32(src_ptr);
         self.scratch.free_i32(dst_local);
         self.scratch.free_i32(closure_local);
         self.scratch.free_i32(src_local);
-        self.scratch.free_i32(idx_local);
-        self.scratch.free_i32(len_local);
+    }
+
+    /// Detect if a lambda body is a simple SIMD-eligible operation on Int elements.
+    /// Returns (op, constant) if the body is `x * k`, `x + k`, or `x - k`.
+    fn detect_simd_map_op(fn_arg: &IrExpr) -> Option<(SimdMapOp, i64)> {
+        if let IrExprKind::Lambda { params, body, .. } = &fn_arg.kind {
+            let param_id = params.first().map(|(v, _)| v.0)?;
+            match &body.kind {
+                IrExprKind::BinOp { op, left, right } => {
+                    let (var_side, lit_side, commutative) = match op {
+                        BinOp::MulInt => (true, true, true),
+                        BinOp::AddInt => (true, true, true),
+                        BinOp::SubInt => (true, true, false), // x - k only
+                        _ => return None,
+                    };
+                    let _ = (var_side, lit_side, commutative);
+                    let simd_kind = match op {
+                        BinOp::MulInt => SimdMapOp::Mul,
+                        BinOp::AddInt => SimdMapOp::Add,
+                        BinOp::SubInt => SimdMapOp::Sub,
+                        _ => unreachable!(),
+                    };
+                    // x op k
+                    if let (IrExprKind::Var { id }, IrExprKind::LitInt { value: k }) = (&left.kind, &right.kind) {
+                        if id.0 == param_id { return Some((simd_kind, *k)); }
+                    }
+                    // k op x (commutative only)
+                    if matches!(op, BinOp::MulInt | BinOp::AddInt) {
+                        if let (IrExprKind::LitInt { value: k }, IrExprKind::Var { id }) = (&left.kind, &right.kind) {
+                            if id.0 == param_id { return Some((simd_kind, *k)); }
+                        }
+                    }
+                    None
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
     }
 }
