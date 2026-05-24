@@ -348,46 +348,49 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
 /// and Emscripten conventions. This ensures i64 loads/stores never trap on alignment.
 fn compile_alloc(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.alloc];
-    let mut f = Function::new([(1, ValType::I32)]); // local 1: $ptr
+    // locals: 1=$ptr, 2=$grow_pages
+    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
 
     wasm!(f, {
-        // COW: allocate size+4 for refcount header, return ptr+4.
-        // Refcount at ptr-4 is initialized to 1.
         // Align heap_ptr up to 8-byte boundary: ptr = (heap_ptr + 7) & ~7
         global_get(emitter.heap_ptr_global);
         i32_const(7); i32_add; i32_const(-8); i32_and;
         local_set(1);
-        // Advance heap_ptr past the allocation: heap_ptr = ptr + size + 4
+        // Advance heap_ptr past the allocation: heap_ptr = ptr + size + 4 (refcount)
         local_get(1);
         local_get(0);
         i32_add;
         i32_const(4); i32_add;
         global_set(emitter.heap_ptr_global);
-        // Grow memory if needed: while heap_ptr > memory.size * 64KB.
-        // Compare in i64 because `memory_size * 65536` overflows i32 once
-        // the heap goes past 2 GB — 2 GB is a realistic size for 1-bit
-        // LLM weights expanded to f64 (Bonsai's `token_embd.weight` alone
-        // is ~2.48 GB in matrix form) and was triggering `unreachable`
-        // instead of a legitimate memory.grow path. Swap operands and use
-        // `i64_ge_u` because the macro set lacks a direct `i64_le_u`.
-        block_empty; loop_empty;
-          memory_size(0); i64_extend_i32_u;
-          i64_const(65536); i64_mul;
-          global_get(emitter.heap_ptr_global); i64_extend_i32_u;
-          i64_ge_u;
-          br_if(1);
-          // Grow by 16 pages (1MB)
-          i32_const(16);
+        // Grow memory if needed — single grow with exponential sizing.
+        // grow_pages = ceil(heap_ptr / 65536) - memory.size
+        // If grow_pages > 0: grow by max(grow_pages, memory.size) for O(1) amortized.
+        global_get(emitter.heap_ptr_global); i64_extend_i32_u;
+        i64_const(65535); i64_add;
+        i64_const(16); i64_shr_u;           // ceil(heap_ptr / 65536) as i64
+        i32_wrap_i64;                        // safe: max 65536 pages
+        memory_size(0);
+        i32_sub;                             // grow_pages = needed - current
+        local_tee(2);
+        i32_const(0);
+        i32_gt_s;
+        if_empty;
+          // Exponential: grow by max(grow_pages, memory.size)
+          // This at least doubles total memory, giving amortized O(1).
+          memory_size(0);                    // current_pages
+          local_get(2);                      // grow_pages
+          memory_size(0);                    // current_pages (for select)
+          local_get(2);                      // grow_pages     (for select)
+          i32_gt_u;                          // current > grow_pages?
+          select;                            // yes: current, no: grow_pages
           memory_grow(0);
-          // If grow failed (-1), trap
           i32_const(-1); i32_eq;
           if_empty; unreachable; end;
-          br(0);
-        end; end;
+        end;
         // Write refcount = 1 at ptr
         local_get(1);
         i32_const(1);
-        i32_store(2, 0);  // store rc=1 at ptr (align=4)
+        i32_store(2, 0);
         // Return ptr + 4 (data starts after refcount header)
         local_get(1);
         i32_const(4); i32_add;
