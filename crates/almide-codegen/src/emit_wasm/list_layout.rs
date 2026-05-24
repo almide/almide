@@ -61,6 +61,9 @@ pub const MAP_TAG_EMPTY: i32 = 0;
 /// Total alloc header size (size field + RC field).
 pub const ALLOC_HEADER_SIZE: i32 = 8;
 
+/// Byte offset from data pointer to the RC field (ptr - RC_OFFSET = &RC).
+pub const RC_OFFSET: i32 = 4;
+
 // ── Set: same layout as List (to_list returns identity) ──
 
 /// Byte offset from set pointer to data. Same as list.

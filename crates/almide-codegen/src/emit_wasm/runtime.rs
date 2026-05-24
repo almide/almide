@@ -474,21 +474,21 @@ fn compile_rc_inc(emitter: &mut WasmEmitter) {
 // Free list entry: block_base = ptr - ALLOC_HEADER_SIZE. Reuse data area
 // for [next_ptr:i32] linked list.
 fn compile_rc_dec(emitter: &mut WasmEmitter) {
-    use super::list_layout::ALLOC_HEADER_SIZE;
+    use super::list_layout::{ALLOC_HEADER_SIZE, RC_OFFSET};
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_dec];
     let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
     wasm!(f, {
-        // rc = *(ptr - 4)
-        local_get(0); i32_const(4); i32_sub;
-        i32_load(2, 0);
+        // rc = *(ptr - RC_OFFSET)   [header: size@-8, RC@-4, data@0]
+        local_get(0); i32_const(RC_OFFSET); i32_sub;
+        i32_load(0);
         local_tee(1);
         i32_const(1);
         i32_gt_u;
         if_empty;
           // rc > 1: decrement
-          local_get(0); i32_const(4); i32_sub;
+          local_get(0); i32_const(RC_OFFSET); i32_sub;
           local_get(1); i32_const(1); i32_sub;
-          i32_store(2, 0);
+          i32_store(0);
         else_;
           // rc <= 1: push to free list
           // Store next pointer in data area: *(ptr) = free_list_head

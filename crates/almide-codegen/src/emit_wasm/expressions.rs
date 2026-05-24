@@ -272,6 +272,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { end; }); // end loop
                 self.depth_pop(_g3);
                 wasm!(self.func, { end; }); // end block
+                if let Some(sl) = iter_scope_local {
+                    self.scratch.free_i32(sl);
+                }
             }
 
             // ── For-in loop ──
