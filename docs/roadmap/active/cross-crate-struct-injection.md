@@ -47,34 +47,30 @@ if needed.contains("fs") && !user_code.contains("struct FileStat") {
 
 The codegen emits the entire `process` runtime module when `process` is in the needed set. The runtime includes `exec_status()` which returns `ProcessStatus`, but the struct definition is never injected.
 
-## Fix
+## Current Status (in-progress)
 
-### 1. Add struct injection in codegen (after line 222)
+### What was tried
 
-```rust
-if needed.contains("process") && !user_code.contains("struct ProcessStatus") {
-    output.push_str("#[derive(Clone, Debug, PartialEq)]\npub struct ProcessStatus {\n    pub code: i64,\n    pub stdout: String,\n    pub stderr: String,\n}\n\n");
-}
-```
+1. **Added struct to runtime source** (`runtime/rs/src/process.rs`): ProcessStatus struct definition added. build.rs regenerates `generated/rust_runtime.rs` with the struct.
 
-### 2. Add struct definition in runtime source
+2. **Added injection guard**: `runtime_has()` closure to check if runtime source already contains the struct → skip injection. However, the guard doesn't prevent double definition.
 
-`runtime/rs/src/process.rs` — currently uses `ProcessStatus` but never defines it:
+3. **The real issue**: runtime source is embedded via build.rs and ALREADY includes the struct. The injection (`output.push_str(...)`) runs BEFORE runtime modules are concatenated, but `runtime_has()` should detect the embedded definition. Despite this, the struct appears twice in output.
 
-```rust
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProcessStatus {
-    pub code: i64,
-    pub stdout: String,
-    pub stderr: String,
-}
-```
+4. **Debug findings**: `strings` on the compiled binary shows 3 occurrences of "struct ProcessStatus". The `runtime_has` closure's filter condition may not match due to `needed` HashSet lifetime/type issues.
 
-### 3. Audit for other missing structs
+### Files modified (uncommitted)
+- `crates/almide-codegen/src/lib.rs` — injection logic (partial, needs fix)
+- `runtime/rs/src/process.rs` — struct definition added
 
-Grep `runtime/rs/src/` for struct usages that lack definitions — same pattern may exist elsewhere.
+### What needs to happen
+1. **Debug why `runtime_has()` returns false** when the generated source DOES contain the struct string. Add println debug to the closure.
+2. **Or: move struct definitions INTO the runtime source** and remove ALL injection logic. The build.rs embedding already handles cross-crate — the struct travels with the runtime source.
+3. **Audit FileStat** — is it also in the runtime source? If so, the fs injection can be removed too.
+4. Same pattern for `AlmideHttpResponse` / `AlmideHttpRequest` (already in `runtime/rs/src/http.rs`).
 
 ## Exit criteria
 
 - `almide test` passes for any crate that depends on a crate using `process` module
 - Specifically: `import almai` + `almai.user("hello")` compiles and runs
+- No double struct definitions in generated Rust output
