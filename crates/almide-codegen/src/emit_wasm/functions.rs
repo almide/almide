@@ -157,6 +157,32 @@ fn compile_function_inner(
 
     compiler.emit_expr(&func.body);
 
+    // Perceus: rc_dec for heap-typed locals that are not returned.
+    // Per-object free (not bump restore) — safe even if values escape.
+    if func.name != "main" && !func.is_test {
+        // Collect locals to rc_dec (must happen before borrowing compiler.func)
+        let mut rc_dec_locals: Vec<u32> = Vec::new();
+        for (var_id, val_type) in &scan.binds {
+            if *val_type != ValType::I32 { continue; }
+            let ty = &_var_table.get(*var_id).ty;
+            if !super::FuncCompiler::is_heap_type(ty) { continue; }
+            if compiler.emitter.mutable_captures.contains(&var_id.0) { continue; }
+            if let Some(&local_idx) = compiler.var_map.get(&var_id.0) {
+                rc_dec_locals.push(local_idx);
+            }
+        }
+        let rc_dec_fn = compiler.emitter.rt.rc_dec;
+        for local_idx in rc_dec_locals {
+            wasm!(compiler.func, {
+                local_get(local_idx);
+                if_empty;
+                  local_get(local_idx);
+                  call(rc_dec_fn);
+                end;
+            });
+        }
+    }
+
     // If function returns a value but body produces Unit (e.g., while loop with guard returns),
     // insert Unreachable to satisfy the validator (the code is unreachable in practice).
     let body_produces = super::values::ty_to_valtype(&func.body.ty);

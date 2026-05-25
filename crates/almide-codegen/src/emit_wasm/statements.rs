@@ -641,7 +641,7 @@ impl FuncCompiler<'_> {
         }
     }
 
-    fn is_heap_type(ty: &Ty) -> bool {
+    pub(super) fn is_heap_type(ty: &Ty) -> bool {
         matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown)
     }
 
