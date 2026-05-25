@@ -242,6 +242,18 @@ impl FuncCompiler<'_> {
                     let ty = &self.var_table.get(*var).ty;
                     self.emit_store_at(ty, 0);
                 } else {
+                    // Perceus: rc_dec old value before overwriting with new value
+                    let ty = &self.var_table.get(*var).ty;
+                    if Self::is_heap_type(ty) {
+                        let rc_dec_fn = self.emitter.rt.rc_dec;
+                        wasm!(self.func, {
+                            local_get(local_idx);
+                            if_empty;
+                              local_get(local_idx);
+                              call(rc_dec_fn);
+                            end;
+                        });
+                    }
                     self.emit_expr(value);
                     wasm!(self.func, { local_set(local_idx); });
                 }
