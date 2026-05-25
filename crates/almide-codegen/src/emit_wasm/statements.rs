@@ -666,6 +666,64 @@ impl FuncCompiler<'_> {
         matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown)
     }
 
+    /// Perceus Rule 3: type-specialized rc_dec.
+    /// For compound types (List[HeapType], etc.), recursively rc_dec children
+    /// before freeing the parent. Expects the pointer on the stack or in local_idx.
+    /// `local_idx` holds the pointer. Emits: if non-null, drop children, then rc_dec.
+    pub(super) fn emit_typed_rc_dec(&mut self, ty: &Ty, local_idx: u32) {
+        let rc_dec_fn = self.emitter.rt.rc_dec;
+        // Check if this type has heap children that need recursive drop
+        let inner_heap_ty = match ty {
+            Ty::Applied(almide_lang::types::TypeConstructorId::List, args) => {
+                args.first().filter(|t| Self::is_heap_type(t))
+            }
+            _ => None,
+        };
+
+        wasm!(self.func, { local_get(local_idx); });
+        wasm!(self.func, { if_empty; });
+        if let Some(inner_ty) = inner_heap_ty {
+            // Rule 3: before freeing the list, check if RC will reach 0.
+            // If so, iterate elements and rc_dec each one.
+            use super::list_layout::{RC_OFFSET, DATA_OFFSET};
+            let inner_size = super::values::byte_size(inner_ty) as i32;
+            wasm!(self.func, {
+                // Check: RC == 1 → children will be orphaned
+                local_get(local_idx); i32_const(RC_OFFSET); i32_sub; i32_load(0);
+                i32_const(1); i32_le_u;
+                if_empty;
+            });
+            // Iterate list elements and rc_dec each
+            let ptr = self.scratch.alloc_i32();
+            let end = self.scratch.alloc_i32();
+            wasm!(self.func, {
+                local_get(local_idx); i32_const(DATA_OFFSET); i32_add; local_set(ptr);
+                local_get(ptr);
+                local_get(local_idx); i32_load(0); i32_const(inner_size); i32_mul;
+                i32_add; local_set(end);
+                block_empty; loop_empty;
+                  local_get(ptr); local_get(end); i32_ge_u; br_if(1);
+                  local_get(ptr); i32_load(0);
+                  if_empty;
+                    local_get(ptr); i32_load(0);
+                    call(rc_dec_fn);
+                  end;
+                  local_get(ptr); i32_const(inner_size); i32_add; local_set(ptr);
+                  br(0);
+                end; end;
+            });
+            self.scratch.free_i32(end);
+            self.scratch.free_i32(ptr);
+            wasm!(self.func, { end; }); // end RC==1 check
+        }
+        // Now rc_dec the parent
+        wasm!(self.func, {
+            local_get(local_idx);
+            call(rc_dec_fn);
+        });
+        wasm!(self.func, { end; }); // end non-null check
+    }
+
     /// Compute drop schedule for a block: maps statement index → list of local indices to rc_dec.
     /// For each heap-typed Bind in the block, finds the last statement that references it.
     /// Variables used in the tail expression or not locally bound are excluded.

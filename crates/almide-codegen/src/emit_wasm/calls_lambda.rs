@@ -192,6 +192,10 @@ impl FuncCompiler<'_> {
                 let offset = (ci as u32) * 8;
                 wasm!(self.func, { local_get(env_scratch); });
                 if let Some(&local_idx) = self.var_map.get(&vid.0) {
+                    // Perceus Rule 1: rc_inc for heap captures (creates shared reference)
+                    if Self::is_heap_type(ty) {
+                        wasm!(self.func, { local_get(local_idx); call(self.emitter.rt.rc_inc); drop; });
+                    }
                     wasm!(self.func, { local_get(local_idx); });
                     self.emit_store_at(ty, offset);
                 } else {
