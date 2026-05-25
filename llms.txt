@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.23.7 (prev v0.23.6). Cross-crate: field-name-based AlmdRec naming, @inline_rust AlmdRec rewrite, SSE runtime dep. WASM: 441B hello world, Perceus RC free.
+- Current stable: v0.23.8 (prev v0.23.7). Cross-crate: field-name-based AlmdRec naming, @inline_rust AlmdRec rewrite, SSE runtime dep. WASM: 441B hello world, Perceus RC free.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.
