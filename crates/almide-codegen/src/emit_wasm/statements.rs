@@ -645,6 +645,62 @@ impl FuncCompiler<'_> {
         matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown)
     }
 
+    /// Compute drop schedule for a block: maps statement index → list of local indices to rc_dec.
+    /// For each heap-typed Bind in the block, finds the last statement that references it.
+    /// Variables used in the tail expression or not locally bound are excluded.
+    pub(super) fn compute_block_drop_schedule(
+        &self,
+        stmts: &[IrStmt],
+        tail: Option<&IrExpr>,
+    ) -> HashMap<usize, Vec<u32>> {
+        // Collect heap-typed locals bound in THIS block
+        let mut block_locals: HashMap<VarId, u32> = HashMap::new(); // var → wasm local index
+        for stmt in stmts {
+            if let IrStmtKind::Bind { var, ty, .. } = &stmt.kind {
+                if Self::is_heap_type(ty) {
+                    if let Some(&idx) = self.var_map.get(&var.0) {
+                        block_locals.insert(*var, idx);
+                    }
+                }
+            }
+        }
+        if block_locals.is_empty() { return HashMap::new(); }
+
+        // Find variables used in tail expression — don't drop those (they're returned)
+        let mut tail_vars: std::collections::HashSet<VarId> = std::collections::HashSet::new();
+        if let Some(tail) = tail {
+            collect_var_refs(tail, &mut tail_vars);
+        }
+
+        // For each block-local, find the last statement index where it's referenced
+        let mut last_use: HashMap<VarId, usize> = HashMap::new();
+        for (i, stmt) in stmts.iter().enumerate() {
+            let mut refs = std::collections::HashSet::new();
+            collect_stmt_var_refs(stmt, &mut refs);
+            for var in &refs {
+                if block_locals.contains_key(var) {
+                    last_use.insert(*var, i);
+                }
+            }
+        }
+
+        // Build schedule: stmt_index → [local_indices to drop]
+        let mut schedule: HashMap<usize, Vec<u32>> = HashMap::new();
+        for (var, stmt_idx) in &last_use {
+            // Skip if used in tail or if this is the binding statement itself
+            if tail_vars.contains(var) { continue; }
+            if let Some(&local_idx) = block_locals.get(var) {
+                // Don't drop at the bind statement — the value was just created
+                let bind_idx = stmts.iter().position(|s| {
+                    matches!(&s.kind, IrStmtKind::Bind { var: v, .. } if *v == *var)
+                });
+                if bind_idx == Some(*stmt_idx) { continue; } // only use is the bind itself
+                schedule.entry(*stmt_idx).or_default().push(local_idx);
+            }
+        }
+        schedule
+    }
+
     /// Check if an expression writes to outer-scope mutable variables with heap types.
     /// Used by auto-scope to determine if heap_restore is safe.
     pub(super) fn expr_writes_outer_heap(&self, expr: &IrExpr) -> bool {
@@ -1080,4 +1136,30 @@ fn scan_pattern(
         }
         _ => {}
     }
+}
+
+/// Collect all VarId references in an expression.
+fn collect_var_refs(expr: &IrExpr, refs: &mut std::collections::HashSet<VarId>) {
+    struct VarCollector<'a> { refs: &'a mut std::collections::HashSet<VarId> }
+    impl IrVisitor for VarCollector<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Var { id } = &expr.kind { self.refs.insert(*id); }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &IrStmt) { walk_stmt(self, stmt); }
+    }
+    VarCollector { refs }.visit_expr(expr);
+}
+
+/// Collect all VarId references in a statement.
+fn collect_stmt_var_refs(stmt: &IrStmt, refs: &mut std::collections::HashSet<VarId>) {
+    struct VarCollector<'a> { refs: &'a mut std::collections::HashSet<VarId> }
+    impl IrVisitor for VarCollector<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Var { id } = &expr.kind { self.refs.insert(*id); }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &IrStmt) { walk_stmt(self, stmt); }
+    }
+    VarCollector { refs }.visit_stmt(stmt);
 }

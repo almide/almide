@@ -196,8 +196,24 @@ impl FuncCompiler<'_> {
 
             // ── Block ──
             IrExprKind::Block { stmts, expr: tail } => {
-                for stmt in stmts {
+                // Perceus Stage 2: compute last-use index for heap locals in this block.
+                // After each statement, rc_dec variables whose last use was in that statement.
+                let drop_schedule = self.compute_block_drop_schedule(stmts, tail.as_deref());
+                for (i, stmt) in stmts.iter().enumerate() {
                     self.emit_stmt(stmt);
+                    // rc_dec variables whose last use was statement i
+                    if let Some(locals) = drop_schedule.get(&i) {
+                        let rc_dec_fn = self.emitter.rt.rc_dec;
+                        for &local_idx in locals {
+                            wasm!(self.func, {
+                                local_get(local_idx);
+                                if_empty;
+                                  local_get(local_idx);
+                                  call(rc_dec_fn);
+                                end;
+                            });
+                        }
+                    }
                 }
                 if let Some(e) = tail {
                     self.emit_expr(e);
