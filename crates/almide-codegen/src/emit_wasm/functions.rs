@@ -167,6 +167,9 @@ fn compile_function_inner(
             let ty = _var_table.get(*var_id).ty.clone();
             if !super::FuncCompiler::is_heap_type(&ty) { continue; }
             if compiler.emitter.mutable_captures.contains(&var_id.0) { continue; }
+            // Skip single-use variables — Stage 2 (last-use drop) handles them
+            let use_count = _var_table.get(*var_id).use_count;
+            if use_count <= 1 { continue; }
             if let Some(&local_idx) = compiler.var_map.get(&var_id.0) {
                 rc_dec_locals.push((local_idx, ty));
             }
