@@ -688,6 +688,7 @@ impl FuncCompiler<'_> {
                 args.iter().any(|t| Self::is_heap_type(t)),
             Ty::Record { fields } =>
                 fields.iter().any(|(_, t)| Self::is_heap_type(t)),
+            Ty::Fn { .. } => true, // closure has env to free
             _ => false,
         };
 
@@ -842,6 +843,25 @@ impl FuncCompiler<'_> {
                         self.scratch.free_i32(cap);
                         self.scratch.free_i32(idx);
                     }
+                }
+                // Fn (closure): rc_dec the env_ptr and its captured values.
+                // Closure pair layout: [table_idx:i32 @ 0][env_ptr:i32 @ 4]
+                // We rc_dec the env allocation. Captured heap values inside the
+                // env were rc_inc'd at capture time, so freeing the env releases
+                // those references (the env itself is freed, captured value RCs
+                // remain — they'll be freed when their original owners drop).
+                Ty::Fn { .. } => {
+                    // Load env_ptr from closure pair
+                    let env_ptr = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        local_get(local_idx); i32_load(4); local_set(env_ptr);
+                        local_get(env_ptr);
+                        if_empty;
+                          local_get(env_ptr);
+                          call(rc_dec_fn);
+                        end;
+                    });
+                    self.scratch.free_i32(env_ptr);
                 }
                 _ => {}
             }
