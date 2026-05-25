@@ -89,13 +89,32 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
         program_args.push(filter.to_string());
     }
 
-    // Phase 1: Compile all test files sequentially (shared cargo workspace)
-    let mut compiled: Vec<(String, Result<std::path::PathBuf, String>)> = Vec::new();
-    for test_file in &test_files {
-        eprintln!("Compiling {}", test_file);
-        let result = super::run::compile_to_binary(test_file, no_check, true, false);
-        compiled.push((test_file.clone(), result));
-    }
+    // Phase 1: Compile all test files in parallel (bounded by CPU count)
+    let compiled: Vec<(String, Result<std::path::PathBuf, String>)> = {
+        let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
+        for _ in 0..cpus { let _ = sem_tx.send(()); }
+        let sem_tx = std::sync::Arc::new(sem_tx);
+        let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
+        let mut handles = Vec::new();
+        for test_file in test_files.clone() {
+            let tx = tx.clone();
+            let sem_rx = sem_rx.clone();
+            let sem_tx = sem_tx.clone();
+            handles.push(std::thread::spawn(move || {
+                let _ = sem_rx.lock().unwrap().recv();
+                let result = super::run::compile_to_binary(&test_file, no_check, true, false);
+                let _ = sem_tx.send(());
+                let _ = tx.send((test_file, result));
+            }));
+        }
+        drop(tx);
+        let mut results: Vec<_> = rx.iter().collect();
+        for h in handles { let _ = h.join(); }
+        results.sort_by(|a, b| a.0.cmp(&b.0));
+        results
+    };
 
     // Phase 2: Execute test binaries in parallel (bounded by CPU count)
     let program_args = std::sync::Arc::new(program_args);
