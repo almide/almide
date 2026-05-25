@@ -55,6 +55,10 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
     let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
     let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir.as_path()) } else { None };
 
+    // Serialize cargo builds: the shared project dir has a single src/main.rs
+    // that gets overwritten per compilation. Parallel writes corrupt it.
+    static BUILD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = BUILD_LOCK.lock().unwrap();
     let result = if use_test_harness {
         cargo_build_test_with_native(&rs_code, &project_dir, native_deps, source_root)
     } else {
