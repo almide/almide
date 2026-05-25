@@ -26,6 +26,7 @@ use super::pass_effect_inference::EffectInferencePass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
+use super::pass_perceus::PerceusPass;
 use super::pass_egg_saturation::EggSaturationPass;
 use super::pass_matrix_shape_spec::MatrixShapeSpecPass;
 use super::pass_const_fold::ConstFoldPass;
@@ -193,6 +194,9 @@ fn build_pipeline(target: Target) -> Pipeline {
         // Call return types inside closures (e.g. map.get inside a lifted lambda).
         .add(ConcretizeTypesPass)
         .add(FanLoweringPass)
+        // Perceus: insert RcInc/RcDec nodes based on types.
+        // Runs after closure conversion (captures are known) and before TailCallMark.
+        .add(PerceusPass)
         // TailCallMark: mark tail-position calls for WASM return_call emission.
         // Must run last — after all passes that may create or transform calls.
         .add(TailCallMarkPass),
