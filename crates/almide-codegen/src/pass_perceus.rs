@@ -38,6 +38,105 @@ impl NanoPass for PerceusPass {
     }
 }
 
+/// Perceus RC elimination: remove redundant Inc/Dec pairs.
+///
+/// Theorem (Inc-Dec Cancellation):
+///   If RcInc(x) was inserted for Bind(b, Var(x)) and b is immutable
+///   with use_count ≤ 1, then RcInc(x) and RcDec(b) cancel.
+///
+/// Proof: RcInc adds +1 to RC(x). RcDec(b) subtracts -1 from RC(x)
+///   (b aliases x). Since b is single-use and immutable, no other
+///   reference changes occur during b's lifetime. The pair is identity. □
+#[derive(Debug)]
+pub struct PerceusOptPass;
+
+impl NanoPass for PerceusOptPass {
+    fn name(&self) -> &str { "PerceusOpt" }
+    fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Wasm]) }
+
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        let mut changed = false;
+        for func in &mut program.functions {
+            if eliminate_redundant_rc(func, &program.var_table) { changed = true; }
+        }
+        for module in &mut program.modules {
+            for func in &mut module.functions {
+                if eliminate_redundant_rc(func, &program.var_table) { changed = true; }
+            }
+        }
+        PassResult { program, changed }
+    }
+}
+
+/// Eliminate redundant RcInc/RcDec pairs in a function.
+fn eliminate_redundant_rc(func: &mut IrFunction, var_table: &VarTable) -> bool {
+    if let IrExprKind::Block { stmts, .. } = &mut func.body.kind {
+        eliminate_in_block(stmts, var_table)
+    } else {
+        false
+    }
+}
+
+/// Scan a block for eliminable Inc/Dec pairs.
+///
+/// Pattern: RcInc(x) immediately before Bind(b, Var(x))
+///          + RcDec(b) later in the block
+///   where b is immutable and use_count(b) ≤ 1
+///
+/// → Remove both RcInc(x) and RcDec(b).
+fn eliminate_in_block(stmts: &mut Vec<IrStmt>, var_table: &VarTable) -> bool {
+    let mut to_remove: HashSet<usize> = HashSet::new();
+
+    // Pass 1: find RcInc(x) + Bind(b, Var(x)) pairs where b is single-use immutable
+    let mut inc_targets: HashMap<usize, (VarId, VarId)> = HashMap::new(); // stmt_idx → (x, b)
+    let mut i = 0;
+    while i + 1 < stmts.len() {
+        if let IrStmtKind::RcInc { var: x } = &stmts[i].kind {
+            if let IrStmtKind::Bind { var: b, value, .. } = &stmts[i + 1].kind {
+                let is_alias = match &value.kind {
+                    IrExprKind::Var { id } => *id == *x,
+                    IrExprKind::Clone { expr } => matches!(&expr.kind, IrExprKind::Var { id } if *id == *x),
+                    IrExprKind::Deref { expr } => matches!(&expr.kind, IrExprKind::Var { id } if *id == *x),
+                    _ => false,
+                };
+                if is_alias {
+                    let info = var_table.get(*b);
+                    let is_immutable = !matches!(info.mutability, Mutability::Var);
+                    if is_immutable && info.use_count <= 1 {
+                        inc_targets.insert(i, (*x, *b));
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+
+    // Pass 2: for each eliminable pair, find the corresponding RcDec(b)
+    for (&inc_idx, &(_x, b)) in &inc_targets {
+        for (j, stmt) in stmts.iter().enumerate() {
+            if j <= inc_idx { continue; }
+            if let IrStmtKind::RcDec { var } = &stmt.kind {
+                if *var == b {
+                    to_remove.insert(inc_idx);  // remove RcInc(x)
+                    to_remove.insert(j);         // remove RcDec(b)
+                    break;
+                }
+            }
+        }
+    }
+
+    if to_remove.is_empty() { return false; }
+
+    // Apply removals (reverse order to preserve indices)
+    let mut indices: Vec<usize> = to_remove.into_iter().collect();
+    indices.sort_unstable_by(|a, b| b.cmp(a));
+    for idx in indices {
+        stmts.remove(idx);
+    }
+
+    true
+}
+
 fn is_heap_type(ty: &Ty) -> bool {
     matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown | Ty::Fn { .. })
 }
