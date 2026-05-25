@@ -757,6 +757,8 @@ impl FuncCompiler<'_> {
                 // Pointer-based iteration + branchless write
                 let elem_ty = self.resolve_list_elem(&args[0], args.get(1));
                 let elem_size = values::byte_size(&elem_ty);
+                // Perceus in-place reuse: single-use source → write results into same buffer
+                let in_place = self.is_single_use_var(&args[0]);
                 let src = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
@@ -771,24 +773,39 @@ impl FuncCompiler<'_> {
                     self.emit_expr(&args[1]);
                     wasm!(self.func, { local_set(closure); });
                 }
-                wasm!(self.func, {
-                    // Alloc max-size output
-                    i32_const(super::list_layout::HEADER_SIZE);
-                    local_get(src); i32_load(0);
-                    i32_const(elem_size as i32); i32_mul; i32_add;
-                    call(self.emitter.rt.alloc); local_set(dst);
-                    i32_const(0); local_set(out_count);
-                    // src_ptr = src + DATA_OFFSET
-                    local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                    local_tee(src_ptr);
-                    // end_ptr = src_ptr + len * elem_size
-                    local_get(src); i32_load(0); i32_const(elem_size as i32); i32_mul;
-                    i32_add; local_set(end_ptr);
-                    // dst_ptr = dst + DATA_OFFSET
-                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                    local_set(dst_ptr);
-                    block_empty; loop_empty;
-                });
+                if in_place {
+                    // In-place: dst = src (compact matching elements to front)
+                    wasm!(self.func, {
+                        i32_const(0); local_set(out_count);
+                        local_get(src); local_set(dst);
+                        local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_tee(src_ptr);
+                        local_get(src); i32_load(0); i32_const(elem_size as i32); i32_mul;
+                        i32_add; local_set(end_ptr);
+                        local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_set(dst_ptr);
+                        block_empty; loop_empty;
+                    });
+                } else {
+                    wasm!(self.func, {
+                        // Alloc max-size output
+                        i32_const(super::list_layout::HEADER_SIZE);
+                        local_get(src); i32_load(0);
+                        i32_const(elem_size as i32); i32_mul; i32_add;
+                        call(self.emitter.rt.alloc); local_set(dst);
+                        i32_const(0); local_set(out_count);
+                        // src_ptr = src + DATA_OFFSET
+                        local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_tee(src_ptr);
+                        // end_ptr = src_ptr + len * elem_size
+                        local_get(src); i32_load(0); i32_const(elem_size as i32); i32_mul;
+                        i32_add; local_set(end_ptr);
+                        // dst_ptr = dst + DATA_OFFSET
+                        local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_set(dst_ptr);
+                        block_empty; loop_empty;
+                    });
+                }
                 let depth_guard = self.depth_push_n(2);
                 wasm!(self.func, {
                     local_get(src_ptr); local_get(end_ptr); i32_ge_u; br_if(1);
@@ -1223,6 +1240,10 @@ impl FuncCompiler<'_> {
 
         let direct_fn = self.try_resolve_direct_call(fn_arg);
 
+        // Perceus in-place reuse: if source is single-use AND element sizes match,
+        // skip allocation and write mapped results directly into the source list.
+        let in_place = self.is_single_use_var(list_arg) && in_size == out_size;
+
         self.emit_expr(list_arg);
         wasm!(self.func, { local_set(src_local); });
         if direct_fn.is_none() && !matches!(&fn_arg.kind, almide_ir::IrExprKind::Lambda { .. }) {
@@ -1230,18 +1251,29 @@ impl FuncCompiler<'_> {
             wasm!(self.func, { local_set(closure_local); });
         }
         let len_local = self.scratch.alloc_i32();
-        wasm!(self.func, {
-            local_get(src_local); i32_load(0); local_set(len_local);
-            // alloc dst
-            i32_const(super::list_layout::HEADER_SIZE);
-            local_get(len_local); i32_const(out_size as i32); i32_mul; i32_add;
-            call(self.emitter.rt.alloc); local_set(dst_local);
-            local_get(dst_local); local_get(len_local); i32_store(0);
-            // Pointer-based iteration
-            local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(src_ptr);
-            local_get(dst_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(dst_ptr);
-            local_get(src_ptr); local_get(len_local); i32_const(in_size as i32); i32_mul; i32_add; local_set(end_ptr);
-        });
+        if in_place {
+            // In-place: dst = src (no allocation)
+            wasm!(self.func, {
+                local_get(src_local); i32_load(0); local_set(len_local);
+                local_get(src_local); local_set(dst_local);
+                local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(src_ptr);
+                local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(dst_ptr);
+                local_get(src_ptr); local_get(len_local); i32_const(in_size as i32); i32_mul; i32_add; local_set(end_ptr);
+            });
+        } else {
+            wasm!(self.func, {
+                local_get(src_local); i32_load(0); local_set(len_local);
+                // alloc dst
+                i32_const(super::list_layout::HEADER_SIZE);
+                local_get(len_local); i32_const(out_size as i32); i32_mul; i32_add;
+                call(self.emitter.rt.alloc); local_set(dst_local);
+                local_get(dst_local); local_get(len_local); i32_store(0);
+                // Pointer-based iteration
+                local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(src_ptr);
+                local_get(dst_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(dst_ptr);
+                local_get(src_ptr); local_get(len_local); i32_const(in_size as i32); i32_mul; i32_add; local_set(end_ptr);
+            });
+        }
 
         // SIMD fast path: process 8 i64 elements per iteration (4× v128 unrolled)
         if let Some((simd_kind, simd_const_val)) = simd_op {
@@ -1360,9 +1392,8 @@ impl FuncCompiler<'_> {
         self.depth_pop(depth_guard);
         wasm!(self.func, { end; end; });
 
-        // Perceus: if source was single-use, free it via rc_dec.
-        // Safe because the map loop is complete — source data is no longer accessed.
-        if self.is_single_use_var(list_arg) {
+        // Perceus: if source was single-use and NOT in-place, free via rc_dec.
+        if !in_place && self.is_single_use_var(list_arg) {
             wasm!(self.func, { local_get(src_local); call(self.emitter.rt.rc_dec); });
         }
 
@@ -1377,14 +1408,18 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(src_local);
     }
 
-    /// Detect if a lambda body is a simple SIMD-eligible operation on Int elements.
-    /// Returns (op, constant) if the body is `x * k`, `x + k`, or `x - k`.
-    /// Check if an expression is a single-use variable (use_count == 1).
-    /// Safe for Perceus: the value is consumed here and can be freed after.
+    /// Check if a list expression is consumed exactly once (safe for in-place reuse).
+    /// True for: single-use variables (use_count == 1) OR temporary expressions
+    /// (Call results, RuntimeCall results) that are not bound to any variable.
     fn is_single_use_var(&self, expr: &IrExpr) -> bool {
-        if let IrExprKind::Var { id } = &expr.kind {
-            self.var_table.get(*id).use_count == 1
-        } else { false }
+        match &expr.kind {
+            IrExprKind::Var { id } => self.var_table.get(*id).use_count == 1,
+            // Temporary expression results: consumed exactly here, never aliased
+            IrExprKind::Call { .. }
+            | IrExprKind::TailCall { .. }
+            | IrExprKind::RuntimeCall { .. } => true,
+            _ => false,
+        }
     }
 
     fn detect_simd_map_op(fn_arg: &IrExpr) -> Option<(SimdMapOp, i64)> {

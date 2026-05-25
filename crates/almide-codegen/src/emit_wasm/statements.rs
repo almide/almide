@@ -104,6 +104,15 @@ impl FuncCompiler<'_> {
                     self.emit_store_at(effective_ty, 0);
                 } else {
                     self.emit_expr(value);
+                    // Perceus: rc_inc when binding a heap alias (Var → Var copy)
+                    if Self::is_heap_type(effective_ty) {
+                        if matches!(&value.kind, IrExprKind::Var { .. }
+                            | IrExprKind::Clone { .. }
+                            | IrExprKind::Deref { .. })
+                        {
+                            wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                        }
+                    }
                     if let Some(_vt) = values::ty_to_valtype(effective_ty) {
                         let local_idx = self.var_map[&var.0];
                         wasm!(self.func, { local_set(local_idx); });
@@ -233,6 +242,18 @@ impl FuncCompiler<'_> {
                     let ty = &self.var_table.get(*var).ty;
                     self.emit_store_at(ty, 0);
                 } else {
+                    // Perceus: rc_dec old value before overwriting with new value
+                    let ty = &self.var_table.get(*var).ty;
+                    if Self::is_heap_type(ty) {
+                        let rc_dec_fn = self.emitter.rt.rc_dec;
+                        wasm!(self.func, {
+                            local_get(local_idx);
+                            if_empty;
+                              local_get(local_idx);
+                              call(rc_dec_fn);
+                            end;
+                        });
+                    }
                     self.emit_expr(value);
                     wasm!(self.func, { local_set(local_idx); });
                 }
@@ -641,8 +662,274 @@ impl FuncCompiler<'_> {
         }
     }
 
-    fn is_heap_type(ty: &Ty) -> bool {
+    pub(super) fn is_heap_type(ty: &Ty) -> bool {
         matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown)
+    }
+
+    /// Perceus Rule 3: type-specialized rc_dec.
+    /// For compound types, recursively rc_dec children before freeing the parent.
+    /// `local_idx` holds the pointer. Emits: if non-null && RC==1, drop children, then rc_dec.
+    pub(super) fn emit_typed_rc_dec(&mut self, ty: &Ty, local_idx: u32) {
+        use almide_lang::types::TypeConstructorId;
+        let rc_dec_fn = self.emitter.rt.rc_dec;
+
+        wasm!(self.func, { local_get(local_idx); });
+        wasm!(self.func, { if_empty; });
+
+        // Determine if this type has heap children
+        let has_children = match ty {
+            Ty::Applied(TypeConstructorId::List, args) =>
+                args.first().map_or(false, |t| Self::is_heap_type(t)),
+            Ty::Applied(TypeConstructorId::Option, args) =>
+                args.first().map_or(false, |t| Self::is_heap_type(t)),
+            Ty::Applied(TypeConstructorId::Result, args) =>
+                args.iter().any(|t| Self::is_heap_type(t)),
+            Ty::Applied(TypeConstructorId::Map, args) =>
+                args.iter().any(|t| Self::is_heap_type(t)),
+            Ty::Record { fields } =>
+                fields.iter().any(|(_, t)| Self::is_heap_type(t)),
+            Ty::Fn { .. } => true, // closure has env to free
+            _ => false,
+        };
+
+        if has_children {
+            use super::list_layout::{RC_OFFSET, DATA_OFFSET};
+            // Only drop children when RC will reach 0
+            wasm!(self.func, {
+                local_get(local_idx); i32_const(RC_OFFSET); i32_sub; i32_load(0);
+                i32_const(1); i32_le_u;
+                if_empty;
+            });
+
+            match ty {
+                // List[HeapType]: iterate elements
+                Ty::Applied(TypeConstructorId::List, args) => {
+                    let inner_ty = &args[0];
+                    let inner_size = super::values::byte_size(inner_ty) as i32;
+                    let ptr = self.scratch.alloc_i32();
+                    let end = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        local_get(local_idx); i32_const(DATA_OFFSET); i32_add; local_set(ptr);
+                        local_get(ptr);
+                        local_get(local_idx); i32_load(0); i32_const(inner_size); i32_mul;
+                        i32_add; local_set(end);
+                        block_empty; loop_empty;
+                          local_get(ptr); local_get(end); i32_ge_u; br_if(1);
+                          local_get(ptr); i32_load(0);
+                          if_empty; local_get(ptr); i32_load(0); call(rc_dec_fn); end;
+                          local_get(ptr); i32_const(inner_size); i32_add; local_set(ptr);
+                          br(0);
+                        end; end;
+                    });
+                    self.scratch.free_i32(end);
+                    self.scratch.free_i32(ptr);
+                }
+                // Option[HeapType]: tag at offset 0, value at offset 4
+                // WASM Option layout: [tag:i32][value:i32/i64/f64]
+                // tag=0 → None, tag=1 → Some
+                Ty::Applied(TypeConstructorId::Option, args) => {
+                    let inner_ty = &args[0];
+                    if Self::is_heap_type(inner_ty) {
+                        let val_offset = 4i32; // after tag
+                        wasm!(self.func, {
+                            local_get(local_idx); i32_load(0); // tag
+                            if_empty; // tag != 0 → Some
+                              local_get(local_idx); i32_load(val_offset as u32);
+                              if_empty;
+                                local_get(local_idx); i32_load(val_offset as u32);
+                                call(rc_dec_fn);
+                              end;
+                            end;
+                        });
+                    }
+                }
+                // Result[T, E]: tag at offset 0, value at offset 4
+                Ty::Applied(TypeConstructorId::Result, args) => {
+                    for (i, arg) in args.iter().enumerate() {
+                        if Self::is_heap_type(arg) {
+                            let tag_val = i as i32; // 0=Ok, 1=Err
+                            let val_offset = 4i32;
+                            wasm!(self.func, {
+                                local_get(local_idx); i32_load(0); // tag
+                                i32_const(tag_val); i32_eq;
+                                if_empty;
+                                  local_get(local_idx); i32_load(val_offset as u32);
+                                  if_empty;
+                                    local_get(local_idx); i32_load(val_offset as u32);
+                                    call(rc_dec_fn);
+                                  end;
+                                end;
+                            });
+                        }
+                    }
+                }
+                // Record { fields }: rc_dec each heap-typed field at known offset
+                Ty::Record { fields } => {
+                    let mut sorted: Vec<_> = fields.iter().collect();
+                    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+                    let mut offset = 0u32;
+                    for (_, field_ty) in &sorted {
+                        if Self::is_heap_type(field_ty) {
+                            wasm!(self.func, {
+                                local_get(local_idx); i32_load(offset);
+                                if_empty;
+                                  local_get(local_idx); i32_load(offset);
+                                  call(rc_dec_fn);
+                                end;
+                            });
+                        }
+                        offset += super::values::byte_size(field_ty) as u32;
+                    }
+                }
+                // Map[K, V]: iterate tag array + data, rc_dec live entries
+                Ty::Applied(TypeConstructorId::Map, args) => {
+                    // Swiss Table: [len][cap][tag_array][data_array]
+                    // tag_array: cap bytes (0x80=empty, else=occupied)
+                    // data: cap × (key_size + val_size) bytes
+                    let key_ty = args.get(0);
+                    let val_ty = args.get(1);
+                    let key_heap = key_ty.map_or(false, |t| Self::is_heap_type(t));
+                    let val_heap = val_ty.map_or(false, |t| Self::is_heap_type(t));
+                    if key_heap || val_heap {
+                        let key_size = key_ty.map_or(8, |t| super::values::byte_size(t)) as i32;
+                        let val_size = val_ty.map_or(8, |t| super::values::byte_size(t)) as i32;
+                        let entry_size = key_size + val_size;
+                        let idx = self.scratch.alloc_i32();
+                        let cap = self.scratch.alloc_i32();
+                        let tag_base = self.scratch.alloc_i32();
+                        let data_base = self.scratch.alloc_i32();
+                        wasm!(self.func, {
+                            local_get(local_idx); i32_load(4); local_set(cap); // cap at offset 4
+                            local_get(local_idx); i32_const(8); i32_add; local_set(tag_base); // tags at offset 8
+                            local_get(tag_base); local_get(cap); i32_add; local_set(data_base); // data after tags
+                            i32_const(0); local_set(idx);
+                            block_empty; loop_empty;
+                              local_get(idx); local_get(cap); i32_ge_u; br_if(1);
+                              // Check tag: occupied if tag & 0x80 == 0
+                              local_get(tag_base); local_get(idx); i32_add; i32_load8_u(0);
+                              i32_const(0x80); i32_and; i32_eqz;
+                              if_empty;
+                        });
+                        // rc_dec key if heap
+                        if key_heap {
+                            wasm!(self.func, {
+                                local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
+                                i32_load(0);
+                                if_empty;
+                                  local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
+                                  i32_load(0); call(rc_dec_fn);
+                                end;
+                            });
+                        }
+                        // rc_dec value if heap
+                        if val_heap {
+                            wasm!(self.func, {
+                                local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
+                                i32_const(key_size); i32_add; i32_load(0);
+                                if_empty;
+                                  local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
+                                  i32_const(key_size); i32_add; i32_load(0); call(rc_dec_fn);
+                                end;
+                            });
+                        }
+                        wasm!(self.func, {
+                              end; // end occupied check
+                              local_get(idx); i32_const(1); i32_add; local_set(idx);
+                              br(0);
+                            end; end;
+                        });
+                        self.scratch.free_i32(data_base);
+                        self.scratch.free_i32(tag_base);
+                        self.scratch.free_i32(cap);
+                        self.scratch.free_i32(idx);
+                    }
+                }
+                // Fn (closure): rc_dec the env_ptr and its captured values.
+                // Closure pair layout: [table_idx:i32 @ 0][env_ptr:i32 @ 4]
+                // We rc_dec the env allocation. Captured heap values inside the
+                // env were rc_inc'd at capture time, so freeing the env releases
+                // those references (the env itself is freed, captured value RCs
+                // remain — they'll be freed when their original owners drop).
+                Ty::Fn { .. } => {
+                    // Load env_ptr from closure pair
+                    let env_ptr = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        local_get(local_idx); i32_load(4); local_set(env_ptr);
+                        local_get(env_ptr);
+                        if_empty;
+                          local_get(env_ptr);
+                          call(rc_dec_fn);
+                        end;
+                    });
+                    self.scratch.free_i32(env_ptr);
+                }
+                _ => {}
+            }
+
+            wasm!(self.func, { end; }); // end RC==1 check
+        }
+        // Now rc_dec the parent
+        wasm!(self.func, {
+            local_get(local_idx);
+            call(rc_dec_fn);
+        });
+        wasm!(self.func, { end; }); // end non-null check
+    }
+
+    /// Compute drop schedule for a block: maps statement index → list of local indices to rc_dec.
+    /// For each heap-typed Bind in the block, finds the last statement that references it.
+    /// Variables used in the tail expression or not locally bound are excluded.
+    pub(super) fn compute_block_drop_schedule(
+        &self,
+        stmts: &[IrStmt],
+        tail: Option<&IrExpr>,
+    ) -> HashMap<usize, Vec<u32>> {
+        // Collect heap-typed locals bound in THIS block
+        let mut block_locals: HashMap<VarId, u32> = HashMap::new(); // var → wasm local index
+        for stmt in stmts {
+            if let IrStmtKind::Bind { var, ty, .. } = &stmt.kind {
+                if Self::is_heap_type(ty) {
+                    if let Some(&idx) = self.var_map.get(&var.0) {
+                        block_locals.insert(*var, idx);
+                    }
+                }
+            }
+        }
+        if block_locals.is_empty() { return HashMap::new(); }
+
+        // Find variables used in tail expression — don't drop those (they're returned)
+        let mut tail_vars: std::collections::HashSet<VarId> = std::collections::HashSet::new();
+        if let Some(tail) = tail {
+            collect_var_refs(tail, &mut tail_vars);
+        }
+
+        // For each block-local, find the last statement index where it's referenced
+        let mut last_use: HashMap<VarId, usize> = HashMap::new();
+        for (i, stmt) in stmts.iter().enumerate() {
+            let mut refs = std::collections::HashSet::new();
+            collect_stmt_var_refs(stmt, &mut refs);
+            for var in &refs {
+                if block_locals.contains_key(var) {
+                    last_use.insert(*var, i);
+                }
+            }
+        }
+
+        // Build schedule: stmt_index → [local_indices to drop]
+        let mut schedule: HashMap<usize, Vec<u32>> = HashMap::new();
+        for (var, stmt_idx) in &last_use {
+            // Skip if used in tail or if this is the binding statement itself
+            if tail_vars.contains(var) { continue; }
+            if let Some(&local_idx) = block_locals.get(var) {
+                // Don't drop at the bind statement — the value was just created
+                let bind_idx = stmts.iter().position(|s| {
+                    matches!(&s.kind, IrStmtKind::Bind { var: v, .. } if *v == *var)
+                });
+                if bind_idx == Some(*stmt_idx) { continue; } // only use is the bind itself
+                schedule.entry(*stmt_idx).or_default().push(local_idx);
+            }
+        }
+        schedule
     }
 
     /// Check if an expression writes to outer-scope mutable variables with heap types.
@@ -1080,4 +1367,30 @@ fn scan_pattern(
         }
         _ => {}
     }
+}
+
+/// Collect all VarId references in an expression.
+fn collect_var_refs(expr: &IrExpr, refs: &mut std::collections::HashSet<VarId>) {
+    struct VarCollector<'a> { refs: &'a mut std::collections::HashSet<VarId> }
+    impl IrVisitor for VarCollector<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Var { id } = &expr.kind { self.refs.insert(*id); }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &IrStmt) { walk_stmt(self, stmt); }
+    }
+    VarCollector { refs }.visit_expr(expr);
+}
+
+/// Collect all VarId references in a statement.
+fn collect_stmt_var_refs(stmt: &IrStmt, refs: &mut std::collections::HashSet<VarId>) {
+    struct VarCollector<'a> { refs: &'a mut std::collections::HashSet<VarId> }
+    impl IrVisitor for VarCollector<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Var { id } = &expr.kind { self.refs.insert(*id); }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &IrStmt) { walk_stmt(self, stmt); }
+    }
+    VarCollector { refs }.visit_stmt(stmt);
 }
