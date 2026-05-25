@@ -210,6 +210,9 @@ impl FuncCompiler<'_> {
                                 if_empty;
                                   local_get(local_idx);
                                   call(rc_dec_fn);
+                                  // Zero the local to prevent double-free at function exit
+                                  i32_const(0);
+                                  local_set(local_idx);
                                 end;
                             });
                         }
