@@ -102,7 +102,7 @@ fn eliminate_in_block(stmts: &mut Vec<IrStmt>, var_table: &VarTable) -> bool {
                 if is_alias {
                     let info = var_table.get(*b);
                     let is_immutable = !matches!(info.mutability, Mutability::Var);
-                    if is_immutable && info.use_count <= 1 {
+                    if is_immutable {
                         inc_targets.insert(i, (*x, *b));
                     }
                 }
@@ -111,8 +111,24 @@ fn eliminate_in_block(stmts: &mut Vec<IrStmt>, var_table: &VarTable) -> bool {
         i += 1;
     }
 
-    // Pass 2: for each eliminable pair, find the corresponding RcDec(b)
-    for (&inc_idx, &(_x, b)) in &inc_targets {
+    // Pass 2: compute last-use index for each variable in this block
+    let mut last_use_idx: HashMap<VarId, usize> = HashMap::new();
+    for (j, stmt) in stmts.iter().enumerate() {
+        let mut refs = HashSet::new();
+        collect_var_refs_stmt(stmt, &mut refs);
+        for var in refs {
+            last_use_idx.insert(var, j);
+        }
+    }
+
+    // Pass 3: for each eliminable pair, verify lifetime and find RcDec(b)
+    for (&inc_idx, &(x, b)) in &inc_targets {
+        // Lifetime check: last_use(x) >= last_use(b)
+        // If b outlives x, we can't eliminate (x would be freed while b is live)
+        let x_last = last_use_idx.get(&x).copied().unwrap_or(0);
+        let b_last = last_use_idx.get(&b).copied().unwrap_or(0);
+        if x_last < b_last { continue; } // b outlives x → unsafe to eliminate
+
         for (j, stmt) in stmts.iter().enumerate() {
             if j <= inc_idx { continue; }
             if let IrStmtKind::RcDec { var } = &stmt.kind {
