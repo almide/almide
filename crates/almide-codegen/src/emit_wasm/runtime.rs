@@ -449,19 +449,19 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
 }
 
 // __rc_inc(ptr: i32) -> i32
-// Increment refcount at ptr-4, return ptr unchanged.
+// Increment refcount at ptr - RC_OFFSET, return ptr unchanged.
 fn compile_rc_inc(emitter: &mut WasmEmitter) {
+    use super::list_layout::RC_OFFSET;
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_inc];
     let mut f = Function::new([]);
     wasm!(f, {
-        // rc = load(ptr - 4)
-        local_get(0); i32_const(4); i32_sub;
-        local_get(0); i32_const(4); i32_sub;
-        i32_load(2, 0);
-        // rc + 1
+        // addr = ptr - RC_OFFSET
+        local_get(0); i32_const(RC_OFFSET); i32_sub;
+        // store(addr, load(addr) + 1)
+        local_get(0); i32_const(RC_OFFSET); i32_sub;
+        i32_load(0);
         i32_const(1); i32_add;
-        // store(ptr - 4, rc + 1)
-        i32_store(2, 0);
+        i32_store(0);
         // return ptr
         local_get(0);
         end;

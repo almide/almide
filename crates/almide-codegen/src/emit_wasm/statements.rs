@@ -104,6 +104,15 @@ impl FuncCompiler<'_> {
                     self.emit_store_at(effective_ty, 0);
                 } else {
                     self.emit_expr(value);
+                    // Perceus: rc_inc when binding a heap alias (Var → Var copy)
+                    if Self::is_heap_type(effective_ty) {
+                        if matches!(&value.kind, IrExprKind::Var { .. }
+                            | IrExprKind::Clone { .. }
+                            | IrExprKind::Deref { .. })
+                        {
+                            wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                        }
+                    }
                     if let Some(_vt) = values::ty_to_valtype(effective_ty) {
                         let local_idx = self.var_map[&var.0];
                         wasm!(self.func, { local_set(local_idx); });
