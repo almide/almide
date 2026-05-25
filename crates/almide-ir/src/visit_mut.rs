@@ -211,7 +211,7 @@ pub fn walk_stmt_mut<V: IrMutVisitor>(v: &mut V, stmt: &mut IrStmt) {
         IrStmtKind::Expr { expr } => {
             v.visit_expr_mut(expr);
         }
-        IrStmtKind::Comment { .. } => {}
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
     }
 }
 

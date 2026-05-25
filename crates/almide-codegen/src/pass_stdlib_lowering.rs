@@ -1367,6 +1367,6 @@ fn count_lbu_stmt(stmt: &IrStmt, targets: &HashSet<VarId>, counts: &mut HashMap<
             count_lbu_expr(end, targets, counts, in_multi);
         }
         IrStmtKind::ListCopySlice { len, .. } => count_lbu_expr(len, targets, counts, in_multi),
-        IrStmtKind::Comment { .. } => {}
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
     }
 }

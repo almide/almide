@@ -346,6 +346,21 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { end; });
             }
 
+            IrStmtKind::RcInc { var } => {
+                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                    wasm!(self.func, {
+                        local_get(local_idx);
+                        call(self.emitter.rt.rc_inc);
+                        drop;
+                    });
+                }
+            }
+            IrStmtKind::RcDec { var } => {
+                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                    let ty = &self.var_table.get(*var).ty;
+                    self.emit_typed_rc_dec(ty, local_idx);
+                }
+            }
             IrStmtKind::Comment { .. } => {
                 // No-op in WASM
             }

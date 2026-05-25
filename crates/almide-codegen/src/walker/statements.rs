@@ -348,6 +348,8 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             }
         }
         IrStmtKind::Comment { text } => format!("// {}", text),
+        // Perceus RC ops are WASM-only; Rust handles ownership natively.
+        IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => String::new(),
     }
 }
 

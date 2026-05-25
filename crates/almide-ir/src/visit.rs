@@ -209,6 +209,8 @@ pub fn walk_stmt<V: IrVisitor>(v: &mut V, stmt: &IrStmt) {
             v.visit_expr(expr);
         }
         IrStmtKind::Comment { .. } => {}
+        IrStmtKind::RcInc { .. } => {}
+        IrStmtKind::RcDec { .. } => {}
     }
 }
 

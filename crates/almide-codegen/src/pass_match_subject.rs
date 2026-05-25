@@ -130,7 +130,7 @@ fn rewrite_stmt(stmt: &mut IrStmt) {
         IrStmtKind::ListCopySlice { len, .. } => { rewrite_expr(len); }
         IrStmtKind::Guard { cond, else_ } => { rewrite_expr(cond); rewrite_expr(else_); }
         IrStmtKind::Expr { expr } => rewrite_expr(expr),
-        IrStmtKind::Comment { .. } => {}
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
     }
 }
 

@@ -347,7 +347,7 @@ pub fn substitute_var_in_stmt(stmt: &IrStmt, var: VarId, replacement: &IrExpr) -
             dst: *dst, src: *src, len: sub(len),
         },
         IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: sub(expr) },
-        IrStmtKind::Comment { .. } => stmt.kind.clone(),
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => stmt.kind.clone(),
     };
     IrStmt { kind, span: stmt.span }
 }

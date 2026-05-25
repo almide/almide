@@ -245,6 +245,9 @@ fn count_uses_in_stmt(stmt: &IrStmt, table: &mut VarTable) {
             count_uses_in_expr(cond, table);
             count_uses_in_expr(else_, table);
         }
+        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => {
+            table.increment_use(*var);
+        }
         IrStmtKind::Comment { .. } => {}
     }
 }
@@ -442,6 +445,7 @@ fn bump_vars_in_stmt(stmt: &IrStmt, locals: &HashSet<u32>, table: &mut VarTable)
             bump_vars_in_expr(cond, locals, table);
             bump_vars_in_expr(else_, locals, table);
         }
+        IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
         IrStmtKind::Comment { .. } => {}
     }
 }

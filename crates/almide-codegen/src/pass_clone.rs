@@ -195,7 +195,7 @@ fn count_syntactic_stmt(stmt: &IrStmt, counts: &mut HashMap<VarId, u32>) {
         IrStmtKind::Guard { cond, else_ } => {
             count_syntactic(cond, counts); count_syntactic(else_, counts);
         }
-        IrStmtKind::Comment { .. } => {}
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
     }
 }
 

@@ -615,6 +615,7 @@ fn scan_non_tail_stmt(stmt: &IrStmt, fn_name: &str) -> (bool, bool) {
         IrStmtKind::ListCopySlice { len, .. } => {
             scan_non_tail(len, fn_name)
         }
+        IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => (false, true),
         IrStmtKind::Comment { .. } => (false, true),
     }
 }

@@ -159,7 +159,7 @@ fn hoist_loops_stmt(stmt: &mut IrStmt, vt: &mut VarTable, pure_fns: &HashSet<Sym
             hoist_loops(cond, vt, pure_fns, mm) | hoist_loops(else_, vt, pure_fns, mm)
         }
         IrStmtKind::Expr { expr } => hoist_loops(expr, vt, pure_fns, mm),
-        IrStmtKind::Comment { .. } => false,
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => false,
     }
 }
 
@@ -238,6 +238,7 @@ fn collect_defined_vars_stmts(stmts: &[IrStmt], defined: &mut HashSet<VarId>, mm
                 collect_defined_vars_expr(cond, defined, mm);
                 collect_defined_vars_expr(else_, defined, mm);
             }
+            IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
             IrStmtKind::Comment { .. } => {}
         }
     }
@@ -788,6 +789,7 @@ fn refs_are_outside_loop_stmt(stmt: &IrStmt, loop_defined: &HashSet<VarId>) -> b
             refs_are_outside_loop(cond, loop_defined) && refs_are_outside_loop(else_, loop_defined)
         }
         IrStmtKind::Expr { expr } => refs_are_outside_loop(expr, loop_defined),
+        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => !loop_defined.contains(var),
         IrStmtKind::Comment { .. } => true,
     }
 }
@@ -919,6 +921,7 @@ fn stmt_is_pure_with(stmt: &IrStmt, pure_fns: &HashSet<Sym>) -> bool {
         IrStmtKind::Guard { cond, else_ } => {
             expr_is_pure_with(cond, pure_fns) && expr_is_pure_with(else_, pure_fns)
         }
+        IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => false,
         IrStmtKind::Comment { .. } => true,
     }
 }

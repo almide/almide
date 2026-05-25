@@ -265,7 +265,7 @@ fn transform_stmt(stmt: &mut IrStmt, vt: &mut VarTable, scope_vars: &HashSet<Var
             transform_expr(cond, vt, scope_vars) | transform_expr(else_, vt, scope_vars)
         }
         IrStmtKind::Expr { expr } => transform_expr(expr, vt, scope_vars),
-        IrStmtKind::Comment { .. } => false,
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => false,
     }
 }
 
@@ -526,6 +526,7 @@ fn collect_free_vars_stmt(stmt: &IrStmt, bound: &HashSet<VarId>, free: &mut Hash
             collect_free_vars(else_, bound, free);
         }
         IrStmtKind::Expr { expr } => collect_free_vars(expr, bound, free),
+        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => { free.insert(*var); }
         IrStmtKind::Comment { .. } => {}
     }
 }
@@ -692,6 +693,9 @@ fn replace_vars_stmt(stmt: &mut IrStmt, renames: &std::collections::HashMap<VarI
             replace_vars(cond, renames); replace_vars(else_, renames);
         }
         IrStmtKind::Expr { expr } => replace_vars(expr, renames),
+        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => {
+            if let Some(new_id) = renames.get(var) { *var = *new_id; }
+        }
         IrStmtKind::Comment { .. } => {}
     }
 }
