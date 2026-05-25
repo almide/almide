@@ -120,22 +120,18 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let program_args = std::sync::Arc::new(program_args);
     let results: Vec<(String, i32)> = {
         let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-        // Channel-based semaphore: pre-fill with `cpus` tokens
         let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
         for _ in 0..cpus { let _ = sem_tx.send(()); }
         let sem_tx = std::sync::Arc::new(sem_tx);
         let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
-
         let (tx, rx) = std::sync::mpsc::channel();
         let mut handles = Vec::new();
-
         for (file, compile_result) in compiled {
             let tx = tx.clone();
             let args = program_args.clone();
             let sem_rx = sem_rx.clone();
             let sem_tx = sem_tx.clone();
             handles.push(std::thread::spawn(move || {
-                // Acquire semaphore token
                 let _ = sem_rx.lock().unwrap().recv();
                 let code = match compile_result {
                     Ok(bin) => super::run::run_binary(&bin, &args),
@@ -144,7 +140,6 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
                         1
                     }
                 };
-                // Release semaphore token
                 let _ = sem_tx.send(());
                 let _ = tx.send((file, code));
             }));
