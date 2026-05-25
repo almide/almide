@@ -667,53 +667,185 @@ impl FuncCompiler<'_> {
     }
 
     /// Perceus Rule 3: type-specialized rc_dec.
-    /// For compound types (List[HeapType], etc.), recursively rc_dec children
-    /// before freeing the parent. Expects the pointer on the stack or in local_idx.
-    /// `local_idx` holds the pointer. Emits: if non-null, drop children, then rc_dec.
+    /// For compound types, recursively rc_dec children before freeing the parent.
+    /// `local_idx` holds the pointer. Emits: if non-null && RC==1, drop children, then rc_dec.
     pub(super) fn emit_typed_rc_dec(&mut self, ty: &Ty, local_idx: u32) {
+        use almide_lang::types::TypeConstructorId;
         let rc_dec_fn = self.emitter.rt.rc_dec;
-        // Check if this type has heap children that need recursive drop
-        let inner_heap_ty = match ty {
-            Ty::Applied(almide_lang::types::TypeConstructorId::List, args) => {
-                args.first().filter(|t| Self::is_heap_type(t))
-            }
-            _ => None,
-        };
 
         wasm!(self.func, { local_get(local_idx); });
         wasm!(self.func, { if_empty; });
-        if let Some(inner_ty) = inner_heap_ty {
-            // Rule 3: before freeing the list, check if RC will reach 0.
-            // If so, iterate elements and rc_dec each one.
+
+        // Determine if this type has heap children
+        let has_children = match ty {
+            Ty::Applied(TypeConstructorId::List, args) =>
+                args.first().map_or(false, |t| Self::is_heap_type(t)),
+            Ty::Applied(TypeConstructorId::Option, args) =>
+                args.first().map_or(false, |t| Self::is_heap_type(t)),
+            Ty::Applied(TypeConstructorId::Result, args) =>
+                args.iter().any(|t| Self::is_heap_type(t)),
+            Ty::Applied(TypeConstructorId::Map, args) =>
+                args.iter().any(|t| Self::is_heap_type(t)),
+            Ty::Record { fields } =>
+                fields.iter().any(|(_, t)| Self::is_heap_type(t)),
+            _ => false,
+        };
+
+        if has_children {
             use super::list_layout::{RC_OFFSET, DATA_OFFSET};
-            let inner_size = super::values::byte_size(inner_ty) as i32;
+            // Only drop children when RC will reach 0
             wasm!(self.func, {
-                // Check: RC == 1 → children will be orphaned
                 local_get(local_idx); i32_const(RC_OFFSET); i32_sub; i32_load(0);
                 i32_const(1); i32_le_u;
                 if_empty;
             });
-            // Iterate list elements and rc_dec each
-            let ptr = self.scratch.alloc_i32();
-            let end = self.scratch.alloc_i32();
-            wasm!(self.func, {
-                local_get(local_idx); i32_const(DATA_OFFSET); i32_add; local_set(ptr);
-                local_get(ptr);
-                local_get(local_idx); i32_load(0); i32_const(inner_size); i32_mul;
-                i32_add; local_set(end);
-                block_empty; loop_empty;
-                  local_get(ptr); local_get(end); i32_ge_u; br_if(1);
-                  local_get(ptr); i32_load(0);
-                  if_empty;
-                    local_get(ptr); i32_load(0);
-                    call(rc_dec_fn);
-                  end;
-                  local_get(ptr); i32_const(inner_size); i32_add; local_set(ptr);
-                  br(0);
-                end; end;
-            });
-            self.scratch.free_i32(end);
-            self.scratch.free_i32(ptr);
+
+            match ty {
+                // List[HeapType]: iterate elements
+                Ty::Applied(TypeConstructorId::List, args) => {
+                    let inner_ty = &args[0];
+                    let inner_size = super::values::byte_size(inner_ty) as i32;
+                    let ptr = self.scratch.alloc_i32();
+                    let end = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        local_get(local_idx); i32_const(DATA_OFFSET); i32_add; local_set(ptr);
+                        local_get(ptr);
+                        local_get(local_idx); i32_load(0); i32_const(inner_size); i32_mul;
+                        i32_add; local_set(end);
+                        block_empty; loop_empty;
+                          local_get(ptr); local_get(end); i32_ge_u; br_if(1);
+                          local_get(ptr); i32_load(0);
+                          if_empty; local_get(ptr); i32_load(0); call(rc_dec_fn); end;
+                          local_get(ptr); i32_const(inner_size); i32_add; local_set(ptr);
+                          br(0);
+                        end; end;
+                    });
+                    self.scratch.free_i32(end);
+                    self.scratch.free_i32(ptr);
+                }
+                // Option[HeapType]: tag at offset 0, value at offset 4
+                // WASM Option layout: [tag:i32][value:i32/i64/f64]
+                // tag=0 → None, tag=1 → Some
+                Ty::Applied(TypeConstructorId::Option, args) => {
+                    let inner_ty = &args[0];
+                    if Self::is_heap_type(inner_ty) {
+                        let val_offset = 4i32; // after tag
+                        wasm!(self.func, {
+                            local_get(local_idx); i32_load(0); // tag
+                            if_empty; // tag != 0 → Some
+                              local_get(local_idx); i32_load(val_offset as u32);
+                              if_empty;
+                                local_get(local_idx); i32_load(val_offset as u32);
+                                call(rc_dec_fn);
+                              end;
+                            end;
+                        });
+                    }
+                }
+                // Result[T, E]: tag at offset 0, value at offset 4
+                Ty::Applied(TypeConstructorId::Result, args) => {
+                    for (i, arg) in args.iter().enumerate() {
+                        if Self::is_heap_type(arg) {
+                            let tag_val = i as i32; // 0=Ok, 1=Err
+                            let val_offset = 4i32;
+                            wasm!(self.func, {
+                                local_get(local_idx); i32_load(0); // tag
+                                i32_const(tag_val); i32_eq;
+                                if_empty;
+                                  local_get(local_idx); i32_load(val_offset as u32);
+                                  if_empty;
+                                    local_get(local_idx); i32_load(val_offset as u32);
+                                    call(rc_dec_fn);
+                                  end;
+                                end;
+                            });
+                        }
+                    }
+                }
+                // Record { fields }: rc_dec each heap-typed field at known offset
+                Ty::Record { fields } => {
+                    let mut sorted: Vec<_> = fields.iter().collect();
+                    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+                    let mut offset = 0u32;
+                    for (_, field_ty) in &sorted {
+                        if Self::is_heap_type(field_ty) {
+                            wasm!(self.func, {
+                                local_get(local_idx); i32_load(offset);
+                                if_empty;
+                                  local_get(local_idx); i32_load(offset);
+                                  call(rc_dec_fn);
+                                end;
+                            });
+                        }
+                        offset += super::values::byte_size(field_ty) as u32;
+                    }
+                }
+                // Map[K, V]: iterate tag array + data, rc_dec live entries
+                Ty::Applied(TypeConstructorId::Map, args) => {
+                    // Swiss Table: [len][cap][tag_array][data_array]
+                    // tag_array: cap bytes (0x80=empty, else=occupied)
+                    // data: cap × (key_size + val_size) bytes
+                    let key_ty = args.get(0);
+                    let val_ty = args.get(1);
+                    let key_heap = key_ty.map_or(false, |t| Self::is_heap_type(t));
+                    let val_heap = val_ty.map_or(false, |t| Self::is_heap_type(t));
+                    if key_heap || val_heap {
+                        let key_size = key_ty.map_or(8, |t| super::values::byte_size(t)) as i32;
+                        let val_size = val_ty.map_or(8, |t| super::values::byte_size(t)) as i32;
+                        let entry_size = key_size + val_size;
+                        let idx = self.scratch.alloc_i32();
+                        let cap = self.scratch.alloc_i32();
+                        let tag_base = self.scratch.alloc_i32();
+                        let data_base = self.scratch.alloc_i32();
+                        wasm!(self.func, {
+                            local_get(local_idx); i32_load(4); local_set(cap); // cap at offset 4
+                            local_get(local_idx); i32_const(8); i32_add; local_set(tag_base); // tags at offset 8
+                            local_get(tag_base); local_get(cap); i32_add; local_set(data_base); // data after tags
+                            i32_const(0); local_set(idx);
+                            block_empty; loop_empty;
+                              local_get(idx); local_get(cap); i32_ge_u; br_if(1);
+                              // Check tag: occupied if tag & 0x80 == 0
+                              local_get(tag_base); local_get(idx); i32_add; i32_load8_u(0);
+                              i32_const(0x80); i32_and; i32_eqz;
+                              if_empty;
+                        });
+                        // rc_dec key if heap
+                        if key_heap {
+                            wasm!(self.func, {
+                                local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
+                                i32_load(0);
+                                if_empty;
+                                  local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
+                                  i32_load(0); call(rc_dec_fn);
+                                end;
+                            });
+                        }
+                        // rc_dec value if heap
+                        if val_heap {
+                            wasm!(self.func, {
+                                local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
+                                i32_const(key_size); i32_add; i32_load(0);
+                                if_empty;
+                                  local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
+                                  i32_const(key_size); i32_add; i32_load(0); call(rc_dec_fn);
+                                end;
+                            });
+                        }
+                        wasm!(self.func, {
+                              end; // end occupied check
+                              local_get(idx); i32_const(1); i32_add; local_set(idx);
+                              br(0);
+                            end; end;
+                        });
+                        self.scratch.free_i32(data_base);
+                        self.scratch.free_i32(tag_base);
+                        self.scratch.free_i32(cap);
+                        self.scratch.free_i32(idx);
+                    }
+                }
+                _ => {}
+            }
+
             wasm!(self.func, { end; }); // end RC==1 check
         }
         // Now rc_dec the parent
