@@ -224,8 +224,13 @@ impl FuncCompiler<'_> {
                     span: None,
                     def_id: None,
                 };
+                // Only enable iter_scope when the loop body actually allocates
+                // heap memory (string/list/record/map construction or calls
+                // returning heap types). Pure-int loops like fib skip the
+                // save/restore entirely.
                 let iter_scope = !body.is_empty()
-                    && !self.expr_writes_outer_heap(&loop_body_expr);
+                    && !self.expr_writes_outer_heap(&loop_body_expr)
+                    && self.expr_allocates_heap(&loop_body_expr);
                 let iter_scope_local = if iter_scope {
                     Some(self.scratch.alloc_i32())
                 } else { None };

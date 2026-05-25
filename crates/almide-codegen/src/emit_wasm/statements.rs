@@ -683,6 +683,89 @@ impl FuncCompiler<'_> {
         scanner.visit_expr(expr);
         scanner.found
     }
+
+    /// Check if an expression allocates heap memory (string/list/record construction,
+    /// or calls returning heap types). Used to decide if iter_scope is worthwhile.
+    pub(super) fn expr_allocates_heap(&self, expr: &IrExpr) -> bool {
+        struct AllocScanner { found: bool }
+        impl IrVisitor for AllocScanner {
+            fn visit_expr(&mut self, expr: &IrExpr) {
+                if self.found { return; }
+                match &expr.kind {
+                    // Direct heap allocations
+                    IrExprKind::LitStr { .. }
+                    | IrExprKind::StringInterp { .. }
+                    | IrExprKind::List { .. }
+                    | IrExprKind::Record { .. }
+                    | IrExprKind::MapLiteral { .. } => {
+                        self.found = true;
+                        return;
+                    }
+                    // Calls that return heap types
+                    IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
+                    | IrExprKind::RuntimeCall { .. } => {
+                        if matches!(&expr.ty, Ty::String | Ty::Applied(_, _)
+                            | Ty::Record { .. } | Ty::Unknown)
+                        {
+                            self.found = true;
+                            return;
+                        }
+                    }
+                    // String concat
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                        self.found = true;
+                        return;
+                    }
+                    _ => {}
+                }
+                walk_expr(self, expr);
+            }
+            fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+                if self.found { return; }
+                walk_stmt(self, stmt);
+            }
+        }
+        let mut scanner = AllocScanner { found: false };
+        scanner.visit_expr(expr);
+        scanner.found
+    }
+
+    /// Check if an expression contains function calls that may allocate heap memory.
+    /// A call is "heap-allocating" if it returns a heap type (String, List, Record, etc.).
+    /// Pure-int recursive calls (like fib) don't allocate and shouldn't trigger iter_scope.
+    pub(super) fn expr_contains_heap_call(&self, expr: &IrExpr) -> bool {
+        struct HeapCallScanner { found: bool }
+        impl IrVisitor for HeapCallScanner {
+            fn visit_expr(&mut self, expr: &IrExpr) {
+                if self.found { return; }
+                match &expr.kind {
+                    IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
+                    | IrExprKind::RuntimeCall { .. } => {
+                        if HeapWriteScanner::is_heap_type(&expr.ty) {
+                            self.found = true;
+                            return;
+                        }
+                    }
+                    _ => {}
+                }
+                walk_expr(self, expr);
+            }
+            fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+                if self.found { return; }
+                walk_stmt(self, stmt);
+            }
+        }
+        // Reuse HeapWriteScanner's is_heap_type (already handles String, Applied, Record, Unknown)
+        struct HeapWriteScanner;
+        impl HeapWriteScanner {
+            fn is_heap_type(ty: &Ty) -> bool {
+                matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown)
+            }
+        }
+        let mut scanner = HeapCallScanner { found: false };
+        scanner.visit_expr(expr);
+        scanner.found
+    }
 }
 
 /// Infer the type of a bind value from its IR expression structure.
