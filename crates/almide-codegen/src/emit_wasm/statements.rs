@@ -641,6 +641,10 @@ impl FuncCompiler<'_> {
         }
     }
 
+    fn is_heap_type(ty: &Ty) -> bool {
+        matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown)
+    }
+
     /// Check if an expression writes to outer-scope mutable variables with heap types.
     /// Used by auto-scope to determine if heap_restore is safe.
     pub(super) fn expr_writes_outer_heap(&self, expr: &IrExpr) -> bool {
@@ -657,7 +661,7 @@ impl FuncCompiler<'_> {
                     | IrStmtKind::IndexAssign { target: var, .. }
                     | IrStmtKind::FieldAssign { target: var, .. } => {
                         let ty = &self.var_table.get(*var).ty;
-                        if Self::is_heap_type(ty) {
+                        if FuncCompiler::is_heap_type(ty) {
                             self.found = true;
                         }
                     }
@@ -670,19 +674,55 @@ impl FuncCompiler<'_> {
                 walk_expr(self, expr);
             }
         }
-        impl HeapWriteScanner<'_> {
-            fn is_heap_type(ty: &Ty) -> bool {
-                matches!(ty, Ty::String
-                    | Ty::Applied(_, _)
-                    | Ty::Record { .. }
-                    | Ty::Unknown
-                )
-            }
-        }
         let mut scanner = HeapWriteScanner { var_table: self.var_table, found: false };
         scanner.visit_expr(expr);
         scanner.found
     }
+
+    /// Check if an expression allocates heap memory (string/list/record construction,
+    /// or calls returning heap types). Used to decide if iter_scope is worthwhile.
+    pub(super) fn expr_allocates_heap(&self, expr: &IrExpr) -> bool {
+        struct AllocScanner { found: bool }
+        impl IrVisitor for AllocScanner {
+            fn visit_expr(&mut self, expr: &IrExpr) {
+                if self.found { return; }
+                match &expr.kind {
+                    // Direct heap allocations
+                    IrExprKind::LitStr { .. }
+                    | IrExprKind::StringInterp { .. }
+                    | IrExprKind::List { .. }
+                    | IrExprKind::Record { .. }
+                    | IrExprKind::MapLiteral { .. } => {
+                        self.found = true;
+                        return;
+                    }
+                    // Calls that return heap types
+                    IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
+                    | IrExprKind::RuntimeCall { .. } => {
+                        if FuncCompiler::is_heap_type(&expr.ty) {
+                            self.found = true;
+                            return;
+                        }
+                    }
+                    // String concat
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                        self.found = true;
+                        return;
+                    }
+                    _ => {}
+                }
+                walk_expr(self, expr);
+            }
+            fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+                if self.found { return; }
+                walk_stmt(self, stmt);
+            }
+        }
+        let mut scanner = AllocScanner { found: false };
+        scanner.visit_expr(expr);
+        scanner.found
+    }
+
 }
 
 /// Infer the type of a bind value from its IR expression structure.
