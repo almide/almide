@@ -1408,14 +1408,18 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(src_local);
     }
 
-    /// Detect if a lambda body is a simple SIMD-eligible operation on Int elements.
-    /// Returns (op, constant) if the body is `x * k`, `x + k`, or `x - k`.
-    /// Check if an expression is a single-use variable (use_count == 1).
-    /// Safe for Perceus: the value is consumed here and can be freed after.
+    /// Check if a list expression is consumed exactly once (safe for in-place reuse).
+    /// True for: single-use variables (use_count == 1) OR temporary expressions
+    /// (Call results, RuntimeCall results) that are not bound to any variable.
     fn is_single_use_var(&self, expr: &IrExpr) -> bool {
-        if let IrExprKind::Var { id } = &expr.kind {
-            self.var_table.get(*id).use_count == 1
-        } else { false }
+        match &expr.kind {
+            IrExprKind::Var { id } => self.var_table.get(*id).use_count == 1,
+            // Temporary expression results: consumed exactly here, never aliased
+            IrExprKind::Call { .. }
+            | IrExprKind::TailCall { .. }
+            | IrExprKind::RuntimeCall { .. } => true,
+            _ => false,
+        }
     }
 
     fn detect_simd_map_op(fn_arg: &IrExpr) -> Option<(SimdMapOp, i64)> {
