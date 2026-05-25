@@ -221,10 +221,11 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
     }
 
     let mut map = HashMap::new();
-    let mut keys: Vec<Vec<String>> = seen.into_iter().collect();
-    keys.sort();
-    for (i, key) in keys.into_iter().enumerate() {
-        map.insert(key, format!("AlmdRec{}", i));
+    for key in seen {
+        // Derive struct name from sorted field names to prevent cross-crate
+        // collisions. Two records with different fields must never share a name.
+        let name = format!("AlmdRec_{}", key.join("_"));
+        map.insert(key, name);
     }
     map
 }

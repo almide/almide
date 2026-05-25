@@ -297,6 +297,49 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 let placeholder = format!("{{{}}}", name.as_str());
                 out = out.replace(&placeholder, &rendered);
             }
+            // Rewrite legacy AlmdRec{N} references to field-name-based names.
+            // @inline_rust templates in dependency packages may contain hardcoded
+            // AlmdRec0, AlmdRec1 etc. that no longer match the current naming.
+            // Extract all AlmdRec{digits} tokens, then resolve each by matching
+            // the constructor's field names against the anon_records map.
+            if out.contains("AlmdRec") {
+                let mut legacy_names: Vec<String> = Vec::new();
+                let bytes = out.as_bytes();
+                let prefix = b"AlmdRec";
+                let mut pos = 0;
+                while pos + prefix.len() < bytes.len() {
+                    if bytes[pos..].starts_with(prefix) {
+                        let start = pos;
+                        pos += prefix.len();
+                        // Consume trailing digits
+                        let digit_start = pos;
+                        while pos < bytes.len() && bytes[pos].is_ascii_digit() { pos += 1; }
+                        if pos > digit_start {
+                            let name = std::str::from_utf8(&bytes[start..pos]).unwrap().to_string();
+                            // Skip names that are already field-based (contain '_' after "AlmdRec")
+                            if !name.contains('_') {
+                                legacy_names.push(name);
+                            }
+                        }
+                    } else {
+                        pos += 1;
+                    }
+                }
+                legacy_names.sort();
+                legacy_names.dedup();
+                for legacy in &legacy_names {
+                    let matched = ctx.ann.anon_records.iter().find(|(field_names, _)| {
+                        field_names.iter().all(|f| {
+                            let pattern = format!("{} {{ {}: ", legacy, f);
+                            let pattern2 = format!(", {}: ", f);
+                            out.contains(&pattern) || out.contains(&pattern2)
+                        })
+                    });
+                    if let Some((_, struct_name)) = matched {
+                        out = out.replace(legacy, struct_name);
+                    }
+                }
+            }
             out
         }
 
