@@ -1223,6 +1223,10 @@ impl FuncCompiler<'_> {
 
         let direct_fn = self.try_resolve_direct_call(fn_arg);
 
+        // Perceus in-place reuse: if source is single-use AND element sizes match,
+        // skip allocation and write mapped results directly into the source list.
+        let in_place = self.is_single_use_var(list_arg) && in_size == out_size;
+
         self.emit_expr(list_arg);
         wasm!(self.func, { local_set(src_local); });
         if direct_fn.is_none() && !matches!(&fn_arg.kind, almide_ir::IrExprKind::Lambda { .. }) {
@@ -1230,18 +1234,29 @@ impl FuncCompiler<'_> {
             wasm!(self.func, { local_set(closure_local); });
         }
         let len_local = self.scratch.alloc_i32();
-        wasm!(self.func, {
-            local_get(src_local); i32_load(0); local_set(len_local);
-            // alloc dst
-            i32_const(super::list_layout::HEADER_SIZE);
-            local_get(len_local); i32_const(out_size as i32); i32_mul; i32_add;
-            call(self.emitter.rt.alloc); local_set(dst_local);
-            local_get(dst_local); local_get(len_local); i32_store(0);
-            // Pointer-based iteration
-            local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(src_ptr);
-            local_get(dst_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(dst_ptr);
-            local_get(src_ptr); local_get(len_local); i32_const(in_size as i32); i32_mul; i32_add; local_set(end_ptr);
-        });
+        if in_place {
+            // In-place: dst = src (no allocation)
+            wasm!(self.func, {
+                local_get(src_local); i32_load(0); local_set(len_local);
+                local_get(src_local); local_set(dst_local);
+                local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(src_ptr);
+                local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(dst_ptr);
+                local_get(src_ptr); local_get(len_local); i32_const(in_size as i32); i32_mul; i32_add; local_set(end_ptr);
+            });
+        } else {
+            wasm!(self.func, {
+                local_get(src_local); i32_load(0); local_set(len_local);
+                // alloc dst
+                i32_const(super::list_layout::HEADER_SIZE);
+                local_get(len_local); i32_const(out_size as i32); i32_mul; i32_add;
+                call(self.emitter.rt.alloc); local_set(dst_local);
+                local_get(dst_local); local_get(len_local); i32_store(0);
+                // Pointer-based iteration
+                local_get(src_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(src_ptr);
+                local_get(dst_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(dst_ptr);
+                local_get(src_ptr); local_get(len_local); i32_const(in_size as i32); i32_mul; i32_add; local_set(end_ptr);
+            });
+        }
 
         // SIMD fast path: process 8 i64 elements per iteration (4× v128 unrolled)
         if let Some((simd_kind, simd_const_val)) = simd_op {
@@ -1360,9 +1375,8 @@ impl FuncCompiler<'_> {
         self.depth_pop(depth_guard);
         wasm!(self.func, { end; end; });
 
-        // Perceus: if source was single-use, free it via rc_dec.
-        // Safe because the map loop is complete — source data is no longer accessed.
-        if self.is_single_use_var(list_arg) {
+        // Perceus: if source was single-use and NOT in-place, free via rc_dec.
+        if !in_place && self.is_single_use_var(list_arg) {
             wasm!(self.func, { local_get(src_local); call(self.emitter.rt.rc_dec); });
         }
 
