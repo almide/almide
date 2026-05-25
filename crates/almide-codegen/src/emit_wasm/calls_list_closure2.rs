@@ -757,6 +757,8 @@ impl FuncCompiler<'_> {
                 // Pointer-based iteration + branchless write
                 let elem_ty = self.resolve_list_elem(&args[0], args.get(1));
                 let elem_size = values::byte_size(&elem_ty);
+                // Perceus in-place reuse: single-use source → write results into same buffer
+                let in_place = self.is_single_use_var(&args[0]);
                 let src = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
@@ -771,24 +773,39 @@ impl FuncCompiler<'_> {
                     self.emit_expr(&args[1]);
                     wasm!(self.func, { local_set(closure); });
                 }
-                wasm!(self.func, {
-                    // Alloc max-size output
-                    i32_const(super::list_layout::HEADER_SIZE);
-                    local_get(src); i32_load(0);
-                    i32_const(elem_size as i32); i32_mul; i32_add;
-                    call(self.emitter.rt.alloc); local_set(dst);
-                    i32_const(0); local_set(out_count);
-                    // src_ptr = src + DATA_OFFSET
-                    local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                    local_tee(src_ptr);
-                    // end_ptr = src_ptr + len * elem_size
-                    local_get(src); i32_load(0); i32_const(elem_size as i32); i32_mul;
-                    i32_add; local_set(end_ptr);
-                    // dst_ptr = dst + DATA_OFFSET
-                    local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                    local_set(dst_ptr);
-                    block_empty; loop_empty;
-                });
+                if in_place {
+                    // In-place: dst = src (compact matching elements to front)
+                    wasm!(self.func, {
+                        i32_const(0); local_set(out_count);
+                        local_get(src); local_set(dst);
+                        local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_tee(src_ptr);
+                        local_get(src); i32_load(0); i32_const(elem_size as i32); i32_mul;
+                        i32_add; local_set(end_ptr);
+                        local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_set(dst_ptr);
+                        block_empty; loop_empty;
+                    });
+                } else {
+                    wasm!(self.func, {
+                        // Alloc max-size output
+                        i32_const(super::list_layout::HEADER_SIZE);
+                        local_get(src); i32_load(0);
+                        i32_const(elem_size as i32); i32_mul; i32_add;
+                        call(self.emitter.rt.alloc); local_set(dst);
+                        i32_const(0); local_set(out_count);
+                        // src_ptr = src + DATA_OFFSET
+                        local_get(src); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_tee(src_ptr);
+                        // end_ptr = src_ptr + len * elem_size
+                        local_get(src); i32_load(0); i32_const(elem_size as i32); i32_mul;
+                        i32_add; local_set(end_ptr);
+                        // dst_ptr = dst + DATA_OFFSET
+                        local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                        local_set(dst_ptr);
+                        block_empty; loop_empty;
+                    });
+                }
                 let depth_guard = self.depth_push_n(2);
                 wasm!(self.func, {
                     local_get(src_ptr); local_get(end_ptr); i32_ge_u; br_if(1);
