@@ -354,13 +354,15 @@ fn insert_rc_ops(func: &mut IrFunction, var_table: &VarTable) -> bool {
     let mut changed = false;
 
     // Recursively process ALL blocks in the function body
-    if insert_rc_in_expr(&mut func.body, var_table) { changed = true; }
+    let mut dropped_vars: HashSet<VarId> = HashSet::new();
+    if insert_rc_in_expr(&mut func.body, var_table, &mut dropped_vars) { changed = true; }
 
-    // Rule 4: Function-exit RcDec for multi-use heap locals (top-level only)
+    // Rule 4: Function-exit RcDec for multi-use heap locals NOT already dropped by Rule 2
     if let IrExprKind::Block { stmts, .. } = &mut func.body.kind {
         let mut exit_vars = Vec::new();
         collect_heap_binds_from_stmts(stmts, var_table, &mut exit_vars);
         for var in exit_vars {
+            if dropped_vars.contains(&var) { continue; } // Rule 2 already handled
             let use_count = var_table.get(var).use_count;
             if use_count <= 1 { continue; }
             stmts.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
@@ -375,7 +377,7 @@ fn insert_rc_ops(func: &mut IrFunction, var_table: &VarTable) -> bool {
 }
 
 /// Recursively insert RC operations in all blocks within an expression.
-fn insert_rc_in_expr(expr: &mut IrExpr, var_table: &VarTable) -> bool {
+fn insert_rc_in_expr(expr: &mut IrExpr, var_table: &VarTable, dropped_vars: &mut HashSet<VarId>) -> bool {
     let mut changed = false;
     match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
@@ -415,44 +417,45 @@ fn insert_rc_in_expr(expr: &mut IrExpr, var_table: &VarTable) -> bool {
             }
             *stmts = new_stmts;
 
-            // Rule 2: last-use drops
-            insert_last_use_drops(stmts, tail.as_deref(), var_table);
+            // Rule 2: last-use drops (returns set of vars that were dropped)
+            let dropped_by_rule2 = insert_last_use_drops(stmts, tail.as_deref(), var_table);
+            dropped_vars.extend(&dropped_by_rule2);
 
             // Recurse into statement values and nested blocks
             for stmt in stmts.iter_mut() {
                 match &mut stmt.kind {
-                    IrStmtKind::Bind { value, .. } => { insert_rc_in_expr(value, var_table); }
-                    IrStmtKind::Assign { value, .. } => { insert_rc_in_expr(value, var_table); }
-                    IrStmtKind::Expr { expr } => { insert_rc_in_expr(expr, var_table); }
+                    IrStmtKind::Bind { value, .. } => { insert_rc_in_expr(value, var_table, dropped_vars); }
+                    IrStmtKind::Assign { value, .. } => { insert_rc_in_expr(value, var_table, dropped_vars); }
+                    IrStmtKind::Expr { expr } => { insert_rc_in_expr(expr, var_table, dropped_vars); }
                     IrStmtKind::Guard { cond, else_ } => {
-                        insert_rc_in_expr(cond, var_table);
-                        insert_rc_in_expr(else_, var_table);
+                        insert_rc_in_expr(cond, var_table, dropped_vars);
+                        insert_rc_in_expr(else_, var_table, dropped_vars);
                     }
                     _ => {}
                 }
             }
-            if let Some(tail) = tail { insert_rc_in_expr(tail, var_table); }
+            if let Some(tail) = tail { insert_rc_in_expr(tail, var_table, dropped_vars); }
         }
         IrExprKind::If { cond, then, else_ } => {
-            insert_rc_in_expr(cond, var_table);
-            insert_rc_in_expr(then, var_table);
-            insert_rc_in_expr(else_, var_table);
+            insert_rc_in_expr(cond, var_table, dropped_vars);
+            insert_rc_in_expr(then, var_table, dropped_vars);
+            insert_rc_in_expr(else_, var_table, dropped_vars);
         }
         IrExprKind::Match { subject, arms } => {
-            insert_rc_in_expr(subject, var_table);
+            insert_rc_in_expr(subject, var_table, dropped_vars);
             for arm in arms {
-                insert_rc_in_expr(&mut arm.body, var_table);
+                insert_rc_in_expr(&mut arm.body, var_table, dropped_vars);
             }
         }
         IrExprKind::While { cond, body } => {
-            insert_rc_in_expr(cond, var_table);
+            insert_rc_in_expr(cond, var_table, dropped_vars);
             // Apply Rule 1 (RcInc) and Rule 3 (Assign RcDec) to while body
-            process_stmt_list(body, var_table);
+            process_stmt_list(body, var_table, dropped_vars);
         }
-        IrExprKind::Lambda { body, .. } => { insert_rc_in_expr(body, var_table); }
+        IrExprKind::Lambda { body, .. } => { insert_rc_in_expr(body, var_table, dropped_vars); }
         IrExprKind::ForIn { iterable, body, .. } => {
-            insert_rc_in_expr(iterable, var_table);
-            process_stmt_list(body, var_table);
+            insert_rc_in_expr(iterable, var_table, dropped_vars);
+            process_stmt_list(body, var_table, dropped_vars);
         }
         _ => {}
     }
@@ -460,7 +463,7 @@ fn insert_rc_in_expr(expr: &mut IrExpr, var_table: &VarTable) -> bool {
 }
 
 /// Rule 2: Insert RcDec after the last use of each heap-typed local in a block.
-fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_table: &VarTable) {
+fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_table: &VarTable) -> HashSet<VarId> {
     // Collect heap-typed locals bound in this block
     let mut block_locals: HashMap<VarId, Ty> = HashMap::new();
     for stmt in stmts.iter() {
@@ -470,7 +473,7 @@ fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_tab
             }
         }
     }
-    if block_locals.is_empty() { return; }
+    if block_locals.is_empty() { return HashSet::new(); }
 
     // Variables used in tail expression — don't drop (they're returned)
     let mut tail_vars: HashSet<VarId> = HashSet::new();
@@ -515,11 +518,14 @@ fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_tab
             }
         }
     }
+
+    // Return set of vars dropped by Rule 2
+    insertions.values().flat_map(|v| v.iter().copied()).collect()
 }
 
 /// Apply Rule 1 (RcInc for alias) and Rule 3 (RcDec for Assign) to a statement list.
 /// Used for while/for-in bodies that aren't full Block expressions.
-fn process_stmt_list(stmts: &mut Vec<IrStmt>, var_table: &VarTable) {
+fn process_stmt_list(stmts: &mut Vec<IrStmt>, var_table: &VarTable, dropped_vars: &mut HashSet<VarId>) {
     let mut new_stmts = Vec::new();
     for stmt in stmts.drain(..) {
         match &stmt.kind {
@@ -555,9 +561,9 @@ fn process_stmt_list(stmts: &mut Vec<IrStmt>, var_table: &VarTable) {
     // Recurse into statement values
     for stmt in stmts.iter_mut() {
         match &mut stmt.kind {
-            IrStmtKind::Bind { value, .. } => { insert_rc_in_expr(value, var_table); }
-            IrStmtKind::Assign { value, .. } => { insert_rc_in_expr(value, var_table); }
-            IrStmtKind::Expr { expr } => { insert_rc_in_expr(expr, var_table); }
+            IrStmtKind::Bind { value, .. } => { insert_rc_in_expr(value, var_table, dropped_vars); }
+            IrStmtKind::Assign { value, .. } => { insert_rc_in_expr(value, var_table, dropped_vars); }
+            IrStmtKind::Expr { expr } => { insert_rc_in_expr(expr, var_table, dropped_vars); }
             _ => {}
         }
     }
