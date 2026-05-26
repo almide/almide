@@ -132,7 +132,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     format!("RcCow::new({})", value_s)
                 };
                 return ctx.templates.render_with("var_binding", None, &[], &[("name", name_s.as_str()), ("type", val_type.as_str()), ("value", val_value.as_str())])
-                    .unwrap_or_else(|| format!("let mut {} = {};", name_s, val_value));
+                    .unwrap_or_else(|| if name_s == "_" { format!("let {}: {} = {};", name_s, val_type, val_value) } else { format!("let mut {}: {} = {};", name_s, val_type, val_value) });
             }
             // Non-RcCow var binding: if value comes from a borrowed param, clone it
             let value_s = if matches!(mutability, Mutability::Var) && !ctx.ann.is_rc_cow(var) {
@@ -146,7 +146,9 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 };
                 if needs_clone { format!("{}.clone()", value_s) } else { value_s }
             } else { value_s };
+            let is_wildcard = name_s == "_";
             let construct = match mutability {
+                _ if is_wildcard => "let_binding",
                 Mutability::Let if needs_mut => "var_binding",
                 Mutability::Let => "let_binding",
                 Mutability::Var => "var_binding",
