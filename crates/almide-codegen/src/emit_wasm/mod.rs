@@ -1946,6 +1946,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
+            used_stdlib_modules: Default::default(),
         };
         let bytes = emit(&program);
         assert_eq!(&bytes[0..4], b"\0asm");

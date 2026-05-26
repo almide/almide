@@ -63,6 +63,7 @@ dependencies = [
  "almide-ir",
  "almide-lang",
  "egg",
+ "proptest",
  "serde",
  "serde_json",
  "toml",

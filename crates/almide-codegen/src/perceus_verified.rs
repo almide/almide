@@ -192,10 +192,8 @@ mod tests {
     use super::*;
 
     /// Corresponds to Lean theorem: `perceus_strictly_better`
-    /// Without Dec: leaked. With Dec: freed.
     #[test]
     fn test_strictly_better() {
-        // Without Dec
         let stmts_leak = vec![
             IrStmt { kind: IrStmtKind::Bind {
                 var: VarId(0), ty: Ty::String,
@@ -204,9 +202,8 @@ mod tests {
                     ty: Ty::String, span: None, def_id: None },
             }, span: None },
         ];
-        assert!(!has_dec(&stmts_leak, VarId(0))); // leaked
+        assert!(!has_dec(&stmts_leak, VarId(0)));
 
-        // With Dec
         let stmts_freed = vec![
             IrStmt { kind: IrStmtKind::Bind {
                 var: VarId(0), ty: Ty::String,
@@ -216,7 +213,304 @@ mod tests {
             }, span: None },
             IrStmt { kind: IrStmtKind::RcDec { var: VarId(0) }, span: None },
         ];
-        assert!(has_dec(&stmts_freed, VarId(0))); // freed
-        assert!(is_freed(&stmts_freed, VarId(0))); // RC = 0
+        assert!(has_dec(&stmts_freed, VarId(0)));
+        assert!(is_freed(&stmts_freed, VarId(0)));
+    }
+}
+
+/// Property-based tests: verify Lean/Rust algorithm consistency.
+///
+/// Each test corresponds to a Lean 4 theorem in AlmidePerceusBelt.
+/// proptest generates random IR structures; if any property fails,
+/// the Rust implementation diverges from the Lean-proven spec.
+#[cfg(test)]
+mod proptest_lean_rust {
+    use super::*;
+    use proptest::prelude::*;
+
+    // ── Strategies ──
+
+    fn arb_var_id() -> impl Strategy<Value = VarId> {
+        (0u32..8).prop_map(VarId)
+    }
+
+    fn arb_heap_ty() -> impl Strategy<Value = Ty> {
+        prop_oneof![
+            Just(Ty::String),
+            Just(Ty::Unknown),
+        ]
+    }
+
+    fn arb_nonheap_ty() -> impl Strategy<Value = Ty> {
+        prop_oneof![
+            Just(Ty::Int),
+            Just(Ty::Float),
+            Just(Ty::Bool),
+            Just(Ty::Unit),
+        ]
+    }
+
+    fn arb_ty() -> impl Strategy<Value = Ty> {
+        prop_oneof![arb_heap_ty(), arb_nonheap_ty()]
+    }
+
+    fn dummy_expr(ty: Ty) -> IrExpr {
+        IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty, span: None, def_id: None }
+    }
+
+    fn arb_stmt() -> impl Strategy<Value = IrStmt> {
+        prop_oneof![
+            arb_var_id().prop_map(|v| IrStmt {
+                kind: IrStmtKind::RcInc { var: v }, span: None,
+            }),
+            arb_var_id().prop_map(|v| IrStmt {
+                kind: IrStmtKind::RcDec { var: v }, span: None,
+            }),
+            (arb_var_id(), arb_ty()).prop_map(|(v, ty)| IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: v, ty: ty.clone(),
+                    mutability: almide_ir::Mutability::Let,
+                    value: dummy_expr(ty),
+                },
+                span: None,
+            }),
+        ]
+    }
+
+    fn arb_stmts() -> impl Strategy<Value = Vec<IrStmt>> {
+        prop::collection::vec(arb_stmt(), 0..20)
+    }
+
+    // ── Lean theorem: countDecs / countIncs correctness ──
+    // These test that our Rust count_decs/count_incs match the
+    // Lean definitions: filter + count on RcDec/RcInc nodes.
+
+    proptest! {
+        /// Lean: `def countDecs (fb : FnBody) (v : VarId) : Nat`
+        #[test]
+        fn count_decs_is_filter_count(stmts in arb_stmts(), var in arb_var_id()) {
+            let expected = stmts.iter()
+                .filter(|s| matches!(&s.kind, IrStmtKind::RcDec { var: v } if *v == var))
+                .count();
+            prop_assert_eq!(count_decs(&stmts, var), expected);
+        }
+
+        /// Lean: `def countIncs (fb : FnBody) (v : VarId) : Nat`
+        #[test]
+        fn count_incs_is_filter_count(stmts in arb_stmts(), var in arb_var_id()) {
+            let expected = stmts.iter()
+                .filter(|s| matches!(&s.kind, IrStmtKind::RcInc { var: v } if *v == var))
+                .count();
+            prop_assert_eq!(count_incs(&stmts, var), expected);
+        }
+    }
+
+    // ── Lean theorem: insertDec_adds_one ──
+    // Adding one RcDec increases countDecs by exactly 1.
+
+    proptest! {
+        #[test]
+        fn insert_dec_adds_one(stmts in arb_stmts(), var in arb_var_id()) {
+            let before = count_decs(&stmts, var);
+            let mut with_dec = stmts;
+            with_dec.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
+            prop_assert_eq!(count_decs(&with_dec, var), before + 1);
+        }
+    }
+
+    // ── Lean theorem: insertDec_keeps_incs ──
+    // Adding RcDec does not change countIncs.
+
+    proptest! {
+        #[test]
+        fn insert_dec_keeps_incs(stmts in arb_stmts(), var in arb_var_id()) {
+            let before = count_incs(&stmts, var);
+            let mut with_dec = stmts;
+            with_dec.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
+            prop_assert_eq!(count_incs(&with_dec, var), before);
+        }
+    }
+
+    // ── Lean theorem: single_dec_frees ──
+    // Fresh variable (0 incs) + 1 Dec = freed (RC reaches 0).
+
+    proptest! {
+        #[test]
+        fn single_dec_frees(var in arb_var_id()) {
+            let stmts = vec![
+                IrStmt { kind: IrStmtKind::RcDec { var }, span: None },
+            ];
+            prop_assert!(is_freed(&stmts, var), "single Dec must free a fresh var");
+        }
+    }
+
+    // ── Lean theorem: inc_dec_is_id ──
+    // Adding an Inc+Dec pair is identity: freed status unchanged.
+
+    proptest! {
+        #[test]
+        fn inc_dec_is_identity(stmts in arb_stmts(), var in arb_var_id()) {
+            let freed_before = is_freed(&stmts, var);
+            let mut with_pair = stmts;
+            with_pair.push(IrStmt { kind: IrStmtKind::RcInc { var }, span: None });
+            with_pair.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
+            prop_assert_eq!(
+                is_freed(&with_pair, var), freed_before,
+                "Inc+Dec pair must not change freed status"
+            );
+        }
+    }
+
+    // ── Lean definition: isFreed ↔ countDecs == countIncs + 1 ──
+
+    proptest! {
+        #[test]
+        fn freed_iff_decs_eq_incs_plus_one(stmts in arb_stmts(), var in arb_var_id()) {
+            let freed = is_freed(&stmts, var);
+            let expected = count_decs(&stmts, var) == count_incs(&stmts, var) + 1;
+            prop_assert_eq!(freed, expected);
+        }
+    }
+
+    // ── Lean definition: hasDec ↔ countDecs ≥ 1 ──
+
+    proptest! {
+        #[test]
+        fn has_dec_iff_count_ge_one(stmts in arb_stmts(), var in arb_var_id()) {
+            let has = has_dec(&stmts, var);
+            let expected = count_decs(&stmts, var) >= 1;
+            prop_assert_eq!(has, expected);
+        }
+    }
+
+    // ── Lean: Ty.isHeap classification ──
+
+    proptest! {
+        #[test]
+        fn heap_type_is_heap(ty in arb_heap_ty()) {
+            prop_assert!(is_heap_type(&ty), "String/Unknown must be heap");
+        }
+
+        #[test]
+        fn nonheap_type_is_not_heap(ty in arb_nonheap_ty()) {
+            prop_assert!(!is_heap_type(&ty), "Int/Float/Bool/Unit must not be heap");
+        }
+    }
+
+    // ── Independence: Dec(a) doesn't affect counts for b ──
+    // Lean: VarId-indexed counting is independent.
+
+    proptest! {
+        #[test]
+        fn dec_independence(
+            stmts in arb_stmts(),
+            a in (0u32..4).prop_map(VarId),
+            b in (4u32..8).prop_map(VarId),
+        ) {
+            let decs_b = count_decs(&stmts, b);
+            let incs_b = count_incs(&stmts, b);
+            let mut extended = stmts;
+            extended.push(IrStmt { kind: IrStmtKind::RcDec { var: a }, span: None });
+            prop_assert_eq!(count_decs(&extended, b), decs_b, "Dec(a) must not change decs(b)");
+            prop_assert_eq!(count_incs(&extended, b), incs_b, "Dec(a) must not change incs(b)");
+        }
+
+        #[test]
+        fn inc_independence(
+            stmts in arb_stmts(),
+            a in (0u32..4).prop_map(VarId),
+            b in (4u32..8).prop_map(VarId),
+        ) {
+            let decs_b = count_decs(&stmts, b);
+            let incs_b = count_incs(&stmts, b);
+            let mut extended = stmts;
+            extended.push(IrStmt { kind: IrStmtKind::RcInc { var: a }, span: None });
+            prop_assert_eq!(count_decs(&extended, b), decs_b, "Inc(a) must not change decs(b)");
+            prop_assert_eq!(count_incs(&extended, b), incs_b, "Inc(a) must not change incs(b)");
+        }
+    }
+
+    // ── Lean theorem: perceus_strictly_better ──
+    // Without Dec: not freed. With Dec: freed.
+
+    proptest! {
+        #[test]
+        fn strictly_better(var in arb_var_id()) {
+            let without = vec![
+                IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var, ty: Ty::String,
+                        mutability: almide_ir::Mutability::Let,
+                        value: dummy_expr(Ty::String),
+                    },
+                    span: None,
+                },
+            ];
+            prop_assert!(!is_freed(&without, var), "no Dec = not freed (leak)");
+
+            let mut with_dec = without;
+            with_dec.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
+            prop_assert!(is_freed(&with_dec, var), "1 Dec = freed");
+        }
+    }
+
+    // ── Lean theorem: assign_both_freed ──
+    // Dec(old) before assign + Dec(new) at exit = both freed.
+
+    proptest! {
+        #[test]
+        fn assign_pattern_both_freed(var in arb_var_id()) {
+            // old alloc → Dec(old) → new alloc → Dec(new)
+            let stmts = vec![
+                IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var, ty: Ty::String,
+                        mutability: almide_ir::Mutability::Var,
+                        value: dummy_expr(Ty::String),
+                    },
+                    span: None,
+                },
+                IrStmt { kind: IrStmtKind::RcDec { var }, span: None },
+                IrStmt {
+                    kind: IrStmtKind::Assign {
+                        var,
+                        value: dummy_expr(Ty::String),
+                    },
+                    span: None,
+                },
+                IrStmt { kind: IrStmtKind::RcDec { var }, span: None },
+            ];
+            // 2 decs, 0 incs — models old+new both freed
+            prop_assert_eq!(count_decs(&stmts, var), 2);
+            prop_assert_eq!(count_incs(&stmts, var), 0);
+        }
+    }
+
+    // ── Lean theorem: alias_frees_heap ──
+    // Inc(v) + Dec(v) + Dec(v) = original + alias both freed.
+
+    proptest! {
+        #[test]
+        fn alias_pattern_freed(var in arb_var_id()) {
+            let stmts = vec![
+                IrStmt { kind: IrStmtKind::RcInc { var }, span: None },
+                IrStmt { kind: IrStmtKind::RcDec { var }, span: None },
+                IrStmt { kind: IrStmtKind::RcDec { var }, span: None },
+            ];
+            // 1 inc + 2 decs = freed (decs == incs + 1 → 2 == 1 + 1)
+            prop_assert!(is_freed(&stmts, var), "alias pattern must be freed");
+        }
+    }
+
+    // ── Commutativity: order of Inc/Dec doesn't affect counts ──
+
+    proptest! {
+        #[test]
+        fn count_order_independent(stmts in arb_stmts(), var in arb_var_id()) {
+            let mut shuffled = stmts.clone();
+            shuffled.reverse();
+            prop_assert_eq!(count_decs(&stmts, var), count_decs(&shuffled, var));
+            prop_assert_eq!(count_incs(&stmts, var), count_incs(&shuffled, var));
+        }
     }
 }
