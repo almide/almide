@@ -163,70 +163,122 @@ fn insert_rc_ops(func: &mut IrFunction, var_table: &VarTable) -> bool {
 
     let mut changed = false;
 
-    // Process the body block
-    if let IrExprKind::Block { stmts, expr } = &mut func.body.kind {
-        // Rule 1: RcInc for Bind aliases
-        // Rule 3: RcDec for Assign old values
-        let mut new_stmts = Vec::new();
-        for stmt in stmts.drain(..) {
-            match &stmt.kind {
-                // Rule 1: Bind(y, Var(x)) where heap → RcInc(x)
-                IrStmtKind::Bind { var: _, ty, value, .. } => {
-                    if is_heap_type(ty) {
-                        let id_opt = match &value.kind {
-                            IrExprKind::Var { id } => Some(*id),
-                            IrExprKind::Clone { expr } => {
-                                if let IrExprKind::Var { id } = &expr.kind { Some(*id) } else { None }
-                            }
-                            IrExprKind::Deref { expr } => {
-                                if let IrExprKind::Var { id } = &expr.kind { Some(*id) } else { None }
-                            }
-                            _ => None,
-                        };
-                        if let Some(id) = id_opt {
-                            new_stmts.push(IrStmt {
-                                kind: IrStmtKind::RcInc { var: id },
-                                span: stmt.span,
-                            });
-                            changed = true;
-                        }
-                    }
-                    new_stmts.push(stmt);
-                }
-                // Rule 3: Assign(x, _) where heap → RcDec(x) before assign
-                IrStmtKind::Assign { var, .. } => {
-                    let ty = &var_table.get(*var).ty;
-                    if is_heap_type(ty) {
-                        new_stmts.push(IrStmt {
-                            kind: IrStmtKind::RcDec { var: *var },
-                            span: stmt.span,
-                        });
-                        changed = true;
-                    }
-                    new_stmts.push(stmt);
-                }
-                _ => new_stmts.push(stmt),
-            }
-        }
-        *stmts = new_stmts;
+    // Recursively process ALL blocks in the function body
+    if insert_rc_in_expr(&mut func.body, var_table) { changed = true; }
 
-        // Rule 2: Last-use RcDec for block locals
-        insert_last_use_drops(stmts, expr.as_deref(), var_table);
-
-        // Rule 4: Function-exit RcDec for remaining heap locals
-        // Collect exit drops from the function body (before mutating stmts)
+    // Rule 4: Function-exit RcDec for multi-use heap locals (top-level only)
+    if let IrExprKind::Block { stmts, .. } = &mut func.body.kind {
         let mut exit_vars = Vec::new();
         collect_heap_binds_from_stmts(stmts, var_table, &mut exit_vars);
         for var in exit_vars {
             let use_count = var_table.get(var).use_count;
             if use_count <= 1 { continue; }
             stmts.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
+            changed = true;
         }
     }
 
     // Rule 5: RcInc for closure captures
     insert_closure_capture_incs(&mut func.body);
 
+    changed
+}
+
+/// Recursively insert RC operations in all blocks within an expression.
+fn insert_rc_in_expr(expr: &mut IrExpr, var_table: &VarTable) -> bool {
+    let mut changed = false;
+    match &mut expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            // Rule 1 + 3: process statements
+            let mut new_stmts = Vec::new();
+            for stmt in stmts.drain(..) {
+                match &stmt.kind {
+                    IrStmtKind::Bind { var: _, ty, value, .. } => {
+                        if is_heap_type(ty) {
+                            let id_opt = match &value.kind {
+                                IrExprKind::Var { id } => Some(*id),
+                                IrExprKind::Clone { expr } => {
+                                    if let IrExprKind::Var { id } = &expr.kind { Some(*id) } else { None }
+                                }
+                                IrExprKind::Deref { expr } => {
+                                    if let IrExprKind::Var { id } = &expr.kind { Some(*id) } else { None }
+                                }
+                                _ => None,
+                            };
+                            if let Some(id) = id_opt {
+                                new_stmts.push(IrStmt { kind: IrStmtKind::RcInc { var: id }, span: stmt.span });
+                                changed = true;
+                            }
+                        }
+                        new_stmts.push(stmt);
+                    }
+                    IrStmtKind::Assign { var, .. } => {
+                        let ty = &var_table.get(*var).ty;
+                        if is_heap_type(ty) {
+                            new_stmts.push(IrStmt { kind: IrStmtKind::RcDec { var: *var }, span: stmt.span });
+                            changed = true;
+                        }
+                        new_stmts.push(stmt);
+                    }
+                    _ => new_stmts.push(stmt),
+                }
+            }
+            *stmts = new_stmts;
+
+            // Rule 2: last-use drops
+            insert_last_use_drops(stmts, tail.as_deref(), var_table);
+
+            // Recurse into statement values and nested blocks
+            for stmt in stmts.iter_mut() {
+                match &mut stmt.kind {
+                    IrStmtKind::Bind { value, .. } => { insert_rc_in_expr(value, var_table); }
+                    IrStmtKind::Assign { value, .. } => { insert_rc_in_expr(value, var_table); }
+                    IrStmtKind::Expr { expr } => { insert_rc_in_expr(expr, var_table); }
+                    IrStmtKind::Guard { cond, else_ } => {
+                        insert_rc_in_expr(cond, var_table);
+                        insert_rc_in_expr(else_, var_table);
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(tail) = tail { insert_rc_in_expr(tail, var_table); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            insert_rc_in_expr(cond, var_table);
+            insert_rc_in_expr(then, var_table);
+            insert_rc_in_expr(else_, var_table);
+        }
+        IrExprKind::Match { subject, arms } => {
+            insert_rc_in_expr(subject, var_table);
+            for arm in arms {
+                insert_rc_in_expr(&mut arm.body, var_table);
+            }
+        }
+        IrExprKind::While { cond, body } => {
+            insert_rc_in_expr(cond, var_table);
+            for stmt in body {
+                match &mut stmt.kind {
+                    IrStmtKind::Bind { value, .. } => { insert_rc_in_expr(value, var_table); }
+                    IrStmtKind::Assign { value, .. } => { insert_rc_in_expr(value, var_table); }
+                    IrStmtKind::Expr { expr } => { insert_rc_in_expr(expr, var_table); }
+                    _ => {}
+                }
+            }
+        }
+        IrExprKind::Lambda { body, .. } => { insert_rc_in_expr(body, var_table); }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            insert_rc_in_expr(iterable, var_table);
+            for stmt in body {
+                match &mut stmt.kind {
+                    IrStmtKind::Bind { value, .. } => { insert_rc_in_expr(value, var_table); }
+                    IrStmtKind::Assign { value, .. } => { insert_rc_in_expr(value, var_table); }
+                    IrStmtKind::Expr { expr } => { insert_rc_in_expr(expr, var_table); }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
     changed
 }
 
