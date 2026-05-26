@@ -537,6 +537,10 @@ fn verify_function(func: &IrFunction, var_table: &VarTable) {
     // Scan entire function body for RC operations and heap binds
     scan_rc_ops(&func.body, &mut inc_count, &mut dec_count, &mut heap_binds, &mut env_load_vars, var_table);
 
+    // Control-flow verification: check that heap vars bound before a branch
+    // are Dec'd on ALL branches (or after the branch).
+    verify_branch_balance(&func.body, &heap_binds, &env_load_vars, var_table, func.name.as_str());
+
     // Collect variables used in return position (any tail expression) — they're
     // transferred to the caller, no RcDec needed.
     let mut returned_vars: HashSet<VarId> = HashSet::new();
@@ -1013,6 +1017,135 @@ fn insert_closure_capture_incs(expr: &mut IrExpr) {
             for arm in arms {
                 insert_closure_capture_incs(&mut arm.body);
             }
+        }
+        _ => {}
+    }
+}
+
+/// Control-flow-aware verification: check branches independently.
+/// For each if/else or match, verify that heap vars bound in an outer scope
+/// are not leaked on any single branch.
+fn verify_branch_balance(
+    expr: &IrExpr,
+    outer_heap_vars: &HashSet<VarId>,
+    env_load_vars: &HashSet<VarId>,
+    var_table: &VarTable,
+    fn_name: &str,
+) {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            // Collect heap vars bound in THIS block
+            let mut local_vars = outer_heap_vars.clone();
+            for stmt in stmts {
+                if let IrStmtKind::Bind { var, ty, .. } = &stmt.kind {
+                    if is_heap_type(ty) && !env_load_vars.contains(var) {
+                        local_vars.insert(*var);
+                    }
+                }
+            }
+            // Recurse into statement values and tail
+            for stmt in stmts {
+                match &stmt.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
+                        verify_branch_balance(value, &local_vars, env_load_vars, var_table, fn_name),
+                    IrStmtKind::Expr { expr } =>
+                        verify_branch_balance(expr, &local_vars, env_load_vars, var_table, fn_name),
+                    _ => {}
+                }
+            }
+            if let Some(tail) = tail {
+                verify_branch_balance(tail, &local_vars, env_load_vars, var_table, fn_name);
+            }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            verify_branch_balance(cond, outer_heap_vars, env_load_vars, var_table, fn_name);
+            // Check: both branches should have consistent Dec for outer heap vars
+            // Only check vars that are REFERENCED in at least one branch
+            let then_decs = collect_decs_in_expr(then);
+            let else_decs = collect_decs_in_expr(else_);
+            let mut then_refs = HashSet::new();
+            let mut else_refs = HashSet::new();
+            collect_var_refs_expr(then, &mut then_refs);
+            collect_var_refs_expr(else_, &mut else_refs);
+            for var in outer_heap_vars {
+                // Only check if var is referenced in BOTH branches
+                let in_both = then_refs.contains(var) && else_refs.contains(var);
+                if !in_both { continue; } // referenced in only one branch → not a branch issue
+                let in_then = then_decs.contains(var);
+                let in_else = else_decs.contains(var);
+                if in_then != in_else {
+                    let name = var_table.get(*var).name.as_str();
+                    eprintln!(
+                        "[perceus-belt] BRANCH-LEAK: `{}` (VarId {}) in `{}` — Dec'd in {} but not {}",
+                        name, var.0, fn_name,
+                        if in_then { "then" } else { "else" },
+                        if in_then { "else" } else { "then" },
+                    );
+                }
+            }
+            verify_branch_balance(then, outer_heap_vars, env_load_vars, var_table, fn_name);
+            verify_branch_balance(else_, outer_heap_vars, env_load_vars, var_table, fn_name);
+        }
+        IrExprKind::Match { subject, arms } => {
+            verify_branch_balance(subject, outer_heap_vars, env_load_vars, var_table, fn_name);
+            if arms.len() > 1 {
+                let arm_decs: Vec<HashSet<VarId>> = arms.iter()
+                    .map(|arm| collect_decs_in_expr(&arm.body))
+                    .collect();
+                let arm_refs: Vec<HashSet<VarId>> = arms.iter()
+                    .map(|arm| { let mut r = HashSet::new(); collect_var_refs_expr(&arm.body, &mut r); r })
+                    .collect();
+                for var in outer_heap_vars {
+                    // Only check if var is referenced in MULTIPLE arms.
+                    // A var referenced in only one arm is defined inside it → not a branch issue.
+                    let ref_count = arm_refs.iter().filter(|r| r.contains(var)).count();
+                    if ref_count < 2 { continue; }
+                    let first_has = arm_decs[0].contains(var);
+                    for (i, decs) in arm_decs.iter().enumerate().skip(1) {
+                        if decs.contains(var) != first_has {
+                            let name = var_table.get(*var).name.as_str();
+                            eprintln!(
+                                "[perceus-belt] BRANCH-LEAK: `{}` (VarId {}) in `{}` — Dec'd in arm 0 but not arm {}",
+                                name, var.0, fn_name, i,
+                            );
+                        }
+                    }
+                }
+            }
+            for arm in arms {
+                verify_branch_balance(&arm.body, outer_heap_vars, env_load_vars, var_table, fn_name);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Collect all VarIds that are Dec'd within an expression.
+fn collect_decs_in_expr(expr: &IrExpr) -> HashSet<VarId> {
+    let mut decs = HashSet::new();
+    scan_decs(expr, &mut decs);
+    decs
+}
+
+fn scan_decs(expr: &IrExpr, decs: &mut HashSet<VarId>) {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            for stmt in stmts {
+                if let IrStmtKind::RcDec { var } = &stmt.kind { decs.insert(*var); }
+                match &stmt.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => scan_decs(value, decs),
+                    IrStmtKind::Expr { expr } => scan_decs(expr, decs),
+                    _ => {}
+                }
+            }
+            if let Some(tail) = tail { scan_decs(tail, decs); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            scan_decs(cond, decs); scan_decs(then, decs); scan_decs(else_, decs);
+        }
+        IrExprKind::Match { subject, arms } => {
+            scan_decs(subject, decs);
+            for arm in arms { scan_decs(&arm.body, decs); }
         }
         _ => {}
     }
