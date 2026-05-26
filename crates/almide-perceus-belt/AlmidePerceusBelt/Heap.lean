@@ -60,4 +60,14 @@ theorem perceus_fixes_heap (v : VarId) (h : Heap) (env : Env) :
     (execute (insertDecBeforeEnd (.vdecl v .string .nop) v) h env).rc h.next = 0 := by
   simp [insertDecBeforeEnd, execute, Heap.alloc, Heap.decRef]
 
+
+-- General: Perceus prevents leaks for any single VDecl
+theorem perceus_prevents_leaks_general (v : VarId) (h : Heap) (env : Env) :
+    -- Without: leak. With: freed.
+    (execute (FnBody.vdecl v Ty.string FnBody.nop) h env).rc h.next = 1 ∧
+    (execute (FnBody.vdecl v Ty.string (FnBody.dec v FnBody.nop)) h env).rc h.next = 0 := by
+  constructor
+  · simp [execute, Heap.alloc]
+  · simp [execute, Heap.alloc, Heap.decRef]
+
 end AlmidePerceusBelt
