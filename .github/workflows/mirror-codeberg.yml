@@ -7,6 +7,7 @@ on:
 
 jobs:
   mirror:
+    if: github.server_url == 'https://github.com'
     name: Push to Codeberg
     runs-on: ubuntu-latest
     steps:
@@ -14,9 +15,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Push mirror
+      - name: Push current branch/tag
         run: |
-          git push --force --prune \
+          git push \
             https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/almide/almide.git \
-            "refs/remotes/origin/*:refs/heads/*" \
-            "refs/tags/*:refs/tags/*"
+            HEAD:refs/heads/${{ github.ref_name }}
