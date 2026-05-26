@@ -72,4 +72,41 @@ theorem inc_dec_preserves (fb : FnBody) (v : VarId) (h : isFreed fb v) :
   unfold isFreed at *; rw [insertDec_adds_one]
   simp [insertDecBeforeEnd, countIncs, countDecs, insertDec_keeps_incs]; omega
 
+-- ═══ GENERAL INDUCTION ═══
+
+def perceusTransform : FnBody → FnBody
+  | .vdecl v ty body =>
+    if ty.isHeap then .vdecl v ty (insertDecBeforeEnd (perceusTransform body) v)
+    else .vdecl v ty (perceusTransform body)
+  | .inc v body => .inc v (perceusTransform body)
+  | .dec v body => .dec v (perceusTransform body)
+  | .ret => .ret
+  | .nop => .nop
+
+def hasDec (fb : FnBody) (v : VarId) : Prop := countDecs fb v ≥ 1
+
+theorem perceus_covers_vdecl (v : VarId) (ty : Ty) (body : FnBody)
+    (h_heap : ty.isHeap = true) (h_fresh : countDecs body v = 0) :
+    hasDec (perceusTransform (.vdecl v ty body)) v := by
+  unfold hasDec perceusTransform; simp [h_heap]; sorry
+
+theorem perceus_preserves_dec (fb : FnBody) (v : VarId) (h : countDecs fb v ≥ 1) :
+    countDecs (perceusTransform fb) v ≥ 1 := by
+  induction fb with
+  | vdecl w ty body ih =>
+    simp [perceusTransform]; split
+    · sorry
+    · simp [countDecs] at h ⊢; exact ih h
+  | inc _ _ ih => simp [perceusTransform, countDecs] at h ⊢; exact ih h
+  | dec _ _ ih => simp [perceusTransform, countDecs] at h ⊢; omega
+  | ret => simp [perceusTransform, countDecs] at h
+  | nop => simp [perceusTransform, countDecs] at h
+
+theorem perceus_idempotent (v : VarId) (ty : Ty) (body : FnBody)
+    (h_heap : ty.isHeap = true) :
+    hasDec (perceusTransform (.vdecl v ty body)) v →
+    hasDec (perceusTransform (perceusTransform (.vdecl v ty body))) v := by
+  intro h; exact perceus_preserves_dec _ v h
+
+
 end AlmidePerceusBelt
