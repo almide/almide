@@ -475,13 +475,19 @@ fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_tab
     }
     if block_locals.is_empty() { return HashSet::new(); }
 
-    // Variables used in tail expression — don't drop (they're returned)
+    // Only exclude variables that ARE the tail expression itself (directly returned).
+    // Variables used INSIDE the tail (as arguments) should still be dropped —
+    // they're consumed by the tail, not returned.
     let mut tail_vars: HashSet<VarId> = HashSet::new();
     if let Some(tail) = tail {
-        collect_var_refs_expr(tail, &mut tail_vars);
+        if let IrExprKind::Var { id } = &tail.kind {
+            tail_vars.insert(*id);
+        }
     }
 
-    // For each block-local, find the last statement that references it
+    // For each block-local, find the last statement that references it.
+    // Also count tail references — variables used in the tail get their
+    // last_use set to the last statement index (they're consumed by the tail).
     let mut last_use: HashMap<VarId, usize> = HashMap::new();
     for (i, stmt) in stmts.iter().enumerate() {
         let mut refs = HashSet::new();
@@ -489,6 +495,17 @@ fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_tab
         for var in &refs {
             if block_locals.contains_key(var) {
                 last_use.insert(*var, i);
+            }
+        }
+    }
+    // Variables used in tail but not AS tail: set last_use to last stmt index
+    if let Some(tail) = tail {
+        let mut tail_refs = HashSet::new();
+        collect_var_refs_expr(tail, &mut tail_refs);
+        let last_idx = stmts.len(); // one past last stmt → won't match bind_idx
+        for var in &tail_refs {
+            if block_locals.contains_key(var) && !tail_vars.contains(var) {
+                last_use.insert(*var, last_idx);
             }
         }
     }
@@ -511,7 +528,8 @@ fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_tab
     for idx in sorted_indices {
         if let Some(vars) = insertions.get(&idx) {
             for var in vars {
-                stmts.insert(idx + 1, IrStmt {
+                let insert_at = (idx + 1).min(stmts.len());
+                stmts.insert(insert_at, IrStmt {
                     kind: IrStmtKind::RcDec { var: *var },
                     span: None,
                 });
@@ -522,6 +540,8 @@ fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_tab
     // Return set of vars dropped by Rule 2
     insertions.values().flat_map(|v| v.iter().copied()).collect()
 }
+
+
 
 /// Apply Rule 1 (RcInc for alias) and Rule 3 (RcDec for Assign) to a statement list.
 /// Used for while/for-in bodies that aren't full Block expressions.
@@ -558,6 +578,9 @@ fn process_stmt_list(stmts: &mut Vec<IrStmt>, var_table: &VarTable, dropped_vars
         }
     }
     *stmts = new_stmts;
+    // Rule 2: last-use drops for variables bound in this statement list
+    let dropped = insert_last_use_drops(stmts, None, var_table);
+    dropped_vars.extend(&dropped);
     // Recurse into statement values
     for stmt in stmts.iter_mut() {
         match &mut stmt.kind {
