@@ -68,13 +68,48 @@ impl NanoPass for PerceusOptPass {
     }
 }
 
-/// Eliminate redundant RcInc/RcDec pairs in a function.
+/// Eliminate redundant RcInc/RcDec pairs in a function (all nested blocks).
 fn eliminate_redundant_rc(func: &mut IrFunction, var_table: &VarTable) -> bool {
-    if let IrExprKind::Block { stmts, .. } = &mut func.body.kind {
-        eliminate_in_block(stmts, var_table)
-    } else {
-        false
+    eliminate_in_expr(&mut func.body, var_table)
+}
+
+fn eliminate_in_expr(expr: &mut IrExpr, var_table: &VarTable) -> bool {
+    let mut changed = false;
+    match &mut expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            if eliminate_in_block(stmts, var_table) { changed = true; }
+            for stmt in stmts.iter_mut() {
+                match &mut stmt.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
+                        if eliminate_in_expr(value, var_table) { changed = true; }
+                    }
+                    IrStmtKind::Expr { expr } => {
+                        if eliminate_in_expr(expr, var_table) { changed = true; }
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(tail) = tail {
+                if eliminate_in_expr(tail, var_table) { changed = true; }
+            }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            if eliminate_in_expr(cond, var_table) { changed = true; }
+            if eliminate_in_expr(then, var_table) { changed = true; }
+            if eliminate_in_expr(else_, var_table) { changed = true; }
+        }
+        IrExprKind::Match { subject, arms } => {
+            if eliminate_in_expr(subject, var_table) { changed = true; }
+            for arm in arms {
+                if eliminate_in_expr(&mut arm.body, var_table) { changed = true; }
+            }
+        }
+        IrExprKind::Lambda { body, .. } => {
+            if eliminate_in_expr(body, var_table) { changed = true; }
+        }
+        _ => {}
     }
+    changed
 }
 
 /// Scan a block for eliminable Inc/Dec pairs.
