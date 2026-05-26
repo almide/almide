@@ -1,14 +1,16 @@
 //! PerceusPass: Insert RcInc/RcDec IR nodes for automatic memory management.
 //!
-//! Implements Perceus-style reference counting (ICFP 2021) at the IR level.
-//! All RC operations are derived from types alone — no user annotation.
+//! Uses Lean 4 FnBody representation internally:
+//!   Block IR → FnBody chain → insert Inc/Dec → FnBody chain → Block IR
 //!
-//! Rules:
-//!   1. RcInc: Bind(y, Var(x)) where is_heap(typeof(x)) → insert RcInc(x) after bind
-//!   2. RcDec: last use of heap-typed variable in a block → insert RcDec after last use
-//!   3. RcDec: Assign(x, _) where is_heap(typeof(x)) → insert RcDec(x) before assign
-//!   4. RcDec: function exit → insert RcDec for all heap locals not returned
-//!   5. RcInc: ClosureCreate captures heap var → insert RcInc
+//! FnBody (continuation-based):
+//!   VDecl(var, ty, expr, body)  — let var: ty = expr; then body
+//!   Assign(var, expr, body)     — var = expr; then body
+//!   Inc(var, body)              — rc_inc(var); then body
+//!   Dec(var, body)              — rc_dec(var); then body
+//!   Expr(expr, body)            — eval expr (discard); then body
+//!   Ret(expr)                   — return expr
+//!   Nop                         — end of chain (Unit return)
 //!
 //! Target: WASM only (Rust handles ownership natively).
 
@@ -16,6 +18,317 @@ use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
 use std::collections::{HashMap, HashSet};
 use super::pass::{NanoPass, PassResult, Target};
+
+// ── Lean 4 FnBody (internal representation for Perceus) ──
+
+/// Continuation-based IR node (Lean 4 style).
+/// Each node chains to the next via `body`. No "tail expression" concept.
+#[derive(Debug, Clone)]
+enum FnBody {
+    /// let var: ty = expr; then body
+    VDecl { var: VarId, ty: Ty, mutability: Mutability, expr: IrExpr, body: Box<FnBody> },
+    /// var = expr; then body
+    Assign { var: VarId, expr: IrExpr, body: Box<FnBody> },
+    /// rc_inc(var); then body
+    Inc { var: VarId, body: Box<FnBody> },
+    /// rc_dec(var); then body
+    Dec { var: VarId, body: Box<FnBody> },
+    /// eval expr (discard result); then body
+    Expr { expr: IrExpr, body: Box<FnBody> },
+    /// Pass-through: original statement preserved as-is
+    Stmt { stmt: IrStmt, body: Box<FnBody> },
+    /// return expr
+    Ret { expr: IrExpr },
+    /// end of chain (Unit return)
+    Nop,
+}
+
+/// Convert Block IR to FnBody chain.
+fn block_to_fnbody(stmts: Vec<IrStmt>, tail: Option<Box<IrExpr>>) -> FnBody {
+    let ret = match tail {
+        Some(e) => FnBody::Ret { expr: *e },
+        None => FnBody::Nop,
+    };
+    // Build chain in reverse: last stmt wraps ret, second-to-last wraps that, etc.
+    stmts.into_iter().rev().fold(ret, |body, stmt| {
+        match stmt.kind {
+            IrStmtKind::Bind { var, ty, value, mutability } =>
+                FnBody::VDecl { var, ty, mutability, expr: value, body: Box::new(body) },
+            IrStmtKind::Assign { var, value } =>
+                FnBody::Assign { var, expr: value, body: Box::new(body) },
+            IrStmtKind::RcInc { var } =>
+                FnBody::Inc { var, body: Box::new(body) },
+            IrStmtKind::RcDec { var } =>
+                FnBody::Dec { var, body: Box::new(body) },
+            IrStmtKind::Expr { expr } =>
+                FnBody::Expr { expr, body: Box::new(body) },
+            _ => FnBody::Stmt { stmt, body: Box::new(body) },
+        }
+    })
+}
+
+/// Convert FnBody chain back to Block IR (stmts + tail).
+fn fnbody_to_block(mut fb: FnBody) -> (Vec<IrStmt>, Option<Box<IrExpr>>) {
+    let mut stmts = Vec::new();
+    loop {
+        match fb {
+            FnBody::VDecl { var, ty, mutability, expr, body } => {
+                stmts.push(IrStmt {
+                    kind: IrStmtKind::Bind { var, ty, mutability, value: expr },
+                    span: None,
+                });
+                fb = *body;
+            }
+            FnBody::Assign { var, expr, body } => {
+                stmts.push(IrStmt { kind: IrStmtKind::Assign { var, value: expr }, span: None });
+                fb = *body;
+            }
+            FnBody::Inc { var, body } => {
+                stmts.push(IrStmt { kind: IrStmtKind::RcInc { var }, span: None });
+                fb = *body;
+            }
+            FnBody::Dec { var, body } => {
+                stmts.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
+                fb = *body;
+            }
+            FnBody::Expr { expr, body } => {
+                stmts.push(IrStmt { kind: IrStmtKind::Expr { expr }, span: None });
+                fb = *body;
+            }
+            FnBody::Stmt { stmt, body } => {
+                stmts.push(stmt);
+                fb = *body;
+            }
+            FnBody::Ret { expr } => {
+                return (stmts, Some(Box::new(expr)));
+            }
+            FnBody::Nop => {
+                return (stmts, None);
+            }
+        }
+    }
+}
+
+/// Recursively apply Perceus to expressions (handles nested blocks).
+fn perceus_expr(expr: &mut IrExpr, var_table: &mut VarTable) {
+    match &mut expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            let old_stmts = std::mem::take(stmts);
+            let old_tail = tail.take();
+            let fb = block_to_fnbody(old_stmts, old_tail);
+            let fb = perceus_fnbody(fb, var_table);
+            let fb = insert_ret_decs(fb, var_table);
+            let (new_stmts, new_tail) = fnbody_to_block(fb);
+            *stmts = new_stmts;
+            *tail = new_tail;
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            perceus_expr(cond, var_table);
+            perceus_expr(then, var_table);
+            perceus_expr(else_, var_table);
+        }
+        IrExprKind::Match { subject, arms } => {
+            perceus_expr(subject, var_table);
+            for arm in arms { perceus_expr(&mut arm.body, var_table); }
+        }
+        IrExprKind::Lambda { body, .. } => { perceus_expr(body, var_table); }
+        IrExprKind::While { cond, body } => {
+            perceus_expr(cond, var_table);
+            // Convert while body stmts to FnBody chain (Nop terminus)
+            let old_body = std::mem::take(body);
+            let fb = block_to_fnbody(old_body, None); // None = Nop
+            let fb = perceus_fnbody(fb, var_table);
+            let fb = insert_ret_decs(fb, var_table); // inserts Dec before Nop for heap locals
+            let (new_body, _) = fnbody_to_block(fb);
+            *body = new_body;
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            perceus_expr(iterable, var_table);
+            let old_body = std::mem::take(body);
+            let fb = block_to_fnbody(old_body, None);
+            let fb = perceus_fnbody(fb, var_table);
+            let fb = insert_ret_decs(fb, var_table);
+            let (new_body, _) = fnbody_to_block(fb);
+            *body = new_body;
+        }
+        _ => {}
+    }
+}
+
+/// Insert Perceus Inc/Dec into a FnBody chain.
+fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
+    match fb {
+        FnBody::VDecl { var, ty, mutability, mut expr, body } => {
+            let body = perceus_fnbody(*body, var_table);
+            // Recurse into the expression (handles nested blocks)
+            perceus_expr(&mut expr, var_table);
+            // Rule 1: RcInc for heap alias
+            let needs_inc = is_heap_type(&ty) && matches!(&expr.kind,
+                IrExprKind::Var { .. } | IrExprKind::Clone { .. } | IrExprKind::Deref { .. });
+            let inc_var = if needs_inc {
+                match &expr.kind {
+                    IrExprKind::Var { id } => Some(*id),
+                    IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } =>
+                        if let IrExprKind::Var { id } = &e.kind { Some(*id) } else { None },
+                    _ => None,
+                }
+            } else { None };
+            // Rule 5: RcInc for closure captures
+            let capture_incs: Vec<VarId> = if let IrExprKind::ClosureCreate { captures, .. } = &expr.kind {
+                captures.iter().filter(|(_, ty)| is_heap_type(ty)).map(|(v, _)| *v).collect()
+            } else { vec![] };
+
+            let mut result = FnBody::VDecl { var, ty, mutability, expr, body: Box::new(body) };
+            // Wrap with Inc nodes
+            if let Some(id) = inc_var {
+                result = FnBody::Inc { var: id, body: Box::new(result) };
+            }
+            for cap in capture_incs.into_iter().rev() {
+                result = FnBody::Inc { var: cap, body: Box::new(result) };
+            }
+            result
+        }
+        FnBody::Assign { var, mut expr, body } => {
+            let body = perceus_fnbody(*body, var_table);
+            perceus_expr(&mut expr, var_table);
+            let mut result = FnBody::Assign { var, expr, body: Box::new(body) };
+            // Rule 3: RcDec old value before assign
+            let ty = &var_table.get(var).ty;
+            if is_heap_type(ty) {
+                result = FnBody::Dec { var, body: Box::new(result) };
+            }
+            result
+        }
+        FnBody::Expr { mut expr, body } => {
+            let body = perceus_fnbody(*body, var_table);
+            perceus_expr(&mut expr, var_table);
+            FnBody::Expr { expr, body: Box::new(body) }
+        }
+        FnBody::Stmt { stmt, body } => {
+            let body = perceus_fnbody(*body, var_table);
+            FnBody::Stmt { stmt, body: Box::new(body) }
+        }
+        FnBody::Inc { var, body } => FnBody::Inc { var, body: Box::new(perceus_fnbody(*body, var_table)) },
+        FnBody::Dec { var, body } => FnBody::Dec { var, body: Box::new(perceus_fnbody(*body, var_table)) },
+        FnBody::Ret { expr } => {
+            // Rule 2+4: Insert Dec for all live heap vars before return.
+            // Collect all heap VDecls in scope, insert Dec for each.
+            FnBody::Ret { expr }
+        }
+        FnBody::Nop => FnBody::Nop,
+    }
+}
+
+/// Collect all heap VDecl vars from the chain, insert Dec before Ret.
+fn insert_ret_decs(fb: FnBody, var_table: &mut VarTable) -> FnBody {
+    let mut heap_vars: Vec<VarId> = Vec::new();
+    collect_heap_vdecls(&fb, &mut heap_vars);
+    // Find which vars are used in the Ret expression (don't dec those)
+    let ret_vars = collect_ret_vars(&fb);
+    insert_decs_before_ret(fb, &heap_vars, &ret_vars, var_table)
+}
+
+fn collect_heap_vdecls(fb: &FnBody, vars: &mut Vec<VarId>) {
+    match fb {
+        FnBody::VDecl { var, ty, body, .. } => {
+            if is_heap_type(ty) { vars.push(*var); }
+            collect_heap_vdecls(body, vars);
+        }
+        FnBody::Assign { body, .. } | FnBody::Inc { body, .. }
+        | FnBody::Dec { body, .. } | FnBody::Expr { body, .. }
+        | FnBody::Stmt { body, .. } => collect_heap_vdecls(body, vars),
+        FnBody::Ret { .. } | FnBody::Nop => {}
+    }
+}
+
+fn collect_ret_vars(fb: &FnBody) -> HashSet<VarId> {
+    let mut vars = HashSet::new();
+    match fb {
+        FnBody::Ret { expr } => { collect_var_refs_expr(expr, &mut vars); }
+        FnBody::VDecl { body, .. } | FnBody::Assign { body, .. }
+        | FnBody::Inc { body, .. } | FnBody::Dec { body, .. }
+        | FnBody::Expr { body, .. } | FnBody::Stmt { body, .. } => {
+            vars = collect_ret_vars(body);
+        }
+        FnBody::Nop => {}
+    }
+    vars
+}
+
+fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<VarId>, var_table: &mut VarTable) -> FnBody {
+    match fb {
+        FnBody::Ret { expr } => {
+            // Variables used inside the return expression (but not AS the return value)
+            // need tail lift: let __ret = expr; Dec(vars); Ret(__ret)
+            let vars_to_dec: Vec<VarId> = heap_vars.iter()
+                .filter(|v| !ret_vars.contains(v) || {
+                    // If var is in ret_vars AND the ret is NOT just Var(v), it's used inside
+                    !matches!(&expr.kind, IrExprKind::Var { id } if *id == **v)
+                })
+                .filter(|v| {
+                    let info = var_table.get(**v);
+                    // Skip EnvLoad-bound vars (borrowed, not owned)
+                    info.use_count > 0 || matches!(info.mutability, Mutability::Var)
+                })
+                .copied()
+                .collect();
+
+            if vars_to_dec.is_empty() {
+                return FnBody::Ret { expr };
+            }
+
+            // Check if any var_to_dec is used inside the ret expr
+            let needs_lift = vars_to_dec.iter().any(|v| ret_vars.contains(v));
+            if needs_lift && !matches!(&expr.kind, IrExprKind::Var { .. }) {
+                // Tail lift: let __ret = expr; Dec(vars); Ret(__ret)
+                let ret_ty = expr.ty.clone();
+                let ret_var = var_table.alloc(
+                    almide_base::intern::sym("__perceus_ret"),
+                    ret_ty.clone(),
+                    Mutability::Let,
+                    None,
+                );
+                let mut result = FnBody::Ret {
+                    expr: IrExpr { kind: IrExprKind::Var { id: ret_var }, ty: ret_ty.clone(), span: None, def_id: None }
+                };
+                for var in vars_to_dec.iter().rev() {
+                    result = FnBody::Dec { var: *var, body: Box::new(result) };
+                }
+                FnBody::VDecl { var: ret_var, ty: ret_ty, mutability: Mutability::Let, expr, body: Box::new(result) }
+            } else {
+                // No lift needed — just insert Decs before Ret
+                let mut result = FnBody::Ret { expr };
+                for var in vars_to_dec.iter().rev() {
+                    result = FnBody::Dec { var: *var, body: Box::new(result) };
+                }
+                result
+            }
+        }
+        FnBody::VDecl { var, ty, mutability, expr, body } =>
+            FnBody::VDecl { var, ty, mutability, expr, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
+        FnBody::Assign { var, expr, body } =>
+            FnBody::Assign { var, expr, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
+        FnBody::Inc { var, body } =>
+            FnBody::Inc { var, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
+        FnBody::Dec { var, body } =>
+            FnBody::Dec { var, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
+        FnBody::Expr { expr, body } =>
+            FnBody::Expr { expr, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
+        FnBody::Stmt { stmt, body } =>
+            FnBody::Stmt { stmt, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
+        FnBody::Nop => {
+            // While/for body: insert Dec for all heap vars before Nop
+            let mut result = FnBody::Nop;
+            for var in heap_vars.iter().rev() {
+                let info = var_table.get(*var);
+                if info.use_count > 0 || matches!(info.mutability, Mutability::Var) {
+                    result = FnBody::Dec { var: *var, body: Box::new(result) };
+                }
+            }
+            result
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct PerceusPass;
@@ -26,12 +339,15 @@ impl NanoPass for PerceusPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
-        for func in &mut program.functions {
-            if insert_rc_ops(func, &program.var_table) { changed = true; }
+        // Need split borrow: functions mutably, var_table mutably
+        let var_table = &mut program.var_table;
+        let functions = &mut program.functions;
+        for func in functions.iter_mut() {
+            if insert_rc_ops(func, var_table) { changed = true; }
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
-                if insert_rc_ops(func, &program.var_table) { changed = true; }
+                if insert_rc_ops(func, &mut program.var_table) { changed = true; }
             }
         }
         PassResult { program, changed }
@@ -220,12 +536,10 @@ fn verify_function(func: &IrFunction, var_table: &VarTable) {
     // Scan entire function body for RC operations and heap binds
     scan_rc_ops(&func.body, &mut inc_count, &mut dec_count, &mut heap_binds, var_table);
 
-    // Collect variables used in return position (tail expression) — they're
+    // Collect variables used in return position (any tail expression) — they're
     // transferred to the caller, no RcDec needed.
     let mut returned_vars: HashSet<VarId> = HashSet::new();
-    if let IrExprKind::Block { expr: Some(tail), .. } = &func.body.kind {
-        collect_var_refs_expr(tail, &mut returned_vars);
-    }
+    collect_all_tail_vars(&func.body, &mut returned_vars);
 
     // Verify: every heap bind has at least one dec (free path)
     for var in &heap_binds {
@@ -351,45 +665,14 @@ fn is_heap_type(ty: &Ty) -> bool {
     matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown | Ty::Fn { .. })
 }
 
-/// Insert RC operations into a function body.
-fn insert_rc_ops(func: &mut IrFunction, var_table: &VarTable) -> bool {
+/// Insert RC operations into a function body using FnBody conversion.
+/// Block IR → FnBody chain → Perceus rules → FnBody → Block IR.
+fn insert_rc_ops(func: &mut IrFunction, var_table: &mut VarTable) -> bool {
     if func.name.as_str() == "main" || func.is_test { return false; }
 
-    let mut changed = false;
-
-    // Build closure capture map: VarId of closure → Vec of captured heap VarIds
-    // This enables Rule 6: when a closure is RcDec'd, also RcDec its captures
-    let mut closure_captures: HashMap<VarId, Vec<VarId>> = HashMap::new();
-    collect_closure_captures(&func.body, &mut closure_captures);
-
-    // Recursively process ALL blocks in the function body
-    let mut dropped_vars: HashSet<VarId> = HashSet::new();
-    if insert_rc_in_expr(&mut func.body, var_table, &mut dropped_vars) { changed = true; }
-
-    // Rule 4: Function-exit RcDec for multi-use heap locals NOT already dropped by Rule 2
-    if let IrExprKind::Block { stmts, .. } = &mut func.body.kind {
-        let mut exit_vars = Vec::new();
-        collect_heap_binds_from_stmts(stmts, var_table, &mut exit_vars);
-        for var in exit_vars {
-            if dropped_vars.contains(&var) { continue; }
-            let use_count = var_table.get(var).use_count;
-            if use_count <= 1 { continue; }
-            stmts.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
-            changed = true;
-        }
-    }
-
-    // Rule 5: RcInc for closure captures
-    insert_closure_capture_incs(&mut func.body);
-
-    // Rule 6: disabled — causes premature free of captured values
-    // when closure is dropped before all uses of the captured variable.
-    // The RcInc from Rule 5 is balanced by the original variable's
-    // own RcDec at its natural scope exit.
-    // TODO: re-enable when lifetime analysis can prove safety.
-    // insert_closure_capture_decs(&mut func.body, &closure_captures);
-
-    changed
+    // Apply Perceus recursively to the entire function body
+    perceus_expr(&mut func.body, var_table);
+    true
 }
 
 /// Collect closure variable → captured heap VarIds mapping.
@@ -721,6 +1004,45 @@ fn insert_closure_capture_incs(expr: &mut IrExpr) {
                 insert_closure_capture_incs(&mut arm.body);
             }
         }
+        _ => {}
+    }
+}
+
+/// Recursively collect all variables used in tail expressions at any nesting level.
+fn collect_all_tail_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            // Variables in this block's tail
+            collect_var_refs_expr(tail, vars);
+            // Recurse into statements' values
+            for stmt in stmts {
+                match &stmt.kind {
+                    IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
+                    IrStmtKind::Assign { value, .. } => collect_all_tail_vars(value, vars),
+                    IrStmtKind::Expr { expr } => collect_all_tail_vars(expr, vars),
+                    _ => {}
+                }
+            }
+            collect_all_tail_vars(tail, vars);
+        }
+        IrExprKind::Block { stmts, expr: None } => {
+            for stmt in stmts {
+                match &stmt.kind {
+                    IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
+                    _ => {}
+                }
+            }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_all_tail_vars(cond, vars);
+            collect_all_tail_vars(then, vars);
+            collect_all_tail_vars(else_, vars);
+        }
+        IrExprKind::Match { subject, arms } => {
+            collect_all_tail_vars(subject, vars);
+            for arm in arms { collect_all_tail_vars(&arm.body, vars); }
+        }
+        IrExprKind::Lambda { body, .. } => collect_all_tail_vars(body, vars),
         _ => {}
     }
 }
