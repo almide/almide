@@ -382,9 +382,12 @@ fn insert_rc_ops(func: &mut IrFunction, var_table: &VarTable) -> bool {
     // Rule 5: RcInc for closure captures
     insert_closure_capture_incs(&mut func.body);
 
-    // Rule 6: After every RcDec of a closure variable, insert RcDec for its captures.
-    // This balances the RcInc from Rule 5.
-    insert_closure_capture_decs(&mut func.body, &closure_captures);
+    // Rule 6: disabled — causes premature free of captured values
+    // when closure is dropped before all uses of the captured variable.
+    // The RcInc from Rule 5 is balanced by the original variable's
+    // own RcDec at its natural scope exit.
+    // TODO: re-enable when lifetime analysis can prove safety.
+    // insert_closure_capture_decs(&mut func.body, &closure_captures);
 
     changed
 }
@@ -566,14 +569,13 @@ fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_tab
     }
     if block_locals.is_empty() { return HashSet::new(); }
 
-    // Only exclude variables that ARE the tail expression itself (directly returned).
-    // Variables used INSIDE the tail (as arguments) should still be dropped —
-    // they're consumed by the tail, not returned.
+    // Exclude ALL variables referenced in the tail expression.
+    // The tail evaluates AFTER all statements — we can't RcDec
+    // tail-referenced variables in the statement list without
+    // causing use-after-free.
     let mut tail_vars: HashSet<VarId> = HashSet::new();
     if let Some(tail) = tail {
-        if let IrExprKind::Var { id } = &tail.kind {
-            tail_vars.insert(*id);
-        }
+        collect_var_refs_expr(tail, &mut tail_vars);
     }
 
     // For each block-local, find the last statement that references it.
@@ -586,17 +588,6 @@ fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_tab
         for var in &refs {
             if block_locals.contains_key(var) {
                 last_use.insert(*var, i);
-            }
-        }
-    }
-    // Variables used in tail but not AS tail: set last_use to last stmt index
-    if let Some(tail) = tail {
-        let mut tail_refs = HashSet::new();
-        collect_var_refs_expr(tail, &mut tail_refs);
-        let last_idx = stmts.len(); // one past last stmt → won't match bind_idx
-        for var in &tail_refs {
-            if block_locals.contains_key(var) && !tail_vars.contains(var) {
-                last_use.insert(*var, last_idx);
             }
         }
     }
