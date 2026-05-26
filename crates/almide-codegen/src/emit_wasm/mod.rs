@@ -564,6 +564,12 @@ impl FuncCompiler<'_> {
 // ── Public API ──────────────────────────────────────────────────────
 
 /// Emit a WASM binary from an IR program (WASI mode).
+/// AlmidePerceusBelt: emit only accepts Verified programs.
+/// This is the type-state gate — unverified IR cannot reach WASM emission.
+pub fn emit_verified(verified: super::Verified<'_>) -> Vec<u8> {
+    emit(verified.0)
+}
+
 pub fn emit(program: &IrProgram) -> Vec<u8> {
     let mut emitter = WasmEmitter::new();
 
