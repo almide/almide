@@ -610,16 +610,55 @@ fn collect_all_stmts(expr: &IrExpr, stmts: &mut Vec<IrStmt>) {
     }
 }
 
-/// Verify using Lean-certified is_heap_type (perceus_verified.rs).
-/// The scan_rc_ops + verify logic uses the same algorithm as the
-/// Lean 4 proofs (countDecs/countIncs/isFreed).
+/// Lean-certified verification. THE ACTUAL VERIFY uses
+/// perceus_verified::verify_expr (mirrors Lean 4 proofs).
 fn verify_function(func: &IrFunction, var_table: &VarTable) {
+    // Collect returned vars and env loads
+    let mut returned_vars: HashSet<VarId> = HashSet::new();
+    collect_all_tail_vars(&func.body, &mut returned_vars);
+    let mut env_load_vars_set: HashSet<VarId> = HashSet::new();
+    scan_env_loads(&func.body, &mut env_load_vars_set);
+
+    // === THE LEAN-CERTIFIED VERIFY ===
+    let issues = super::perceus_verified::verify_expr(
+        &func.body, var_table, &returned_vars, &env_load_vars_set,
+    );
+    for (var, msg) in &issues {
+        let name = var_table.get(*var).name.as_str();
+        eprintln!("[perceus-belt] {}: `{}` (VarId {}) in `{}`",
+            msg, name, var.0, func.name.as_str());
+    }
+
+    // Branch verification (additional)
+    verify_branch_balance(&func.body, &HashSet::new(), &env_load_vars_set, var_table, func.name.as_str());
+}
+
+fn scan_env_loads(expr: &IrExpr, vars: &mut HashSet<VarId>) {
+    if let IrExprKind::Block { stmts, expr: tail } = &expr.kind {
+        for stmt in stmts {
+            if let IrStmtKind::Bind { var, value, ty, .. } = &stmt.kind {
+                if is_heap_type(ty) && matches!(&value.kind, IrExprKind::EnvLoad { .. }) {
+                    vars.insert(*var);
+                }
+            }
+        }
+        if let Some(t) = tail { scan_env_loads(t, vars); }
+    }
+    if let IrExprKind::If { then, else_, .. } = &expr.kind {
+        scan_env_loads(then, vars); scan_env_loads(else_, vars);
+    }
+    if let IrExprKind::Match { arms, .. } = &expr.kind {
+        for arm in arms { scan_env_loads(&arm.body, vars); }
+    }
+}
+
+// === Legacy verify (kept for reference) ===
+#[allow(dead_code)]
+fn verify_function_legacy(func: &IrFunction, var_table: &VarTable) {
     let mut inc_count: HashMap<VarId, usize> = HashMap::new();
     let mut dec_count: HashMap<VarId, usize> = HashMap::new();
     let mut heap_binds: HashSet<VarId> = HashSet::new();
     let mut env_load_vars: HashSet<VarId> = HashSet::new();
-
-    // Scan entire function body for RC operations and heap binds
     scan_rc_ops(&func.body, &mut inc_count, &mut dec_count, &mut heap_binds, &mut env_load_vars, var_table);
 
     // Control-flow verification: check that heap vars bound before a branch

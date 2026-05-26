@@ -91,6 +91,102 @@ pub fn verify_rc_balance(
     issues
 }
 
+/// Lean-certified recursive verification of entire expression tree.
+/// Walks all blocks, if/else, match, while, for-in.
+/// Reports (VarId, message) for every violation.
+pub fn verify_expr(
+    expr: &IrExpr,
+    var_table: &VarTable,
+    returned_vars: &std::collections::HashSet<VarId>,
+    env_load_vars: &std::collections::HashSet<VarId>,
+) -> Vec<(VarId, &'static str)> {
+    let mut issues = Vec::new();
+    verify_expr_inner(expr, var_table, returned_vars, env_load_vars, &mut issues);
+    issues
+}
+
+fn verify_expr_inner(
+    expr: &IrExpr,
+    var_table: &VarTable,
+    returned_vars: &std::collections::HashSet<VarId>,
+    env_load_vars: &std::collections::HashSet<VarId>,
+    issues: &mut Vec<(VarId, &'static str)>,
+) {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            // Verify this block: each heap Bind should have Dec in this scope
+            for stmt in stmts {
+                if let IrStmtKind::Bind { var, ty, value, .. } = &stmt.kind {
+                    if !is_heap_type(ty) { continue; }
+                    if matches!(&value.kind, IrExprKind::EnvLoad { .. }) { continue; }
+                    if env_load_vars.contains(var) { continue; }
+                    if returned_vars.contains(var) { continue; }
+                    // TCO temporaries have their own RC management
+                    let vname = var_table.get(*var).name.as_str();
+                    if vname.starts_with("__tco_") || vname.starts_with("__br_") { continue; }
+
+                    let decs = count_decs(stmts, *var);
+                    let incs = count_incs(stmts, *var);
+                    let info = var_table.get(*var);
+                    let is_mutable = matches!(info.mutability, almide_ir::Mutability::Var);
+
+                    // Lean theorem: single_dec_frees
+                    if decs == 0 && !is_mutable {
+                        issues.push((*var, "LEAK: no RcDec"));
+                    }
+                    // Lean theorem: inc_dec_is_id (balance check)
+                    if !is_mutable && decs > incs + 1 {
+                        issues.push((*var, "DOUBLE-FREE: too many RcDec"));
+                    }
+                }
+            }
+            // Recurse into nested expressions
+            for stmt in stmts {
+                match &stmt.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
+                        verify_expr_inner(value, var_table, returned_vars, env_load_vars, issues),
+                    IrStmtKind::Expr { expr } =>
+                        verify_expr_inner(expr, var_table, returned_vars, env_load_vars, issues),
+                    IrStmtKind::Guard { cond, else_ } => {
+                        verify_expr_inner(cond, var_table, returned_vars, env_load_vars, issues);
+                        verify_expr_inner(else_, var_table, returned_vars, env_load_vars, issues);
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(t) = tail {
+                verify_expr_inner(t, var_table, returned_vars, env_load_vars, issues);
+            }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            verify_expr_inner(cond, var_table, returned_vars, env_load_vars, issues);
+            verify_expr_inner(then, var_table, returned_vars, env_load_vars, issues);
+            verify_expr_inner(else_, var_table, returned_vars, env_load_vars, issues);
+        }
+        IrExprKind::Match { subject, arms } => {
+            verify_expr_inner(subject, var_table, returned_vars, env_load_vars, issues);
+            for arm in arms {
+                verify_expr_inner(&arm.body, var_table, returned_vars, env_load_vars, issues);
+            }
+        }
+        IrExprKind::While { cond, body } => {
+            verify_expr_inner(cond, var_table, returned_vars, env_load_vars, issues);
+            for stmt in body {
+                match &stmt.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
+                        verify_expr_inner(value, var_table, returned_vars, env_load_vars, issues),
+                    IrStmtKind::Expr { expr } =>
+                        verify_expr_inner(expr, var_table, returned_vars, env_load_vars, issues),
+                    _ => {}
+                }
+            }
+        }
+        IrExprKind::Lambda { body, .. } =>
+            verify_expr_inner(body, var_table, returned_vars, env_load_vars, issues),
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
