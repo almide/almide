@@ -120,6 +120,27 @@ jobs:
           $ALMIDE test spec/ --target wasm
 
   # ═══════════════════════════════════════════════
+  # Lean Proofs (AlmidePerceusBelt)
+  # ═══════════════════════════════════════════════
+
+  lean-proofs:
+    name: Lean Proofs (0 sorry)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: crates/almide-perceus-belt
+
+      - name: Verify 0 sorry
+        run: |
+          if grep -rn '\bsorry\b' crates/almide-perceus-belt/AlmidePerceusBelt/ --include='*.lean'; then
+            echo "::error::sorry found in Lean proofs — all theorems must be fully proven"
+            exit 1
+          fi
+
+  # ═══════════════════════════════════════════════
   # Checks
   # ═══════════════════════════════════════════════
 

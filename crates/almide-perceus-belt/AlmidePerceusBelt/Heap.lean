@@ -37,6 +37,7 @@ def execute : FnBody → Heap → Env → Heap
     match env v with
     | some a => execute body (h.decRef a) env
     | none => execute body h env
+  | .ite th _, h, env => execute th h env  -- execute then-branch (deterministic choice)
   | .ret, h, _ | .nop, h, _ => h
 
 -- ══════ Heap Proofs ══════
