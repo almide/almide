@@ -723,6 +723,18 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
         span: None,
     };
 
+    // Perceus: RcDec for heap-typed TCO temporaries at end of while body.
+    // These temps hold intermediate values (e.g., list.drop result) that
+    // are consumed per iteration and should be freed.
+    let mut while_body = vec![while_body_stmt];
+    for (tmp_var, tmp_ty) in &temps {
+        if matches!(tmp_ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. }
+            | Ty::Unknown | Ty::Fn { .. })
+        {
+            while_body.push(IrStmt { kind: IrStmtKind::RcDec { var: *tmp_var }, span: None });
+        }
+    }
+
     let while_expr = IrExpr {
         kind: IrExprKind::While {
             cond: Box::new(IrExpr {
@@ -730,7 +742,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
                 ty: Ty::Bool,
                 span: None, def_id: None,
             }),
-            body: vec![while_body_stmt],
+            body: while_body,
         },
         ty: Ty::Unit,
         span: None, def_id: None,

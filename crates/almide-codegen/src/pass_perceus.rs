@@ -532,9 +532,10 @@ fn verify_function(func: &IrFunction, var_table: &VarTable) {
     let mut inc_count: HashMap<VarId, usize> = HashMap::new();
     let mut dec_count: HashMap<VarId, usize> = HashMap::new();
     let mut heap_binds: HashSet<VarId> = HashSet::new();
+    let mut env_load_vars: HashSet<VarId> = HashSet::new();
 
     // Scan entire function body for RC operations and heap binds
-    scan_rc_ops(&func.body, &mut inc_count, &mut dec_count, &mut heap_binds, var_table);
+    scan_rc_ops(&func.body, &mut inc_count, &mut dec_count, &mut heap_binds, &mut env_load_vars, var_table);
 
     // Collect variables used in return position (any tail expression) — they're
     // transferred to the caller, no RcDec needed.
@@ -544,27 +545,30 @@ fn verify_function(func: &IrFunction, var_table: &VarTable) {
     // Verify: every heap bind has at least one dec (free path)
     for var in &heap_binds {
         if returned_vars.contains(var) { continue; } // returned → caller owns
-        // Skip compiler-generated temporaries (TCO, etc.)
-        let var_name = var_table.get(*var).name.as_str();
-        if var_name.starts_with("__tco_") || var_name.starts_with("__br_") { continue; }
+        // EnvLoad-bound vars are borrowed from closure env (not owned)
+        let is_env_load = env_load_vars.contains(var);
+        if is_env_load { continue; }
+
         let decs = dec_count.get(var).copied().unwrap_or(0);
         let incs = inc_count.get(var).copied().unwrap_or(0);
-        if decs == 0 {
-            let name = var_table.get(*var).name.as_str();
+        let name = var_table.get(*var).name.as_str();
+        let info = var_table.get(*var);
+        let is_mutable = matches!(info.mutability, Mutability::Var);
+
+        // AlmidePerceusBelt: no exclusions. Every heap var must have a free path.
+        if decs == 0 && !is_mutable {
+            // Immutable heap var with no Dec → definite leak
             eprintln!(
-                "[perceus-verify] warning: heap variable `{}` (VarId {}) in `{}` has no RcDec — potential leak",
+                "[perceus-belt] LEAK: `{}` (VarId {}) in `{}` — no RcDec",
                 name, var.0, func.name.as_str()
             );
         }
-        // Check balance: incs + 1 (alloc) should equal decs (over all paths)
-        // Skip mutable vars: each Assign creates a new object, so Assign-Dec
-        // and exit-Dec operate on different allocations (not double-free).
-        let info = var_table.get(*var);
-        let is_mutable = matches!(info.mutability, Mutability::Var);
+        // Mutable vars: Assign-Dec frees old value, exit-Dec frees final value.
+        // Multiple Decs is expected (one per Assign + one at exit).
+        // For immutable vars: decs > incs + 1 → potential double-free.
         if !is_mutable && decs > incs + 1 {
-            let name = var_table.get(*var).name.as_str();
             eprintln!(
-                "[perceus-verify] warning: heap variable `{}` (VarId {}) in `{}` has {} decs but only {} incs — potential double-free",
+                "[perceus-belt] DOUBLE-FREE: `{}` (VarId {}) in `{}` — {} decs, {} incs",
                 name, var.0, func.name.as_str(), decs, incs
             );
         }
@@ -576,6 +580,7 @@ fn scan_rc_ops(
     inc_count: &mut HashMap<VarId, usize>,
     dec_count: &mut HashMap<VarId, usize>,
     heap_binds: &mut HashSet<VarId>,
+    env_load_vars: &mut HashSet<VarId>,
     var_table: &VarTable,
 ) {
     match &expr.kind {
@@ -590,74 +595,73 @@ fn scan_rc_ops(
                     }
                     IrStmtKind::Bind { var, ty, value, .. } => {
                         if is_heap_type(ty) {
-                            // Skip EnvLoad binds — they're borrowed from closure env, not owned
-                            let is_env_load = matches!(&value.kind, IrExprKind::EnvLoad { .. });
-                            if !is_env_load {
-                                heap_binds.insert(*var);
+                            heap_binds.insert(*var);
+                            if matches!(&value.kind, IrExprKind::EnvLoad { .. }) {
+                                env_load_vars.insert(*var);
                             }
                         }
-                        scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
+                        scan_rc_ops(value, inc_count, dec_count, heap_binds, env_load_vars, var_table);
                     }
                     IrStmtKind::Assign { value, .. } => {
-                        scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
+                        scan_rc_ops(value, inc_count, dec_count, heap_binds, env_load_vars, var_table);
                     }
                     IrStmtKind::Expr { expr } => {
-                        scan_rc_ops(expr, inc_count, dec_count, heap_binds, var_table);
+                        scan_rc_ops(expr, inc_count, dec_count, heap_binds, env_load_vars, var_table);
                     }
                     IrStmtKind::Guard { cond, else_ } => {
-                        scan_rc_ops(cond, inc_count, dec_count, heap_binds, var_table);
-                        scan_rc_ops(else_, inc_count, dec_count, heap_binds, var_table);
+                        scan_rc_ops(cond, inc_count, dec_count, heap_binds, env_load_vars, var_table);
+                        scan_rc_ops(else_, inc_count, dec_count, heap_binds, env_load_vars, var_table);
                     }
                     _ => {}
                 }
             }
             if let Some(tail) = tail {
-                scan_rc_ops(tail, inc_count, dec_count, heap_binds, var_table);
+                scan_rc_ops(tail, inc_count, dec_count, heap_binds, env_load_vars, var_table);
             }
         }
         IrExprKind::If { cond, then, else_ } => {
-            scan_rc_ops(cond, inc_count, dec_count, heap_binds, var_table);
-            scan_rc_ops(then, inc_count, dec_count, heap_binds, var_table);
-            scan_rc_ops(else_, inc_count, dec_count, heap_binds, var_table);
+            scan_rc_ops(cond, inc_count, dec_count, heap_binds, env_load_vars, var_table);
+            scan_rc_ops(then, inc_count, dec_count, heap_binds, env_load_vars, var_table);
+            scan_rc_ops(else_, inc_count, dec_count, heap_binds, env_load_vars, var_table);
         }
         IrExprKind::Match { subject, arms } => {
-            scan_rc_ops(subject, inc_count, dec_count, heap_binds, var_table);
+            scan_rc_ops(subject, inc_count, dec_count, heap_binds, env_load_vars, var_table);
             for arm in arms {
-                scan_rc_ops(&arm.body, inc_count, dec_count, heap_binds, var_table);
+                scan_rc_ops(&arm.body, inc_count, dec_count, heap_binds, env_load_vars, var_table);
             }
         }
         IrExprKind::While { cond, body } => {
-            scan_rc_ops(cond, inc_count, dec_count, heap_binds, var_table);
+            scan_rc_ops(cond, inc_count, dec_count, heap_binds, env_load_vars, var_table);
             for stmt in body {
                 match &stmt.kind {
                     IrStmtKind::RcInc { var } => { *inc_count.entry(*var).or_insert(0) += 1; }
                     IrStmtKind::RcDec { var } => { *dec_count.entry(*var).or_insert(0) += 1; }
                     IrStmtKind::Bind { var, ty, value, .. } => {
                         if is_heap_type(ty) { heap_binds.insert(*var); }
-                        scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
+                        scan_rc_ops(value, inc_count, dec_count, heap_binds, env_load_vars, var_table);
                     }
                     IrStmtKind::Assign { value, .. } => {
-                        scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
+                        scan_rc_ops(value, inc_count, dec_count, heap_binds, env_load_vars, var_table);
                     }
                     IrStmtKind::Expr { expr } => {
-                        scan_rc_ops(expr, inc_count, dec_count, heap_binds, var_table);
+                        scan_rc_ops(expr, inc_count, dec_count, heap_binds, env_load_vars, var_table);
                     }
                     _ => {}
                 }
             }
         }
         IrExprKind::Lambda { body, .. } => {
-            scan_rc_ops(body, inc_count, dec_count, heap_binds, var_table);
+            scan_rc_ops(body, inc_count, dec_count, heap_binds, env_load_vars, var_table);
         }
         IrExprKind::ForIn { iterable, body, .. } => {
-            scan_rc_ops(iterable, inc_count, dec_count, heap_binds, var_table);
+            scan_rc_ops(iterable, inc_count, dec_count, heap_binds, env_load_vars, var_table);
             for stmt in body {
                 match &stmt.kind {
                     IrStmtKind::RcInc { var } => { *inc_count.entry(*var).or_insert(0) += 1; }
                     IrStmtKind::RcDec { var } => { *dec_count.entry(*var).or_insert(0) += 1; }
                     IrStmtKind::Bind { var, ty, value, .. } => {
                         if is_heap_type(ty) { heap_binds.insert(*var); }
-                        scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
+                        scan_rc_ops(value, inc_count, dec_count, heap_binds, env_load_vars, var_table);
                     }
                     _ => {}
                 }
