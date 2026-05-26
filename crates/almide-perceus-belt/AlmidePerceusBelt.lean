@@ -1,3 +1,4 @@
--- This module serves as the root of the `AlmidePerceusBelt` library.
--- Import modules here that should be built as part of the library.
+-- AlmidePerceusBelt: Formal proof of Perceus RC soundness.
 import AlmidePerceusBelt.Basic
+import AlmidePerceusBelt.FnBody
+import AlmidePerceusBelt.Heap
