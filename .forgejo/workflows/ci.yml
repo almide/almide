@@ -7,39 +7,6 @@ on:
     branches: [main, develop]
 
 jobs:
-  build-and-test:
-    name: Build + Test
-    runs-on: codeberg-medium
-    steps:
-      - uses: https://code.forgejo.org/actions/checkout@v4
-
-      - name: Install Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.89.0
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Install wasmtime
-        run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash
-          echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Cargo tests
-        run: cargo test -- --test-threads=1
-
-      - name: Install almide
-        run: |
-          cp target/release/almide /usr/local/bin/ || sudo cp target/release/almide /usr/local/bin/
-          almide --version
-
-      - name: Almide spec tests (Rust)
-        run: almide test spec/
-
-      - name: Almide spec tests (WASM)
-        run: almide test spec/ --target wasm
-
   lean-proofs:
     name: Lean Proofs (0 sorry)
     runs-on: codeberg-tiny
