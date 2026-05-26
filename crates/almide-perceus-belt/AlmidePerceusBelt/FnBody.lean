@@ -281,7 +281,7 @@ private theorem insertDec_preserves_allHeapFreed (fb : FnBody) (v : VarId)
     at least one Dec for that variable on all execution paths.
     This guarantees that every heap allocation will be freed.
 
-    Lean 4 kernel verified. 0 sorry.
+    Lean 4 kernel verified. All goals proven.
     ═══════════════════════════════════════════════════════ -/
 theorem perceus_all_heap_freed (fb : FnBody) :
     allHeapFreed (perceusTransform fb) := by
