@@ -270,7 +270,11 @@ fn scan_rc_ops(
                     }
                     IrStmtKind::Bind { var, ty, value, .. } => {
                         if is_heap_type(ty) {
-                            heap_binds.insert(*var);
+                            // Skip EnvLoad binds — they're borrowed from closure env, not owned
+                            let is_env_load = matches!(&value.kind, IrExprKind::EnvLoad { .. });
+                            if !is_env_load {
+                                heap_binds.insert(*var);
+                            }
                         }
                         scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
                     }
@@ -353,6 +357,11 @@ fn insert_rc_ops(func: &mut IrFunction, var_table: &VarTable) -> bool {
 
     let mut changed = false;
 
+    // Build closure capture map: VarId of closure → Vec of captured heap VarIds
+    // This enables Rule 6: when a closure is RcDec'd, also RcDec its captures
+    let mut closure_captures: HashMap<VarId, Vec<VarId>> = HashMap::new();
+    collect_closure_captures(&func.body, &mut closure_captures);
+
     // Recursively process ALL blocks in the function body
     let mut dropped_vars: HashSet<VarId> = HashSet::new();
     if insert_rc_in_expr(&mut func.body, var_table, &mut dropped_vars) { changed = true; }
@@ -362,7 +371,7 @@ fn insert_rc_ops(func: &mut IrFunction, var_table: &VarTable) -> bool {
         let mut exit_vars = Vec::new();
         collect_heap_binds_from_stmts(stmts, var_table, &mut exit_vars);
         for var in exit_vars {
-            if dropped_vars.contains(&var) { continue; } // Rule 2 already handled
+            if dropped_vars.contains(&var) { continue; }
             let use_count = var_table.get(var).use_count;
             if use_count <= 1 { continue; }
             stmts.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
@@ -373,7 +382,89 @@ fn insert_rc_ops(func: &mut IrFunction, var_table: &VarTable) -> bool {
     // Rule 5: RcInc for closure captures
     insert_closure_capture_incs(&mut func.body);
 
+    // Rule 6: After every RcDec of a closure variable, insert RcDec for its captures.
+    // This balances the RcInc from Rule 5.
+    insert_closure_capture_decs(&mut func.body, &closure_captures);
+
     changed
+}
+
+/// Collect closure variable → captured heap VarIds mapping.
+fn collect_closure_captures(expr: &IrExpr, map: &mut HashMap<VarId, Vec<VarId>>) {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            for stmt in stmts {
+                if let IrStmtKind::Bind { var, value, .. } = &stmt.kind {
+                    if let IrExprKind::ClosureCreate { captures, .. } = &value.kind {
+                        let heap_caps: Vec<VarId> = captures.iter()
+                            .filter(|(_, ty)| is_heap_type(ty))
+                            .map(|(vid, _)| *vid)
+                            .collect();
+                        if !heap_caps.is_empty() {
+                            map.insert(*var, heap_caps);
+                        }
+                    }
+                    collect_closure_captures(value, map);
+                }
+                if let IrStmtKind::Expr { expr } = &stmt.kind {
+                    collect_closure_captures(expr, map);
+                }
+            }
+            if let Some(tail) = tail { collect_closure_captures(tail, map); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_closure_captures(cond, map);
+            collect_closure_captures(then, map);
+            collect_closure_captures(else_, map);
+        }
+        IrExprKind::Match { subject, arms } => {
+            collect_closure_captures(subject, map);
+            for arm in arms { collect_closure_captures(&arm.body, map); }
+        }
+        _ => {}
+    }
+}
+
+/// Rule 6: After every RcDec of a closure var, insert RcDec for its captures.
+fn insert_closure_capture_decs(expr: &mut IrExpr, caps: &HashMap<VarId, Vec<VarId>>) {
+    if caps.is_empty() { return; }
+    match &mut expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            let mut new_stmts = Vec::new();
+            for stmt in stmts.drain(..) {
+                let capture_decs: Vec<VarId> = if let IrStmtKind::RcDec { var } = &stmt.kind {
+                    caps.get(var).cloned().unwrap_or_default()
+                } else { vec![] };
+                new_stmts.push(stmt);
+                // Insert RcDec for each captured heap var after the closure's RcDec
+                for cap_var in capture_decs {
+                    new_stmts.push(IrStmt { kind: IrStmtKind::RcDec { var: cap_var }, span: None });
+                }
+            }
+            *stmts = new_stmts;
+            // Recurse
+            for stmt in stmts.iter_mut() {
+                match &mut stmt.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
+                        insert_closure_capture_decs(value, caps);
+                    }
+                    IrStmtKind::Expr { expr } => { insert_closure_capture_decs(expr, caps); }
+                    _ => {}
+                }
+            }
+            if let Some(tail) = tail { insert_closure_capture_decs(tail, caps); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            insert_closure_capture_decs(cond, caps);
+            insert_closure_capture_decs(then, caps);
+            insert_closure_capture_decs(else_, caps);
+        }
+        IrExprKind::Match { subject, arms } => {
+            insert_closure_capture_decs(subject, caps);
+            for arm in arms { insert_closure_capture_decs(&mut arm.body, caps); }
+        }
+        _ => {}
+    }
 }
 
 /// Recursively insert RC operations in all blocks within an expression.

@@ -847,7 +847,9 @@ impl FuncCompiler<'_> {
                 // those references (the env itself is freed, captured value RCs
                 // remain — they'll be freed when their original owners drop).
                 Ty::Fn { .. } => {
-                    // Load env_ptr from closure pair
+                    // Load env_ptr from closure pair, rc_dec env
+                    // Captured values are handled at IR level by PerceusPass
+                    // (RcDec for captures is inserted alongside RcDec for the closure)
                     let env_ptr = self.scratch.alloc_i32();
                     wasm!(self.func, {
                         local_get(local_idx); i32_load(4); local_set(env_ptr);
