@@ -47,6 +47,7 @@ pub mod pass_tail_call_mark;
 pub mod pass_licm;
 pub mod pass_peephole;
 pub mod pass_perceus;
+pub mod perceus_verified;
 pub mod pass_egg_saturation;
 pub mod pass_matrix_shape_spec;
 pub mod pass_const_fold;
