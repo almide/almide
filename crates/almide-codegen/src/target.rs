@@ -26,6 +26,7 @@ use super::pass_effect_inference::EffectInferencePass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
+use super::pass_anf::AnfPass;
 use super::pass_perceus::{PerceusPass, PerceusOptPass, PerceusVerifyPass};
 use super::pass_egg_saturation::EggSaturationPass;
 use super::pass_matrix_shape_spec::MatrixShapeSpecPass;
@@ -194,8 +195,11 @@ fn build_pipeline(target: Target) -> Pipeline {
         // Call return types inside closures (e.g. map.get inside a lifted lambda).
         .add(ConcretizeTypesPass)
         .add(FanLoweringPass)
+        // ANF: lift heap sub-expressions to let bindings so Perceus can Dec them.
+        // Must run before PerceusPass — makes all heap allocs visible as VDecls.
+        .add(AnfPass)
         // Perceus: insert RcInc/RcDec nodes based on types.
-        // Runs after closure conversion (captures are known) and before TailCallMark.
+        // Runs after ANF (all heap allocs are VDecls) and closure conversion.
         .add(PerceusPass)
         // Perceus optimization: eliminate redundant Inc/Dec pairs.
         // Theorem: immutable single-use aliases have identity Inc/Dec.

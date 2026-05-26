@@ -267,8 +267,9 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
                 })
                 .filter(|v| {
                     let info = var_table.get(**v);
-                    // Skip EnvLoad-bound vars (borrowed, not owned)
-                    info.use_count > 0 || matches!(info.mutability, Mutability::Var)
+                    let name = info.name.as_str();
+                    // Skip TCO/branch temporaries (their own RC management)
+                    !name.starts_with("__tco_") && !name.starts_with("__br_")
                 })
                 .copied()
                 .collect();
@@ -321,7 +322,8 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
             let mut result = FnBody::Nop;
             for var in heap_vars.iter().rev() {
                 let info = var_table.get(*var);
-                if info.use_count > 0 || matches!(info.mutability, Mutability::Var) {
+                let name = info.name.as_str();
+                if !name.starts_with("__tco_") && !name.starts_with("__br_") {
                     result = FnBody::Dec { var: *var, body: Box::new(result) };
                 }
             }
@@ -521,7 +523,7 @@ impl NanoPass for PerceusVerifyPass {
 
     fn run(&self, program: IrProgram, _target: Target) -> PassResult {
         for func in &program.functions {
-            if func.name.as_str() == "main" || func.is_test { continue; }
+            if func.is_test { continue; }
             // Lean-certified verify: uses perceus_verified::is_heap_type,
             // count_decs, count_incs (mirroring Lean 4 proven definitions)
             verify_function(func, &program.var_table);
@@ -806,11 +808,87 @@ fn is_heap_type(ty: &Ty) -> bool {
 /// Insert RC operations into a function body using FnBody conversion.
 /// Block IR → FnBody chain → Perceus rules → FnBody → Block IR.
 fn insert_rc_ops(func: &mut IrFunction, var_table: &mut VarTable) -> bool {
-    if func.name.as_str() == "main" || func.is_test { return false; }
+    if func.is_test { return false; }
 
     // Apply Perceus recursively to the entire function body
     perceus_expr(&mut func.body, var_table);
+    // Note: function parameters use borrow semantics — the CALLER owns the
+    // value and Dec's it at scope exit. The callee does NOT Dec parameters.
+    // This avoids double-free (caller Dec + callee Dec on same pointer).
+
     true
+}
+
+/// Insert RcDec for heap-typed function parameters at the end of blocks.
+/// Uses the same tail-lift pattern as insert_ret_decs.
+fn insert_param_decs(expr: &mut IrExpr, params: &[VarId], var_table: &mut VarTable) {
+    match &mut expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            // Recurse into nested expressions
+            for stmt in stmts.iter_mut() {
+                match &mut stmt.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
+                        insert_param_decs(value, params, var_table),
+                    IrStmtKind::Expr { expr } =>
+                        insert_param_decs(expr, params, var_table),
+                    _ => {}
+                }
+            }
+            // Insert Dec stmts for each heap param before the tail expression
+            if let Some(tail_expr) = tail {
+                // Check which params are used in the tail expression (don't Dec returned params)
+                let mut tail_refs = HashSet::new();
+                collect_var_refs_expr(tail_expr, &mut tail_refs);
+
+                let params_to_dec: Vec<VarId> = params.iter()
+                    .filter(|p| !tail_refs.contains(p) || !matches!(&tail_expr.kind, IrExprKind::Var { id } if *id == **p))
+                    .copied()
+                    .collect();
+
+                if !params_to_dec.is_empty() {
+                    // If any param is referenced inside (but not AS) the tail, use tail lift
+                    let needs_lift = params_to_dec.iter().any(|p| tail_refs.contains(p));
+                    if needs_lift {
+                        let ret_ty = tail_expr.ty.clone();
+                        let ret_var = var_table.alloc(
+                            almide_base::intern::sym("__perceus_param_ret"),
+                            ret_ty.clone(), Mutability::Let, None,
+                        );
+                        let old_tail = std::mem::replace(tail_expr.as_mut(), IrExpr {
+                            kind: IrExprKind::Var { id: ret_var },
+                            ty: ret_ty.clone(), span: None, def_id: None,
+                        });
+                        // Build: let __ret = old_tail; Dec(params); __ret
+                        let mut dec_stmts: Vec<IrStmt> = vec![IrStmt {
+                            kind: IrStmtKind::Bind { var: ret_var, ty: ret_ty, mutability: Mutability::Let, value: old_tail },
+                            span: None,
+                        }];
+                        for p in &params_to_dec {
+                            dec_stmts.push(IrStmt { kind: IrStmtKind::RcDec { var: *p }, span: None });
+                        }
+                        stmts.extend(dec_stmts);
+                    } else {
+                        for p in &params_to_dec {
+                            stmts.push(IrStmt { kind: IrStmtKind::RcDec { var: *p }, span: None });
+                        }
+                    }
+                }
+            } else {
+                // No tail expression (Unit return) — Dec all params
+                for p in params {
+                    stmts.push(IrStmt { kind: IrStmtKind::RcDec { var: *p }, span: None });
+                }
+            }
+        }
+        IrExprKind::If { then, else_, .. } => {
+            insert_param_decs(then, params, var_table);
+            insert_param_decs(else_, params, var_table);
+        }
+        IrExprKind::Match { arms, .. } => {
+            for arm in arms { insert_param_decs(&mut arm.body, params, var_table); }
+        }
+        _ => {}
+    }
 }
 
 /// Collect closure variable → captured heap VarIds mapping.
