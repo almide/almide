@@ -194,4 +194,34 @@ theorem cf_vdecl_ite_freed (v : VarId) (ty : Ty) :
   unfold hasDec
   simp [countDecs]
 
+-- ══════════════════════════════════════════════════════
+-- PROOFS: PerceusOpt (Inc-Dec Elimination)
+-- Corresponds to PerceusOptPass in pass_perceus.rs.
+-- The optimization removes Inc(x)+Dec(b) where b aliases x.
+-- In the FnBody model (single VarId), this is Inc(v)+Dec(v).
+-- ══════════════════════════════════════════════════════
+
+/-- PerceusOpt soundness: Inc(v)+Dec(v) wrapper is identity for isFreed.
+    For any variable w, freed status is unchanged by adding/removing
+    an Inc+Dec pair for v. This justifies eliminate_in_block. -/
+theorem opt_inc_dec_preserves_freed (v w : VarId) (body : FnBody) :
+    isFreed (.inc v (.dec v body)) w ↔ isFreed body w := by
+  unfold isFreed; simp [countDecs, countIncs]; split <;> omega
+
+/-- PerceusOpt: Inc(v)+Dec(v) preserves hasDec for different variables -/
+theorem opt_inc_dec_preserves_hasDec (v w : VarId) (body : FnBody) (h : v ≠ w) :
+    hasDec (.inc v (.dec v body)) w ↔ hasDec body w := by
+  unfold hasDec; simp [countDecs, beq_iff_eq, h]
+
+/-- PerceusOpt: Inc(v)+Dec(v) always has hasDec for v itself -/
+theorem opt_inc_dec_has_dec_self (v : VarId) (body : FnBody) :
+    hasDec (.inc v (.dec v body)) v := by
+  unfold hasDec; simp [countDecs]
+
+/-- PerceusOpt: Inc+Dec pair adds exactly 1 to both counts -/
+theorem opt_inc_dec_count_balance (v : VarId) (body : FnBody) :
+    countDecs (.inc v (.dec v body)) v = countDecs body v + 1 ∧
+    countIncs (.inc v (.dec v body)) v = countIncs body v + 1 := by
+  simp [countDecs, countIncs, Nat.add_comm]
+
 end AlmidePerceusBelt

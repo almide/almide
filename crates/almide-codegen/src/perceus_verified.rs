@@ -513,4 +513,35 @@ mod proptest_lean_rust {
             prop_assert_eq!(count_incs(&stmts, var), count_incs(&shuffled, var));
         }
     }
+
+    // ── Lean theorem: opt_inc_dec_preserves_freed ──
+    // PerceusOpt: Inc(v)+Dec(v) pair is identity for isFreed.
+
+    proptest! {
+        #[test]
+        fn opt_inc_dec_preserves_freed(stmts in arb_stmts(), var in arb_var_id()) {
+            let freed_before = is_freed(&stmts, var);
+            // Wrap with Inc+Dec pair
+            let mut wrapped = vec![IrStmt { kind: IrStmtKind::RcInc { var }, span: None }];
+            wrapped.extend(stmts);
+            wrapped.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
+            prop_assert_eq!(
+                is_freed(&wrapped, var), freed_before,
+                "Inc+Dec wrapper must not change freed status (PerceusOpt soundness)"
+            );
+        }
+
+        #[test]
+        fn opt_inc_dec_count_balance(stmts in arb_stmts(), var in arb_var_id()) {
+            let decs_before = count_decs(&stmts, var);
+            let incs_before = count_incs(&stmts, var);
+            // Wrap with Inc+Dec pair
+            let mut wrapped = vec![IrStmt { kind: IrStmtKind::RcInc { var }, span: None }];
+            wrapped.extend(stmts);
+            wrapped.push(IrStmt { kind: IrStmtKind::RcDec { var }, span: None });
+            // Both counts increase by exactly 1
+            prop_assert_eq!(count_decs(&wrapped, var), decs_before + 1);
+            prop_assert_eq!(count_incs(&wrapped, var), incs_before + 1);
+        }
+    }
 }

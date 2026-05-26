@@ -128,4 +128,19 @@ theorem perceus_strictly_better (v : VarId) (h : Heap) (env : Env) :
   · simp [execute, Heap.alloc, Heap.decRef]
 
 
+-- ═══ PERCEUS-OPT: Inc+Dec Heap Identity ═══
+
+/-- PerceusOpt heap soundness: Inc(v)+Dec(v) is identity on RC.
+    Matches PerceusOptPass eliminate_in_block in pass_perceus.rs. -/
+theorem opt_inc_dec_heap_rc (v : VarId) (h : Heap) (env : Env) (addr : Addr) :
+    (execute (.inc v (.dec v .nop)) h env).rc addr = h.rc addr := by
+  simp only [execute]
+  cases env v with
+  | none => rfl
+  | some a =>
+    simp only [Heap.incRef, Heap.decRef]
+    split
+    · split <;> simp_all <;> omega
+    · rfl
+
 end AlmidePerceusBelt
