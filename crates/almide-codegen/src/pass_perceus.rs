@@ -188,6 +188,161 @@ fn eliminate_in_block(stmts: &mut Vec<IrStmt>, var_table: &VarTable) -> bool {
     true
 }
 
+/// Perceus verification: check that RC operations are correctly balanced.
+///
+/// Invariant: For each heap-typed variable v,
+///   inc_count(v) + 1 (initial alloc) ≥ dec_count(v)
+///   AND dec_count(v) ≥ 1 (every alloc has at least one free path)
+///
+/// Violations are reported as compiler warnings (not errors — the program
+/// still runs, it just may leak or double-free).
+#[derive(Debug)]
+pub struct PerceusVerifyPass;
+
+impl NanoPass for PerceusVerifyPass {
+    fn name(&self) -> &str { "PerceusVerify" }
+    fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Wasm]) }
+
+    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
+        for func in &program.functions {
+            if func.name.as_str() == "main" || func.is_test { continue; }
+            verify_function(func, &program.var_table);
+        }
+        PassResult { program, changed: false }
+    }
+}
+
+fn verify_function(func: &IrFunction, var_table: &VarTable) {
+    let mut inc_count: HashMap<VarId, usize> = HashMap::new();
+    let mut dec_count: HashMap<VarId, usize> = HashMap::new();
+    let mut heap_binds: HashSet<VarId> = HashSet::new();
+
+    // Scan entire function body for RC operations and heap binds
+    scan_rc_ops(&func.body, &mut inc_count, &mut dec_count, &mut heap_binds, var_table);
+
+    // Collect variables used in return position (tail expression) — they're
+    // transferred to the caller, no RcDec needed.
+    let mut returned_vars: HashSet<VarId> = HashSet::new();
+    if let IrExprKind::Block { expr: Some(tail), .. } = &func.body.kind {
+        collect_var_refs_expr(tail, &mut returned_vars);
+    }
+
+    // Verify: every heap bind has at least one dec (free path)
+    for var in &heap_binds {
+        if returned_vars.contains(var) { continue; } // returned → caller owns
+        let decs = dec_count.get(var).copied().unwrap_or(0);
+        let incs = inc_count.get(var).copied().unwrap_or(0);
+        if decs == 0 {
+            let name = var_table.get(*var).name.as_str();
+            eprintln!(
+                "[perceus-verify] warning: heap variable `{}` (VarId {}) in `{}` has no RcDec — potential leak",
+                name, var.0, func.name.as_str()
+            );
+        }
+        // Check balance: incs + 1 (alloc) should equal decs (over all paths)
+        // This is approximate — control flow makes exact checking hard
+        if decs > incs + 1 {
+            let name = var_table.get(*var).name.as_str();
+            eprintln!(
+                "[perceus-verify] warning: heap variable `{}` (VarId {}) in `{}` has {} decs but only {} incs — potential double-free",
+                name, var.0, func.name.as_str(), decs, incs
+            );
+        }
+    }
+}
+
+fn scan_rc_ops(
+    expr: &IrExpr,
+    inc_count: &mut HashMap<VarId, usize>,
+    dec_count: &mut HashMap<VarId, usize>,
+    heap_binds: &mut HashSet<VarId>,
+    var_table: &VarTable,
+) {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: tail } => {
+            for stmt in stmts {
+                match &stmt.kind {
+                    IrStmtKind::RcInc { var } => {
+                        *inc_count.entry(*var).or_insert(0) += 1;
+                    }
+                    IrStmtKind::RcDec { var } => {
+                        *dec_count.entry(*var).or_insert(0) += 1;
+                    }
+                    IrStmtKind::Bind { var, ty, value, .. } => {
+                        if is_heap_type(ty) {
+                            heap_binds.insert(*var);
+                        }
+                        scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
+                    }
+                    IrStmtKind::Assign { value, .. } => {
+                        scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
+                    }
+                    IrStmtKind::Expr { expr } => {
+                        scan_rc_ops(expr, inc_count, dec_count, heap_binds, var_table);
+                    }
+                    IrStmtKind::Guard { cond, else_ } => {
+                        scan_rc_ops(cond, inc_count, dec_count, heap_binds, var_table);
+                        scan_rc_ops(else_, inc_count, dec_count, heap_binds, var_table);
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(tail) = tail {
+                scan_rc_ops(tail, inc_count, dec_count, heap_binds, var_table);
+            }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            scan_rc_ops(cond, inc_count, dec_count, heap_binds, var_table);
+            scan_rc_ops(then, inc_count, dec_count, heap_binds, var_table);
+            scan_rc_ops(else_, inc_count, dec_count, heap_binds, var_table);
+        }
+        IrExprKind::Match { subject, arms } => {
+            scan_rc_ops(subject, inc_count, dec_count, heap_binds, var_table);
+            for arm in arms {
+                scan_rc_ops(&arm.body, inc_count, dec_count, heap_binds, var_table);
+            }
+        }
+        IrExprKind::While { cond, body } => {
+            scan_rc_ops(cond, inc_count, dec_count, heap_binds, var_table);
+            for stmt in body {
+                match &stmt.kind {
+                    IrStmtKind::RcInc { var } => { *inc_count.entry(*var).or_insert(0) += 1; }
+                    IrStmtKind::RcDec { var } => { *dec_count.entry(*var).or_insert(0) += 1; }
+                    IrStmtKind::Bind { var, ty, value, .. } => {
+                        if is_heap_type(ty) { heap_binds.insert(*var); }
+                        scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
+                    }
+                    IrStmtKind::Assign { value, .. } => {
+                        scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
+                    }
+                    IrStmtKind::Expr { expr } => {
+                        scan_rc_ops(expr, inc_count, dec_count, heap_binds, var_table);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        IrExprKind::Lambda { body, .. } => {
+            scan_rc_ops(body, inc_count, dec_count, heap_binds, var_table);
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            scan_rc_ops(iterable, inc_count, dec_count, heap_binds, var_table);
+            for stmt in body {
+                match &stmt.kind {
+                    IrStmtKind::RcInc { var } => { *inc_count.entry(*var).or_insert(0) += 1; }
+                    IrStmtKind::RcDec { var } => { *dec_count.entry(*var).or_insert(0) += 1; }
+                    IrStmtKind::Bind { var, ty, value, .. } => {
+                        if is_heap_type(ty) { heap_binds.insert(*var); }
+                        scan_rc_ops(value, inc_count, dec_count, heap_binds, var_table);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 fn is_heap_type(ty: &Ty) -> bool {
     matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown | Ty::Fn { .. })
 }
