@@ -9,7 +9,7 @@ on:
 jobs:
   build-and-test:
     name: Build + Test
-    runs-on: docker
+    runs-on: codeberg-medium
     container:
       image: rust:1.89-bookworm
     steps:
@@ -19,16 +19,6 @@ jobs:
         run: |
           curl https://wasmtime.dev/install.sh -sSf | bash
           echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
-
-      - name: Cache cargo
-        uses: https://github.com/actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: codeberg-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: codeberg-cargo-
 
       - name: Build
         run: cargo build --release
@@ -49,7 +39,7 @@ jobs:
 
   lean-proofs:
     name: Lean Proofs (0 sorry)
-    runs-on: docker
+    runs-on: codeberg-tiny
     container:
       image: debian:bookworm-slim
     steps:
