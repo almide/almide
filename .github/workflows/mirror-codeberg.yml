@@ -1,0 +1,22 @@
+name: Mirror to Codeberg
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+
+jobs:
+  mirror:
+    name: Push to Codeberg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push mirror
+        run: |
+          git push --force --prune \
+            https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/almide/almide.git \
+            "refs/remotes/origin/*:refs/heads/*" \
+            "refs/tags/*:refs/tags/*"

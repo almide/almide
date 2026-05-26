@@ -1,0 +1,64 @@
+name: CI (Codeberg)
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build-and-test:
+    name: Build + Test
+    runs-on: docker
+    container:
+      image: rust:1.89-bookworm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
+
+      - name: Cache cargo
+        uses: https://github.com/actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: codeberg-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: codeberg-cargo-
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Cargo tests
+        run: cargo test -- --test-threads=1
+
+      - name: Install almide
+        run: |
+          cp target/release/almide /usr/local/bin/
+          almide --version
+
+      - name: Almide spec tests (Rust)
+        run: almide test spec/
+
+      - name: Almide spec tests (WASM)
+        run: almide test spec/ --target wasm
+
+  lean-proofs:
+    name: Lean Proofs (0 sorry)
+    runs-on: docker
+    container:
+      image: debian:bookworm-slim
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify 0 sorry
+        run: |
+          if grep -rn '\bsorry\b' crates/almide-perceus-belt/AlmidePerceusBelt/ --include='*.lean'; then
+            echo "::error::sorry found in Lean proofs"
+            exit 1
+          fi
+          echo "0 sorry in Lean proofs"
