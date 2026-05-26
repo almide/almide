@@ -256,26 +256,13 @@ fn insert_rc_in_expr(expr: &mut IrExpr, var_table: &VarTable) -> bool {
         }
         IrExprKind::While { cond, body } => {
             insert_rc_in_expr(cond, var_table);
-            for stmt in body {
-                match &mut stmt.kind {
-                    IrStmtKind::Bind { value, .. } => { insert_rc_in_expr(value, var_table); }
-                    IrStmtKind::Assign { value, .. } => { insert_rc_in_expr(value, var_table); }
-                    IrStmtKind::Expr { expr } => { insert_rc_in_expr(expr, var_table); }
-                    _ => {}
-                }
-            }
+            // Apply Rule 1 (RcInc) and Rule 3 (Assign RcDec) to while body
+            process_stmt_list(body, var_table);
         }
         IrExprKind::Lambda { body, .. } => { insert_rc_in_expr(body, var_table); }
         IrExprKind::ForIn { iterable, body, .. } => {
             insert_rc_in_expr(iterable, var_table);
-            for stmt in body {
-                match &mut stmt.kind {
-                    IrStmtKind::Bind { value, .. } => { insert_rc_in_expr(value, var_table); }
-                    IrStmtKind::Assign { value, .. } => { insert_rc_in_expr(value, var_table); }
-                    IrStmtKind::Expr { expr } => { insert_rc_in_expr(expr, var_table); }
-                    _ => {}
-                }
-            }
+            process_stmt_list(body, var_table);
         }
         _ => {}
     }
@@ -336,6 +323,52 @@ fn insert_last_use_drops(stmts: &mut Vec<IrStmt>, tail: Option<&IrExpr>, var_tab
                     span: None,
                 });
             }
+        }
+    }
+}
+
+/// Apply Rule 1 (RcInc for alias) and Rule 3 (RcDec for Assign) to a statement list.
+/// Used for while/for-in bodies that aren't full Block expressions.
+fn process_stmt_list(stmts: &mut Vec<IrStmt>, var_table: &VarTable) {
+    let mut new_stmts = Vec::new();
+    for stmt in stmts.drain(..) {
+        match &stmt.kind {
+            IrStmtKind::Bind { var: _, ty, value, .. } => {
+                if is_heap_type(ty) {
+                    let id_opt = match &value.kind {
+                        IrExprKind::Var { id } => Some(*id),
+                        IrExprKind::Clone { expr } => {
+                            if let IrExprKind::Var { id } = &expr.kind { Some(*id) } else { None }
+                        }
+                        IrExprKind::Deref { expr } => {
+                            if let IrExprKind::Var { id } = &expr.kind { Some(*id) } else { None }
+                        }
+                        _ => None,
+                    };
+                    if let Some(id) = id_opt {
+                        new_stmts.push(IrStmt { kind: IrStmtKind::RcInc { var: id }, span: stmt.span });
+                    }
+                }
+                new_stmts.push(stmt);
+            }
+            IrStmtKind::Assign { var, .. } => {
+                let ty = &var_table.get(*var).ty;
+                if is_heap_type(ty) {
+                    new_stmts.push(IrStmt { kind: IrStmtKind::RcDec { var: *var }, span: stmt.span });
+                }
+                new_stmts.push(stmt);
+            }
+            _ => new_stmts.push(stmt),
+        }
+    }
+    *stmts = new_stmts;
+    // Recurse into statement values
+    for stmt in stmts.iter_mut() {
+        match &mut stmt.kind {
+            IrStmtKind::Bind { value, .. } => { insert_rc_in_expr(value, var_table); }
+            IrStmtKind::Assign { value, .. } => { insert_rc_in_expr(value, var_table); }
+            IrStmtKind::Expr { expr } => { insert_rc_in_expr(expr, var_table); }
+            _ => {}
         }
     }
 }
