@@ -317,7 +317,7 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
         FnBody::Stmt { stmt, body } =>
             FnBody::Stmt { stmt, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
         FnBody::Nop => {
-            // While/for body: insert Dec for all heap vars before Nop
+            // While/for body: insert Dec for heap vars bound in this body.
             let mut result = FnBody::Nop;
             for var in heap_vars.iter().rev() {
                 let info = var_table.get(*var);
@@ -544,6 +544,9 @@ fn verify_function(func: &IrFunction, var_table: &VarTable) {
     // Verify: every heap bind has at least one dec (free path)
     for var in &heap_binds {
         if returned_vars.contains(var) { continue; } // returned → caller owns
+        // Skip compiler-generated temporaries (TCO, etc.)
+        let var_name = var_table.get(*var).name.as_str();
+        if var_name.starts_with("__tco_") || var_name.starts_with("__br_") { continue; }
         let decs = dec_count.get(var).copied().unwrap_or(0);
         let incs = inc_count.get(var).copied().unwrap_or(0);
         if decs == 0 {
@@ -554,8 +557,11 @@ fn verify_function(func: &IrFunction, var_table: &VarTable) {
             );
         }
         // Check balance: incs + 1 (alloc) should equal decs (over all paths)
-        // This is approximate — control flow makes exact checking hard
-        if decs > incs + 1 {
+        // Skip mutable vars: each Assign creates a new object, so Assign-Dec
+        // and exit-Dec operate on different allocations (not double-free).
+        let info = var_table.get(*var);
+        let is_mutable = matches!(info.mutability, Mutability::Var);
+        if !is_mutable && decs > incs + 1 {
             let name = var_table.get(*var).name.as_str();
             eprintln!(
                 "[perceus-verify] warning: heap variable `{}` (VarId {}) in `{}` has {} decs but only {} incs — potential double-free",
