@@ -17,6 +17,7 @@ env:
 
 jobs:
   cross-target:
+    if: github.server_url == 'https://github.com'
     name: Cross-Target (Rust vs WASM)
     runs-on: ubuntu-latest
     steps:
