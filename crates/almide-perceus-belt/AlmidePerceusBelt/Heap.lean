@@ -37,6 +37,9 @@ def execute : FnBody → Heap → Env → Heap
     match env v with
     | some a => execute body (h.decRef a) env
     | none => execute body h env
+  | .assign v _ body, h, env =>
+    let (h', a) := h.alloc
+    execute body h' (fun x => if x == v then some a else env x)
   | .ite th _, h, env => execute th h env  -- execute then-branch (deterministic choice)
   | .ret, h, _ | .nop, h, _ => h
 
