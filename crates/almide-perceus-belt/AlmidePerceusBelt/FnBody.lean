@@ -124,4 +124,75 @@ theorem perceus_idempotent (v : VarId) (ty : Ty) (body : FnBody)
   intro h; exact perceus_preserves_dec _ v h
 
 
+-- ═══ CONTROL FLOW: if/match in FnBody ═══
+
+-- Extended FnBody with branching
+inductive FnBodyCF where
+  | vdecl : VarId → Ty → FnBodyCF → FnBodyCF
+  | inc : VarId → FnBodyCF → FnBodyCF
+  | dec : VarId → FnBodyCF → FnBodyCF
+  | ite : FnBodyCF → FnBodyCF → FnBodyCF  -- if-then-else (both branches)
+  | ret : FnBodyCF
+  | nop : FnBodyCF
+
+def countDecsCF : FnBodyCF → VarId → Nat
+  | .dec v b, t => (if v == t then 1 else 0) + countDecsCF b t
+  | .vdecl _ _ b, t | .inc _ b, t => countDecsCF b t
+  | .ite th el, t => min (countDecsCF th t) (countDecsCF el t)  -- BOTH branches must Dec
+  | .ret, _ | .nop, _ => 0
+
+def countIncsCF : FnBodyCF → VarId → Nat
+  | .inc v b, t => (if v == t then 1 else 0) + countIncsCF b t
+  | .vdecl _ _ b, t | .dec _ b, t => countIncsCF b t
+  | .ite th el, t => min (countIncsCF th t) (countIncsCF el t)
+  | .ret, _ | .nop, _ => 0
+
+def hasDecCF (fb : FnBodyCF) (v : VarId) : Prop := countDecsCF fb v ≥ 1
+
+def insertDecBeforeEndCF (fb : FnBodyCF) (v : VarId) : FnBodyCF :=
+  match fb with
+  | .vdecl w ty b => .vdecl w ty (insertDecBeforeEndCF b v)
+  | .inc w b => .inc w (insertDecBeforeEndCF b v)
+  | .dec w b => .dec w (insertDecBeforeEndCF b v)
+  | .ite th el => .ite (insertDecBeforeEndCF th v) (insertDecBeforeEndCF el v)  -- BOTH branches
+  | .ret => .dec v .ret
+  | .nop => .dec v .nop
+
+/-- Dec insertion adds one Dec in BOTH branches of if/else -/
+theorem insertDecCF_adds_one (fb : FnBodyCF) (v : VarId) :
+    countDecsCF (insertDecBeforeEndCF fb v) v = countDecsCF fb v + 1 := by
+  induction fb with
+  | vdecl _ _ _ ih => simp [insertDecBeforeEndCF, countDecsCF]; exact ih
+  | inc _ _ ih => simp [insertDecBeforeEndCF, countDecsCF]; exact ih
+  | dec _ _ ih => simp [insertDecBeforeEndCF, countDecsCF]; omega
+  | ite th el ih_th ih_el =>
+    simp [insertDecBeforeEndCF, countDecsCF]
+    rw [ih_th, ih_el]; omega
+  | ret => simp [insertDecBeforeEndCF, countDecsCF]
+  | nop => simp [insertDecBeforeEndCF, countDecsCF]
+
+/-- Control flow soundness: Dec inserted in BOTH branches → freed on ALL paths -/
+theorem cf_both_branches_freed (v : VarId) (th el : FnBodyCF)
+    (h_th : countDecsCF th v = 0) (h_el : countDecsCF el v = 0) :
+    hasDecCF (insertDecBeforeEndCF (.ite th el) v) v := by
+  unfold hasDecCF insertDecBeforeEndCF countDecsCF
+  rw [insertDecCF_adds_one, insertDecCF_adds_one, h_th, h_el]
+  simp [Nat.min_self]
+
+
+
+
+/-- If only ONE branch has Dec, countDecsCF uses min → not freed -/
+theorem cf_one_branch_insufficient (v : VarId) :
+    ¬ hasDecCF (.ite (.dec v .ret) .ret) v := by
+  unfold hasDecCF
+  simp [countDecsCF]
+
+/-- VDecl + if/else with Dec in both branches = freed -/
+theorem cf_vdecl_ite_freed (v : VarId) (ty : Ty) :
+    hasDecCF (.vdecl v ty (.ite (.dec v .ret) (.dec v .ret))) v := by
+  unfold hasDecCF
+  simp [countDecsCF]
+
+
 end AlmidePerceusBelt
