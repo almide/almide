@@ -180,6 +180,6 @@ fn propagate_stmt(stmt: &mut IrStmt, constants: &HashMap<VarId, IrExpr>) {
             propagate_expr(else_, constants);
         }
         IrStmtKind::Expr { expr } => propagate_expr(expr, constants),
-        IrStmtKind::Comment { .. } => {}
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
     }
 }

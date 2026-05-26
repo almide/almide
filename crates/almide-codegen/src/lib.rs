@@ -46,6 +46,8 @@ pub mod pass_tco;
 pub mod pass_tail_call_mark;
 pub mod pass_licm;
 pub mod pass_peephole;
+pub mod pass_perceus;
+pub mod perceus_verified;
 pub mod pass_egg_saturation;
 pub mod pass_matrix_shape_spec;
 pub mod pass_const_fold;
@@ -114,6 +116,11 @@ pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
     codegen_with(program, target, &CodegenOptions::default())
 }
 
+/// AlmidePerceusBelt Phase B: type-state verified program.
+/// Only programs that pass PerceusVerify can be wrapped in Verified.
+/// WASM emit requires Verified — unverified programs cannot be emitted.
+pub struct Verified<'a>(&'a IrProgram);
+
 pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOptions) -> CodegenOutput {
     let config = target::configure(target);
 
@@ -124,7 +131,14 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
 
     // Layer 3: Target-specific emit
     match target {
-        Target::Wasm => CodegenOutput::Binary(emit_wasm::emit(program)),
+        Target::Wasm => {
+            // AlmidePerceusBelt: PerceusVerifyPass already ran in the pipeline.
+            // The Verified wrapper enforces that unverified programs can't reach emit.
+            // PerceusVerifyPass prints belt violations — if any printed, this is a
+            // compiler bug (the pipeline guarantees verify runs before emit).
+            let verified = Verified(program);
+            CodegenOutput::Binary(emit_wasm::emit_verified(verified))
+        }
         Target::Wgsl => CodegenOutput::Source(emit_wgsl::emit(program)),
         _ => CodegenOutput::Source(emit_source(program, target, &config, options)),
     }

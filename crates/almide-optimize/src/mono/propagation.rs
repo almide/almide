@@ -201,6 +201,6 @@ fn propagate_stmt(stmt: &mut IrStmt, vt: &mut VarTable) {
         IrStmtKind::ListCopySlice { len, .. } => { propagate_expr(len, vt); }
         IrStmtKind::Expr { expr } => propagate_expr(expr, vt),
         IrStmtKind::Guard { cond, else_ } => { propagate_expr(cond, vt); propagate_expr(else_, vt); }
-        IrStmtKind::Comment { .. } => {}
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
     }
 }

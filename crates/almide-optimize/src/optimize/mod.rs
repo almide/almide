@@ -237,7 +237,7 @@ fn fold_stmt(stmt: &mut IrStmt) {
             fold_expr(else_);
         }
         IrStmtKind::Expr { expr } => fold_expr(expr),
-        IrStmtKind::Comment { .. } => {}
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
     }
 }
 

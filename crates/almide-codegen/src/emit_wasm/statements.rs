@@ -104,15 +104,7 @@ impl FuncCompiler<'_> {
                     self.emit_store_at(effective_ty, 0);
                 } else {
                     self.emit_expr(value);
-                    // Perceus: rc_inc when binding a heap alias (Var → Var copy)
-                    if Self::is_heap_type(effective_ty) {
-                        if matches!(&value.kind, IrExprKind::Var { .. }
-                            | IrExprKind::Clone { .. }
-                            | IrExprKind::Deref { .. })
-                        {
-                            wasm!(self.func, { call(self.emitter.rt.rc_inc); });
-                        }
-                    }
+                    // Perceus rc_inc is now handled by PerceusPass (IR-level RcInc node)
                     if let Some(_vt) = values::ty_to_valtype(effective_ty) {
                         let local_idx = self.var_map[&var.0];
                         wasm!(self.func, { local_set(local_idx); });
@@ -242,18 +234,7 @@ impl FuncCompiler<'_> {
                     let ty = &self.var_table.get(*var).ty;
                     self.emit_store_at(ty, 0);
                 } else {
-                    // Perceus: rc_dec old value before overwriting with new value
-                    let ty = &self.var_table.get(*var).ty;
-                    if Self::is_heap_type(ty) {
-                        let rc_dec_fn = self.emitter.rt.rc_dec;
-                        wasm!(self.func, {
-                            local_get(local_idx);
-                            if_empty;
-                              local_get(local_idx);
-                              call(rc_dec_fn);
-                            end;
-                        });
-                    }
+                    // Perceus Assign rc_dec is now handled by PerceusPass (IR-level RcDec before Assign)
                     self.emit_expr(value);
                     wasm!(self.func, { local_set(local_idx); });
                 }
@@ -346,6 +327,21 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { end; });
             }
 
+            IrStmtKind::RcInc { var } => {
+                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                    wasm!(self.func, {
+                        local_get(local_idx);
+                        call(self.emitter.rt.rc_inc);
+                        drop;
+                    });
+                }
+            }
+            IrStmtKind::RcDec { var } => {
+                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                    let ty = &self.var_table.get(*var).ty;
+                    self.emit_typed_rc_dec(ty, local_idx);
+                }
+            }
             IrStmtKind::Comment { .. } => {
                 // No-op in WASM
             }
@@ -851,7 +847,9 @@ impl FuncCompiler<'_> {
                 // those references (the env itself is freed, captured value RCs
                 // remain — they'll be freed when their original owners drop).
                 Ty::Fn { .. } => {
-                    // Load env_ptr from closure pair
+                    // Load env_ptr from closure pair, rc_dec env
+                    // Captured values are handled at IR level by PerceusPass
+                    // (RcDec for captures is inserted alongside RcDec for the closure)
                     let env_ptr = self.scratch.alloc_i32();
                     wasm!(self.func, {
                         local_get(local_idx); i32_load(4); local_set(env_ptr);

@@ -1,0 +1,10 @@
+name = "almide-perceus-belt"
+version = "0.1.0"
+defaultTargets = ["almide-perceus-belt"]
+
+[[lean_lib]]
+name = "AlmidePerceusBelt"
+
+[[lean_exe]]
+name = "almide-perceus-belt"
+root = "Main"

@@ -214,6 +214,7 @@ fn collect_varids_in_stmt(stmt: &IrStmt, out: &mut Vec<VarId>) {
         IrStmtKind::ListCopySlice { dst, src, len } => { collect_var_id(*dst, out); collect_var_id(*src, out); collect_varids_in_expr(len, out); }
         IrStmtKind::Expr { expr } => collect_varids_in_expr(expr, out),
         IrStmtKind::Guard { cond, else_ } => { collect_varids_in_expr(cond, out); collect_varids_in_expr(else_, out); }
+        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => { collect_var_id(*var, out); }
         IrStmtKind::Comment { .. } => {}
     }
 }
@@ -344,6 +345,7 @@ fn remap_stmt_varids(stmt: &mut IrStmt, remap: &HashMap<VarId, VarId>) {
         IrStmtKind::ListCopySlice { dst, src, len } => { *dst = remap_id(*dst, remap); *src = remap_id(*src, remap); remap_expr_varids(len, remap); }
         IrStmtKind::Expr { expr } => remap_expr_varids(expr, remap),
         IrStmtKind::Guard { cond, else_ } => { remap_expr_varids(cond, remap); remap_expr_varids(else_, remap); }
+        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => { *var = remap_id(*var, remap); }
         IrStmtKind::Comment { .. } => {}
     }
 }
@@ -570,6 +572,6 @@ fn substitute_stmt_types(stmt: &mut IrStmt, bindings: &HashMap<String, Ty>) {
             substitute_expr_types(cond, bindings);
             substitute_expr_types(else_, bindings);
         }
-        IrStmtKind::Comment { .. } => {}
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
     }
 }

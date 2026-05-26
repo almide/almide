@@ -305,6 +305,7 @@ fn is_pure_stmt(
             is_pure_expr(cond, local_vars, effect_fns, mutable_vars) &&
             is_pure_expr(else_, local_vars, effect_fns, mutable_vars)
         }
+        IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => true,
         IrStmtKind::Comment { .. } => true,
     }
 }

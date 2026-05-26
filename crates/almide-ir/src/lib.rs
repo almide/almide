@@ -635,6 +635,8 @@ impl IrStmt {
             IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard { cond: f(cond), else_: f(else_) },
             IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: f(expr) },
             IrStmtKind::Comment { .. } => self.kind,
+            IrStmtKind::RcInc { .. } => self.kind,
+            IrStmtKind::RcDec { .. } => self.kind,
             IrStmtKind::ListSwap { target, a, b } => IrStmtKind::ListSwap { target, a: f(a), b: f(b) },
             IrStmtKind::ListReverse { target, end } => IrStmtKind::ListReverse { target, end: f(end) },
             IrStmtKind::ListRotateLeft { target, end } => IrStmtKind::ListRotateLeft { target, end: f(end) },
@@ -691,6 +693,12 @@ pub enum IrStmtKind {
     Guard { cond: IrExpr, else_: IrExpr },
     Expr { expr: IrExpr },
     Comment { text: String },
+    // ── Perceus RC operations (inserted by PerceusPass) ──
+    /// Increment reference count of a heap-typed variable (shared reference created).
+    RcInc { var: VarId },
+    /// Decrement reference count of a heap-typed variable (reference released).
+    /// When RC reaches 0, the value is freed (with recursive child drop based on type).
+    RcDec { var: VarId },
     // ── Peephole-optimized list operations (inserted by PeepholePass) ──
     /// xs.swap(a, b)
     ListSwap { target: VarId, a: IrExpr, b: IrExpr },
