@@ -88,14 +88,29 @@ def hasDec (fb : FnBody) (v : VarId) : Prop := countDecs fb v ≥ 1
 theorem perceus_covers_vdecl (v : VarId) (ty : Ty) (body : FnBody)
     (h_heap : ty.isHeap = true) (h_fresh : countDecs body v = 0) :
     hasDec (perceusTransform (.vdecl v ty body)) v := by
-  unfold hasDec perceusTransform; simp [h_heap]; sorry
+  unfold hasDec perceusTransform; simp [h_heap]
+  show countDecs (insertDecBeforeEnd (perceusTransform body) v) v ≥ 1
+  have h := insertDec_adds_one (perceusTransform body) v
+  rw [h]; exact Nat.le_add_left 1 _
 
 theorem perceus_preserves_dec (fb : FnBody) (v : VarId) (h : countDecs fb v ≥ 1) :
     countDecs (perceusTransform fb) v ≥ 1 := by
   induction fb with
   | vdecl w ty body ih =>
     simp [perceusTransform]; split
-    · sorry
+    · simp [countDecs] at h
+      have h1 := ih h
+      have h2 : countDecs (insertDecBeforeEnd (perceusTransform body) w) v ≥ countDecs (perceusTransform body) v := by
+        induction (perceusTransform body) with
+        | vdecl _ _ _ ih2 => simp [insertDecBeforeEnd, countDecs]; exact ih2
+        | inc _ _ ih2 => simp [insertDecBeforeEnd, countDecs]; exact ih2
+        | dec _ _ ih2 => simp only [insertDecBeforeEnd, countDecs]; split <;> simp_all <;> omega
+        | ret => simp [insertDecBeforeEnd, countDecs]
+        | nop => simp [insertDecBeforeEnd, countDecs]
+      exact Nat.le_trans h1 h2
+
+
+
     · simp [countDecs] at h ⊢; exact ih h
   | inc _ _ ih => simp [perceusTransform, countDecs] at h ⊢; exact ih h
   | dec _ _ ih => simp [perceusTransform, countDecs] at h ⊢; omega
