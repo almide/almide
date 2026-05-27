@@ -617,13 +617,17 @@ fn collect_all_stmts(expr: &IrExpr, stmts: &mut Vec<IrStmt>) {
 /// Lean-certified verification. THE ACTUAL VERIFY uses
 /// perceus_verified::verify_expr (mirrors Lean 4 proofs).
 fn verify_function(func: &IrFunction, var_table: &VarTable) {
-    // Collect returned vars and env loads
+    perceus_verify_function(func, var_table);
+}
+
+/// Run Lean 4-certified Perceus RC verification on a single function.
+/// Returns the number of violations found.
+pub fn perceus_verify_function(func: &IrFunction, var_table: &VarTable) -> usize {
     let mut returned_vars: HashSet<VarId> = HashSet::new();
     collect_all_tail_vars(&func.body, &mut returned_vars);
     let mut env_load_vars_set: HashSet<VarId> = HashSet::new();
     scan_env_loads(&func.body, &mut env_load_vars_set);
 
-    // === THE LEAN-CERTIFIED VERIFY ===
     let issues = super::perceus_verified::verify_expr(
         &func.body, var_table, &returned_vars, &env_load_vars_set,
     );
@@ -633,8 +637,8 @@ fn verify_function(func: &IrFunction, var_table: &VarTable) {
             msg, name, var.0, func.name.as_str());
     }
 
-    // Branch verification (additional)
     verify_branch_balance(&func.body, &HashSet::new(), &env_load_vars_set, var_table, func.name.as_str());
+    issues.len()
 }
 
 fn scan_env_loads(expr: &IrExpr, vars: &mut HashSet<VarId>) {
