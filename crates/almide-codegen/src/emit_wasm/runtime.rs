@@ -466,7 +466,9 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_dec];
     let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
     let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
+    let hdr = emitter.layout_reg.header_size(ALLOC_HEADER) as i32;
     let heap_start = emitter.rt.heap_start_global;
+    let free_list = emitter.free_list_global;
 
     let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
     {
@@ -481,8 +483,12 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
             w.get(0).i32c(rc_neg).sub();
             w.get(1).i32c(1).sub();
             w.emit_store(0, rc_ty);
-        }, |_| {
-            // rc <= 1: dead block (bump allocator, no free list yet)
+        }, |w| {
+            // rc <= 1: dead block. Push to free list for reuse.
+            // ptr[0] = free_list_head (store next in data area)
+            w.get(0).gget(free_list).emit_store(0, MemType::I32);
+            // free_list_head = block_base (= ptr - hdr)
+            w.get(0).i32c(hdr).sub().gset(free_list);
         });
     }
     f.instruction(&wasm_encoder::Instruction::End);

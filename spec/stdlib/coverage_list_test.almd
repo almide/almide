@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix WASM codegen bug
 // Coverage tests for list.group_by
 
 test "list.group_by by parity" {
