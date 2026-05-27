@@ -17,6 +17,7 @@ mod wasm_macro;
 
 pub mod values;
 pub mod list_layout;
+pub mod engine;
 mod strings;
 mod runtime;
 mod runtime_eq;
