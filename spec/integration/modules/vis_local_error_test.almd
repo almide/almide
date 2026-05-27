@@ -1,3 +1,4 @@
+// wasm:skip — expected compile error test (no test blocks)
 // ============================================================
 // Visibility Error Test: local fn
 // ============================================================
