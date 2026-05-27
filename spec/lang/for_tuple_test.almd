@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix map iteration / map.fold WASM codegen
 
 // for_tuple_test — ForIn with tuple destructuring
 test "for with map tuple destructure" {

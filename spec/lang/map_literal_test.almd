@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix map iteration / map.fold WASM codegen
 
 // Map literal syntax tests
 test "empty map with type annotation" {
