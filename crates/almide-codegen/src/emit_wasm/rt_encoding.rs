@@ -66,7 +66,8 @@ pub(super) fn compile_base64_encode(emitter: &mut WasmEmitter, url_safe: bool) {
     wasm!(f, {
         local_get(2); i32_const(string_hdr()); i32_add;
         call(emitter.rt.alloc); local_set(3);
-        local_get(3); local_get(2); i32_store(0);
+        local_get(3); local_get(2); i32_store(0); // len
+        local_get(3); local_get(2); i32_store(string_cap_off() as u32); // cap
         i32_const(0); local_set(4); // i = 0
         i32_const(0); local_set(5); // j = 0
     });
@@ -77,8 +78,8 @@ pub(super) fn compile_base64_encode(emitter: &mut WasmEmitter, url_safe: bool) {
             local_get(4); i32_const(3); i32_add; local_get(1); i32_gt_u; br_if(1);
             // Load 3 bytes b0, b1, b2
             local_get(0); i32_const(string_data_off()); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(6);
-            local_get(0); i32_const(5); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(7);
-            local_get(0); i32_const(6); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(8);
+            local_get(0); i32_const(string_data_off() + 1); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(7);
+            local_get(0); i32_const(string_data_off() + 2); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(8);
             // c0 = alphabet[b0 >> 2]
             local_get(6); i32_const(2); i32_shr_u; local_set(9);
     });
@@ -96,7 +97,7 @@ pub(super) fn compile_base64_encode(emitter: &mut WasmEmitter, url_safe: bool) {
     emit_b64_alphabet_lookup(&mut f, 9, url_safe);
     wasm!(f, {
             local_set(9);
-            local_get(3); i32_const(5); i32_add; local_get(5); i32_add;
+            local_get(3); i32_const(string_data_off() + 1); i32_add; local_get(5); i32_add;
             local_get(9);
             i32_store8(0);
             // c2 = alphabet[((b1 & 0xF) << 2) | (b2 >> 6)]
@@ -107,7 +108,7 @@ pub(super) fn compile_base64_encode(emitter: &mut WasmEmitter, url_safe: bool) {
     emit_b64_alphabet_lookup(&mut f, 9, url_safe);
     wasm!(f, {
             local_set(9);
-            local_get(3); i32_const(6); i32_add; local_get(5); i32_add;
+            local_get(3); i32_const(string_data_off() + 2); i32_add; local_get(5); i32_add;
             local_get(9);
             i32_store8(0);
             // c3 = alphabet[b2 & 0x3F]
@@ -146,14 +147,14 @@ pub(super) fn compile_base64_encode(emitter: &mut WasmEmitter, url_safe: bool) {
     emit_b64_alphabet_lookup(&mut f, 9, url_safe);
     wasm!(f, {
             local_set(9);
-            local_get(3); i32_const(5); i32_add; local_get(5); i32_add;
+            local_get(3); i32_const(string_data_off() + 1); i32_add; local_get(5); i32_add;
             local_get(9);
             i32_store8(0);
     });
     if !url_safe {
         wasm!(f, {
             // padding '=' '='
-            local_get(3); i32_const(6); i32_add; local_get(5); i32_add;
+            local_get(3); i32_const(string_data_off() + 2); i32_add; local_get(5); i32_add;
             i32_const(61); i32_store8(0);
             local_get(3); i32_const(7); i32_add; local_get(5); i32_add;
             i32_const(61); i32_store8(0);
@@ -166,7 +167,7 @@ pub(super) fn compile_base64_encode(emitter: &mut WasmEmitter, url_safe: bool) {
         if_empty;
             // 2 bytes: 3 output chars + 1 padding (if std)
             local_get(0); i32_const(string_data_off()); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(6);
-            local_get(0); i32_const(5); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(7);
+            local_get(0); i32_const(string_data_off() + 1); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(7);
             local_get(6); i32_const(2); i32_shr_u; local_set(9);
     });
     emit_b64_alphabet_lookup(&mut f, 9, url_safe);
@@ -182,7 +183,7 @@ pub(super) fn compile_base64_encode(emitter: &mut WasmEmitter, url_safe: bool) {
     emit_b64_alphabet_lookup(&mut f, 9, url_safe);
     wasm!(f, {
             local_set(9);
-            local_get(3); i32_const(5); i32_add; local_get(5); i32_add;
+            local_get(3); i32_const(string_data_off() + 1); i32_add; local_get(5); i32_add;
             local_get(9);
             i32_store8(0);
             local_get(7); i32_const(15); i32_and; i32_const(2); i32_shl; local_set(9);
@@ -190,7 +191,7 @@ pub(super) fn compile_base64_encode(emitter: &mut WasmEmitter, url_safe: bool) {
     emit_b64_alphabet_lookup(&mut f, 9, url_safe);
     wasm!(f, {
             local_set(9);
-            local_get(3); i32_const(6); i32_add; local_get(5); i32_add;
+            local_get(3); i32_const(string_data_off() + 2); i32_add; local_get(5); i32_add;
             local_get(9);
             i32_store8(0);
     });
@@ -287,8 +288,8 @@ pub(super) fn compile_base64_decode(emitter: &mut WasmEmitter, _url_safe: bool) 
         block_empty; loop_empty;
             local_get(4); i32_const(4); i32_add; local_get(2); i32_gt_u; br_if(1);
             local_get(0); i32_const(string_data_off()); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(6);
-            local_get(0); i32_const(5); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(7);
-            local_get(0); i32_const(6); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(8);
+            local_get(0); i32_const(string_data_off() + 1); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(7);
+            local_get(0); i32_const(string_data_off() + 2); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(8);
             local_get(0); i32_const(7); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(9);
             local_get(6);
     });
@@ -326,11 +327,11 @@ pub(super) fn compile_base64_decode(emitter: &mut WasmEmitter, _url_safe: bool) 
             local_get(3); i32_const(string_data_off()); i32_add; local_get(5); i32_add;
             local_get(6); i32_const(2); i32_shl; local_get(7); i32_const(4); i32_shr_u; i32_or;
             i32_store8(0);
-            local_get(3); i32_const(5); i32_add; local_get(5); i32_add;
+            local_get(3); i32_const(string_data_off() + 1); i32_add; local_get(5); i32_add;
             local_get(7); i32_const(15); i32_and; i32_const(4); i32_shl;
             local_get(8); i32_const(2); i32_shr_u; i32_or;
             i32_store8(0);
-            local_get(3); i32_const(6); i32_add; local_get(5); i32_add;
+            local_get(3); i32_const(string_data_off() + 2); i32_add; local_get(5); i32_add;
             local_get(8); i32_const(3); i32_and; i32_const(6); i32_shl;
             local_get(9); i32_or;
             i32_store8(0);
@@ -350,7 +351,7 @@ pub(super) fn compile_base64_decode(emitter: &mut WasmEmitter, _url_safe: bool) 
     emit_b64_decode_char(&mut f);
     wasm!(f, {
             local_set(6);
-            local_get(0); i32_const(5); i32_add; local_get(4); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(string_data_off() + 1); i32_add; local_get(4); i32_add; i32_load8_u(0);
     });
     emit_b64_decode_char(&mut f);
     wasm!(f, {
@@ -376,12 +377,12 @@ pub(super) fn compile_base64_decode(emitter: &mut WasmEmitter, _url_safe: bool) 
     emit_b64_decode_char(&mut f);
     wasm!(f, {
             local_set(6);
-            local_get(0); i32_const(5); i32_add; local_get(4); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(string_data_off() + 1); i32_add; local_get(4); i32_add; i32_load8_u(0);
     });
     emit_b64_decode_char(&mut f);
     wasm!(f, {
             local_set(7);
-            local_get(0); i32_const(6); i32_add; local_get(4); i32_add; i32_load8_u(0);
+            local_get(0); i32_const(string_data_off() + 2); i32_add; local_get(4); i32_add; i32_load8_u(0);
     });
     emit_b64_decode_char(&mut f);
     wasm!(f, {
@@ -398,14 +399,15 @@ pub(super) fn compile_base64_decode(emitter: &mut WasmEmitter, _url_safe: bool) 
             local_get(3); i32_const(string_data_off()); i32_add; local_get(5); i32_add;
             local_get(6); i32_const(2); i32_shl; local_get(7); i32_const(4); i32_shr_u; i32_or;
             i32_store8(0);
-            local_get(3); i32_const(5); i32_add; local_get(5); i32_add;
+            local_get(3); i32_const(string_data_off() + 1); i32_add; local_get(5); i32_add;
             local_get(7); i32_const(15); i32_and; i32_const(4); i32_shl;
             local_get(8); i32_const(2); i32_shr_u; i32_or;
             i32_store8(0);
             local_get(5); i32_const(2); i32_add; local_set(5);
         end;
-        // Set actual output length on the bytes header
+        // Set actual output length + cap on the bytes header
         local_get(3); local_get(5); i32_store(0);
+        local_get(3); local_get(5); i32_store(string_cap_off() as u32);
         // Wrap in Result::ok
         i32_const(8); call(emitter.rt.alloc); local_set(10);
         local_get(10); i32_const(0); i32_store(0);
@@ -545,7 +547,8 @@ pub(super) fn compile_hex_decode(emitter: &mut WasmEmitter) {
         end;
         local_get(1); i32_const(1); i32_shr_u; local_set(2);
         local_get(2); i32_const(string_hdr()); i32_add; call(emitter.rt.alloc); local_set(3);
-        local_get(3); local_get(2); i32_store(0);
+        local_get(3); local_get(2); i32_store(0); // len
+        local_get(3); local_get(2); i32_store(string_cap_off() as u32); // cap
         i32_const(0); local_set(4);
         block_empty; loop_empty;
             local_get(4); local_get(2); i32_ge_u; br_if(1);
@@ -555,7 +558,7 @@ pub(super) fn compile_hex_decode(emitter: &mut WasmEmitter) {
     emit_hex_char_to_nibble(&mut f);
     wasm!(f, {
             local_set(5);
-            local_get(0); i32_const(5); i32_add; local_get(4); i32_const(2); i32_mul; i32_add;
+            local_get(0); i32_const(string_data_off() + 1); i32_add; local_get(4); i32_const(2); i32_mul; i32_add;
             i32_load8_u(0);
     });
     emit_hex_char_to_nibble(&mut f);
