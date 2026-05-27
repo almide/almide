@@ -1,4 +1,3 @@
-// wasm:skip — WASM codegen ICE (ScratchAllocator / missing runtime fn)
 // Functional pattern regression tests
 // Covers: FnRef, FnMut, nested impl Fn, HOF variable pass, currying
 
