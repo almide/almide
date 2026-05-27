@@ -478,6 +478,8 @@ impl FuncCompiler<'_> {
         }
         true
     }
+
+    // (filter method is handled via map.set insertion — see calls_map.rs)
 }
 
 // ── Swiss Table iteration helpers ──

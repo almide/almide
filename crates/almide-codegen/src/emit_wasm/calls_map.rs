@@ -677,6 +677,16 @@ impl FuncCompiler<'_> {
                     local_set(mb);
                     local_get(ma); i32_load(list_layout::MAP_CAP_OFFSET as u32); local_set(cap_a);
                     local_get(mb); i32_load(list_layout::MAP_CAP_OFFSET as u32); local_set(cap_b);
+                    // If a is empty, just copy b and return
+                    local_get(cap_a); i32_eqz;
+                    if_empty;
+                      i32_const(list_layout::MAP_HEADER_SIZE);
+                      local_get(cap_b); local_get(cap_b); i32_const(es as i32); i32_mul; i32_add; i32_add;
+                      local_tee(ri);
+                      call(self.emitter.rt.alloc); local_set(result);
+                      local_get(result); local_get(mb); local_get(ri); memory_copy;
+                      local_get(result); return_;
+                    end;
                     // Copy a's table
                     i32_const(list_layout::MAP_HEADER_SIZE);
                     local_get(cap_a); local_get(cap_a); i32_const(es as i32); i32_mul; i32_add; i32_add;
