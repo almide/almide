@@ -269,6 +269,9 @@ struct ImportInfo {
 
 /// Central state for WASM binary emission.
 pub struct WasmEmitter {
+    // Layout registry — single source of truth for all heap object layouts.
+    pub layout_reg: engine::LayoutRegistry,
+
     // Type section (deduplicated function signatures)
     pub(crate) types: Vec<(Vec<ValType>, Vec<ValType>)>,
     type_map: HashMap<(Vec<ValType>, Vec<ValType>), u32>,
@@ -371,6 +374,7 @@ pub struct LambdaInfo {
 impl WasmEmitter {
     fn new() -> Self {
         WasmEmitter {
+            layout_reg: engine::LayoutRegistry::new(),
             types: Vec::new(),
             type_map: HashMap::new(),
             imports: Vec::new(),

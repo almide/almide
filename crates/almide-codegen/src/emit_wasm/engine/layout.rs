@@ -24,6 +24,27 @@ pub enum MemType {
     U8,
 }
 
+impl MemType {
+    /// WASM alignment exponent (log2 of natural alignment in bytes).
+    /// I32/F32 → 2 (4 bytes), I64/F64 → 3 (8 bytes), U8 → 0 (1 byte).
+    pub const fn align_exp(self) -> u32 {
+        match self {
+            Self::I32 | Self::F32 => 2,
+            Self::I64 | Self::F64 => 3,
+            Self::U8 => 0,
+        }
+    }
+
+    /// Size in bytes.
+    pub const fn byte_size(self) -> u32 {
+        match self {
+            Self::I32 | Self::F32 => 4,
+            Self::I64 | Self::F64 => 8,
+            Self::U8 => 1,
+        }
+    }
+}
+
 /// How to compute a field's offset from the base pointer.
 #[derive(Debug, Clone)]
 pub enum FieldOffset {
@@ -63,6 +84,10 @@ pub const LIST: LayoutId = LayoutId(1);
 pub const SWISS_MAP: LayoutId = LayoutId(2);
 pub const SET: LayoutId = LayoutId(3);
 pub const ALLOC_HEADER: LayoutId = LayoutId(4);
+pub const CLOSURE_PAIR: LayoutId = LayoutId(5);
+pub const VARIANT: LayoutId = LayoutId(6);
+pub const OPTION: LayoutId = LayoutId(7);
+pub const RESULT: LayoutId = LayoutId(8);
 
 // Well-known field IDs for String.
 pub mod string {
@@ -96,6 +121,21 @@ pub mod alloc {
     pub const SIZE: FieldId = FieldId(0);
     /// Reference count (at ptr - 4).
     pub const RC: FieldId = FieldId(1);
+}
+
+// Well-known field IDs for ClosurePair: [table_idx:i32 @ 0][env_ptr:i32 @ 4]
+pub mod closure {
+    use super::FieldId;
+    pub const TABLE_IDX: FieldId = FieldId(0);
+    pub const ENV_PTR: FieldId = FieldId(1);
+}
+
+// Well-known field IDs for tagged unions (Variant/Option/Result).
+// All share: [tag:i32 @ 0][payload @ 4...]
+pub mod tagged {
+    use super::FieldId;
+    pub const TAG: FieldId = FieldId(0);
+    pub const PAYLOAD: FieldId = FieldId(1);
 }
 
 impl LayoutRegistry {
@@ -162,8 +202,48 @@ impl LayoutRegistry {
             name: "AllocHeader",
             header_size: 8,
             fields: vec![
-                MemField { name: "size", offset: FieldOffset::Fixed(0), ty: MemType::I32, elem_stride: 0 }, // ptr - 8
-                MemField { name: "rc", offset: FieldOffset::Fixed(4), ty: MemType::I32, elem_stride: 0 },   // ptr - 4
+                MemField { name: "size", offset: FieldOffset::Fixed(0), ty: MemType::I32, elem_stride: 0 },
+                MemField { name: "rc", offset: FieldOffset::Fixed(4), ty: MemType::I32, elem_stride: 0 },
+            ],
+        });
+
+        // ── ClosurePair: [table_idx:i32 @ 0][env_ptr:i32 @ 4] ──
+        layouts.push(MemLayout {
+            name: "ClosurePair",
+            header_size: 0,
+            fields: vec![
+                MemField { name: "table_idx", offset: FieldOffset::Fixed(0), ty: MemType::I32, elem_stride: 0 },
+                MemField { name: "env_ptr", offset: FieldOffset::Fixed(4), ty: MemType::I32, elem_stride: 0 },
+            ],
+        });
+
+        // ── Variant: [tag:i32 @ 0][payload... @ 4] ──
+        layouts.push(MemLayout {
+            name: "Variant",
+            header_size: 4,
+            fields: vec![
+                MemField { name: "tag", offset: FieldOffset::Fixed(0), ty: MemType::I32, elem_stride: 0 },
+                MemField { name: "payload", offset: FieldOffset::Fixed(4), ty: MemType::I32, elem_stride: 0 },
+            ],
+        });
+
+        // ── Option: [tag:i32 @ 0][value @ 4] ── (tag 0=None, 1=Some)
+        layouts.push(MemLayout {
+            name: "Option",
+            header_size: 4,
+            fields: vec![
+                MemField { name: "tag", offset: FieldOffset::Fixed(0), ty: MemType::I32, elem_stride: 0 },
+                MemField { name: "payload", offset: FieldOffset::Fixed(4), ty: MemType::I32, elem_stride: 0 },
+            ],
+        });
+
+        // ── Result: [tag:i32 @ 0][value @ 4] ── (tag 0=Ok, 1=Err)
+        layouts.push(MemLayout {
+            name: "Result",
+            header_size: 4,
+            fields: vec![
+                MemField { name: "tag", offset: FieldOffset::Fixed(0), ty: MemType::I32, elem_stride: 0 },
+                MemField { name: "payload", offset: FieldOffset::Fixed(4), ty: MemType::I32, elem_stride: 0 },
             ],
         });
 
@@ -195,6 +275,19 @@ impl LayoutRegistry {
     /// Get a field definition.
     pub fn field(&self, layout: LayoutId, field: FieldId) -> &MemField {
         &self.layouts[layout.0 as usize].fields[field.0 as usize]
+    }
+
+    /// Negative offset from data pointer to an alloc header field.
+    ///
+    /// Alloc header sits *before* the data pointer:
+    /// `[size:4][rc:4][data...]`
+    ///                 ^ ptr
+    ///
+    /// `ptr - neg_offset(ALLOC_HEADER, alloc::RC)` → address of RC field.
+    pub fn alloc_header_neg_offset(&self, field: FieldId) -> u32 {
+        let hdr = self.header_size(ALLOC_HEADER);
+        let field_off = self.fixed_offset(ALLOC_HEADER, field);
+        hdr - field_off
     }
 }
 

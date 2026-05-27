@@ -71,6 +71,17 @@ pub enum LoadKind {
     U16,  // i32.load16_u
 }
 
+impl LoadKind {
+    pub const fn align_exp(self) -> u32 {
+        match self {
+            Self::I32 | Self::F32 => 2,
+            Self::I64 | Self::F64 => 3,
+            Self::U8 | Self::I8S => 0,
+            Self::U16 => 1,
+        }
+    }
+}
+
 /// Store width for memory writes.
 #[derive(Debug, Clone, Copy)]
 pub enum StoreKind {
@@ -80,6 +91,17 @@ pub enum StoreKind {
     F64,
     I8,  // i32.store8
     I16, // i32.store16
+}
+
+impl StoreKind {
+    pub const fn align_exp(self) -> u32 {
+        match self {
+            Self::I32 | Self::F32 => 2,
+            Self::I64 | Self::F64 => 3,
+            Self::I8 => 0,
+            Self::I16 => 1,
+        }
+    }
 }
 
 /// A part of string interpolation.

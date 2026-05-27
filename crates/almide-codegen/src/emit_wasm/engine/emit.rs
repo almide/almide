@@ -1,13 +1,16 @@
 //! WasmIR → wasm-encoder emission.
 //!
-//! This is the ONLY module that knows raw WASM instructions.
-//! Every other module works with typed WasmIR ops.
+//! Emits `Op` trees (from ir.rs) into wasm-encoder Functions.
+//! Used by the IR-based pipeline (future optimization passes).
+//!
+//! For direct codegen, prefer `WasmBuilder` (builder.rs) which emits
+//! layout-safe instructions without an intermediate IR.
 
 use wasm_encoder::Function;
-use super::layout::{LayoutRegistry, LayoutId, FieldId, FieldOffset};
+use super::layout::{LayoutRegistry, FieldOffset};
 use super::ir::*;
 
-/// Emit a sequence of WasmIR ops into a wasm-encoder Function.
+/// Emit a sequence of WasmIR ops.
 pub fn emit_ops(ops: &[Op], f: &mut Function, reg: &LayoutRegistry) {
     for op in ops {
         emit_op(op, f, reg);
@@ -18,71 +21,55 @@ pub fn emit_ops(ops: &[Op], f: &mut Function, reg: &LayoutRegistry) {
 pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
     use wasm_encoder::Instruction::*;
     match op {
-        // ── Stack ──
         Op::LocalGet(l) => { f.instruction(&LocalGet(*l)); }
         Op::LocalSet(l) => { f.instruction(&LocalSet(*l)); }
         Op::LocalTee(l) => { f.instruction(&LocalTee(*l)); }
         Op::GlobalGet(g) => { f.instruction(&GlobalGet(*g)); }
         Op::GlobalSet(g) => { f.instruction(&GlobalSet(*g)); }
-        Op::Const(c) => emit_const(c, f),
+        Op::Const(c) => match c {
+            Const::I32(v) => { f.instruction(&I32Const(*v)); }
+            Const::I64(v) => { f.instruction(&I64Const(*v)); }
+            Const::F32(v) => { f.instruction(&F32Const(*v)); }
+            Const::F64(v) => { f.instruction(&F64Const(*v)); }
+        },
         Op::Drop => { f.instruction(&Drop); }
 
-        // ── Arithmetic ──
-        Op::BinOp(b) => emit_binop(b, f),
-        Op::UnOp(u) => emit_unop(u, f),
+        Op::BinOp(b) => { emit_binop(b, f); }
+        Op::UnOp(u) => { emit_unop(u, f); }
 
-        // ── Typed memory access ──
         Op::FieldLoad { layout, field, kind } => {
-            // Stack: [base_ptr] → [value]
             let offset = reg.fixed_offset(*layout, *field);
-            emit_load_at_offset(*kind, offset, f);
+            emit_load(offset, *kind, f);
         }
         Op::FieldStore { layout, field, kind } => {
-            // Stack: [base_ptr, value] → []
             let offset = reg.fixed_offset(*layout, *field);
-            emit_store_at_offset(*kind, offset, f);
+            emit_store(offset, *kind, f);
         }
         Op::ElemAddr { layout, field, stride } => {
-            // Stack: [base_ptr, index] → [elem_addr]
-            // addr = base + field_offset + index * stride
             let offset = reg.fixed_offset(*layout, *field);
-            // Reorder: we need base + offset + idx * stride
-            // Stack has [base, idx]. We need: base + offset first, then + idx*stride
-            // Use: i32.const(stride); i32.mul; — now stack has [base, idx*stride]
-            // But we need to add offset to base first...
-            // Better approach: emit as separate ops in the lowering phase.
-            // For now: assume stack is [base_ptr, index]
             f.instruction(&I32Const(*stride as i32));
             f.instruction(&I32Mul);
-            // Stack: [base_ptr, index*stride]
             f.instruction(&I32Add);
-            // Stack: [base_ptr + index*stride]
-            f.instruction(&I32Const(offset as i32));
-            f.instruction(&I32Add);
-            // Stack: [base_ptr + offset + index*stride]
+            if offset != 0 {
+                f.instruction(&I32Const(offset as i32));
+                f.instruction(&I32Add);
+            }
         }
         Op::DynFieldAddr { layout, field } => {
-            // Stack: [base_ptr] → [field_addr]
-            let mem_field = reg.field(*layout, *field);
-            match &mem_field.offset {
+            let mf = reg.field(*layout, *field);
+            match &mf.offset {
                 FieldOffset::Fixed(n) => {
                     f.instruction(&I32Const(*n as i32));
                     f.instruction(&I32Add);
                 }
-                FieldOffset::AfterDynamic { base, size_field } => {
-                    // addr = base_ptr + base + base_ptr[size_field_offset]
-                    // We need base_ptr twice: once for the add, once for loading cap.
-                    // Caller should have base_ptr on stack. We tee it.
-                    // Actually, we need a local. The lowering should handle this.
-                    // For now, panic — this should be lowered to explicit ops.
-                    panic!("DynFieldAddr should be lowered to explicit ops before emission");
+                FieldOffset::AfterDynamic { .. } => {
+                    panic!("DynFieldAddr(AfterDynamic) requires a temp local — use WasmBuilder::dyn_field_addr instead");
                 }
             }
         }
-        Op::Load(kind) => emit_load(*kind, f),
-        Op::Store(kind) => emit_store(*kind, f),
+        Op::Load(kind) => emit_load(0, *kind, f),
+        Op::Store(kind) => emit_store(0, *kind, f),
 
-        // ── Collection iteration ──
         Op::ListForEach { list, elem_local, elem_stride, body } => {
             emit_list_foreach(*list, *elem_local, *elem_stride, body, f, reg);
         }
@@ -90,39 +77,21 @@ pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
             emit_map_foreach(*map, *entry_local, *entry_stride, body, f, reg);
         }
 
-        // ── Allocation ──
-        Op::Alloc => {
-            // Size on stack → ptr on stack.
-            // The alloc function index must be resolved externally.
-            // For now, this is a placeholder.
-            panic!("Op::Alloc must be resolved to a Call during lowering");
-        }
+        // Abstract ops — resolve at lowering or use WasmBuilder.
+        Op::Alloc => panic!("Op::Alloc: use WasmBuilder::alloc or resolve to Op::Call"),
+        Op::AllocCollection { .. } => panic!("Op::AllocCollection: use WasmBuilder::alloc_collection"),
+        Op::RcInc => panic!("Op::RcInc: use WasmBuilder::rc_inc or resolve to Op::Call"),
+        Op::RcDec { .. } => panic!("Op::RcDec: use WasmBuilder::rc_dec or resolve to Op::Call"),
+        Op::CowCheck { .. } => panic!("Op::CowCheck: use WasmBuilder::cow_check"),
+        Op::StringConcat => panic!("Op::StringConcat: resolve to Op::Call(concat_str)"),
+        Op::StringInterp { .. } => panic!("Op::StringInterp: use WasmBuilder for string interpolation"),
+        Op::DeepEq { wasm_ty } => match wasm_ty {
+            WasmTy::I32 => { f.instruction(&I32Eq); }
+            WasmTy::I64 => { f.instruction(&I64Eq); }
+            WasmTy::F64 => { f.instruction(&F64Eq); }
+            WasmTy::F32 => { f.instruction(&F32Eq); }
+        },
 
-        // ── Perceus RC ──
-        Op::RcInc => {
-            panic!("Op::RcInc must be resolved to a Call during lowering");
-        }
-        Op::RcDec { .. } => {
-            panic!("Op::RcDec must be resolved to a Call during lowering");
-        }
-        Op::CowCheck { .. } => {
-            panic!("Op::CowCheck not yet implemented");
-        }
-
-        // ── String ops ──
-        Op::StringConcat => {
-            panic!("Op::StringConcat must be resolved to a Call during lowering");
-        }
-        Op::StringInterp { .. } => {
-            panic!("Op::StringInterp not yet implemented in emit phase");
-        }
-
-        // ── Deep equality ──
-        Op::DeepEq { .. } => {
-            panic!("Op::DeepEq must be resolved during lowering");
-        }
-
-        // ── Control flow ──
         Op::Block(body) => {
             f.instruction(&Block(wasm_encoder::BlockType::Empty));
             emit_ops(body, f, reg);
@@ -149,83 +118,55 @@ pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
             }
             f.instruction(&End);
         }
-        Op::Br(depth) => { f.instruction(&Br(*depth)); }
-        Op::BrIf(depth) => { f.instruction(&BrIf(*depth)); }
+        Op::Br(d) => { f.instruction(&Br(*d)); }
+        Op::BrIf(d) => { f.instruction(&BrIf(*d)); }
         Op::Return => { f.instruction(&Return); }
         Op::Unreachable => { f.instruction(&Unreachable); }
 
-        // ── Calls ──
         Op::Call(idx) => { f.instruction(&Call(*idx)); }
         Op::CallIndirect { sig } => {
             f.instruction(&CallIndirect { type_index: *sig, table_index: 0 });
         }
 
-        // ── Memory ──
-        Op::MemoryCopy => {
-            f.instruction(&MemoryCopy { src_mem: 0, dst_mem: 0 });
-        }
+        Op::MemoryCopy => { f.instruction(&MemoryCopy { src_mem: 0, dst_mem: 0 }); }
         Op::MemorySize => { f.instruction(&MemorySize(0)); }
         Op::MemoryGrow => { f.instruction(&MemoryGrow(0)); }
 
-        // ── Sequence ──
         Op::Seq(ops) => emit_ops(ops, f, reg),
-
-        Op::AllocCollection { .. } => {
-            panic!("Op::AllocCollection not yet implemented");
-        }
     }
 }
 
 // ── Helpers ──
 
-fn mem_arg(offset: u32, align: u32) -> wasm_encoder::MemArg {
-    wasm_encoder::MemArg { offset: offset as u64, align, memory_index: 0 }
+fn ma(offset: u32, kind_align: u32) -> wasm_encoder::MemArg {
+    wasm_encoder::MemArg { offset: offset as u64, align: kind_align, memory_index: 0 }
 }
 
-fn emit_const(c: &Const, f: &mut Function) {
+fn emit_load(offset: u32, kind: LoadKind, f: &mut Function) {
     use wasm_encoder::Instruction::*;
-    match c {
-        Const::I32(v) => { f.instruction(&I32Const(*v)); }
-        Const::I64(v) => { f.instruction(&I64Const(*v)); }
-        Const::F32(v) => { f.instruction(&F32Const(*v)); }
-        Const::F64(v) => { f.instruction(&F64Const(*v)); }
+    let a = ma(offset, kind.align_exp());
+    match kind {
+        LoadKind::I32 => { f.instruction(&I32Load(a)); }
+        LoadKind::I64 => { f.instruction(&I64Load(a)); }
+        LoadKind::F32 => { f.instruction(&F32Load(a)); }
+        LoadKind::F64 => { f.instruction(&F64Load(a)); }
+        LoadKind::U8 => { f.instruction(&I32Load8U(a)); }
+        LoadKind::I8S => { f.instruction(&I32Load8S(a)); }
+        LoadKind::U16 => { f.instruction(&I32Load16U(a)); }
     }
 }
 
-fn emit_load_at_offset(kind: LoadKind, offset: u32, f: &mut Function) {
+fn emit_store(offset: u32, kind: StoreKind, f: &mut Function) {
     use wasm_encoder::Instruction::*;
-    let (align, instr): (u32, _) = match kind {
-        LoadKind::I32 => (2, I32Load(mem_arg(offset, 2))),
-        LoadKind::I64 => (3, I64Load(mem_arg(offset, 3))),
-        LoadKind::F32 => (2, F32Load(mem_arg(offset, 2))),
-        LoadKind::F64 => (3, F64Load(mem_arg(offset, 3))),
-        LoadKind::U8 => (0, I32Load8U(mem_arg(offset, 0))),
-        LoadKind::I8S => (0, I32Load8S(mem_arg(offset, 0))),
-        LoadKind::U16 => (1, I32Load16U(mem_arg(offset, 1))),
-    };
-    let _ = align;
-    f.instruction(&instr);
-}
-
-fn emit_load(kind: LoadKind, f: &mut Function) {
-    emit_load_at_offset(kind, 0, f);
-}
-
-fn emit_store_at_offset(kind: StoreKind, offset: u32, f: &mut Function) {
-    use wasm_encoder::Instruction::*;
-    let instr = match kind {
-        StoreKind::I32 => I32Store(mem_arg(offset, 2)),
-        StoreKind::I64 => I64Store(mem_arg(offset, 3)),
-        StoreKind::F32 => F32Store(mem_arg(offset, 2)),
-        StoreKind::F64 => F64Store(mem_arg(offset, 3)),
-        StoreKind::I8 => I32Store8(mem_arg(offset, 0)),
-        StoreKind::I16 => I32Store16(mem_arg(offset, 1)),
-    };
-    f.instruction(&instr);
-}
-
-fn emit_store(kind: StoreKind, f: &mut Function) {
-    emit_store_at_offset(kind, 0, f);
+    let a = ma(offset, kind.align_exp());
+    match kind {
+        StoreKind::I32 => { f.instruction(&I32Store(a)); }
+        StoreKind::I64 => { f.instruction(&I64Store(a)); }
+        StoreKind::F32 => { f.instruction(&F32Store(a)); }
+        StoreKind::F64 => { f.instruction(&F64Store(a)); }
+        StoreKind::I8 => { f.instruction(&I32Store8(a)); }
+        StoreKind::I16 => { f.instruction(&I32Store16(a)); }
+    }
 }
 
 fn emit_binop(b: &BinOp, f: &mut Function) {
@@ -267,138 +208,101 @@ fn emit_unop(u: &UnOp, f: &mut Function) {
     f.instruction(&instr);
 }
 
-/// Emit list iteration: for each element in list[0..len], invoke body.
 fn emit_list_foreach(
-    list: Local, elem_local: Local, elem_stride: u32,
+    list: Local, elem: Local, stride: u32,
     body: &[Op], f: &mut Function, reg: &LayoutRegistry,
 ) {
     use wasm_encoder::Instruction::*;
     use super::layout;
+    let len_off = reg.fixed_offset(layout::LIST, layout::list::LEN);
+    let len_align = reg.field(layout::LIST, layout::list::LEN).ty.align_exp();
+    let data_off = reg.fixed_offset(layout::LIST, layout::list::DATA);
+    let idx = elem + 1;
 
-    let len_offset = reg.fixed_offset(layout::LIST, layout::list::LEN);
-    let data_offset = reg.fixed_offset(layout::LIST, layout::list::DATA);
-
-    // i = 0
     f.instruction(&I32Const(0));
-    f.instruction(&LocalSet(elem_local + 1)); // use elem_local+1 as index (convention)
-    // TODO: proper local allocation for index
-
-    // block { loop {
+    f.instruction(&LocalSet(idx));
     f.instruction(&Block(wasm_encoder::BlockType::Empty));
     f.instruction(&Loop(wasm_encoder::BlockType::Empty));
-
-    // if i >= len: br 1
-    f.instruction(&LocalGet(elem_local + 1));
+    f.instruction(&LocalGet(idx));
     f.instruction(&LocalGet(list));
-    f.instruction(&I32Load(mem_arg(len_offset, 2)));
+    f.instruction(&I32Load(ma(len_off, len_align)));
     f.instruction(&I32GeU);
     f.instruction(&BrIf(1));
-
-    // elem_local = list + data_offset + i * stride
     f.instruction(&LocalGet(list));
-    f.instruction(&I32Const(data_offset as i32));
+    f.instruction(&I32Const(data_off as i32));
     f.instruction(&I32Add);
-    f.instruction(&LocalGet(elem_local + 1));
-    f.instruction(&I32Const(elem_stride as i32));
+    f.instruction(&LocalGet(idx));
+    f.instruction(&I32Const(stride as i32));
     f.instruction(&I32Mul);
     f.instruction(&I32Add);
-    f.instruction(&LocalSet(elem_local));
-
-    // body
+    f.instruction(&LocalSet(elem));
     emit_ops(body, f, reg);
-
-    // i++
-    f.instruction(&LocalGet(elem_local + 1));
+    f.instruction(&LocalGet(idx));
     f.instruction(&I32Const(1));
     f.instruction(&I32Add);
-    f.instruction(&LocalSet(elem_local + 1));
+    f.instruction(&LocalSet(idx));
     f.instruction(&Br(0));
-
-    // } }
     f.instruction(&End);
     f.instruction(&End);
 }
 
-/// Emit Swiss Table map iteration: for each occupied slot, invoke body.
-/// Body receives entry address in `entry_local`.
 fn emit_map_foreach(
-    map: Local, entry_local: Local, entry_stride: u32,
+    map: Local, entry: Local, stride: u32,
     body: &[Op], f: &mut Function, reg: &LayoutRegistry,
 ) {
     use wasm_encoder::Instruction::*;
     use super::layout;
+    let cap_off = reg.fixed_offset(layout::SWISS_MAP, layout::map::CAP);
+    let cap_align = reg.field(layout::SWISS_MAP, layout::map::CAP).ty.align_exp();
+    let tags_off = reg.fixed_offset(layout::SWISS_MAP, layout::map::TAGS);
+    let tag_align = reg.field(layout::SWISS_MAP, layout::map::TAGS).ty.align_exp();
+    let cap_l = entry + 1;
+    let eb_l = entry + 2;
+    let idx = entry + 3;
 
-    let cap_offset = reg.fixed_offset(layout::SWISS_MAP, layout::map::CAP);
-    let tags_offset = reg.fixed_offset(layout::SWISS_MAP, layout::map::TAGS);
-
-    // Scratch locals: cap=entry_local+1, eb=entry_local+2, i=entry_local+3
-    // TODO: proper local allocation
-    let cap_local = entry_local + 1;
-    let eb_local = entry_local + 2;
-    let i_local = entry_local + 3;
-
-    // cap = map[CAP_OFFSET]
     f.instruction(&LocalGet(map));
-    f.instruction(&I32Load(mem_arg(cap_offset, 2)));
-    f.instruction(&LocalSet(cap_local));
-
-    // eb (entry base) = map + TAGS_OFFSET + cap
+    f.instruction(&I32Load(ma(cap_off, cap_align)));
+    f.instruction(&LocalSet(cap_l));
     f.instruction(&LocalGet(map));
-    f.instruction(&I32Const(tags_offset as i32));
+    f.instruction(&I32Const(tags_off as i32));
     f.instruction(&I32Add);
-    f.instruction(&LocalGet(cap_local));
+    f.instruction(&LocalGet(cap_l));
     f.instruction(&I32Add);
-    f.instruction(&LocalSet(eb_local));
-
-    // i = 0
+    f.instruction(&LocalSet(eb_l));
     f.instruction(&I32Const(0));
-    f.instruction(&LocalSet(i_local));
-
-    // block { loop {
+    f.instruction(&LocalSet(idx));
     f.instruction(&Block(wasm_encoder::BlockType::Empty));
     f.instruction(&Loop(wasm_encoder::BlockType::Empty));
-
-    // if i >= cap: br 1
-    f.instruction(&LocalGet(i_local));
-    f.instruction(&LocalGet(cap_local));
+    f.instruction(&LocalGet(idx));
+    f.instruction(&LocalGet(cap_l));
     f.instruction(&I32GeU);
     f.instruction(&BrIf(1));
-
-    // tag = map[TAGS_OFFSET + i]; if tag == 0: skip
     f.instruction(&LocalGet(map));
-    f.instruction(&I32Const(tags_offset as i32));
+    f.instruction(&I32Const(tags_off as i32));
     f.instruction(&I32Add);
-    f.instruction(&LocalGet(i_local));
+    f.instruction(&LocalGet(idx));
     f.instruction(&I32Add);
-    f.instruction(&I32Load8U(mem_arg(0, 0)));
+    f.instruction(&I32Load8U(ma(0, tag_align)));
     f.instruction(&I32Eqz);
     f.instruction(&If(wasm_encoder::BlockType::Empty));
-    f.instruction(&LocalGet(i_local));
+    f.instruction(&LocalGet(idx));
     f.instruction(&I32Const(1));
     f.instruction(&I32Add);
-    f.instruction(&LocalSet(i_local));
-    f.instruction(&Br(1)); // br(1) from inside if = loop start
+    f.instruction(&LocalSet(idx));
+    f.instruction(&Br(1));
     f.instruction(&End);
-
-    // entry_local = eb + i * entry_stride
-    f.instruction(&LocalGet(eb_local));
-    f.instruction(&LocalGet(i_local));
-    f.instruction(&I32Const(entry_stride as i32));
+    f.instruction(&LocalGet(eb_l));
+    f.instruction(&LocalGet(idx));
+    f.instruction(&I32Const(stride as i32));
     f.instruction(&I32Mul);
     f.instruction(&I32Add);
-    f.instruction(&LocalSet(entry_local));
-
-    // body
+    f.instruction(&LocalSet(entry));
     emit_ops(body, f, reg);
-
-    // i++
-    f.instruction(&LocalGet(i_local));
+    f.instruction(&LocalGet(idx));
     f.instruction(&I32Const(1));
     f.instruction(&I32Add);
-    f.instruction(&LocalSet(i_local));
+    f.instruction(&LocalSet(idx));
     f.instruction(&Br(0));
-
-    // } }
     f.instruction(&End);
     f.instruction(&End);
 }
