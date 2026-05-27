@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix WASM codegen bug
 // Coverage tests for various uncovered stdlib functions
 import json
 
