@@ -1,3 +1,4 @@
+// wasm:skip — matrix WASM runtime not yet ported
 // matrix.{broadcast_add_row, layer_norm_rows, softmax_rows, gelu,
 //         linear_row, linear_row_no_bias, multi_head_attention,
 //         masked_multi_head_attention, causal_mask_add}

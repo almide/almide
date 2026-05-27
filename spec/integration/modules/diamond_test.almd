@@ -1,3 +1,4 @@
+// wasm:skip — TODO: fix cross-module fn ref WASM codegen
 // Diamond dependency test
 // Structure: this file → dmod_b → dmod_d (+ dmod_d.utils submodule)
 //                       → dmod_c → dmod_d

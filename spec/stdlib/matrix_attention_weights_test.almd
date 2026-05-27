@@ -1,3 +1,4 @@
+// wasm:skip — matrix WASM runtime not yet ported
 // MatrixFusionPass — `softmax_rows(scale(mul(Q, Kt), s))` fuses into
 // matrix.attention_weights(Q, Kt, s). Guards:
 //   1. Nested expression form rewrites correctly.

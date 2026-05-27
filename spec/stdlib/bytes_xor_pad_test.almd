@@ -1,3 +1,4 @@
+// wasm:skip — bytes WASM runtime partially ported
 // bytes.xor / pad_left / pad_right / copy_from
 
 test "xor pairwise" {

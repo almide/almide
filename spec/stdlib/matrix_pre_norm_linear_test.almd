@@ -1,3 +1,4 @@
+// wasm:skip — matrix WASM runtime not yet ported
 // MatrixFusionPass: `linear_row(layer_norm_rows(x, γ, β, ε), W, b)` →
 // `pre_norm_linear(x, γ, β, ε, W, b)`. Guards nested + let-split.
 

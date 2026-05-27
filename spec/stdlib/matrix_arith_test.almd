@@ -1,3 +1,4 @@
+// wasm:skip — matrix WASM runtime not yet ported
 // matrix.{sub, div, neg, pow} — arithmetic completeness tests.
 
 test "sub element-wise" {

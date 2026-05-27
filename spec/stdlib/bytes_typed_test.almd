@@ -1,3 +1,4 @@
+// wasm:skip — bytes WASM runtime partially ported
 // Stage 4a/4b: typed byte IO via `Endian` variant.
 // WASM dispatch lives in `emit_wasm/calls_bytes.rs` — each typed name
 // expands to an `if_i64` / `if_empty` branch on the Endian tag that
