@@ -1036,7 +1036,8 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     let mut user_func_indices: Vec<u32> = Vec::new();
     let mut test_func_indices: Vec<(u32, String)> = Vec::new();
     let has_main = program.functions.iter().any(|f| f.name == "main" && !f.is_test);
-    let library_mode = !has_main;
+    let has_tests = program.functions.iter().any(|f| f.is_test);
+    let library_mode = !has_main && !has_tests;
 
     for (func_enum_idx, func) in program.functions.iter().enumerate() {
         // Skip @extern(wasm) — already registered as imports above
