@@ -453,8 +453,13 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
 fn compile_rc_inc(emitter: &mut WasmEmitter) {
     use super::list_layout::RC_OFFSET;
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_inc];
+    let heap_start_global = emitter.rt.heap_start_global;
     let mut f = Function::new([]);
     wasm!(f, {
+        // Data section pointers have no alloc header — return as-is.
+        local_get(0); global_get(heap_start_global); i32_lt_u;
+        if_empty; local_get(0); return_; end;
+
         // addr = ptr - RC_OFFSET
         local_get(0); i32_const(RC_OFFSET); i32_sub;
         // store(addr, load(addr) + 1)
@@ -509,8 +514,13 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
 // If refcount == 1: return ptr unchanged (in-place mutation is safe).
 fn compile_cow_check(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.cow_check];
+    let heap_start_global = emitter.rt.heap_start_global;
     let mut f = Function::new([(1, ValType::I32)]); // local 2: $new_ptr
     wasm!(f, {
+        // Data section pointers have no alloc header — treat as unique (no copy needed).
+        local_get(0); global_get(heap_start_global); i32_lt_u;
+        if_empty; local_get(0); return_; end;
+
         // if load(ptr - 4) <= 1 then return ptr (unique owner)
         local_get(0); i32_const(4); i32_sub;
         i32_load(2, 0);
