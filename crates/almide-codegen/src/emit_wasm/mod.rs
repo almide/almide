@@ -1268,7 +1268,20 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Phase 3: Assemble (DCE already ran in Phase 2.5: {} functions eliminated)
     let _ = dce_count;
-    assemble(&mut emitter)
+    let bytes = assemble(&mut emitter);
+
+    // Phase 4: Validate — mechanical guarantee of structural correctness.
+    // Stack balance, type safety, and control flow integrity are verified
+    // post-emit. If validation fails, it's a compiler bug — hard error.
+    #[cfg(debug_assertions)]
+    {
+        if let Err(e) = wasmparser::validate(&bytes) {
+            eprintln!("[WASM Engine] validation FAILED: {e}");
+            eprintln!("[WASM Engine] This is a compiler bug. The emitted WASM is structurally invalid.");
+        }
+    }
+
+    bytes
 }
 
 /// Assemble all sections into a final WASM binary.

@@ -477,17 +477,19 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
         w.if_void(|w| { w.ret(); }, |_| {});
         // rc = *(ptr - rc_neg)
         w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty).tee(1);
-        w.i32c(1).gt_u();
+        // Double-free guard: rc == 0 means block is already freed.
+        // Trap immediately — this is a Perceus compiler bug.
+        w.get(1).eqz();
+        w.if_void(|w| { w.unreachable_(); }, |_| {});
+        w.get(1).i32c(1).gt_u();
         w.if_void(|w| {
             // rc > 1: decrement
             w.get(0).i32c(rc_neg).sub();
             w.get(1).i32c(1).sub();
             w.emit_store(0, rc_ty);
         }, |w| {
-            // rc <= 1: dead block. Push to free list for reuse.
-            // ptr[0] = free_list_head (store next in data area)
+            // rc == 1: dead block. Push to free list for reuse.
             w.get(0).gget(free_list).emit_store(0, MemType::I32);
-            // free_list_head = block_base (= ptr - hdr)
             w.get(0).i32c(hdr).sub().gset(free_list);
         });
     }
