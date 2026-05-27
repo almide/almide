@@ -1,3 +1,4 @@
+// wasm:skip — @extern not available in WASM
 // @extern test: Pattern 2 — body is fallback for targets without @extern
 // Since we compile to Rust, @extern(rs, ...) takes priority over the body.
 // The body is used as fallback for targets that don't have an @extern.
