@@ -1,4 +1,4 @@
-// wasm:skip — TODO: map.fold WASM runtime not yet ported
+// wasm:skip — TODO: map.filter/map.map/map.update WASM Swiss Table
 
 test "map.fold sums values" {
   let m = ["a": 1, "b": 2, "c": 3];

@@ -12,7 +12,8 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_map_closure_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
         match method {
             "fold" => {
-                // fold(m, init, f) → A: f(acc, key, val) for each entry
+                // fold(m, init, f) → A: f(acc, key, val) for each occupied entry
+                use super::list_layout::{MAP_TAGS_OFFSET, MAP_CAP_OFFSET};
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
@@ -20,6 +21,8 @@ impl FuncCompiler<'_> {
                 let map_ptr = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
+                let cap = self.scratch.alloc_i32();
+                let eb = self.scratch.alloc_i32();
                 let acc = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
@@ -29,20 +32,30 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[2]); // closure
                 wasm!(self.func, {
                     local_set(closure);
+                    // Swiss Table setup
+                    local_get(map_ptr); i32_load(MAP_CAP_OFFSET as u32); local_set(cap);
+                    local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
+                    local_get(cap); i32_add; local_set(eb);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
-                      local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
+                      local_get(i); local_get(cap); i32_ge_u; br_if(1);
+                      // Skip empty slots (tag == 0)
+                      local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
+                      local_get(i); i32_add; i32_load8_u(0); i32_eqz;
+                      if_empty;
+                        local_get(i); i32_const(1); i32_add; local_set(i); br(1); // → loop start
+                      end;
                       // Call f(acc, key, val)
                       local_get(closure); i32_load(4); // env
                       local_get(acc); // acc
-                      // key = map[4 + i*entry]
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      // key = eb[i*entry]
+                      local_get(eb);
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
                 wasm!(self.func, {
-                      // val = map[4 + i*entry + ks]
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      // val = eb[i*entry + ks]
+                      local_get(eb);
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                 });
@@ -66,11 +79,14 @@ impl FuncCompiler<'_> {
                     local_get(acc);
                 });
                 self.scratch.free_i64(acc);
+                self.scratch.free_i32(eb);
+                self.scratch.free_i32(cap);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(map_ptr);
             }
             "each" => {
+                use super::list_layout::{MAP_TAGS_OFFSET, MAP_CAP_OFFSET};
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
@@ -78,21 +94,31 @@ impl FuncCompiler<'_> {
                 let map_ptr = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
+                let cap = self.scratch.alloc_i32();
+                let eb = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     local_set(closure);
+                    local_get(map_ptr); i32_load(MAP_CAP_OFFSET as u32); local_set(cap);
+                    local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
+                    local_get(cap); i32_add; local_set(eb);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
-                      local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
+                      local_get(i); local_get(cap); i32_ge_u; br_if(1);
+                      local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
+                      local_get(i); i32_add; i32_load8_u(0); i32_eqz;
+                      if_empty;
+                        local_get(i); i32_const(1); i32_add; local_set(i); br(1);
+                      end;
                       local_get(closure); i32_load(4); // env
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(eb);
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
                 wasm!(self.func, {
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(eb);
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                 });
@@ -111,11 +137,14 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                 });
+                self.scratch.free_i32(eb);
+                self.scratch.free_i32(cap);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(map_ptr);
             }
             "any" => {
+                use super::list_layout::{MAP_TAGS_OFFSET, MAP_CAP_OFFSET};
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
@@ -123,23 +152,33 @@ impl FuncCompiler<'_> {
                 let map_ptr = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
+                let cap = self.scratch.alloc_i32();
+                let eb = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     local_set(closure);
+                    local_get(map_ptr); i32_load(MAP_CAP_OFFSET as u32); local_set(cap);
+                    local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
+                    local_get(cap); i32_add; local_set(eb);
                     i32_const(0); local_set(i);
                     i32_const(0); local_set(result);
                     block_empty; loop_empty;
-                      local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
+                      local_get(i); local_get(cap); i32_ge_u; br_if(1);
+                      local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
+                      local_get(i); i32_add; i32_load8_u(0); i32_eqz;
+                      if_empty;
+                        local_get(i); i32_const(1); i32_add; local_set(i); br(1);
+                      end;
                       local_get(closure); i32_load(4);
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(eb);
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
                 wasm!(self.func, {
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(eb);
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                 });
@@ -163,11 +202,14 @@ impl FuncCompiler<'_> {
                     local_get(result);
                 });
                 self.scratch.free_i32(result);
+                self.scratch.free_i32(eb);
+                self.scratch.free_i32(cap);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(map_ptr);
             }
             "all" => {
+                use super::list_layout::{MAP_TAGS_OFFSET, MAP_CAP_OFFSET};
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
@@ -175,23 +217,33 @@ impl FuncCompiler<'_> {
                 let map_ptr = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
+                let cap = self.scratch.alloc_i32();
+                let eb = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     local_set(closure);
+                    local_get(map_ptr); i32_load(MAP_CAP_OFFSET as u32); local_set(cap);
+                    local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
+                    local_get(cap); i32_add; local_set(eb);
                     i32_const(0); local_set(i);
                     i32_const(1); local_set(result);
                     block_empty; loop_empty;
-                      local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
+                      local_get(i); local_get(cap); i32_ge_u; br_if(1);
+                      local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
+                      local_get(i); i32_add; i32_load8_u(0); i32_eqz;
+                      if_empty;
+                        local_get(i); i32_const(1); i32_add; local_set(i); br(1);
+                      end;
                       local_get(closure); i32_load(4);
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(eb);
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
                 wasm!(self.func, {
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(eb);
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                 });
@@ -216,11 +268,14 @@ impl FuncCompiler<'_> {
                     local_get(result);
                 });
                 self.scratch.free_i32(result);
+                self.scratch.free_i32(eb);
+                self.scratch.free_i32(cap);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(map_ptr);
             }
             "count" => {
+                use super::list_layout::{MAP_TAGS_OFFSET, MAP_CAP_OFFSET};
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
@@ -228,23 +283,33 @@ impl FuncCompiler<'_> {
                 let map_ptr = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
+                let cap = self.scratch.alloc_i32();
+                let eb = self.scratch.alloc_i32();
                 let cnt = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     local_set(closure);
+                    local_get(map_ptr); i32_load(MAP_CAP_OFFSET as u32); local_set(cap);
+                    local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
+                    local_get(cap); i32_add; local_set(eb);
                     i32_const(0); local_set(i);
                     i64_const(0); local_set(cnt);
                     block_empty; loop_empty;
-                      local_get(i); local_get(map_ptr); i32_load(0); i32_ge_u; br_if(1);
+                      local_get(i); local_get(cap); i32_ge_u; br_if(1);
+                      local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
+                      local_get(i); i32_add; i32_load8_u(0); i32_eqz;
+                      if_empty;
+                        local_get(i); i32_const(1); i32_add; local_set(i); br(1);
+                      end;
                       local_get(closure); i32_load(4);
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(eb);
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
                 wasm!(self.func, {
-                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(eb);
                       local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
                 });

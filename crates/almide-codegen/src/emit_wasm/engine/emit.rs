@@ -377,7 +377,7 @@ fn emit_map_foreach(
     f.instruction(&I32Const(1));
     f.instruction(&I32Add);
     f.instruction(&LocalSet(i_local));
-    f.instruction(&Br(2)); // br to loop start
+    f.instruction(&Br(1)); // br(1) from inside if = loop start
     f.instruction(&End);
 
     // entry_local = eb + i * entry_stride
