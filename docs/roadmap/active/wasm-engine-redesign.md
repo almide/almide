@@ -265,10 +265,62 @@ All of current `emit_wasm/`:
 - [ ] Remove all `emit_wasm/*.rs` files
 - [ ] Single entry point: `wasm_engine::compile(ir_program) -> Vec<u8>`
 
+## Findings from v0.23.11 Patch Session (2026-05-27)
+
+Session fixed 18 test files (175→193/240) by patching emit_wasm directly. Key findings that inform the redesign:
+
+### 1. Stack Discipline is the Hardest Problem
+
+**The blocking CI bug**: Perceus/ANF inserts a trailing `Ret(var_ref)` in void functions. This becomes a Block tail expression that pushes a value onto the WASM stack. The IR type annotation says Unit (Perceus doesn't update it), but codegen actually emits `local.get` which pushes i32. Result: "values remaining on stack at end of block" — rejected by V8 and newer wasmtime.
+
+**Why WasmIR fixes this**: The emit phase can statically verify stack balance per block/function. Each `Op` has a known stack effect (+1, -1, 0). A void function whose ops sum to non-zero gets an automatic `Op::Drop`. No IR type annotation trust needed.
+
+### 2. Layout Offset Bugs are Systemic
+
+String layout change (4→8 byte header) broke 3 sites. Map Swiss Table migration broke 35+ sites. HTTP module had 15+ hardcoded offsets. All fixed by replacing `i32_const(4)` with `list_layout::DATA_OFFSET` — but this is still manual and fragile.
+
+**Why WasmIR fixes this**: `Op::FieldLoad { layout: STRING, field: DATA }` resolves offset via `LayoutRegistry`. Zero hardcoded offsets in lowering.
+
+### 3. rc_dec on Data Section Pointers Corrupts Memory
+
+`rc_dec(ptr)` reads `ptr-4` as refcount. Interned strings in the data section have no alloc header → memory corruption. Fixed by adding `ptr < heap_start` guard to rc_dec/rc_inc/cow_check.
+
+**Why WasmIR fixes this**: `Op::RcDec { ptr, layout }` in the emit phase can check pointer origin. Or better: the lowering phase never emits RcDec for compile-time-known interned values.
+
+### 4. wasmparser Validation+Stub Hides Bugs
+
+The old emit_wasm validated with wasmparser 0.225 and replaced broken functions with `unreachable` stubs. This silently degraded correctness. Worse: wasmparser 0.225 had false positives on valid WASM that wasm-tools 0.244 accepts. Removed entirely — codegen must produce valid WASM.
+
+**Why WasmIR fixes this**: Stack balance is verified structurally at the IR level before emission. If WasmIR is well-formed, the emitted WASM is guaranteed valid.
+
+### 5. Swiss Table Iteration is a Pattern, Not a Primitive
+
+Every map closure method (fold/each/any/all/count/find/update/map) reimplemented the Swiss Table iteration loop. Extracted `MapIter` helpers — but still 8 call sites.
+
+**Why WasmIR fixes this**: `Op::MapForEach { map, entry_stride, body }` is a single IR node. The emit phase generates the Swiss Table loop once.
+
+### 6. Perceus/ANF Transforms IR Types Unreliably
+
+Perceus changes block structure (inserts RcDec statements, Ret tail expressions) but doesn't always update `.ty` annotations. The WASM emitter can't trust `expr.ty` for stack management decisions.
+
+**Why WasmIR fixes this**: WasmIR doesn't carry type annotations — it carries stack effects. Each Op explicitly declares what it pushes/pops. No "trust the annotation" problem.
+
+### Current Blockers (require WasmEngine to fix properly)
+
+| Bug | Symptom | Root Cause |
+|-----|---------|-----------|
+| `filter \|> map` pipe | WASM stack mismatch in void function | Perceus tail expr in void block |
+| `mut` param | list.push via mut param traps | Pass-by-reference not implemented in WASM |
+| `bytes.from_list` + assert | Heap corruption in test function | Perceus drop ordering |
+| `group_by` + assert | Same as above | Same |
+| `opaque type` | ConcretizeTypes fails on Member | Upstream type checker issue |
+| `intra-module fn ref` | Wrong function table index | Closure conversion for module fns |
+
 ## Metrics
 
-- **Correctness**: `almide test spec/ --target wasm` — 240/240 (currently 175/240)
+- **Correctness**: `almide test spec/ --target wasm` — 240/240 (currently 193/240)
 - **Binary size**: ≤ current (336B hello world baseline)
 - **Performance**: ≥ current (5 wins vs Rust+LLVM baseline)
 - **Code volume**: emit_wasm/ LOC reduced by ≥50%
 - **Layout bugs**: structurally impossible (enforced by LayoutRegistry)
+- **Stack bugs**: structurally impossible (verified at WasmIR level)
