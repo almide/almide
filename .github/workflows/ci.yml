@@ -200,6 +200,10 @@ jobs:
 
       - run: cargo build --release
 
+      - name: Install wasmtime
+        if: runner.os != 'Windows'
+        run: curl https://wasmtime.dev/install.sh -sSf | bash && echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
+
       # --test-threads=1: see note on the primary Test Rust job.
       - run: cargo test -- --test-threads=1
 
