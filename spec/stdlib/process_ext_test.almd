@@ -1,4 +1,3 @@
-// wasm:skip — process.env/spawn/kill are native-only
 import process
 
 test "process.env reads HOME or USERPROFILE" {

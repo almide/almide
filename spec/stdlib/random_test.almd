@@ -1,4 +1,3 @@
-// wasm:skip — OS/native-only API, not available in WASM
 // Comprehensive random module tests
 // All random functions are effect, so we use top-level effect fn wrappers.
 import random

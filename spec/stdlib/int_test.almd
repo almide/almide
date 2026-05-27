@@ -1,4 +1,3 @@
-// wasm:skip — int.to_hex / hex encoding WASM runtime not yet ported
 
 // Comprehensive int module tests
 // ── to_string ──

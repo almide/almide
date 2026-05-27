@@ -1,4 +1,3 @@
-// wasm:skip — matrix WASM runtime not yet ported
 // matrix.{split_cols_even, concat_cols, concat_cols_many, conv1d,
 //         gather_rows, dot_row, row_dot, from_bytes_f16_le}
 // — auxiliary ops regression tests.

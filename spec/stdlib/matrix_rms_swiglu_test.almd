@@ -1,4 +1,3 @@
-// wasm:skip — matrix WASM runtime not yet ported
 // RMSNorm and SwiGLU primitives for Llama-style transformer FFN.
 
 fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {

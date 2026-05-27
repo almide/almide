@@ -1,4 +1,3 @@
-// wasm:skip — matrix WASM runtime not yet ported
 // Coverage tests for matrix.map
 
 test "matrix.map squares elements" {

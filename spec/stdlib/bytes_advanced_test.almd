@@ -1,4 +1,3 @@
-// wasm:skip — bytes WASM runtime partially ported
 // bytes high-level operations: reverse / fill / map_each / insert / remove_at /
 // chunks / split / lines.
 

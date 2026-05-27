@@ -1,4 +1,3 @@
-// wasm:skip — OS/native-only API, not available in WASM
 import net
 
 test "tcp loopback: listen, connect, write, read, close" {

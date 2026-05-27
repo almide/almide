@@ -1,4 +1,3 @@
-// wasm:skip — TypeVar remains after monomorphization (compiler bug)
 // Phase 1+2: test where — value binding, table-driven, reference override, call response
 
 fn parse_age(s: String) -> Result[Int, String] =

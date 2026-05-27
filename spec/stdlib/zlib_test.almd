@@ -1,4 +1,3 @@
-// wasm:skip — OS/native-only API, not available in WASM
 import zlib
 
 test "zlib compress/decompress roundtrip" {
