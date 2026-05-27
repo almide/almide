@@ -191,13 +191,13 @@ fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
         FnBody::Assign { var, mut expr, body } => {
             let body = perceus_fnbody(*body, var_table);
             perceus_expr(&mut expr, var_table);
-            let mut result = FnBody::Assign { var, expr, body: Box::new(body) };
-            // Rule 3: RcDec old value before assign
-            let ty = &var_table.get(var).ty;
-            if is_heap_type(ty) {
-                result = FnBody::Dec { var, body: Box::new(result) };
-            }
-            result
+            // Mutable assign: do NOT Dec old value here.
+            // The WASM emitter handles mutable vars with local.set — the old
+            // pointer is overwritten but NOT freed mid-scope. The scope-exit
+            // Dec handles the final value. Intermediate old values leak by
+            // design in the current model (same as Koka's approach for var).
+            // TODO: proper old-value recovery requires COW or arena allocation.
+            FnBody::Assign { var, expr, body: Box::new(body) }
         }
         FnBody::Expr { mut expr, body } => {
             let body = perceus_fnbody(*body, var_table);
@@ -268,8 +268,9 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
                 .filter(|v| {
                     let info = var_table.get(**v);
                     let name = info.name.as_str();
-                    // Skip TCO/branch temporaries (their own RC management)
+                    // Skip TCO/branch/perceus temporaries (their own RC management)
                     !name.starts_with("__tco_") && !name.starts_with("__br_")
+                    && !name.starts_with("__perceus_old")
                 })
                 .copied()
                 .collect();
@@ -323,7 +324,8 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
             for var in heap_vars.iter().rev() {
                 let info = var_table.get(*var);
                 let name = info.name.as_str();
-                if !name.starts_with("__tco_") && !name.starts_with("__br_") {
+                if !name.starts_with("__tco_") && !name.starts_with("__br_")
+                    && !name.starts_with("__perceus_old") {
                     result = FnBody::Dec { var: *var, body: Box::new(result) };
                 }
             }
