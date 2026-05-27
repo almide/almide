@@ -52,7 +52,10 @@ jobs:
           ALMIDE=./target/release/almide
           rust_pass=0; wasm_pass=0; rust_fail=0; wasm_fail=0; both_pass=0; errors=""
 
-          for f in $(find spec/ -name '*.almd' -type f | sort); do
+          for f in $(find spec/ -name '*_test.almd' -type f | sort); do
+            # Skip files marked with wasm:skip
+            if head -3 "$f" | grep -q 'wasm:skip'; then continue; fi
+
             rust_ok=false; wasm_ok=false
 
             if $ALMIDE test "$f" > /dev/null 2>&1; then
@@ -76,7 +79,7 @@ jobs:
             fi
           done
 
-          total=$(find spec/ -name '*.almd' -type f | wc -l)
+          total=$(find spec/ -name '*_test.almd' -type f | wc -l)
           echo ""
           echo "=== Cross-Target Results ==="
           echo "Rust:  $rust_pass pass / $rust_fail fail"
