@@ -248,7 +248,7 @@ mod tests {
     use almide_lang::types::Ty;
 
     fn lit_int(v: i64) -> IrExpr {
-        IrExpr { kind: IrExprKind::LitInt { value: v }, ty: Ty::Int, span: None, def_id: None }
+        IrExpr { kind: IrExprKind::LitInt { value: v }, ty: Ty::Int, span: None, def_id: None, }
     }
 
     fn lit_str(v: &str) -> IrExpr {
@@ -347,7 +347,7 @@ mod tests {
                     ty: Ty::Int,
                     value: lit_int(42),
                 },
-                span: None, def_id: None,
+                span: None,
             },
         ];
         dce_stmts(&mut stmts, &var_table);
@@ -368,7 +368,7 @@ mod tests {
                     ty: Ty::Int,
                     value: lit_int(42),
                 },
-                span: None, def_id: None,
+                span: None,
             },
         ];
         dce_stmts(&mut stmts, &var_table);
@@ -397,7 +397,7 @@ mod tests {
                         span: None, def_id: None,
                     },
                 },
-                span: None, def_id: None,
+                span: None,
             },
         ];
         dce_stmts(&mut stmts, &var_table);

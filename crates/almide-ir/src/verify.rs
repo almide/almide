@@ -504,6 +504,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
+            used_stdlib_modules: Default::default(),
         }
     }
 
@@ -531,6 +532,8 @@ mod tests {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
+            mutated_params: vec![],
+            module_origin: None,
         }
     }
 
@@ -715,11 +718,14 @@ mod tests {
                 functions: vec![make_fn("helper", mod_body)],
                 top_lets: vec![],
                 var_table: mod_vt,
+                exports: vec![],
+                imports: vec![],
             }],
             type_registry: Default::default(),
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
+            used_stdlib_modules: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -774,6 +780,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
+            used_stdlib_modules: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -810,6 +817,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
+            used_stdlib_modules: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -838,6 +846,8 @@ mod tests {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
+            mutated_params: vec![],
+            module_origin: None,
         };
         let prog = make_program(vec![f], vt);
         let errors = verify_program(&prog);
@@ -935,7 +945,7 @@ mod tests {
         let vt = VarTable::new();
         let body = IrExpr {
             kind: IrExprKind::Call {
-                target: CallTarget::Module { module: "mymod".into(), func: "nonexistent".into() },
+                target: CallTarget::Module { module: "mymod".into(), func: "nonexistent".into(), def_id: None },
                 args: vec![],
                 type_args: vec![],
             },
@@ -956,12 +966,14 @@ mod tests {
                 functions: vec![mod_fn],
                 top_lets: vec![],
                 var_table: VarTable::new(),
+                exports: vec![], imports: vec![],
             }],
             type_registry: Default::default(),
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
             def_table: Default::default(),
+            used_stdlib_modules: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -973,7 +985,7 @@ mod tests {
         let vt = VarTable::new();
         let body = IrExpr {
             kind: IrExprKind::Call {
-                target: CallTarget::Module { module: "mymod".into(), func: "helper".into() },
+                target: CallTarget::Module { module: "mymod".into(), func: "helper".into(), def_id: None },
                 args: vec![],
                 type_args: vec![],
             },
@@ -993,12 +1005,14 @@ mod tests {
                 functions: vec![mod_fn],
                 top_lets: vec![],
                 var_table: VarTable::new(),
+                exports: vec![], imports: vec![],
             }],
             type_registry: Default::default(),
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
             def_table: Default::default(),
+            used_stdlib_modules: Default::default(),
         };
         assert!(verify_program(&prog).is_empty());
     }
@@ -1009,7 +1023,7 @@ mod tests {
         let vt = VarTable::new();
         let body = IrExpr {
             kind: IrExprKind::Call {
-                target: CallTarget::Module { module: "string".into(), func: "len".into() },
+                target: CallTarget::Module { module: "string".into(), func: "len".into(), def_id: None },
                 args: vec![IrExpr { kind: IrExprKind::LitStr { value: "hi".into() }, ty: Ty::String, span: None, def_id: None }],
                 type_args: vec![],
             },
