@@ -391,8 +391,15 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
                     w.get(4).i32c(hdr).add().emit_load(0, MemType::I32);
                     w.emit_store(0, MemType::I32);
                 });
-                // RC = 1, return data ptr
+                // RC = 1
                 w.get(4).i32c(1).emit_store(rc_off, rc_ty);
+                // Zero-fill reused block's data area to prevent stale data
+                // (critical for Swiss Table tag arrays)
+                w.get(4).i32c(hdr).add();  // data_ptr
+                w.i32c(0);                 // fill value
+                w.get(4).emit_load(size_off, size_ty); // size
+                w.raw(wasm_encoder::Instruction::MemoryFill(0));
+                // Return data ptr
                 w.get(4).i32c(hdr).add().ret();
             }, |_| {});
             // Advance: prev = cur, cur = cur.next
