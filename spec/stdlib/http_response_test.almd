@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix WASM codegen bug
 import http
 
 test "http.response creates plain text response" {
