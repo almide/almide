@@ -85,6 +85,8 @@ jobs:
 
           if [ -n "$errors" ]; then
             echo -e "\nMismatches:$errors"
+            echo "::error::Cross-target mismatches found — see above"
+            exit 1
           fi
 
           echo "::notice::Cross-target: Rust $rust_pass, WASM $wasm_pass, both $both_pass / $total"

@@ -495,6 +495,8 @@ impl FuncCompiler<'_> {
     /// longer trap, and the module no longer reserves memory for a scratch
     /// that goes unused when no interpolation runs.
     pub(super) fn emit_string_interp(&mut self, parts: &[IrStringPart]) {
+        use super::list_layout::{STRING_DATA_OFFSET, STRING_CAP_OFFSET, STRING_HEADER_SIZE};
+
         if parts.is_empty() {
             let empty = self.emitter.intern_string("");
             wasm!(self.func, { i32_const(empty as i32); });
@@ -530,11 +532,11 @@ impl FuncCompiler<'_> {
             });
         }
 
-        // Stage 3: alloc result = [len:i32][data...] with one heap bump.
+        // Stage 3: alloc result = [len:i32][cap:i32][data...] with one heap bump.
         let result_local = self.scratch.alloc_i32();
         wasm!(self.func, {
             local_get(total_len_local);
-            i32_const(4);
+            i32_const(STRING_HEADER_SIZE);
             i32_add;
         });
         let alloc_fn = self.emitter.rt.alloc;
@@ -548,22 +550,28 @@ impl FuncCompiler<'_> {
             local_get(total_len_local);
             i32_store(0);
         });
+        // Write capacity = total_len.
+        wasm!(self.func, {
+            local_get(result_local);
+            local_get(total_len_local);
+            i32_store(STRING_CAP_OFFSET as u32);
+        });
 
         // Stage 4: memory.copy each part's data bytes into the result buffer.
-        // dst starts at result + 4 and advances by each part's length.
+        // dst starts at result + STRING_DATA_OFFSET and advances by each part's length.
         let dst_local = self.scratch.alloc_i32();
         wasm!(self.func, {
             local_get(result_local);
-            i32_const(4);
+            i32_const(STRING_DATA_OFFSET);
             i32_add;
             local_set(dst_local);
         });
         for &p in &part_locals {
             wasm!(self.func, {
-                // memory.copy(dst, src=part+4, len=mem0[part])
+                // memory.copy(dst, src=part+STRING_DATA_OFFSET, len=mem0[part])
                 local_get(dst_local);
                 local_get(p);
-                i32_const(4);
+                i32_const(STRING_DATA_OFFSET);
                 i32_add;
                 local_get(p);
                 i32_load(0);
@@ -631,6 +639,7 @@ impl FuncCompiler<'_> {
 
     /// ASCII case conversion. Expects string ptr on stack. Returns new string ptr.
     pub(super) fn emit_str_case_convert(&mut self, is_upper: bool) {
+        use super::list_layout::{STRING_DATA_OFFSET, STRING_CAP_OFFSET, STRING_HEADER_SIZE};
         // String ptr is on stack. Store to scratch local.
         let src = self.scratch.alloc_i32();
         let dst = self.scratch.alloc_i32();
@@ -638,8 +647,8 @@ impl FuncCompiler<'_> {
         let s1 = self.scratch.alloc_i32();
         wasm!(self.func, {
             local_set(src);
-            // Alloc dst with same len
-            i32_const(4);
+            // Alloc dst with same len: [len:i32][cap:i32][data...]
+            i32_const(STRING_HEADER_SIZE);
             local_get(src);
             i32_load(0);
             i32_add;
@@ -650,6 +659,11 @@ impl FuncCompiler<'_> {
             local_get(src);
             i32_load(0);
             i32_store(0);
+            // Store cap = len in dst
+            local_get(dst);
+            local_get(src);
+            i32_load(0);
+            i32_store(STRING_CAP_OFFSET as u32);
         });
         // Loop: convert each byte
         wasm!(self.func, {
@@ -667,13 +681,13 @@ impl FuncCompiler<'_> {
             br_if(1);
             // dst addr
             local_get(dst);
-            i32_const(4);
+            i32_const(STRING_DATA_OFFSET);
             i32_add;
             local_get(s);
             i32_add;
             // src byte
             local_get(src);
-            i32_const(4);
+            i32_const(STRING_DATA_OFFSET);
             i32_add;
             local_get(s);
             i32_add;

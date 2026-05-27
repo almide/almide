@@ -336,11 +336,11 @@ pub(super) fn compile_cmp(emitter: &mut WasmEmitter) {
     f.instruction(&Loop(wasm_encoder::BlockType::Empty));
     f.instruction(&LocalGet(3)).instruction(&LocalGet(2)).instruction(&I32GeU);
     f.instruction(&BrIf(1));
-    f.instruction(&LocalGet(0)).instruction(&I32Const(4)).instruction(&I32Add);
+    f.instruction(&LocalGet(0)).instruction(&I32Const(super::list_layout::STRING_DATA_OFFSET)).instruction(&I32Add);
     f.instruction(&LocalGet(3)).instruction(&I32Add);
     f.instruction(&I32Load8U(mem0_byte));
     f.instruction(&LocalSet(4));
-    f.instruction(&LocalGet(1)).instruction(&I32Const(4)).instruction(&I32Add);
+    f.instruction(&LocalGet(1)).instruction(&I32Const(super::list_layout::STRING_DATA_OFFSET)).instruction(&I32Add);
     f.instruction(&LocalGet(3)).instruction(&I32Add);
     f.instruction(&I32Load8U(mem0_byte));
     f.instruction(&LocalSet(5));
