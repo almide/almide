@@ -274,7 +274,9 @@ impl FuncCompiler<'_> {
             }
             "find" => {
                 // find(m, pred) → Option[(K, V)]
-                use super::list_layout::{MAP_TAGS_OFFSET, MAP_CAP_OFFSET};
+                use super::engine::layout::{SWISS_MAP, map as lm};
+                let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
+                let MAP_CAP_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
@@ -363,7 +365,10 @@ impl FuncCompiler<'_> {
             "update" => {
                 // update(m, key, f) → Map: apply f to value at key
                 // Swiss Table: memcpy entire map, then find+modify value in the copy.
-                use super::list_layout::{MAP_TAGS_OFFSET, MAP_CAP_OFFSET, MAP_HEADER_SIZE};
+                use super::engine::layout::{SWISS_MAP, map as lm};
+                let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
+                let MAP_CAP_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
+                let MAP_HEADER_SIZE = self.emitter.layout_reg.header_size(SWISS_MAP) as i32;
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
@@ -497,7 +502,9 @@ impl FuncCompiler<'_> {
     /// Allocate scratch locals and emit Swiss Table setup:
     /// cap = map[CAP_OFFSET], eb = map + TAGS_OFFSET + cap, i = 0.
     pub(super) fn map_iter_begin(&mut self, map_expr: &IrExpr, entry_size: u32) -> MapIter {
-        use super::list_layout::{MAP_TAGS_OFFSET, MAP_CAP_OFFSET};
+        use super::engine::layout::{SWISS_MAP, map as lm};
+                let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
+                let MAP_CAP_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
         let map = self.scratch.alloc_i32();
         let cap = self.scratch.alloc_i32();
         let eb = self.scratch.alloc_i32();
@@ -516,7 +523,8 @@ impl FuncCompiler<'_> {
     /// Emit loop header: block/loop, break if i >= cap, skip empty tag.
     /// After this, the current slot is guaranteed occupied.
     pub(super) fn map_iter_loop_head(&mut self, it: &MapIter) {
-        use super::list_layout::MAP_TAGS_OFFSET;
+        use super::engine::layout::{SWISS_MAP, map as lm};
+        let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
         wasm!(self.func, {
             block_empty; loop_empty;
               local_get(it.i); local_get(it.cap); i32_ge_u; br_if(1);
@@ -566,7 +574,9 @@ impl FuncCompiler<'_> {
     /// Allocate a full copy of a Swiss Table map (header + tags + entries).
     /// Returns scratch local holding the new map pointer.
     pub(super) fn map_copy_full(&mut self, it: &MapIter) -> u32 {
-        use super::list_layout::{MAP_HEADER_SIZE, MAP_TAGS_OFFSET};
+        use super::engine::layout::{SWISS_MAP, map as lm};
+        let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
+        let MAP_HEADER_SIZE = self.emitter.layout_reg.header_size(SWISS_MAP) as i32;
         let total = self.scratch.alloc_i32();
         let new_map = self.scratch.alloc_i32();
         wasm!(self.func, {
@@ -585,7 +595,8 @@ impl FuncCompiler<'_> {
 
     /// Compute entry base for a copied map: new_map + TAGS_OFFSET + cap.
     pub(super) fn map_copy_entry_base(&mut self, new_map: u32, it: &MapIter) -> u32 {
-        use super::list_layout::MAP_TAGS_OFFSET;
+        use super::engine::layout::{SWISS_MAP, map as lm};
+        let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
         let new_eb = self.scratch.alloc_i32();
         wasm!(self.func, {
             local_get(new_map); i32_const(MAP_TAGS_OFFSET); i32_add;

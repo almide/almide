@@ -69,4 +69,78 @@ impl FuncCompiler<'_> {
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
         w.get(list_local).field_load(LIST, list::LEN);
     }
+
+    // ── Swiss Table helpers ──
+
+    /// Swiss Table setup: load cap, compute entries_base. Stack: `[]`
+    /// Sets `cap_local = map[CAP]`, `eb_local = map + TAGS_OFFSET + cap`.
+    pub fn emit_swiss_setup(&mut self, map: u32, cap_local: u32, eb_local: u32) {
+        use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m}};
+        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+        w.get(map).field_load(SWISS_MAP, m::CAP).set(cap_local);
+        w.get(map).field_addr(SWISS_MAP, m::TAGS).get(cap_local).add().set(eb_local);
+    }
+
+    /// Load Swiss Table tag at index. Stack: `[] → [tag:i32]`
+    pub fn emit_swiss_tag_load(&mut self, map: u32, idx: u32) {
+        use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m, MemType}};
+        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+        w.get(map).field_addr(SWISS_MAP, m::TAGS).get(idx).add();
+        w.emit_load(0, MemType::U8);
+    }
+
+    /// Store Swiss Table tag at index. Stack: `[tag:i32] → []`
+    pub fn emit_swiss_tag_store(&mut self, map: u32, idx: u32) {
+        use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m, MemType}};
+        let tmp = self.scratch.alloc_i32();
+        wasm!(self.func, { local_set(tmp); }); // save tag from stack
+        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+        w.get(map).field_addr(SWISS_MAP, m::TAGS).get(idx).add();
+        w.get(tmp).emit_store(0, MemType::U8);
+        self.scratch.free_i32(tmp);
+    }
+
+    /// Map length. Stack: `[] → [len:i32]`
+    pub fn emit_map_len(&mut self, map: u32) {
+        use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m}};
+        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+        w.get(map).field_load(SWISS_MAP, m::LEN);
+    }
+
+    /// Store map length. Stack: `[] → []`. `len_local` has the value.
+    pub fn emit_map_store_len(&mut self, map: u32, len_local: u32) {
+        use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m}};
+        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+        w.get(map).get(len_local).field_store(SWISS_MAP, m::LEN);
+    }
+
+    /// Allocate empty map (len=0, cap=0). Returns scratch local.
+    pub fn emit_map_alloc_empty(&mut self) -> u32 {
+        use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m}};
+        let dst = self.scratch.alloc_i32();
+        let hdr = self.emitter.layout_reg.header_size(SWISS_MAP);
+        let alloc_fn = self.emitter.rt.alloc;
+        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+        w.i32c(hdr as i32).call(alloc_fn).tee(dst);
+        w.i32c(0).field_store(SWISS_MAP, m::LEN);
+        w.get(dst).i32c(0).field_store(SWISS_MAP, m::CAP);
+        dst
+    }
+
+    /// Allocate map with given capacity. Writes len=0, cap=cap_val.
+    /// Total size = header + cap (tags) + cap * entry_stride (entries).
+    /// Returns scratch local.
+    pub fn emit_map_alloc(&mut self, cap_val: u32, entry_stride: u32) -> u32 {
+        use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m}};
+        let dst = self.scratch.alloc_i32();
+        let hdr = self.emitter.layout_reg.header_size(SWISS_MAP);
+        let alloc_fn = self.emitter.rt.alloc;
+        // total = hdr + cap + cap * entry_stride
+        let total = hdr + cap_val + cap_val * entry_stride;
+        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+        w.i32c(total as i32).call(alloc_fn).tee(dst);
+        w.i32c(0).field_store(SWISS_MAP, m::LEN);
+        w.get(dst).i32c(cap_val as i32).field_store(SWISS_MAP, m::CAP);
+        dst
+    }
 }
