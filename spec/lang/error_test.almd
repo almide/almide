@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix effect fn with loop WASM codegen
 
 // error_test — Error handling (Result, effect fn, auto-?, do block)
 // ── ok / err construction ──

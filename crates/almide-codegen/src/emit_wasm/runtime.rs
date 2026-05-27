@@ -476,8 +476,14 @@ fn compile_rc_inc(emitter: &mut WasmEmitter) {
 fn compile_rc_dec(emitter: &mut WasmEmitter) {
     use super::list_layout::{ALLOC_HEADER_SIZE, RC_OFFSET};
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_dec];
+    let heap_start_global = emitter.rt.heap_start_global;
     let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
     wasm!(f, {
+        // Guard: skip data-section pointers (no alloc header before them).
+        // Pointers below heap_start are interned strings/constants in the data section.
+        local_get(0); global_get(heap_start_global); i32_lt_u;
+        if_empty; return_; end;
+
         // rc = *(ptr - RC_OFFSET)   [header: size@-8, RC@-4, data@0]
         local_get(0); i32_const(RC_OFFSET); i32_sub;
         i32_load(0);
@@ -490,14 +496,8 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
           local_get(1); i32_const(1); i32_sub;
           i32_store(0);
         else_;
-          // rc <= 1: push to free list
-          // Store next pointer in data area: *(ptr) = free_list_head
-          local_get(0);
-          global_get(emitter.free_list_global);
-          i32_store(0);
-          // free_list_head = block_base = ptr - ALLOC_HEADER_SIZE
-          local_get(0); i32_const(ALLOC_HEADER_SIZE); i32_sub;
-          global_set(emitter.free_list_global);
+          // rc <= 1: block is dead. Currently just drop (bump allocator).
+          // TODO: free list reuse once the linked-list invariants are verified.
         end;
         end;
     });

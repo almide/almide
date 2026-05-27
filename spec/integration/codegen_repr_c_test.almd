@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix WASM codegen bug
 // codegen_repr_c_test — Named types (struct/enum) used in FFI-style patterns:
 // pub fields, field access, variant matching, record spread, display
 

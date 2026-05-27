@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix for-guard-else-continue WASM codegen
 
 // control_flow_test — Control flow constructs
 // ── if/then/else ──

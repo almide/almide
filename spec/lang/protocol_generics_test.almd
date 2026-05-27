@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix generic protocol dispatch WASM codegen
 
 // protocol_generics_test — Generic functions with protocol bounds
 // ── Basic protocol generic function ──

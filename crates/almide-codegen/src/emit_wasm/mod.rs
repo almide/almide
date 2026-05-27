@@ -189,6 +189,9 @@ pub struct RuntimeFuncs {
     pub cow_check: u32,
     pub heap_save: u32,
     pub heap_restore: u32,
+    /// Global index holding the heap start address (immutable).
+    /// Pointers below this are in the data section and must NOT be rc_dec'd.
+    pub heap_start_global: u32,
     pub println_str: u32,
     pub int_to_string: u32,
     pub println_int: u32,
@@ -383,7 +386,7 @@ impl WasmEmitter {
             data_bytes: vec![0x0A],
             rt: RuntimeFuncs {
                 fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
-                heap_save: 0, heap_restore: 0,
+                heap_save: 0, heap_restore: 0, heap_start_global: 0,
                 println_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
@@ -450,7 +453,7 @@ impl WasmEmitter {
             def_globals: HashMap::new(),
             top_let_globals_by_name: HashMap::new(),
             top_let_init: Vec::new(),
-            next_global: 4, // 0 = heap_ptr, 1 = free_list, 2 = preopen_table, 3 = preopen_count
+            next_global: 5, // 0=heap_ptr, 1=free_list, 2=preopen_table, 3=preopen_count, 4=heap_start
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
             record_fields: HashMap::new(),
@@ -1363,6 +1366,17 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
         },
         &wasm_encoder::ConstExpr::i32_const(0),
     );
+    // Global 4: heap_start (immutable) — pointers below this are data section, not heap
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: false,
+            shared: false,
+        },
+        &wasm_encoder::ConstExpr::i32_const(heap_start_aligned as i32),
+    );
+    emitter.rt.heap_start_global = 4;
+
     // Top-level let globals
     for &(_, vt, bits) in &emitter.top_let_init {
         let init = match vt {

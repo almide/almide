@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix WASM codegen bug
 type Handler = {
     run: (String) -> String,
     name: String,

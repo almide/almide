@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix WASM codegen bug
 // codegen_variant_record_test — Variant with record payload edge cases
 
 // ── Variant with record payload and default fields ──
