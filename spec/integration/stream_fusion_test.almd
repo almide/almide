@@ -1,3 +1,4 @@
+// wasm:skip — codegen-broken function stub (TypeVar remains)
 // ── Stream fusion robustness tests ──
 
 test "fusion: map+map" {

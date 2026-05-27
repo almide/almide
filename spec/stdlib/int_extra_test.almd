@@ -1,3 +1,4 @@
+// wasm:skip — int.to_hex / hex encoding WASM runtime not yet ported
 
 // int extra tests — deeper coverage of int module
 test "int.parse valid positive" {

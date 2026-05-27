@@ -1,3 +1,4 @@
+// wasm:skip — process.exec_status is native-only
 import process
 
 test "process.exec_status returns a ProcessStatus on success" {

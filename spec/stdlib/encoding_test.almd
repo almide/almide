@@ -1,3 +1,4 @@
+// wasm:skip — int.to_hex / hex encoding WASM runtime not yet ported
 // hex stdlib tests
 
 import hex

@@ -1,3 +1,4 @@
+// wasm:skip — matrix WASM runtime not yet ported
 // matrix.{zeros, ones, shape, transpose, add, mul, scale, mul_scaled, slice_rows}
 // — constructor + core linear algebra regression tests.
 

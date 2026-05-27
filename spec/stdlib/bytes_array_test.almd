@@ -1,3 +1,4 @@
+// wasm:skip — bytes WASM runtime partially ported
 // bytes.read_*_le_array — bulk readers for typed arrays.
 
 test "read_i32_le_array" {

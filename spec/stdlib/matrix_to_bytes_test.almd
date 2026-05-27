@@ -1,3 +1,4 @@
+// wasm:skip — matrix WASM runtime not yet ported
 // matrix.to_bytes_*_le — round-trip with from_bytes_*_le.
 
 test "to_bytes_f64_le round-trip preserves all values" {

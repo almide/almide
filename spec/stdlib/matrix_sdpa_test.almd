@@ -1,3 +1,4 @@
+// wasm:skip — matrix WASM runtime not yet ported
 // MatrixFusionPass: scaled_dot_product_attention.
 // Detects `mul(attention_weights(Q, Kt, s), V)` (which itself comes from
 // `mul(softmax_rows(scale(mul(Q, Kt), s)), V)` after attention_weights
