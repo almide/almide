@@ -8,7 +8,7 @@
 
 use super::FuncCompiler;
 use super::values;
-use super::list_layout;
+use super::list_layout; // MAP_INITIAL_CAP, MAP_TAG_EMPTY
 use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;

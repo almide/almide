@@ -4,6 +4,7 @@
 //! Only fd_write is imported from WASI.
 
 use super::{CompiledFunc, WasmEmitter, SCRATCH_ITOA, NEWLINE_OFFSET};
+use super::rt_string::{string_data_off, string_hdr, string_cap_off, list_data_off, list_hdr};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
 
@@ -556,11 +557,11 @@ fn compile_println_str(emitter: &mut WasmEmitter) {
     let mut f = Function::new([]);
 
     // --- Write the string ---
-    // iov[0].buf = ptr + STRING_DATA_OFFSET  (skip len+cap header)
+    // iov[0].buf = ptr + string_data_off()  (skip len+cap header)
     wasm!(f, {
         i32_const(0);
         local_get(0);
-        i32_const(super::list_layout::STRING_DATA_OFFSET);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
         i32_add;
         i32_store(0);
     });
@@ -726,11 +727,11 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         local_set(5);
     });
 
-    // $result = __alloc(STRING_HEADER_SIZE + $len)
+    // $result = __alloc(string_hdr() + $len)
     // String layout: [len:i32][cap:i32][data@8]
     wasm!(f, {
         local_get(5);
-        i32_const(super::list_layout::STRING_HEADER_SIZE);
+        i32_const(emitter.layout_reg.header_size(super::engine::layout::STRING) as i32);
         i32_add;
         call(emitter.rt.alloc);
         local_set(6);
@@ -743,10 +744,10 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         i32_store(0);
         local_get(6);
         local_get(5);
-        i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
+        i32_store(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
     });
 
-    // memcpy: copy $len bytes from $start to $result+STRING_DATA_OFFSET
+    // memcpy: copy $len bytes from $start to $result+string_data_off()
     wasm!(f, {
         i32_const(0);
         local_set(7);
@@ -757,10 +758,10 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         i32_ge_u;
         br_if(1);
     });
-    // mem[$result + STRING_DATA_OFFSET + $i] = mem[$start + $i]
+    // mem[$result + string_data_off() + $i] = mem[$start + $i]
     wasm!(f, {
         local_get(6);
-        i32_const(super::list_layout::STRING_DATA_OFFSET);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
         i32_add;
         local_get(7);
         i32_add;
@@ -852,15 +853,15 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     // Build frac string from buf[0..count]
     // String layout: [len:i32][cap:i32][data@8]
     wasm!(f, {
-        i32_const(super::list_layout::STRING_HEADER_SIZE); local_get(5); i32_add;
+        i32_const(emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); local_get(5); i32_add;
         call(emitter.rt.alloc); local_set(2);
         local_get(2); local_get(5); i32_store(0);
-        local_get(2); local_get(5); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
+        local_get(2); local_get(5); i32_store(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
         // Copy digits
         i32_const(0); local_set(6);
         block_empty; loop_empty;
           local_get(6); local_get(5); i32_ge_u; br_if(1);
-          local_get(2); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(6); i32_add;
+          local_get(2); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(6); i32_add;
           local_get(4); local_get(6); i32_add; i32_load8_u(0);
           i32_store8(0);
           local_get(6); i32_const(1); i32_add; local_set(6);
@@ -900,7 +901,6 @@ fn compile_println_int(emitter: &mut WasmEmitter) {
 /// __concat_str(left: i32, right: i32) -> i32
 /// Concatenates two strings. Each is [len:i32][data:u8...].
 fn compile_concat_str(emitter: &mut WasmEmitter) {
-    use super::list_layout::{STRING_DATA_OFFSET, STRING_CAP_OFFSET, STRING_HEADER_SIZE};
     let type_idx = emitter.func_type_indices[&emitter.rt.concat_str];
     // params: 0=$left, 1=$right
     // locals: 2=$left_len, 3=$right_len, 4=$new_len, 5=$result, 6=$i
@@ -924,7 +924,7 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
         i32_add;
         local_set(4);       // new_len = left_len + right_len
         local_get(4);
-        i32_const(STRING_HEADER_SIZE);
+        i32_const(string_hdr());
         i32_add;
         call(emitter.rt.alloc);
         local_set(5);
@@ -933,12 +933,12 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
         i32_store(0);       // result.len = new_len
         local_get(5);
         local_get(4);
-        i32_store(STRING_CAP_OFFSET as u32); // result.cap = new_len
+        i32_store(string_cap_off() as u32); // result.cap = new_len
     });
 
     // Copy left data: dst=result+DATA_OFFSET, src=left+DATA_OFFSET
     emit_memcpy_loop(&mut f, 5, 0, 2, 6,
-        STRING_DATA_OFFSET as u32, STRING_DATA_OFFSET as u32);
+        string_data_off() as u32, string_data_off() as u32);
 
     // Copy right data: dst=result+DATA_OFFSET+left_len, src=right+DATA_OFFSET
     wasm!(f, {
@@ -951,14 +951,14 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
         i32_ge_u;
         br_if(1);
         local_get(5);
-        i32_const(STRING_DATA_OFFSET);
+        i32_const(string_data_off());
         i32_add;
         local_get(2);
         i32_add;
         local_get(6);
         i32_add;
         local_get(1);
-        i32_const(STRING_DATA_OFFSET);
+        i32_const(string_data_off());
         i32_add;
         local_get(6);
         i32_add;
@@ -979,7 +979,6 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
 
 /// Capacity-aware string append: if left has room, append in-place; else grow 2x.
 fn compile_string_append(emitter: &mut WasmEmitter) {
-    use super::list_layout::{STRING_DATA_OFFSET, STRING_CAP_OFFSET};
     let type_idx = emitter.func_type_indices[&emitter.rt.string_append];
     // params: 0=$left, 1=$right
     // locals: 2=$left_len, 3=$right_len, 4=$new_len, 5=$left_cap, 6=$result, 7=$i
@@ -996,14 +995,14 @@ fn compile_string_append(emitter: &mut WasmEmitter) {
         local_get(0); i32_load(0); local_set(2);               // left_len
         local_get(1); i32_load(0); local_set(3);               // right_len
         local_get(2); local_get(3); i32_add; local_set(4);     // new_len
-        local_get(0); i32_load(STRING_CAP_OFFSET as u32); local_set(5); // left_cap
+        local_get(0); i32_load(string_cap_off() as u32); local_set(5); // left_cap
 
         // if left_cap >= new_len: append in-place
         local_get(5); local_get(4); i32_ge_u;
         if_i32;
           // In-place: memory_copy right data after left data
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add;
-          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(2); i32_add;
+          local_get(1); i32_const(string_data_off()); i32_add;
           local_get(3);
           memory_copy;
           // Update left.len
@@ -1015,18 +1014,18 @@ fn compile_string_append(emitter: &mut WasmEmitter) {
           local_get(5); local_get(4); i32_lt_u;
           if_empty; local_get(4); local_set(5); end;          // cap = max(cap*2, new_len)
           // Alloc
-          local_get(5); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(5); i32_const(string_data_off()); i32_add;
           call(emitter.rt.alloc); local_set(6);
           local_get(6); local_get(4); i32_store(0);           // result.len = new_len
-          local_get(6); local_get(5); i32_store(STRING_CAP_OFFSET as u32); // result.cap
+          local_get(6); local_get(5); i32_store(string_cap_off() as u32); // result.cap
           // Copy left data
-          local_get(6); i32_const(STRING_DATA_OFFSET); i32_add;
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(6); i32_const(string_data_off()); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add;
           local_get(2);
           memory_copy;
           // Copy right data
-          local_get(6); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add;
-          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(6); i32_const(string_data_off()); i32_add; local_get(2); i32_add;
+          local_get(1); i32_const(string_data_off()); i32_add;
           local_get(3);
           memory_copy;
           local_get(6);  // return new pointer

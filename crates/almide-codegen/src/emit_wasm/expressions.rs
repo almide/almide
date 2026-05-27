@@ -424,11 +424,11 @@ impl FuncCompiler<'_> {
                 // Empty hash map: [len=0][cap=0]
                 let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(super::list_layout::MAP_HEADER_SIZE);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::SWISS_MAP) as i32);
                     call(self.emitter.rt.alloc);
                     local_set(scratch);
                     local_get(scratch); i32_const(0); i32_store(0); // len = 0
-                    local_get(scratch); i32_const(0); i32_store(super::list_layout::MAP_CAP_OFFSET as u32); // cap = 0
+                    local_get(scratch); i32_const(0); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP)); // cap = 0
                     local_get(scratch);
                 });
                 self.scratch.free_i32(scratch);
@@ -441,11 +441,11 @@ impl FuncCompiler<'_> {
                     // Empty map
                     let scratch = self.scratch.alloc_i32();
                     wasm!(self.func, {
-                        i32_const(super::list_layout::MAP_HEADER_SIZE);
+                        i32_const(self.emitter.layout_reg.header_size(super::engine::layout::SWISS_MAP) as i32);
                         call(self.emitter.rt.alloc);
                         local_set(scratch);
                         local_get(scratch); i32_const(0); i32_store(0);
-                        local_get(scratch); i32_const(0); i32_store(super::list_layout::MAP_CAP_OFFSET as u32);
+                        local_get(scratch); i32_const(0); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP));
                         local_get(scratch);
                     });
                     self.scratch.free_i32(scratch);
@@ -457,7 +457,7 @@ impl FuncCompiler<'_> {
                     let mut cap = 16u32;
                     while cap < n * 2 { cap *= 2; }
                     // Swiss Table: [header][tags: cap bytes][entries: cap * entry_size]
-                    let total = super::list_layout::MAP_HEADER_SIZE as u32 + cap + cap * entry_size;
+                    let total = self.emitter.layout_reg.header_size(super::engine::layout::SWISS_MAP) as i32 as u32 + cap + cap * entry_size;
 
                     let map = self.scratch.alloc_i32();
                     let idx = self.scratch.alloc_i32();
@@ -468,9 +468,9 @@ impl FuncCompiler<'_> {
                         call(self.emitter.rt.alloc);
                         local_set(map);
                         local_get(map); i32_const(n as i32); i32_store(0);
-                        local_get(map); i32_const(cap as i32); i32_store(super::list_layout::MAP_CAP_OFFSET as u32);
+                        local_get(map); i32_const(cap as i32); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP));
                         // entries_base = map + 8 + cap
-                        local_get(map); i32_const(super::list_layout::MAP_TAGS_OFFSET); i32_add;
+                        local_get(map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
                         i32_const(cap as i32); i32_add; local_set(eb);
                     });
 
@@ -501,7 +501,7 @@ impl FuncCompiler<'_> {
                         // Probe for empty tag
                         wasm!(self.func, {
                             block_empty; loop_empty;
-                              local_get(map); i32_const(super::list_layout::MAP_TAGS_OFFSET); i32_add;
+                              local_get(map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
                               local_get(idx); i32_add; i32_load8_u(0);
                               i32_eqz; br_if(1);
                               local_get(idx); i32_const(1); i32_add;
@@ -509,7 +509,7 @@ impl FuncCompiler<'_> {
                               local_set(idx); br(0);
                             end; end;
                             // Store tag (1 byte)
-                            local_get(map); i32_const(super::list_layout::MAP_TAGS_OFFSET); i32_add;
+                            local_get(map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
                             local_get(idx); i32_add; local_get(h2_lit); i32_store8(0);
                             // Store key at entries_base + idx * entry_size
                             local_get(eb); local_get(idx); i32_const(entry_size as i32); i32_mul; i32_add;
@@ -935,7 +935,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(dst); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                      local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(i); i32_const(8); i32_mul; i32_add;
                       // value = start + i
                       local_get(s); local_get(i); i64_extend_i32_u; i64_add;
@@ -1528,7 +1528,7 @@ impl FuncCompiler<'_> {
             local_get(str_local); local_tee(s);
             i32_load(0); local_set(len);
             local_get(s);
-            i32_load(super::list_layout::STRING_CAP_OFFSET as u32);
+            i32_load(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32);
             local_set(cap);
             // Loop
             block_empty; loop_empty;
@@ -1549,7 +1549,7 @@ impl FuncCompiler<'_> {
             local_get(len); local_get(cap); i32_lt_u;
             if_empty;
               local_get(s);
-              i32_const(super::list_layout::STRING_DATA_OFFSET);
+              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
               i32_add;
               local_get(len); i32_add;
               i32_const(byte_val as i32);
@@ -1564,23 +1564,23 @@ impl FuncCompiler<'_> {
               if_empty; i32_const(16); local_set(cap); end;
               // Alloc
               local_get(cap);
-              i32_const(super::list_layout::STRING_DATA_OFFSET);
+              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
               i32_add;
               call(self.emitter.rt.alloc); local_tee(s);
               // Copy old data
-              i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
               local_get(str_local);
-              i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
               local_get(len);
               memory_copy;
               // Write cap
               local_get(s); local_get(cap);
-              i32_store(super::list_layout::STRING_CAP_OFFSET as u32);
+              i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32);
               // Update str local
               local_get(s); local_set(str_local);
               // Write byte
               local_get(s);
-              i32_const(super::list_layout::STRING_DATA_OFFSET);
+              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
               i32_add;
               local_get(len); i32_add;
               i32_const(byte_val as i32);

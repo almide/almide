@@ -48,11 +48,11 @@ pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(1); i32_const(2); i32_ge_u;
         if_empty;
-          local_get(0); i32_load8_u(super::list_layout::STRING_DATA_OFFSET as u32); // first byte
+          local_get(0); i32_load8_u(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32); // first byte
           i32_const(48); // '0'
           i32_eq;
           if_empty;
-            local_get(0); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; i32_const(1); i32_add; i32_load8_u(0); // second byte
+            local_get(0); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; i32_const(1); i32_add; i32_load8_u(0); // second byte
             local_set(4);
             local_get(4); i32_const(120); i32_eq; // 'x'
             local_get(4); i32_const(88); i32_eq; // 'X'
@@ -80,7 +80,7 @@ pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
 
     // byte = s[DATA_OFFSET+i]
     wasm!(f, {
-        local_get(0); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+        local_get(0); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
         local_get(2); i32_add;
         i32_load8_u(0); local_set(4);
     });
@@ -221,7 +221,7 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
 
     // Check leading '-'
     wasm!(f, {
-        local_get(0); i32_load8_u(super::list_layout::STRING_DATA_OFFSET as u32);
+        local_get(0); i32_load8_u(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
         i32_const(45); // '-'
         i32_eq;
         if_empty;
@@ -232,7 +232,7 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
 
     // Check leading '+' (only if not already negative)
     wasm!(f, {
-        local_get(0); i32_load8_u(super::list_layout::STRING_DATA_OFFSET as u32);
+        local_get(0); i32_load8_u(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
         i32_const(43); // '+'
         i32_eq;
         local_get(4); i32_eqz;
@@ -250,7 +250,7 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
 
     // byte = s[DATA_OFFSET+i]
     wasm!(f, {
-        local_get(0); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+        local_get(0); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
         local_get(2); i32_add;
         i32_load8_u(0); local_set(5);
     });
@@ -498,15 +498,15 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
     let dot = emitter.intern_string(".");
     wasm!(f, {
         // Alloc decimal string: STRING_HEADER_SIZE + count bytes
-        i32_const(super::list_layout::STRING_HEADER_SIZE); local_get(9); i32_add;
+        i32_const(emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); local_get(9); i32_add;
         call(emitter.rt.alloc); local_set(11);
         local_get(11); local_get(9); i32_store(0); // len
-        local_get(11); local_get(9); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0); // cap = len
+        local_get(11); local_get(9); i32_store(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0); // cap = len
         // Copy buf[0..count] to result+STRING_DATA_OFFSET
         i32_const(0); local_set(12);
         block_empty; loop_empty;
           local_get(12); local_get(9); i32_ge_u; br_if(1);
-          local_get(11); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(12); i32_add;
+          local_get(11); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(12); i32_add;
           local_get(8); local_get(12); i32_add; i32_load8_u(0);
           i32_store8(0);
           local_get(12); i32_const(1); i32_add; local_set(12);

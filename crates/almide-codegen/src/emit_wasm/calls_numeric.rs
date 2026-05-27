@@ -448,10 +448,10 @@ impl FuncCompiler<'_> {
                     local_set(n64);
                     local_get(n64); i64_eqz;
                     if_i32;
-                      i32_const(super::list_layout::STRING_HEADER_SIZE + 1); call(self.emitter.rt.alloc); local_set(buf);
+                      i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32 + 1); call(self.emitter.rt.alloc); local_set(buf);
                       local_get(buf); i32_const(1); i32_store(0);
-                      local_get(buf); i32_const(1); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
-                      local_get(buf); i32_const(48); i32_store8(super::list_layout::STRING_DATA_OFFSET as u32);
+                      local_get(buf); i32_const(1); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
+                      local_get(buf); i32_const(48); i32_store8(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
                       local_get(buf);
                     else_;
                       // Alloc temp buffer for reversed digits

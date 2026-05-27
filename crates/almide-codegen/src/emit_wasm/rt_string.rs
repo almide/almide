@@ -20,11 +20,11 @@ static LAYOUT_CONSTS: LazyLock<(i32, i32, i32, i32, i32)> = LazyLock::new(|| {
         r.header_size(LIST) as i32,                  // HEADER_SIZE (list)
     )
 });
-fn string_data_off() -> i32 { LAYOUT_CONSTS.0 }
-fn string_hdr() -> i32 { LAYOUT_CONSTS.1 }
-fn string_cap_off() -> i32 { LAYOUT_CONSTS.2 }
-fn list_data_off() -> i32 { LAYOUT_CONSTS.3 }
-fn list_hdr() -> i32 { LAYOUT_CONSTS.4 }
+pub(super) fn string_data_off() -> i32 { LAYOUT_CONSTS.0 }
+pub(super) fn string_hdr() -> i32 { LAYOUT_CONSTS.1 }
+pub(super) fn string_cap_off() -> i32 { LAYOUT_CONSTS.2 }
+pub(super) fn list_data_off() -> i32 { LAYOUT_CONSTS.3 }
+pub(super) fn list_hdr() -> i32 { LAYOUT_CONSTS.4 }
 
 /// Register all string runtime function signatures.
 pub fn register(emitter: &mut WasmEmitter) {

@@ -56,9 +56,9 @@ impl FuncCompiler<'_> {
                     i32_const(8); call(self.emitter.rt.alloc); local_set(tuple_ptr);
                     local_get(tuple_ptr); i32_const(ct_key as i32); i32_store(0);
                     local_get(tuple_ptr); i32_const(ct_val as i32); i32_store(4);
-                    i32_const(super::list_layout::HEADER_SIZE + 4); call(self.emitter.rt.alloc); local_set(hdr_list);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32 + 4); call(self.emitter.rt.alloc); local_set(hdr_list);
                     local_get(hdr_list); i32_const(1); i32_store(0); // len = 1
-                    local_get(hdr_list); local_get(tuple_ptr); i32_store(super::list_layout::DATA_OFFSET as u32); // data[0] = tuple_ptr
+                    local_get(hdr_list); local_get(tuple_ptr); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32 as u32); // data[0] = tuple_ptr
                     local_get(s); local_get(hdr_list); i32_store(12);
                     local_get(s);
                 });
@@ -122,7 +122,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      local_get(hdrs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                      local_get(hdrs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(pair_ptr);
                       local_get(pair_ptr); i32_load(0);
@@ -174,23 +174,23 @@ impl FuncCompiler<'_> {
                     local_get(resp); i32_load(12); local_set(old_hdrs);
                     local_get(old_hdrs); i32_load(0); i32_const(1); i32_add;
                     local_set(val_scratch); // reuse as new_len
-                    i32_const(super::list_layout::HEADER_SIZE); local_get(val_scratch); i32_const(4); i32_mul; i32_add;
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(val_scratch); i32_const(4); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(new_hdrs);
                     local_get(new_hdrs); local_get(val_scratch); i32_store(0);
                     // Copy old header ptrs
                     i32_const(0); local_set(key_scratch); // reuse as i
                     block_empty; loop_empty;
                       local_get(key_scratch); local_get(old_hdrs); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(new_hdrs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                      local_get(new_hdrs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(key_scratch); i32_const(4); i32_mul; i32_add;
-                      local_get(old_hdrs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                      local_get(old_hdrs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(key_scratch); i32_const(4); i32_mul; i32_add;
                       i32_load(0); i32_store(0);
                       local_get(key_scratch); i32_const(1); i32_add; local_set(key_scratch);
                       br(0);
                     end; end;
                     // Append new tuple at end
-                    local_get(new_hdrs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                    local_get(new_hdrs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                     local_get(old_hdrs); i32_load(0); i32_const(4); i32_mul; i32_add;
                     local_get(tuple_ptr); i32_store(0);
                     // Build new response
@@ -232,19 +232,19 @@ impl FuncCompiler<'_> {
                     local_get(tuple_ptr); local_get(cookie_val); i32_store(4);
                     local_get(resp); i32_load(12); local_set(old_hdrs);
                     local_get(old_hdrs); i32_load(0); i32_const(1); i32_add; local_set(new_len);
-                    i32_const(super::list_layout::HEADER_SIZE); local_get(new_len); i32_const(4); i32_mul; i32_add;
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(new_len); i32_const(4); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(new_hdrs);
                     local_get(new_hdrs); local_get(new_len); i32_store(0);
                     i32_const(0); local_set(ci);
                     block_empty; loop_empty;
                       local_get(ci); local_get(old_hdrs); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(new_hdrs); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(ci); i32_const(4); i32_mul; i32_add;
-                      local_get(old_hdrs); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_get(ci); i32_const(4); i32_mul; i32_add;
+                      local_get(new_hdrs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; local_get(ci); i32_const(4); i32_mul; i32_add;
+                      local_get(old_hdrs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; local_get(ci); i32_const(4); i32_mul; i32_add;
                       i32_load(0); i32_store(0);
                       local_get(ci); i32_const(1); i32_add; local_set(ci);
                       br(0);
                     end; end;
-                    local_get(new_hdrs); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                    local_get(new_hdrs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                     local_get(old_hdrs); i32_load(0); i32_const(4); i32_mul; i32_add;
                     local_get(tuple_ptr); i32_store(0);
                     i32_const(16); call(self.emitter.rt.alloc); local_set(new_resp);
@@ -282,7 +282,7 @@ impl FuncCompiler<'_> {
                     local_set(hdr_map);
                     local_get(hdr_map); i32_load(0); local_set(len);
                     // Build headers list from Swiss Table map entries
-                    i32_const(super::list_layout::HEADER_SIZE); local_get(len); i32_const(4); i32_mul; i32_add;
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(len); i32_const(4); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(hdr_list);
                     local_get(hdr_list); local_get(len); i32_store(0);
                 });
@@ -291,14 +291,14 @@ impl FuncCompiler<'_> {
                 let map_eb = self.scratch.alloc_i32();
                 let j = self.scratch.alloc_i32(); // output index
                 wasm!(self.func, {
-                    local_get(hdr_map); i32_load(super::list_layout::MAP_CAP_OFFSET as u32); local_set(map_cap);
-                    local_get(hdr_map); i32_const(super::list_layout::MAP_TAGS_OFFSET); i32_add;
+                    local_get(hdr_map); i32_load(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP)); local_set(map_cap);
+                    local_get(hdr_map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
                     local_get(map_cap); i32_add; local_set(map_eb);
                     i32_const(0); local_set(i);
                     i32_const(0); local_set(j);
                     block_empty; loop_empty;
                       local_get(i); local_get(map_cap); i32_ge_u; br_if(1);
-                      local_get(hdr_map); i32_const(super::list_layout::MAP_TAGS_OFFSET); i32_add;
+                      local_get(hdr_map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
                       local_get(i); i32_add; i32_load8_u(0); i32_eqz;
                       if_empty;
                         local_get(i); i32_const(1); i32_add; local_set(i); br(1);
@@ -313,7 +313,7 @@ impl FuncCompiler<'_> {
                       local_get(map_eb); local_get(i); i32_const(8); i32_mul; i32_add;
                       i32_load(4); i32_store(4); // val
                       // hdr_list[j] = tuple
-                      local_get(hdr_list); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                      local_get(hdr_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(j); i32_const(4); i32_mul; i32_add;
                       local_get(tuple); i32_store(0);
                       local_get(j); i32_const(1); i32_add; local_set(j);
@@ -351,9 +351,9 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     i32_store(4);
-                    i32_const(super::list_layout::HEADER_SIZE + 4); call(self.emitter.rt.alloc); local_set(hdrs);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32 + 4); call(self.emitter.rt.alloc); local_set(hdrs);
                     local_get(hdrs); i32_const(1); i32_store(0);
-                    local_get(hdrs); local_get(tuple); i32_store(super::list_layout::DATA_OFFSET as u32);
+                    local_get(hdrs); local_get(tuple); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32 as u32);
                     local_get(s); local_get(hdrs); i32_store(12); local_get(s);
                 });
                 self.scratch.free_i32(hdrs);

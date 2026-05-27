@@ -113,7 +113,7 @@ impl FuncCompiler<'_> {
         // Load element from data[idx]
         wasm!(self.func, {
             local_get(list_scratch);
-            i32_const(super::list_layout::DATA_OFFSET);
+            i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32);
             i32_add;
             local_get(idx_scratch);
             i32_const(entry_size as i32);
@@ -168,7 +168,6 @@ impl FuncCompiler<'_> {
     /// Layout: [len:i32][cap:i32][tags: cap bytes][entries: cap × (key+val)]
     /// Iterates slot 0..cap, skips empty tags (tag==0).
     fn emit_for_in_map(&mut self, var: almide_ir::VarId, var_tuple: Option<&[almide_ir::VarId]>, iterable: &IrExpr, body: &[IrStmt]) {
-        use super::list_layout::{MAP_TAGS_OFFSET, MAP_CAP_OFFSET};
 
         let (key_ty, val_ty, key_size, val_size) = if let Ty::Applied(_, args) = &iterable.ty {
             let kt = args.first().cloned().unwrap_or(Ty::String);
@@ -189,10 +188,10 @@ impl FuncCompiler<'_> {
         self.emit_expr(iterable);
         wasm!(self.func, {
             local_set(m);
-            // cap = m[MAP_CAP_OFFSET]
-            local_get(m); i32_load(MAP_CAP_OFFSET as u32); local_set(cap);
-            // entry_base = m + MAP_TAGS_OFFSET + cap
-            local_get(m); i32_const(MAP_TAGS_OFFSET); i32_add;
+            // cap = m[self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP) as i32]
+            local_get(m); i32_load(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP) as i32 as u32); local_set(cap);
+            // entry_base = m + self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32 + cap
+            local_get(m); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
             local_get(cap); i32_add; local_set(eb);
             // idx = 0
             i32_const(0); local_set(idx);
@@ -212,7 +211,7 @@ impl FuncCompiler<'_> {
 
         // Check tag: if tag[idx] == 0 (empty), skip to next slot
         wasm!(self.func, {
-            local_get(m); i32_const(MAP_TAGS_OFFSET); i32_add;
+            local_get(m); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
             local_get(idx); i32_add; i32_load8_u(0);
             i32_eqz;
             if_empty;
