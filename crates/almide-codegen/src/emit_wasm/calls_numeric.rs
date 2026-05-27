@@ -475,15 +475,20 @@ impl FuncCompiler<'_> {
                       end; end;
                 });
                 wasm!(self.func, {
-                      // Alloc result string
-                      i32_const(4); local_get(count); i32_add;
+                      // Alloc result string: [len][cap][data...]
+                      i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32);
+                      local_get(count); i32_add;
                       call(self.emitter.rt.alloc); local_set(digit);
-                      local_get(digit); local_get(count); i32_store(0);
+                      local_get(digit); local_get(count); i32_store(0); // len
+                      local_get(digit); local_get(count);
+                      i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as u32); // cap
                       // Copy reversed
                       i32_const(0); local_set(idx);
                       block_empty; loop_empty;
                         local_get(idx); local_get(count); i32_ge_u; br_if(1);
-                        local_get(digit); i32_const(4); i32_add; local_get(idx); i32_add;
+                        local_get(digit);
+                        i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
+                        i32_add; local_get(idx); i32_add;
                         local_get(buf);
                         local_get(count); i32_const(1); i32_sub; local_get(idx); i32_sub;
                         i32_add; i32_load8_u(0);
