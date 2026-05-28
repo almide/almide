@@ -497,9 +497,7 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
             w.emit_store(0, rc_ty);
         }, |w| {
             // rc <= 1: dead block. Push to free list for reuse.
-            // ptr[0] = free_list_head (store next in data area)
             w.get(0).gget(free_list).emit_store(0, MemType::I32);
-            // free_list_head = block_base (= ptr - hdr)
             w.get(0).i32c(hdr).sub().gset(free_list);
         });
     }
