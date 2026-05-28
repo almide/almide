@@ -890,7 +890,7 @@ impl FuncCompiler<'_> {
     // ── Swiss Table helpers ──
 
     /// Allocate a new table: [len=0][cap][tags:cap bytes][entries:cap*es bytes]
-    fn emit_alloc_table(&mut self, out: u32, cap: u32, es: i32) {
+    pub(super) fn emit_alloc_table(&mut self, out: u32, cap: u32, es: i32) {
         use super::engine::layout::{SWISS_MAP, map as lm};
         let map_hdr = self.emitter.layout_reg.header_size(SWISS_MAP) as i32;
         let map_cap_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
@@ -910,7 +910,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Split hash on stack into h1 (bucket index) → idx_local and h2 (tag) → h2_local.
-    fn emit_h1_h2(&mut self, cap: u32, idx_local: u32, h2_local: u32) {
+    pub(super) fn emit_h1_h2(&mut self, cap: u32, idx_local: u32, h2_local: u32) {
         let ht = self.scratch.alloc_i32();
         wasm!(self.func, {
             local_tee(ht);

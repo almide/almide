@@ -644,27 +644,56 @@ impl FuncCompiler<'_> {
                     end; end;
                 });
 
-                // Phase 2: Build map
+                // Phase 2: Build Swiss Table map
+                // Allocate Swiss Table with cap = next_pow2(max(len*2, 16))
+                let cap_local = self.scratch.alloc_i32();
+                let eb = self.scratch.alloc_i32(); // entries base
+                let h2 = self.scratch.alloc_i32();
+                let probe_idx = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(list_hdr); local_get(len); i32_const(entry_size); i32_mul; i32_add;
-                    call(self.emitter.rt.alloc); local_set(map_ptr);
+                    // cap = next power of 2 >= max(len * 2, 16)
+                    i32_const(16); local_set(cap_local);
+                    block_empty; loop_empty;
+                      local_get(cap_local); local_get(len); i32_const(2); i32_mul; i32_ge_u; br_if(1);
+                      local_get(cap_local); i32_const(1); i32_shl; local_set(cap_local);
+                      br(0);
+                    end; end;
+                });
+                self.emit_alloc_table(map_ptr, cap_local, entry_size as i32);
+                self.emit_swiss_setup(map_ptr, j, eb); // j reused as cap_check, eb = entries base
+                wasm!(self.func, {
                     i32_const(0); local_set(map_len);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      // Load key[i]
                       local_get(keys_arr);
                       local_get(i); i32_const(ks); i32_mul; i32_add;
                 });
                 if key_is_i64 { wasm!(self.func, { i64_load(0); local_set(cur_key); }); }
                 else { wasm!(self.func, { i32_load(0); local_set(cur_key); }); }
-                // Search map for cur_key → found_idx (-1 if not found)
+                // Hash key → h1 (probe index) + h2 (tag)
+                if key_is_i64 { wasm!(self.func, { local_get(cur_key); i32_wrap_i64; }); }
+                else { wasm!(self.func, { local_get(cur_key); }); }
+                self.emit_hash_key(&key_ty);
+                self.emit_h1_h2(cap_local, probe_idx, h2);
+                // Probe for existing key or empty slot
                 wasm!(self.func, {
                       i32_const(-1); local_set(found_idx);
-                      i32_const(0); local_set(j);
                       block_empty; loop_empty;
-                        local_get(j); local_get(map_len); i32_ge_u; br_if(1);
-                        local_get(map_ptr); i32_const(list_data_off); i32_add;
-                        local_get(j); i32_const(entry_size); i32_mul; i32_add;
+                });
+                self.emit_swiss_tag_load(map_ptr, probe_idx);
+                wasm!(self.func, {
+                        local_set(j); // reuse j as tag
+                        local_get(j); i32_eqz;
+                        if_empty;
+                          // Empty slot: not found
+                          br(2);
+                        end;
+                        local_get(j); local_get(h2); i32_eq;
+                        if_empty;
+                          // Tag matches: compare key
+                          local_get(eb); local_get(probe_idx); i32_const(entry_size); i32_mul; i32_add;
                 });
                 if key_is_i64 { wasm!(self.func, { i64_load(0); local_get(cur_key); i64_eq; }); }
                 else {
@@ -672,15 +701,22 @@ impl FuncCompiler<'_> {
                     self.emit_key_eq(&key_ty);
                 }
                 wasm!(self.func, {
-                        if_empty; local_get(j); local_set(found_idx); end;
-                        local_get(j); i32_const(1); i32_add; local_set(j);
+                          if_empty;
+                            local_get(probe_idx); local_set(found_idx);
+                            br(3);
+                          end;
+                        end;
+                        // Advance probe
+                        local_get(probe_idx); i32_const(1); i32_add;
+                        local_get(cap_local); i32_const(1); i32_sub; i32_and;
+                        local_set(probe_idx);
                         br(0);
                       end; end;
+
                       local_get(found_idx); i32_const(-1); i32_ne;
                       if_empty;
                         // === Found: append element to existing list ===
-                        local_get(map_ptr); i32_const(list_data_off); i32_add;
-                        local_get(found_idx); i32_const(entry_size); i32_mul; i32_add;
+                        local_get(eb); local_get(found_idx); i32_const(entry_size); i32_mul; i32_add;
                         i32_const(ks); i32_add;
                         i32_load(0);
                         local_set(old_list);
@@ -703,12 +739,25 @@ impl FuncCompiler<'_> {
                 self.emit_load_at(&elem_ty, 0);
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, {
-                        local_get(map_ptr); i32_const(list_data_off); i32_add;
-                        local_get(found_idx); i32_const(entry_size); i32_mul; i32_add;
+                        // Update list ptr in entry
+                        local_get(eb); local_get(found_idx); i32_const(entry_size); i32_mul; i32_add;
                         i32_const(ks); i32_add;
                         local_get(new_list); i32_store(0);
                       else_;
-                        // === Not found: create new entry ===
+                        // === Not found: insert new entry ===
+                });
+                // Write tag (h2) at probe_idx
+                wasm!(self.func, { local_get(h2); });
+                self.emit_swiss_tag_store(map_ptr, probe_idx);
+                wasm!(self.func, {
+                        // Write key
+                        local_get(eb); local_get(probe_idx); i32_const(entry_size); i32_mul; i32_add;
+                        local_get(cur_key);
+                });
+                if key_is_i64 { wasm!(self.func, { i64_store(0); }); }
+                else { wasm!(self.func, { i32_store(0); }); }
+                wasm!(self.func, {
+                        // Create single-element list
                         i32_const(list_hdr); i32_const(es); i32_add;
                         call(self.emitter.rt.alloc); local_set(new_list);
                         local_get(new_list); i32_const(1); i32_store(0);
@@ -719,15 +768,8 @@ impl FuncCompiler<'_> {
                 self.emit_load_at(&elem_ty, 0);
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, {
-                        local_get(map_ptr); i32_const(list_data_off); i32_add;
-                        local_get(map_len); i32_const(entry_size); i32_mul; i32_add;
-                        local_get(cur_key);
-                });
-                if key_is_i64 { wasm!(self.func, { i64_store(0); }); }
-                else { wasm!(self.func, { i32_store(0); }); }
-                wasm!(self.func, {
-                        local_get(map_ptr); i32_const(list_data_off); i32_add;
-                        local_get(map_len); i32_const(entry_size); i32_mul; i32_add;
+                        // Write list ptr in entry
+                        local_get(eb); local_get(probe_idx); i32_const(entry_size); i32_mul; i32_add;
                         i32_const(ks); i32_add;
                         local_get(new_list); i32_store(0);
                         local_get(map_len); i32_const(1); i32_add; local_set(map_len);
@@ -738,6 +780,10 @@ impl FuncCompiler<'_> {
                     local_get(map_ptr); local_get(map_len); i32_store(0);
                     local_get(map_ptr);
                 });
+                self.scratch.free_i32(probe_idx);
+                self.scratch.free_i32(h2);
+                self.scratch.free_i32(eb);
+                self.scratch.free_i32(cap_local);
 
                 if key_is_i64 { self.scratch.free_i64(cur_key); } else { self.scratch.free_i32(cur_key); }
                 self.scratch.free_i32(old_len);
