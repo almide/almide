@@ -6,13 +6,21 @@
 
 ## Active
 
-3 items
+11 items
 
 | Item | Description |
 |------|-------------|
-| [Effect Firewall](active/effect-firewall.md) | test + effect — intercept effect calls in tests for deterministic testing |
+| [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
+| [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
+| [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
+| [Region-based Memory Management](active/region-inference.md) |  |
+| [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
+| [Almide WASM Engine — Complete Redesign](active/wasm-engine-redesign.md) |  |
+| [WASM Optimization Roadmap](active/wasm-optimization-roadmap.md) |  |
+| [Perceus Void Block Stack Balance — CI Blocker](active/wasm-perceus-void-block.md) |  |
+| [WASM Remaining 15 Skips — Fix Roadmap](active/wasm-remaining-15.md) |  |
 
 ## On Hold
 
@@ -53,10 +61,10 @@
 
 ## Done
 
-242 items
+247 items
 
 <details>
-<summary>Show all 242 completed items</summary>
+<summary>Show all 247 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
