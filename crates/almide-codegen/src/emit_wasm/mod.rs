@@ -908,7 +908,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 }
                 emitter.variant_info.insert(td.name.to_string(), variant_cases);
             }
-            _ => {}
+            almide_ir::IrTypeDeclKind::Alias { .. } => {
+                // Alias types are erased by ConcretizeTypesPass — nothing to register.
+            }
         }
     }
 

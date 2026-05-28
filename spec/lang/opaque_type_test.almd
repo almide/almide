@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix WASM codegen bug
 // opaque type — comprehensive test for mod type (nominal newtype)
 
 mod type SafeHtml = String
