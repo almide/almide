@@ -84,7 +84,8 @@ impl NanoPass for ConcretizeTypesPass {
                 aliases.insert(td.name.to_string(), target.clone());
             }
         }
-        if !aliases.is_empty() {
+        // Erase aliases only for WASM target — Rust codegen handles newtypes natively.
+        if !aliases.is_empty() && _target == Target::Wasm {
             erase_type_aliases(&mut program, &aliases);
         }
 
