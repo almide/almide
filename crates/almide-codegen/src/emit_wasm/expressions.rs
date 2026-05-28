@@ -196,12 +196,17 @@ impl FuncCompiler<'_> {
 
             // ── Block ──
             IrExprKind::Block { stmts, expr: tail } => {
-                // Perceus last-use drop is now handled by PerceusPass (IR-level RcDec nodes)
                 for stmt in stmts {
                     self.emit_stmt(stmt);
                 }
                 if let Some(e) = tail {
                     self.emit_expr(e);
+                    // Perceus inserts Ret(var) in void blocks — drop if needed.
+                    if values::ty_to_valtype(&expr.ty).is_none()
+                        && values::ty_to_valtype(&e.ty).is_some()
+                    {
+                        wasm!(self.func, { drop; });
+                    }
                 }
             }
 
