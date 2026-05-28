@@ -1,109 +1,73 @@
 # Perceus Void Block Stack Balance — CI Blocker
 
-> **Status**: Active — blocks Windows CI (Linux/macOS pass)
+> **Status**: Active — StackBalancePass implemented, pending CI verification
 > **Tests**: `wasm_list_nested_map_filter`, `wasm_cross_target_spec`
 > **Error**: `values remaining on stack at end of block` (wasmtime 45+)
 
 ## Problem
 
-Perceus inserts `Ret(var_ref)` as tail expression in void blocks. This pushes a value onto the WASM stack in a context that expects no value. Strict validators (wasmtime 45+, wasmparser) reject this.
+After ANF lifts heap sub-expressions into Blocks (`wrap_with_lets`), void-context
+blocks may have non-Unit tail expressions. Perceus converts these tails to
+`FnBody::Ret`, then excludes "returned" variables from `RcDec`. This causes:
+
+1. **Stack imbalance**: the tail pushes a value in a context that expects none
+2. **RC leak**: variables "returned" by the tail are not Dec'd (ownership transferred
+   to a caller that doesn't exist)
+
+The root cause: Perceus cannot distinguish void-context blocks from value-context
+blocks — it treats every tail as a return value.
+
+## Solution: StackBalancePass (ANF → **StackBalance** → Perceus)
+
+A NanoPass that runs **after ANF, before Perceus**. Propagates expected type
+top-down from function signatures:
+
+- Void function body → demote tail to `Expr` statement
+- `Expr` statement value → demote nested block tails
+- Bind/Assign value → preserve tail (value context)
+
+After the pass, void-context blocks have no tails. Perceus sees `Nop` terminus
+and correctly Dec's all heap vars.
 
 ```
-// IR after Perceus:
-Block {
-    stmts: [
-        Bind { xs = list.filter(...) },
-        Bind { result = list.map(xs, ...) },
-        RcDec(xs),        // Perceus cleanup
-    ],
-    expr: Some(Var(result)),  // ← Perceus tail Ret: pushes i32
-    ty: Applied(List, [Int]), // ← Perceus updated type to match tail
-}
-// But the enclosing function is void (ret_ty = Unit)
+ANF → StackBalance → Perceus → PerceusOpt → PerceusVerify → TailCallMark
 ```
 
-The `functions.rs` drop fix handles the function-level case, but the Block's own `.ty` is updated by Perceus to match the tail, so the `block_vt.is_none() && tail_vt.is_some()` check never triggers.
+### Why this placement
 
-## Why Grain Doesn't Have This Problem
+| Placement | Problem |
+|-----------|---------|
+| Inside Perceus (Option A) | Couples RC logic to void-context awareness. Perceus should only care about reference counts. |
+| After Perceus (Option B) | Moving tail to Expr stmt changes RC semantics — vars that Perceus excluded from Dec now leak. |
+| Emit level (Option C) | Trusts `.ty` annotations that Perceus/ANF may not update. Reactive, not preventive. |
+| **Before Perceus** | Perceus sees correct block structure. No type trust. No RC interference. |
 
-Grain uses **uniform representation** — all values (including void) are `i32`:
-- `const_void = MConstI32(0x6FFFFFFE)` — void is a tagged i32
-- Every block always returns i32 — no type mismatch possible
-- `MDrop(arg)` is an explicit IR node that emits `Expression.Drop.make`
+### Design principles
 
-## Fix Options (ranked)
+- **Context-driven**: expected type comes from function signature, not from `.ty` annotations
+- **By construction**: void blocks structurally cannot have tails after the pass
+- **Single responsibility**: StackBalance handles stack, Perceus handles RC
+- **Defense in depth**: emit-level drops (functions.rs:166, expressions.rs:205) remain as safety nets
 
-### Option A: Perceus pass — don't Ret in void blocks (recommended)
+## Implementation
 
-In `pass_perceus.rs`, when converting Block tail to `FnBody::Ret`, check if the enclosing function returns Unit. If so, emit the tail as a `Stmt(Expr)` + `Nop` instead of `Ret`.
+`crates/almide-codegen/src/pass_stack_balance.rs`
 
-```rust
-// pass_perceus.rs, block_to_fnbody()
-// Before:
-Some(e) => FnBody::Ret { expr: *e }
-// After:
-Some(e) => {
-    if is_void_context {
-        FnBody::Expr { expr: *e, body: Box::new(FnBody::Nop) }
-    } else {
-        FnBody::Ret { expr: *e }
-    }
-}
-```
+Pipeline registration: `crates/almide-codegen/src/target.rs` (after `AnfPass`, before `PerceusPass`)
 
-The `Expr` variant wraps the value as a statement, which `emit_stmt(Expr)` will drop automatically (line 246: `if ty_to_valtype.is_some() { drop; }`).
+## Previous attempts
 
-**Pro**: Fixes at the source. No downstream hacks.
-**Con**: Needs `is_void_context` threading through Perceus pass.
+### Emit-level drop (partial — still in place as safety net)
 
-### Option B: ANF pass — wrap void-context tail in Drop
+`functions.rs:166`: drops if void function body produces value.
+`expressions.rs:205`: drops if block type is Unit but tail type is non-Unit.
 
-After ANF + Perceus, add a cleanup pass that walks all void functions' body blocks and wraps non-Unit tail expressions in a Drop statement:
-
-```rust
-if func.ret_ty == Unit && func.body.ty != Unit {
-    // Convert tail to statement + drop
-    let tail = take(&mut func.body.expr);
-    func.body.stmts.push(Stmt::Expr(tail));
-    func.body.expr = None;
-    func.body.ty = Unit;
-}
-```
-
-**Pro**: Simple, isolated pass. Doesn't touch Perceus.
-**Con**: Post-hoc fix rather than root cause.
-
-### Option C: Emit-level drop (current partial fix)
-
-Already implemented in `functions.rs` (line 166): `if func_expects.is_none() && body_produces.is_some() { drop; }`. Works for the top-level function body but not for inner blocks where Perceus updated `.ty`.
-
-**Pro**: Already partially implemented.
-**Con**: Doesn't catch inner blocks. Perceus updates `.ty` so condition doesn't trigger.
-
-## Reproduction
-
-```bash
-echo 'fn main() -> Unit = {
-  let result = [1, 2, 3, 4] |> list.filter((x) => x % 2 == 0) |> list.map((x) => x * x)
-  println(int.to_string(list.len(result)))
-}' > /tmp/test.almd
-# Fails with wasmparser validation (debug build):
-cargo run -- build /tmp/test.almd --target wasm -o /tmp/test.wasm
-# Passes with wasm-tools 1.245 but fails with wasmtime 45+
-
-# Split version (no pipe) works:
-echo 'fn main() -> Unit = {
-  let xs = [1, 2, 3, 4]
-  let filtered = list.filter(xs, (x) => x % 2 == 0)
-  let result = list.map(filtered, (x) => x * x)
-  println(int.to_string(list.len(result)))
-}' > /tmp/split.almd
-cargo run -- build /tmp/split.almd --target wasm -o /tmp/split.wasm  # OK
-```
+These catch some cases but fail when:
+- Perceus updates `.ty` to match the tail (condition never triggers)
+- Nested blocks have mismatched annotations
 
 ## References
 
-- Grain `MDrop` IR node: `/tmp/grain-src/compiler/src/codegen/compcore.re:2780`
-- Grain `const_void`: `/tmp/grain-src/compiler/src/codegen/mashtree.re:582`
+- Grain `MDrop` IR node: uniform representation avoids the problem entirely
 - Perceus `block_to_fnbody`: `crates/almide-codegen/src/pass_perceus.rs:49`
-- Current partial fix: `crates/almide-codegen/src/emit_wasm/functions.rs:166`
+- ANF `wrap_with_lets`: `crates/almide-codegen/src/pass_anf.rs:58`

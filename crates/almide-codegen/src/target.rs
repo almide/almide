@@ -27,6 +27,7 @@ use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
 use super::pass_anf::AnfPass;
+use super::pass_stack_balance::StackBalancePass;
 use super::pass_perceus::{PerceusPass, PerceusOptPass, PerceusVerifyPass};
 use super::pass_egg_saturation::EggSaturationPass;
 use super::pass_matrix_shape_spec::MatrixShapeSpecPass;
@@ -201,6 +202,12 @@ fn build_pipeline(target: Target) -> Pipeline {
         // ANF: lift heap sub-expressions to let bindings so Perceus can Dec them.
         // Must run before PerceusPass — makes all heap allocs visible as VDecls.
         .add(AnfPass)
+        // StackBalance: demote non-Unit tails in void-context blocks to Expr stmts.
+        // Must run after ANF (which creates blocks) and before Perceus (which
+        // converts tails to Ret nodes and skips Dec for "returned" variables).
+        // Without this, void functions can have Ret tails that push values onto
+        // the WASM stack — rejected by strict validators (wasmtime 45+, V8).
+        .add(StackBalancePass)
         // Perceus: insert RcInc/RcDec nodes based on types.
         // Runs after ANF (all heap allocs are VDecls) and closure conversion.
         .add(PerceusPass)
