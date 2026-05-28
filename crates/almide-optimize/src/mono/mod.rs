@@ -407,11 +407,16 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
     }
 }
 
-/// After monomorphization, no TypeVars of any kind should remain in the IR.
+/// After monomorphization, no TypeVars should remain in LIVE code.
 /// Generic type params (A, B, T) should have been substituted by monomorphization.
 /// Inference vars (?0, ?1) should have been resolved by the type checker.
+///
+/// Only checks VarTable entries that are referenced by remaining functions
+/// or top_lets. Orphaned entries from removed generic functions are ignored —
+/// they have TypeVar types but are not used by any live code.
 fn verify_no_typevars_post_mono(program: &almide_ir::IrProgram) {
     use almide_lang::types::Ty;
+    use std::collections::HashSet;
     fn has_any_typevar(ty: &Ty) -> bool {
         match ty {
             Ty::TypeVar(_) => true,
@@ -423,17 +428,78 @@ fn verify_no_typevars_post_mono(program: &almide_ir::IrProgram) {
             _ => false,
         }
     }
+
+    // Collect all VarIds referenced by live code
+    let mut live_vars: HashSet<u32> = HashSet::new();
+    for func in &program.functions {
+        for p in &func.params { live_vars.insert(p.var.0); }
+        collect_live_vars(&func.body, &mut live_vars);
+    }
+    for tl in &program.top_lets {
+        collect_live_vars(&tl.value, &mut live_vars);
+    }
+
     let mut count = 0;
     for func in &program.functions {
         if has_any_typevar(&func.ret_ty) { count += 1; }
         for p in &func.params { if has_any_typevar(&p.ty) { count += 1; } }
     }
-    for i in 0..program.var_table.len() {
-        let info = program.var_table.get(almide_ir::VarId(i as u32));
-        if has_any_typevar(&info.ty) { count += 1; }
+    // Only check VarTable entries that are used by remaining functions
+    for &vid in &live_vars {
+        if (vid as usize) < program.var_table.len() {
+            let info = program.var_table.get(almide_ir::VarId(vid));
+            if has_any_typevar(&info.ty) { count += 1; }
+        }
     }
     if count > 0 {
         eprintln!("[ICE] {} TypeVar(s) remain after monomorphization. Generic params should be fully substituted.", count);
+    }
+}
+
+/// Collect all VarIds referenced in an expression tree.
+fn collect_live_vars(expr: &IrExpr, vars: &mut std::collections::HashSet<u32>) {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    struct VarCollector<'a> { vars: &'a mut std::collections::HashSet<u32> }
+    impl IrVisitor for VarCollector<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            match &expr.kind {
+                IrExprKind::Var { id } => { self.vars.insert(id.0); }
+                IrExprKind::Lambda { params, .. } => {
+                    for (vid, _) in params { self.vars.insert(vid.0); }
+                }
+                IrExprKind::ForIn { var, var_tuple, .. } => {
+                    self.vars.insert(var.0);
+                    if let Some(tvs) = var_tuple { for v in tvs { self.vars.insert(v.0); } }
+                }
+                _ => {}
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &IrStmt) {
+            match &stmt.kind {
+                IrStmtKind::Bind { var, .. } => { self.vars.insert(var.0); }
+                IrStmtKind::Assign { var, .. } => { self.vars.insert(var.0); }
+                IrStmtKind::BindDestructure { pattern, .. } => collect_pattern_vars(pattern, self.vars),
+                _ => {}
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    VarCollector { vars }.visit_expr(expr);
+}
+
+fn collect_pattern_vars(pattern: &IrPattern, vars: &mut std::collections::HashSet<u32>) {
+    match pattern {
+        IrPattern::Bind { var, .. } => { vars.insert(var.0); }
+        IrPattern::Constructor { args, .. } => { for a in args { collect_pattern_vars(a, vars); } }
+        IrPattern::Tuple { elements } => { for e in elements { collect_pattern_vars(e, vars); } }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
+            collect_pattern_vars(inner, vars);
+        }
+        IrPattern::RecordPattern { fields, .. } => {
+            for f in fields { if let Some(p) = &f.pattern { collect_pattern_vars(p, vars); } }
+        }
+        _ => {}
     }
 }
 
