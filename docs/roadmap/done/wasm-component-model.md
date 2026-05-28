@@ -1,4 +1,6 @@
 <!-- description: WebAssembly Component Model support with WIT bindings -->
+<!-- done: 2026-05-29 -->
+<!-- note: merged into docs/roadmap/active/wasm-engine-redesign.md Phase 2-3 -->
 # WASM Component Model
 
 WebAssembly Component Model と WIT (WebAssembly Interface Types) をサポートし、言語間の相互運用を実現する。
