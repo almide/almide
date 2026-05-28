@@ -969,7 +969,48 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(h);
                 self.scratch.free_i32(s);
             }
-            _ => {} // Bool/pointer: identity hash, already i32
+            Ty::Bool => {} // identity hash: 0 or 1, already i32
+            Ty::Named(_, _) | Ty::Record { .. } => {
+                // Hash record fields: FNV-1a over field bytes
+                let fields = if let Ty::Record { fields } = key_ty {
+                    fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect::<Vec<_>>()
+                } else if let Ty::Named(name, _) = key_ty {
+                    self.emitter.record_fields.get(name.as_str()).cloned().unwrap_or_default()
+                } else if let Some(fs) = self.emitter.record_fields.get("") {
+                    fs.clone()
+                } else {
+                    vec![]
+                };
+                if fields.is_empty() {
+                    // No fields known: identity hash
+                } else {
+                    let ptr = self.scratch.alloc_i32();
+                    let h = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        local_set(ptr);
+                        i32_const(0x811C9DC5u32 as i32); local_set(h);
+                    });
+                    let mut offset = 0u32;
+                    for (_, fty) in &fields {
+                        let fsize = super::values::byte_size(fty);
+                        // Hash each byte of the field
+                        for b in 0..fsize {
+                            wasm!(self.func, {
+                                local_get(h);
+                                local_get(ptr); i32_load8_u(offset + b);
+                                i32_xor;
+                                i32_const(0x01000193u32 as i32); i32_mul;
+                                local_set(h);
+                            });
+                        }
+                        offset += fsize;
+                    }
+                    wasm!(self.func, { local_get(h); });
+                    self.scratch.free_i32(h);
+                    self.scratch.free_i32(ptr);
+                }
+            }
+            _ => {} // other pointers: identity hash
         }
     }
 
@@ -1069,6 +1110,10 @@ impl FuncCompiler<'_> {
         match key_ty {
             Ty::Int => { wasm!(self.func, { i64_eq; }); }
             Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
+            Ty::Named(_, _) | Ty::Record { .. } => {
+                let size = super::values::byte_size(key_ty);
+                wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+            }
             _ => { wasm!(self.func, { i32_eq; }); }
         }
     }

@@ -52,7 +52,7 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
         // Closure calling convention: (env: i32, declared_params...) -> ret
         let mut wasm_params = vec![ValType::I32]; // env_ptr
         for (vid, ty) in params {
-            let resolved_ty = resolve_lambda_param_ty(ty, &_body.ty, &program.var_table, *vid);
+            let resolved_ty = resolve_lambda_param_ty(ty, _body, &program.var_table, *vid);
             if let Some(vt) = values::ty_to_valtype(&resolved_ty) {
                 wasm_params.push(vt);
             }
@@ -409,16 +409,30 @@ fn collect_pattern_var_ids(pattern: &almide_ir::IrPattern, out: &mut HashSet<u32
 }
 
 /// Resolve a lambda parameter type when it's TypeVar or Unknown.
-fn resolve_lambda_param_ty(param_ty: &almide_lang::types::Ty, _body_ty: &almide_lang::types::Ty, var_table: &almide_ir::VarTable, vid: VarId) -> almide_lang::types::Ty {
-    // Always try VarTable first — it has the type-checker's resolved types.
+fn resolve_lambda_param_ty(
+    param_ty: &almide_lang::types::Ty,
+    body: &almide_ir::IrExpr,
+    var_table: &almide_ir::VarTable,
+    vid: VarId,
+) -> almide_lang::types::Ty {
+    // 1. VarTable
     if (vid.0 as usize) < var_table.len() {
         let info = var_table.get(vid);
         if !info.ty.is_unresolved() {
             return info.ty.clone();
         }
     }
+    // 2. IR annotation
     if !param_ty.is_unresolved() {
         return param_ty.clone();
+    }
+    // 3. Infer from body usage (e.g. string interp → String)
+    if let Some(inferred) = crate::pass_concretize_types::infer_var_type_from_body(body, vid) {
+        return inferred;
+    }
+    // 4. Body return type as fallback (fold accumulator pattern)
+    if !body.ty.is_unresolved() && !matches!(body.ty, almide_lang::types::Ty::Unit | almide_lang::types::Ty::Bool) {
+        return body.ty.clone();
     }
     almide_lang::types::Ty::Int
 }
