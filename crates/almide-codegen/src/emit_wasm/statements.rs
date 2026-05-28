@@ -395,8 +395,10 @@ impl FuncCompiler<'_> {
             }
 
             IrStmtKind::IndexAssign { target, index, value } => {
-                // xs[i] = v → store value at list_ptr + 4 + i * elem_size
-                let elem_size = super::values::byte_size(&value.ty);
+                // xs[i] = v → store value at ptr + data_off + i * elem_size
+                let target_ty = &self.var_table.get(*target).ty;
+                let is_bytes = matches!(target_ty, Ty::Bytes);
+                let elem_size = if is_bytes { 1u32 } else { super::values::byte_size(&value.ty) };
                 // Resolve list pointer: local var or module-level global
                 let has_ptr = if let Some(&local_idx) = self.var_map.get(&target.0) {
                     wasm!(self.func, { local_get(local_idx); });
@@ -415,23 +417,31 @@ impl FuncCompiler<'_> {
                     }
                 };
                 if has_ptr {
+                    let data_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA);
                     if let IrExprKind::LitInt { value: idx_val } = &index.kind {
-                        let offset = (self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32 as u32) + (*idx_val as u32) * (elem_size as u32);
+                        let offset = data_off + (*idx_val as u32) * elem_size;
                         self.emit_expr(value);
-                        self.emit_store_at(&value.ty, offset);
+                        if is_bytes {
+                            wasm!(self.func, { i32_wrap_i64; i32_store8(offset); });
+                        } else {
+                            self.emit_store_at(&value.ty, offset);
+                        }
                     } else {
-                        wasm!(self.func, { i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; });
+                        wasm!(self.func, { i32_const(data_off as i32); i32_add; });
                         self.emit_expr(index);
                         if matches!(&index.ty, almide_lang::types::Ty::Int) {
                             wasm!(self.func, { i32_wrap_i64; });
                         }
-                        wasm!(self.func, {
-                            i32_const(elem_size as i32);
-                            i32_mul;
-                            i32_add;
-                        });
+                        if elem_size > 1 {
+                            wasm!(self.func, { i32_const(elem_size as i32); i32_mul; });
+                        }
+                        wasm!(self.func, { i32_add; });
                         self.emit_expr(value);
-                        self.emit_store_at(&value.ty, 0);
+                        if is_bytes {
+                            wasm!(self.func, { i32_wrap_i64; i32_store8(0); });
+                        } else {
+                            self.emit_store_at(&value.ty, 0);
+                        }
                     }
                 }
             }

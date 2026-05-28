@@ -275,35 +275,41 @@ impl FuncCompiler<'_> {
 
     /// Emit index access: list_ptr + 8 + index * elem_size
     pub(super) fn emit_index_access(&mut self, object: &IrExpr, index: &IrExpr, result_ty: &Ty) {
-        let elem_size = values::byte_size(result_ty);
+        let is_bytes = matches!(&object.ty, Ty::Bytes);
+        let elem_size = if is_bytes { 1u32 } else { values::byte_size(result_ty) };
+        let data_off = self.emitter.layout_reg.fixed_offset(
+            super::engine::layout::LIST, super::engine::layout::list::DATA,
+        );
 
-        self.emit_expr(object); // list ptr
+        self.emit_expr(object); // ptr
 
         // Optimize constant index: compute offset at compile time
         if let IrExprKind::LitInt { value } = &index.kind {
-            let offset = 8 + (*value as u32) * (elem_size as u32);
-            self.emit_load_at(result_ty, offset);
+            let offset = data_off + (*value as u32) * elem_size;
+            if is_bytes {
+                wasm!(self.func, { i32_load8_u(offset); i64_extend_i32_u; });
+            } else {
+                self.emit_load_at(result_ty, offset);
+            }
             return;
         }
 
-        wasm!(self.func, {
-            i32_const(8);
-            i32_add;
-        });
+        wasm!(self.func, { i32_const(data_off as i32); i32_add; });
 
-        // Add index * elem_size
         self.emit_expr(index);
         if matches!(&index.ty, Ty::Int) {
             wasm!(self.func, { i32_wrap_i64; });
         }
-        wasm!(self.func, {
-            i32_const(elem_size as i32);
-            i32_mul;
-            i32_add;
-        });
+        if elem_size > 1 {
+            wasm!(self.func, { i32_const(elem_size as i32); i32_mul; });
+        }
+        wasm!(self.func, { i32_add; });
 
-        // Load element
-        self.emit_load_at(result_ty, 0);
+        if is_bytes {
+            wasm!(self.func, { i32_load8_u(0); i64_extend_i32_u; });
+        } else {
+            self.emit_load_at(result_ty, 0);
+        }
     }
 
     /// Emit a tuple construction: allocate memory, store each element sequentially.

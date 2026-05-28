@@ -1,4 +1,3 @@
-// wasm:skip — TODO: fix WASM codegen bug
 import bytes
 
 test "list index read" {
