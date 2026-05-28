@@ -61,8 +61,17 @@ fn run_wasm(source: &str) -> String {
         panic!("WASM compilation failed:\n{}", stderr);
     }
 
-    // Run with Node.js using WASI
-    let js_runner = format!(r#"
+    // Run with wasmtime (preferred) or Node.js WASI (fallback)
+    let output = Command::new("wasmtime")
+        .arg("--dir=/")
+        .arg(wasm_path.to_str().unwrap())
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.code() != Some(127) => o, // wasmtime found
+        _ => {
+            // Fallback: Node.js WASI
+            let js_runner = format!(r#"
 const {{ readFileSync }} = require('fs');
 const {{ WASI }} = require('wasi');
 const wasi = new WASI({{ version: 'preview1', args: [], env: {{}} }});
@@ -72,13 +81,15 @@ const inst = new WebAssembly.Instance(mod, wasi.getImportObject());
 wasi.start(inst);
 "#, wasm_path.to_str().unwrap().replace('\\', "/"));
 
-    let js_path = dir.path().join("run.cjs");
-    std::fs::write(&js_path, &js_runner).unwrap();
+            let js_path = dir.path().join("run.cjs");
+            std::fs::write(&js_path, &js_runner).unwrap();
 
-    let output = Command::new("node")
-        .arg(js_path.to_str().unwrap())
-        .output()
-        .expect("failed to run node");
+            Command::new("node")
+                .arg(js_path.to_str().unwrap())
+                .output()
+                .expect("failed to run node or wasmtime")
+        }
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

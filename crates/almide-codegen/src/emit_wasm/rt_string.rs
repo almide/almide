@@ -5,7 +5,26 @@
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
-use super::list_layout::{DATA_OFFSET, HEADER_SIZE, STRING_DATA_OFFSET, STRING_HEADER_SIZE, STRING_CAP_OFFSET};
+// Layout constants derived from LayoutRegistry at module init.
+// These replace the old list_layout::* imports — values are identical but
+// come from the single source of truth (engine::layout).
+use super::engine::layout::{STRING, LIST, string as ls, list as ll};
+use std::sync::LazyLock;
+static LAYOUT_CONSTS: LazyLock<(i32, i32, i32, i32, i32)> = LazyLock::new(|| {
+    let r = super::engine::LayoutRegistry::new();
+    (
+        r.fixed_offset(STRING, ls::DATA) as i32,   // string_data_off()
+        r.header_size(STRING) as i32,               // string_hdr()
+        r.fixed_offset(STRING, ls::CAP) as i32,     // string_cap_off()
+        r.fixed_offset(LIST, ll::DATA) as i32,      // DATA_OFFSET (list)
+        r.header_size(LIST) as i32,                  // HEADER_SIZE (list)
+    )
+});
+pub(super) fn string_data_off() -> i32 { LAYOUT_CONSTS.0 }
+pub(super) fn string_hdr() -> i32 { LAYOUT_CONSTS.1 }
+pub(super) fn string_cap_off() -> i32 { LAYOUT_CONSTS.2 }
+pub(super) fn list_data_off() -> i32 { LAYOUT_CONSTS.3 }
+pub(super) fn list_hdr() -> i32 { LAYOUT_CONSTS.4 }
 
 /// Register all string runtime function signatures.
 pub fn register(emitter: &mut WasmEmitter) {
@@ -130,8 +149,8 @@ fn compile_char_count(emitter: &mut WasmEmitter) {
         i32_const(0); local_set(3);
         block_empty; loop_empty;
           local_get(2); local_get(1); i32_ge_u; br_if(1);
-          // byte = s[STRING_DATA_OFFSET + i]
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
+          // byte = s[string_data_off() + i]
+          local_get(0); i32_const(string_data_off()); i32_add;
           local_get(2); i32_add; i32_load8_u(0);
           // if (byte & 0xC0) != 0x80 then count++
           i32_const(0xC0); i32_and;
@@ -170,8 +189,8 @@ fn compile_eq(emitter: &mut WasmEmitter) {
         block_empty; loop_empty;
           local_get(3); local_get(2); i32_ge_u;
           if_empty; i32_const(1); return_; end;
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add; i32_load8_u(0);
-          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add; i32_load8_u(0);
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0);
+          local_get(1); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0);
           i32_ne;
           if_empty; i32_const(0); return_; end;
           local_get(3); i32_const(1); i32_add; local_set(3);
@@ -201,9 +220,9 @@ fn compile_contains(emitter: &mut WasmEmitter) {
         block_empty; loop_empty;
           local_get(4); local_get(2); local_get(3); i32_sub; i32_const(1); i32_add;
           i32_ge_u; br_if(1);
-          // compare h[STRING_DATA_OFFSET+i..] with n[STRING_DATA_OFFSET..n_len]
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(4); i32_add;
-          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
+          // compare h[string_data_off()+i..] with n[string_data_off()..n_len]
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(4); i32_add;
+          local_get(1); i32_const(string_data_off()); i32_add;
           local_get(3);
           call(emitter.rt.mem_eq);
           if_empty; i32_const(1); return_; end;
@@ -229,7 +248,7 @@ fn compile_trim(emitter: &mut WasmEmitter) {
     wasm!(f, {
         block_empty; loop_empty;
           local_get(2); local_get(3); i32_ge_u; br_if(1);
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0);
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(2); i32_add; i32_load8_u(0);
           local_set(1);
           local_get(1); i32_const(32); i32_eq;
           local_get(1); i32_const(9); i32_eq; i32_or;
@@ -244,7 +263,7 @@ fn compile_trim(emitter: &mut WasmEmitter) {
     wasm!(f, {
         block_empty; loop_empty;
           local_get(3); local_get(2); i32_le_u; br_if(1);
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add;
           local_get(3); i32_const(1); i32_sub; i32_add; i32_load8_u(0);
           local_set(1);
           local_get(1); i32_const(32); i32_eq;
@@ -271,14 +290,13 @@ fn compile_slice(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.slice];
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
-        i32_const(STRING_HEADER_SIZE); local_get(2); local_get(1); i32_sub; i32_add;
-        call(emitter.rt.alloc); local_set(3);
-        local_get(3); local_get(2); local_get(1); i32_sub; i32_store(0);
+        local_get(2); local_get(1); i32_sub;
+        call(emitter.rt.string_alloc); local_set(3);
         i32_const(0); local_set(4);
         block_empty; loop_empty;
           local_get(4); local_get(2); local_get(1); i32_sub; i32_ge_u; br_if(1);
-          local_get(3); i32_const(STRING_DATA_OFFSET); i32_add; local_get(4); i32_add;
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(1); i32_add; local_get(4); i32_add;
+          local_get(3); i32_const(string_data_off()); i32_add; local_get(4); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(1); i32_add; local_get(4); i32_add;
           i32_load8_u(0); i32_store8(0);
           local_get(4); i32_const(1); i32_add; local_set(4);
           br(0);
@@ -293,13 +311,12 @@ fn compile_reverse(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
-        i32_const(STRING_HEADER_SIZE); local_get(1); i32_add; call(emitter.rt.alloc); local_set(2);
-        local_get(2); local_get(1); i32_store(0);
+        local_get(1); call(emitter.rt.string_alloc); local_set(2);
         i32_const(0); local_set(3);
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          local_get(2); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add;
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(2); i32_const(string_data_off()); i32_add; local_get(3); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add;
           local_get(1); i32_const(1); i32_sub; local_get(3); i32_sub; i32_add;
           i32_load8_u(0); i32_store8(0);
           local_get(3); i32_const(1); i32_add; local_set(3);
@@ -315,13 +332,12 @@ fn compile_repeat(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_get(1); i32_mul; local_set(2);
-        i32_const(STRING_HEADER_SIZE); local_get(2); i32_add; call(emitter.rt.alloc); local_set(3);
-        local_get(3); local_get(2); i32_store(0);
+        local_get(2); call(emitter.rt.string_alloc); local_set(3);
         i32_const(0); local_set(2); // reuse as offset
         block_empty; loop_empty;
           local_get(2); local_get(0); i32_load(0); local_get(1); i32_mul; i32_ge_u; br_if(1);
-          local_get(3); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add;
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(3); i32_const(string_data_off()); i32_add; local_get(2); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add;
           local_get(2); local_get(0); i32_load(0); i32_rem_u;
           i32_add; i32_load8_u(0); i32_store8(0);
           local_get(2); i32_const(1); i32_add; local_set(2);
@@ -353,8 +369,8 @@ fn compile_index_of(emitter: &mut WasmEmitter) {
         block_empty; loop_empty;
           local_get(4); local_get(2); local_get(3); i32_sub; i32_const(1); i32_add;
           i32_ge_u; br_if(1);
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(4); i32_add;
-          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(4); i32_add;
+          local_get(1); i32_const(string_data_off()); i32_add;
           local_get(3);
           call(emitter.rt.mem_eq);
           if_empty;
@@ -437,7 +453,7 @@ fn compile_split(emitter: &mut WasmEmitter) {
           call(emitter.rt.string.split); local_set(6);
           // result = [before] ++ rest_list
           // Alloc: HEADER_SIZE + (1 + rest_list.len) * 4
-          i32_const(HEADER_SIZE);
+          i32_const(list_hdr());
           local_get(6); i32_load(0); i32_const(1); i32_add;
           i32_const(4); i32_mul; i32_add;
           call(emitter.rt.alloc); local_set(7);
@@ -454,7 +470,7 @@ fn compile_split(emitter: &mut WasmEmitter) {
             local_get(3); local_get(6); i32_load(0); i32_ge_u; br_if(1);
             local_get(7); i32_const(12); i32_add; // &result[1] = data_offset(8) + 1*4
             local_get(3); i32_const(4); i32_mul; i32_add;
-            local_get(6); i32_const(DATA_OFFSET); i32_add;
+            local_get(6); i32_const(list_data_off()); i32_add;
             local_get(3); i32_const(4); i32_mul; i32_add;
             i32_load(0); i32_store(0);
             local_get(3); i32_const(1); i32_add; local_set(3);
@@ -475,12 +491,10 @@ fn compile_join(emitter: &mut WasmEmitter) {
         local_get(2); i32_eqz;
         if_i32;
           // empty list → empty string
-          i32_const(STRING_HEADER_SIZE); call(emitter.rt.alloc); local_tee(4);
-          i32_const(0); i32_store(0);
-          local_get(4);
+          i32_const(0); call(emitter.rt.string_alloc);
         else_;
           // result = list[0]
-          local_get(0); i32_const(DATA_OFFSET); i32_add; i32_load(0); local_set(4);
+          local_get(0); i32_const(list_data_off()); i32_add; i32_load(0); local_set(4);
           i32_const(1); local_set(3); // i=1
           block_empty; loop_empty;
             local_get(3); local_get(2); i32_ge_u; br_if(1);
@@ -488,7 +502,7 @@ fn compile_join(emitter: &mut WasmEmitter) {
             local_get(4); local_get(1); call(emitter.rt.concat_str); local_set(4);
             // result = concat(result, list[i])
             local_get(4);
-            local_get(0); i32_const(DATA_OFFSET); i32_add;
+            local_get(0); i32_const(list_data_off()); i32_add;
             local_get(3); i32_const(4); i32_mul; i32_add; i32_load(0);
             call(emitter.rt.concat_str); local_set(4);
             local_get(3); i32_const(1); i32_add; local_set(3);
@@ -575,7 +589,7 @@ fn compile_trim_start(emitter: &mut WasmEmitter) {
         i32_const(0); local_set(2);
         block_empty; loop_empty;
           local_get(2); local_get(1); i32_ge_u; br_if(1);
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add; i32_load8_u(0);
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(2); i32_add; i32_load8_u(0);
           local_tee(1);
           i32_const(32); i32_eq;
           local_get(1); i32_const(9); i32_eq; i32_or;
@@ -601,7 +615,7 @@ fn compile_trim_end(emitter: &mut WasmEmitter) {
         local_get(0); i32_load(0); local_set(1);
         block_empty; loop_empty;
           local_get(1); i32_eqz; br_if(1);
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add;
           local_get(1); i32_const(1); i32_sub; i32_add;
           i32_load8_u(0); local_set(2);
           local_get(2); i32_const(32); i32_eq;
@@ -637,13 +651,13 @@ fn compile_case_transform(emitter: &mut WasmEmitter, type_idx: u32, lo: i32, hi:
     ]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
-        i32_const(STRING_HEADER_SIZE); local_get(1); i32_add;
+        i32_const(string_hdr()); local_get(1); i32_add;
         call(emitter.rt.alloc); local_set(2);
         local_get(2); local_get(1); i32_store(0);
         i32_const(0); local_set(3);
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add;
           i32_load8_u(0); local_set(4);
           local_get(4); i32_const(lo); i32_ge_u;
           local_get(4); i32_const(hi); i32_le_u;
@@ -651,7 +665,7 @@ fn compile_case_transform(emitter: &mut WasmEmitter, type_idx: u32, lo: i32, hi:
           if_empty;
             local_get(4); i32_const(delta); i32_add; local_set(4);
           end;
-          local_get(2); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add;
+          local_get(2); i32_const(string_data_off()); i32_add; local_get(3); i32_add;
           local_get(4); i32_store8(0);
           local_get(3); i32_const(1); i32_add; local_set(3);
           br(0);
@@ -670,19 +684,19 @@ fn compile_chars(emitter: &mut WasmEmitter) {
     ]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
-        i32_const(HEADER_SIZE); local_get(1); i32_const(4); i32_mul; i32_add;
+        i32_const(list_hdr()); local_get(1); i32_const(4); i32_mul; i32_add;
         call(emitter.rt.alloc); local_set(2);
         local_get(2); local_get(1); i32_store(0);
         i32_const(0); local_set(3);
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          i32_const(STRING_HEADER_SIZE + 1); call(emitter.rt.alloc); local_set(4);
+          i32_const(1); call(emitter.rt.string_alloc); local_set(4);
           local_get(4); i32_const(1); i32_store(0);
-          local_get(4); i32_const(1); i32_store(STRING_CAP_OFFSET as u32, 0);
+          local_get(4); i32_const(1); i32_store(string_cap_off() as u32, 0);
           local_get(4);
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add; i32_load8_u(0);
-          i32_store8(STRING_DATA_OFFSET as u32);
-          local_get(2); i32_const(DATA_OFFSET); i32_add; local_get(3); i32_const(4); i32_mul; i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0);
+          i32_store8(string_data_off() as u32);
+          local_get(2); i32_const(list_data_off()); i32_add; local_get(3); i32_const(4); i32_mul; i32_add;
           local_get(4); i32_store(0);
           local_get(3); i32_const(1); i32_add; local_set(3);
           br(0);
@@ -699,14 +713,14 @@ fn compile_lines(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(0); i32_load(0); i32_eqz;
         if_i32;
-          i32_const(HEADER_SIZE); call(emitter.rt.alloc); local_set(1);
+          i32_const(list_hdr()); call(emitter.rt.alloc); local_set(1);
           local_get(1); i32_const(0); i32_store(0);
           local_get(1);
         else_;
-          i32_const(STRING_HEADER_SIZE + 1); call(emitter.rt.alloc); local_set(1);
+          i32_const(1); call(emitter.rt.string_alloc); local_set(1);
           local_get(1); i32_const(1); i32_store(0);
-          local_get(1); i32_const(1); i32_store(STRING_CAP_OFFSET as u32, 0);
-          local_get(1); i32_const(10); i32_store8(STRING_DATA_OFFSET as u32);
+          local_get(1); i32_const(1); i32_store(string_cap_off() as u32, 0);
+          local_get(1); i32_const(10); i32_store8(string_data_off() as u32);
           local_get(0); local_get(1); call(emitter.rt.string.split);
         end;
         end;
@@ -719,14 +733,14 @@ fn compile_from_bytes(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
-        i32_const(STRING_HEADER_SIZE); local_get(1); i32_add;
+        i32_const(string_hdr()); local_get(1); i32_add;
         call(emitter.rt.alloc); local_set(2);
         local_get(2); local_get(1); i32_store(0);
         i32_const(0); local_set(3);
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          local_get(2); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add;
-          local_get(0); i32_const(DATA_OFFSET); i32_add; local_get(3); i32_const(8); i32_mul; i32_add;
+          local_get(2); i32_const(string_data_off()); i32_add; local_get(3); i32_add;
+          local_get(0); i32_const(list_data_off()); i32_add; local_get(3); i32_const(8); i32_mul; i32_add;
           i64_load(0); i32_wrap_i64; i32_store8(0);
           local_get(3); i32_const(1); i32_add; local_set(3);
           br(0);
@@ -741,14 +755,14 @@ fn compile_to_bytes(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
-        i32_const(HEADER_SIZE); local_get(1); i32_const(8); i32_mul; i32_add;
+        i32_const(list_hdr()); local_get(1); i32_const(8); i32_mul; i32_add;
         call(emitter.rt.alloc); local_set(2);
         local_get(2); local_get(1); i32_store(0);
         i32_const(0); local_set(3);
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          local_get(2); i32_const(DATA_OFFSET); i32_add; local_get(3); i32_const(8); i32_mul; i32_add;
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(3); i32_add;
+          local_get(2); i32_const(list_data_off()); i32_add; local_get(3); i32_const(8); i32_mul; i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add;
           i32_load8_u(0); i64_extend_i32_u; i64_store(0);
           local_get(3); i32_const(1); i32_add; local_set(3);
           br(0);

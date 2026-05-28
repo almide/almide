@@ -4,7 +4,6 @@
 
 use super::FuncCompiler;
 use almide_ir::IrExpr;
-use super::list_layout::{STRING_DATA_OFFSET, STRING_HEADER_SIZE, STRING_CAP_OFFSET};
 
 /// Requested primitive load for the typed byte-read family.
 #[derive(Clone, Copy)]
@@ -60,7 +59,7 @@ impl FuncCompiler<'_> {
                       local_set(result);
                       local_get(result);
                       // load byte as u8 → i64
-                      local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       local_get(idx); i32_add;
                       i32_load8_u(0);
                       i64_extend_i32_u;
@@ -91,7 +90,7 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[2]); // default
                 wasm!(self.func, {
                     else_;
-                      local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       local_get(idx); i32_add;
                       i32_load8_u(0);
                       i64_extend_i32_u;
@@ -116,7 +115,7 @@ impl FuncCompiler<'_> {
                     local_get(idx); local_get(buf); i32_load(0); i32_lt_u;
                     if_empty;
                       // store byte: mem[buf + 4 + idx] = val
-                      local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(idx); i32_add;
+                      local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(idx); i32_add;
                       local_get(val);
                       i32_store8(0);
                     end;
@@ -135,13 +134,14 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(n);
                     // alloc 4 + n bytes
-                    local_get(n); i32_const(STRING_HEADER_SIZE); i32_add;
+                    local_get(n); i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); i32_add;
                     call(self.emitter.rt.alloc);
                     local_set(ptr);
-                    // store length
+                    // store length + cap
                     local_get(ptr); local_get(n); i32_store(0);
-                    // zero the data region: memory.fill(ptr+4, 0, n)
-                    local_get(ptr); i32_const(STRING_DATA_OFFSET); i32_add;
+                    local_get(ptr); local_get(n); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP));
+                    // zero the data region
+                    local_get(ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                     i32_const(0);
                     local_get(n);
                     memory_fill;
@@ -163,7 +163,7 @@ impl FuncCompiler<'_> {
                     local_set(xs);
                     local_get(xs); i32_load(0); local_set(len);
                     // alloc 4 + len
-                    local_get(len); i32_const(STRING_HEADER_SIZE); i32_add;
+                    local_get(len); i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); i32_add;
                     call(self.emitter.rt.alloc);
                     local_set(dst);
                     local_get(dst); local_get(len); i32_store(0);
@@ -172,9 +172,9 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       // dst_byte_addr = dst + 4 + i
-                      local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add;
+                      local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add;
                       // src_elem = xs + 4 + i*8 → load i64, wrap to i32, store as u8
-                      local_get(xs); i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(xs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       local_get(i); i32_const(8); i32_mul; i32_add;
                       i64_load(0);
                       i32_wrap_i64;
@@ -201,7 +201,7 @@ impl FuncCompiler<'_> {
                     local_set(src);
                     local_get(src); i32_load(0); local_set(len);
                     // alloc 4 + len*8
-                    local_get(len); i32_const(8); i32_mul; i32_const(STRING_HEADER_SIZE); i32_add;
+                    local_get(len); i32_const(8); i32_mul; i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); i32_add;
                     call(self.emitter.rt.alloc);
                     local_set(dst);
                     local_get(dst); local_get(len); i32_store(0);
@@ -210,10 +210,10 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       // dst + 4 + i*8
-                      local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       local_get(i); i32_const(8); i32_mul; i32_add;
                       // load u8 from src + 4 + i, extend to i64
-                      local_get(src); i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(src); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       local_get(i); i32_add;
                       i32_load8_u(0);
                       i64_extend_i32_u;
@@ -255,13 +255,13 @@ impl FuncCompiler<'_> {
                     // new_len = e - s
                     local_get(e); local_get(s); i32_sub; local_set(new_len);
                     // alloc
-                    local_get(new_len); i32_const(STRING_HEADER_SIZE); i32_add;
+                    local_get(new_len); i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); i32_add;
                     call(self.emitter.rt.alloc);
                     local_set(dst);
                     local_get(dst); local_get(new_len); i32_store(0);
                     // memory.copy(dst+4, src+4+s, new_len)
-                    local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add;
-                    local_get(src); i32_const(STRING_DATA_OFFSET); i32_add; local_get(s); i32_add;
+                    local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                    local_get(src); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(s); i32_add;
                     local_get(new_len);
                     memory_copy;
                     local_get(dst);
@@ -287,7 +287,7 @@ impl FuncCompiler<'_> {
                     local_get(a); i32_load(0); local_set(len_a);
                     local_get(b); i32_load(0); local_set(len_b);
                     // alloc 4 + len_a + len_b
-                    local_get(len_a); local_get(len_b); i32_add; i32_const(STRING_HEADER_SIZE); i32_add;
+                    local_get(len_a); local_get(len_b); i32_add; i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); i32_add;
                     call(self.emitter.rt.alloc);
                     local_set(dst);
                     // store total length
@@ -295,13 +295,13 @@ impl FuncCompiler<'_> {
                     local_get(len_a); local_get(len_b); i32_add;
                     i32_store(0);
                     // copy a data
-                    local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add;
-                    local_get(a); i32_const(STRING_DATA_OFFSET); i32_add;
+                    local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                    local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                     local_get(len_a);
                     memory_copy;
                     // copy b data
-                    local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(len_a); i32_add;
-                    local_get(b); i32_const(STRING_DATA_OFFSET); i32_add;
+                    local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(len_a); i32_add;
+                    local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                     local_get(len_b);
                     memory_copy;
                     local_get(dst);
@@ -331,7 +331,7 @@ impl FuncCompiler<'_> {
                     local_get(src); i32_load(0); local_set(src_len);
                     local_get(src_len); local_get(n); i32_mul; local_set(total);
                     // alloc 4 + total
-                    local_get(total); i32_const(STRING_HEADER_SIZE); i32_add;
+                    local_get(total); i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); i32_add;
                     call(self.emitter.rt.alloc);
                     local_set(dst);
                     local_get(dst); local_get(total); i32_store(0);
@@ -340,9 +340,9 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(n); i32_ge_u; br_if(1);
                       // dst + 4 + i*src_len
-                      local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       local_get(i); local_get(src_len); i32_mul; i32_add;
-                      local_get(src); i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(src); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       local_get(src_len);
                       memory_copy;
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -373,19 +373,20 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     // old_len = buf[0]
                     local_get(buf); i32_load(0); local_set(old_len);
-                    // new_buf = alloc(4 + old_len + 1)
-                    local_get(old_len); i32_const(5); i32_add;
+                    // new_buf = alloc(hdr + old_len + 1)
+                    local_get(old_len); i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32 + 1); i32_add;
                     call(self.emitter.rt.alloc);
                     local_set(new_buf);
-                    // new_buf[0] = old_len + 1
+                    // new_buf.len = old_len + 1, new_buf.cap = same
                     local_get(new_buf); local_get(old_len); i32_const(1); i32_add; i32_store(0);
+                    local_get(new_buf); local_get(old_len); i32_const(1); i32_add; i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP));
                     // copy old data: new_buf+4 <- buf+4, old_len bytes
-                    local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add;
-                    local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+                    local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                    local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                     local_get(old_len);
                     memory_copy;
                     // new_buf[4 + old_len] = val
-                    local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(old_len); i32_add;
+                    local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(old_len); i32_add;
                     local_get(val); i32_store8(0);
                 });
                 // Update the variable: need to store new_buf back
@@ -427,12 +428,12 @@ impl FuncCompiler<'_> {
                     // new_buf[0] = old_len + 8
                     local_get(new_buf); local_get(old_len); i32_const(8); i32_add; i32_store(0);
                     // copy old data: new_buf+4 <- buf+4, old_len bytes
-                    local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add;
-                    local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+                    local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                    local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                     local_get(old_len);
                     memory_copy;
                     // *(new_buf + 4 + old_len) = fval (f64 LE)
-                    local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(old_len); i32_add;
+                    local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(old_len); i32_add;
                     local_get(fval);
                     f64_store(0);
                 });
@@ -553,7 +554,7 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     i32_wrap_i64;
-                    local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; i32_add;
+                    local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; i32_add;
                     local_set(addr);
                 });
                 self.emit_expr(&args[2]); // val: f64 on stack
@@ -583,7 +584,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(val);
                     // address = buf + 4 + pos
-                    local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add;
+                    local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add;
                     local_get(val);
                     i32_store16(0);
                 });
@@ -616,7 +617,7 @@ impl FuncCompiler<'_> {
                 // bytes.data_ptr(b) → Int (i64)
                 // Return pointer to data region: buf + 4
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_const(STRING_DATA_OFFSET); i32_add; i64_extend_i32_u; });
+                wasm!(self.func, { i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; i64_extend_i32_u; });
             }
             // ── Little-endian reads (native WASM loads) ──
             "read_u8" => {
@@ -702,16 +703,16 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     i32_wrap_i64;
-                    local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; i32_add; local_set(src);
+                    local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; i32_add; local_set(src);
                 });
                 self.emit_expr(&args[2]);
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(len);
                     // alloc 4 + len
-                    local_get(len); i32_const(STRING_HEADER_SIZE); i32_add;
+                    local_get(len); i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(len); i32_store(0);
-                    local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add;
+                    local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                     local_get(src);
                     local_get(len);
                     memory_copy;
@@ -741,10 +742,10 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(n); i32_ge_u; br_if(1);
                       // Load u32 len from buf + 4 + pos
-                      local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add;
+                      local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add;
                       i32_load(0); local_set(lval);
                       // pos += 4 + len
-                      local_get(pos); i32_const(STRING_DATA_OFFSET); i32_add; local_get(lval); i32_add;
+                      local_get(pos); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(lval); i32_add;
                       local_set(pos);
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -774,31 +775,31 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(n);
                     // alloc list: 4 + n*4
-                    local_get(n); i32_const(4); i32_mul; i32_const(STRING_HEADER_SIZE); i32_add;
+                    local_get(n); i32_const(4); i32_mul; i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(n); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(n); i32_ge_u; br_if(1);
                       // len at [buf+4+pos]
-                      local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add;
+                      local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add;
                       i32_load(0); local_set(lval);
                       // alloc string: [len][bytes]
-                      local_get(lval); i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(lval); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       call(self.emitter.rt.alloc); local_set(s);
                       local_get(s); local_get(lval); i32_store(0);
                       // memcpy bytes: dst = s+4, src = buf+4+pos+4, n = lval
-                      local_get(s); i32_const(STRING_DATA_OFFSET); i32_add;
-                      local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
-                      local_get(pos); i32_add; i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                      local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                      local_get(pos); i32_add; i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       local_get(lval);
                       memory_copy;
                       // result[i] = s
-                      local_get(result); i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(result); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       local_get(s); i32_store(0);
                       // pos += 4 + len
-                      local_get(pos); i32_const(STRING_DATA_OFFSET); i32_add; local_get(lval); i32_add;
+                      local_get(pos); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(lval); i32_add;
                       local_set(pos);
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -844,17 +845,17 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(n);
                     // alloc list: 4 + n * out_bytes
-                    local_get(n); i32_const(out_bytes); i32_mul; i32_const(STRING_HEADER_SIZE); i32_add;
+                    local_get(n); i32_const(out_bytes); i32_mul; i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(n); i32_store(0);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(n); i32_ge_u; br_if(1);
                       // dst = result + 4 + i * out_bytes
-                      local_get(result); i32_const(STRING_DATA_OFFSET); i32_add;
+                      local_get(result); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                       local_get(i); i32_const(out_bytes); i32_mul; i32_add;
                       // src addr = buf + 4 + pos + i * elem_bytes
-                      local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add;
+                      local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add;
                       local_get(i); i32_const(elem_bytes); i32_mul; i32_add;
                 });
                 // i16/u16 LE: native load, sign/zero extend
@@ -984,7 +985,7 @@ impl FuncCompiler<'_> {
     fn emit_typed_byte_read(&mut self, buf_expr: &IrExpr, pos_expr: &IrExpr, op: ByteReadOp) {
         // Compute address = buf + 4 + pos.
         self.emit_expr(buf_expr);
-        wasm!(self.func, { i32_const(STRING_DATA_OFFSET); i32_add; });
+        wasm!(self.func, { i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; });
         self.emit_expr(pos_expr);
         wasm!(self.func, { i32_wrap_i64; i32_add; });
 
@@ -1037,19 +1038,23 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_get(buf); i32_load(0); local_set(old_len);
         });
-        // new_buf = alloc(4 + old_len + size_bytes)
+        // new_buf = alloc(hdr + old_len + size_bytes)
+        let str_hdr = self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32;
+        let str_cap_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP);
         wasm!(self.func, {
-            local_get(old_len); i32_const(4 + size_bytes as i32); i32_add;
+            local_get(old_len); i32_const(str_hdr + size_bytes as i32); i32_add;
             call(self.emitter.rt.alloc); local_set(new_buf);
-            // new_buf[0] = old_len + size_bytes
+            // new_buf.len = old_len + size_bytes, new_buf.cap = same
             local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(0);
+            local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP));
+            local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(str_cap_off);
             // memcpy old data
-            local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add;
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+            local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
             local_get(old_len);
             memory_copy;
             // address = new_buf + 4 + old_len
-            local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(old_len); i32_add;
+            local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(old_len); i32_add;
         });
         // Store with width-specific opcode. Almide Int is i64; narrow first.
         match size_bytes {
@@ -1084,14 +1089,15 @@ impl FuncCompiler<'_> {
         wasm!(self.func, { local_set(fval); });
         wasm!(self.func, {
             local_get(buf); i32_load(0); local_set(old_len);
-            local_get(old_len); i32_const(4 + size_bytes as i32); i32_add;
+            local_get(old_len); i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32 + size_bytes as i32); i32_add;
             call(self.emitter.rt.alloc); local_set(new_buf);
             local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(0);
-            local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add;
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+            local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP));
+            local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
             local_get(old_len);
             memory_copy;
-            local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(old_len); i32_add;
+            local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(old_len); i32_add;
         });
         if as_f32 {
             wasm!(self.func, { local_get(fval); f32_demote_f64; f32_store(0); });
@@ -1121,7 +1127,7 @@ impl FuncCompiler<'_> {
         self.emit_expr(pos_expr);
         wasm!(self.func, {
             i32_wrap_i64;
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; i32_add; local_set(src);
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; i32_add; local_set(src);
             i64_const(0); local_set(acc);
         });
         for i in 0..size_bytes {
@@ -1176,7 +1182,7 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_set(val_i64);
             // address = buf + 4 + pos
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add;
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add;
         });
         match size_bytes {
             1 => { wasm!(self.func, { local_get(val_i64); i32_wrap_i64; i32_store8(0); }); }
@@ -1202,7 +1208,7 @@ impl FuncCompiler<'_> {
         self.emit_expr(&args[2]);
         wasm!(self.func, {
             local_set(fval);
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add;
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add;
         });
         if as_f32 {
             wasm!(self.func, { local_get(fval); f32_demote_f64; f32_store(0); });
@@ -1225,7 +1231,7 @@ impl FuncCompiler<'_> {
         self.emit_expr(&args[1]); wasm!(self.func, { i32_wrap_i64; local_set(pos); });
         self.emit_expr(&args[2]); wasm!(self.func, {
             local_set(val_i64);
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add; local_set(dst);
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add; local_set(dst);
         });
         for i in 0..size_bytes {
             let shift = 8 * (size_bytes - 1 - i) as i64;
@@ -1260,7 +1266,7 @@ impl FuncCompiler<'_> {
             wasm!(self.func, { i64_reinterpret_f64; local_set(bits); });
         }
         wasm!(self.func, {
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add; local_set(dst);
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add; local_set(dst);
         });
         for i in 0..size_bytes {
             let shift = 8 * (size_bytes - 1 - i) as i64;
@@ -1292,14 +1298,15 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_set(val_i64);
             local_get(buf); i32_load(0); local_set(old_len);
-            local_get(old_len); i32_const(4 + size_bytes as i32); i32_add;
+            local_get(old_len); i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32 + size_bytes as i32); i32_add;
             call(self.emitter.rt.alloc); local_set(new_buf);
             local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(0);
-            local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add;
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+            local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP));
+            local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
             local_get(old_len);
             memory_copy;
-            local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(old_len); i32_add;
+            local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(old_len); i32_add;
             local_set(dst);
         });
         // Write MSB-first: byte at offset i = (val >> (8*(size-1-i))) & 0xff
@@ -1351,14 +1358,15 @@ impl FuncCompiler<'_> {
         }
         wasm!(self.func, {
             local_get(buf); i32_load(0); local_set(old_len);
-            local_get(old_len); i32_const(4 + size_bytes as i32); i32_add;
+            local_get(old_len); i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32 + size_bytes as i32); i32_add;
             call(self.emitter.rt.alloc); local_set(new_buf);
             local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(0);
-            local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add;
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+            local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP));
+            local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
             local_get(old_len);
             memory_copy;
-            local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(old_len); i32_add;
+            local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(old_len); i32_add;
             local_set(dst);
         });
         for i in 0..size_bytes {
@@ -1461,16 +1469,16 @@ impl FuncCompiler<'_> {
         self.emit_expr(&args[1]); wasm!(self.func, {
             local_set(closure);
             local_get(buf); i32_load(0); local_set(len);
-            local_get(len); i32_const(STRING_HEADER_SIZE); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+            local_get(len); call(self.emitter.rt.string_alloc); local_set(dst);
             local_get(dst); local_get(len); i32_store(0);
             i32_const(0); local_set(i);
             block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
                 // dst[i] = (i32) f((i64) b[i])
-                local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add;
+                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add;
                 // closure call args: env, arg, table_idx
                 local_get(closure); i32_load(4);
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add;
                 i32_load8_u(0); i64_extend_i32_u;
                 local_get(closure); i32_load(0);
         });
@@ -1506,14 +1514,14 @@ impl FuncCompiler<'_> {
             local_get(alen); local_get(blen); i32_lt_u;
             if_i32; local_get(alen); else_; local_get(blen); end;
             local_set(n);
-            local_get(n); i32_const(STRING_HEADER_SIZE); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+            local_get(n); call(self.emitter.rt.string_alloc); local_set(dst);
             local_get(dst); local_get(n); i32_store(0);
             i32_const(0); local_set(i);
             block_empty; loop_empty;
                 local_get(i); local_get(n); i32_ge_u; br_if(1);
-                local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add;
-                local_get(a); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add; i32_load8_u(0);
-                local_get(b); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add; i32_load8_u(0);
+                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add;
+                local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add; i32_load8_u(0);
+                local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add; i32_load8_u(0);
                 i32_xor;
                 i32_store8(0);
                 local_get(i); i32_const(1); i32_add; local_set(i);
@@ -1547,12 +1555,12 @@ impl FuncCompiler<'_> {
             // If blen >= target → clone unchanged
             local_get(blen); local_get(target); i32_ge_u;
             if_i32;
-                local_get(blen); i32_const(STRING_HEADER_SIZE); i32_add; call(self.emitter.rt.alloc); local_set(dst);
-                local_get(dst); local_get(buf); local_get(blen); i32_const(STRING_DATA_OFFSET); i32_add; memory_copy;
+                local_get(blen); call(self.emitter.rt.string_alloc); local_set(dst);
+                local_get(dst); local_get(buf); local_get(blen); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; memory_copy;
                 local_get(dst);
             else_;
                 local_get(target); local_get(blen); i32_sub; local_set(pad);
-                local_get(target); i32_const(STRING_HEADER_SIZE); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+                local_get(target); call(self.emitter.rt.string_alloc); local_set(dst);
                 local_get(dst); local_get(target); i32_store(0);
         });
         if left {
@@ -1561,29 +1569,29 @@ impl FuncCompiler<'_> {
                 i32_const(0); local_set(i);
                 block_empty; loop_empty;
                     local_get(i); local_get(pad); i32_ge_u; br_if(1);
-                    local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add;
+                    local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add;
                     local_get(val); i32_store8(0);
                     local_get(i); i32_const(1); i32_add; local_set(i);
                     br(0);
                 end; end;
                 // Copy original into [pad..target)
-                local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pad); i32_add;
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pad); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                 local_get(blen);
                 memory_copy;
             });
         } else {
             wasm!(self.func, {
                 // Copy original into [0..blen)
-                local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add;
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                 local_get(blen);
                 memory_copy;
                 // Fill [blen..target) with val
                 i32_const(0); local_set(i);
                 block_empty; loop_empty;
                     local_get(i); local_get(pad); i32_ge_u; br_if(1);
-                    local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(blen); i32_add; local_get(i); i32_add;
+                    local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(blen); i32_add; local_get(i); i32_add;
                     local_get(val); i32_store8(0);
                     local_get(i); i32_const(1); i32_add; local_set(i);
                     br(0);
@@ -1638,8 +1646,8 @@ impl FuncCompiler<'_> {
                 if_i32; local_get(len); else_; local_get(avail_src); end;
                 local_set(len);
                 // memcpy: dst+4+dst_off ← src+4+src_off, len bytes
-                local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(dst_off); i32_add;
-                local_get(src); i32_const(STRING_DATA_OFFSET); i32_add; local_get(src_off); i32_add;
+                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(dst_off); i32_add;
+                local_get(src); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(src_off); i32_add;
                 local_get(len);
                 memory_copy;
             end;
@@ -1665,14 +1673,14 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_set(buf);
             local_get(buf); i32_load(0); local_set(len);
-            local_get(len); i32_const(STRING_HEADER_SIZE); i32_add; call(self.emitter.rt.alloc); local_set(dst);
+            local_get(len); call(self.emitter.rt.string_alloc); local_set(dst);
             local_get(dst); local_get(len); i32_store(0);
             i32_const(0); local_set(i);
             block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
                 // dst[4 + i] = buf[4 + (len - 1 - i)]
-                local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add;
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                 local_get(len); i32_const(1); i32_sub; local_get(i); i32_sub; i32_add;
                 i32_load8_u(0);
                 i32_store8(0);
@@ -1702,7 +1710,7 @@ impl FuncCompiler<'_> {
             i32_const(0); local_set(i);
             block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add;
                 local_get(val); i32_store8(0);
                 local_get(i); i32_const(1); i32_add; local_set(i);
                 br(0);
@@ -1733,19 +1741,18 @@ impl FuncCompiler<'_> {
             local_get(pos); local_get(len); i32_gt_u;
             if_empty; local_get(len); local_set(pos); end;
             // alloc len + 5
-            local_get(len); i32_const(STRING_HEADER_SIZE + 1); i32_add; call(self.emitter.rt.alloc); local_set(dst);
-            local_get(dst); local_get(len); i32_const(1); i32_add; i32_store(0);
+            local_get(len); i32_const(1); i32_add; call(self.emitter.rt.string_alloc); local_set(dst);
             // memcpy [0, pos)
-            local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add;
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+            local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
             local_get(pos);
             memory_copy;
-            // store val at dst+4+pos
-            local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add;
+            // store val at dst+data_off+pos
+            local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add;
             local_get(val); i32_store8(0);
-            // memcpy [pos, len)
-            local_get(dst); i32_const(5); i32_add; local_get(pos); i32_add;
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add;
+            // memcpy [pos, len) → dst+data_off+pos+1
+            local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 + 1); i32_add; local_get(pos); i32_add;
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add;
             local_get(len); local_get(pos); i32_sub;
             memory_copy;
             local_get(dst);
@@ -1770,20 +1777,19 @@ impl FuncCompiler<'_> {
             // If pos out of range → clone len+4 bytes
             local_get(pos); local_get(len); i32_ge_u;
             if_i32;
-                local_get(len); i32_const(STRING_HEADER_SIZE); i32_add; call(self.emitter.rt.alloc); local_set(dst);
-                local_get(dst); local_get(buf); local_get(len); i32_const(STRING_DATA_OFFSET); i32_add; memory_copy;
+                local_get(len); call(self.emitter.rt.string_alloc); local_set(dst);
+                local_get(dst); local_get(buf); local_get(len); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; memory_copy;
                 local_get(dst);
             else_;
-                local_get(len); i32_const(3); i32_add; call(self.emitter.rt.alloc); local_set(dst);
-                local_get(dst); local_get(len); i32_const(1); i32_sub; i32_store(0);
+                local_get(len); i32_const(1); i32_sub; call(self.emitter.rt.string_alloc); local_set(dst);
                 // memcpy [0, pos)
-                local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add;
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                 local_get(pos);
                 memory_copy;
                 // memcpy [pos+1, len)
-                local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos); i32_add;
-                local_get(buf); i32_const(5); i32_add; local_get(pos); i32_add;
+                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 + 1); i32_add; local_get(pos); i32_add;
                 local_get(len); local_get(pos); i32_sub; i32_const(1); i32_sub;
                 memory_copy;
                 local_get(dst);
@@ -1820,7 +1826,7 @@ impl FuncCompiler<'_> {
             end;
             local_set(n_chunks);
             // alloc List header: 4 + n_chunks*4
-            local_get(n_chunks); i32_const(4); i32_mul; i32_const(STRING_DATA_OFFSET); i32_add;
+            local_get(n_chunks); i32_const(4); i32_mul; i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
             call(self.emitter.rt.alloc); local_set(result);
             local_get(result); local_get(n_chunks); i32_store(0);
             i32_const(0); local_set(i);
@@ -1833,15 +1839,15 @@ impl FuncCompiler<'_> {
                 if_i32; local_get(size); else_; local_get(len); local_get(off); i32_sub; end;
                 local_set(chunk_len);
                 // alloc chunk: 4 + chunk_len
-                local_get(chunk_len); i32_const(STRING_DATA_OFFSET); i32_add;
+                local_get(chunk_len); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                 call(self.emitter.rt.alloc); local_set(chunk);
                 local_get(chunk); local_get(chunk_len); i32_store(0);
-                local_get(chunk); i32_const(STRING_DATA_OFFSET); i32_add;
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(off); i32_add;
+                local_get(chunk); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(off); i32_add;
                 local_get(chunk_len);
                 memory_copy;
                 // result.elems[i] = chunk
-                local_get(result); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_const(4); i32_mul; i32_add;
+                local_get(result); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_const(4); i32_mul; i32_add;
                 local_get(chunk); i32_store(0);
                 local_get(off); local_get(size); i32_add; local_set(off);
                 local_get(i); i32_const(1); i32_add; local_set(i);
@@ -1880,10 +1886,10 @@ impl FuncCompiler<'_> {
         if lf {
             // sep is implicit "\n" — alloc a 1-byte sep buffer at runtime.
             wasm!(self.func, {
-                i32_const(STRING_HEADER_SIZE + 1); call(self.emitter.rt.alloc); local_set(sep);
+                i32_const(1); call(self.emitter.rt.string_alloc); local_set(sep);
                 local_get(sep); i32_const(1); i32_store(0);
-                local_get(sep); i32_const(1); i32_store(STRING_CAP_OFFSET as u32, 0);
-                local_get(sep); i32_const(10); i32_store8(STRING_DATA_OFFSET as u32);
+                local_get(sep); i32_const(1); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
+                local_get(sep); i32_const(10); i32_store8(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
             });
         } else {
             self.emit_expr(&args[1]);
@@ -1900,7 +1906,7 @@ impl FuncCompiler<'_> {
                 i32_const(0); local_set(i);
                 block_empty; loop_empty;
                     local_get(i); local_get(blen); i32_ge_u; br_if(1);
-                    local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add;
+                    local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add;
                     i32_load8_u(0); i32_const(10); i32_eq;
                     if_empty; local_get(count); i32_const(1); i32_add; local_set(count); end;
                     local_get(i); i32_const(1); i32_add; local_set(i);
@@ -1911,7 +1917,7 @@ impl FuncCompiler<'_> {
                 if_empty;
                     // empty buffer → count stays 0
                 else_;
-                    local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(blen); i32_const(1); i32_sub; i32_add;
+                    local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(blen); i32_const(1); i32_sub; i32_add;
                     i32_load8_u(0); i32_const(10); i32_ne;
                     if_empty; local_get(count); i32_const(1); i32_add; local_set(count); end;
                 end;
@@ -1932,9 +1938,9 @@ impl FuncCompiler<'_> {
                         i32_const(1); local_set(out_idx);
                         block_empty; loop_empty;
                             local_get(j); local_get(plen); i32_ge_u; br_if(1);
-                            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add; local_get(j); i32_add;
+                            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add; local_get(j); i32_add;
                             i32_load8_u(0);
-                            local_get(sep); i32_const(STRING_DATA_OFFSET); i32_add; local_get(j); i32_add;
+                            local_get(sep); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(j); i32_add;
                             i32_load8_u(0);
                             i32_ne;
                             if_empty;
@@ -1957,7 +1963,7 @@ impl FuncCompiler<'_> {
         }
         // Second pass: build the actual list using count chunks.
         wasm!(self.func, {
-            local_get(count); i32_const(4); i32_mul; i32_const(STRING_DATA_OFFSET); i32_add;
+            local_get(count); i32_const(4); i32_mul; i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
             call(self.emitter.rt.alloc); local_set(result);
             local_get(result); local_get(count); i32_store(0);
             i32_const(0); local_set(start);
@@ -1973,9 +1979,9 @@ impl FuncCompiler<'_> {
                     i32_const(1); local_set(chunk_len); // reuse: match flag
                     block_empty; loop_empty;
                         local_get(j); local_get(plen); i32_ge_u; br_if(1);
-                        local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add; local_get(j); i32_add;
+                        local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add; local_get(j); i32_add;
                         i32_load8_u(0);
-                        local_get(sep); i32_const(STRING_DATA_OFFSET); i32_add; local_get(j); i32_add;
+                        local_get(sep); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(j); i32_add;
                         i32_load8_u(0);
                         i32_ne; if_empty; i32_const(0); local_set(chunk_len); br(2); end;
                         local_get(j); i32_const(1); i32_add; local_set(j);
@@ -1989,13 +1995,13 @@ impl FuncCompiler<'_> {
                 local_get(i); local_get(plen); i32_add; local_get(blen); i32_gt_u;
                 if_empty; local_get(blen); local_set(i); end;
                 local_get(i); local_get(start); i32_sub; local_set(chunk_len);
-                local_get(chunk_len); i32_const(STRING_HEADER_SIZE); i32_add; call(self.emitter.rt.alloc); local_set(chunk);
+                local_get(chunk_len); call(self.emitter.rt.string_alloc); local_set(chunk);
                 local_get(chunk); local_get(chunk_len); i32_store(0);
-                local_get(chunk); i32_const(STRING_DATA_OFFSET); i32_add;
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(start); i32_add;
+                local_get(chunk); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(start); i32_add;
                 local_get(chunk_len);
                 memory_copy;
-                local_get(result); i32_const(STRING_DATA_OFFSET); i32_add; local_get(out_idx); i32_const(4); i32_mul; i32_add;
+                local_get(result); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(out_idx); i32_const(4); i32_mul; i32_add;
                 local_get(chunk); i32_store(0);
                 local_get(out_idx); i32_const(1); i32_add; local_set(out_idx);
                 local_get(i); local_get(plen); i32_add; local_set(i);
@@ -2052,9 +2058,9 @@ impl FuncCompiler<'_> {
                 i32_const(0); local_set(i);
                 block_empty; loop_empty;
                     local_get(i); local_get(plen); i32_ge_u; br_if(1);
-                    local_get(b); i32_const(STRING_DATA_OFFSET); i32_add; local_get(off); i32_add; local_get(i); i32_add;
+                    local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(off); i32_add; local_get(i); i32_add;
                     i32_load8_u(0);
-                    local_get(pat); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add;
+                    local_get(pat); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add;
                     i32_load8_u(0);
                     i32_ne;
                     if_empty;
@@ -2108,9 +2114,9 @@ impl FuncCompiler<'_> {
                         i32_const(0); local_set(j);
                         block_empty; loop_empty;
                             local_get(j); local_get(plen); i32_ge_u; br_if(1);
-                            local_get(b); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add; local_get(j); i32_add;
+                            local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add; local_get(j); i32_add;
                             i32_load8_u(0);
-                            local_get(pat); i32_const(STRING_DATA_OFFSET); i32_add; local_get(j); i32_add;
+                            local_get(pat); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(j); i32_add;
                             i32_load8_u(0);
                             i32_ne; br_if(1);
                             local_get(j); i32_const(1); i32_add; local_set(j);
@@ -2163,8 +2169,8 @@ impl FuncCompiler<'_> {
             i32_const(0); local_set(i);
             block_empty; loop_empty;
                 local_get(i); local_get(minlen); i32_ge_u; br_if(1);
-                local_get(a); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add; i32_load8_u(0); local_set(av);
-                local_get(b); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add; i32_load8_u(0); local_set(bv);
+                local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add; i32_load8_u(0); local_set(av);
+                local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add; i32_load8_u(0); local_set(bv);
                 local_get(av); local_get(bv); i32_lt_u;
                 if_empty; i32_const(-1); local_set(result); br(2); end;
                 local_get(av); local_get(bv); i32_gt_u;
@@ -2214,7 +2220,7 @@ impl FuncCompiler<'_> {
             i32_const(1); local_set(valid);
             block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(i); i32_add; i32_load8_u(0); local_set(b);
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(i); i32_add; i32_load8_u(0); local_set(b);
                 // ASCII fast path
                 local_get(b); i32_const(128); i32_lt_u;
                 if_empty;
@@ -2249,7 +2255,7 @@ impl FuncCompiler<'_> {
                 i32_const(0); local_set(k);
                 block_empty; loop_empty;
                     local_get(k); local_get(need); i32_ge_u; br_if(1);
-                    local_get(buf); i32_const(5); i32_add;
+                    local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 + 1); i32_add;
                     local_get(i); i32_add; local_get(k); i32_add;
                     i32_load8_u(0); local_set(fb);
                     local_get(fb); i32_const(0x80); i32_lt_u;
@@ -2303,7 +2309,7 @@ impl FuncCompiler<'_> {
                 let shift = 8 * (width - 1 - i) as i64;
                 wasm!(self.func, {
                     local_get(val);
-                    local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+                    local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
                     i32_load8_u(i as u64);
                     i64_extend_i32_u;
                     i64_const(shift); i64_shl;
@@ -2323,7 +2329,7 @@ impl FuncCompiler<'_> {
         } else {
             // LE: native loads
             wasm!(self.func, {
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
             });
             match (width, signed) {
                 (1, _) => { wasm!(self.func, { i32_load8_u(0); i64_extend_i32_u; }); }
@@ -2385,7 +2391,7 @@ impl FuncCompiler<'_> {
                 let shift = 8 * (width - 1 - i) as i64;
                 wasm!(self.func, {
                     local_get(bits);
-                    local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+                    local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
                     i32_load8_u(i as u64);
                     i64_extend_i32_u;
                     i64_const(shift); i64_shl;
@@ -2404,7 +2410,7 @@ impl FuncCompiler<'_> {
             self.scratch.free_i64(bits);
         } else {
             wasm!(self.func, {
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
             });
             if width == 4 {
                 wasm!(self.func, { f32_load(0); f64_promote_f32; local_set(fval); });
@@ -2454,12 +2460,12 @@ impl FuncCompiler<'_> {
             i32_le_u;
             if_empty;
               // alloc Bytes: 4 + n bytes
-              local_get(n_i32); i32_const(STRING_DATA_OFFSET); i32_add;
+              local_get(n_i32); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
               call(self.emitter.rt.alloc); local_set(dst);
               local_get(dst); local_get(n_i32); i32_store(0);
               // memcpy data
-              local_get(dst); i32_const(STRING_DATA_OFFSET); i32_add;
-              local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+              local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+              local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
               local_get(n_i32);
               memory_copy;
               // Wrap the Bytes pointer in an Option cell (4 bytes).
@@ -2500,7 +2506,7 @@ impl FuncCompiler<'_> {
             if_empty;
               i32_const(4); call(self.emitter.rt.alloc); local_set(payload);
               local_get(payload);
-              local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+              local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
               i32_load8_u(0); i32_const(0); i32_ne;
               i32_store(0);
               local_get(payload); local_set(opt_ptr);
@@ -2538,7 +2544,7 @@ impl FuncCompiler<'_> {
             local_get(buf); i32_load(0);
             i32_le_u;
             if_empty;
-              local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+              local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
               i32_load16_u(0);
               call(self.emitter.rt.bytes_f16_to_f64);
               local_set(fval);
@@ -2579,32 +2585,33 @@ impl FuncCompiler<'_> {
             local_set(pos);
             local_get(pos); i32_wrap_i64; local_set(pos_i32);
             local_get(buf); i32_load(0); local_set(buf_len);
-            // Prefix bounds: pos + 4 <= len?
-            local_get(pos_i32); i32_const(STRING_DATA_OFFSET); i32_add;
+            // Prefix bounds: pos + 4 (u32 prefix size) <= len?
+            local_get(pos_i32); i32_const(4); i32_add;
             local_get(buf_len); i32_le_u;
             if_empty;
               // Read u32 BE length (4 bytes, big-endian).
               i32_const(0); local_set(slen);
               local_get(slen);
-              local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+              local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
               i32_load8_u(0); i32_const(24); i32_shl; i32_or;
-              local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+              local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
               i32_load8_u(1); i32_const(16); i32_shl; i32_or;
-              local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+              local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
               i32_load8_u(2); i32_const(8); i32_shl; i32_or;
-              local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add;
+              local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add;
               i32_load8_u(3); i32_or;
               local_set(slen);
               // Body bounds: pos + 4 + slen <= len?
-              local_get(pos_i32); i32_const(STRING_DATA_OFFSET); i32_add; local_get(slen); i32_add;
+              local_get(pos_i32); i32_const(4); i32_add; local_get(slen); i32_add;
               local_get(buf_len); i32_le_u;
               if_empty;
                 // Alloc String: [len:i32][utf8...]
-                local_get(slen); i32_const(STRING_DATA_OFFSET); i32_add;
+                local_get(slen); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                 call(self.emitter.rt.alloc); local_set(str_ptr);
-                local_get(str_ptr); local_get(slen); i32_store(0);
-                local_get(str_ptr); i32_const(STRING_DATA_OFFSET); i32_add;
-                local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(pos_i32); i32_add; i32_const(STRING_DATA_OFFSET); i32_add;
+                local_get(str_ptr); local_get(slen); i32_store(0); // len
+                local_get(str_ptr); local_get(slen); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP)); // cap
+                local_get(str_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+                local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(pos_i32); i32_add; i32_const(4); i32_add;
                 local_get(slen);
                 memory_copy;
                 // Option[String] cell is a 4-byte pointer wrapper.
@@ -2745,11 +2752,12 @@ impl FuncCompiler<'_> {
         // Alloc fresh buffer wider by `size_bytes`, memcpy old data.
         wasm!(self.func, {
             local_get(buf); i32_load(0); local_set(old_len);
-            local_get(old_len); i32_const(4 + size_bytes as i32); i32_add;
+            local_get(old_len); i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32 + size_bytes as i32); i32_add;
             call(self.emitter.rt.alloc); local_set(new_buf);
             local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(0);
-            local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add;
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add;
+            local_get(new_buf); local_get(old_len); i32_const(size_bytes as i32); i32_add; i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP));
+            local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
             local_get(old_len);
             memory_copy;
         });
@@ -2832,7 +2840,7 @@ impl FuncCompiler<'_> {
         be: bool,
     ) {
         wasm!(self.func, {
-            local_get(new_buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(old_len); i32_add;
+            local_get(new_buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(old_len); i32_add;
         });
         self.emit_typed_store_body(val_i64, val_f64, size_bytes, is_float, be);
     }
@@ -2849,7 +2857,7 @@ impl FuncCompiler<'_> {
         be: bool,
     ) {
         wasm!(self.func, {
-            local_get(buf); i32_const(STRING_DATA_OFFSET); i32_add; local_get(offset); i32_add;
+            local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(offset); i32_add;
         });
         self.emit_typed_store_body(val_i64, val_f64, size_bytes, is_float, be);
     }

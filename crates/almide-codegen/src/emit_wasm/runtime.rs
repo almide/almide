@@ -4,6 +4,7 @@
 //! Only fd_write is imported from WASI.
 
 use super::{CompiledFunc, WasmEmitter, SCRATCH_ITOA, NEWLINE_OFFSET};
+use super::rt_string::{string_data_off, string_hdr, string_cap_off, list_data_off, list_hdr};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
 
@@ -182,6 +183,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // Capacity-aware: if left has room, append in-place; else realloc 2x.
     emitter.rt.string_append = emitter.register_func("__string_append", concat_ty);
 
+    // __string_alloc(len) -> ptr: alloc string with len AND cap written.
+    let str_alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.rt.string_alloc = emitter.register_func("__string_alloc", str_alloc_ty);
+
     // Note: string interpolation is now emitted inline at the call site
     // (see `calls_string::emit_string_interp`). No scratch runtime helpers.
 
@@ -309,6 +314,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_println_int(emitter);
     compile_concat_str(emitter);
     compile_string_append(emitter);
+    compile_string_alloc(emitter);
     super::runtime_eq::compile_option_eq_i64(emitter);
     super::runtime_eq::compile_option_eq_str(emitter);
     super::runtime_eq::compile_result_eq_i64_str(emitter);
@@ -352,192 +358,182 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
 /// All returned pointers are guaranteed to be 8-byte aligned, matching wasi-libc
 /// and Emscripten conventions. This ensures i64 loads/stores never trap on alignment.
 fn compile_alloc(emitter: &mut WasmEmitter) {
+    use super::engine::{WasmBuilder, layout::*};
     let type_idx = emitter.func_type_indices[&emitter.rt.alloc];
-    // locals: 1=$ptr, 2=$grow_pages, 3=$prev, 4=$cur
+    let hdr = emitter.layout_reg.header_size(ALLOC_HEADER) as i32;
+    let rc_off = emitter.layout_reg.fixed_offset(ALLOC_HEADER, alloc::RC);
+    let size_off = emitter.layout_reg.fixed_offset(ALLOC_HEADER, alloc::SIZE);
+    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
+    let size_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::SIZE).ty;
+    let free_list = emitter.free_list_global;
+    let heap_ptr = emitter.heap_ptr_global;
+
+    // locals: 0=request_size, 1=ptr, 2=grow_pages, 3=prev, 4=cur
     let mut f = Function::new([
         (1, ValType::I32), (1, ValType::I32),
         (1, ValType::I32), (1, ValType::I32),
     ]);
+    {
+        let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
 
-    // Header layout: [size:i32][RC:i32][data...].
-    // alloc(request_size) returns pointer to data (ptr+8).
-    // ptr-4 = RC, ptr-8 = size (for Perceus rc_dec/free).
-    use super::list_layout::ALLOC_HEADER_SIZE;
-    let header_size: i32 = ALLOC_HEADER_SIZE;
+        // --- Free list walk ---
+        w.i32c(0).set(3);                       // prev = null
+        w.gget(free_list).set(4);               // cur = free_list_head
+        w.block(|w| { w.loop_(|w| {
+            w.get(4).eqz().br_if(1);            // cur == null → bump
+            w.get(4).emit_load(size_off, size_ty); // cur.size
+            w.get(0).ge_u();                     // >= request_size?
+            w.if_void(|w| {
+                // Found: unlink
+                w.get(3).eqz();
+                w.if_void(|w| {
+                    // prev == null → cur is head: head = cur.next
+                    w.get(4).i32c(hdr).add().emit_load(0, MemType::I32);
+                    w.gset(free_list);
+                }, |w| {
+                    // prev.next = cur.next
+                    w.get(3).i32c(hdr).add();
+                    w.get(4).i32c(hdr).add().emit_load(0, MemType::I32);
+                    w.emit_store(0, MemType::I32);
+                });
+                // RC = 1
+                w.get(4).i32c(1).emit_store(rc_off, rc_ty);
+                // Zero-fill reused block's data area to prevent stale data
+                // (critical for Swiss Table tag arrays)
+                w.get(4).i32c(hdr).add();  // data_ptr
+                w.i32c(0);                 // fill value
+                w.get(4).emit_load(size_off, size_ty); // size
+                w.raw(wasm_encoder::Instruction::MemoryFill(0));
+                // Return data ptr
+                w.get(4).i32c(hdr).add().ret();
+            }, |_| {});
+            // Advance: prev = cur, cur = cur.next
+            w.get(4).set(3);
+            w.get(4).i32c(hdr).add().emit_load(0, MemType::I32).set(4);
+            w.br(0);
+        }); });
 
-    wasm!(f, {
-        // --- Free list check: walk list for block >= requested size ---
-        i32_const(0); local_set(3);                       // prev = null
-        global_get(emitter.free_list_global); local_set(4); // cur = free_list_head
-        block_empty; loop_empty;
-          local_get(4); i32_eqz; br_if(1);                // cur == null → bump path
-          // Check size: *(cur) >= request_size?
-          local_get(4); i32_load(0);                       // cur.size
-          local_get(0);                                    // request_size
-          i32_ge_u;
-          if_empty;
-            // Found: unlink from free list
-            local_get(3); i32_eqz;
-            if_empty;
-              // prev == null → cur is head
-              local_get(4); i32_const(header_size); i32_add; i32_load(0); // cur.next
-              global_set(emitter.free_list_global);
-            else_;
-              // prev.next = cur.next
-              local_get(3); i32_const(header_size); i32_add;
-              local_get(4); i32_const(header_size); i32_add; i32_load(0);
-              i32_store(0);
-            end;
-            // Write RC=1, return cur+8
-            local_get(4); i32_const(1); i32_store(4);     // RC = 1
-            local_get(4); i32_const(header_size); i32_add;
-            return_;
-          end;
-          // Advance: prev = cur, cur = cur.next
-          local_get(4); local_set(3);
-          local_get(4); i32_const(header_size); i32_add; i32_load(0);
-          local_set(4);
-          br(0);
-        end; end;
-
-        // --- Bump path (no suitable free block found) ---
-        // Align heap_ptr to 8-byte boundary
-        global_get(emitter.heap_ptr_global);
-        i32_const(7); i32_add; i32_const(-8); i32_and;
-        local_set(1);
-        // Advance heap_ptr: ptr + size + header
-        local_get(1);
-        local_get(0);
-        i32_add;
-        i32_const(header_size); i32_add;
-        global_set(emitter.heap_ptr_global);
+        // --- Bump path ---
+        // Align heap_ptr to header boundary
+        let align_mask = hdr - 1;       // hdr is power of 2 (8) → mask = 7
+        w.gget(heap_ptr).i32c(align_mask).add().i32c(-hdr).and().set(1);
+        // Advance: ptr + size + header
+        w.get(1).get(0).add().i32c(hdr).add().gset(heap_ptr);
         // Grow memory if needed
-        global_get(emitter.heap_ptr_global); i64_extend_i32_u;
-        i64_const(65535); i64_add;
-        i64_const(16); i64_shr_u;
-        i32_wrap_i64;
-        memory_size(0);
-        i32_sub;
-        local_tee(2);
-        i32_const(0);
-        i32_gt_s;
-        if_empty;
-          memory_size(0);
-          local_get(2);
-          memory_size(0);
-          local_get(2);
-          i32_gt_u;
-          select;
-          memory_grow(0);
-          i32_const(-1); i32_eq;
-          if_empty; unreachable; end;
-        end;
-        // Write header: size + RC
-        local_get(1);
-        local_get(0);
-        i32_store(0);                // *(ptr) = size
-        local_get(1);
-        i32_const(1);
-        i32_store(4);                // *(ptr+4) = RC = 1
-        // Return ptr + 8 (data starts after size+RC header)
-        local_get(1);
-        i32_const(header_size); i32_add;
-        end;
-    });
-
+        w.gget(heap_ptr);
+        w.raw(wasm_encoder::Instruction::I64ExtendI32U);
+        w.raw(wasm_encoder::Instruction::I64Const(65535));
+        w.raw(wasm_encoder::Instruction::I64Add);
+        w.raw(wasm_encoder::Instruction::I64Const(16));
+        w.raw(wasm_encoder::Instruction::I64ShrU);
+        w.raw(wasm_encoder::Instruction::I32WrapI64);
+        w.memory_size().sub().tee(2);
+        w.i32c(0);
+        w.raw(wasm_encoder::Instruction::I32GtS);
+        w.if_void(|w| {
+            w.memory_size().get(2);
+            w.memory_size().get(2);
+            w.gt_u();
+            w.raw(wasm_encoder::Instruction::Select);
+            w.memory_grow();
+            w.i32c(-1).eq();
+            w.if_void(|w| { w.unreachable_(); }, |_| {});
+        }, |_| {});
+        // Write header
+        w.get(1).get(0).emit_store(size_off, size_ty);
+        w.get(1).i32c(1).emit_store(rc_off, rc_ty);
+        // Return data ptr
+        w.get(1).i32c(hdr).add();
+    }
+    f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
-// __rc_inc(ptr: i32) -> i32
-// Increment refcount at ptr - RC_OFFSET, return ptr unchanged.
 fn compile_rc_inc(emitter: &mut WasmEmitter) {
-    use super::list_layout::RC_OFFSET;
+    use super::engine::{WasmBuilder, layout::*};
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_inc];
+    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
+    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
+    let heap_start = emitter.rt.heap_start_global;
+
     let mut f = Function::new([]);
-    wasm!(f, {
-        // addr = ptr - RC_OFFSET
-        local_get(0); i32_const(RC_OFFSET); i32_sub;
-        // store(addr, load(addr) + 1)
-        local_get(0); i32_const(RC_OFFSET); i32_sub;
-        i32_load(0);
-        i32_const(1); i32_add;
-        i32_store(0);
-        // return ptr
-        local_get(0);
-        end;
-    });
+    {
+        let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
+        // Guard: data section ptrs have no header
+        w.get(0).gget(heap_start).lt_u();
+        w.if_void(|w| { w.get(0).ret(); }, |_| {});
+        // *(ptr - rc_neg) += 1
+        w.get(0).i32c(rc_neg).sub();
+        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty);
+        w.i32c(1).add();
+        w.emit_store(0, rc_ty);
+        w.get(0); // return ptr
+    }
+    f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
-// __rc_dec(ptr: i32) → ()
-// Decrement RC. If RC drops to 0, push block to free list for reuse.
-// Free list entry: block_base = ptr - ALLOC_HEADER_SIZE. Reuse data area
-// for [next_ptr:i32] linked list.
 fn compile_rc_dec(emitter: &mut WasmEmitter) {
-    use super::list_layout::{ALLOC_HEADER_SIZE, RC_OFFSET};
+    use super::engine::{WasmBuilder, layout::*};
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_dec];
+    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
+    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
+    let hdr = emitter.layout_reg.header_size(ALLOC_HEADER) as i32;
+    let heap_start = emitter.rt.heap_start_global;
+    let free_list = emitter.free_list_global;
+
     let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
-    wasm!(f, {
-        // rc = *(ptr - RC_OFFSET)   [header: size@-8, RC@-4, data@0]
-        local_get(0); i32_const(RC_OFFSET); i32_sub;
-        i32_load(0);
-        local_tee(1);
-        i32_const(1);
-        i32_gt_u;
-        if_empty;
-          // rc > 1: decrement
-          local_get(0); i32_const(RC_OFFSET); i32_sub;
-          local_get(1); i32_const(1); i32_sub;
-          i32_store(0);
-        else_;
-          // rc <= 1: push to free list
-          // Store next pointer in data area: *(ptr) = free_list_head
-          local_get(0);
-          global_get(emitter.free_list_global);
-          i32_store(0);
-          // free_list_head = block_base = ptr - ALLOC_HEADER_SIZE
-          local_get(0); i32_const(ALLOC_HEADER_SIZE); i32_sub;
-          global_set(emitter.free_list_global);
-        end;
-        end;
-    });
+    {
+        let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
+        w.get(0).gget(heap_start).lt_u();
+        w.if_void(|w| { w.ret(); }, |_| {});
+        // rc = *(ptr - rc_neg)
+        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty).tee(1);
+        w.i32c(1).gt_u();
+        w.if_void(|w| {
+            // rc > 1: decrement
+            w.get(0).i32c(rc_neg).sub();
+            w.get(1).i32c(1).sub();
+            w.emit_store(0, rc_ty);
+        }, |w| {
+            // rc <= 1: dead block. Push to free list for reuse.
+            w.get(0).gget(free_list).emit_store(0, MemType::I32);
+            w.get(0).i32c(hdr).sub().gset(free_list);
+        });
+    }
+    f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
-// __cow_check(ptr: i32, size: i32) -> i32
-// If refcount > 1: allocate new buffer, memcpy, decrement old rc, return new ptr.
-// If refcount == 1: return ptr unchanged (in-place mutation is safe).
 fn compile_cow_check(emitter: &mut WasmEmitter) {
+    use super::engine::{WasmBuilder, layout::*};
     let type_idx = emitter.func_type_indices[&emitter.rt.cow_check];
+    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
+    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
+    let heap_start = emitter.rt.heap_start_global;
+    let alloc_fn = emitter.rt.alloc;
+
     let mut f = Function::new([(1, ValType::I32)]); // local 2: $new_ptr
-    wasm!(f, {
-        // if load(ptr - 4) <= 1 then return ptr (unique owner)
-        local_get(0); i32_const(4); i32_sub;
-        i32_load(2, 0);
-        i32_const(1); i32_le_u;
-        if_empty;
-            local_get(0);
-            return_;
-        end;
-        // Shared: allocate new buffer of `size` bytes
-        local_get(1);
-        call(emitter.rt.alloc);
-        local_set(2);
-        // memcpy: new_ptr[0..size] = ptr[0..size]
-        local_get(2); // dst
-        local_get(0); // src
-        local_get(1); // size
-        memory_copy(0, 0);
-        // Decrement old refcount
-        local_get(0); i32_const(4); i32_sub;
-        local_get(0); i32_const(4); i32_sub;
-        i32_load(2, 0);
-        i32_const(1); i32_sub;
-        i32_store(2, 0);
-        // Return new ptr
-        local_get(2);
-        end;
-    });
+    {
+        let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
+        // Data section → unique
+        w.get(0).gget(heap_start).lt_u();
+        w.if_void(|w| { w.get(0).ret(); }, |_| {});
+        // if rc <= 1 → unique owner, return as-is
+        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty);
+        w.i32c(1).raw(wasm_encoder::Instruction::I32LeU);
+        w.if_void(|w| { w.get(0).ret(); }, |_| {});
+        // Shared: alloc new, memcpy, dec old rc
+        w.get(1).call(alloc_fn).set(2);
+        w.get(2).get(0).get(1).memory_copy();
+        // old rc -= 1
+        w.get(0).i32c(rc_neg).sub();
+        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty);
+        w.i32c(1).sub();
+        w.emit_store(0, rc_ty);
+        w.get(2); // return new ptr
+    }
+    f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
@@ -577,11 +573,11 @@ fn compile_println_str(emitter: &mut WasmEmitter) {
     let mut f = Function::new([]);
 
     // --- Write the string ---
-    // iov[0].buf = ptr + STRING_DATA_OFFSET  (skip len+cap header)
+    // iov[0].buf = ptr + string_data_off()  (skip len+cap header)
     wasm!(f, {
         i32_const(0);
         local_get(0);
-        i32_const(super::list_layout::STRING_DATA_OFFSET);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
         i32_add;
         i32_store(0);
     });
@@ -747,11 +743,11 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         local_set(5);
     });
 
-    // $result = __alloc(STRING_HEADER_SIZE + $len)
+    // $result = __alloc(string_hdr() + $len)
     // String layout: [len:i32][cap:i32][data@8]
     wasm!(f, {
         local_get(5);
-        i32_const(super::list_layout::STRING_HEADER_SIZE);
+        i32_const(emitter.layout_reg.header_size(super::engine::layout::STRING) as i32);
         i32_add;
         call(emitter.rt.alloc);
         local_set(6);
@@ -764,10 +760,10 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         i32_store(0);
         local_get(6);
         local_get(5);
-        i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
+        i32_store(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
     });
 
-    // memcpy: copy $len bytes from $start to $result+STRING_DATA_OFFSET
+    // memcpy: copy $len bytes from $start to $result+string_data_off()
     wasm!(f, {
         i32_const(0);
         local_set(7);
@@ -778,10 +774,10 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         i32_ge_u;
         br_if(1);
     });
-    // mem[$result + STRING_DATA_OFFSET + $i] = mem[$start + $i]
+    // mem[$result + string_data_off() + $i] = mem[$start + $i]
     wasm!(f, {
         local_get(6);
-        i32_const(super::list_layout::STRING_DATA_OFFSET);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
         i32_add;
         local_get(7);
         i32_add;
@@ -873,15 +869,15 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     // Build frac string from buf[0..count]
     // String layout: [len:i32][cap:i32][data@8]
     wasm!(f, {
-        i32_const(super::list_layout::STRING_HEADER_SIZE); local_get(5); i32_add;
+        i32_const(emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); local_get(5); i32_add;
         call(emitter.rt.alloc); local_set(2);
         local_get(2); local_get(5); i32_store(0);
-        local_get(2); local_get(5); i32_store(super::list_layout::STRING_CAP_OFFSET as u32, 0);
+        local_get(2); local_get(5); i32_store(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
         // Copy digits
         i32_const(0); local_set(6);
         block_empty; loop_empty;
           local_get(6); local_get(5); i32_ge_u; br_if(1);
-          local_get(2); i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add; local_get(6); i32_add;
+          local_get(2); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(6); i32_add;
           local_get(4); local_get(6); i32_add; i32_load8_u(0);
           i32_store8(0);
           local_get(6); i32_const(1); i32_add; local_set(6);
@@ -921,7 +917,6 @@ fn compile_println_int(emitter: &mut WasmEmitter) {
 /// __concat_str(left: i32, right: i32) -> i32
 /// Concatenates two strings. Each is [len:i32][data:u8...].
 fn compile_concat_str(emitter: &mut WasmEmitter) {
-    use super::list_layout::{STRING_DATA_OFFSET, STRING_CAP_OFFSET, STRING_HEADER_SIZE};
     let type_idx = emitter.func_type_indices[&emitter.rt.concat_str];
     // params: 0=$left, 1=$right
     // locals: 2=$left_len, 3=$right_len, 4=$new_len, 5=$result, 6=$i
@@ -945,7 +940,7 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
         i32_add;
         local_set(4);       // new_len = left_len + right_len
         local_get(4);
-        i32_const(STRING_HEADER_SIZE);
+        i32_const(string_hdr());
         i32_add;
         call(emitter.rt.alloc);
         local_set(5);
@@ -954,12 +949,12 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
         i32_store(0);       // result.len = new_len
         local_get(5);
         local_get(4);
-        i32_store(STRING_CAP_OFFSET as u32); // result.cap = new_len
+        i32_store(string_cap_off() as u32); // result.cap = new_len
     });
 
     // Copy left data: dst=result+DATA_OFFSET, src=left+DATA_OFFSET
     emit_memcpy_loop(&mut f, 5, 0, 2, 6,
-        STRING_DATA_OFFSET as u32, STRING_DATA_OFFSET as u32);
+        string_data_off() as u32, string_data_off() as u32);
 
     // Copy right data: dst=result+DATA_OFFSET+left_len, src=right+DATA_OFFSET
     wasm!(f, {
@@ -972,14 +967,14 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
         i32_ge_u;
         br_if(1);
         local_get(5);
-        i32_const(STRING_DATA_OFFSET);
+        i32_const(string_data_off());
         i32_add;
         local_get(2);
         i32_add;
         local_get(6);
         i32_add;
         local_get(1);
-        i32_const(STRING_DATA_OFFSET);
+        i32_const(string_data_off());
         i32_add;
         local_get(6);
         i32_add;
@@ -998,9 +993,39 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
+/// __string_alloc(data_len: i32) -> ptr
+/// Allocate a string buffer with header properly initialized:
+///   ptr[0] = data_len (len field)
+///   ptr[cap_off] = data_len (cap field)
+/// Returns pointer to the string header.
+/// This eliminates the entire class of "cap not written" bugs.
+fn compile_string_alloc(emitter: &mut WasmEmitter) {
+    use super::engine::{WasmBuilder, layout::*};
+    let type_idx = emitter.func_type_indices[&emitter.rt.string_alloc];
+    let hdr = emitter.layout_reg.header_size(STRING) as i32;
+    let cap_off = emitter.layout_reg.fixed_offset(STRING, string::CAP);
+    let cap_ty = emitter.layout_reg.field(STRING, string::CAP).ty;
+    let alloc_fn = emitter.rt.alloc;
+
+    // param 0 = data_len, local 1 = ptr
+    let mut f = Function::new([(1, ValType::I32)]);
+    {
+        let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
+        // ptr = alloc(hdr + data_len)
+        w.get(0).i32c(hdr).add().call(alloc_fn).set(1);
+        // ptr.len = data_len
+        w.get(1).get(0).emit_store(0, MemType::I32);
+        // ptr.cap = data_len
+        w.get(1).get(0).emit_store(cap_off, cap_ty);
+        // return ptr
+        w.get(1);
+    }
+    f.instruction(&wasm_encoder::Instruction::End);
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
 /// Capacity-aware string append: if left has room, append in-place; else grow 2x.
 fn compile_string_append(emitter: &mut WasmEmitter) {
-    use super::list_layout::{STRING_DATA_OFFSET, STRING_CAP_OFFSET};
     let type_idx = emitter.func_type_indices[&emitter.rt.string_append];
     // params: 0=$left, 1=$right
     // locals: 2=$left_len, 3=$right_len, 4=$new_len, 5=$left_cap, 6=$result, 7=$i
@@ -1017,14 +1042,14 @@ fn compile_string_append(emitter: &mut WasmEmitter) {
         local_get(0); i32_load(0); local_set(2);               // left_len
         local_get(1); i32_load(0); local_set(3);               // right_len
         local_get(2); local_get(3); i32_add; local_set(4);     // new_len
-        local_get(0); i32_load(STRING_CAP_OFFSET as u32); local_set(5); // left_cap
+        local_get(0); i32_load(string_cap_off() as u32); local_set(5); // left_cap
 
         // if left_cap >= new_len: append in-place
         local_get(5); local_get(4); i32_ge_u;
         if_i32;
           // In-place: memory_copy right data after left data
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add;
-          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(2); i32_add;
+          local_get(1); i32_const(string_data_off()); i32_add;
           local_get(3);
           memory_copy;
           // Update left.len
@@ -1036,18 +1061,18 @@ fn compile_string_append(emitter: &mut WasmEmitter) {
           local_get(5); local_get(4); i32_lt_u;
           if_empty; local_get(4); local_set(5); end;          // cap = max(cap*2, new_len)
           // Alloc
-          local_get(5); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(5); i32_const(string_data_off()); i32_add;
           call(emitter.rt.alloc); local_set(6);
           local_get(6); local_get(4); i32_store(0);           // result.len = new_len
-          local_get(6); local_get(5); i32_store(STRING_CAP_OFFSET as u32); // result.cap
+          local_get(6); local_get(5); i32_store(string_cap_off() as u32); // result.cap
           // Copy left data
-          local_get(6); i32_const(STRING_DATA_OFFSET); i32_add;
-          local_get(0); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(6); i32_const(string_data_off()); i32_add;
+          local_get(0); i32_const(string_data_off()); i32_add;
           local_get(2);
           memory_copy;
           // Copy right data
-          local_get(6); i32_const(STRING_DATA_OFFSET); i32_add; local_get(2); i32_add;
-          local_get(1); i32_const(STRING_DATA_OFFSET); i32_add;
+          local_get(6); i32_const(string_data_off()); i32_add; local_get(2); i32_add;
+          local_get(1); i32_const(string_data_off()); i32_add;
           local_get(3);
           memory_copy;
           local_get(6);  // return new pointer

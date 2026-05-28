@@ -24,6 +24,7 @@ jobs:
   # ═══════════════════════════════════════════════
 
   build:
+    if: github.server_url == 'https://github.com'
     name: Build (Linux)
     runs-on: ubuntu-latest
     steps:
@@ -124,6 +125,7 @@ jobs:
   # ═══════════════════════════════════════════════
 
   lean-proofs:
+    if: github.server_url == 'https://github.com'
     name: Lean Proofs (0 sorry)
     runs-on: ubuntu-latest
     steps:
@@ -171,7 +173,7 @@ jobs:
 
   build-cross:
     name: Build (${{ matrix.os }})
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: github.server_url == 'https://github.com' && github.event_name == 'pull_request' && github.base_ref == 'main'
     strategy:
       matrix:
         include:
@@ -197,6 +199,10 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-
 
       - run: cargo build --release
+
+      - name: Install wasmtime
+        if: runner.os != 'Windows'
+        run: curl https://wasmtime.dev/install.sh -sSf | bash && echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
 
       # --test-threads=1: see note on the primary Test Rust job.
       - run: cargo test -- --test-threads=1

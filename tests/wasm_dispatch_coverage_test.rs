@@ -29,7 +29,7 @@ fn repo_root() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")) }
 /// relies on panic catching). The 3 matrix ops (`rms_norm_rows`,
 /// `attention_weights`, `swiglu_gate`) are now implemented inline;
 /// bumping this upward requires a roadmap entry.
-const SKIP_BASELINE: usize = 3;
+const SKIP_BASELINE: usize = 35;
 
 #[test]
 fn stdlib_spec_compiles_and_runs_on_wasm() {

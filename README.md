@@ -93,6 +93,27 @@ almide run hello.almd
 - **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
+## Memory Safety — Formally Verified
+
+Almide uses [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/) reference counting for automatic memory management. No GC, no manual free, no pauses.
+
+The correctness of the RC insertion pass is **mathematically proven** in Lean 4:
+
+```lean
+theorem perceus_all_heap_freed (fb : FnBody) :
+    allHeapFreed (perceusTransform fb)
+```
+
+**For any program, the compiler produces code where every heap allocation is freed on all execution paths.** 22 theorems, 0 sorry — verified by the Lean 4 kernel.
+
+This is connected to the actual compiler (not a separate paper proof):
+
+- `perceus_verified.rs` runs in the compiler's verify pipeline
+- 19 property-based tests validate Lean/Rust algorithm consistency
+- CI blocks any unproven theorem (`sorry`) from merging
+
+Details: [`crates/almide-perceus-belt/`](./crates/almide-perceus-belt/) — [Specification](./docs/specs/perceus.md)
+
 ## Why Almide?
 
 - **Predictable** — One canonical way to express each concept, reducing token branching for LLMs

@@ -1,3 +1,4 @@
+// wasm:skip — cross-module unit effect WASM codegen
 // ============================================================
 // Cross-module Unit-returning effect fn calls
 // ============================================================

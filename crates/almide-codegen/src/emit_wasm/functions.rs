@@ -163,7 +163,11 @@ fn compile_function_inner(
     // insert Unreachable to satisfy the validator (the code is unreachable in practice).
     let body_produces = super::values::ty_to_valtype(&func.body.ty);
     let func_expects = super::values::ty_to_valtype(&func.ret_ty);
-    if func_expects.is_some() && body_produces.is_none() {
+    if func_expects.is_none() && body_produces.is_some() {
+        // Void function but body pushes a value (Perceus tail expression
+        // in void blocks). Drop to maintain WASM stack balance.
+        wasm!(compiler.func, { drop; });
+    } else if func_expects.is_some() && body_produces.is_none() {
         wasm!(compiler.func, { unreachable; });
     }
 

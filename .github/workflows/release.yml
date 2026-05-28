@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   build:
+    if: github.server_url == 'https://github.com'
     name: Build (${{ matrix.target }})
     strategy:
       fail-fast: false

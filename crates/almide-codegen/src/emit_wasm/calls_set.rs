@@ -4,7 +4,6 @@
 //! Essentially a List with unique elements.
 
 use super::FuncCompiler;
-use super::list_layout::{DATA_OFFSET, HEADER_SIZE};
 use super::values;
 use almide_ir::IrExpr;
 use almide_lang::types::Ty;
@@ -16,7 +15,7 @@ impl FuncCompiler<'_> {
             "new" => {
                 let s = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(HEADER_SIZE); call(self.emitter.rt.alloc); local_set(s);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); call(self.emitter.rt.alloc); local_set(s);
                     local_get(s); i32_const(0); i32_store(0);
                     local_get(s);
                 });
@@ -41,7 +40,7 @@ impl FuncCompiler<'_> {
                 let xs = self.scratch.alloc_i32();
                 // Start with empty set
                 wasm!(self.func, {
-                    i32_const(HEADER_SIZE); call(self.emitter.rt.alloc); local_set(s);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); call(self.emitter.rt.alloc); local_set(s);
                     local_get(s); i32_const(0); i32_store(0);
                 });
                 self.emit_expr(&args[0]);
@@ -55,12 +54,12 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(s3); // found
                       block_empty; loop_empty;
                         local_get(s2); local_get(s); i32_load(0); i32_ge_u; br_if(1);
-                        local_get(s); i32_const(DATA_OFFSET); i32_add;
+                        local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
-                        local_get(xs); i32_const(DATA_OFFSET); i32_add;
+                        local_get(xs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s1); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -74,7 +73,7 @@ impl FuncCompiler<'_> {
                       local_get(s3); i32_eqz;
                       if_empty;
                         // Grow set: alloc new with len+1
-                        i32_const(HEADER_SIZE); local_get(s); i32_load(0); i32_const(1); i32_add;
+                        i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(s); i32_load(0); i32_const(1); i32_add;
                         i32_const(es); i32_mul; i32_add;
                         call(self.emitter.rt.alloc); local_set(s2);
                         local_get(s2); local_get(s); i32_load(0); i32_const(1); i32_add; i32_store(0);
@@ -82,9 +81,9 @@ impl FuncCompiler<'_> {
                         i32_const(0); local_set(s3);
                         block_empty; loop_empty;
                           local_get(s3); local_get(s); i32_load(0); i32_ge_u; br_if(1);
-                          local_get(s2); i32_const(DATA_OFFSET); i32_add;
+                          local_get(s2); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                           local_get(s3); i32_const(es); i32_mul; i32_add;
-                          local_get(s); i32_const(DATA_OFFSET); i32_add;
+                          local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                           local_get(s3); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -93,9 +92,9 @@ impl FuncCompiler<'_> {
                           br(0);
                         end; end;
                         // Append new element
-                        local_get(s2); i32_const(DATA_OFFSET); i32_add;
+                        local_get(s2); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s); i32_load(0); i32_const(es); i32_mul; i32_add;
-                        local_get(xs); i32_const(DATA_OFFSET); i32_add;
+                        local_get(xs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s1); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -131,7 +130,7 @@ impl FuncCompiler<'_> {
                             i32_const(0); local_set(s2);
                             block_empty; loop_empty;
                               local_get(s1); local_get(s); i32_load(0); i32_ge_u; br_if(1);
-                              local_get(s); i32_const(DATA_OFFSET); i32_add;
+                              local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                               local_get(s1); i32_const(es); i32_mul; i32_add;
                               i64_load(0); local_get(s64); i64_eq;
                               if_empty; i32_const(1); local_set(s2); br(2); end;
@@ -151,7 +150,7 @@ impl FuncCompiler<'_> {
                             i32_const(0); local_set(s2);
                             block_empty; loop_empty;
                               local_get(s1); local_get(s); i32_load(0); i32_ge_u; br_if(1);
-                              local_get(s); i32_const(DATA_OFFSET); i32_add;
+                              local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                               local_get(s1); i32_const(es); i32_mul; i32_add;
                               i32_load(0); local_get(s3);
                         });
@@ -191,7 +190,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(s2); // found
                     block_empty; loop_empty;
                       local_get(s1); local_get(s); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(s); i32_const(DATA_OFFSET); i32_add;
+                      local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(s1); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -205,16 +204,16 @@ impl FuncCompiler<'_> {
                     local_get(s2);
                     if_i32; local_get(s);
                     else_;
-                      i32_const(HEADER_SIZE); local_get(s); i32_load(0); i32_const(1); i32_add;
+                      i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(s); i32_load(0); i32_const(1); i32_add;
                       i32_const(es); i32_mul; i32_add;
                       call(self.emitter.rt.alloc); local_set(s1);
                       local_get(s1); local_get(s); i32_load(0); i32_const(1); i32_add; i32_store(0);
                       i32_const(0); local_set(s2);
                       block_empty; loop_empty;
                         local_get(s2); local_get(s); i32_load(0); i32_ge_u; br_if(1);
-                        local_get(s1); i32_const(DATA_OFFSET); i32_add;
+                        local_get(s1); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
-                        local_get(s); i32_const(DATA_OFFSET); i32_add;
+                        local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -222,7 +221,7 @@ impl FuncCompiler<'_> {
                         local_get(s2); i32_const(1); i32_add; local_set(s2);
                         br(0);
                       end; end;
-                      local_get(s1); i32_const(DATA_OFFSET); i32_add;
+                      local_get(s1); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(s); i32_load(0); i32_const(es); i32_mul; i32_add;
                       local_get(val);
                 });
@@ -252,7 +251,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(s2);
                     block_empty; loop_empty;
                       local_get(s2); local_get(s); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(s); i32_const(DATA_OFFSET); i32_add;
+                      local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -268,7 +267,7 @@ impl FuncCompiler<'_> {
                     else_;
                       // Store original set ptr
                       local_get(s); local_set(orig);
-                      i32_const(HEADER_SIZE); local_get(orig); i32_load(0); i32_const(1); i32_sub;
+                      i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(orig); i32_load(0); i32_const(1); i32_sub;
                       i32_const(es); i32_mul; i32_add;
                       call(self.emitter.rt.alloc); local_set(s2);
                       local_get(s2);
@@ -282,9 +281,9 @@ impl FuncCompiler<'_> {
                         i32_ge_u; br_if(1);
                         local_get(s3); local_get(s1); i32_ne;
                         if_empty;
-                          local_get(s2); i32_const(DATA_OFFSET); i32_add;
+                          local_get(s2); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                           local_get(s); i32_const(es); i32_mul; i32_add;
-                          local_get(orig); i32_const(DATA_OFFSET); i32_add;
+                          local_get(orig); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                           local_get(s3); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -320,16 +319,16 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(b);
                     // Alloc max size: a.len + b.len
-                    i32_const(HEADER_SIZE); local_get(a); i32_load(0); local_get(b); i32_load(0); i32_add;
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(a); i32_load(0); local_get(b); i32_load(0); i32_add;
                     i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     // Copy all of a first
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(a); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(result); i32_const(DATA_OFFSET); i32_add;
+                      local_get(result); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
-                      local_get(a); i32_const(DATA_OFFSET); i32_add;
+                      local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -346,12 +345,12 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(j);
                       block_empty; loop_empty;
                         local_get(j); local_get(a); i32_load(0); i32_ge_u; br_if(1);
-                        local_get(b); i32_const(DATA_OFFSET); i32_add;
+                        local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
-                        local_get(a); i32_const(DATA_OFFSET); i32_add;
+                        local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(j); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -364,9 +363,9 @@ impl FuncCompiler<'_> {
                       // j >= a.len means NOT found → add b[i]
                       local_get(j); local_get(a); i32_load(0); i32_ge_u;
                       if_empty;
-                        local_get(result); i32_const(DATA_OFFSET); i32_add;
+                        local_get(result); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(out_count); i32_const(es); i32_mul; i32_add;
-                        local_get(b); i32_const(DATA_OFFSET); i32_add;
+                        local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -410,7 +409,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(b);
                     // result = alloc(4 + a.len * es)
-                    i32_const(HEADER_SIZE); local_get(a); i32_load(0);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(a); i32_load(0);
                     i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(s);
                     i32_const(0); local_set(s1); // out_count
@@ -422,13 +421,13 @@ impl FuncCompiler<'_> {
                       block_empty; loop_empty;
                         local_get(s3); local_get(b); i32_load(0); i32_ge_u; br_if(1);
                         // Load a[i]
-                        local_get(a); i32_const(DATA_OFFSET); i32_add;
+                        local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
                         // Load b[j]
-                        local_get(b); i32_const(DATA_OFFSET); i32_add;
+                        local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s3); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -442,9 +441,9 @@ impl FuncCompiler<'_> {
                       local_get(s3); local_get(b); i32_load(0); i32_lt_u;
                       if_empty;
                         // Copy a[i] to result[out_count]
-                        local_get(s); i32_const(DATA_OFFSET); i32_add;
+                        local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s1); i32_const(es); i32_mul; i32_add;
-                        local_get(a); i32_const(DATA_OFFSET); i32_add;
+                        local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -480,7 +479,7 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     local_set(b);
-                    i32_const(HEADER_SIZE); local_get(a); i32_load(0);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(a); i32_load(0);
                     i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(s);
                     i32_const(0); local_set(s1);
@@ -490,12 +489,12 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(s3); // j
                       block_empty; loop_empty;
                         local_get(s3); local_get(b); i32_load(0); i32_ge_u; br_if(1);
-                        local_get(a); i32_const(DATA_OFFSET); i32_add;
+                        local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
-                        local_get(b); i32_const(DATA_OFFSET); i32_add;
+                        local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s3); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -508,9 +507,9 @@ impl FuncCompiler<'_> {
                       // j >= b.len means NOT found → keep element
                       local_get(s3); local_get(b); i32_load(0); i32_ge_u;
                       if_empty;
-                        local_get(s); i32_const(DATA_OFFSET); i32_add;
+                        local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s1); i32_const(es); i32_mul; i32_add;
-                        local_get(a); i32_const(DATA_OFFSET); i32_add;
+                        local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -549,7 +548,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(b);
                     // result = alloc(4 + (a.len + b.len) * es)
-                    i32_const(HEADER_SIZE);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32);
                     local_get(a); i32_load(0);
                     local_get(b); i32_load(0);
                     i32_add; i32_const(es); i32_mul; i32_add;
@@ -564,12 +563,12 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(s3);
                       block_empty; loop_empty;
                         local_get(s3); local_get(b); i32_load(0); i32_ge_u; br_if(1);
-                        local_get(a); i32_const(DATA_OFFSET); i32_add;
+                        local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
-                        local_get(b); i32_const(DATA_OFFSET); i32_add;
+                        local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s3); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -581,9 +580,9 @@ impl FuncCompiler<'_> {
                       end; end;
                       local_get(s3); local_get(b); i32_load(0); i32_ge_u;
                       if_empty;
-                        local_get(s); i32_const(DATA_OFFSET); i32_add;
+                        local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s1); i32_const(es); i32_mul; i32_add;
-                        local_get(a); i32_const(DATA_OFFSET); i32_add;
+                        local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -602,12 +601,12 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(s3);
                       block_empty; loop_empty;
                         local_get(s3); local_get(a); i32_load(0); i32_ge_u; br_if(1);
-                        local_get(b); i32_const(DATA_OFFSET); i32_add;
+                        local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
-                        local_get(a); i32_const(DATA_OFFSET); i32_add;
+                        local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s3); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -619,9 +618,9 @@ impl FuncCompiler<'_> {
                       end; end;
                       local_get(s3); local_get(a); i32_load(0); i32_ge_u;
                       if_empty;
-                        local_get(s); i32_const(DATA_OFFSET); i32_add;
+                        local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s1); i32_const(es); i32_mul; i32_add;
-                        local_get(b); i32_const(DATA_OFFSET); i32_add;
+                        local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
@@ -663,12 +662,12 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(s2); // j
                       block_empty; loop_empty;
                         local_get(s2); local_get(b); i32_load(0); i32_ge_u; br_if(1);
-                        local_get(a); i32_const(DATA_OFFSET); i32_add;
+                        local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s1); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
-                        local_get(b); i32_const(DATA_OFFSET); i32_add;
+                        local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -717,12 +716,12 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(s2); // j
                       block_empty; loop_empty;
                         local_get(s2); local_get(b); i32_load(0); i32_ge_u; br_if(1);
-                        local_get(a); i32_const(DATA_OFFSET); i32_add;
+                        local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s1); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
-                        local_get(b); i32_const(DATA_OFFSET); i32_add;
+                        local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
@@ -766,7 +765,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(mapped);
                     // Start with empty set
-                    i32_const(HEADER_SIZE); call(self.emitter.rt.alloc); local_set(result);
+                    i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); i32_const(0); i32_store(0);
                     // For each element in mapped, insert if not present
                     i32_const(0); local_set(i);
@@ -777,12 +776,12 @@ impl FuncCompiler<'_> {
                       i32_const(0); local_set(found);
                       block_empty; loop_empty;
                         local_get(j); local_get(result); i32_load(0); i32_ge_u; br_if(1);
-                        local_get(result); i32_const(DATA_OFFSET); i32_add;
+                        local_get(result); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(j); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&result_elem_ty, 0);
                 wasm!(self.func, {
-                        local_get(mapped); i32_const(DATA_OFFSET); i32_add;
+                        local_get(mapped); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&result_elem_ty, 0);
@@ -795,7 +794,7 @@ impl FuncCompiler<'_> {
                       local_get(found); i32_eqz;
                       if_empty;
                         // Not found: append to result
-                        i32_const(HEADER_SIZE); local_get(result); i32_load(0); i32_const(1); i32_add;
+                        i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(result); i32_load(0); i32_const(1); i32_add;
                         i32_const(es); i32_mul; i32_add;
                         call(self.emitter.rt.alloc); local_set(j); // new result
                         local_get(j); local_get(result); i32_load(0); i32_const(1); i32_add; i32_store(0);
@@ -803,9 +802,9 @@ impl FuncCompiler<'_> {
                         i32_const(0); local_set(found);
                         block_empty; loop_empty;
                           local_get(found); local_get(result); i32_load(0); i32_ge_u; br_if(1);
-                          local_get(j); i32_const(DATA_OFFSET); i32_add;
+                          local_get(j); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                           local_get(found); i32_const(es); i32_mul; i32_add;
-                          local_get(result); i32_const(DATA_OFFSET); i32_add;
+                          local_get(result); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                           local_get(found); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&result_elem_ty);
@@ -814,9 +813,9 @@ impl FuncCompiler<'_> {
                           br(0);
                         end; end;
                         // Copy new element
-                        local_get(j); i32_const(DATA_OFFSET); i32_add;
+                        local_get(j); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(result); i32_load(0); i32_const(es); i32_mul; i32_add;
-                        local_get(mapped); i32_const(DATA_OFFSET); i32_add;
+                        local_get(mapped); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&result_elem_ty);

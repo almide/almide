@@ -246,13 +246,13 @@ pub(super) fn compile_list_eq(emitter: &mut WasmEmitter) {
         return_;
         end;
         local_get(0);
-        i32_const(super::list_layout::DATA_OFFSET);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32);
         i32_add;
         local_get(5);
         i32_add;
         i32_load8_u(0);
         local_get(1);
-        i32_const(super::list_layout::DATA_OFFSET);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32);
         i32_add;
         local_get(5);
         i32_add;
@@ -299,9 +299,9 @@ pub(super) fn compile_list_list_str_cmp(emitter: &mut WasmEmitter) {
         i32_const(0); local_set(5);
         block_empty; loop_empty;
           local_get(5); local_get(4); i32_ge_u; br_if(1);
-          local_get(0); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+          local_get(0); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
           local_get(5); i32_const(4); i32_mul; i32_add; i32_load(0);
-          local_get(1); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+          local_get(1); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
           local_get(5); i32_const(4); i32_mul; i32_add; i32_load(0);
           call(str_cmp); local_set(6);
           local_get(6); i32_const(0); i32_ne;
@@ -349,7 +349,7 @@ pub(super) fn compile_concat_list(emitter: &mut WasmEmitter) {
         local_get(2);
         i32_mul;
         local_set(8);
-        i32_const(super::list_layout::HEADER_SIZE);
+        i32_const(emitter.layout_reg.header_size(super::engine::layout::LIST) as i32);
         local_get(7);
         i32_add;
         local_get(8);
@@ -380,14 +380,14 @@ pub(super) fn compile_concat_list(emitter: &mut WasmEmitter) {
         i32_ge_u;
         br_if(1);
         local_get(6);
-        i32_const(super::list_layout::DATA_OFFSET);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32);
         i32_add;
         local_get(7);
         i32_add;
         local_get(9);
         i32_add;
         local_get(1);
-        i32_const(super::list_layout::DATA_OFFSET);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32);
         i32_add;
         local_get(9);
         i32_add;
@@ -465,7 +465,7 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     // Check leading '-'
     wasm!(f, {
         local_get(0);
-        i32_load8_u(super::list_layout::STRING_DATA_OFFSET as u32);
+        i32_load8_u(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
         i32_const(45);
         i32_eq;
         if_empty;
@@ -479,7 +479,7 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     // Check leading '+'
     wasm!(f, {
         local_get(0);
-        i32_load8_u(super::list_layout::STRING_DATA_OFFSET as u32);
+        i32_load8_u(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
         i32_const(43);
         i32_eq;
         local_get(4);
@@ -504,7 +504,7 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     // byte = s[STRING_DATA_OFFSET+i]
     wasm!(f, {
         local_get(0);
-        i32_const(super::list_layout::STRING_DATA_OFFSET);
+        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
         i32_add;
         local_get(2);
         i32_add;

@@ -1,3 +1,4 @@
+// wasm:skip — @extern(c) not available in WASM
 // @extern(c) test: call C library functions from Almide
 
 @extern(c, "m", "sqrt")

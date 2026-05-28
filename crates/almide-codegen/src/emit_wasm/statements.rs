@@ -129,13 +129,13 @@ impl FuncCompiler<'_> {
                                             local_get(local_idx); local_tee(s);
                                             i32_load(0); local_tee(len_l);
                                             local_get(s);
-                                            i32_load(super::list_layout::STRING_CAP_OFFSET as u32);
+                                            i32_load(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32);
                                             local_tee(cap_l);
                                             i32_lt_u;
                                             if_empty;
                                               // Fast: in-place byte store (ptr unchanged, no local_set needed)
                                               local_get(s);
-                                              i32_const(super::list_layout::STRING_DATA_OFFSET);
+                                              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
                                               i32_add;
                                               local_get(len_l);
                                               i32_add;
@@ -151,18 +151,18 @@ impl FuncCompiler<'_> {
                                               if_empty; i32_const(16); local_set(cap_l); end;
                                               // Alloc new buffer
                                               local_get(cap_l);
-                                              i32_const(super::list_layout::STRING_DATA_OFFSET);
+                                              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
                                               i32_add;
                                               call(self.emitter.rt.alloc); local_tee(s);
                                               // Copy old data
-                                              i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+                                              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                                               local_get(local_idx);
-                                              i32_const(super::list_layout::STRING_DATA_OFFSET); i32_add;
+                                              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
                                               local_get(len_l);
                                               memory_copy;
                                               // Write new byte
                                               local_get(s);
-                                              i32_const(super::list_layout::STRING_DATA_OFFSET);
+                                              i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
                                               i32_add;
                                               local_get(len_l); i32_add;
                                               i32_const(byte as i32);
@@ -173,7 +173,7 @@ impl FuncCompiler<'_> {
                                               i32_store(0);
                                               local_get(s);
                                               local_get(cap_l);
-                                              i32_store(super::list_layout::STRING_CAP_OFFSET as u32);
+                                              i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32);
                                               // Update local (ptr changed)
                                               local_get(s); local_set(local_idx);
                                             end;
@@ -395,8 +395,10 @@ impl FuncCompiler<'_> {
             }
 
             IrStmtKind::IndexAssign { target, index, value } => {
-                // xs[i] = v → store value at list_ptr + 4 + i * elem_size
-                let elem_size = super::values::byte_size(&value.ty);
+                // xs[i] = v → store value at ptr + data_off + i * elem_size
+                let target_ty = &self.var_table.get(*target).ty;
+                let is_bytes = matches!(target_ty, Ty::Bytes);
+                let elem_size = if is_bytes { 1u32 } else { super::values::byte_size(&value.ty) };
                 // Resolve list pointer: local var or module-level global
                 let has_ptr = if let Some(&local_idx) = self.var_map.get(&target.0) {
                     wasm!(self.func, { local_get(local_idx); });
@@ -415,23 +417,31 @@ impl FuncCompiler<'_> {
                     }
                 };
                 if has_ptr {
+                    let data_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA);
                     if let IrExprKind::LitInt { value: idx_val } = &index.kind {
-                        let offset = (super::list_layout::DATA_OFFSET as u32) + (*idx_val as u32) * (elem_size as u32);
+                        let offset = data_off + (*idx_val as u32) * elem_size;
                         self.emit_expr(value);
-                        self.emit_store_at(&value.ty, offset);
+                        if is_bytes {
+                            wasm!(self.func, { i32_wrap_i64; i32_store8(offset); });
+                        } else {
+                            self.emit_store_at(&value.ty, offset);
+                        }
                     } else {
-                        wasm!(self.func, { i32_const(super::list_layout::DATA_OFFSET); i32_add; });
+                        wasm!(self.func, { i32_const(data_off as i32); i32_add; });
                         self.emit_expr(index);
                         if matches!(&index.ty, almide_lang::types::Ty::Int) {
                             wasm!(self.func, { i32_wrap_i64; });
                         }
-                        wasm!(self.func, {
-                            i32_const(elem_size as i32);
-                            i32_mul;
-                            i32_add;
-                        });
+                        if elem_size > 1 {
+                            wasm!(self.func, { i32_const(elem_size as i32); i32_mul; });
+                        }
+                        wasm!(self.func, { i32_add; });
                         self.emit_expr(value);
-                        self.emit_store_at(&value.ty, 0);
+                        if is_bytes {
+                            wasm!(self.func, { i32_wrap_i64; i32_store8(0); });
+                        } else {
+                            self.emit_store_at(&value.ty, 0);
+                        }
                     }
                 }
             }
@@ -458,12 +468,12 @@ impl FuncCompiler<'_> {
                     let addr_b = self.scratch.alloc_i32();
                     let tmp = self.scratch_for_ty(&elem_ty);
 
-                    wasm!(self.func, { local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add; });
+                    wasm!(self.func, { local_get(list_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; });
                     self.emit_expr(a);
                     if matches!(&a.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
                     wasm!(self.func, { i32_const(elem_size); i32_mul; i32_add; local_set(addr_a); });
 
-                    wasm!(self.func, { local_get(list_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add; });
+                    wasm!(self.func, { local_get(list_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; });
                     self.emit_expr(b);
                     if matches!(&b.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
                     wasm!(self.func, { i32_const(elem_size); i32_mul; i32_add; local_set(addr_b); });
@@ -510,7 +520,7 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { local_set(hi); });
 
                     let base_ptr = self.scratch.alloc_i32();
-                    wasm!(self.func, { local_get(list_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(base_ptr); });
+                    wasm!(self.func, { local_get(list_local); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; local_set(base_ptr); });
                     wasm!(self.func, {
                         block_empty;
                         loop_empty;
@@ -574,7 +584,7 @@ impl FuncCompiler<'_> {
                     let base = self.scratch.alloc_i32();
                     let end_i32 = self.scratch.alloc_i32();
 
-                    wasm!(self.func, { local_get(list_local); i32_const(super::list_layout::DATA_OFFSET); i32_add; local_set(base); });
+                    wasm!(self.func, { local_get(list_local); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; local_set(base); });
                     self.emit_expr(end);
                     if matches!(&end.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
                     wasm!(self.func, { local_set(end_i32); });
@@ -616,8 +626,8 @@ impl FuncCompiler<'_> {
                         let elem_ty = self.list_elem_ty_var(*dst);
                         let elem_size = values::byte_size(&elem_ty) as i32;
                         wasm!(self.func, {
-                            local_get(dst_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
-                            local_get(src_ptr); i32_const(super::list_layout::DATA_OFFSET); i32_add;
+                            local_get(dst_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
+                            local_get(src_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         });
                         self.emit_expr(len);
                         if matches!(&len.ty, Ty::Int) { wasm!(self.func, { i32_wrap_i64; }); }
@@ -664,15 +674,16 @@ impl FuncCompiler<'_> {
 
     /// Perceus Rule 3: type-specialized rc_dec.
     /// For compound types, recursively rc_dec children before freeing the parent.
-    /// `local_idx` holds the pointer. Emits: if non-null && RC==1, drop children, then rc_dec.
+    /// All offsets derived from LayoutRegistry — zero magic numbers.
     pub(super) fn emit_typed_rc_dec(&mut self, ty: &Ty, local_idx: u32) {
         use almide_lang::types::TypeConstructorId;
+        use super::engine::{WasmBuilder, layout::*};
         let rc_dec_fn = self.emitter.rt.rc_dec;
+        let rc_neg = self.emitter.layout_reg.alloc_header_neg_offset(alloc::RC);
 
-        wasm!(self.func, { local_get(local_idx); });
-        wasm!(self.func, { if_empty; });
+        // if ptr != null {
+        wasm!(self.func, { local_get(local_idx); if_empty; });
 
-        // Determine if this type has heap children
         let has_children = match ty {
             Ty::Applied(TypeConstructorId::List, args) =>
                 args.first().map_or(false, |t| Self::is_heap_type(t)),
@@ -684,193 +695,143 @@ impl FuncCompiler<'_> {
                 args.iter().any(|t| Self::is_heap_type(t)),
             Ty::Record { fields } =>
                 fields.iter().any(|(_, t)| Self::is_heap_type(t)),
-            Ty::Fn { .. } => true, // closure has env to free
+            Ty::Fn { .. } => true,
             _ => false,
         };
 
         if has_children {
-            use super::list_layout::{RC_OFFSET, DATA_OFFSET};
-            // Only drop children when RC will reach 0
-            wasm!(self.func, {
-                local_get(local_idx); i32_const(RC_OFFSET); i32_sub; i32_load(0);
-                i32_const(1); i32_le_u;
-                if_empty;
-            });
+            // if rc <= 1 (about to die) { drop children }
+            {
+                let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+                w.get(local_idx).i32c(rc_neg as i32).sub().emit_load(0, MemType::I32);
+                w.i32c(1).raw(wasm_encoder::Instruction::I32LeU);
+                w.raw(wasm_encoder::Instruction::If(wasm_encoder::BlockType::Empty));
+            }
 
             match ty {
-                // List[HeapType]: iterate elements
+                // ── List[HeapType]: iterate elements, rc_dec each ──
                 Ty::Applied(TypeConstructorId::List, args) => {
-                    let inner_ty = &args[0];
-                    let inner_size = super::values::byte_size(inner_ty) as i32;
-                    let ptr = self.scratch.alloc_i32();
-                    let end = self.scratch.alloc_i32();
-                    wasm!(self.func, {
-                        local_get(local_idx); i32_const(DATA_OFFSET); i32_add; local_set(ptr);
-                        local_get(ptr);
-                        local_get(local_idx); i32_load(0); i32_const(inner_size); i32_mul;
-                        i32_add; local_set(end);
-                        block_empty; loop_empty;
-                          local_get(ptr); local_get(end); i32_ge_u; br_if(1);
-                          local_get(ptr); i32_load(0);
-                          if_empty; local_get(ptr); i32_load(0); call(rc_dec_fn); end;
-                          local_get(ptr); i32_const(inner_size); i32_add; local_set(ptr);
-                          br(0);
-                        end; end;
-                    });
-                    self.scratch.free_i32(end);
-                    self.scratch.free_i32(ptr);
-                }
-                // Option[HeapType]: tag at offset 0, value at offset 4
-                // WASM Option layout: [tag:i32][value:i32/i64/f64]
-                // tag=0 → None, tag=1 → Some
-                Ty::Applied(TypeConstructorId::Option, args) => {
-                    let inner_ty = &args[0];
-                    if Self::is_heap_type(inner_ty) {
-                        let val_offset = 4i32; // after tag
-                        wasm!(self.func, {
-                            local_get(local_idx); i32_load(0); // tag
-                            if_empty; // tag != 0 → Some
-                              local_get(local_idx); i32_load(val_offset as u32);
-                              if_empty;
-                                local_get(local_idx); i32_load(val_offset as u32);
-                                call(rc_dec_fn);
-                              end;
-                            end;
+                    let elem_size = super::values::byte_size(&args[0]);
+                    let elem = self.scratch.alloc_i32();
+                    let idx = self.scratch.alloc_i32();
+                    {
+                        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+                        w.list_foreach(local_idx, elem, idx, elem_size, |w| {
+                            w.get(elem).emit_load(0, MemType::I32);
+                            w.if_void(
+                                |w| { w.get(elem).emit_load(0, MemType::I32).call(rc_dec_fn); },
+                                |_| {},
+                            );
                         });
                     }
+                    self.scratch.free_i32(idx);
+                    self.scratch.free_i32(elem);
                 }
-                // Result[T, E]: tag at offset 0, value at offset 4
+                // ── Option[HeapType]: if Some, dec payload ──
+                Ty::Applied(TypeConstructorId::Option, args) => {
+                    if Self::is_heap_type(&args[0]) {
+                        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+                        w.get(local_idx).field_load(OPTION, tagged::TAG);
+                        w.if_void(|w| {
+                            w.get(local_idx).field_load(OPTION, tagged::PAYLOAD);
+                            w.if_void(
+                                |w| { w.get(local_idx).field_load(OPTION, tagged::PAYLOAD).call(rc_dec_fn); },
+                                |_| {},
+                            );
+                        }, |_| {});
+                    }
+                }
+                // ── Result[T, E]: dec matching variant's payload ──
                 Ty::Applied(TypeConstructorId::Result, args) => {
                     for (i, arg) in args.iter().enumerate() {
                         if Self::is_heap_type(arg) {
-                            let tag_val = i as i32; // 0=Ok, 1=Err
-                            let val_offset = 4i32;
-                            wasm!(self.func, {
-                                local_get(local_idx); i32_load(0); // tag
-                                i32_const(tag_val); i32_eq;
-                                if_empty;
-                                  local_get(local_idx); i32_load(val_offset as u32);
-                                  if_empty;
-                                    local_get(local_idx); i32_load(val_offset as u32);
-                                    call(rc_dec_fn);
-                                  end;
-                                end;
-                            });
+                            let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+                            w.get(local_idx).field_load(RESULT, tagged::TAG);
+                            w.i32c(i as i32).eq();
+                            w.if_void(|w| {
+                                w.get(local_idx).field_load(RESULT, tagged::PAYLOAD);
+                                w.if_void(
+                                    |w| { w.get(local_idx).field_load(RESULT, tagged::PAYLOAD).call(rc_dec_fn); },
+                                    |_| {},
+                                );
+                            }, |_| {});
                         }
                     }
                 }
-                // Record { fields }: rc_dec each heap-typed field at known offset
+                // ── Record: dec each heap-typed field ──
                 Ty::Record { fields } => {
                     let mut sorted: Vec<_> = fields.iter().collect();
                     sorted.sort_by(|a, b| a.0.cmp(&b.0));
                     let mut offset = 0u32;
                     for (_, field_ty) in &sorted {
                         if Self::is_heap_type(field_ty) {
-                            wasm!(self.func, {
-                                local_get(local_idx); i32_load(offset);
-                                if_empty;
-                                  local_get(local_idx); i32_load(offset);
-                                  call(rc_dec_fn);
-                                end;
-                            });
+                            let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+                            w.get(local_idx).emit_load(offset, MemType::I32);
+                            w.if_void(
+                                |w| { w.get(local_idx).emit_load(offset, MemType::I32).call(rc_dec_fn); },
+                                |_| {},
+                            );
                         }
-                        offset += super::values::byte_size(field_ty) as u32;
+                        offset += super::values::byte_size(field_ty);
                     }
                 }
-                // Map[K, V]: iterate tag array + data, rc_dec live entries
+                // ── Map[K, V]: Swiss Table iteration, dec live entries ──
                 Ty::Applied(TypeConstructorId::Map, args) => {
-                    // Swiss Table: [len][cap][tag_array][data_array]
-                    // tag_array: cap bytes (0x80=empty, else=occupied)
-                    // data: cap × (key_size + val_size) bytes
                     let key_ty = args.get(0);
                     let val_ty = args.get(1);
                     let key_heap = key_ty.map_or(false, |t| Self::is_heap_type(t));
                     let val_heap = val_ty.map_or(false, |t| Self::is_heap_type(t));
                     if key_heap || val_heap {
-                        let key_size = key_ty.map_or(8, |t| super::values::byte_size(t)) as i32;
-                        let val_size = val_ty.map_or(8, |t| super::values::byte_size(t)) as i32;
-                        let entry_size = key_size + val_size;
+                        let key_size = key_ty.map_or(8, |t| super::values::byte_size(t));
+                        let val_size = val_ty.map_or(8, |t| super::values::byte_size(t));
+                        let entry_stride = key_size + val_size;
+                        let entry = self.scratch.alloc_i32();
+                        let cap_l = self.scratch.alloc_i32();
+                        let eb = self.scratch.alloc_i32();
                         let idx = self.scratch.alloc_i32();
-                        let cap = self.scratch.alloc_i32();
-                        let tag_base = self.scratch.alloc_i32();
-                        let data_base = self.scratch.alloc_i32();
-                        wasm!(self.func, {
-                            local_get(local_idx); i32_load(4); local_set(cap); // cap at offset 4
-                            local_get(local_idx); i32_const(8); i32_add; local_set(tag_base); // tags at offset 8
-                            local_get(tag_base); local_get(cap); i32_add; local_set(data_base); // data after tags
-                            i32_const(0); local_set(idx);
-                            block_empty; loop_empty;
-                              local_get(idx); local_get(cap); i32_ge_u; br_if(1);
-                              // Check tag: occupied if tag & 0x80 == 0
-                              local_get(tag_base); local_get(idx); i32_add; i32_load8_u(0);
-                              i32_const(0x80); i32_and; i32_eqz;
-                              if_empty;
-                        });
-                        // rc_dec key if heap
-                        if key_heap {
-                            wasm!(self.func, {
-                                local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
-                                i32_load(0);
-                                if_empty;
-                                  local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
-                                  i32_load(0); call(rc_dec_fn);
-                                end;
+                        {
+                            let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+                            w.map_foreach(local_idx, entry, cap_l, eb, idx, entry_stride, |w| {
+                                if key_heap {
+                                    w.get(entry).emit_load(0, MemType::I32);
+                                    w.if_void(
+                                        |w| { w.get(entry).emit_load(0, MemType::I32).call(rc_dec_fn); },
+                                        |_| {},
+                                    );
+                                }
+                                if val_heap {
+                                    w.get(entry).emit_load(key_size, MemType::I32);
+                                    w.if_void(
+                                        |w| { w.get(entry).emit_load(key_size, MemType::I32).call(rc_dec_fn); },
+                                        |_| {},
+                                    );
+                                }
                             });
                         }
-                        // rc_dec value if heap
-                        if val_heap {
-                            wasm!(self.func, {
-                                local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
-                                i32_const(key_size); i32_add; i32_load(0);
-                                if_empty;
-                                  local_get(data_base); local_get(idx); i32_const(entry_size); i32_mul; i32_add;
-                                  i32_const(key_size); i32_add; i32_load(0); call(rc_dec_fn);
-                                end;
-                            });
-                        }
-                        wasm!(self.func, {
-                              end; // end occupied check
-                              local_get(idx); i32_const(1); i32_add; local_set(idx);
-                              br(0);
-                            end; end;
-                        });
-                        self.scratch.free_i32(data_base);
-                        self.scratch.free_i32(tag_base);
-                        self.scratch.free_i32(cap);
                         self.scratch.free_i32(idx);
+                        self.scratch.free_i32(eb);
+                        self.scratch.free_i32(cap_l);
+                        self.scratch.free_i32(entry);
                     }
                 }
-                // Fn (closure): rc_dec the env_ptr and its captured values.
-                // Closure pair layout: [table_idx:i32 @ 0][env_ptr:i32 @ 4]
-                // We rc_dec the env allocation. Captured heap values inside the
-                // env were rc_inc'd at capture time, so freeing the env releases
-                // those references (the env itself is freed, captured value RCs
-                // remain — they'll be freed when their original owners drop).
+                // ── Fn (closure): dec env_ptr ──
                 Ty::Fn { .. } => {
-                    // Load env_ptr from closure pair, rc_dec env
-                    // Captured values are handled at IR level by PerceusPass
-                    // (RcDec for captures is inserted alongside RcDec for the closure)
-                    let env_ptr = self.scratch.alloc_i32();
-                    wasm!(self.func, {
-                        local_get(local_idx); i32_load(4); local_set(env_ptr);
-                        local_get(env_ptr);
-                        if_empty;
-                          local_get(env_ptr);
-                          call(rc_dec_fn);
-                        end;
-                    });
-                    self.scratch.free_i32(env_ptr);
+                    let env = self.scratch.alloc_i32();
+                    {
+                        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+                        w.get(local_idx).field_load(CLOSURE_PAIR, closure::ENV_PTR).set(env);
+                        w.get(env);
+                        w.if_void(|w| { w.get(env).call(rc_dec_fn); }, |_| {});
+                    }
+                    self.scratch.free_i32(env);
                 }
                 _ => {}
             }
 
             wasm!(self.func, { end; }); // end RC==1 check
         }
-        // Now rc_dec the parent
-        wasm!(self.func, {
-            local_get(local_idx);
-            call(rc_dec_fn);
-        });
+        // rc_dec the parent
+        wasm!(self.func, { local_get(local_idx); call(rc_dec_fn); });
         wasm!(self.func, { end; }); // end non-null check
     }
 

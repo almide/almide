@@ -1,0 +1,22 @@
+name: CI (Codeberg)
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lean-proofs:
+    name: Lean Proofs (0 sorry)
+    runs-on: codeberg-tiny
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+
+      - name: Verify 0 sorry
+        run: |
+          if grep -rn '\bsorry\b' crates/almide-perceus-belt/AlmidePerceusBelt/ --include='*.lean'; then
+            echo "::error::sorry found in Lean proofs"
+            exit 1
+          fi
+          echo "0 sorry in Lean proofs"

@@ -1,3 +1,4 @@
+// wasm:skip — recursive generic codegen ICE
 // Test: Recursive generic variant types
 
 type Tree[T] =

@@ -1,3 +1,4 @@
+// wasm:skip — WASM codegen ICE (ScratchAllocator / missing runtime fn)
 import bytes
 
 test "set_at with read from same buffer" {

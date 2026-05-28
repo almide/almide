@@ -1,3 +1,4 @@
+// wasm:skip — no test blocks, cross-target mismatch
 // ============================================================
 // Visibility + Effect — Specification Tests (effect context)
 // ============================================================

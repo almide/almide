@@ -26,6 +26,8 @@ use super::pass_effect_inference::EffectInferencePass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
+use super::pass_anf::AnfPass;
+use super::pass_stack_balance::StackBalancePass;
 use super::pass_perceus::{PerceusPass, PerceusOptPass, PerceusVerifyPass};
 use super::pass_egg_saturation::EggSaturationPass;
 use super::pass_matrix_shape_spec::MatrixShapeSpecPass;
@@ -166,6 +168,9 @@ fn build_pipeline(target: Target) -> Pipeline {
             // fn) pair, which would leave closures with `List[TypeVar(A)]`
             // param types and break ConcretizeTypes / WASM emit downstream.
             .add(LambdaTypeResolvePass)
+            // Mut param lowering: rewrite `mut` param functions to return
+            // mutated values, assign back at call sites. WASM has no &mut.
+            .add(super::pass_mut_param_lowering::MutParamLoweringPass)
             // @intrinsic(symbol) → RuntimeCall. See Rust pipeline comment.
             .add(IntrinsicLoweringPass)
             // Verify all user-module calls resolve to known IrFunctions.
@@ -194,8 +199,17 @@ fn build_pipeline(target: Target) -> Pipeline {
         // Call return types inside closures (e.g. map.get inside a lifted lambda).
         .add(ConcretizeTypesPass)
         .add(FanLoweringPass)
+        // ANF: lift heap sub-expressions to let bindings so Perceus can Dec them.
+        // Must run before PerceusPass — makes all heap allocs visible as VDecls.
+        .add(AnfPass)
+        // StackBalance: demote non-Unit tails in void-context blocks to Expr stmts.
+        // Must run after ANF (which creates blocks) and before Perceus (which
+        // converts tails to Ret nodes and skips Dec for "returned" variables).
+        // Without this, void functions can have Ret tails that push values onto
+        // the WASM stack — rejected by strict validators (wasmtime 45+, V8).
+        .add(StackBalancePass)
         // Perceus: insert RcInc/RcDec nodes based on types.
-        // Runs after closure conversion (captures are known) and before TailCallMark.
+        // Runs after ANF (all heap allocs are VDecls) and closure conversion.
         .add(PerceusPass)
         // Perceus optimization: eliminate redundant Inc/Dec pairs.
         // Theorem: immutable single-use aliases have identity Inc/Dec.

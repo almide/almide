@@ -1,3 +1,4 @@
+// wasm:skip — expected compile error test (no test blocks)
 // Test: phantom dependency is rejected
 // dmod_b imports dmod_d, but THIS file only imports dmod_b.
 // Accessing dmod_d directly should fail.

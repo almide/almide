@@ -37,6 +37,7 @@
 //!   Emit can still fall back, but for all common patterns this pass makes
 //!   emit's job trivial.
 
+use std::collections::HashMap;
 use almide_ir::*;
 use almide_ir::visit::{walk_expr, walk_stmt};
 use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut};
@@ -74,9 +75,20 @@ impl NanoPass for ConcretizeTypesPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        // Build a symbol table of (module, func) -> ret_ty for all user
-        // module functions + top-level functions. This lets us resolve Call
-        // return types without deferring to emit-time guessing.
+        // Build type alias map: alias_name → underlying type.
+        // mod type SafeHtml = String → aliases["SafeHtml"] = String
+        // Erase aliases throughout the IR so downstream codegen never sees them.
+        let mut aliases: HashMap<String, Ty> = HashMap::new();
+        for td in program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter())) {
+            if let almide_ir::IrTypeDeclKind::Alias { target } = &td.kind {
+                aliases.insert(td.name.to_string(), target.clone());
+            }
+        }
+        // Erase aliases only for WASM target — Rust codegen handles newtypes natively.
+        if !aliases.is_empty() && _target == Target::Wasm {
+            erase_type_aliases(&mut program, &aliases);
+        }
+
         let symbols = build_symbol_table(&program);
 
         // Take var_table out of program so we can mutate it while also
@@ -191,6 +203,147 @@ impl SymbolTable {
             })
         })?;
         fs.iter().find(|(n, _)| n.as_str() == field).map(|(_, t)| t)
+    }
+}
+
+/// Erase type aliases throughout the IR. Replaces:
+/// - `Ty::Named("Alias", _)` → underlying type
+/// - `Call(Named("Alias"), [arg])` → `arg` (identity constructor)
+/// - `Constructor { name: "Alias", args: [Bind(v)] }` → `Bind(v)` (identity unwrap)
+/// This is the Rust `#[repr(transparent)]` / Haskell `newtype` approach.
+fn erase_type_aliases(program: &mut IrProgram, aliases: &HashMap<String, Ty>) {
+    use almide_ir::{IrExprKind, IrStmtKind, IrPattern};
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+
+    fn erase_ty(ty: &mut Ty, aliases: &HashMap<String, Ty>) {
+        if let Ty::Named(name, _) = ty {
+            if let Some(target) = aliases.get(name.as_str()) {
+                *ty = target.clone();
+            }
+        }
+    }
+
+    fn erase_expr(expr: &mut almide_ir::IrExpr, aliases: &HashMap<String, Ty>) {
+        erase_ty(&mut expr.ty, aliases);
+        match &mut expr.kind {
+            // Constructor call: Alias(arg) → arg
+            IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, args, .. } => {
+                if aliases.contains_key(name.as_str()) && args.len() == 1 {
+                    let arg = args.remove(0);
+                    *expr = arg;
+                    erase_expr(expr, aliases);
+                    return;
+                }
+                for a in args.iter_mut() { erase_expr(a, aliases); }
+            }
+            IrExprKind::Block { stmts, expr: tail } => {
+                for s in stmts.iter_mut() { erase_stmt(s, aliases); }
+                if let Some(t) = tail { erase_expr(t, aliases); }
+            }
+            IrExprKind::If { cond, then, else_ } => {
+                erase_expr(cond, aliases);
+                erase_expr(then, aliases);
+                erase_expr(else_, aliases);
+            }
+            IrExprKind::Match { subject, arms } => {
+                erase_expr(subject, aliases);
+                for arm in arms.iter_mut() {
+                    erase_pattern(&mut arm.pattern, aliases);
+                    if let Some(g) = &mut arm.guard { erase_expr(g, aliases); }
+                    erase_expr(&mut arm.body, aliases);
+                }
+            }
+            IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } => {
+                for a in args.iter_mut() { erase_expr(a, aliases); }
+            }
+            IrExprKind::RuntimeCall { args, .. } => {
+                for a in args.iter_mut() { erase_expr(a, aliases); }
+            }
+            IrExprKind::Lambda { body, params, .. } => {
+                for (_, t) in params.iter_mut() { erase_ty(t, aliases); }
+                erase_expr(body, aliases);
+            }
+            IrExprKind::BinOp { left, right, .. } => {
+                erase_expr(left, aliases);
+                erase_expr(right, aliases);
+            }
+            IrExprKind::UnOp { operand, .. } => erase_expr(operand, aliases),
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+                for e in elements.iter_mut() { erase_expr(e, aliases); }
+            }
+            IrExprKind::Record { fields, .. } => {
+                for (_, e) in fields.iter_mut() { erase_expr(e, aliases); }
+            }
+            IrExprKind::Member { object, .. } => erase_expr(object, aliases),
+            IrExprKind::IndexAccess { object, index } => {
+                erase_expr(object, aliases);
+                erase_expr(index, aliases);
+            }
+            IrExprKind::ForIn { iterable, body, .. } => {
+                erase_expr(iterable, aliases);
+                for s in body.iter_mut() { erase_stmt(s, aliases); }
+            }
+            IrExprKind::While { cond, body } => {
+                erase_expr(cond, aliases);
+                for s in body.iter_mut() { erase_stmt(s, aliases); }
+            }
+            IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+            | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+            | IrExprKind::Unwrap { expr: e } | IrExprKind::Clone { expr: e } => erase_expr(e, aliases),
+            _ => {}
+        }
+    }
+
+    fn erase_stmt(stmt: &mut almide_ir::IrStmt, aliases: &HashMap<String, Ty>) {
+        match &mut stmt.kind {
+            IrStmtKind::Bind { value, ty, .. } => {
+                erase_ty(ty, aliases);
+                erase_expr(value, aliases);
+            }
+            IrStmtKind::Assign { value, .. } => erase_expr(value, aliases),
+            IrStmtKind::Expr { expr } => erase_expr(expr, aliases),
+            IrStmtKind::BindDestructure { value, pattern, .. } => {
+                erase_expr(value, aliases);
+                erase_pattern(pattern, aliases);
+            }
+            _ => {}
+        }
+    }
+
+    fn erase_pattern(pat: &mut IrPattern, aliases: &HashMap<String, Ty>) {
+        match pat {
+            // Constructor("Alias", [Bind(v)]) → Bind(v)
+            IrPattern::Constructor { name, args } => {
+                if aliases.contains_key(name.as_str()) && args.len() == 1 {
+                    *pat = args.remove(0);
+                    return;
+                }
+            }
+            IrPattern::Tuple { elements } => {
+                for e in elements.iter_mut() { erase_pattern(e, aliases); }
+            }
+            IrPattern::Some { inner } => erase_pattern(inner, aliases),
+            IrPattern::Ok { inner } | IrPattern::Err { inner } => erase_pattern(inner, aliases),
+            _ => {}
+        }
+    }
+
+    for func in &mut program.functions {
+        erase_ty(&mut func.ret_ty, aliases);
+        for p in &mut func.params { erase_ty(&mut p.ty, aliases); }
+        erase_expr(&mut func.body, aliases);
+    }
+    for tl in &mut program.top_lets { erase_expr(&mut tl.value, aliases); }
+    for module in &mut program.modules {
+        for func in &mut module.functions {
+            erase_ty(&mut func.ret_ty, aliases);
+            for p in &mut func.params { erase_ty(&mut p.ty, aliases); }
+            erase_expr(&mut func.body, aliases);
+        }
+    }
+    // Also erase in VarTable
+    for entry in &mut program.var_table.entries {
+        erase_ty(&mut entry.ty, aliases);
     }
 }
 
