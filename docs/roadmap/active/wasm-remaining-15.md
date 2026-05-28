@@ -61,6 +61,42 @@
 |------|------|
 | coverage_assert_throws | WASM `unreachable` can't be caught — assert_throws is impossible |
 
+## Insight from Grain/OCaml WASM Compilers
+
+**Grain** solves the call_indirect type problem via **uniform representation**:
+- All values are `Managed` (boxed, i32 pointer on heap with tag)
+- call_indirect signature is always `(i32, i32, ...) -> i32`
+- No type mismatch possible — everything is i32
+- Perceus-compatible: all values have alloc headers, RC works uniformly
+
+**OCaml (wasm_of_ocaml)** uses 31-bit tagged integers for uniform repr.
+**Wasocaml** uses WASM-GC structs with structural subtyping on closures.
+
+### Almide's Design Choice
+
+Almide uses **unboxed values** (Int = i64, Float = f64) for performance.
+This creates the call_indirect type signature problem:
+- `list.fold(xs, 0.0, (a, b) => a + b)` needs `(i32, f64, f64) -> f64`
+- But if lambda params are Unknown → registered as `(i32, i32, i32) -> i32`
+- → WASM type mismatch trap
+
+**Three possible solutions**:
+
+1. **Selective boxing for closures** — box lambda params that can't be resolved.
+   Cost: box/unbox at closure boundary. Benefit: no perf hit for non-closure code.
+   Grain uses this universally; Almide can apply it selectively.
+
+2. **Fix type inference chain** (current approach) — resolve all lambda params to
+   concrete types before WASM emit. 3-step plan in section B above.
+   Cost: complexity in pass ordering. Benefit: zero runtime overhead.
+
+3. **Type-specialized function tables** — separate tables per closure signature.
+   `(i32, f64, f64) -> f64` closures go in table_f64f64, etc.
+   Cost: table proliferation. Benefit: no boxing, no inference needed.
+
+**Recommendation**: Option 2 first (fix inference). If too fragile, fall back to
+Option 1 (selective boxing) which is architecturally robust and Perceus-native.
+
 ## Priority Order
 
 1. **B (TypeVar)** — 5 tests, single root cause, clear fix path
