@@ -1,4 +1,3 @@
-// wasm:skip — bytes WASM runtime partially ported
 // bytes cursor family — immutable position-threaded reads.
 // Each read returns (next_pos, Option[T]); EOF returns (pos, none).
 

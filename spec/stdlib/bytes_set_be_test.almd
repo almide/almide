@@ -1,4 +1,3 @@
-// wasm:skip — bytes WASM runtime partially ported
 // bytes.set_*_le, append_*_be, read_*_be_array — symmetric writers/readers.
 
 test "set_u8 overwrites byte at position" {

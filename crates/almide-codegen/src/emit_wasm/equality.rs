@@ -56,7 +56,7 @@ impl FuncCompiler<'_> {
             }
             Ty::Float64 => { wasm!(self.func, { f64_eq; }); }
             Ty::Bool => { wasm!(self.func, { i32_eq; }); }
-            Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
+            Ty::String | Ty::Bytes => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
 
             Ty::Applied(TypeConstructorId::List, args) => {
                 let elem_ty = args.first().cloned().unwrap_or(Ty::Int);

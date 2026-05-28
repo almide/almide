@@ -1,4 +1,3 @@
-// wasm:skip — bytes WASM runtime partially ported
 // bytes ↔ String conversions: strict, lossy, validation.
 
 test "to_string round-trip with ASCII" {
