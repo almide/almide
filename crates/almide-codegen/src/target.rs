@@ -167,6 +167,9 @@ fn build_pipeline(target: Target) -> Pipeline {
             // fn) pair, which would leave closures with `List[TypeVar(A)]`
             // param types and break ConcretizeTypes / WASM emit downstream.
             .add(LambdaTypeResolvePass)
+            // Mut param lowering: rewrite `mut` param functions to return
+            // mutated values, assign back at call sites. WASM has no &mut.
+            .add(super::pass_mut_param_lowering::MutParamLoweringPass)
             // @intrinsic(symbol) → RuntimeCall. See Rust pipeline comment.
             .add(IntrinsicLoweringPass)
             // Verify all user-module calls resolve to known IrFunctions.
