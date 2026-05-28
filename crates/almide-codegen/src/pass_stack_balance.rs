@@ -14,13 +14,15 @@
 //! have no tails (Nop terminus in FnBody). Perceus then correctly
 //! Dec's all heap vars at scope exit.
 //!
-//! Invariant (post-pass):
-//!   For every Block B that is the body of a void function, or is
-//!   nested inside an Expr statement: B.tail == None.
+//! The pass propagates `expected_void` through ALL control flow:
+//!   - Block: demote tail to Expr stmt
+//!   - If/Match: propagate to branches, update block type to Unit
+//!   - Leaf expressions (Var, Call, Lit): wrap in void Block
 //!
-//! This is the stack-balance analogue of Perceus's RC-balance guarantee:
-//! Perceus ensures every heap alloc is freed exactly once; StackBalance
-//! ensures every WASM block has the correct number of values on exit.
+//! Invariant (post-pass):
+//!   In every void context, no expression pushes a value onto the
+//!   WASM stack. Blocks have no tails, If/Match have BlockType::Empty,
+//!   and leaf expressions are wrapped in Expr statements that drop.
 
 use almide_ir::*;
 use almide_lang::types::Ty;
@@ -31,50 +33,78 @@ fn is_void(ty: &Ty) -> bool {
     matches!(ty, Ty::Unit | Ty::Never)
 }
 
+/// Wrap a non-Unit expression in `Block { Expr(original) }` so its
+/// value is emitted-and-dropped rather than left on the stack.
+fn void_wrap(expr: &mut IrExpr) -> bool {
+    if is_void(&expr.ty) { return false; }
+    let inner = std::mem::replace(expr, IrExpr {
+        kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
+    });
+    *expr = IrExpr {
+        kind: IrExprKind::Block {
+            stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: inner }, span: None }],
+            expr: None,
+        },
+        ty: Ty::Unit,
+        span: None,
+        def_id: None,
+    };
+    true
+}
+
 /// Balance an expression given its context.
 ///
 /// `expected_void`: true if the enclosing context expects no stack value
-/// (void function body, Expr statement, etc.).
-///
-/// For Block expressions in void context: demotes the tail to an Expr
-/// statement. The WASM emitter's Expr-stmt handler automatically drops
-/// values produced by the expression.
+/// (void function body, Expr statement, If/Match branch in void context).
 ///
 /// Returns true if any IR was modified.
 fn balance_expr(expr: &mut IrExpr, expected_void: bool) -> bool {
     let mut changed = false;
     match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
-            // Process existing statements (may contain void-context sub-blocks)
+            // Process existing statements
             for stmt in stmts.iter_mut() {
                 if balance_stmt(stmt) { changed = true; }
             }
 
             if expected_void {
                 if let Some(tail_expr) = tail.take() {
+                    // Recurse into tail with void context before demoting.
+                    // This handles nested If/Match/Block inside the tail.
+                    let mut t = *tail_expr;
+                    if balance_expr(&mut t, true) { changed = true; }
                     // Demote: move tail to Expr statement.
-                    // The emitter's Expr-stmt handler will drop any produced value.
                     stmts.push(IrStmt {
-                        kind: IrStmtKind::Expr { expr: *tail_expr },
+                        kind: IrStmtKind::Expr { expr: t },
                         span: None,
                     });
                     expr.ty = Ty::Unit;
                     changed = true;
                 }
             } else if let Some(t) = tail {
-                // Non-void context: recurse into tail for nested blocks
+                // Non-void context: recurse into tail for nested structures
                 if balance_expr(t, false) { changed = true; }
             }
         }
         IrExprKind::If { cond, then, else_ } => {
             if balance_expr(cond, false) { changed = true; }
-            if balance_expr(then, false) { changed = true; }
-            if balance_expr(else_, false) { changed = true; }
+            // Propagate void context into branches
+            if balance_expr(then, expected_void) { changed = true; }
+            if balance_expr(else_, expected_void) { changed = true; }
+            // Update If type so WASM emitter uses BlockType::Empty
+            if expected_void && !is_void(&expr.ty) {
+                expr.ty = Ty::Unit;
+                changed = true;
+            }
         }
         IrExprKind::Match { subject, arms } => {
             if balance_expr(subject, false) { changed = true; }
             for arm in arms.iter_mut() {
-                if balance_expr(&mut arm.body, false) { changed = true; }
+                if balance_expr(&mut arm.body, expected_void) { changed = true; }
+            }
+            if expected_void && !is_void(&expr.ty) {
+                expr.ty = Ty::Unit;
+                changed = true;
             }
         }
         IrExprKind::While { cond, body } => {
@@ -93,7 +123,13 @@ fn balance_expr(expr: &mut IrExpr, expected_void: bool) -> bool {
             // Lambda bodies are expression context (return their value)
             if balance_expr(body, false) { changed = true; }
         }
-        _ => {}
+        _ => {
+            // Leaf expression in void context that produces a value:
+            // wrap in Block { Expr(original) } so the emitter drops it.
+            if expected_void {
+                if void_wrap(expr) { changed = true; }
+            }
+        }
     }
     changed
 }
