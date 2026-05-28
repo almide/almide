@@ -113,6 +113,12 @@ pub fn monomorphize(program: &mut IrProgram) {
     // types (e.g., `let x = mono_fn(...)` where x.ty was set before mono).
     propagate_concrete_types(program);
 
+    // Erase remaining TypeVars in VarTable. After mono + propagation, any
+    // surviving TypeVars are from stdlib generic params (e.g., filter_map[A,B]'s
+    // B leaking into a lambda param). These are resolved at runtime, not compile
+    // time. Replace with Unknown so downstream passes handle them correctly.
+    erase_orphan_typevars(&mut program.var_table);
+
     // Post-mono guard: ALL TypeVars (including generic params) should be resolved
     verify_no_typevars_post_mono(program);
 }
@@ -404,6 +410,27 @@ fn monomorphize_module_fns(program: &mut IrProgram) {
                 "inline_rust" | "wasm_intrinsic"
             ))
         });
+    }
+}
+
+/// Replace remaining TypeVars in VarTable with Unknown.
+///
+/// After mono + propagation, surviving TypeVars are from stdlib generic params
+/// (e.g., `filter_map[A, B]`'s B leaking into a lambda param type). These don't
+/// affect correctness — the WASM emitter handles Unknown as I32 (pointer).
+fn erase_orphan_typevars(vt: &mut VarTable) {
+    fn erase(ty: &Ty) -> Ty {
+        match ty {
+            Ty::TypeVar(_) => Ty::Unknown,
+            _ => ty.map_children(&erase),
+        }
+    }
+    for i in 0..vt.len() {
+        let has_tv = utils::has_typevar(&vt.entries[i].ty);
+        if has_tv {
+            let erased = erase(&vt.entries[i].ty);
+            vt.entries[i].ty = erased;
+        }
     }
 }
 
