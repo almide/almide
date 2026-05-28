@@ -1007,8 +1007,8 @@ impl FuncCompiler<'_> {
                     });
                     // Load source element via pointer
                     let mut cur_ty = source_elem_ty.clone();
-                    let cur_vt = values::ty_to_valtype(&cur_ty).unwrap_or(ValType::I32);
-                    let cur_local = self.scratch.alloc(cur_vt);
+                    let mut cur_vt = values::ty_to_valtype(&cur_ty).unwrap_or(ValType::I32);
+                    let mut cur_local = self.scratch.alloc(cur_vt);
                     wasm!(self.func, { local_get(ptr); });
                     self.emit_load_at(&cur_ty, 0);
                     wasm!(self.func, { local_set(cur_local); });
@@ -1022,11 +1022,23 @@ impl FuncCompiler<'_> {
                                         self.var_map.insert(vid.0, cur_local);
                                     }
                                     self.emit_expr(body);
-                                    wasm!(self.func, { local_set(cur_local); });
+                                    // Map may change the value type (e.g. Tuple → Float).
+                                    // Re-alloc cur_local with the correct type.
+                                    let new_ty = body.ty.clone();
+                                    let new_vt = values::ty_to_valtype(&new_ty).unwrap_or(ValType::I32);
+                                    if new_vt != cur_vt {
+                                        let new_local = self.scratch.alloc(new_vt);
+                                        wasm!(self.func, { local_set(new_local); });
+                                        self.scratch.free(cur_local, cur_vt);
+                                        cur_local = new_local;
+                                        cur_vt = new_vt;
+                                    } else {
+                                        wasm!(self.func, { local_set(cur_local); });
+                                    }
                                     if let Some((vid, _)) = params.first() {
                                         self.var_map.remove(&vid.0);
                                     }
-                                    cur_ty = body.ty.clone();
+                                    cur_ty = new_ty;
                                 }
                             }
                             PipelineStage::Filter(lambda) => {

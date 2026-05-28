@@ -1,4 +1,3 @@
-// wasm:skip — TypeVar remains after monomorphization (compiler bug)
 // Regression: list.fold's accumulator-element lambda params must be
 // inferred end-to-end across pipe chains, even when the upstream
 // list.map's lambda body is initially unresolved (e.g. tuple

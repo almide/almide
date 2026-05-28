@@ -1,4 +1,3 @@
-// wasm:skip — TypeVar remains after monomorphization (compiler bug)
 // codegen_pipes_test — Pipe operator chaining edge cases
 
 // ── Long pipe chain ──
