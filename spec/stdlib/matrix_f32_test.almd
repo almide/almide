@@ -1,4 +1,3 @@
-// wasm:skip — matrix WASM runtime not yet ported
 // matrix.{zeros, ones, mul, mul_scaled, mul_t, mul_t_scaled}_f32
 // — SmallF32 storage path regression tests.
 //

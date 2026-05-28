@@ -1,4 +1,3 @@
-// wasm:skip — matrix WASM runtime not yet ported
 // MatrixFusionPass: `gelu(linear_row(x, W, b))` → `linear_row_gelu(x, W, b)`.
 // Guards nested form, let-split form, and single-use safety.
 
