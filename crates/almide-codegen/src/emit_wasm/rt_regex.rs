@@ -935,7 +935,7 @@ fn emit_build_captures_list(
     wasm!(f, {
         local_get(grp_start); i32_const(-1); i32_eq;
         if_i32;
-            i32_const(string_hdr()); call(alloc); local_set(str_ptr);
+            i32_const(0); call(emitter.rt.string_alloc); local_set(str_ptr);
             local_get(str_ptr); i32_const(0); i32_store(0);
             local_get(str_ptr);
         else_;

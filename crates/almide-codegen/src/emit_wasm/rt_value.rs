@@ -281,6 +281,7 @@ fn compile_json_parse_at(emitter: &mut WasmEmitter) {
     let parse_at_fn = emitter.rt.json_parse_at;
     let type_idx = emitter.func_type_indices[&parse_at_fn];
     let alloc = emitter.rt.alloc;
+    let string_alloc = emitter.rt.string_alloc;
     let _concat = emitter.rt.concat_str;
     let _str_eq = emitter.rt.string.eq;
 
@@ -407,7 +408,7 @@ fn compile_json_parse_at(emitter: &mut WasmEmitter) {
     });
 
     // ── String ──
-    emit_parse_string(&mut f, alloc);
+    emit_parse_string(&mut f, alloc, string_alloc);
 
     // ── Number ──
     emit_parse_number(&mut f, alloc);
@@ -525,7 +526,7 @@ fn emit_skip_ws(f: &mut Function) {
 
 /// Parse JSON string starting at current pos (ch=='"').
 /// Uses locals: 0=str_ptr, 1=pos, 2=result_ptr, 3=str_len, 4=ch, 5=start, 6=value_ptr, 7=tmp, 9=count
-fn emit_parse_string(f: &mut Function, alloc: u32) {
+fn emit_parse_string(f: &mut Function, alloc: u32, string_alloc: u32) {
     wasm!(f, {
         local_get(4); i32_const(34); i32_eq;
         if_empty;
@@ -550,8 +551,7 @@ fn emit_parse_string(f: &mut Function, alloc: u32) {
     // Build string
     wasm!(f, {
           local_get(1); local_get(5); i32_sub; local_set(7);
-          i32_const(string_hdr()); local_get(7); i32_add; call(alloc); local_set(6);
-          local_get(6); local_get(7); i32_store(0);
+          local_get(7); call(string_alloc); local_set(6);
           i32_const(0); local_set(9);
     });
     // Copy bytes loop with JSON escape decoding.

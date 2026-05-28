@@ -66,8 +66,7 @@ pub(super) fn compile_base64_encode(emitter: &mut WasmEmitter, url_safe: bool) {
     wasm!(f, {
         local_get(2); i32_const(string_hdr()); i32_add;
         call(emitter.rt.alloc); local_set(3);
-        local_get(3); local_get(2); i32_store(0); // len
-        local_get(3); local_get(2); i32_store(string_cap_off() as u32); // cap
+        // len+cap already written by string_alloc
         i32_const(0); local_set(4); // i = 0
         i32_const(0); local_set(5); // j = 0
     });
@@ -475,9 +474,8 @@ pub(super) fn compile_hex_encode(emitter: &mut WasmEmitter, upper: bool) {
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
         local_get(1); i32_const(2); i32_mul; local_set(2);
-        local_get(2); i32_const(string_hdr()); i32_add; call(emitter.rt.alloc); local_set(3);
-        local_get(3); local_get(2); i32_store(0); // len
-        local_get(3); local_get(2); i32_store(string_cap_off() as u32); // cap
+        local_get(2); call(emitter.rt.string_alloc); local_set(3);
+        // len+cap already written by string_alloc
         i32_const(0); local_set(4);
         block_empty; loop_empty;
             local_get(4); local_get(1); i32_ge_u; br_if(1);
@@ -546,9 +544,8 @@ pub(super) fn compile_hex_decode(emitter: &mut WasmEmitter) {
             local_get(7); return_;
         end;
         local_get(1); i32_const(1); i32_shr_u; local_set(2);
-        local_get(2); i32_const(string_hdr()); i32_add; call(emitter.rt.alloc); local_set(3);
-        local_get(3); local_get(2); i32_store(0); // len
-        local_get(3); local_get(2); i32_store(string_cap_off() as u32); // cap
+        local_get(2); call(emitter.rt.string_alloc); local_set(3);
+        // len+cap already written by string_alloc
         i32_const(0); local_set(4);
         block_empty; loop_empty;
             local_get(4); local_get(2); i32_ge_u; br_if(1);

@@ -491,9 +491,7 @@ fn compile_join(emitter: &mut WasmEmitter) {
         local_get(2); i32_eqz;
         if_i32;
           // empty list → empty string
-          i32_const(string_hdr()); call(emitter.rt.alloc); local_tee(4);
-          i32_const(0); i32_store(0);
-          local_get(4);
+          i32_const(0); call(emitter.rt.string_alloc);
         else_;
           // result = list[0]
           local_get(0); i32_const(list_data_off()); i32_add; i32_load(0); local_set(4);
@@ -692,7 +690,7 @@ fn compile_chars(emitter: &mut WasmEmitter) {
         i32_const(0); local_set(3);
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          i32_const(string_hdr() + 1); call(emitter.rt.alloc); local_set(4);
+          i32_const(1); call(emitter.rt.string_alloc); local_set(4);
           local_get(4); i32_const(1); i32_store(0);
           local_get(4); i32_const(1); i32_store(string_cap_off() as u32, 0);
           local_get(4);
@@ -719,7 +717,7 @@ fn compile_lines(emitter: &mut WasmEmitter) {
           local_get(1); i32_const(0); i32_store(0);
           local_get(1);
         else_;
-          i32_const(string_hdr() + 1); call(emitter.rt.alloc); local_set(1);
+          i32_const(1); call(emitter.rt.string_alloc); local_set(1);
           local_get(1); i32_const(1); i32_store(0);
           local_get(1); i32_const(1); i32_store(string_cap_off() as u32, 0);
           local_get(1); i32_const(10); i32_store8(string_data_off() as u32);

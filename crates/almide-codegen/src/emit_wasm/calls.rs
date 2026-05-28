@@ -558,7 +558,7 @@ impl FuncCompiler<'_> {
                             local_get(s); i32_load(0); i32_eqz; // tag == 0?
                             if_i32;
                               // ok → empty string
-                              i32_const(string_hdr()); call(self.emitter.rt.alloc); local_set(s1);
+                              i32_const(0); call(self.emitter.rt.string_alloc); local_set(s1);
                               local_get(s1); i32_const(0); i32_store(0);
                               local_get(s1);
                             else_;
@@ -589,7 +589,7 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, {
                               local_set(s2);
                               // Build ": " separator [len=2][cap=2][':'][' ']
-                              i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32 + 2); call(self.emitter.rt.alloc); local_set(s3);
+                              i32_const(2); call(self.emitter.rt.string_alloc); local_set(s3);
                               local_get(s3); i32_const(2); i32_store(0);
                               local_get(s3); i32_const(2); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
                               local_get(s3); i32_const(58); i32_store8(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
@@ -619,7 +619,7 @@ impl FuncCompiler<'_> {
                         let s1 = self.scratch.alloc_i32();
                         wasm!(self.func, {
                             local_set(s);
-                            i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32 + 2); call(self.emitter.rt.alloc); local_set(s1);
+                            i32_const(2); call(self.emitter.rt.string_alloc); local_set(s1);
                             local_get(s1); i32_const(2); i32_store(0);
                             local_get(s1); i32_const(2); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
                             local_get(s1); i32_const(58); i32_store8(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32); // ':'
@@ -1159,7 +1159,7 @@ impl FuncCompiler<'_> {
                 // Empty string: alloc string_hdr() bytes, len=0
                 let tmp = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    i32_const(string_hdr()); call(self.emitter.rt.alloc);
+                    i32_const(0); call(self.emitter.rt.string_alloc);
                     local_set(tmp);
                     local_get(tmp);
                     i32_const(0); i32_store(0);
@@ -1192,7 +1192,7 @@ impl FuncCompiler<'_> {
                     local_get(tmp);
                     i32_const(1); i32_store(0); // tag=err
                     local_get(tmp);
-                    i32_const(string_hdr()); call(self.emitter.rt.alloc);
+                    i32_const(0); call(self.emitter.rt.string_alloc);
                     i32_store(4); // empty string at offset 4
                     local_get(tmp);
                 });
