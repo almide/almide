@@ -236,8 +236,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_set(ts); });
 
                 wasm!(self.func, {
-                    i32_const(24); call(self.emitter.rt.alloc); local_set(ptr);
-                    local_get(ptr); i32_const(20); i32_store(0);
+                    i32_const(20); call(self.emitter.rt.string_alloc); local_set(ptr);
                 });
 
                 let d = self.scratch.alloc_i64();
@@ -281,18 +280,19 @@ impl FuncCompiler<'_> {
                     local_get(d); i64_const(60); i64_rem_s; local_set(se);
                 });
 
-                self.emit_write_decimal_digits(ptr, 4, yr, 4);
-                wasm!(self.func, { local_get(ptr); i32_const(45); i32_store8(8); });
-                self.emit_write_decimal_digits(ptr, 9, mo, 2);
-                wasm!(self.func, { local_get(ptr); i32_const(45); i32_store8(11); });
-                self.emit_write_decimal_digits(ptr, 12, dy, 2);
-                wasm!(self.func, { local_get(ptr); i32_const(84); i32_store8(14); });
-                self.emit_write_decimal_digits(ptr, 15, hr, 2);
-                wasm!(self.func, { local_get(ptr); i32_const(58); i32_store8(17); });
-                self.emit_write_decimal_digits(ptr, 18, mi, 2);
-                wasm!(self.func, { local_get(ptr); i32_const(58); i32_store8(20); });
-                self.emit_write_decimal_digits(ptr, 21, se, 2);
-                wasm!(self.func, { local_get(ptr); i32_const(90); i32_store8(23); });
+                let d_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA);
+                self.emit_write_decimal_digits(ptr, d_off, yr, 4);        // YYYY
+                wasm!(self.func, { local_get(ptr); i32_const(45); i32_store8(d_off + 4); }); // -
+                self.emit_write_decimal_digits(ptr, d_off + 5, mo, 2);    // MM
+                wasm!(self.func, { local_get(ptr); i32_const(45); i32_store8(d_off + 7); }); // -
+                self.emit_write_decimal_digits(ptr, d_off + 8, dy, 2);    // DD
+                wasm!(self.func, { local_get(ptr); i32_const(84); i32_store8(d_off + 10); }); // T
+                self.emit_write_decimal_digits(ptr, d_off + 11, hr, 2);   // HH
+                wasm!(self.func, { local_get(ptr); i32_const(58); i32_store8(d_off + 13); }); // :
+                self.emit_write_decimal_digits(ptr, d_off + 14, mi, 2);   // MM
+                wasm!(self.func, { local_get(ptr); i32_const(58); i32_store8(d_off + 16); }); // :
+                self.emit_write_decimal_digits(ptr, d_off + 17, se, 2);   // SS
+                wasm!(self.func, { local_get(ptr); i32_const(90); i32_store8(d_off + 19); }); // Z
 
                 wasm!(self.func, { local_get(ptr); });
 
@@ -488,9 +488,10 @@ impl FuncCompiler<'_> {
 
     /// Parse N decimal ASCII digits from a string buffer into an i64 local.
     pub(super) fn emit_parse_digits(&mut self, str_local: u32, char_offset: u32, num_digits: u32, dest: u32) {
+        let data_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA);
         wasm!(self.func, { i64_const(0); local_set(dest); });
         for i in 0..num_digits {
-            let off = 4 + char_offset + i;
+            let off = data_off + char_offset + i;
             wasm!(self.func, {
                 local_get(dest); i64_const(10); i64_mul;
                 local_get(str_local); i32_load8_u(off);

@@ -183,6 +183,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // Capacity-aware: if left has room, append in-place; else realloc 2x.
     emitter.rt.string_append = emitter.register_func("__string_append", concat_ty);
 
+    // __string_alloc(len) -> ptr: alloc string with len AND cap written.
+    let str_alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.rt.string_alloc = emitter.register_func("__string_alloc", str_alloc_ty);
+
     // Note: string interpolation is now emitted inline at the call site
     // (see `calls_string::emit_string_interp`). No scratch runtime helpers.
 
@@ -310,6 +314,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_println_int(emitter);
     compile_concat_str(emitter);
     compile_string_append(emitter);
+    compile_string_alloc(emitter);
     super::runtime_eq::compile_option_eq_i64(emitter);
     super::runtime_eq::compile_option_eq_str(emitter);
     super::runtime_eq::compile_result_eq_i64_str(emitter);
@@ -987,6 +992,37 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
     });
 
     wasm!(f, { local_get(5); end; });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// __string_alloc(data_len: i32) -> ptr
+/// Allocate a string buffer with header properly initialized:
+///   ptr[0] = data_len (len field)
+///   ptr[cap_off] = data_len (cap field)
+/// Returns pointer to the string header.
+/// This eliminates the entire class of "cap not written" bugs.
+fn compile_string_alloc(emitter: &mut WasmEmitter) {
+    use super::engine::{WasmBuilder, layout::*};
+    let type_idx = emitter.func_type_indices[&emitter.rt.string_alloc];
+    let hdr = emitter.layout_reg.header_size(STRING) as i32;
+    let cap_off = emitter.layout_reg.fixed_offset(STRING, string::CAP);
+    let cap_ty = emitter.layout_reg.field(STRING, string::CAP).ty;
+    let alloc_fn = emitter.rt.alloc;
+
+    // param 0 = data_len, local 1 = ptr
+    let mut f = Function::new([(1, ValType::I32)]);
+    {
+        let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
+        // ptr = alloc(hdr + data_len)
+        w.get(0).i32c(hdr).add().call(alloc_fn).set(1);
+        // ptr.len = data_len
+        w.get(1).get(0).emit_store(0, MemType::I32);
+        // ptr.cap = data_len
+        w.get(1).get(0).emit_store(cap_off, cap_ty);
+        // return ptr
+        w.get(1);
+    }
+    f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 

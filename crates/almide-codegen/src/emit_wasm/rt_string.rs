@@ -290,9 +290,8 @@ fn compile_slice(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.slice];
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
-        i32_const(string_hdr()); local_get(2); local_get(1); i32_sub; i32_add;
-        call(emitter.rt.alloc); local_set(3);
-        local_get(3); local_get(2); local_get(1); i32_sub; i32_store(0);
+        local_get(2); local_get(1); i32_sub;
+        call(emitter.rt.string_alloc); local_set(3);
         i32_const(0); local_set(4);
         block_empty; loop_empty;
           local_get(4); local_get(2); local_get(1); i32_sub; i32_ge_u; br_if(1);
@@ -312,8 +311,7 @@ fn compile_reverse(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
-        i32_const(string_hdr()); local_get(1); i32_add; call(emitter.rt.alloc); local_set(2);
-        local_get(2); local_get(1); i32_store(0);
+        local_get(1); call(emitter.rt.string_alloc); local_set(2);
         i32_const(0); local_set(3);
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
@@ -334,8 +332,7 @@ fn compile_repeat(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_get(1); i32_mul; local_set(2);
-        i32_const(string_hdr()); local_get(2); i32_add; call(emitter.rt.alloc); local_set(3);
-        local_get(3); local_get(2); i32_store(0);
+        local_get(2); call(emitter.rt.string_alloc); local_set(3);
         i32_const(0); local_set(2); // reuse as offset
         block_empty; loop_empty;
           local_get(2); local_get(0); i32_load(0); local_get(1); i32_mul; i32_ge_u; br_if(1);

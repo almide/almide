@@ -197,6 +197,10 @@ pub struct RuntimeFuncs {
     pub println_int: u32,
     pub concat_str: u32,
     pub string_append: u32,
+    /// __string_alloc(len: i32) -> i32
+    /// Allocate string with header: writes len AND cap, returns ptr.
+    /// Eliminates the class of bugs where cap is forgotten after alloc.
+    pub string_alloc: u32,
     pub concat_list: u32,
     pub list_eq: u32,
     pub mem_eq: u32,
@@ -402,6 +406,7 @@ impl WasmEmitter {
                 hex_encode: 0, hex_encode_upper: 0, hex_decode: 0,
                 concat_str: 0,
                 string_append: 0,
+                string_alloc: 0,
                 concat_list: 0,
                 list_eq: 0, mem_eq: 0, list_list_str_cmp: 0,
                 option_eq_i64: 0, option_eq_str: 0,
