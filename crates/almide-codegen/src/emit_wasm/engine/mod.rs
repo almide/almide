@@ -25,7 +25,9 @@ pub mod ir;
 pub mod emit;
 pub mod builder;
 pub mod lower;
+pub mod module;
 
 pub use layout::LayoutRegistry;
 pub use builder::WasmBuilder;
 pub use ir::verify_func_stack;
+pub use module::{build_module, BuildError};

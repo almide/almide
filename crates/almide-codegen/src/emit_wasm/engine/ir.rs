@@ -18,12 +18,24 @@ pub type FuncIdx = u32;
 pub type SigIdx = u32;
 
 /// Primitive WASM value types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WasmTy {
     I32,
     I64,
     F32,
     F64,
+}
+
+impl WasmTy {
+    /// Convert to a wasm-encoder ValType for section encoding.
+    pub fn to_valtype(self) -> wasm_encoder::ValType {
+        match self {
+            WasmTy::I32 => wasm_encoder::ValType::I32,
+            WasmTy::I64 => wasm_encoder::ValType::I64,
+            WasmTy::F32 => wasm_encoder::ValType::F32,
+            WasmTy::F64 => wasm_encoder::ValType::F64,
+        }
+    }
 }
 
 /// A constant value.

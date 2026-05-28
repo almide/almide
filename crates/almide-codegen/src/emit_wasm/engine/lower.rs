@@ -9,18 +9,16 @@
 //! are declarative. No raw wasm-encoder calls.
 
 use almide_ir::{
-    self, IrExpr, IrExprKind, IrStmt, IrStmtKind, IrFunction, IrParam, IrStringPart,
-    IrMatchArm, IrPattern, IrVisibility, VarId, VarTable, Mutability, CallTarget, DefId,
+    IrExpr, IrExprKind, IrStmt, IrStmtKind, IrFunction, IrParam,
+    IrMatchArm, IrPattern, VarId, VarTable, CallTarget,
 };
 use almide_lang::types::Ty;
-use almide_base::intern::Sym;
 
 use super::ir::{
-    self as wir, Op, Const, WasmTy, WasmFunc, Local, FuncIdx, SigIdx,
-    BinOp as WBinOp, UnOp as WUnOp, LoadKind, StoreKind, StringPart,
-    StackEffect, verify_func_stack,
+    Op, Const, WasmTy, WasmFunc, Local, FuncIdx,
+    BinOp as WBinOp, UnOp as WUnOp, LoadKind, StoreKind,
 };
-use super::layout::{self, LayoutId, FieldId, LayoutRegistry};
+use super::layout::{self, LayoutRegistry};
 
 /// Lowering context for a single function.
 pub struct LowerCtx<'a> {
@@ -177,7 +175,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         IrExprKind::LitBool { value } => vec![Op::Const(Const::I32(if *value { 1 } else { 0 }))],
         IrExprKind::Unit => vec![],  // Unit produces nothing
 
-        IrExprKind::LitStr { value } => {
+        IrExprKind::LitStr { value: _ } => {
             // String literals are stored in the data segment.
             // For now, emit a placeholder that the emitter resolves.
             // TODO: proper data segment interning
@@ -492,7 +490,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             let mut first = true;
             for part in parts {
                 match part {
-                    almide_ir::IrStringPart::Lit { value } => {
+                    almide_ir::IrStringPart::Lit { value: _ } => {
                         // TODO: intern string in data segment
                         ops.push(Op::Const(Const::I32(0))); // placeholder str ptr
                     }
@@ -721,31 +719,31 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         }
 
         // ── Range ──
-        IrExprKind::Range { start, end, inclusive } => {
+        IrExprKind::Range { start: _, end: _, inclusive: _ } => {
             // TODO: allocate list and fill with range values
             vec![Op::Const(Const::I32(0))] // placeholder
         }
 
         // ── MapLiteral ──
-        IrExprKind::MapLiteral { entries } => {
+        IrExprKind::MapLiteral { entries: _ } => {
             // TODO: allocate Swiss Table and insert entries
             vec![Op::Const(Const::I32(0))] // placeholder
         }
 
         // ── SpreadRecord ──
-        IrExprKind::SpreadRecord { base, fields } => {
+        IrExprKind::SpreadRecord { base, fields: _ } => {
             // TODO: clone base record and update fields
             lower_expr(base, ctx) // simplified: just return base
         }
 
         // ── MapAccess ──
-        IrExprKind::MapAccess { object, key } => {
+        IrExprKind::MapAccess { object: _, key: _ } => {
             // TODO: Swiss Table lookup
             vec![Op::Const(Const::I32(0))] // placeholder
         }
 
         // ── OptionalChain ──
-        IrExprKind::OptionalChain { expr: inner, field } => {
+        IrExprKind::OptionalChain { expr: _inner, field: _ } => {
             // TODO: check None, then access field
             vec![Op::Const(Const::I32(0))] // placeholder
         }
@@ -911,7 +909,7 @@ fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut Lower
         }
         CallTarget::Computed { callee } => {
             // Indirect call through closure
-            let mut callee_ops = lower_expr(callee, ctx);
+            let callee_ops = lower_expr(callee, ctx);
             ops.extend(callee_ops);
             // TODO: extract table_idx and env_ptr from closure pair
             ops.push(Op::Unreachable); // placeholder
@@ -1044,7 +1042,7 @@ fn lower_match_arms_void(arms: &[IrMatchArm], subj: Local, subj_ty: &Ty, ctx: &m
 }
 
 /// Emit a condition check for a pattern. Pushes i32 (0 or 1) onto stack.
-fn pattern_condition(pattern: &IrPattern, subj: Local, subj_ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
+fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, _ctx: &mut LowerCtx) -> Vec<Op> {
     match pattern {
         IrPattern::Wildcard | IrPattern::Bind { .. } => {
             vec![Op::Const(Const::I32(1))] // always matches
@@ -1060,7 +1058,7 @@ fn pattern_condition(pattern: &IrPattern, subj: Local, subj_ty: &Ty, ctx: &mut L
                 _ => vec![Op::Const(Const::I32(1))], // TODO: string/float comparison
             }
         }
-        IrPattern::Constructor { name, .. } => {
+        IrPattern::Constructor { name: _, .. } => {
             // Load tag from variant and compare
             // TODO: resolve tag index from variant name
             vec![
@@ -1106,18 +1104,15 @@ fn pattern_condition(pattern: &IrPattern, subj: Local, subj_ty: &Ty, ctx: &mut L
 }
 
 /// Bind pattern variables to the subject value.
-fn bind_pattern(pattern: &IrPattern, subj: Local, subj_ty: &Ty, ctx: &mut LowerCtx) {
+fn bind_pattern(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut LowerCtx) {
     match pattern {
         IrPattern::Bind { var, .. } => {
-            let local = ctx.bind_var(*var, subj_ty);
-            // Will be set via LocalGet(subj) when the body references it
-            // For now, copy subject to the bound local
-            // (This is done implicitly by the var mapping)
+            // The bound variable aliases the subject local directly — no copy needed.
             ctx.var_map[var.0 as usize] = Some(subj);
         }
         IrPattern::Constructor { args, .. } => {
             // Bind constructor arguments from payload
-            for (i, arg) in args.iter().enumerate() {
+            for arg in args.iter() {
                 if let IrPattern::Bind { var, .. } = arg {
                     let local = ctx.alloc_local(WasmTy::I32);
                     if (var.0 as usize) < ctx.var_map.len() {
@@ -1216,6 +1211,8 @@ fn lower_for_in(var: VarId, iterable: &IrExpr, body: &[IrStmt], ctx: &mut LowerC
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::ir::verify_func_stack;
+    use almide_ir::{IrVisibility, Mutability};
     use almide_base::intern::sym;
 
     fn empty_var_table() -> VarTable {
@@ -1227,7 +1224,7 @@ mod tests {
     #[test]
     fn lower_lit_int() {
         let reg = LayoutRegistry::new();
-        let mut vt = empty_var_table();
+        let vt = empty_var_table();
         let func = IrFunction {
             name: sym("test"),
             params: vec![],
