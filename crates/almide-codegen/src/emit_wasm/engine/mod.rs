@@ -24,6 +24,7 @@ pub mod layout;
 pub mod ir;
 pub mod emit;
 pub mod builder;
+pub mod lower;
 
 pub use layout::LayoutRegistry;
 pub use builder::WasmBuilder;
