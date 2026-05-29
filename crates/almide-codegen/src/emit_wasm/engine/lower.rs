@@ -492,42 +492,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         }
 
         // ── Record literal ──
-        IrExprKind::Record { fields, .. } => {
-            // Fields are laid out in the record TYPE's canonical order at their
-            // natural byte widths. Both construction and Member read offsets
-            // from the same type, so they always agree. If the type can't be
-            // resolved to offsets, reject (→ legacy) rather than collapsing
-            // every field to offset 0.
-            let Some(total) = record_total_size(&expr.ty, ctx.record_types) else {
-                return vec![Op::Unsupported("record-unresolved-type")];
-            };
-            let mut ops = Vec::new();
-            let rec = ctx.alloc_local(WasmTy::I32);
-            ops.push(Op::Const(Const::I32(total)));
-            ops.push(Op::Alloc);
-            ops.push(Op::LocalSet(rec));
-
-            for (name, value) in fields.iter() {
-                let Some((off, _)) = record_field_offset(&expr.ty, name.as_str(), ctx.record_types) else {
-                    return vec![Op::Unsupported("record-field-missing")];
-                };
-                ops.push(Op::LocalGet(rec));
-                if off != 0 {
-                    ops.push(Op::Const(Const::I32(off)));
-                    ops.push(Op::BinOp(WBinOp::I32Add));
-                }
-                ops.extend(lower_expr(value, ctx));
-                let store_kind = match ty_to_wasm(&value.ty) {
-                    WasmTy::I64 => StoreKind::I64,
-                    WasmTy::F64 => StoreKind::F64,
-                    _ => StoreKind::I32,
-                };
-                ops.push(Op::Store(store_kind));
-            }
-
-            ops.push(Op::LocalGet(rec));
-            ops
-        }
+        IrExprKind::Record { fields, .. } => lower_record(&expr.ty, fields, ctx),
 
         // ── Member access ──
         IrExprKind::Member { object, field } => {
@@ -604,47 +569,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         }
 
         // ── String interpolation ──
-        IrExprKind::StringInterp { parts } => {
-            // Each interpolated expression must become a String. We support
-            // String parts directly and Int parts via __int_to_string. Other
-            // types (Float, Bool, …) have no to_string runtime yet, so the
-            // whole interpolation is rejected cleanly rather than concatenating
-            // a non-pointer as if it were one.
-            let unsupported = parts.iter().any(|p| {
-                matches!(p, almide_ir::IrStringPart::Expr { expr }
-                    if !matches!(expr.ty, Ty::String | Ty::Int))
-            });
-            if unsupported {
-                return vec![Op::StringInterp { parts: Vec::new() }];
-            }
-            if parts.is_empty() {
-                let off = ctx.interner.intern("");
-                return vec![Op::Const(Const::I32(off as i32))];
-            }
-            // Left-associative concat of all (string-valued) parts.
-            let mut ops = Vec::new();
-            for (i, part) in parts.iter().enumerate() {
-                match part {
-                    almide_ir::IrStringPart::Lit { value } => {
-                        let off = ctx.interner.intern(value);
-                        ops.push(Op::Const(Const::I32(off as i32)));
-                    }
-                    almide_ir::IrStringPart::Expr { expr: e } => {
-                        ops.extend(lower_expr(e, ctx));
-                        // Convert Int → String. (String parts are already pointers.)
-                        if matches!(e.ty, Ty::Int) {
-                            if let Some(idx) = (ctx.func_idx)("__int_to_string") {
-                                ops.push(Op::Call { idx, pops: 1, pushes: 1 });
-                            }
-                        }
-                    }
-                }
-                if i > 0 {
-                    ops.push(Op::StringConcat);
-                }
-            }
-            ops
-        }
+        IrExprKind::StringInterp { parts } => lower_string_interp(parts, ctx),
 
         // ── Option/Result constructors ──
         IrExprKind::OptionSome { expr: inner } => {
@@ -782,72 +707,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         IrExprKind::Try { expr: _inner } => vec![Op::Unsupported("Try")],
 
         // ── ClosureCreate ──
-        IrExprKind::ClosureCreate { func_name, captures } => {
-            let mut ops = Vec::new();
-            let closure = ctx.alloc_local(WasmTy::I32);
-
-            // Allocate closure pair: [table_idx:i32, env_ptr:i32]
-            // Plus env: captures.len() * 8 bytes
-            let env_size = (captures.len() as i32) * 8;
-            let pair_size = 8; // table_idx + env_ptr
-
-            // Allocate env
-            let env_ptr = ctx.alloc_local(WasmTy::I32);
-            if !captures.is_empty() {
-                ops.push(Op::Const(Const::I32(env_size)));
-                ops.push(Op::Alloc);
-                ops.push(Op::LocalSet(env_ptr));
-
-                // Store captures into env. Each slot is 8 bytes; the value is
-                // written at its natural width to match EnvLoad's load width.
-                for (i, (vid, cap_ty)) in captures.iter().enumerate() {
-                    ops.push(Op::LocalGet(env_ptr));
-                    let off = (i as i32) * 8;
-                    if off != 0 {
-                        ops.push(Op::Const(Const::I32(off)));
-                        ops.push(Op::BinOp(WBinOp::I32Add));
-                    }
-                    if let Some(local) = ctx.get_var(*vid) {
-                        ops.push(Op::LocalGet(local));
-                    } else {
-                        ops.push(Op::Const(Const::I32(0)));
-                    }
-                    let store_kind = match ty_to_wasm(cap_ty) {
-                        WasmTy::I64 => StoreKind::I64,
-                        WasmTy::F64 => StoreKind::F64,
-                        _ => StoreKind::I32,
-                    };
-                    ops.push(Op::Store(store_kind));
-                }
-            }
-
-            // Allocate closure pair
-            ops.push(Op::Const(Const::I32(pair_size)));
-            ops.push(Op::Alloc);
-            ops.push(Op::LocalTee(closure));
-
-            // Store table_idx (func index)
-            if let Some(idx) = (ctx.func_idx)(func_name.as_str()) {
-                ops.push(Op::Const(Const::I32(idx as i32)));
-            } else {
-                ops.push(Op::Const(Const::I32(0)));
-            }
-            ops.push(Op::Store(StoreKind::I32));
-
-            // Store env_ptr at offset 4
-            ops.push(Op::LocalGet(closure));
-            ops.push(Op::Const(Const::I32(4)));
-            ops.push(Op::BinOp(WBinOp::I32Add));
-            if captures.is_empty() {
-                ops.push(Op::Const(Const::I32(0)));
-            } else {
-                ops.push(Op::LocalGet(env_ptr));
-            }
-            ops.push(Op::Store(StoreKind::I32));
-
-            ops.push(Op::LocalGet(closure));
-            ops
-        }
+        IrExprKind::ClosureCreate { func_name, captures } => lower_closure_create(func_name, captures, ctx),
 
         // ── Lambda ──
         // ClosureConversion should have lifted these into ClosureCreate; a raw
@@ -869,76 +729,10 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         }
 
         // ── MapLiteral → __map_new + __map_set per entry ──
-        IrExprKind::MapLiteral { entries } => {
-            use almide_lang::types::constructor::TypeConstructorId as TC;
-            let (key_ty, val_ty) = match &expr.ty {
-                Ty::Applied(TC::Map, a) if a.len() == 2 && super::intrinsics::map_supported(&expr.ty) =>
-                    (a[0].clone(), a[1].clone()),
-                _ => return vec![Op::Unsupported("MapLiteral")],
-            };
-            let (new_idx, set_idx) = match ((ctx.func_idx)("__map_new"), (ctx.func_idx)("__map_set")) {
-                (Some(n), Some(s)) => (n, s),
-                _ => return vec![Op::Unsupported("MapLiteral")],
-            };
-            let kind = if matches!(key_ty, Ty::String) { 1 } else { 0 };
-            let widen = |ops: &mut Vec<Op>, ty: &Ty| {
-                if matches!(ty_to_wasm(ty), WasmTy::I32) { ops.push(Op::UnOp(WUnOp::I64ExtendI32U)); }
-            };
-            let m = ctx.alloc_local(WasmTy::I32);
-            let mut ops = vec![Op::Call { idx: new_idx, pops: 0, pushes: 1 }, Op::LocalSet(m)];
-            for (k, v) in entries {
-                ops.push(Op::LocalGet(m));
-                ops.extend(lower_expr(k, ctx)); widen(&mut ops, &key_ty);
-                ops.extend(lower_expr(v, ctx)); widen(&mut ops, &val_ty);
-                ops.push(Op::Const(Const::I32(kind)));
-                ops.push(Op::Call { idx: set_idx, pops: 4, pushes: 1 });
-                ops.push(Op::LocalSet(m));
-            }
-            ops.push(Op::LocalGet(m));
-            ops
-        }
+        IrExprKind::MapLiteral { entries } => lower_map_literal(&expr.ty, entries, ctx),
 
         // ── SpreadRecord: { ...base, f: v } ──
-        // Spread preserves the record type, so base and result share field
-        // offsets: copy the whole base record, then overwrite the named fields.
-        IrExprKind::SpreadRecord { base, fields } => {
-            let Some(total) = record_total_size(&expr.ty, ctx.record_types) else {
-                return vec![Op::Unsupported("SpreadRecord")];
-            };
-            let mut ops = Vec::new();
-            let out = ctx.alloc_local(WasmTy::I32);
-            let base_l = ctx.alloc_local(WasmTy::I32);
-            ops.extend(lower_expr(base, ctx));
-            ops.push(Op::LocalSet(base_l));
-            ops.push(Op::Const(Const::I32(total)));
-            ops.push(Op::Alloc);
-            ops.push(Op::LocalSet(out));
-            // memcpy(out, base, total)
-            ops.push(Op::LocalGet(out));
-            ops.push(Op::LocalGet(base_l));
-            ops.push(Op::Const(Const::I32(total)));
-            ops.push(Op::MemoryCopy);
-            // overwrite the explicitly-spread fields
-            for (name, value) in fields.iter() {
-                let Some((off, _)) = record_field_offset(&expr.ty, name.as_str(), ctx.record_types) else {
-                    return vec![Op::Unsupported("record-field-missing")];
-                };
-                ops.push(Op::LocalGet(out));
-                if off != 0 {
-                    ops.push(Op::Const(Const::I32(off)));
-                    ops.push(Op::BinOp(WBinOp::I32Add));
-                }
-                ops.extend(lower_expr(value, ctx));
-                let sk = match ty_to_wasm(&value.ty) {
-                    WasmTy::I64 => StoreKind::I64,
-                    WasmTy::F64 => StoreKind::F64,
-                    _ => StoreKind::I32,
-                };
-                ops.push(Op::Store(sk));
-            }
-            ops.push(Op::LocalGet(out));
-            ops
-        }
+        IrExprKind::SpreadRecord { base, fields } => lower_spread_record(&expr.ty, base, fields, ctx),
 
         // ── MapAccess (Swiss Table lookup not implemented) ──
         IrExprKind::MapAccess { object: _, key: _ } => vec![Op::Unsupported("MapAccess")],
@@ -992,6 +786,194 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             }
         }
     }
+}
+
+// ── Heavy expression arms, extracted from lower_expr to keep its dispatch
+//    match shallow (one call per construct) ───────────────────────────
+
+type Sym = almide_base::intern::Sym;
+
+/// Record literal `{ a: .., b: .. }` — alloc + store each field at its offset.
+fn lower_record(ty: &Ty, fields: &[(Sym, IrExpr)], ctx: &mut LowerCtx) -> Vec<Op> {
+    // Fields are laid out in the record TYPE's canonical order at their natural
+    // widths; both construction and Member read offsets from the same type.
+    // Reject (→ legacy) if the type can't be resolved rather than collapse to 0.
+    let Some(total) = record_total_size(ty, ctx.record_types) else {
+        return vec![Op::Unsupported("record-unresolved-type")];
+    };
+    let mut ops = Vec::new();
+    let rec = ctx.alloc_local(WasmTy::I32);
+    ops.push(Op::Const(Const::I32(total)));
+    ops.push(Op::Alloc);
+    ops.push(Op::LocalSet(rec));
+    for (name, value) in fields.iter() {
+        let Some((off, _)) = record_field_offset(ty, name.as_str(), ctx.record_types) else {
+            return vec![Op::Unsupported("record-field-missing")];
+        };
+        ops.push(Op::LocalGet(rec));
+        if off != 0 {
+            ops.push(Op::Const(Const::I32(off)));
+            ops.push(Op::BinOp(WBinOp::I32Add));
+        }
+        ops.extend(lower_expr(value, ctx));
+        ops.push(Op::Store(store_kind_of(ty_to_wasm(&value.ty))));
+    }
+    ops.push(Op::LocalGet(rec));
+    ops
+}
+
+/// String interpolation `"${..}"` — concat String/Int parts (Int via
+/// __int_to_string); other part types reject cleanly.
+fn lower_string_interp(parts: &[almide_ir::IrStringPart], ctx: &mut LowerCtx) -> Vec<Op> {
+    let unsupported = parts.iter().any(|p| {
+        matches!(p, almide_ir::IrStringPart::Expr { expr }
+            if !matches!(expr.ty, Ty::String | Ty::Int))
+    });
+    if unsupported {
+        return vec![Op::StringInterp { parts: Vec::new() }];
+    }
+    if parts.is_empty() {
+        let off = ctx.interner.intern("");
+        return vec![Op::Const(Const::I32(off as i32))];
+    }
+    let mut ops = Vec::new();
+    for (i, part) in parts.iter().enumerate() {
+        match part {
+            almide_ir::IrStringPart::Lit { value } => {
+                let off = ctx.interner.intern(value);
+                ops.push(Op::Const(Const::I32(off as i32)));
+            }
+            almide_ir::IrStringPart::Expr { expr: e } => {
+                ops.extend(lower_expr(e, ctx));
+                if matches!(e.ty, Ty::Int) {
+                    if let Some(idx) = (ctx.func_idx)("__int_to_string") {
+                        ops.push(Op::Call { idx, pops: 1, pushes: 1 });
+                    }
+                }
+            }
+        }
+        if i > 0 {
+            ops.push(Op::StringConcat);
+        }
+    }
+    ops
+}
+
+/// `ClosureCreate` — closure pair `[table_idx][env_ptr]` plus a captured-env
+/// block; captures are stored at their natural widths (matching EnvLoad).
+fn lower_closure_create(func_name: &Sym, captures: &[(VarId, Ty)], ctx: &mut LowerCtx) -> Vec<Op> {
+    let mut ops = Vec::new();
+    let closure = ctx.alloc_local(WasmTy::I32);
+    let env_size = (captures.len() as i32) * 8;
+    let env_ptr = ctx.alloc_local(WasmTy::I32);
+    if !captures.is_empty() {
+        ops.push(Op::Const(Const::I32(env_size)));
+        ops.push(Op::Alloc);
+        ops.push(Op::LocalSet(env_ptr));
+        for (i, (vid, cap_ty)) in captures.iter().enumerate() {
+            ops.push(Op::LocalGet(env_ptr));
+            let off = (i as i32) * 8;
+            if off != 0 {
+                ops.push(Op::Const(Const::I32(off)));
+                ops.push(Op::BinOp(WBinOp::I32Add));
+            }
+            if let Some(local) = ctx.get_var(*vid) {
+                ops.push(Op::LocalGet(local));
+            } else {
+                ops.push(Op::Const(Const::I32(0)));
+            }
+            ops.push(Op::Store(store_kind_of(ty_to_wasm(cap_ty))));
+        }
+    }
+    ops.push(Op::Const(Const::I32(8))); // pair size
+    ops.push(Op::Alloc);
+    ops.push(Op::LocalTee(closure));
+    if let Some(idx) = (ctx.func_idx)(func_name.as_str()) {
+        ops.push(Op::Const(Const::I32(idx as i32)));
+    } else {
+        ops.push(Op::Const(Const::I32(0)));
+    }
+    ops.push(Op::Store(StoreKind::I32));
+    ops.push(Op::LocalGet(closure));
+    ops.push(Op::Const(Const::I32(4)));
+    ops.push(Op::BinOp(WBinOp::I32Add));
+    if captures.is_empty() {
+        ops.push(Op::Const(Const::I32(0)));
+    } else {
+        ops.push(Op::LocalGet(env_ptr));
+    }
+    ops.push(Op::Store(StoreKind::I32));
+    ops.push(Op::LocalGet(closure));
+    ops
+}
+
+/// `MapLiteral` — __map_new then __map_set per entry (widening i32 keys/vals).
+fn lower_map_literal(ty: &Ty, entries: &[(IrExpr, IrExpr)], ctx: &mut LowerCtx) -> Vec<Op> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    let (key_ty, val_ty) = match ty {
+        Ty::Applied(TC::Map, a) if a.len() == 2 && super::intrinsics::map_supported(ty) =>
+            (a[0].clone(), a[1].clone()),
+        _ => return vec![Op::Unsupported("MapLiteral")],
+    };
+    let (new_idx, set_idx) = match ((ctx.func_idx)("__map_new"), (ctx.func_idx)("__map_set")) {
+        (Some(n), Some(s)) => (n, s),
+        _ => return vec![Op::Unsupported("MapLiteral")],
+    };
+    let kind = if matches!(key_ty, Ty::String) { 1 } else { 0 };
+    let widen = |ops: &mut Vec<Op>, ty: &Ty| {
+        if matches!(ty_to_wasm(ty), WasmTy::I32) { ops.push(Op::UnOp(WUnOp::I64ExtendI32U)); }
+    };
+    let m = ctx.alloc_local(WasmTy::I32);
+    let mut ops = vec![Op::Call { idx: new_idx, pops: 0, pushes: 1 }, Op::LocalSet(m)];
+    for (k, v) in entries {
+        ops.push(Op::LocalGet(m));
+        ops.extend(lower_expr(k, ctx)); widen(&mut ops, &key_ty);
+        ops.extend(lower_expr(v, ctx)); widen(&mut ops, &val_ty);
+        ops.push(Op::Const(Const::I32(kind)));
+        ops.push(Op::Call { idx: set_idx, pops: 4, pushes: 1 });
+        ops.push(Op::LocalSet(m));
+    }
+    ops.push(Op::LocalGet(m));
+    ops
+}
+
+/// `SpreadRecord` `{ ...base, f: v }` — copy the whole base record (spread
+/// preserves the type, so offsets match), then overwrite the named fields.
+fn lower_spread_record(ty: &Ty, base: &IrExpr, fields: &[(Sym, IrExpr)], ctx: &mut LowerCtx) -> Vec<Op> {
+    let Some(total) = record_total_size(ty, ctx.record_types) else {
+        return vec![Op::Unsupported("SpreadRecord")];
+    };
+    let mut ops = Vec::new();
+    let out = ctx.alloc_local(WasmTy::I32);
+    let base_l = ctx.alloc_local(WasmTy::I32);
+    ops.extend(lower_expr(base, ctx));
+    ops.push(Op::LocalSet(base_l));
+    ops.push(Op::Const(Const::I32(total)));
+    ops.push(Op::Alloc);
+    ops.push(Op::LocalSet(out));
+    ops.push(Op::LocalGet(out));
+    ops.push(Op::LocalGet(base_l));
+    ops.push(Op::Const(Const::I32(total)));
+    ops.push(Op::MemoryCopy);
+    for (name, value) in fields.iter() {
+        let Some((off, _)) = record_field_offset(ty, name.as_str(), ctx.record_types) else {
+            return vec![Op::Unsupported("record-field-missing")];
+        };
+        ops.push(Op::LocalGet(out));
+        if off != 0 {
+            ops.push(Op::Const(Const::I32(off)));
+            ops.push(Op::BinOp(WBinOp::I32Add));
+        }
+        ops.extend(lower_expr(value, ctx));
+        ops.push(Op::Store(store_kind_of(ty_to_wasm(&value.ty))));
+    }
+    ops.push(Op::LocalGet(out));
+    ops
+}
+
+/// `StoreKind` for a WASM value type's natural width.
+fn store_kind_of(wt: WasmTy) -> StoreKind {
+    match wt { WasmTy::I64 => StoreKind::I64, WasmTy::F64 => StoreKind::F64, _ => StoreKind::I32 }
 }
 
 /// Lower an expression in void context (discard result if any).
