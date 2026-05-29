@@ -49,7 +49,7 @@ resolved — harmless, candidate for cleanup.
 
 ---
 
-## Category 2 — Silent element/payload-type default → wrong load/store width  *(IN PROGRESS: "Unknown sweep")*
+## Category 2 — Silent element/payload-type default → wrong load/store width  *(SWEPT)*
 
 **Shape:** an **element or payload type** lookup returns `None` (type leaked as
 `Ty::Unknown`) and the caller does `.unwrap_or(Ty::Int)` / `.unwrap_or(Ty::String)`.
@@ -65,11 +65,19 @@ but the same silent class.
   `option_to_list`, `list_reverse`, `list_filter_map`, `list_flat_map`,
   `list_map` — all default an element/payload type to `Ty::Int`/`Ty::String`.
 
-**Plan:** convert each to **honest rejection** — when the element/payload type is
-unresolved (`Unknown`/`TypeVar`), return `Op::Unsupported` (→ legacy) rather than
-guessing a width. Guard against over-fallback: verify each site is actually
-reachable with an unresolved type before converting (the differential shows 0
-current bugs, i.e. real programs carry resolved types).
+**Done (commit bddf9447):** `concrete_ty(Option<Ty>) -> Option<Ty>` yields `None`
+for `Unknown`/`TypeVar`; the 11 list/option/result intrinsic helpers route
+through it and reject (→ legacy) instead of guessing i64. `ForIn` rejects a
+List/Set with an unresolved element but keeps the Int default for ranges (`None`
+from `list_element_ty`); `ConcatList` rejects an unresolved stride. Differential
+gate unchanged (real programs carry resolved types).
+
+**Residual (lower priority):** match-destructure sub-types in `sub_slots` /
+`bind_pattern` use `pattern_fallback_ty` (the pattern's *own* declared `Bind`
+type) as fallback — concrete, so not a blind Int guess — except the List-pattern
+element (`list_element_ty(subj_ty).unwrap_or(Ty::Int)`), which still guesses for
+a list pattern on an unresolved scrutinee. Convert when `sub_slots` is made
+fallible.
 
 ---
 
