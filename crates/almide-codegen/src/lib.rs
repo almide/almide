@@ -160,6 +160,18 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
             // AlmidePerceusBelt: Verified::verify() runs Lean 4-certified
             // RC balance check. Only verified programs can reach WASM emit.
             let verified = Verified::verify(program);
+            // Opt-in WASM engine v2 (ALMIDE_WASM_V2). Runs the new lowering →
+            // verify → assemble pipeline; on any unsupported construct it falls
+            // back to the legacy emitter so existing programs keep building.
+            if std::env::var_os("ALMIDE_WASM_V2").is_some() {
+                let reg = emit_wasm::engine::LayoutRegistry::new();
+                match emit_wasm::engine::build_module(
+                    &program.functions, &program.var_table, &reg,
+                ) {
+                    Ok(bytes) => return CodegenOutput::Binary(bytes),
+                    Err(e) => eprintln!("[wasm-v2] {e}; falling back to legacy emitter"),
+                }
+            }
             CodegenOutput::Binary(emit_wasm::emit_verified(verified))
         }
         Target::Wgsl => CodegenOutput::Source(emit_wgsl::emit(program)),
