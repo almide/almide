@@ -147,6 +147,13 @@ pub fn lower_intrinsic(
             && matches!(super::lower::list_element_ty(&args[0].ty), Some(Ty::Int)) =>
             call_runtime("__list_sort_int", args, 1, ctx),
         "almide_rt_list_contains" if args.len() == 2 => list_contains(&args[0], &args[1], ctx),
+        // ── Pure list builders (sub-ranges / construction; no new runtime) ──
+        "almide_rt_list_take" if args.len() == 2 => list_take(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_list_drop" if args.len() == 2 => list_drop(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_list_slice" if args.len() == 3 => list_slice(&args[0], &args[1], &args[2], ret_ty, ctx),
+        "almide_rt_list_repeat" if args.len() == 2 => list_repeat(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_list_with_capacity" if args.len() == 1 => list_with_capacity(&args[0], ret_ty, ctx),
+        "almide_rt_list_enumerate" if args.len() == 1 => list_enumerate(&args[0], ctx),
         "almide_rt_string_starts_with" if args.len() == 2 => call_runtime("__string_starts_with", args, 1, ctx),
         "almide_rt_string_ends_with" if args.len() == 2 => call_runtime("__string_ends_with", args, 1, ctx),
 
@@ -1452,6 +1459,195 @@ fn alloc_list(out: u32, count: u32, es: i32, alloc: super::ir::FuncIdx) -> Vec<O
         Op::LocalGet(out), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
         Op::LocalGet(count), Op::Store(StoreKind::I32),
     ]
+}
+
+/// Ops that clamp the i32 local `v` into `[0, hi]` in place.
+fn clamp_0_hi(v: u32, hi: u32) -> Vec<Op> {
+    vec![
+        Op::LocalGet(v), Op::Const(Const::I32(0)), Op::BinOp(B::I32LtS),
+        Op::If { ty: WasmTy::I32, then: vec![Op::Const(Const::I32(0))], else_: vec![Op::LocalGet(v)] },
+        Op::LocalSet(v),
+        Op::LocalGet(v), Op::LocalGet(hi), Op::BinOp(B::I32GtS),
+        Op::If { ty: WasmTy::I32, then: vec![Op::LocalGet(hi)], else_: vec![Op::LocalGet(v)] },
+        Op::LocalSet(v),
+    ]
+}
+
+/// `out = xs[start, start+count)` as a fresh list. `start`/`count` are i32 locals
+/// (caller clamps), `es` the element byte width.
+fn build_sublist(xs: u32, start: u32, count: u32, es: i32, out: u32, alloc: super::ir::FuncIdx) -> Vec<Op> {
+    let mut ops = alloc_list(out, count, es, alloc);
+    ops.extend(vec![
+        Op::LocalGet(out), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(xs), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(start), Op::Const(Const::I32(es)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalGet(count), Op::Const(Const::I32(es)), Op::BinOp(B::I32Mul),
+        Op::MemoryCopy,
+    ]);
+    ops
+}
+
+/// Common prologue for the sub-range builders: evaluate `xs` into a local and
+/// load its length. Returns (xs_local, len_local, ops, es, alloc).
+fn sublist_prologue(xs: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<(u32, u32, Vec<Op>, i32, super::ir::FuncIdx)> {
+    let elem_ty = concrete_ty(super::lower::list_element_ty(ret_ty))?;
+    let es = wasm_byte_size(&elem_ty);
+    let alloc = (ctx.func_idx)("__alloc")?;
+    let xs_l = ctx.alloc_local(WasmTy::I32);
+    let len = ctx.alloc_local(WasmTy::I32);
+    let mut ops = lower_expr(xs, ctx);
+    ops.push(Op::LocalSet(xs_l));
+    ops.push(Op::LocalGet(xs_l)); ops.push(Op::Load(LoadKind::I32)); ops.push(Op::LocalSet(len));
+    Some((xs_l, len, ops, es, alloc))
+}
+
+/// `list.take(xs, n)` — first `clamp(n, 0, len)` elements.
+fn list_take(xs: &IrExpr, n: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (xs_l, len, mut ops, es, alloc) = sublist_prologue(xs, ret_ty, ctx)?;
+    let cnt = ctx.alloc_local(WasmTy::I32);
+    let start = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    ops.extend(lower_expr(n, ctx)); ops.push(Op::UnOp(U::I32WrapI64)); ops.push(Op::LocalSet(cnt));
+    ops.extend(clamp_0_hi(cnt, len));
+    ops.push(Op::Const(Const::I32(0))); ops.push(Op::LocalSet(start));
+    ops.extend(build_sublist(xs_l, start, cnt, es, out, alloc));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `list.drop(xs, n)` — elements from index `clamp(n, 0, len)` onward.
+fn list_drop(xs: &IrExpr, n: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (xs_l, len, mut ops, es, alloc) = sublist_prologue(xs, ret_ty, ctx)?;
+    let start = ctx.alloc_local(WasmTy::I32);
+    let cnt = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    ops.extend(lower_expr(n, ctx)); ops.push(Op::UnOp(U::I32WrapI64)); ops.push(Op::LocalSet(start));
+    ops.extend(clamp_0_hi(start, len));
+    ops.extend(vec![Op::LocalGet(len), Op::LocalGet(start), Op::BinOp(B::I32Sub), Op::LocalSet(cnt)]);
+    ops.extend(build_sublist(xs_l, start, cnt, es, out, alloc));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `list.slice(xs, start, end)` — elements `[clamp(start), clamp(end))`.
+fn list_slice(xs: &IrExpr, start_e: &IrExpr, end_e: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (xs_l, len, mut ops, es, alloc) = sublist_prologue(xs, ret_ty, ctx)?;
+    let s = ctx.alloc_local(WasmTy::I32);
+    let e = ctx.alloc_local(WasmTy::I32);
+    let cnt = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    ops.extend(lower_expr(start_e, ctx)); ops.push(Op::UnOp(U::I32WrapI64)); ops.push(Op::LocalSet(s));
+    ops.extend(clamp_0_hi(s, len));
+    ops.extend(lower_expr(end_e, ctx)); ops.push(Op::UnOp(U::I32WrapI64)); ops.push(Op::LocalSet(e));
+    // e = max(e, s) then min(e, len)
+    ops.extend(vec![
+        Op::LocalGet(e), Op::LocalGet(s), Op::BinOp(B::I32LtS),
+        Op::If { ty: WasmTy::I32, then: vec![Op::LocalGet(s)], else_: vec![Op::LocalGet(e)] }, Op::LocalSet(e),
+        Op::LocalGet(e), Op::LocalGet(len), Op::BinOp(B::I32GtS),
+        Op::If { ty: WasmTy::I32, then: vec![Op::LocalGet(len)], else_: vec![Op::LocalGet(e)] }, Op::LocalSet(e),
+    ]);
+    ops.extend(vec![Op::LocalGet(e), Op::LocalGet(s), Op::BinOp(B::I32Sub), Op::LocalSet(cnt)]);
+    ops.extend(build_sublist(xs_l, s, cnt, es, out, alloc));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `list.repeat(val, n)` — a list of `max(n, 0)` copies of `val`.
+fn list_repeat(val: &IrExpr, n: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let elem_ty = concrete_ty(super::lower::list_element_ty(ret_ty))?;
+    let es = wasm_byte_size(&elem_ty);
+    let sk = store_kind_of(ty_to_wasm(&elem_ty));
+    let alloc = (ctx.func_idx)("__alloc")?;
+    let val_l = ctx.alloc_local(ty_to_wasm(&elem_ty));
+    let cnt = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let i = ctx.alloc_local(WasmTy::I32);
+    let mut ops = lower_expr(val, ctx);
+    ops.push(Op::LocalSet(val_l));
+    ops.extend(lower_expr(n, ctx)); ops.push(Op::UnOp(U::I32WrapI64)); ops.push(Op::LocalSet(cnt));
+    // cnt = cnt < 0 ? 0 : cnt
+    ops.extend(vec![
+        Op::LocalGet(cnt), Op::Const(Const::I32(0)), Op::BinOp(B::I32LtS),
+        Op::If { ty: WasmTy::I32, then: vec![Op::Const(Const::I32(0))], else_: vec![Op::LocalGet(cnt)] }, Op::LocalSet(cnt),
+    ]);
+    ops.extend(alloc_list(out, cnt, es, alloc));
+    ops.push(Op::Const(Const::I32(0))); ops.push(Op::LocalSet(i));
+    let loop_body = vec![
+        Op::LocalGet(i), Op::LocalGet(cnt), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        Op::LocalGet(out), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(i), Op::Const(Const::I32(es)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalGet(val_l), Op::Store(sk),
+        Op::LocalGet(i), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(i), Op::Br(0),
+    ];
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `list.with_capacity(cap)` — an empty list (`len = 0`) with `max(cap,0)` slots
+/// reserved (`cap` field set). Useful once mutation lands; valid empty list now.
+fn list_with_capacity(cap_e: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let elem_ty = concrete_ty(super::lower::list_element_ty(ret_ty))?;
+    let es = wasm_byte_size(&elem_ty);
+    let alloc = (ctx.func_idx)("__alloc")?;
+    let cap = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let mut ops = lower_expr(cap_e, ctx);
+    ops.push(Op::UnOp(U::I32WrapI64)); ops.push(Op::LocalSet(cap));
+    ops.extend(vec![
+        Op::LocalGet(cap), Op::Const(Const::I32(0)), Op::BinOp(B::I32LtS),
+        Op::If { ty: WasmTy::I32, then: vec![Op::Const(Const::I32(0))], else_: vec![Op::LocalGet(cap)] }, Op::LocalSet(cap),
+    ]);
+    // out = alloc(8 + cap*es) ; out.len = 0 ; out.cap = cap
+    ops.extend(vec![
+        Op::Const(Const::I32(8)), Op::LocalGet(cap), Op::Const(Const::I32(es)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::Call { idx: alloc, pops: 1, pushes: 1 }, Op::LocalSet(out),
+        Op::LocalGet(out), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
+        Op::LocalGet(out), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(cap), Op::Store(StoreKind::I32),
+        Op::LocalGet(out),
+    ]);
+    Some(ops)
+}
+
+/// `list.enumerate(xs)` — `List[(Int, A)]`: a heap tuple `[Int@0][A@8]` per
+/// element, collected into a 4-byte-slot list.
+fn list_enumerate(xs: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let a_ty = concrete_ty(super::lower::list_element_ty(&xs.ty))?;
+    let a_es = wasm_byte_size(&a_ty);
+    let a_lk = load_kind_of(ty_to_wasm(&a_ty));
+    let a_sk = store_kind_of(ty_to_wasm(&a_ty));
+    let tup_size = 8 + a_es;
+    let alloc = (ctx.func_idx)("__alloc")?;
+    let xs_l = ctx.alloc_local(WasmTy::I32);
+    let len = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let i = ctx.alloc_local(WasmTy::I32);
+    let tup = ctx.alloc_local(WasmTy::I32);
+    let mut ops = lower_expr(xs, ctx);
+    ops.push(Op::LocalSet(xs_l));
+    ops.push(Op::LocalGet(xs_l)); ops.push(Op::Load(LoadKind::I32)); ops.push(Op::LocalSet(len));
+    ops.extend(alloc_list(out, len, 4, alloc));
+    ops.push(Op::Const(Const::I32(0))); ops.push(Op::LocalSet(i));
+    let loop_body = vec![
+        Op::LocalGet(i), Op::LocalGet(len), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        // tup = alloc(tup_size)
+        Op::Const(Const::I32(tup_size)), Op::Call { idx: alloc, pops: 1, pushes: 1 }, Op::LocalSet(tup),
+        // tup[0] = (i64) i
+        Op::LocalGet(tup), Op::LocalGet(i), Op::UnOp(U::I64ExtendI32U), Op::Store(StoreKind::I64),
+        // tup[8] = xs[8 + i*a_es]
+        Op::LocalGet(tup), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(xs_l), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(i), Op::Const(Const::I32(a_es)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add), Op::Load(a_lk),
+        Op::Store(a_sk),
+        // out[8 + i*4] = tup
+        Op::LocalGet(out), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(i), Op::Const(Const::I32(4)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalGet(tup), Op::Store(StoreKind::I32),
+        Op::LocalGet(i), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(i), Op::Br(0),
+    ];
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
 }
 
 /// `out.len = out.cap = count` (used after a filtering pass).

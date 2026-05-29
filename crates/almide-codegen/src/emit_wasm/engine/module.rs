@@ -2177,6 +2177,54 @@ mod tests {
         if let Some(r) = run_vt(&[main2], &vt, "main") { assert_eq!(r, "0", "None"); }
     }
 
+    /// Pure list builders: take / drop / slice / repeat / with_capacity / enumerate.
+    #[test]
+    fn exec_list_builders() {
+        let li = Ty::list(Ty::Int);
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let lst = |xs: &[i64]| IrExpr { kind: IrExprKind::List { elements: xs.iter().map(|n| lit_int(*n)).collect() },
+            ty: li.clone(), span: None, def_id: None };
+        let len = |e: IrExpr| call("almide_rt_list_len", vec![e], Ty::Int);
+        let getor = |e: IrExpr, i: i64| call("almide_rt_list_get_or", vec![e, lit_int(i), lit_int(-1)], Ty::Int);
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        let take = |xs: &[i64], n: i64| call("almide_rt_list_take", vec![lst(xs), lit_int(n)], li.clone());
+        ti(len(take(&[10, 20, 30, 40], 2)), "2", "take len");
+        ti(getor(take(&[10, 20, 30, 40], 2), 1), "20", "take[1]");
+        ti(len(take(&[10, 20], 9)), "2", "take clamps to len");
+        ti(len(take(&[10, 20], -1)), "0", "take negative → 0");
+
+        let drop = |xs: &[i64], n: i64| call("almide_rt_list_drop", vec![lst(xs), lit_int(n)], li.clone());
+        ti(len(drop(&[10, 20, 30, 40], 1)), "3", "drop len");
+        ti(getor(drop(&[10, 20, 30, 40], 1), 0), "20", "drop[0]");
+        ti(len(drop(&[10, 20], 9)), "0", "drop past end → 0");
+
+        let slice = |xs: &[i64], s: i64, e: i64| call("almide_rt_list_slice", vec![lst(xs), lit_int(s), lit_int(e)], li.clone());
+        ti(len(slice(&[10, 20, 30, 40], 1, 3)), "2", "slice len");
+        ti(getor(slice(&[10, 20, 30, 40], 1, 3), 0), "20", "slice[0]");
+        ti(getor(slice(&[10, 20, 30, 40], 1, 3), 1), "30", "slice[1]");
+        ti(len(slice(&[10, 20, 30], 2, 1)), "0", "slice end<start → 0");
+
+        let rep = |v: i64, n: i64| call("almide_rt_list_repeat", vec![lit_int(v), lit_int(n)], li.clone());
+        ti(len(rep(7, 3)), "3", "repeat len");
+        ti(getor(rep(7, 3), 2), "7", "repeat[2]");
+        ti(len(rep(7, 0)), "0", "repeat 0");
+
+        ti(len(call("almide_rt_list_with_capacity", vec![lit_int(5)], li.clone())), "0", "with_capacity len 0");
+
+        // enumerate → List[(Int, Int)]; element 1 is (1, 20)
+        let lii = Ty::list(Ty::Tuple(vec![Ty::Int, Ty::Int]));
+        let en = || call("almide_rt_list_enumerate", vec![lst(&[10, 20, 30])], lii.clone());
+        ti(len(en()), "3", "enumerate len");
+        let elem1 = || IrExpr { kind: IrExprKind::IndexAccess { object: Box::new(en()), index: Box::new(lit_int(1)) },
+            ty: Ty::Tuple(vec![Ty::Int, Ty::Int]), span: None, def_id: None };
+        let tix = |obj: IrExpr, i: usize| IrExpr { kind: IrExprKind::TupleIndex { object: Box::new(obj), index: i },
+            ty: Ty::Int, span: None, def_id: None };
+        ti(tix(elem1(), 0), "1", "enumerate[1].0 == index 1");
+        ti(tix(elem1(), 1), "20", "enumerate[1].1 == value 20");
+    }
+
     /// SpreadRecord: { ...base, b: 99 } preserves a/c, overrides b.
     #[test]
     fn exec_spread_record() {
