@@ -46,6 +46,7 @@ pub fn lower_intrinsic(
 
         // ── Tier 3: higher-order with an inline (non-capturing) lambda ──
         "almide_rt_list_map" if args.len() == 2 => list_map(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_list_filter" if args.len() == 2 => list_filter(&args[0], &args[1], ret_ty, ctx),
         "almide_rt_list_fold" if args.len() == 3 => list_fold(&args[0], &args[1], &args[2], ret_ty, ctx),
 
         _ => None,
@@ -146,6 +147,71 @@ fn list_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Op
     loop_body.push(Op::Br(0));
 
     ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `list.filter(xs, pred)` with an inline lambda `pred = (p) => bool`.
+/// Over-allocates to the input length, then fixes len/cap to the match count.
+fn list_filter(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1)?;
+    let es = super::lower::wasm_byte_size(&pty);
+    let lk = load_kind_of(ty_to_wasm(&pty));
+    let sk = store_kind_of(ty_to_wasm(&pty));
+    let _ = ret_ty;
+
+    let (lp, mut ops) = list_loop_header(xs_expr, ctx);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let oc = ctx.alloc_local(WasmTy::I32); // matched count
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+
+    // out = __alloc(8 + len*es) (worst case); oc = 0
+    let alloc = (ctx.func_idx)("__alloc")?;
+    ops.push(Op::Const(Const::I32(8)));
+    ops.push(Op::LocalGet(lp.len));
+    ops.push(Op::Const(Const::I32(es)));
+    ops.push(Op::BinOp(B::I32Mul));
+    ops.push(Op::BinOp(B::I32Add));
+    ops.push(Op::Call { idx: alloc, pops: 1, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+    ops.push(Op::Const(Const::I32(0)));
+    ops.push(Op::LocalSet(oc));
+
+    // store-if-match body: out[oc*es] = elem; oc++
+    let keep = vec![
+        Op::LocalGet(out), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(oc), Op::Const(Const::I32(es)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalGet(elem),
+        Op::Store(sk),
+        Op::LocalGet(oc), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(oc),
+    ];
+
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    loop_body.extend(load_elem(lp.xs, lp.idx, es, lk));
+    loop_body.push(Op::LocalSet(elem));
+    loop_body.extend(lower_expr(body, ctx)); // predicate → i32 bool
+    loop_body.push(Op::IfVoid { then: keep, else_: vec![] });
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(lp.idx));
+    loop_body.push(Op::Br(0));
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+
+    // out.len = out.cap = oc
+    ops.push(Op::LocalGet(out));
+    ops.push(Op::LocalGet(oc));
+    ops.push(Op::Store(StoreKind::I32));
+    ops.push(Op::LocalGet(out));
+    ops.push(Op::Const(Const::I32(4)));
+    ops.push(Op::BinOp(B::I32Add));
+    ops.push(Op::LocalGet(oc));
+    ops.push(Op::Store(StoreKind::I32));
     ops.push(Op::LocalGet(out));
     Some(ops)
 }
