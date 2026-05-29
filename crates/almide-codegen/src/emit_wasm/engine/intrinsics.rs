@@ -133,6 +133,53 @@ pub fn lower_intrinsic(
         "almide_rt_string_starts_with" if args.len() == 2 => call_runtime("__string_starts_with", args, 1, ctx),
         "almide_rt_string_ends_with" if args.len() == 2 => call_runtime("__string_ends_with", args, 1, ctx),
 
+        // ── Set[A]: represented as Map[A, A] (key = val = element). A is Int or
+        // String. Core ops reuse the Map runtime verbatim; set algebra and HOFs
+        // scan the table's occupied slots. ──
+        "almide_rt_set_new" if set_supported(ret_ty) =>
+            (ctx.func_idx)("__map_new").map(|idx| vec![Op::Call { idx, pops: 0, pushes: 1 }]),
+        "almide_rt_set_insert" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_insert(&args[0], &args[1], ctx),
+        "almide_rt_set_remove" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_remove(&args[0], &args[1], ctx),
+        "almide_rt_set_contains" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_contains(&args[0], &args[1], ctx),
+        "almide_rt_set_len" if args.len() == 1 && set_supported(&args[0].ty) =>
+            call_runtime("__map_len", args, 1, ctx),
+        "almide_rt_set_is_empty" if args.len() == 1 && set_supported(&args[0].ty) =>
+            (ctx.func_idx)("__map_len").map(|idx| {
+                let mut ops = lower_expr(&args[0], ctx);
+                ops.push(Op::Call { idx, pops: 1, pushes: 1 });
+                ops.push(Op::UnOp(U::I64Eqz));
+                ops
+            }),
+        "almide_rt_set_to_list" if args.len() == 1 && set_supported(&args[0].ty) =>
+            set_to_list(&args[0], ctx),
+        "almide_rt_set_from_list" if args.len() == 1 && set_supported(ret_ty) =>
+            set_from_list(&args[0], ret_ty, ctx),
+        "almide_rt_set_union" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_merge(&args[0], &args[1], ctx),
+        "almide_rt_set_intersection" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_combine(&args[0], &args[1], true, ctx),
+        "almide_rt_set_difference" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_combine(&args[0], &args[1], false, ctx),
+        "almide_rt_set_symmetric_difference" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_sym_diff(&args[0], &args[1], ctx),
+        "almide_rt_set_is_subset" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_pair_pred(&args[0], &args[1], true, ctx),
+        "almide_rt_set_is_disjoint" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_pair_pred(&args[0], &args[1], false, ctx),
+        "almide_rt_set_filter" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_filter(&args[0], &args[1], ctx),
+        "almide_rt_set_map" if args.len() == 2 && set_supported(&args[0].ty) && set_supported(ret_ty) =>
+            set_map_op(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_set_fold" if args.len() == 3 && set_supported(&args[0].ty) =>
+            set_fold(&args[0], &args[1], &args[2], ret_ty, ctx),
+        "almide_rt_set_any" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_any_all(&args[0], &args[1], true, ctx),
+        "almide_rt_set_all" if args.len() == 2 && set_supported(&args[0].ty) =>
+            set_any_all(&args[0], &args[1], false, ctx),
+
         _ => None,
     }
 }
@@ -702,6 +749,348 @@ fn map_contains_op(m: &IrExpr, k: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>
     ops.extend(lower_widened(k, &key_ty, ctx));
     ops.push(Op::Const(Const::I32(kind)));
     ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
+}
+
+// ── Set[A] = Map[A, A] (key = val = element) ─────────────────────────
+
+/// Extract (kind_const, elem_ty) from a supported `Set[A]`.
+fn set_elem(ty: &Ty) -> Option<(i32, Ty)> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty {
+        Ty::Applied(TC::Set, a) if a.len() == 1 => Some((map_key_kind(&a[0])?, a[0].clone())),
+        _ => None,
+    }
+}
+
+/// `Set[A]` with a supported element kind (Int or String).
+pub(super) fn set_supported(ty: &Ty) -> bool {
+    set_elem(ty).is_some()
+}
+
+/// Standard occupied-slot scan over a Swiss table: for each slot in `[0, cap)`
+/// whose tag byte is non-zero, run `occ` (which addresses the entry via a prior
+/// `map_entry_into` into `ea`). `occ` must leave the stack balanced.
+fn table_scan_loop(m_l: u32, cap_l: u32, slot_l: u32, occ: Vec<Op>) -> Vec<Op> {
+    let mut loop_body = vec![
+        Op::LocalGet(slot_l), Op::LocalGet(cap_l), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        Op::LocalGet(m_l), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(slot_l), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+    ];
+    loop_body.push(Op::IfVoid { then: occ, else_: vec![] });
+    loop_body.extend([Op::LocalGet(slot_l), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(slot_l), Op::Br(0)]);
+    vec![Op::Block(vec![Op::Loop(loop_body)])]
+}
+
+/// `set.insert(s, v) -> Set[A]` — Map set with key = val = element.
+fn set_insert(s: &IrExpr, v: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, elem_ty) = set_elem(&s.ty)?;
+    let idx = (ctx.func_idx)("__map_set")?;
+    let s_l = ctx.alloc_local(WasmTy::I32);
+    let el = ctx.alloc_local(WasmTy::I64);
+    let mut ops = lower_expr(s, ctx);
+    ops.push(Op::LocalSet(s_l));
+    ops.extend(lower_widened(v, &elem_ty, ctx));
+    ops.push(Op::LocalSet(el));
+    ops.push(Op::LocalGet(s_l));
+    ops.push(Op::LocalGet(el));
+    ops.push(Op::LocalGet(el));
+    ops.push(Op::Const(Const::I32(kind)));
+    ops.push(Op::Call { idx, pops: 4, pushes: 1 });
+    Some(ops)
+}
+
+/// `set.remove(s, v) -> Set[A]`.
+fn set_remove(s: &IrExpr, v: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, elem_ty) = set_elem(&s.ty)?;
+    let idx = (ctx.func_idx)("__map_remove")?;
+    let mut ops = lower_expr(s, ctx);
+    ops.extend(lower_widened(v, &elem_ty, ctx));
+    ops.push(Op::Const(Const::I32(kind)));
+    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
+}
+
+/// `set.contains(s, v) -> Bool`.
+fn set_contains(s: &IrExpr, v: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, elem_ty) = set_elem(&s.ty)?;
+    let idx = (ctx.func_idx)("__map_contains")?;
+    let mut ops = lower_expr(s, ctx);
+    ops.extend(lower_widened(v, &elem_ty, ctx));
+    ops.push(Op::Const(Const::I32(kind)));
+    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
+}
+
+/// `set.to_list(s) -> List[A]` — collect the key slots (= elements).
+fn set_to_list(s: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (_kind, elem_ty) = set_elem(&s.ty)?;
+    let idx = (ctx.func_idx)("__map_collect")?;
+    let elem_size = wasm_byte_size(&elem_ty);
+    let mut ops = lower_expr(s, ctx);
+    ops.push(Op::Const(Const::I32(0)));
+    ops.push(Op::Const(Const::I32(elem_size)));
+    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
+}
+
+/// `set.union(a, b) -> Set[A]` — Map merge (idempotent on equal elements).
+fn set_merge(a: &IrExpr, b: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, _e) = set_elem(&a.ty)?;
+    let idx = (ctx.func_idx)("__map_merge")?;
+    let mut ops = lower_expr(a, ctx);
+    ops.extend(lower_expr(b, ctx));
+    ops.push(Op::Const(Const::I32(kind)));
+    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
+}
+
+/// `set.from_list(xs) -> Set[A]` — insert each list element into a fresh set.
+fn set_from_list(xs: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, elem_ty) = set_elem(ret_ty)?;
+    let (new_idx, set_idx) = ((ctx.func_idx)("__map_new")?, (ctx.func_idx)("__map_set")?);
+    let es = wasm_byte_size(&elem_ty);
+    let lk = load_kind_of(ty_to_wasm(&elem_ty));
+    let widen = matches!(ty_to_wasm(&elem_ty), WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let el = ctx.alloc_local(WasmTy::I64);
+    let (lp, mut ops) = list_loop_header(xs, ctx);
+    ops.push(Op::Call { idx: new_idx, pops: 0, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+
+    let mut lb = vec![
+        Op::LocalGet(lp.idx), Op::LocalGet(lp.len), Op::BinOp(B::I32GeU), Op::BrIf(1),
+    ];
+    lb.extend(load_elem(lp.xs, lp.idx, es, lk));
+    if widen { lb.push(Op::UnOp(U::I64ExtendI32U)); }
+    lb.push(Op::LocalSet(el));
+    lb.extend(vec![
+        Op::LocalGet(out), Op::LocalGet(el), Op::LocalGet(el), Op::Const(Const::I32(kind)),
+        Op::Call { idx: set_idx, pops: 4, pushes: 1 }, Op::LocalSet(out),
+        Op::LocalGet(lp.idx), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(lp.idx), Op::Br(0),
+    ]);
+    ops.push(Op::Block(vec![Op::Loop(lb)]));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `set.intersection`/`difference(a, b)` — scan `a`, keeping each element whose
+/// membership in `b` matches `keep_when_in_b` (true = intersection, false =
+/// difference). Copies the raw i64 key slot, so no per-element width juggling.
+fn set_combine(a: &IrExpr, b: &IrExpr, keep_when_in_b: bool, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, _e) = set_elem(&a.ty)?;
+    let (new_idx, set_idx, contains_idx) =
+        ((ctx.func_idx)("__map_new")?, (ctx.func_idx)("__map_set")?, (ctx.func_idx)("__map_contains")?);
+    let b_l = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let ea = ctx.alloc_local(WasmTy::I32);
+
+    let mut ops = lower_expr(b, ctx);
+    ops.push(Op::LocalSet(b_l));
+    let (m_l, cap_l, slot_l, pro) = map_iter_prologue(a, ctx);
+    ops.extend(pro);
+    ops.push(Op::Call { idx: new_idx, pops: 0, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+
+    let mut occ = map_entry_into(m_l, cap_l, slot_l, ea);
+    // b.contains(key)
+    occ.extend(vec![
+        Op::LocalGet(b_l), Op::LocalGet(ea), Op::Load(LoadKind::I64), Op::Const(Const::I32(kind)),
+        Op::Call { idx: contains_idx, pops: 3, pushes: 1 },
+    ]);
+    if !keep_when_in_b { occ.push(Op::UnOp(U::I32Eqz)); }
+    let keep = vec![
+        Op::LocalGet(out),
+        Op::LocalGet(ea), Op::Load(LoadKind::I64),
+        Op::LocalGet(ea), Op::Load(LoadKind::I64),
+        Op::Const(Const::I32(kind)),
+        Op::Call { idx: set_idx, pops: 4, pushes: 1 }, Op::LocalSet(out),
+    ];
+    occ.push(Op::IfVoid { then: keep, else_: vec![] });
+    ops.extend(table_scan_loop(m_l, cap_l, slot_l, occ));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `set.symmetric_difference(a, b)` — elements in exactly one of `a`, `b`.
+/// Two scans: (a not in b) then (b not in a), inserting into one fresh set.
+fn set_sym_diff(a: &IrExpr, b: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, _e) = set_elem(&a.ty)?;
+    let (new_idx, set_idx, contains_idx) =
+        ((ctx.func_idx)("__map_new")?, (ctx.func_idx)("__map_set")?, (ctx.func_idx)("__map_contains")?);
+    let a_l = ctx.alloc_local(WasmTy::I32);
+    let b_l = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+
+    let mut ops = lower_expr(a, ctx);
+    ops.push(Op::LocalSet(a_l));
+    ops.extend(lower_expr(b, ctx));
+    ops.push(Op::LocalSet(b_l));
+    ops.push(Op::Call { idx: new_idx, pops: 0, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+
+    // One scan of `src`, inserting keys absent from `other`.
+    let scan = |src_l: u32, other_l: u32, ctx: &mut LowerCtx| -> Vec<Op> {
+        let cap_l = ctx.alloc_local(WasmTy::I32);
+        let slot_l = ctx.alloc_local(WasmTy::I32);
+        let ea = ctx.alloc_local(WasmTy::I32);
+        let mut pre = vec![
+            Op::LocalGet(src_l), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(cap_l),
+            Op::Const(Const::I32(0)), Op::LocalSet(slot_l),
+        ];
+        let mut occ = map_entry_into(src_l, cap_l, slot_l, ea);
+        occ.extend(vec![
+            Op::LocalGet(other_l), Op::LocalGet(ea), Op::Load(LoadKind::I64), Op::Const(Const::I32(kind)),
+            Op::Call { idx: contains_idx, pops: 3, pushes: 1 }, Op::UnOp(U::I32Eqz),
+        ]);
+        let keep = vec![
+            Op::LocalGet(out),
+            Op::LocalGet(ea), Op::Load(LoadKind::I64),
+            Op::LocalGet(ea), Op::Load(LoadKind::I64),
+            Op::Const(Const::I32(kind)),
+            Op::Call { idx: set_idx, pops: 4, pushes: 1 }, Op::LocalSet(out),
+        ];
+        occ.push(Op::IfVoid { then: keep, else_: vec![] });
+        pre.extend(table_scan_loop(src_l, cap_l, slot_l, occ));
+        pre
+    };
+    let s1 = scan(a_l, b_l, ctx);
+    ops.extend(s1);
+    let s2 = scan(b_l, a_l, ctx);
+    ops.extend(s2);
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `set.is_subset(a, b)` (every element of `a` in `b`) / `is_disjoint(a, b)`
+/// (no element of `a` in `b`). Scans `a`; on the first violating element,
+/// returns 0. `want_in_b` true = subset, false = disjoint.
+fn set_pair_pred(a: &IrExpr, b: &IrExpr, want_in_b: bool, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, _e) = set_elem(&a.ty)?;
+    let contains_idx = (ctx.func_idx)("__map_contains")?;
+    let b_l = ctx.alloc_local(WasmTy::I32);
+    let ea = ctx.alloc_local(WasmTy::I32);
+
+    let mut ops = lower_expr(b, ctx);
+    ops.push(Op::LocalSet(b_l));
+    let (m_l, cap_l, slot_l, pro) = map_iter_prologue(a, ctx);
+    ops.extend(pro);
+
+    let mut occ = map_entry_into(m_l, cap_l, slot_l, ea);
+    occ.extend(vec![
+        Op::LocalGet(b_l), Op::LocalGet(ea), Op::Load(LoadKind::I64), Op::Const(Const::I32(kind)),
+        Op::Call { idx: contains_idx, pops: 3, pushes: 1 },
+    ]);
+    // subset wants in_b==true; violation = !in_b. disjoint wants in_b==false; violation = in_b.
+    if want_in_b { occ.push(Op::UnOp(U::I32Eqz)); }
+    occ.push(Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::Return], else_: vec![] });
+    ops.extend(table_scan_loop(m_l, cap_l, slot_l, occ));
+    ops.push(Op::Const(Const::I32(1)));
+    Some(ops)
+}
+
+/// `set.filter(s, f: (A) -> Bool) -> Set[A]`.
+fn set_filter(s: &IrExpr, f: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, _e) = set_elem(&s.ty)?;
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let (new_idx, set_idx) = ((ctx.func_idx)("__map_new")?, (ctx.func_idx)("__map_set")?);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let ea = ctx.alloc_local(WasmTy::I32);
+
+    let (m_l, cap_l, slot_l, mut ops) = map_iter_prologue(s, ctx);
+    ops.push(Op::Call { idx: new_idx, pops: 0, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+
+    let mut occ = map_entry_into(m_l, cap_l, slot_l, ea);
+    occ.push(Op::LocalGet(ea)); occ.push(Op::Load(load_kind_of(ty_to_wasm(&pty)))); occ.push(Op::LocalSet(elem));
+    occ.extend(lower_expr(&body, ctx)); // predicate → i32
+    let keep = vec![
+        Op::LocalGet(out),
+        Op::LocalGet(ea), Op::Load(LoadKind::I64),
+        Op::LocalGet(ea), Op::Load(LoadKind::I64),
+        Op::Const(Const::I32(kind)),
+        Op::Call { idx: set_idx, pops: 4, pushes: 1 }, Op::LocalSet(out),
+    ];
+    occ.push(Op::IfVoid { then: keep, else_: vec![] });
+    ops.extend(table_scan_loop(m_l, cap_l, slot_l, occ));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `set.map(s, f: (A) -> B) -> Set[B]`.
+fn set_map_op(s: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (out_kind, be) = set_elem(ret_ty)?;
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let out_widen = matches!(ty_to_wasm(&be), WasmTy::I32);
+    let (new_idx, set_idx) = ((ctx.func_idx)("__map_new")?, (ctx.func_idx)("__map_set")?);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let nv = ctx.alloc_local(WasmTy::I64);
+    let ea = ctx.alloc_local(WasmTy::I32);
+
+    let (m_l, cap_l, slot_l, mut ops) = map_iter_prologue(s, ctx);
+    ops.push(Op::Call { idx: new_idx, pops: 0, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+
+    let mut occ = map_entry_into(m_l, cap_l, slot_l, ea);
+    occ.push(Op::LocalGet(ea)); occ.push(Op::Load(load_kind_of(ty_to_wasm(&pty)))); occ.push(Op::LocalSet(elem));
+    occ.extend(lower_expr(&body, ctx)); // f(elem) → B
+    if out_widen { occ.push(Op::UnOp(U::I64ExtendI32U)); }
+    occ.push(Op::LocalSet(nv));
+    occ.extend(vec![
+        Op::LocalGet(out), Op::LocalGet(nv), Op::LocalGet(nv), Op::Const(Const::I32(out_kind)),
+        Op::Call { idx: set_idx, pops: 4, pushes: 1 }, Op::LocalSet(out),
+    ]);
+    ops.extend(table_scan_loop(m_l, cap_l, slot_l, occ));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `set.fold(s, init, f: (B, A) -> B) -> B`.
+fn set_fold(s: &IrExpr, init: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (params, body) = inline_lambda_n(f, 2, ctx)?;
+    let (acc_v, _a) = params[0].clone();
+    let (e_v, e_ty) = params[1].clone();
+    let acc = ctx.alloc_local(ty_to_wasm(ret_ty));
+    let elem = ctx.alloc_local(ty_to_wasm(&e_ty));
+    let ea = ctx.alloc_local(WasmTy::I32);
+    ctx.map_var(acc_v, acc); ctx.map_var(e_v, elem);
+
+    let mut ops = lower_expr(init, ctx);
+    ops.push(Op::LocalSet(acc));
+    let (m_l, cap_l, slot_l, pro) = map_iter_prologue(s, ctx);
+    ops.extend(pro);
+
+    let mut occ = map_entry_into(m_l, cap_l, slot_l, ea);
+    occ.push(Op::LocalGet(ea)); occ.push(Op::Load(load_kind_of(ty_to_wasm(&e_ty)))); occ.push(Op::LocalSet(elem));
+    occ.extend(lower_expr(&body, ctx)); occ.push(Op::LocalSet(acc));
+    ops.extend(table_scan_loop(m_l, cap_l, slot_l, occ));
+    ops.push(Op::LocalGet(acc));
+    Some(ops)
+}
+
+/// `set.any(s, f)` / `set.all(s, f)` — short-circuiting predicate scan.
+fn set_any_all(s: &IrExpr, f: &IrExpr, is_any: bool, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+    let ea = ctx.alloc_local(WasmTy::I32);
+
+    let (m_l, cap_l, slot_l, mut ops) = map_iter_prologue(s, ctx);
+    let mut occ = map_entry_into(m_l, cap_l, slot_l, ea);
+    occ.push(Op::LocalGet(ea)); occ.push(Op::Load(load_kind_of(ty_to_wasm(&pty)))); occ.push(Op::LocalSet(elem));
+    occ.extend(lower_expr(&body, ctx)); // predicate → i32
+    // any: first true → return 1. all: first false → return 0.
+    if is_any {
+        occ.push(Op::IfVoid { then: vec![Op::Const(Const::I32(1)), Op::Return], else_: vec![] });
+    } else {
+        occ.push(Op::UnOp(U::I32Eqz));
+        occ.push(Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::Return], else_: vec![] });
+    }
+    ops.extend(table_scan_loop(m_l, cap_l, slot_l, occ));
+    ops.push(Op::Const(Const::I32(if is_any { 0 } else { 1 })));
     Some(ops)
 }
 

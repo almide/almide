@@ -1417,6 +1417,153 @@ mod tests {
         if let Some(r) = run(&[m3], "main") { assert_eq!(r, "1", "slice café[3,4] len chars"); }
     }
 
+    /// Set HOFs: fold/any/all/filter/map with inline lambdas.
+    #[test]
+    fn exec_set_hof() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let set_i = Ty::Applied(TC::Set, vec![Ty::Int]);
+        // from_list([..]) → Set[Int]
+        let from_i = |xs: &[i64]| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_set_from_list"),
+                args: vec![IrExpr { kind: IrExprKind::List { elements: xs.iter().map(|n| lit_int(*n)).collect() },
+                                    ty: Ty::list(Ty::Int), span: None, def_id: None }] },
+            ty: set_i.clone(), span: None, def_id: None };
+        let var = |id| IrExpr { kind: IrExprKind::Var { id }, ty: Ty::Int, span: None, def_id: None };
+
+        // fold(from_list([1,2,3]), 0, (acc,x) => acc + x) → 6
+        {
+            let mut vt = VarTable::new();
+            let acc = vt.alloc(sym("acc"), Ty::Int, almide_ir::Mutability::Let, None);
+            let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+            let lam = IrExpr { kind: IrExprKind::Lambda { params: vec![(acc, Ty::Int), (x, Ty::Int)],
+                body: Box::new(binop(almide_ir::BinOp::AddInt, var(acc), var(x), Ty::Int)), lambda_id: None },
+                ty: Ty::Fn { params: vec![Ty::Int, Ty::Int], ret: Box::new(Ty::Int) }, span: None, def_id: None };
+            let call = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_set_fold"),
+                args: vec![from_i(&[1, 2, 3]), lit_int(0), lam] }, ty: Ty::Int, span: None, def_id: None };
+            let m = mk_func("main", Ty::Int, call);
+            if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(r, "6", "set.fold sum"); }
+        }
+
+        // predicate-lambda helper: (x) => x <op> n, applied to set via `symbol`,
+        // result wrapped by `wrap` (e.g. len) to an Int we can print.
+        let pred = |symbol: &str, xs: &[i64], op: almide_ir::BinOp, n: i64, ret: Ty| {
+            let mut vt = VarTable::new();
+            let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+            let lam = IrExpr { kind: IrExprKind::Lambda { params: vec![(x, Ty::Int)],
+                body: Box::new(binop(op, var(x), lit_int(n), Ty::Bool)), lambda_id: None },
+                ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) }, span: None, def_id: None };
+            let call = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym(symbol),
+                args: vec![from_i(xs), lam] }, ty: ret, span: None, def_id: None };
+            (vt, call)
+        };
+        let run_b = |vt: VarTable, e: IrExpr, exp: &str, msg: &str| {
+            let m = mk_func("main", Ty::Bool, e);
+            if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(&r, exp, "{}", msg); }
+        };
+
+        // any / all (Bool)
+        let (vt, e) = pred("almide_rt_set_any", &[1, 2, 3], almide_ir::BinOp::Gt, 2, Ty::Bool);
+        run_b(vt, e, "1", "any x>2");
+        let (vt, e) = pred("almide_rt_set_any", &[1, 2, 3], almide_ir::BinOp::Gt, 5, Ty::Bool);
+        run_b(vt, e, "0", "any x>5");
+        let (vt, e) = pred("almide_rt_set_all", &[1, 2, 3], almide_ir::BinOp::Gt, 0, Ty::Bool);
+        run_b(vt, e, "1", "all x>0");
+        let (vt, e) = pred("almide_rt_set_all", &[1, 2, 3], almide_ir::BinOp::Gt, 1, Ty::Bool);
+        run_b(vt, e, "0", "all x>1");
+
+        // filter(set, x=>x>2) → Set; len == 2, and 3 present / 1 absent
+        let filt_len = |xs: &[i64], n: i64| {
+            let (mut vt, set) = pred("almide_rt_set_filter", xs, almide_ir::BinOp::Gt, n, set_i.clone());
+            let _ = &mut vt;
+            let len = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_set_len"), args: vec![set] },
+                ty: Ty::Int, span: None, def_id: None };
+            (vt, len)
+        };
+        let (vt, e) = filt_len(&[1, 2, 3, 4], 2);
+        let m = mk_func("main", Ty::Int, e);
+        if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(r, "2", "set.filter len"); }
+
+        // map(set, x=>x*10) → Set; len == 3
+        {
+            let mut vt = VarTable::new();
+            let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+            let lam = IrExpr { kind: IrExprKind::Lambda { params: vec![(x, Ty::Int)],
+                body: Box::new(binop(almide_ir::BinOp::MulInt, var(x), lit_int(10), Ty::Int)), lambda_id: None },
+                ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) }, span: None, def_id: None };
+            let mapped = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_set_map"),
+                args: vec![from_i(&[1, 2, 3]), lam] }, ty: set_i.clone(), span: None, def_id: None };
+            let len = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_set_len"), args: vec![mapped] },
+                ty: Ty::Int, span: None, def_id: None };
+            let m = mk_func("main", Ty::Int, len);
+            if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(r, "3", "set.map len"); }
+        }
+    }
+
+    /// Set core ops (Set[A] = Map[A,A]): from_list/len/contains/insert/remove/
+    /// is_empty/union/intersection/difference/symmetric_difference/is_subset/
+    /// is_disjoint/to_list, for Int and String elements. No lambdas.
+    #[test]
+    fn exec_set_core() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let set_i = Ty::Applied(TC::Set, vec![Ty::Int]);
+        let set_s = Ty::Applied(TC::Set, vec![Ty::String]);
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let from_i = |xs: &[i64]| call("almide_rt_set_from_list",
+            vec![IrExpr { kind: IrExprKind::List { elements: xs.iter().map(|n| lit_int(*n)).collect() },
+                          ty: Ty::list(Ty::Int), span: None, def_id: None }], set_i.clone());
+        let from_s = |xs: &[&str]| call("almide_rt_set_from_list",
+            vec![IrExpr { kind: IrExprKind::List { elements: xs.iter().map(|s| lit_str(s)).collect() },
+                          ty: Ty::list(Ty::String), span: None, def_id: None }], set_s.clone());
+        let len = |s: IrExpr| call("almide_rt_set_len", vec![s], Ty::Int);
+        let contains = |s: IrExpr, v: i64| call("almide_rt_set_contains", vec![s, lit_int(v)], Ty::Bool);
+        let contains_s = |s: IrExpr, v: &str| call("almide_rt_set_contains", vec![s, lit_str(v)], Ty::Bool);
+        let bin = |a: IrExpr, b: IrExpr, op: &str, ty: Ty| call(op, vec![a, b], ty);
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+        let tb = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Bool, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        // dedup on construction + membership
+        ti(len(from_i(&[1, 2, 3, 2, 1])), "3", "from_list dedup len");
+        tb(contains(from_i(&[1, 2, 3]), 2), "1", "contains hit");
+        tb(contains(from_i(&[1, 2, 3]), 5), "0", "contains miss");
+        // is_empty
+        tb(call("almide_rt_set_is_empty", vec![call("almide_rt_set_new", vec![], set_i.clone())], Ty::Bool), "1", "new is_empty");
+        tb(call("almide_rt_set_is_empty", vec![from_i(&[1])], Ty::Bool), "0", "non-empty");
+        // insert / remove
+        ti(len(call("almide_rt_set_insert", vec![from_i(&[1, 2]), lit_int(9)], set_i.clone())), "3", "insert grows");
+        ti(len(call("almide_rt_set_insert", vec![from_i(&[1, 2]), lit_int(1)], set_i.clone())), "2", "insert dup no-op");
+        let removed = || call("almide_rt_set_remove", vec![from_i(&[1, 2, 3]), lit_int(2)], set_i.clone());
+        ti(len(removed()), "2", "remove len");
+        tb(contains(removed(), 2), "0", "removed gone");
+        // union / intersection / difference / symmetric_difference
+        ti(len(bin(from_i(&[1, 2]), from_i(&[2, 3]), "almide_rt_set_union", set_i.clone())), "3", "union len");
+        let inter = || bin(from_i(&[1, 2, 3]), from_i(&[2, 3, 4]), "almide_rt_set_intersection", set_i.clone());
+        ti(len(inter()), "2", "intersection len");
+        tb(contains(inter(), 2), "1", "intersection has 2");
+        tb(contains(inter(), 1), "0", "intersection lacks 1");
+        let diff = || bin(from_i(&[1, 2, 3]), from_i(&[2, 3, 4]), "almide_rt_set_difference", set_i.clone());
+        ti(len(diff()), "1", "difference len");
+        tb(contains(diff(), 1), "1", "difference has 1");
+        tb(contains(diff(), 2), "0", "difference lacks 2");
+        let sym = || bin(from_i(&[1, 2, 3]), from_i(&[2, 3, 4]), "almide_rt_set_symmetric_difference", set_i.clone());
+        ti(len(sym()), "2", "sym_diff len");
+        tb(contains(sym(), 1), "1", "sym_diff has 1");
+        tb(contains(sym(), 4), "1", "sym_diff has 4");
+        tb(contains(sym(), 3), "0", "sym_diff lacks 3");
+        // is_subset / is_disjoint
+        tb(bin(from_i(&[1, 2]), from_i(&[1, 2, 3]), "almide_rt_set_is_subset", Ty::Bool), "1", "subset yes");
+        tb(bin(from_i(&[1, 4]), from_i(&[1, 2, 3]), "almide_rt_set_is_subset", Ty::Bool), "0", "subset no");
+        tb(bin(from_i(&[1, 2]), from_i(&[3, 4]), "almide_rt_set_is_disjoint", Ty::Bool), "1", "disjoint yes");
+        tb(bin(from_i(&[1, 2]), from_i(&[2, 3]), "almide_rt_set_is_disjoint", Ty::Bool), "0", "disjoint no");
+        // to_list → List[Int], check its length
+        ti(call("almide_rt_string_len", vec![lit_str("x")], Ty::Int), "1", "harness sanity"); // (unrelated guard)
+        ti(call("almide_rt_list_len", vec![call("almide_rt_set_to_list", vec![from_i(&[7, 8, 9])], Ty::list(Ty::Int))], Ty::Int), "3", "to_list len");
+        // String elements (FNV hash + __string_eq path)
+        ti(len(from_s(&["a", "b", "a"])), "2", "string set dedup");
+        tb(contains_s(from_s(&["a", "b"]), "a"), "1", "string contains hit");
+        tb(contains_s(from_s(&["a", "b"]), "c"), "0", "string contains miss");
+    }
+
     /// string.split / join (+ list.join), including a split→join round-trip.
     #[test]
     fn exec_string_split_join() {
