@@ -433,6 +433,78 @@ mod tests {
         }
     }
 
+    /// Integer negation lowers to `0 - x`: `-(5)` → -5.
+    #[test]
+    fn exec_neg_int() {
+        let neg = IrExpr {
+            kind: IrExprKind::UnOp {
+                op: almide_ir::UnOp::NegInt,
+                operand: Box::new(lit_int(5)),
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, neg);
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "-5");
+        }
+    }
+
+    /// Match on a literal: `match 2 { 1 => 10, 2 => 20, _ => 0 }` → 20.
+    #[test]
+    fn exec_match_literal() {
+        use almide_ir::{IrMatchArm, IrPattern};
+        fn lit_arm(v: i64, body: i64) -> IrMatchArm {
+            IrMatchArm {
+                pattern: IrPattern::Literal { expr: lit_int(v) },
+                guard: None,
+                body: lit_int(body),
+            }
+        }
+        let arms = vec![
+            lit_arm(1, 10),
+            lit_arm(2, 20),
+            IrMatchArm { pattern: IrPattern::Wildcard, guard: None, body: lit_int(0) },
+        ];
+        let m = IrExpr {
+            kind: IrExprKind::Match { subject: Box::new(lit_int(2)), arms },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, m);
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "20");
+        }
+    }
+
+    /// Function with parameters called with arguments: `add(3, 4)` → 7.
+    #[test]
+    fn exec_call_with_params() {
+        use almide_ir::{IrParam, ParamBorrow, CallTarget};
+        let mut vt = VarTable::new();
+        let a = vt.alloc(sym("a"), Ty::Int, almide_ir::Mutability::Let, None);
+        let b = vt.alloc(sym("b"), Ty::Int, almide_ir::Mutability::Let, None);
+        let mk_param = |var, name| IrParam {
+            var, ty: Ty::Int, name, borrow: ParamBorrow::Own,
+            open_record: None, default: None, attrs: vec![],
+        };
+        let var = |id| IrExpr { kind: IrExprKind::Var { id }, ty: Ty::Int, span: None, def_id: None };
+        let add_body = binop(almide_ir::BinOp::AddInt, var(a), var(b), Ty::Int);
+        let mut add = mk_func("add", Ty::Int, add_body);
+        add.params = vec![mk_param(a, sym("a")), mk_param(b, sym("b"))];
+
+        let call = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Named { name: sym("add") },
+                args: vec![lit_int(3), lit_int(4)],
+                type_args: vec![],
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, call);
+        if let Some(r) = run_vt(&[add, main], &vt, "main") {
+            assert_eq!(r, "7");
+        }
+    }
+
     /// End-to-end allocation: `[10, 20][1]` must return 20 at runtime,
     /// exercising __alloc + element store + element load through the runtime.
     #[test]

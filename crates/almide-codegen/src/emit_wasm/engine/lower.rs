@@ -223,6 +223,13 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
 
         // ── Unary operations ──
         IrExprKind::UnOp { op, operand } => {
+            // Integer negation has no single WASM instruction — emit `0 - x`.
+            if matches!(op, almide_ir::UnOp::NegInt) {
+                let mut ops = vec![Op::Const(Const::I64(0))];
+                ops.extend(lower_expr(operand, ctx));
+                ops.push(Op::BinOp(WBinOp::I64Sub));
+                return ops;
+            }
             let mut ops = lower_expr(operand, ctx);
             if let Some(wasm_op) = lower_unop(op, &operand.ty) {
                 ops.push(Op::UnOp(wasm_op));
@@ -968,7 +975,8 @@ fn lower_unop(op: &almide_ir::UnOp, _operand_ty: &Ty) -> Option<WUnOp> {
     use almide_ir::UnOp as IrOp;
 
     Some(match op {
-        IrOp::NegInt => WUnOp::I64ExtendI32S, // TODO: proper i64 negate (0 - x)
+        // NegInt is lowered to `0 - x` by the caller (no single WASM i64 neg).
+        IrOp::NegInt => return None,
         IrOp::NegFloat => WUnOp::F64Neg,
         IrOp::Not => WUnOp::I32Eqz,
     })
