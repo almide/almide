@@ -88,6 +88,12 @@ pub fn lower_intrinsic(
             map_contains_op(&args[0], &args[1], ctx),
         "almide_rt_map_len" if args.len() == 1 && map_supported(&args[0].ty) =>
             call_runtime("__map_len", args, 1, ctx),
+        "almide_rt_map_keys" if args.len() == 1 && map_supported(&args[0].ty) =>
+            map_collect(&args[0], 0, ctx),
+        "almide_rt_map_values" if args.len() == 1 && map_supported(&args[0].ty) =>
+            map_collect(&args[0], 8, ctx),
+        "almide_rt_map_remove" if args.len() == 2 && map_supported(&args[0].ty) =>
+            map_remove_op(&args[0], &args[1], ctx),
         "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
         // sort: Int lists via the runtime selection sort; other element types
         // (Float/String/composite) fall back until typed comparators land.
@@ -439,6 +445,29 @@ fn map_set_op(m: &IrExpr, k: &IrExpr, v: &IrExpr, ctx: &mut LowerCtx) -> Option<
     ops.extend(lower_widened(v, &val_ty, ctx));
     ops.push(Op::Const(Const::I32(kind)));
     ops.push(Op::Call { idx, pops: 4, pushes: 1 });
+    Some(ops)
+}
+
+/// `map.keys(m) -> List[K]` (field_off 0) / `map.values(m) -> List[V]` (8).
+fn map_collect(m: &IrExpr, field_off: i32, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (_kind, key_ty, val_ty) = map_kv(&m.ty)?;
+    let idx = (ctx.func_idx)("__map_collect")?;
+    let elem_size = wasm_byte_size(if field_off == 0 { &key_ty } else { &val_ty });
+    let mut ops = lower_expr(m, ctx);
+    ops.push(Op::Const(Const::I32(field_off)));
+    ops.push(Op::Const(Const::I32(elem_size)));
+    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
+}
+
+/// `map.remove(m, k) -> Map[K,V]`.
+fn map_remove_op(m: &IrExpr, k: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, key_ty, _v) = map_kv(&m.ty)?;
+    let idx = (ctx.func_idx)("__map_remove")?;
+    let mut ops = lower_expr(m, ctx);
+    ops.extend(lower_widened(k, &key_ty, ctx));
+    ops.push(Op::Const(Const::I32(kind)));
+    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
     Some(ops)
 }
 

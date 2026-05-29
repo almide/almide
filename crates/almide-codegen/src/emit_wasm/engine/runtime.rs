@@ -57,10 +57,12 @@ pub struct RuntimeFns {
     pub map_len: FuncIdx,
     pub map_hash: FuncIdx,
     pub map_key_eq: FuncIdx,
+    pub map_collect: FuncIdx, // keys/values into a List
+    pub map_remove: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 24;
+pub const COUNT: u32 = 26;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -90,11 +92,13 @@ impl RuntimeFns {
             map_len: 21,
             map_hash: 22,
             map_key_eq: 23,
+            map_collect: 24,
+            map_remove: 25,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 24] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 26] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -120,6 +124,8 @@ impl RuntimeFns {
             ("__map_len", self.map_len),
             ("__map_hash", self.map_hash),
             ("__map_key_eq", self.map_key_eq),
+            ("__map_collect", self.map_collect),
+            ("__map_remove", self.map_remove),
         ]
     }
 }
@@ -153,7 +159,127 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_map_len(),
         build_map_hash(),
         build_map_key_eq(),
+        build_map_collect(),
+        build_map_remove(),
     ]
+}
+
+/// `__map_collect(m, field_off, elem_size) -> i32` — collect each occupied
+/// entry's key (field_off 0) or value (field_off 8) into a List of `elem_size`
+/// elements. Backs both map.keys and map.values.
+fn build_map_collect() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const M: u32 = 0;
+    const FOFF: u32 = 1;
+    const ES: u32 = 2;
+    const CAP: u32 = 3;
+    const LEN: u32 = 4;
+    const OUT: u32 = 5;
+    const SLOT: u32 = 6;
+    const OC: u32 = 7;
+    const ADDR: u32 = 8;
+    const VAL: u32 = 9; // i64
+
+    let store = vec![
+        // addr = out + 8 + oc*es
+        Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(OC), Op::LocalGet(ES), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalSet(ADDR),
+        // val = entry[slot] + foff  (i64)
+        Op::LocalGet(M), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(CAP), Op::BinOp(B::I32Add),
+        Op::LocalGet(SLOT), Op::Const(Const::I32(MAP_ENTRY)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalGet(FOFF), Op::BinOp(B::I32Add), Op::Load(LoadKind::I64), Op::LocalSet(VAL),
+        // store es bytes: i64 if es==8 else i32(wrap)
+        Op::LocalGet(ES), Op::Const(Const::I32(8)), Op::BinOp(B::I32Eq),
+        Op::IfVoid {
+            then: vec![Op::LocalGet(ADDR), Op::LocalGet(VAL), Op::Store(StoreKind::I64)],
+            else_: vec![Op::LocalGet(ADDR), Op::LocalGet(VAL), Op::UnOp(U::I32WrapI64), Op::Store(StoreKind::I32)],
+        },
+        Op::LocalGet(OC), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(OC),
+    ];
+    let mut loop_body = vec![
+        Op::LocalGet(SLOT), Op::LocalGet(CAP), Op::BinOp(B::I32GeU), Op::BrIf(1),
+    ];
+    loop_body.extend(map_tag_addr(M, SLOT)); loop_body.push(Op::Load(LoadKind::U8));
+    loop_body.push(Op::IfVoid { then: store, else_: vec![] });
+    loop_body.extend([Op::LocalGet(SLOT), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(SLOT), Op::Br(0)]);
+
+    let body = vec![
+        Op::LocalGet(M), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(CAP),
+        Op::LocalGet(M), Op::Load(LoadKind::I32), Op::LocalSet(LEN),
+        // out = alloc(8 + len*es) ; out.len=out.cap=len
+        Op::Const(Const::I32(8)), Op::LocalGet(LEN), Op::LocalGet(ES), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+        Op::LocalGet(OUT), Op::LocalGet(LEN), Op::Store(StoreKind::I32),
+        Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(LEN), Op::Store(StoreKind::I32),
+        Op::Const(Const::I32(0)), Op::LocalSet(SLOT),
+        Op::Const(Const::I32(0)), Op::LocalSet(OC),
+        Op::Block(vec![Op::Loop(loop_body)]),
+        Op::LocalGet(OUT),
+    ];
+    WasmFunc {
+        name: "__map_collect".into(), params: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I64], // cap,len,out,slot,oc,addr,val
+        body,
+    }
+}
+
+/// `__map_remove(m, k, kind) -> i32` — functional: rebuild without key `k`.
+fn build_map_remove() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const M: u32 = 0;
+    const K: u32 = 1;
+    const KIND: u32 = 2;
+    const OLDCAP: u32 = 3;
+    const NEWCAP: u32 = 4;
+    const OUT: u32 = 5;
+    const SLOT: u32 = 6;
+    const EA: u32 = 7;
+
+    let mut copy = Vec::new();
+    copy.extend([Op::LocalGet(SLOT), Op::LocalGet(OLDCAP), Op::BinOp(B::I32GeU), Op::BrIf(1)]);
+    copy.extend(map_tag_addr(M, SLOT)); copy.push(Op::Load(LoadKind::U8));
+    let put_unless_match = {
+        let mut t = Vec::new();
+        t.extend(map_entry_addr(M, OLDCAP, SLOT)); t.push(Op::LocalSet(EA));
+        // skip if key matches k
+        t.push(Op::LocalGet(EA)); t.push(Op::Load(LoadKind::I64));
+        t.push(Op::LocalGet(K)); t.push(Op::LocalGet(KIND));
+        t.push(Op::Call { idx: rt.map_key_eq, pops: 3, pushes: 1 });
+        t.push(Op::UnOp(U::I32Eqz)); // not equal → keep
+        let keep = vec![
+            Op::LocalGet(OUT),
+            Op::LocalGet(EA), Op::Load(LoadKind::I64),
+            Op::LocalGet(EA), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I64),
+            Op::LocalGet(KIND),
+            Op::Call { idx: rt.map_put, pops: 4, pushes: 0 },
+        ];
+        t.push(Op::IfVoid { then: keep, else_: vec![] });
+        t
+    };
+    copy.push(Op::IfVoid { then: put_unless_match, else_: vec![] });
+    copy.extend([Op::LocalGet(SLOT), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(SLOT), Op::Br(0)]);
+
+    let body = vec![
+        Op::LocalGet(M), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(OLDCAP),
+        // newcap = len*2 ; min 4  (len entries, removing at most one)
+        Op::LocalGet(M), Op::Load(LoadKind::I32), Op::Const(Const::I32(2)), Op::BinOp(B::I32Mul), Op::LocalSet(NEWCAP),
+        Op::LocalGet(NEWCAP), Op::Const(Const::I32(4)), Op::BinOp(B::I32LtU),
+        Op::IfVoid { then: vec![Op::Const(Const::I32(4)), Op::LocalSet(NEWCAP)], else_: vec![] },
+        Op::Const(Const::I32(8)), Op::LocalGet(NEWCAP), Op::BinOp(B::I32Add),
+        Op::LocalGet(NEWCAP), Op::Const(Const::I32(MAP_ENTRY)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+        Op::LocalGet(OUT), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
+        Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(NEWCAP), Op::Store(StoreKind::I32),
+        Op::Const(Const::I32(0)), Op::LocalSet(SLOT),
+        Op::Block(vec![Op::Loop(copy)]),
+        Op::LocalGet(OUT),
+    ];
+    WasmFunc {
+        name: "__map_remove".into(), params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // oldcap,newcap,out,slot,ea
+        body,
+    }
 }
 
 /// `__map_hash(key: i64, kind: i32) -> i32` — kind 0 = Int (low 32 bits),
