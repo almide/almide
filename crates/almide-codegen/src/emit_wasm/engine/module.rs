@@ -1417,6 +1417,41 @@ mod tests {
         if let Some(r) = run(&[m3], "main") { assert_eq!(r, "1", "slice café[3,4] len chars"); }
     }
 
+    /// string.split / join (+ list.join), including a split→join round-trip.
+    #[test]
+    fn exec_string_split_join() {
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let len = |e: IrExpr| call("almide_rt_string_len", vec![e], Ty::Int);
+        let byte = |e: IrExpr, i: i64| call("__byte_at", vec![e, lit_int(i)], Ty::Int);
+        let str_list = |xs: &[&str]| IrExpr {
+            kind: IrExprKind::List { elements: xs.iter().map(|s| lit_str(s)).collect() },
+            ty: Ty::list(Ty::String), span: None, def_id: None };
+        let join = |list: IrExpr, sep: &str| call("almide_rt_string_join", vec![list, lit_str(sep)], Ty::String);
+        let split = |s: &str, sep: &str| call("almide_rt_string_split", vec![lit_str(s), lit_str(sep)], Ty::list(Ty::String));
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        // join(["foo","bar","baz"], "-") → "foo-bar-baz" (len 11)
+        ti(len(join(str_list(&["foo", "bar", "baz"]), "-")), "11", "join len");
+        ti(byte(join(str_list(&["foo", "bar", "baz"]), "-"), 3), "45", "join sep '-'");
+        // join edge cases
+        ti(len(join(str_list(&[]), "-")), "0", "join empty list");
+        ti(len(join(str_list(&["x"]), "-")), "1", "join single (no sep)");
+        // list.join routes to the same runtime fn
+        ti(len(call("almide_rt_list_join", vec![str_list(&["ab", "cd"]), lit_str(", ")], Ty::String)), "6", "list.join len");
+        // split→join round-trip: split("a,bb,ccc", ",") |> join("/") → "a/bb/ccc" (len 8)
+        ti(len(join(split("a,bb,ccc", ","), "/")), "8", "round-trip len");
+        ti(byte(join(split("a,bb,ccc", ","), "/"), 1), "47", "round-trip sep '/'");
+        ti(byte(join(split("a,bb,ccc", ","), "/"), 0), "97", "round-trip [0]=='a'");
+        // split with no match → single piece
+        ti(len(join(split("hello", ","), "_")), "5", "split no-match → [s]");
+        // empty separator → [s]
+        ti(len(join(split("abc", ""), "_")), "3", "split empty sep → [s]");
+        // trailing separator → trailing empty piece: split("a,", ",") → ["a",""]
+        ti(len(join(split("a,", ","), "X")), "2", "trailing sep → a + X + empty");
+        ti(byte(join(split("a,", ","), "X"), 1), "88", "trailing sep join [1]=='X'");
+    }
+
     /// string.replace / replace_first.
     #[test]
     fn exec_string_replace() {

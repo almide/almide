@@ -91,6 +91,10 @@ pub fn lower_intrinsic(
             call_runtime("__string_last_index_of", args, 1, ctx),
         "almide_rt_string_replace" if args.len() == 3 => str_replace(args, 1, ctx),
         "almide_rt_string_replace_first" if args.len() == 3 => str_replace(args, 0, ctx),
+        "almide_rt_string_split" if args.len() == 2 =>
+            call_runtime("__string_split", args, 1, ctx),
+        "almide_rt_string_join" | "almide_rt_list_join" if args.len() == 2 =>
+            call_runtime("__string_join", args, 1, ctx),
 
         // ── Map: Int or String keys; Int or pointer/i32 values (not Float). ──
         "almide_rt_map_new" if map_supported(ret_ty) =>
