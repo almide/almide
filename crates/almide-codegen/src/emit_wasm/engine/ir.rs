@@ -212,6 +212,12 @@ pub enum Op {
     // ── Sequence ──
     /// A flat sequence of ops (for grouping without adding a WASM block).
     Seq(Vec<Op>),
+
+    /// A construct the engine cannot lower yet. Carries a label for diagnostics.
+    /// Treated as producing one value for stack-balance purposes, but the
+    /// module builder rejects any function containing it (→ legacy fallback),
+    /// so it never reaches emission.
+    Unsupported(&'static str),
 }
 
 // ── Stack-effect verification ─────────────────────────────────────────
@@ -298,6 +304,10 @@ impl Op {
 
             // ── Memory bulk ──
             Op::MemoryCopy => Normal { pops: 3, pushes: 0 },
+
+            // ── Unsupported: pretend it leaves one value so stack balance
+            //    holds long enough for the builder to detect and reject it. ──
+            Op::Unsupported(_) => Normal { pops: 0, pushes: 1 },
         }
     }
 }
@@ -423,6 +433,7 @@ fn op_name(op: &Op) -> &'static str {
         Op::Call { .. } => "Call", Op::CallIndirect { .. } => "CallIndirect",
         Op::MemoryCopy => "MemoryCopy", Op::MemorySize => "MemorySize",
         Op::MemoryGrow => "MemoryGrow", Op::Seq(_) => "Seq",
+        Op::Unsupported(_) => "Unsupported",
     }
 }
 

@@ -133,6 +133,10 @@ pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
         Op::MemoryGrow => { f.instruction(&MemoryGrow(0)); }
 
         Op::Seq(ops) => emit_ops(ops, f, reg),
+
+        Op::Unsupported(what) => {
+            panic!("Op::Unsupported({what}) reached emission — module builder should have rejected it");
+        }
     }
 }
 

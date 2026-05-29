@@ -133,15 +133,19 @@ pub fn build_module(
     let mut funcs: Vec<WasmFunc> = runtime::runtime_funcs(reg, heap_start as i32);
     funcs.append(&mut user_funcs);
 
-    // ── Phase D: verify every function and reject unresolved abstract ops ──
+    // ── Phase D: reject unresolved abstract ops, then verify stack balance ──
+    // Abstract-op check first: an Unsupported marker yields a clear feature
+    // diagnostic, whereas it would otherwise surface as a confusing stack
+    // imbalance (it pushes a placeholder value). Verification then guards the
+    // fully-supported functions.
     for wf in &funcs {
+        if let Some(op) = first_abstract_op(&wf.body) {
+            return Err(BuildError::UnresolvedAbstract { func: wf.name.clone(), op });
+        }
         verify_func_stack(wf).map_err(|detail| BuildError::StackVerify {
             func: wf.name.clone(),
             detail,
         })?;
-        if let Some(op) = first_abstract_op(&wf.body) {
-            return Err(BuildError::UnresolvedAbstract { func: wf.name.clone(), op });
-        }
     }
 
     // ── Phase E: assemble sections ──
@@ -174,6 +178,7 @@ fn first_abstract_op(ops: &[Op]) -> Option<&'static str> {
             }
             Op::StringConcat => return Some("StringConcat"),
             Op::StringInterp { .. } => return Some("StringInterp"),
+            Op::Unsupported(what) => return Some(what),
 
             // Recurse into compound control flow.
             Op::Block(body) | Op::Loop(body) | Op::Seq(body) => {

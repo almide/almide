@@ -340,8 +340,8 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             if let Some(idx) = (ctx.func_idx)(symbol.as_str()) {
                 ops.push(Op::Call { idx, pops, pushes });
             } else {
-                // Unknown runtime function — emit unreachable as placeholder
-                ops.push(Op::Unreachable);
+                // Unknown runtime intrinsic — reject (→ legacy fallback).
+                ops.push(Op::Unsupported("runtime-call"));
             }
             ops
         }
@@ -395,10 +395,9 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops
         }
 
-        // ── Empty list ──
+        // ── Empty map (Swiss Table not yet implemented) ──
         IrExprKind::EmptyMap => {
-            // Empty map: allocate minimal Swiss Table
-            vec![Op::Const(Const::I32(0))] // placeholder
+            vec![Op::Unsupported("EmptyMap")]
         }
 
         // ── Tuple literal ──
@@ -708,20 +707,9 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops
         }
 
-        // ── Try: Result -> Option conversion (propagate error) ──
-        IrExprKind::Try { expr: inner } => {
-            // Simplified: just extract the value, error handling is TODO
-            let mut ops = lower_expr(inner, ctx);
-            ops.push(Op::Const(Const::I32(4)));
-            ops.push(Op::BinOp(WBinOp::I32Add));
-            let load_kind = match ty_to_wasm(&expr.ty) {
-                WasmTy::I64 => LoadKind::I64,
-                WasmTy::F64 => LoadKind::F64,
-                _ => LoadKind::I32,
-            };
-            ops.push(Op::Load(load_kind));
-            ops
-        }
+        // ── Try (`?`): needs error propagation (early return on Err), which
+        //    isn't modeled yet — reject so legacy handles it correctly. ──
+        IrExprKind::Try { expr: _inner } => vec![Op::Unsupported("Try")],
 
         // ── ClosureCreate ──
         IrExprKind::ClosureCreate { func_name, captures } => {
@@ -791,12 +779,10 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops
         }
 
-        // ── Lambda (no captures — kept as-is by ClosureConversion) ──
-        IrExprKind::Lambda { .. } => {
-            // Non-capturing lambdas are inlined by the emitter.
-            // For now, placeholder.
-            vec![Op::Const(Const::I32(0))]
-        }
+        // ── Lambda ──
+        // ClosureConversion should have lifted these into ClosureCreate; a raw
+        // Lambda reaching codegen is not something we can lower.
+        IrExprKind::Lambda { .. } => vec![Op::Unsupported("Lambda")],
 
         // ── Range ──
         IrExprKind::Range { start, end, inclusive } => {
@@ -812,35 +798,20 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops
         }
 
-        // ── MapLiteral ──
-        IrExprKind::MapLiteral { entries: _ } => {
-            // TODO: allocate Swiss Table and insert entries
-            vec![Op::Const(Const::I32(0))] // placeholder
-        }
+        // ── MapLiteral (Swiss Table not yet implemented) ──
+        IrExprKind::MapLiteral { entries: _ } => vec![Op::Unsupported("MapLiteral")],
 
-        // ── SpreadRecord ──
-        IrExprKind::SpreadRecord { base, fields: _ } => {
-            // TODO: clone base record and update fields
-            lower_expr(base, ctx) // simplified: just return base
-        }
+        // ── SpreadRecord (record clone + field update not implemented) ──
+        IrExprKind::SpreadRecord { base: _, fields: _ } => vec![Op::Unsupported("SpreadRecord")],
 
-        // ── MapAccess ──
-        IrExprKind::MapAccess { object: _, key: _ } => {
-            // TODO: Swiss Table lookup
-            vec![Op::Const(Const::I32(0))] // placeholder
-        }
+        // ── MapAccess (Swiss Table lookup not implemented) ──
+        IrExprKind::MapAccess { object: _, key: _ } => vec![Op::Unsupported("MapAccess")],
 
-        // ── OptionalChain ──
-        IrExprKind::OptionalChain { expr: _inner, field: _ } => {
-            // TODO: check None, then access field
-            vec![Op::Const(Const::I32(0))] // placeholder
-        }
+        // ── OptionalChain (None-check + field access not implemented) ──
+        IrExprKind::OptionalChain { expr: _inner, field: _ } => vec![Op::Unsupported("OptionalChain")],
 
-        // ── ToOption ──
-        IrExprKind::ToOption { expr: inner } => {
-            // Result → Option conversion
-            lower_expr(inner, ctx) // simplified
-        }
+        // ── ToOption (Result → Option conversion not implemented) ──
+        IrExprKind::ToOption { expr: _inner } => vec![Op::Unsupported("ToOption")],
 
         // ── FnRef ──
         IrExprKind::FnRef { name } => {
@@ -874,12 +845,14 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         IrExprKind::Break => vec![Op::Br(1)],    // break out of loop block
         IrExprKind::Continue => vec![Op::Br(0)],  // jump to loop head
 
-        // ── Remaining fallback ──
+        // ── Remaining unhandled variants ──
+        // A Unit-typed unknown produces nothing; anything else would need a
+        // real value, so reject (→ legacy fallback) rather than fake a zero.
         _ => {
             if matches!(expr.ty, Ty::Unit) {
                 vec![]
             } else {
-                vec![Op::Const(Const::I32(0))]
+                vec![Op::Unsupported("unhandled-expr")]
             }
         }
     }
@@ -957,10 +930,10 @@ fn lower_stmt(stmt: &IrStmt, ctx: &mut LowerCtx) -> Vec<Op> {
 
         IrStmtKind::Comment { .. } => vec![],
 
-        _ => {
-            // TODO: IndexAssign, MapInsert, FieldAssign, BindDestructure, ListSwap, etc.
-            vec![]
-        }
+        // IndexAssign, MapInsert, FieldAssign, BindDestructure, ListSwap, … are
+        // not lowered yet. Emit a marker so the builder rejects (→ legacy
+        // fallback) instead of silently dropping the side effect.
+        _ => vec![Op::Unsupported("unhandled-stmt")],
     }
 }
 
@@ -986,7 +959,10 @@ fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut Lower
             if let Some(idx) = (ctx.func_idx)(name.as_str()) {
                 ops.push(Op::Call { idx, pops, pushes });
             } else {
-                ops.push(Op::Unreachable);
+                // Unresolved function (e.g. an unimplemented stdlib fn) — reject
+                // so the build falls back to the legacy emitter rather than
+                // trapping at runtime.
+                ops.push(Op::Unsupported("unresolved-fn"));
             }
         }
         CallTarget::Module { module, func: method, .. } => {
@@ -996,10 +972,11 @@ fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut Lower
             } else if let Some(idx) = (ctx.func_idx)(method.as_str()) {
                 ops.push(Op::Call { idx, pops, pushes });
             } else {
-                ops.push(Op::Unreachable);
+                // Stdlib dispatch (e.g. string.len, list.push) is not in v2 yet.
+                ops.push(Op::Unsupported("stdlib-call"));
             }
         }
-        _ => ops.push(Op::Unreachable),
+        _ => ops.push(Op::Unsupported("unresolved-call")),
     }
     ops
 }
