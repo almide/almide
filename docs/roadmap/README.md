@@ -6,7 +6,7 @@
 
 ## Active
 
-14 items
+15 items
 
 | Item | Description |
 |------|-------------|
@@ -15,6 +15,7 @@
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
+| [Almide Guarantees Charter](active/guarantees-charter.md) | Almide Guarantees Charter — eliminate categories of human/AI worry by mechanical, inferred, LLM-fixable guarantees ("proof without puzzles") |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Region-based Memory Management](active/region-inference.md) |  |
 | [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
