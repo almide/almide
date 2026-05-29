@@ -477,11 +477,14 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         IrExprKind::Record { fields, .. } => {
             // Fields are laid out in the record TYPE's canonical order at their
             // natural byte widths. Both construction and Member read offsets
-            // from the same type, so they always agree.
+            // from the same type, so they always agree. If the type can't be
+            // resolved to offsets, reject (→ legacy) rather than collapsing
+            // every field to offset 0.
+            let Some(total) = record_total_size(&expr.ty, ctx.record_types) else {
+                return vec![Op::Unsupported("record-unresolved-type")];
+            };
             let mut ops = Vec::new();
             let rec = ctx.alloc_local(WasmTy::I32);
-            let total = record_total_size(&expr.ty, ctx.record_types)
-                .unwrap_or_else(|| fields.iter().map(|(_, v)| wasm_byte_size(&v.ty)).sum());
             ops.push(Op::Const(Const::I32(total)));
             ops.push(Op::Alloc);
             ops.push(Op::LocalSet(rec));
@@ -510,10 +513,12 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
 
         // ── Member access ──
         IrExprKind::Member { object, field } => {
+            // A guessed offset is silent memory corruption, so reject (→ legacy)
+            // when the record type can't be resolved to concrete field offsets.
+            let Some((offset, _)) = record_field_offset(&object.ty, field.as_str(), ctx.record_types) else {
+                return vec![Op::Unsupported("member-unresolved-record")];
+            };
             let mut ops = lower_expr(object, ctx);
-            let offset = record_field_offset(&object.ty, field.as_str(), ctx.record_types)
-                .map(|(o, _)| o)
-                .unwrap_or(0);
             if offset != 0 {
                 ops.push(Op::Const(Const::I32(offset)));
                 ops.push(Op::BinOp(WBinOp::I32Add));
@@ -529,14 +534,14 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
 
         // ── TupleIndex ──
         IrExprKind::TupleIndex { object, index } => {
-            let mut ops = lower_expr(object, ctx);
             // Element offset = sum of the byte sizes of all preceding elements
-            // (tuples pack elements at their natural width, not a fixed stride).
-            let offset = match &object.ty {
-                Ty::Tuple(elems) => elems.iter().take(*index)
-                    .map(|t| wasm_byte_size(t)).sum::<i32>(),
-                _ => (*index as i32) * 8, // fallback: assume widest
+            // (tuples pack at natural width). Reject (→ legacy) if the tuple
+            // type is unresolved rather than guess a stride.
+            let Ty::Tuple(elems) = &object.ty else {
+                return vec![Op::Unsupported("tuple-index-unresolved")];
             };
+            let offset = elems.iter().take(*index).map(|t| wasm_byte_size(t)).sum::<i32>();
+            let mut ops = lower_expr(object, ctx);
             if offset != 0 {
                 ops.push(Op::Const(Const::I32(offset)));
                 ops.push(Op::BinOp(WBinOp::I32Add));
