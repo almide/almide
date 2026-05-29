@@ -52,9 +52,136 @@ pub fn lower_intrinsic(
         "almide_rt_list_all" if args.len() == 2 => list_any_all(&args[0], &args[1], false, ctx),
         "almide_rt_list_count" if args.len() == 2 => list_count(&args[0], &args[1], ctx),
         "almide_rt_list_find" if args.len() == 2 => list_find(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_list_reverse" if args.len() == 1 => list_reverse(&args[0], ret_ty, ctx),
+        "almide_rt_list_filter_map" if args.len() == 2 => list_filter_map(&args[0], &args[1], ret_ty, ctx),
 
         _ => None,
     }
+}
+
+/// `list.reverse(xs)` — new list with elements in reverse order.
+fn list_reverse(xs_expr: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let elem_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
+    let es = wasm_byte_size(&elem_ty);
+    let lk = load_kind_of(ty_to_wasm(&elem_ty));
+    let sk = store_kind_of(ty_to_wasm(&elem_ty));
+    let (lp, mut ops) = list_loop_header(xs_expr, ctx);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let alloc = (ctx.func_idx)("__alloc")?;
+    ops.extend(alloc_list(out, lp.len, es, alloc));
+
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    // out[idx] = xs[len-1-idx]
+    loop_body.push(Op::LocalGet(out));
+    loop_body.push(Op::Const(Const::I32(8)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(es)));
+    loop_body.push(Op::BinOp(B::I32Mul));
+    loop_body.push(Op::BinOp(B::I32Add));
+    // src = xs + 8 + (len-1-idx)*es
+    loop_body.push(Op::LocalGet(lp.xs));
+    loop_body.push(Op::Const(Const::I32(8)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Sub));
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::BinOp(B::I32Sub));
+    loop_body.push(Op::Const(Const::I32(es)));
+    loop_body.push(Op::BinOp(B::I32Mul));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::Load(lk));
+    loop_body.push(Op::Store(sk));
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(lp.idx));
+    loop_body.push(Op::Br(0));
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `list.filter_map(xs, f)` — apply `f: (A) -> Option[B]`, keep the Some values.
+fn list_filter_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let in_es = wasm_byte_size(&pty);
+    let in_lk = load_kind_of(ty_to_wasm(&pty));
+    let out_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
+    let out_es = wasm_byte_size(&out_ty);
+    let out_sk = store_kind_of(ty_to_wasm(&out_ty));
+    let out_lk = load_kind_of(ty_to_wasm(&out_ty));
+
+    let (lp, mut ops) = list_loop_header(xs_expr, ctx);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let oc = ctx.alloc_local(WasmTy::I32);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    let opt = ctx.alloc_local(WasmTy::I32);
+    ctx.map_var(pvar, elem);
+    let alloc = (ctx.func_idx)("__alloc")?;
+    ops.extend(alloc_list(out, lp.len, out_es, alloc)); // worst-case capacity
+    ops.push(Op::Const(Const::I32(0)));
+    ops.push(Op::LocalSet(oc));
+
+    // on Some: out[oc] = opt.payload; oc++
+    let keep = vec![
+        Op::LocalGet(out), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(oc), Op::Const(Const::I32(out_es)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalGet(opt), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(out_lk),
+        Op::Store(out_sk),
+        Op::LocalGet(oc), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(oc),
+    ];
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    loop_body.extend(load_elem(lp.xs, lp.idx, in_es, in_lk));
+    loop_body.push(Op::LocalSet(elem));
+    loop_body.extend(lower_expr(&body, ctx)); // f(elem) → Option ptr
+    loop_body.push(Op::LocalSet(opt));
+    loop_body.push(Op::LocalGet(opt));
+    loop_body.push(Op::Load(LoadKind::I32)); // tag (nonzero = Some)
+    loop_body.push(Op::IfVoid { then: keep, else_: vec![] });
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(lp.idx));
+    loop_body.push(Op::Br(0));
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.extend(set_list_len(out, oc));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `out = __alloc(8 + count*elem_size); out.len = out.cap = count`.
+fn alloc_list(out: u32, count: u32, es: i32, alloc: super::ir::FuncIdx) -> Vec<Op> {
+    vec![
+        Op::Const(Const::I32(8)),
+        Op::LocalGet(count),
+        Op::Const(Const::I32(es)),
+        Op::BinOp(B::I32Mul),
+        Op::BinOp(B::I32Add),
+        Op::Call { idx: alloc, pops: 1, pushes: 1 },
+        Op::LocalSet(out),
+        Op::LocalGet(out), Op::LocalGet(count), Op::Store(StoreKind::I32),
+        Op::LocalGet(out), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        Op::LocalGet(count), Op::Store(StoreKind::I32),
+    ]
+}
+
+/// `out.len = out.cap = count` (used after a filtering pass).
+fn set_list_len(out: u32, count: u32) -> Vec<Op> {
+    vec![
+        Op::LocalGet(out), Op::LocalGet(count), Op::Store(StoreKind::I32),
+        Op::LocalGet(out), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        Op::LocalGet(count), Op::Store(StoreKind::I32),
+    ]
 }
 
 /// `list.find(xs, pred) -> Option[A]` — first matching element wrapped in Some,

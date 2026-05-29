@@ -893,6 +893,76 @@ mod tests {
         }
     }
 
+    /// list.reverse: `[1,2,3].reverse()` → [3,2,1]; [0]==3, [2]==1.
+    #[test]
+    fn exec_intrinsic_reverse() {
+        let mk = |i: i64| {
+            let list = IrExpr {
+                kind: IrExprKind::List { elements: vec![lit_int(1), lit_int(2), lit_int(3)] },
+                ty: Ty::list(Ty::Int), span: None, def_id: None,
+            };
+            let rev = IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_reverse"), args: vec![list] },
+                ty: Ty::list(Ty::Int), span: None, def_id: None,
+            };
+            IrExpr {
+                kind: IrExprKind::IndexAccess { object: Box::new(rev), index: Box::new(lit_int(i)) },
+                ty: Ty::Int, span: None, def_id: None,
+            }
+        };
+        let m0 = mk_func("main", Ty::Int, mk(0));
+        if let Some(r) = run(&[m0], "main") { assert_eq!(r, "3", "reverse[0]"); }
+        let m2 = mk_func("main", Ty::Int, mk(2));
+        if let Some(r) = run(&[m2], "main") { assert_eq!(r, "1", "reverse[2]"); }
+    }
+
+    /// list.filter_map: `[1,2,3,4].filter_map(x => if x>2 then Some(x*10) else None)`
+    /// → [30,40]; length 2, [0]==30.
+    #[test]
+    fn exec_intrinsic_filter_map() {
+        let opt_int = Ty::Applied(
+            almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Int]);
+        let mk_fm = || {
+            let mut vt = VarTable::new();
+            let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+            let vx = || IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None };
+            let body = IrExpr {
+                kind: IrExprKind::If {
+                    cond: Box::new(binop(almide_ir::BinOp::Gt, vx(), lit_int(2), Ty::Bool)),
+                    then: Box::new(IrExpr {
+                        kind: IrExprKind::OptionSome {
+                            expr: Box::new(binop(almide_ir::BinOp::MulInt, vx(), lit_int(10), Ty::Int)),
+                        },
+                        ty: opt_int.clone(), span: None, def_id: None,
+                    }),
+                    else_: Box::new(IrExpr { kind: IrExprKind::OptionNone, ty: opt_int.clone(), span: None, def_id: None }),
+                },
+                ty: opt_int.clone(), span: None, def_id: None,
+            };
+            let lam = IrExpr {
+                kind: IrExprKind::Lambda { params: vec![(x, Ty::Int)], body: Box::new(body), lambda_id: None },
+                ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(opt_int.clone()) }, span: None, def_id: None,
+            };
+            let list = IrExpr {
+                kind: IrExprKind::List { elements: vec![lit_int(1), lit_int(2), lit_int(3), lit_int(4)] },
+                ty: Ty::list(Ty::Int), span: None, def_id: None,
+            };
+            let fm = IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_filter_map"), args: vec![list, lam] },
+                ty: Ty::list(Ty::Int), span: None, def_id: None,
+            };
+            (vt, fm)
+        };
+        let (vt, fm) = mk_fm();
+        let len = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_len"), args: vec![fm] }, ty: Ty::Int, span: None, def_id: None };
+        let m = mk_func("main", Ty::Int, len);
+        if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(r, "2", "filter_map len"); }
+        let (vt2, fm2) = mk_fm();
+        let idx0 = IrExpr { kind: IrExprKind::IndexAccess { object: Box::new(fm2), index: Box::new(lit_int(0)) }, ty: Ty::Int, span: None, def_id: None };
+        let m2 = mk_func("main", Ty::Int, idx0);
+        if let Some(r) = run_vt(&[m2], &vt2, "main") { assert_eq!(r, "30", "filter_map[0]"); }
+    }
+
     /// list.find returns Option: `[1,2,3].find(x=>x>1) ?? -1` → 2 (Some(2));
     /// `[1,2,3].find(x=>x>5) ?? -1` → -1 (None).
     #[test]
