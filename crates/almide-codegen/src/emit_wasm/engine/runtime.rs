@@ -39,10 +39,11 @@ pub struct RuntimeFns {
     pub byte_at: FuncIdx,
     pub int_to_string: FuncIdx,
     pub string_eq: FuncIdx,
+    pub range: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 8;
+pub const COUNT: u32 = 9;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -56,11 +57,12 @@ impl RuntimeFns {
             byte_at: 5,
             int_to_string: 6,
             string_eq: 7,
+            range: 8,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 8] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 9] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -70,6 +72,7 @@ impl RuntimeFns {
             ("__byte_at", self.byte_at),
             ("__int_to_string", self.int_to_string),
             ("__string_eq", self.string_eq),
+            ("__range", self.range),
         ]
     }
 }
@@ -87,6 +90,7 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_byte_at(),
         build_int_to_string(),
         build_string_eq(),
+        build_range(),
     ]
 }
 
@@ -403,6 +407,65 @@ fn build_string_eq() -> WasmFunc {
         params: vec![WasmTy::I32, WasmTy::I32],
         results: vec![WasmTy::I32],
         locals: vec![WasmTy::I32, WasmTy::I32], // la, i
+        body,
+    }
+}
+
+/// `__range(start: i64, end: i64, inclusive: i32) -> i32`
+///
+/// Builds a `List[Int]` of `[start, start+1, …]` up to `end` (exclusive, or
+/// inclusive when the flag is set). Empty when the span is non-positive.
+fn build_range() -> WasmFunc {
+    let alloc_fn = RuntimeFns::fixed().alloc;
+    const START: u32 = 0; // i64
+    const END: u32 = 1;   // i64
+    const INCL: u32 = 2;  // i32
+    const N64: u32 = 3;   // i64: signed element count
+    const N: u32 = 4;     // i32: clamped count
+    const LIST: u32 = 5;  // i32
+    const I: u32 = 6;     // i32: fill index
+
+    let body = vec![
+        // n64 = (end - start) + inclusive
+        Op::LocalGet(END), Op::LocalGet(START), Op::BinOp(B::I64Sub),
+        Op::LocalGet(INCL), Op::UnOp(U::I64ExtendI32U), Op::BinOp(B::I64Add),
+        Op::LocalSet(N64),
+        // n = n64 < 0 ? 0 : wrap(n64)
+        Op::LocalGet(N64), Op::Const(Const::I64(0)), Op::BinOp(B::I64LtS),
+        Op::If {
+            ty: WasmTy::I32,
+            then: vec![Op::Const(Const::I32(0))],
+            else_: vec![Op::LocalGet(N64), Op::UnOp(U::I32WrapI64)],
+        },
+        Op::LocalSet(N),
+        // list = __alloc(8 + n*8) ; list.len = list.cap = n
+        Op::Const(Const::I32(8)),
+        Op::LocalGet(N), Op::Const(Const::I32(8)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::Call { idx: alloc_fn, pops: 1, pushes: 1 }, Op::LocalSet(LIST),
+        Op::LocalGet(LIST), Op::LocalGet(N), Op::Store(StoreKind::I32),
+        Op::LocalGet(LIST), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(N), Op::Store(StoreKind::I32),
+        // i = 0; while i < n { list[8 + i*8] = start + i; i++ }
+        Op::Const(Const::I32(0)), Op::LocalSet(I),
+        Op::Block(vec![Op::Loop(vec![
+            Op::LocalGet(I), Op::LocalGet(N), Op::BinOp(B::I32GeU), Op::BrIf(1),
+            // addr = list + 8 + i*8
+            Op::LocalGet(LIST), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+            Op::LocalGet(I), Op::Const(Const::I32(8)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+            // value = start + (i as i64)
+            Op::LocalGet(START),
+            Op::LocalGet(I), Op::UnOp(U::I64ExtendI32U), Op::BinOp(B::I64Add),
+            Op::Store(StoreKind::I64),
+            Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(I),
+            Op::Br(0),
+        ])]),
+        Op::LocalGet(LIST),
+    ];
+
+    WasmFunc {
+        name: "__range".into(),
+        params: vec![WasmTy::I64, WasmTy::I64, WasmTy::I32],
+        results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I64, WasmTy::I32, WasmTy::I32, WasmTy::I32], // n64, n, list, i
         body,
     }
 }

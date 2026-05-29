@@ -787,9 +787,17 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         }
 
         // ── Range ──
-        IrExprKind::Range { start: _, end: _, inclusive: _ } => {
-            // TODO: allocate list and fill with range values
-            vec![Op::Const(Const::I32(0))] // placeholder
+        IrExprKind::Range { start, end, inclusive } => {
+            // __range(start, end, inclusive) builds the List[Int].
+            let mut ops = lower_expr(start, ctx);
+            ops.extend(lower_expr(end, ctx));
+            ops.push(Op::Const(Const::I32(if *inclusive { 1 } else { 0 })));
+            if let Some(idx) = (ctx.func_idx)("__range") {
+                ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+            } else {
+                ops.push(Op::Unreachable);
+            }
+            ops
         }
 
         // ── MapLiteral ──
@@ -1267,6 +1275,27 @@ fn wasm_byte_size(ty: &Ty) -> i32 {
     }
 }
 
+/// The element type of a `List[T]` / `Set[T]` (None if not such a type).
+fn list_element_ty(ty: &Ty) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty {
+        Ty::Applied(TC::List, args) | Ty::Applied(TC::Set, args) if !args.is_empty() => {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
+/// LoadKind matching a WASM value type's natural width.
+fn load_kind_of(wt: WasmTy) -> LoadKind {
+    match wt {
+        WasmTy::I64 => LoadKind::I64,
+        WasmTy::F64 => LoadKind::F64,
+        WasmTy::F32 => LoadKind::F32,
+        WasmTy::I32 => LoadKind::I32,
+    }
+}
+
 /// Byte offset (and type) of a named field within a record type, computed by
 /// summing the natural widths of preceding fields in declared order. Returns
 /// None if the type is not a record or the field is absent.
@@ -1299,9 +1328,16 @@ fn record_total_size(ty: &Ty) -> Option<i32> {
 
 fn lower_for_in(var: VarId, iterable: &IrExpr, body: &[IrStmt], ctx: &mut LowerCtx) -> Vec<Op> {
     let mut ops = Vec::new();
+    // Element type from the iterable: List[T] / Set[T] → T (default Int).
+    let elem_ty = list_element_ty(&iterable.ty).unwrap_or(Ty::Int);
+    let elem_wasm = ty_to_wasm(&elem_ty);
+    let elem_size = wasm_byte_size(&elem_ty);
+    let (elem_load, elem_store) = (load_kind_of(elem_wasm), ()); // store unused here
+    let _ = elem_store;
+
     let list = ctx.alloc_local(WasmTy::I32);
     let idx = ctx.alloc_local(WasmTy::I32);
-    let elem = ctx.alloc_local(ty_to_wasm(&Ty::Int)); // placeholder elem type
+    let elem = ctx.alloc_local(elem_wasm);
 
     ops.extend(lower_expr(iterable, ctx));
     ops.push(Op::LocalSet(list));
@@ -1327,10 +1363,10 @@ fn lower_for_in(var: VarId, iterable: &IrExpr, body: &[IrStmt], ctx: &mut LowerC
     loop_body.push(Op::Const(Const::I32(8)));
     loop_body.push(Op::BinOp(WBinOp::I32Add));
     loop_body.push(Op::LocalGet(idx));
-    loop_body.push(Op::Const(Const::I32(4))); // TODO: proper elem size
+    loop_body.push(Op::Const(Const::I32(elem_size)));
     loop_body.push(Op::BinOp(WBinOp::I32Mul));
     loop_body.push(Op::BinOp(WBinOp::I32Add));
-    loop_body.push(Op::Load(LoadKind::I32)); // TODO: proper load kind
+    loop_body.push(Op::Load(elem_load));
     loop_body.push(Op::LocalSet(elem));
 
     // Body statements
