@@ -131,7 +131,7 @@ fn first_abstract_op(ops: &[Op]) -> Option<&'static str> {
                     return Some(n);
                 }
             }
-            Op::If { then, else_ } | Op::IfVoid { then, else_ } => {
+            Op::If { then, else_, .. } | Op::IfVoid { then, else_ } => {
                 if let Some(n) = first_abstract_op(then).or_else(|| first_abstract_op(else_)) {
                     return Some(n);
                 }
@@ -298,13 +298,17 @@ mod tests {
 
     /// Build, invoke `func`, and return its printed result. `None` ⇒ skip.
     fn run(funcs: &[IrFunction], func: &str) -> Option<String> {
+        run_vt(funcs, &VarTable::new(), func)
+    }
+
+    /// Like `run`, but with an explicit VarTable (for functions with bindings).
+    fn run_vt(funcs: &[IrFunction], vt: &VarTable, func: &str) -> Option<String> {
         if !wasmtime_available() {
             eprintln!("[skip] wasmtime not found — skipping execution test");
             return None;
         }
-        let vt = VarTable::new();
         let reg = LayoutRegistry::new();
-        let bytes = build_module(funcs, &vt, &reg).expect("build should succeed");
+        let bytes = build_module(funcs, vt, &reg).expect("build should succeed");
         assert!(wasmparser::validate(&bytes).is_ok(), "module must validate before exec");
 
         let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
@@ -351,6 +355,81 @@ mod tests {
         let main = mk_func("main", Ty::Int, body);
         if let Some(r) = run(&[main], "main") {
             assert_eq!(r, "3");
+        }
+    }
+
+    fn binop(op: almide_ir::BinOp, l: IrExpr, r: IrExpr, ty: Ty) -> IrExpr {
+        IrExpr {
+            kind: IrExprKind::BinOp { op, left: Box::new(l), right: Box::new(r) },
+            ty, span: None, def_id: None,
+        }
+    }
+
+    fn iff(cond: IrExpr, then: IrExpr, else_: IrExpr, ty: Ty) -> IrExpr {
+        IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(cond), then: Box::new(then), else_: Box::new(else_),
+            },
+            ty, span: None, def_id: None,
+        }
+    }
+
+    /// Integer equality dispatches to i64.eq: `if 2 == 2 then 7 else 8` → 7.
+    #[test]
+    fn exec_int_eq() {
+        let cond = binop(almide_ir::BinOp::Eq, lit_int(2), lit_int(2), Ty::Bool);
+        let main = mk_func("main", Ty::Int, iff(cond, lit_int(7), lit_int(8), Ty::Int));
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "7");
+        }
+    }
+
+    /// Integer comparison, false branch: `if 5 < 3 then 1 else 0` → 0.
+    #[test]
+    fn exec_int_lt_false() {
+        let cond = binop(almide_ir::BinOp::Lt, lit_int(5), lit_int(3), Ty::Bool);
+        let main = mk_func("main", Ty::Int, iff(cond, lit_int(1), lit_int(0), Ty::Int));
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "0");
+        }
+    }
+
+    /// Float arithmetic + comparison: `if 1.5 + 2.0 > 3.0 then ... ` exercises f64.
+    #[test]
+    fn exec_float_arith() {
+        fn litf(v: f64) -> IrExpr {
+            IrExpr { kind: IrExprKind::LitFloat { value: v }, ty: Ty::Float, span: None, def_id: None }
+        }
+        // 1.5 + 2.0 = 3.5
+        let sum = binop(almide_ir::BinOp::AddFloat, litf(1.5), litf(2.0), Ty::Float);
+        let main = mk_func("main", Ty::Float, sum);
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "3.5");
+        }
+    }
+
+    /// Let binding then use: `{ let x = 5; x + 10 }` → 15.
+    #[test]
+    fn exec_let_binding() {
+        use almide_ir::{IrStmt, IrStmtKind, Mutability};
+        let mut vt = VarTable::new();
+        let x = vt.alloc(sym("x"), Ty::Int, Mutability::Let, None);
+        let var_x = IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None };
+        let body = IrExpr {
+            kind: IrExprKind::Block {
+                stmts: vec![IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: x, ty: Ty::Int, mutability: Mutability::Let, value: lit_int(5),
+                    },
+                    span: None,
+                }],
+                expr: Some(Box::new(binop(almide_ir::BinOp::AddInt, var_x, lit_int(10), Ty::Int))),
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, body);
+        if let Some(r) = run_vt(&[main], &vt, "main") {
+            assert_eq!(r, "15");
         }
     }
 

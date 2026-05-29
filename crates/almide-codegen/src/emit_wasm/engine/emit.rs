@@ -102,8 +102,8 @@ pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
             emit_ops(body, f, reg);
             f.instruction(&End);
         }
-        Op::If { then, else_ } => {
-            f.instruction(&If(wasm_encoder::BlockType::Result(wasm_encoder::ValType::I32)));
+        Op::If { ty, then, else_ } => {
+            f.instruction(&If(wasm_encoder::BlockType::Result(ty.to_valtype())));
             emit_ops(then, f, reg);
             f.instruction(&Else);
             emit_ops(else_, f, reg);

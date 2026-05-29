@@ -267,10 +267,9 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             let has_result = !matches!(expr.ty, Ty::Unit);
 
             if has_result {
-                // Coerce bool condition to i32 if needed
                 let then_ops = lower_expr(then, ctx);
                 let else_ops = lower_expr(else_, ctx);
-                ops.push(Op::If { then: then_ops, else_: else_ops });
+                ops.push(Op::If { ty: ty_to_wasm(&expr.ty), then: then_ops, else_: else_ops });
             } else {
                 let then_ops = lower_expr_void(then, ctx);
                 let else_ops = lower_expr_void(else_, ctx);
@@ -631,7 +630,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
                 t
             };
             let else_ops = lower_expr(fallback, ctx);
-            ops.push(Op::If { then: then_ops, else_: else_ops });
+            ops.push(Op::If { ty: ty_to_wasm(&expr.ty), then: then_ops, else_: else_ops });
             ops
         }
 
@@ -925,8 +924,14 @@ fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut Lower
 
 // ── BinOp / UnOp mapping ─────────────────────────────────────────────
 
-fn lower_binop(op: &almide_ir::BinOp, _left_ty: &Ty) -> Option<WBinOp> {
+fn lower_binop(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<WBinOp> {
     use almide_ir::BinOp as IrOp;
+
+    // Comparisons are type-dispatched on the operand type: Int → i64,
+    // Float → f64, everything else (Bool, pointers) → i32. String/composite
+    // deep equality is not a simple binop and falls through to a runtime call.
+    let is_float = matches!(left_ty, Ty::Float);
+    let is_int = matches!(left_ty, Ty::Int);
 
     Some(match op {
         IrOp::AddInt => WBinOp::I64Add,
@@ -939,12 +944,14 @@ fn lower_binop(op: &almide_ir::BinOp, _left_ty: &Ty) -> Option<WBinOp> {
         IrOp::DivFloat => WBinOp::F64Div,
         IrOp::ModInt => WBinOp::I64RemS,
 
-        IrOp::Eq => WBinOp::I32Eq,  // TODO: type-dispatch for deep eq
-        IrOp::Neq => WBinOp::I32Ne,
-        IrOp::Lt => WBinOp::I64LtS,  // TODO: float dispatch
-        IrOp::Lte => WBinOp::I64LeS,
-        IrOp::Gt => WBinOp::I64GtS,
-        IrOp::Gte => WBinOp::I64GeS,
+        IrOp::Eq if matches!(left_ty, Ty::String) => return None, // deep eq → runtime
+        IrOp::Neq if matches!(left_ty, Ty::String) => return None,
+        IrOp::Eq => if is_int { WBinOp::I64Eq } else if is_float { WBinOp::F64Eq } else { WBinOp::I32Eq },
+        IrOp::Neq => if is_int { WBinOp::I64Ne } else if is_float { WBinOp::F64Ne } else { WBinOp::I32Ne },
+        IrOp::Lt => if is_float { WBinOp::F64Lt } else if is_int { WBinOp::I64LtS } else { WBinOp::I32LtS },
+        IrOp::Lte => if is_float { WBinOp::F64Le } else if is_int { WBinOp::I64LeS } else { WBinOp::I32LeS },
+        IrOp::Gt => if is_float { WBinOp::F64Gt } else if is_int { WBinOp::I64GtS } else { WBinOp::I32GtS },
+        IrOp::Gte => if is_float { WBinOp::F64Ge } else if is_int { WBinOp::I64GeS } else { WBinOp::I32GeS },
 
         IrOp::And => WBinOp::I32And,
         IrOp::Or => WBinOp::I32Or,
@@ -983,14 +990,14 @@ fn lower_match(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, ctx: &mut 
     // For literals: compare directly
     // Wildcard: always matches
     if has_result {
-        ops.extend(lower_match_arms_with_result(arms, subj_local, &subject.ty, ctx));
+        ops.extend(lower_match_arms_with_result(arms, subj_local, &subject.ty, result_ty, ctx));
     } else {
         ops.extend(lower_match_arms_void(arms, subj_local, &subject.ty, ctx));
     }
     ops
 }
 
-fn lower_match_arms_with_result(arms: &[IrMatchArm], subj: Local, subj_ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
+fn lower_match_arms_with_result(arms: &[IrMatchArm], subj: Local, subj_ty: &Ty, result_ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
     if arms.is_empty() {
         return vec![Op::Unreachable];
     }
@@ -1011,9 +1018,9 @@ fn lower_match_arms_with_result(arms: &[IrMatchArm], subj: Local, subj_ty: &Ty, 
         bind_pattern(&arm.pattern, subj, subj_ty, ctx);
         lower_expr(&arm.body, ctx)
     };
-    let else_ops = lower_match_arms_with_result(rest, subj, subj_ty, ctx);
+    let else_ops = lower_match_arms_with_result(rest, subj, subj_ty, result_ty, ctx);
 
-    ops.push(Op::If { then: then_ops, else_: else_ops });
+    ops.push(Op::If { ty: ty_to_wasm(result_ty), then: then_ops, else_: else_ops });
     ops
 }
 

@@ -192,7 +192,8 @@ pub enum Op {
     // ── Control flow ──
     Block(Vec<Op>),
     Loop(Vec<Op>),
-    If { then: Vec<Op>, else_: Vec<Op> },
+    /// `if` producing a single value of type `ty` (both branches push one `ty`).
+    If { ty: WasmTy, then: Vec<Op>, else_: Vec<Op> },
     IfVoid { then: Vec<Op>, else_: Vec<Op> },
     Br(u32),
     BrIf(u32),
@@ -351,7 +352,7 @@ fn verify_compound(op: &Op, depth: &mut i32, ctx: &str, idx: usize) -> Result<()
             // Block/Loop/Seq: body must have net 0 effect (no result type in current usage)
             verify_ops(body, 0, ctx)?;
         }
-        Op::If { then, else_ } => {
+        Op::If { then, else_, .. } => {
             // Pops condition (i32)
             *depth -= 1;
             if *depth < 0 {
@@ -510,6 +511,7 @@ mod tests {
         let f = i32_func(vec![
             Op::Const(Const::I32(1)), // condition
             Op::If {
+                ty: WasmTy::I32,
                 then: vec![Op::Const(Const::I32(10))],
                 else_: vec![Op::Const(Const::I32(20))],
             },

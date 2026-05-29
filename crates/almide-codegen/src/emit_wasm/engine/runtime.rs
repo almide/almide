@@ -196,7 +196,7 @@ pub fn resolve_abstract_ops(ops: &mut Vec<Op>, rt: &RuntimeFns) {
             }
             // Recurse into compound bodies.
             Op::Block(body) | Op::Loop(body) | Op::Seq(body) => resolve_abstract_ops(body, rt),
-            Op::If { then, else_ } | Op::IfVoid { then, else_ } => {
+            Op::If { then, else_, .. } | Op::IfVoid { then, else_ } => {
                 resolve_abstract_ops(then, rt);
                 resolve_abstract_ops(else_, rt);
             }
