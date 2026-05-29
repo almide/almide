@@ -1081,6 +1081,76 @@ mod tests {
         if let Some(r) = run(&[mx], "main") { assert_eq!(r, "7", "max(3,7)"); }
     }
 
+    /// Option/Result tag tests + unwrap_or via intrinsics.
+    #[test]
+    fn exec_intrinsic_option_result() {
+        let opt_int = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Int]);
+        let res_int = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, vec![Ty::Int, Ty::String]);
+        let some = || IrExpr { kind: IrExprKind::OptionSome { expr: Box::new(lit_int(7)) }, ty: opt_int.clone(), span: None, def_id: None };
+        let none = || IrExpr { kind: IrExprKind::OptionNone, ty: opt_int.clone(), span: None, def_id: None };
+        let ok = || IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(lit_int(9)) }, ty: res_int.clone(), span: None, def_id: None };
+
+        let call1 = |sym_: &str, a: IrExpr, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(sym_), args: vec![a] }, ty, span: None, def_id: None };
+
+        // is_some(Some)=1, is_none(Some)=0, is_some(None)=0
+        let t = |e: IrExpr, exp: &str| { let m = mk_func("main", Ty::Bool, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp); } };
+        t(call1("almide_rt_option_is_some", some(), Ty::Bool), "1");
+        t(call1("almide_rt_option_is_none", some(), Ty::Bool), "0");
+        t(call1("almide_rt_option_is_some", none(), Ty::Bool), "0");
+        t(call1("almide_rt_result_is_ok", ok(), Ty::Bool), "1");
+        t(call1("almide_rt_result_is_err", ok(), Ty::Bool), "0");
+
+        // unwrap_or: Some(7) ?? 99 = 7 ; None ?? 99 = 99 ; Ok(9) ?? 99 = 9
+        let uo = |sym_: &str, a: IrExpr| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(sym_), args: vec![a, lit_int(99)] },
+            ty: Ty::Int, span: None, def_id: None };
+        let ti = |e: IrExpr, exp: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp); } };
+        ti(uo("almide_rt_option_unwrap_or", some()), "7");
+        ti(uo("almide_rt_option_unwrap_or", none()), "99");
+        ti(uo("almide_rt_result_unwrap_or", ok()), "9");
+    }
+
+    /// option.map: `Some(5).map(x => x*2) ?? -1` → 10; `None.map(...) ?? -1` → -1.
+    #[test]
+    fn exec_intrinsic_option_map() {
+        let opt_int = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Int]);
+        let build = |is_some: bool| {
+            let mut vt = VarTable::new();
+            let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+            let inner = if is_some {
+                IrExpr { kind: IrExprKind::OptionSome { expr: Box::new(lit_int(5)) }, ty: opt_int.clone(), span: None, def_id: None }
+            } else {
+                IrExpr { kind: IrExprKind::OptionNone, ty: opt_int.clone(), span: None, def_id: None }
+            };
+            let lam = IrExpr {
+                kind: IrExprKind::Lambda {
+                    params: vec![(x, Ty::Int)],
+                    body: Box::new(binop(almide_ir::BinOp::MulInt,
+                        IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None },
+                        lit_int(2), Ty::Int)),
+                    lambda_id: None,
+                },
+                ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) }, span: None, def_id: None,
+            };
+            let mapped = IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_option_map"), args: vec![inner, lam] },
+                ty: opt_int.clone(), span: None, def_id: None,
+            };
+            let uo = IrExpr {
+                kind: IrExprKind::UnwrapOr { expr: Box::new(mapped), fallback: Box::new(lit_int(-1)) },
+                ty: Ty::Int, span: None, def_id: None,
+            };
+            (vt, uo)
+        };
+        let (vt, s) = build(true);
+        let m = mk_func("main", Ty::Int, s);
+        if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(r, "10", "Some(5).map(*2)"); }
+        let (vt2, n) = build(false);
+        let m2 = mk_func("main", Ty::Int, n);
+        if let Some(r) = run_vt(&[m2], &vt2, "main") { assert_eq!(r, "-1", "None.map"); }
+    }
+
     /// string.len counts UTF-8 code points, not bytes:
     /// "café" is 5 bytes but 4 chars; "abc" is 3.
     #[test]

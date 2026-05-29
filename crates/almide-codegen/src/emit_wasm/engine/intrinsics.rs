@@ -56,6 +56,108 @@ pub fn lower_intrinsic(
         "almide_rt_list_reverse" if args.len() == 1 => list_reverse(&args[0], ret_ty, ctx),
         "almide_rt_list_filter_map" if args.len() == 2 => list_filter_map(&args[0], &args[1], ret_ty, ctx),
 
+        // ── Option / Result tag tests (tag @0: Some=1/None=0, Ok=0/Err=1) ──
+        "almide_rt_option_is_some" => Some(load_tag(&args[0], ctx)),     // tag (1=Some)
+        "almide_rt_result_is_err" => Some(load_tag(&args[0], ctx)),     // tag (1=Err)
+        "almide_rt_option_is_none" => Some(tag_eqz(&args[0], ctx)),     // tag==0
+        "almide_rt_result_is_ok" => Some(tag_eqz(&args[0], ctx)),      // tag==0 (Ok)
+        // unwrap_or: Option keeps payload when tag != 0; Result when tag == 0.
+        "almide_rt_option_unwrap_or" if args.len() == 2 =>
+            Some(tagged_unwrap_or(&args[0], &args[1], true, ret_ty, ctx)),
+        "almide_rt_result_unwrap_or" if args.len() == 2 =>
+            Some(tagged_unwrap_or(&args[0], &args[1], false, ret_ty, ctx)),
+        "almide_rt_option_map" if args.len() == 2 => option_map(&args[0], &args[1], ret_ty, ctx),
+
+        _ => None,
+    }
+}
+
+/// Load a tagged-union tag (i32 at offset 0): Some=1/None=0, Err=1/Ok=0.
+fn load_tag(arg: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
+    let mut ops = lower_expr(arg, ctx);
+    ops.push(Op::Load(LoadKind::I32));
+    ops
+}
+
+/// `tag == 0` — None for Option, Ok for Result.
+fn tag_eqz(arg: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
+    let mut ops = load_tag(arg, ctx);
+    ops.push(Op::UnOp(U::I32Eqz));
+    ops
+}
+
+/// `unwrap_or(v, default)`. `payload_when_nonzero` selects which tag yields the
+/// payload: Option → nonzero (Some); Result → zero (Ok).
+fn tagged_unwrap_or(v: &IrExpr, default: &IrExpr, payload_when_nonzero: bool, ret_ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
+    let wt = ty_to_wasm(ret_ty);
+    let lk = load_kind_of(wt);
+    let ptr = ctx.alloc_local(WasmTy::I32);
+    let mut ops = lower_expr(v, ctx);
+    ops.push(Op::LocalTee(ptr));
+    ops.push(Op::Load(LoadKind::I32)); // tag
+    let payload = vec![
+        Op::LocalGet(ptr), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(lk),
+    ];
+    let fallback = lower_expr(default, ctx);
+    // If condition is the tag (nonzero → then). Place payload/fallback so the
+    // payload corresponds to the right tag.
+    let (then_ops, else_ops) = if payload_when_nonzero {
+        (payload, fallback) // Option: Some(tag!=0) → payload
+    } else {
+        (fallback, payload) // Result: Err(tag!=0) → default, Ok → payload
+    };
+    ops.push(Op::If { ty: wt, then: then_ops, else_: else_ops });
+    ops
+}
+
+/// `option.map(o, f)` — `Some(f(x))` when `o` is Some, else None.
+fn option_map(o: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let in_lk = load_kind_of(ty_to_wasm(&pty));
+    let out_ty = option_payload_ty(ret_ty).unwrap_or(Ty::Int);
+    let out_sk = store_kind_of(ty_to_wasm(&out_ty));
+
+    let o_local = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+    let alloc = (ctx.func_idx)("__alloc")?;
+
+    let mut ops = lower_expr(o, ctx);
+    ops.push(Op::LocalSet(o_local));
+    // out = __alloc(12)
+    ops.push(Op::Const(Const::I32(12)));
+    ops.push(Op::Call { idx: alloc, pops: 1, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+
+    // elem = o.payload (used only in the Some branch)
+    let some_branch = {
+        let mut t = vec![
+            Op::LocalGet(o_local), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+            Op::Load(in_lk), Op::LocalSet(elem),
+            // out.tag = 1
+            Op::LocalGet(out), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
+            // out.payload = f(elem)
+            Op::LocalGet(out), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        ];
+        t.extend(lower_expr(&body, ctx));
+        t.push(Op::Store(out_sk));
+        t
+    };
+    let none_branch = vec![Op::LocalGet(out), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32)];
+
+    ops.push(Op::LocalGet(o_local));
+    ops.push(Op::Load(LoadKind::I32)); // tag (nonzero = Some)
+    ops.push(Op::IfVoid { then: some_branch, else_: none_branch });
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// Payload type of an `Option[T]` (None if not an Option).
+fn option_payload_ty(ty: &Ty) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty {
+        Ty::Applied(TC::Option, args) if !args.is_empty() => Some(args[0].clone()),
         _ => None,
     }
 }
