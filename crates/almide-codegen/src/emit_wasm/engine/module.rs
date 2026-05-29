@@ -708,18 +708,19 @@ mod tests {
         assert!(wasmparser::validate(&bytes).is_ok(), "module must validate");
     }
 
-    /// Interpolating a non-String value needs to_string (no runtime yet), so
-    /// it is rejected cleanly as an unresolved StringInterp.
+    /// Interpolating a Float still needs to_string (no runtime yet), so it is
+    /// rejected cleanly as an unresolved StringInterp.
     #[test]
-    fn string_interp_with_int_rejected() {
+    fn string_interp_with_float_rejected() {
         use almide_ir::IrStringPart;
         let vt = VarTable::new();
         let reg = LayoutRegistry::new();
+        let litf = IrExpr { kind: IrExprKind::LitFloat { value: 1.5 }, ty: Ty::Float, span: None, def_id: None };
         let interp = IrExpr {
             kind: IrExprKind::StringInterp {
                 parts: vec![
                     IrStringPart::Lit { value: "x=".into() },
-                    IrStringPart::Expr { expr: lit_int(1) },
+                    IrStringPart::Expr { expr: litf },
                 ],
             },
             ty: Ty::String, span: None, def_id: None,
@@ -789,5 +790,67 @@ mod tests {
         if let Some(r) = run(&[main], "main") {
             assert_eq!(r, "6");
         }
+    }
+
+    /// Build `"${n}"` for an integer literal `n`.
+    fn interp_int(n: i64) -> IrExpr {
+        use almide_ir::IrStringPart;
+        IrExpr {
+            kind: IrExprKind::StringInterp {
+                parts: vec![IrStringPart::Expr { expr: lit_int(n) }],
+            },
+            ty: Ty::String, span: None, def_id: None,
+        }
+    }
+
+    /// `__int_to_string(42)` via `"${42}"` → length 2, bytes '4','2'.
+    #[test]
+    fn exec_int_to_string_positive() {
+        let len = mk_func("main", Ty::Int, rt_call("__strlen", vec![interp_int(42)]));
+        if let Some(r) = run(&[len], "main") { assert_eq!(r, "2"); }
+        let b0 = mk_func("main", Ty::Int, rt_call("__byte_at", vec![interp_int(42), lit_int(0)]));
+        if let Some(r) = run(&[b0], "main") { assert_eq!(r, "52", "'4'"); }
+        let b1 = mk_func("main", Ty::Int, rt_call("__byte_at", vec![interp_int(42), lit_int(1)]));
+        if let Some(r) = run(&[b1], "main") { assert_eq!(r, "50", "'2'"); }
+    }
+
+    /// `"${0}"` → length 1, byte '0'.
+    #[test]
+    fn exec_int_to_string_zero() {
+        let len = mk_func("main", Ty::Int, rt_call("__strlen", vec![interp_int(0)]));
+        if let Some(r) = run(&[len], "main") { assert_eq!(r, "1"); }
+        let b0 = mk_func("main", Ty::Int, rt_call("__byte_at", vec![interp_int(0), lit_int(0)]));
+        if let Some(r) = run(&[b0], "main") { assert_eq!(r, "48", "'0'"); }
+    }
+
+    /// `"${-5}"` → length 2, leading '-' then '5'.
+    #[test]
+    fn exec_int_to_string_negative() {
+        let len = mk_func("main", Ty::Int, rt_call("__strlen", vec![interp_int(-5)]));
+        if let Some(r) = run(&[len], "main") { assert_eq!(r, "2"); }
+        let b0 = mk_func("main", Ty::Int, rt_call("__byte_at", vec![interp_int(-5), lit_int(0)]));
+        if let Some(r) = run(&[b0], "main") { assert_eq!(r, "45", "'-'"); }
+        let b1 = mk_func("main", Ty::Int, rt_call("__byte_at", vec![interp_int(-5), lit_int(1)]));
+        if let Some(r) = run(&[b1], "main") { assert_eq!(r, "53", "'5'"); }
+    }
+
+    /// Mixed literal + int interpolation: `"x=${42}"` → "x=42", length 4.
+    #[test]
+    fn exec_interp_mixed() {
+        use almide_ir::IrStringPart;
+        let interp = IrExpr {
+            kind: IrExprKind::StringInterp {
+                parts: vec![
+                    IrStringPart::Lit { value: "x=".into() },
+                    IrStringPart::Expr { expr: lit_int(42) },
+                ],
+            },
+            ty: Ty::String, span: None, def_id: None,
+        };
+        let len = mk_func("main", Ty::Int, rt_call("__strlen", vec![interp.clone()]));
+        if let Some(r) = run(&[len], "main") { assert_eq!(r, "4"); }
+        // byte 2 is '4'
+        let b2 = mk_func("main", Ty::Int, rt_call("__byte_at", vec![interp, lit_int(2)]));
+        if let Some(r) = run(&[b2], "main") { assert_eq!(r, "52", "'4'"); }
     }
 }

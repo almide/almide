@@ -503,21 +503,23 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
 
         // ── String interpolation ──
         IrExprKind::StringInterp { parts } => {
-            // Supported only when every interpolated expression is already a
-            // String — there is no int/float/bool → String runtime yet. If any
-            // part needs to_string, emit the abstract op so the build rejects it
-            // cleanly rather than concatenating a non-pointer as if it were one.
-            let needs_to_string = parts.iter().any(|p| {
-                matches!(p, almide_ir::IrStringPart::Expr { expr } if !matches!(expr.ty, Ty::String))
+            // Each interpolated expression must become a String. We support
+            // String parts directly and Int parts via __int_to_string. Other
+            // types (Float, Bool, …) have no to_string runtime yet, so the
+            // whole interpolation is rejected cleanly rather than concatenating
+            // a non-pointer as if it were one.
+            let unsupported = parts.iter().any(|p| {
+                matches!(p, almide_ir::IrStringPart::Expr { expr }
+                    if !matches!(expr.ty, Ty::String | Ty::Int))
             });
-            if needs_to_string {
+            if unsupported {
                 return vec![Op::StringInterp { parts: Vec::new() }];
             }
             if parts.is_empty() {
                 let off = ctx.interner.intern("");
                 return vec![Op::Const(Const::I32(off as i32))];
             }
-            // Left-associative concat of all (string) parts.
+            // Left-associative concat of all (string-valued) parts.
             let mut ops = Vec::new();
             for (i, part) in parts.iter().enumerate() {
                 match part {
@@ -527,6 +529,12 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
                     }
                     almide_ir::IrStringPart::Expr { expr: e } => {
                         ops.extend(lower_expr(e, ctx));
+                        // Convert Int → String. (String parts are already pointers.)
+                        if matches!(e.ty, Ty::Int) {
+                            if let Some(idx) = (ctx.func_idx)("__int_to_string") {
+                                ops.push(Op::Call { idx, pops: 1, pushes: 1 });
+                            }
+                        }
                     }
                 }
                 if i > 0 {

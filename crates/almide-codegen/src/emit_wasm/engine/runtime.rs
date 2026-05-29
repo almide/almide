@@ -37,10 +37,11 @@ pub struct RuntimeFns {
     pub string_concat: FuncIdx,
     pub strlen: FuncIdx,
     pub byte_at: FuncIdx,
+    pub int_to_string: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 6;
+pub const COUNT: u32 = 7;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -52,11 +53,12 @@ impl RuntimeFns {
             string_concat: 3,
             strlen: 4,
             byte_at: 5,
+            int_to_string: 6,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 6] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 7] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -64,6 +66,7 @@ impl RuntimeFns {
             ("__string_concat", self.string_concat),
             ("__strlen", self.strlen),
             ("__byte_at", self.byte_at),
+            ("__int_to_string", self.int_to_string),
         ]
     }
 }
@@ -79,6 +82,7 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_string_concat(),
         build_strlen(),
         build_byte_at(),
+        build_int_to_string(),
     ]
 }
 
@@ -267,6 +271,94 @@ fn build_byte_at() -> WasmFunc {
             Op::Load(LoadKind::U8),
             Op::UnOp(U::I64ExtendI32U),
         ],
+    }
+}
+
+/// `__int_to_string(n: i64) -> i32`
+///
+/// Renders a signed integer as a decimal String (heap-allocated). Works for 0
+/// and negatives. Two passes: count digits, then fill backward from the end.
+fn build_int_to_string() -> WasmFunc {
+    let alloc_fn = RuntimeFns::fixed().alloc;
+    const N: u32 = 0;   // param: value (i64)
+    const NEG: u32 = 1; // i32: 1 if negative
+    const V: u32 = 2;   // i64: |n|
+    const ND: u32 = 3;  // i32: digit count
+    const TOT: u32 = 4; // i32: total chars (digits + sign)
+    const S: u32 = 5;   // i32: string ptr
+    const P: u32 = 6;   // i32: write cursor
+    const T: u32 = 7;   // i64: working value
+
+    let body = vec![
+        // neg = n < 0
+        Op::LocalGet(N), Op::Const(Const::I64(0)), Op::BinOp(B::I64LtS),
+        Op::LocalSet(NEG),
+        // v = neg ? (0 - n) : n
+        Op::LocalGet(NEG),
+        Op::If {
+            ty: WasmTy::I64,
+            then: vec![Op::Const(Const::I64(0)), Op::LocalGet(N), Op::BinOp(B::I64Sub)],
+            else_: vec![Op::LocalGet(N)],
+        },
+        Op::LocalSet(V),
+        // nd = 1; t = v
+        Op::Const(Const::I32(1)), Op::LocalSet(ND),
+        Op::LocalGet(V), Op::LocalSet(T),
+        // count digits: while (t /= 10) != 0 { nd++ }
+        Op::Block(vec![Op::Loop(vec![
+            Op::LocalGet(T), Op::Const(Const::I64(10)), Op::BinOp(B::I64DivS), Op::LocalTee(T),
+            Op::Const(Const::I64(0)), Op::BinOp(B::I64Eq), Op::BrIf(1),
+            Op::LocalGet(ND), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(ND),
+            Op::Br(0),
+        ])]),
+        // total = nd + neg
+        Op::LocalGet(ND), Op::LocalGet(NEG), Op::BinOp(B::I32Add), Op::LocalSet(TOT),
+        // s = __alloc(8 + total); s.len = s.cap = total
+        Op::Const(Const::I32(8)), Op::LocalGet(TOT), Op::BinOp(B::I32Add),
+        Op::Call { idx: alloc_fn, pops: 1, pushes: 1 }, Op::LocalSet(S),
+        Op::LocalGet(S), Op::LocalGet(TOT), Op::Store(StoreKind::I32),
+        Op::LocalGet(S), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(TOT), Op::Store(StoreKind::I32),
+        // if neg { *(s+8) = '-' }
+        Op::LocalGet(NEG),
+        Op::IfVoid {
+            then: vec![
+                Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+                Op::Const(Const::I32(45)), Op::Store(StoreKind::I8),
+            ],
+            else_: vec![],
+        },
+        // p = s + 8 + total ; t = v
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(TOT), Op::BinOp(B::I32Add), Op::LocalSet(P),
+        Op::LocalGet(V), Op::LocalSet(T),
+        // fill digits backward until t == 0
+        Op::Block(vec![Op::Loop(vec![
+            // p--
+            Op::LocalGet(P), Op::Const(Const::I32(1)), Op::BinOp(B::I32Sub), Op::LocalSet(P),
+            // *p = '0' + (t % 10)
+            Op::LocalGet(P),
+            Op::LocalGet(T), Op::Const(Const::I64(10)), Op::BinOp(B::I64RemS),
+            Op::UnOp(U::I32WrapI64), Op::Const(Const::I32(48)), Op::BinOp(B::I32Add),
+            Op::Store(StoreKind::I8),
+            // t /= 10 ; if t == 0 break
+            Op::LocalGet(T), Op::Const(Const::I64(10)), Op::BinOp(B::I64DivS), Op::LocalTee(T),
+            Op::Const(Const::I64(0)), Op::BinOp(B::I64Eq), Op::BrIf(1),
+            Op::Br(0),
+        ])]),
+        // return s
+        Op::LocalGet(S),
+    ];
+
+    WasmFunc {
+        name: "__int_to_string".into(),
+        params: vec![WasmTy::I64],
+        results: vec![WasmTy::I32],
+        // neg(i32), v(i64), nd(i32), total(i32), s(i32), p(i32), t(i64)
+        locals: vec![
+            WasmTy::I32, WasmTy::I64, WasmTy::I32, WasmTy::I32,
+            WasmTy::I32, WasmTy::I32, WasmTy::I64,
+        ],
+        body,
     }
 }
 
