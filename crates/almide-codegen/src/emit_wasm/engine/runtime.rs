@@ -1,74 +1,93 @@
 //! Engine runtime — the minimal set of support functions that abstract
-//! WasmIR ops resolve to.
+//! WasmIR ops resolve to, plus string primitives.
 //!
 //! These are themselves expressed in WasmIR (`WasmFunc`) and pass the same
 //! stack-effect verifier as user code — there is no hand-written, unverified
 //! runtime in the v2 engine. The module builder places them at fixed indices
-//! before any user function, then `resolve_abstract_ops` rewrites
-//! `Op::Alloc` / `Op::RcInc` / `Op::RcDec` into `Op::Call` targeting them.
+//! (`0..COUNT`) before any user function, then `resolve_abstract_ops` rewrites
+//! `Op::Alloc` / `Op::RcInc` / `Op::RcDec` / `Op::StringConcat` into `Op::Call`
+//! targeting them.
 //!
 //! ## Allocator
 //!
 //! A bump allocator over a single linear memory. `__alloc(data_size)` reserves
 //! `header(8) + data_size` bytes, writes the alloc header
 //! (`[size @ base][rc=1 @ base+4]`), and returns the *data* pointer `base + 8`.
-//! The header layout is taken from `LayoutRegistry` (`ALLOC_HEADER`), so the
-//! runtime stays consistent with every other emission site.
 //!
-//! Phase 2a does not reclaim memory: `__rc_dec` decrements the count but never
-//! frees (memory-safe, not space-optimal). A free-list reuse path and typed,
-//! recursive child-dec are deferred to later phases.
+//! ## RC and string literals
+//!
+//! String literals live in the data segment *below* `heap_start` and have no
+//! alloc header. `__rc_inc` / `__rc_dec` therefore guard on `ptr >= heap_start`
+//! and skip data-segment pointers entirely. Phase 2b still never frees:
+//! `__rc_dec` only keeps the count accurate.
 
-use super::ir::{Op, Const, WasmTy, WasmFunc, FuncIdx, BinOp as B, LoadKind, StoreKind};
+use super::ir::{Op, Const, WasmTy, WasmFunc, FuncIdx, BinOp as B, UnOp as U, LoadKind, StoreKind};
 use super::layout::{self, LayoutRegistry, alloc};
 
 /// Index of the mutable i32 global holding the bump pointer (next free byte).
 pub const HEAP_GLOBAL: u32 = 0;
 
-/// Initial heap pointer. Leaves the low region free (null guard + room for a
-/// future data segment of string literals).
-pub const HEAP_BASE: i32 = 1024;
-
-/// Resolved indices of the runtime functions within the assembled module.
-/// Runtime functions always occupy the first slots, so these are stable.
+/// Resolved indices of the runtime functions. Runtime functions always occupy
+/// the first slots in the module, so these are stable.
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeFns {
     pub alloc: FuncIdx,
     pub rc_inc: FuncIdx,
     pub rc_dec: FuncIdx,
+    pub string_concat: FuncIdx,
+    pub strlen: FuncIdx,
+    pub byte_at: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 3;
+pub const COUNT: u32 = 6;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
     pub const fn fixed() -> Self {
-        RuntimeFns { alloc: 0, rc_inc: 1, rc_dec: 2 }
+        RuntimeFns {
+            alloc: 0,
+            rc_inc: 1,
+            rc_dec: 2,
+            string_concat: 3,
+            strlen: 4,
+            byte_at: 5,
+        }
+    }
+
+    /// Map of runtime function names to indices, for the build's name lookup.
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 6] {
+        [
+            ("__alloc", self.alloc),
+            ("__rc_inc", self.rc_inc),
+            ("__rc_dec", self.rc_dec),
+            ("__string_concat", self.string_concat),
+            ("__strlen", self.strlen),
+            ("__byte_at", self.byte_at),
+        ]
     }
 }
 
-/// Build the runtime functions as verified WasmIR, in index order
-/// (`alloc`, `rc_inc`, `rc_dec`).
-pub fn runtime_funcs(reg: &LayoutRegistry) -> Vec<WasmFunc> {
-    vec![build_alloc(reg), build_rc_inc(reg), build_rc_dec(reg)]
+/// Build the runtime functions as verified WasmIR, in index order.
+/// `heap_start` is the first heap byte (everything below it is the immutable
+/// data segment) — baked into the RC guard.
+pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
+    vec![
+        build_alloc(reg),
+        build_rc_inc(reg, heap_start),
+        build_rc_dec(reg, heap_start),
+        build_string_concat(),
+        build_strlen(),
+        build_byte_at(),
+    ]
 }
 
 /// `__alloc(size: i32) -> i32`
-///
-/// ```text
-///   base = HEAP                       ; alloc-header start
-///   HEAP = base + align8(8 + size)    ; bump
-///   *base       = size                ; header.size
-///   *(base + 4) = 1                   ; header.rc
-///   return base + 8                   ; data pointer
-/// ```
 fn build_alloc(reg: &LayoutRegistry) -> WasmFunc {
     let hdr = reg.header_size(layout::ALLOC_HEADER) as i32; // 8
     let size_off = reg.fixed_offset(layout::ALLOC_HEADER, alloc::SIZE) as i32; // 0
     let rc_off = reg.fixed_offset(layout::ALLOC_HEADER, alloc::RC) as i32; // 4
 
-    // param: size = local 0 ; scratch: base = local 1
     const SIZE: u32 = 0;
     const BASE: u32 = 1;
 
@@ -76,11 +95,11 @@ fn build_alloc(reg: &LayoutRegistry) -> WasmFunc {
         // base = HEAP
         Op::GlobalGet(HEAP_GLOBAL),
         Op::LocalTee(BASE),
-        // HEAP = base + align8(hdr + size) = base + ((hdr + size + 7) & ~7)
+        // HEAP = base + ((hdr + size + 7) & ~7)
         Op::LocalGet(SIZE),
         Op::Const(Const::I32(hdr + 7)),
         Op::BinOp(B::I32Add),
-        Op::Const(Const::I32(!7)), // ~7 = 0xFFFFFFF8
+        Op::Const(Const::I32(!7)),
         Op::BinOp(B::I32And),
         Op::BinOp(B::I32Add),
         Op::GlobalSet(HEAP_GLOBAL),
@@ -111,29 +130,32 @@ fn build_alloc(reg: &LayoutRegistry) -> WasmFunc {
     }
 }
 
-/// `__rc_inc(ptr: i32)` — increment the reference count at `ptr - rc_neg`.
-fn build_rc_inc(reg: &LayoutRegistry) -> WasmFunc {
-    let rc_neg = reg.alloc_header_neg_offset(alloc::RC) as i32; // 4
+/// Emit `*(ptr - rc_neg) op= 1` guarded by `ptr >= heap_start`.
+fn rc_update(rc_neg: i32, heap_start: i32, delta_op: B) -> WasmFunc {
     const PTR: u32 = 0;
-
-    let body = vec![
-        // addr = ptr - rc_neg  (computed twice: once for store target, once for load)
+    let update = vec![
+        // addr (for store)
         Op::LocalGet(PTR),
         Op::Const(Const::I32(rc_neg)),
         Op::BinOp(B::I32Sub),
-        // load current rc
+        // current rc
         Op::LocalGet(PTR),
         Op::Const(Const::I32(rc_neg)),
         Op::BinOp(B::I32Sub),
         Op::Load(LoadKind::I32),
         Op::Const(Const::I32(1)),
-        Op::BinOp(B::I32Add),
-        // store rc + 1 at addr
+        Op::BinOp(delta_op),
         Op::Store(StoreKind::I32),
     ];
-
+    let body = vec![
+        // if ptr >= heap_start { update }
+        Op::LocalGet(PTR),
+        Op::Const(Const::I32(heap_start)),
+        Op::BinOp(B::I32GeU),
+        Op::IfVoid { then: update, else_: vec![] },
+    ];
     WasmFunc {
-        name: "__rc_inc".into(),
+        name: String::new(), // set by caller
         params: vec![WasmTy::I32],
         results: vec![],
         locals: vec![],
@@ -141,59 +163,130 @@ fn build_rc_inc(reg: &LayoutRegistry) -> WasmFunc {
     }
 }
 
-/// `__rc_dec(ptr: i32)` — decrement the reference count at `ptr - rc_neg`.
-///
-/// Phase 2a never frees: it only keeps the count accurate so COW checks and
-/// future reclamation see correct values.
-fn build_rc_dec(reg: &LayoutRegistry) -> WasmFunc {
+/// `__rc_inc(ptr: i32)` — increment refcount, skipping data-segment pointers.
+fn build_rc_inc(reg: &LayoutRegistry, heap_start: i32) -> WasmFunc {
     let rc_neg = reg.alloc_header_neg_offset(alloc::RC) as i32;
-    const PTR: u32 = 0;
+    let mut f = rc_update(rc_neg, heap_start, B::I32Add);
+    f.name = "__rc_inc".into();
+    f
+}
+
+/// `__rc_dec(ptr: i32)` — decrement refcount (no free yet), skipping data-segment.
+fn build_rc_dec(reg: &LayoutRegistry, heap_start: i32) -> WasmFunc {
+    let rc_neg = reg.alloc_header_neg_offset(alloc::RC) as i32;
+    let mut f = rc_update(rc_neg, heap_start, B::I32Sub);
+    f.name = "__rc_dec".into();
+    f
+}
+
+/// `__string_concat(a: i32, b: i32) -> i32`
+///
+/// Allocates a fresh heap String `[len][cap][bytes]` holding a's bytes
+/// followed by b's. Reads only the source strings' len/data, so the sources
+/// may be heap- or data-segment-resident.
+fn build_string_concat() -> WasmFunc {
+    let alloc_fn = RuntimeFns::fixed().alloc;
+    const A: u32 = 0;
+    const B_: u32 = 1;
+    const LA: u32 = 2;
+    const LB: u32 = 3;
+    const S: u32 = 4;
 
     let body = vec![
-        Op::LocalGet(PTR),
-        Op::Const(Const::I32(rc_neg)),
-        Op::BinOp(B::I32Sub),
-        Op::LocalGet(PTR),
-        Op::Const(Const::I32(rc_neg)),
-        Op::BinOp(B::I32Sub),
-        Op::Load(LoadKind::I32),
-        Op::Const(Const::I32(1)),
-        Op::BinOp(B::I32Sub),
+        // la = len(a) ; lb = len(b)
+        Op::LocalGet(A), Op::Load(LoadKind::I32), Op::LocalSet(LA),
+        Op::LocalGet(B_), Op::Load(LoadKind::I32), Op::LocalSet(LB),
+        // s = __alloc(8 + la + lb)
+        Op::Const(Const::I32(8)),
+        Op::LocalGet(LA), Op::BinOp(B::I32Add),
+        Op::LocalGet(LB), Op::BinOp(B::I32Add),
+        Op::Call { idx: alloc_fn, pops: 1, pushes: 1 },
+        Op::LocalSet(S),
+        // s.len = la + lb
+        Op::LocalGet(S),
+        Op::LocalGet(LA), Op::LocalGet(LB), Op::BinOp(B::I32Add),
         Op::Store(StoreKind::I32),
+        // s.cap = la + lb
+        Op::LocalGet(S), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        Op::LocalGet(LA), Op::LocalGet(LB), Op::BinOp(B::I32Add),
+        Op::Store(StoreKind::I32),
+        // memcpy(s+8, a+8, la)
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(A), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(LA),
+        Op::MemoryCopy,
+        // memcpy(s+8+la, b+8, lb)
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(LA), Op::BinOp(B::I32Add),
+        Op::LocalGet(B_), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(LB),
+        Op::MemoryCopy,
+        // return s
+        Op::LocalGet(S),
     ];
 
     WasmFunc {
-        name: "__rc_dec".into(),
-        params: vec![WasmTy::I32],
-        results: vec![],
-        locals: vec![],
+        name: "__string_concat".into(),
+        params: vec![WasmTy::I32, WasmTy::I32],
+        results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32], // la, lb, s
         body,
+    }
+}
+
+/// `__strlen(p: i32) -> i64` — byte length of a String (zero-extended).
+fn build_strlen() -> WasmFunc {
+    WasmFunc {
+        name: "__strlen".into(),
+        params: vec![WasmTy::I32],
+        results: vec![WasmTy::I64],
+        locals: vec![],
+        body: vec![
+            Op::LocalGet(0),
+            Op::Load(LoadKind::I32),
+            Op::UnOp(U::I64ExtendI32U),
+        ],
+    }
+}
+
+/// `__byte_at(p: i32, i: i64) -> i64` — the byte at index `i` (zero-extended).
+fn build_byte_at() -> WasmFunc {
+    WasmFunc {
+        name: "__byte_at".into(),
+        params: vec![WasmTy::I32, WasmTy::I64],
+        results: vec![WasmTy::I64],
+        locals: vec![],
+        body: vec![
+            // addr = p + 8 + (i as i32)
+            Op::LocalGet(0),
+            Op::Const(Const::I32(8)),
+            Op::BinOp(B::I32Add),
+            Op::LocalGet(1),
+            Op::UnOp(U::I32WrapI64),
+            Op::BinOp(B::I32Add),
+            Op::Load(LoadKind::U8),
+            Op::UnOp(U::I64ExtendI32U),
+        ],
     }
 }
 
 // ── Abstract-op resolution ───────────────────────────────────────────
 
-/// Rewrite abstract allocation/RC ops into concrete `Call`s to the runtime.
+/// Rewrite abstract allocation / RC / string ops into concrete `Call`s.
 ///
-/// The rewrite is stack-effect preserving (`Alloc` is pop1/push1, the runtime
-/// `__alloc` is too; `RcInc`/`RcDec` are pop1/push0 like their runtime fns),
-/// so a function that verified before resolution still verifies after.
+/// Stack-effect preserving: `Alloc` (1→1) ↔ `__alloc`; `RcInc`/`RcDec` (1→0)
+/// ↔ their fns; `StringConcat` (2→1) ↔ `__string_concat`. So a function that
+/// verified before resolution still verifies after.
 ///
-/// Ops that have no runtime yet (`StringConcat`, `StringInterp`,
-/// `AllocCollection`, `CowCheck`) are left untouched — the module builder's
-/// abstract-op check rejects them with a clear diagnostic.
+/// `StringInterp`, `AllocCollection`, `CowCheck` are left untouched and the
+/// module builder's abstract-op check rejects any that remain.
 pub fn resolve_abstract_ops(ops: &mut Vec<Op>, rt: &RuntimeFns) {
     for op in ops.iter_mut() {
         match op {
-            Op::Alloc => {
-                *op = Op::Call { idx: rt.alloc, pops: 1, pushes: 1 };
-            }
-            Op::RcInc => {
-                *op = Op::Call { idx: rt.rc_inc, pops: 1, pushes: 0 };
-            }
-            Op::RcDec { .. } => {
-                *op = Op::Call { idx: rt.rc_dec, pops: 1, pushes: 0 };
-            }
+            Op::Alloc => *op = Op::Call { idx: rt.alloc, pops: 1, pushes: 1 },
+            Op::RcInc => *op = Op::Call { idx: rt.rc_inc, pops: 1, pushes: 0 },
+            Op::RcDec { .. } => *op = Op::Call { idx: rt.rc_dec, pops: 1, pushes: 0 },
+            Op::StringConcat => *op = Op::Call { idx: rt.string_concat, pops: 2, pushes: 1 },
             // Recurse into compound bodies.
             Op::Block(body) | Op::Loop(body) | Op::Seq(body) => resolve_abstract_ops(body, rt),
             Op::If { then, else_, .. } | Op::IfVoid { then, else_ } => {
@@ -219,25 +312,27 @@ mod tests {
     #[test]
     fn runtime_functions_verify() {
         let reg = LayoutRegistry::new();
-        for f in runtime_funcs(&reg) {
+        for f in runtime_funcs(&reg, 1024) {
             verify_func_stack(&f).unwrap_or_else(|e| panic!("{} failed: {}", f.name, e));
         }
     }
 
     #[test]
-    fn resolve_rewrites_alloc_and_rc() {
+    fn resolve_rewrites_alloc_rc_and_concat() {
         let rt = RuntimeFns::fixed();
         let mut ops = vec![
             Op::Const(Const::I32(16)),
             Op::Alloc,
             Op::RcInc,
+            Op::StringConcat,
             Op::Block(vec![Op::RcDec { layout: layout::ALLOC_HEADER }]),
         ];
         resolve_abstract_ops(&mut ops, &rt);
-        assert!(matches!(ops[1], Op::Call { idx: 0, .. }));
-        assert!(matches!(ops[2], Op::Call { idx: 1, .. }));
-        if let Op::Block(inner) = &ops[3] {
-            assert!(matches!(inner[0], Op::Call { idx: 2, .. }));
+        assert!(matches!(ops[1], Op::Call { idx, .. } if idx == rt.alloc));
+        assert!(matches!(ops[2], Op::Call { idx, .. } if idx == rt.rc_inc));
+        assert!(matches!(ops[3], Op::Call { idx, .. } if idx == rt.string_concat));
+        if let Op::Block(inner) = &ops[4] {
+            assert!(matches!(inner[0], Op::Call { idx, .. } if idx == rt.rc_dec));
         } else {
             panic!("block not preserved");
         }

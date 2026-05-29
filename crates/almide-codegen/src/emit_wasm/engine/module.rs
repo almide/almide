@@ -32,7 +32,8 @@ use wasm_encoder::{
 use super::ir::{Op, WasmFunc, WasmTy, FuncIdx, verify_func_stack};
 use super::emit::emit_ops;
 use super::layout::LayoutRegistry;
-use super::runtime::{self, RuntimeFns, HEAP_GLOBAL, HEAP_BASE};
+use super::data::DataInterner;
+use super::runtime::{self, RuntimeFns, HEAP_GLOBAL};
 
 /// Errors produced while building a module from IR.
 #[derive(Debug)]
@@ -71,40 +72,59 @@ pub fn build_module(
 ) -> Result<Vec<u8>, BuildError> {
     // Runtime functions occupy the first `COUNT` indices; user functions follow.
     let rt = RuntimeFns::fixed();
-    let runtime_funcs = runtime::runtime_funcs(reg);
     let base = runtime::COUNT;
 
-    // ── Phase A: assign a function index to every user function, by name ──
-    // (offset past the runtime functions, which are emitted first)
+    // ── Phase A: name → index for runtime fns and every user function ──
     let mut name_idx: HashMap<String, FuncIdx> = HashMap::new();
+    for (name, idx) in rt.name_table() {
+        name_idx.insert(name.to_string(), idx);
+    }
     for (i, f) in ir_funcs.iter().enumerate() {
         name_idx.insert(f.name.as_str().to_string(), base + i as FuncIdx);
     }
     let lookup = |name: &str| name_idx.get(name).copied();
 
-    // ── Phase B: lower → resolve abstract ops → verify ──
-    let mut funcs: Vec<WasmFunc> = Vec::with_capacity(runtime_funcs.len() + ir_funcs.len());
-    funcs.extend(runtime_funcs);
+    // ── Phase B: lower user functions, interning string literals as we go ──
+    let mut interner = DataInterner::new(DATA_BASE);
+    let mut user_funcs: Vec<WasmFunc> = Vec::with_capacity(ir_funcs.len());
     for f in ir_funcs {
-        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup);
-        // Resolve Alloc / RcInc / RcDec into Calls to the runtime. This is
-        // stack-effect preserving, so verification below still holds.
+        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup, &mut interner);
+        // Resolve Alloc / RcInc / RcDec / StringConcat into Calls to the runtime.
+        // Stack-effect preserving, so verification below still holds.
         runtime::resolve_abstract_ops(&mut wf.body, &rt);
-        verify_func_stack(&wf).map_err(|detail| BuildError::StackVerify {
+        user_funcs.push(wf);
+    }
+
+    // ── Phase C: heap starts after the (now-complete) data segment ──
+    let heap_start = align8(interner.end());
+
+    // Build runtime functions with the resolved heap_start (RC guard baked in),
+    // then place them before the user functions.
+    let mut funcs: Vec<WasmFunc> = runtime::runtime_funcs(reg, heap_start as i32);
+    funcs.append(&mut user_funcs);
+
+    // ── Phase D: verify every function and reject unresolved abstract ops ──
+    for wf in &funcs {
+        verify_func_stack(wf).map_err(|detail| BuildError::StackVerify {
             func: wf.name.clone(),
             detail,
         })?;
         if let Some(op) = first_abstract_op(&wf.body) {
-            return Err(BuildError::UnresolvedAbstract {
-                func: wf.name.clone(),
-                op,
-            });
+            return Err(BuildError::UnresolvedAbstract { func: wf.name.clone(), op });
         }
-        funcs.push(wf);
     }
 
-    // ── Phase C: assemble sections ──
-    Ok(assemble(&funcs, &name_idx, reg))
+    // ── Phase E: assemble sections ──
+    Ok(assemble(&funcs, &name_idx, reg, &interner, heap_start))
+}
+
+/// First offset of the string-literal data segment. Above the null page so
+/// pointer 0 stays invalid; 8-aligned for clean string headers.
+const DATA_BASE: u32 = 16;
+
+/// Round up to the next multiple of 8.
+fn align8(n: u32) -> u32 {
+    (n + 7) & !7
 }
 
 /// Walk an op tree and return the name of the first abstract op found, if any.
@@ -152,6 +172,8 @@ fn assemble(
     funcs: &[WasmFunc],
     name_idx: &HashMap<String, FuncIdx>,
     reg: &LayoutRegistry,
+    interner: &DataInterner,
+    heap_start: u32,
 ) -> Vec<u8> {
     let mut module = Module::new();
 
@@ -192,11 +214,11 @@ fn assemble(
     module.section(&memory);
 
     // ── Global section ──
-    // Global 0: bump-allocator heap pointer (next free byte).
+    // Global 0: bump-allocator heap pointer, starting just past the data segment.
     let mut globals = GlobalSection::new();
     globals.global(
         GlobalType { val_type: ValType::I32, mutable: true, shared: false },
-        &wasm_encoder::ConstExpr::i32_const(HEAP_BASE),
+        &wasm_encoder::ConstExpr::i32_const(heap_start as i32),
     );
     debug_assert_eq!(HEAP_GLOBAL, 0, "runtime expects the heap pointer at global 0");
     module.section(&globals);
@@ -227,6 +249,17 @@ fn assemble(
         codes.function(&wf);
     }
     module.section(&codes);
+
+    // ── Data section (interned string literals at DATA_BASE) ──
+    if !interner.bytes().is_empty() {
+        let mut data = wasm_encoder::DataSection::new();
+        data.active(
+            0,
+            &wasm_encoder::ConstExpr::i32_const(interner.base() as i32),
+            interner.bytes().iter().copied(),
+        );
+        module.section(&data);
+    }
 
     module.finish()
 }
@@ -675,10 +708,10 @@ mod tests {
         assert!(wasmparser::validate(&bytes).is_ok(), "module must validate");
     }
 
-    /// String interpolation still has no runtime — it is rejected cleanly
-    /// (via `StringConcat`), never panicked.
+    /// Interpolating a non-String value needs to_string (no runtime yet), so
+    /// it is rejected cleanly as an unresolved StringInterp.
     #[test]
-    fn string_interp_rejected() {
+    fn string_interp_with_int_rejected() {
         use almide_ir::IrStringPart;
         let vt = VarTable::new();
         let reg = LayoutRegistry::new();
@@ -689,12 +722,72 @@ mod tests {
                     IrStringPart::Expr { expr: lit_int(1) },
                 ],
             },
-            ty: Ty::String,
-            span: None,
-            def_id: None,
+            ty: Ty::String, span: None, def_id: None,
         };
         let main = mk_func("main", Ty::String, interp);
         let err = build_module(&[main], &vt, &reg).unwrap_err();
-        assert!(matches!(err, BuildError::UnresolvedAbstract { op: "StringConcat", .. }), "got {:?}", err);
+        assert!(matches!(err, BuildError::UnresolvedAbstract { op: "StringInterp", .. }), "got {:?}", err);
+    }
+
+    fn lit_str(s: &str) -> IrExpr {
+        IrExpr { kind: IrExprKind::LitStr { value: s.to_string() }, ty: Ty::String, span: None, def_id: None }
+    }
+
+    /// Call a runtime helper that returns an i64, with the given string args.
+    fn rt_call(symbol: &str, args: Vec<IrExpr>) -> IrExpr {
+        IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args },
+            ty: Ty::Int, span: None, def_id: None,
+        }
+    }
+
+    /// A string literal lands in the data segment with the right byte length:
+    /// `__strlen("hello")` → 5.
+    #[test]
+    fn exec_string_literal_len() {
+        let main = mk_func("main", Ty::Int, rt_call("__strlen", vec![lit_str("hello")]));
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "5");
+        }
+    }
+
+    /// Concatenation length: `__strlen("foo" + "bar")` → 6.
+    #[test]
+    fn exec_string_concat_len() {
+        let concat = binop(almide_ir::BinOp::ConcatStr, lit_str("foo"), lit_str("bar"), Ty::String);
+        let main = mk_func("main", Ty::Int, rt_call("__strlen", vec![concat]));
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "6");
+        }
+    }
+
+    /// Concatenation content: the byte at index 3 of `"foo" + "bar"` is 'b' (98).
+    #[test]
+    fn exec_string_concat_content() {
+        let concat = binop(almide_ir::BinOp::ConcatStr, lit_str("foo"), lit_str("bar"), Ty::String);
+        let main = mk_func("main", Ty::Int, rt_call("__byte_at", vec![concat, lit_int(3)]));
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "98", "byte 3 of 'foobar' is 'b'");
+        }
+    }
+
+    /// String interpolation of String-typed parts works: `"${a}${b}"` for
+    /// a="foo", b="bar" has length 6.
+    #[test]
+    fn exec_string_interp_strings() {
+        use almide_ir::IrStringPart;
+        let interp = IrExpr {
+            kind: IrExprKind::StringInterp {
+                parts: vec![
+                    IrStringPart::Expr { expr: lit_str("foo") },
+                    IrStringPart::Expr { expr: lit_str("bar") },
+                ],
+            },
+            ty: Ty::String, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, rt_call("__strlen", vec![interp]));
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "6");
+        }
     }
 }

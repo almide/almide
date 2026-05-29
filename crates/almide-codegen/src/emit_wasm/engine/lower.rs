@@ -19,6 +19,7 @@ use super::ir::{
     BinOp as WBinOp, UnOp as WUnOp, LoadKind, StoreKind,
 };
 use super::layout::{self, LayoutRegistry};
+use super::data::DataInterner;
 
 /// Lowering context for a single function.
 pub struct LowerCtx<'a> {
@@ -33,6 +34,8 @@ pub struct LowerCtx<'a> {
     /// Function index lookup: name → FuncIdx.
     /// Provided by the emitter's function registration phase.
     pub func_idx: &'a dyn Fn(&str) -> Option<FuncIdx>,
+    /// Shared interner for string literals (data segment).
+    pub interner: &'a mut DataInterner,
     /// Next scratch local index (for temporaries).
     next_local: u32,
 }
@@ -43,6 +46,7 @@ impl<'a> LowerCtx<'a> {
         var_table: &VarTable,
         reg: &'a LayoutRegistry,
         func_idx: &'a dyn Fn(&str) -> Option<FuncIdx>,
+        interner: &'a mut DataInterner,
     ) -> Self {
         let mut var_map = vec![None; var_table.len()];
         let mut locals = Vec::new();
@@ -64,6 +68,7 @@ impl<'a> LowerCtx<'a> {
             param_count,
             reg,
             func_idx,
+            interner,
             next_local: param_count,
         }
     }
@@ -131,8 +136,9 @@ pub fn lower_function(
     var_table: &VarTable,
     reg: &LayoutRegistry,
     func_idx: &dyn Fn(&str) -> Option<FuncIdx>,
+    interner: &mut DataInterner,
 ) -> WasmFunc {
-    let mut ctx = LowerCtx::new(&func.params, var_table, reg, func_idx);
+    let mut ctx = LowerCtx::new(&func.params, var_table, reg, func_idx, interner);
     let has_result = !matches!(func.ret_ty, Ty::Unit);
     let body = lower_expr(&func.body, &mut ctx);
 
@@ -175,11 +181,11 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         IrExprKind::LitBool { value } => vec![Op::Const(Const::I32(if *value { 1 } else { 0 }))],
         IrExprKind::Unit => vec![],  // Unit produces nothing
 
-        IrExprKind::LitStr { value: _ } => {
-            // String literals are stored in the data segment.
-            // For now, emit a placeholder that the emitter resolves.
-            // TODO: proper data segment interning
-            vec![Op::Const(Const::I32(0))] // placeholder ptr
+        IrExprKind::LitStr { value } => {
+            // Intern into the data segment; the constant is the absolute offset
+            // of the String object's header.
+            let off = ctx.interner.intern(value);
+            vec![Op::Const(Const::I32(off as i32))]
         }
 
         // ── Variables ──
@@ -217,7 +223,13 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops.extend(lower_expr(right, ctx));
             if let Some(wasm_op) = lower_binop(op, &left.ty) {
                 ops.push(Op::BinOp(wasm_op));
+            } else if matches!(op, almide_ir::BinOp::ConcatStr) {
+                // String concatenation → runtime call (resolved to __string_concat).
+                ops.push(Op::StringConcat);
             }
+            // Other None cases (ConcatList, ModFloat, Pow, matrix, String deep-eq)
+            // have no runtime yet; they leave the stack unbalanced and are caught
+            // by the verifier until their runtimes land.
             ops
         }
 
@@ -491,28 +503,35 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
 
         // ── String interpolation ──
         IrExprKind::StringInterp { parts } => {
+            // Supported only when every interpolated expression is already a
+            // String — there is no int/float/bool → String runtime yet. If any
+            // part needs to_string, emit the abstract op so the build rejects it
+            // cleanly rather than concatenating a non-pointer as if it were one.
+            let needs_to_string = parts.iter().any(|p| {
+                matches!(p, almide_ir::IrStringPart::Expr { expr } if !matches!(expr.ty, Ty::String))
+            });
+            if needs_to_string {
+                return vec![Op::StringInterp { parts: Vec::new() }];
+            }
+            if parts.is_empty() {
+                let off = ctx.interner.intern("");
+                return vec![Op::Const(Const::I32(off as i32))];
+            }
+            // Left-associative concat of all (string) parts.
             let mut ops = Vec::new();
-            // Concatenate all parts into a new string
-            // For now, lower each part and use StringConcat
-            let mut first = true;
-            for part in parts {
+            for (i, part) in parts.iter().enumerate() {
                 match part {
-                    almide_ir::IrStringPart::Lit { value: _ } => {
-                        // TODO: intern string in data segment
-                        ops.push(Op::Const(Const::I32(0))); // placeholder str ptr
+                    almide_ir::IrStringPart::Lit { value } => {
+                        let off = ctx.interner.intern(value);
+                        ops.push(Op::Const(Const::I32(off as i32)));
                     }
                     almide_ir::IrStringPart::Expr { expr: e } => {
                         ops.extend(lower_expr(e, ctx));
-                        // TODO: call to_string if not already string
                     }
                 }
-                if !first {
+                if i > 0 {
                     ops.push(Op::StringConcat);
                 }
-                first = false;
-            }
-            if parts.is_empty() {
-                ops.push(Op::Const(Const::I32(0))); // empty string
             }
             ops
         }
@@ -1228,6 +1247,7 @@ fn lower_for_in(var: VarId, iterable: &IrExpr, body: &[IrStmt], ctx: &mut LowerC
 mod tests {
     use super::*;
     use super::super::ir::verify_func_stack;
+    use super::super::data::DataInterner;
     use almide_ir::{IrVisibility, Mutability};
     use almide_base::intern::sym;
 
@@ -1236,6 +1256,8 @@ mod tests {
     }
 
     fn no_func_idx(_name: &str) -> Option<FuncIdx> { None }
+
+    fn interner() -> DataInterner { DataInterner::new(16) }
 
     #[test]
     fn lower_lit_int() {
@@ -1251,7 +1273,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx);
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner());
         assert_eq!(wasm_func.results, vec![WasmTy::I64]);
         assert!(verify_func_stack(&wasm_func).is_ok(), "stack verification failed: {:?}", verify_func_stack(&wasm_func));
     }
@@ -1276,7 +1298,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx);
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner());
         assert!(verify_func_stack(&wasm_func).is_ok());
         // Should be: Const(1), Const(2), I64Add
         assert_eq!(wasm_func.body.len(), 3);
@@ -1308,7 +1330,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx);
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner());
         assert!(verify_func_stack(&wasm_func).is_ok(), "{:?}", verify_func_stack(&wasm_func));
         assert!(wasm_func.results.is_empty());
     }
@@ -1333,7 +1355,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx);
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner());
         assert!(verify_func_stack(&wasm_func).is_ok(), "{:?}", verify_func_stack(&wasm_func));
     }
 }
