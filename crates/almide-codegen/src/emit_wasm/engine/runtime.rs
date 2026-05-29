@@ -44,10 +44,11 @@ pub struct RuntimeFns {
     pub starts_with: FuncIdx,
     pub ends_with: FuncIdx,
     pub string_slice: FuncIdx,
+    pub string_get: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 13;
+pub const COUNT: u32 = 14;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -66,11 +67,12 @@ impl RuntimeFns {
             starts_with: 10,
             ends_with: 11,
             string_slice: 12,
+            string_get: 13,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 13] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 14] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -85,6 +87,7 @@ impl RuntimeFns {
             ("__string_starts_with", self.starts_with),
             ("__string_ends_with", self.ends_with),
             ("__string_slice", self.string_slice),
+            ("__string_get", self.string_get),
         ]
     }
 }
@@ -107,7 +110,49 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_prefix_cmp("__string_starts_with", false),
         build_prefix_cmp("__string_ends_with", true),
         build_string_slice(),
+        build_string_get(),
     ]
+}
+
+/// `__string_get(s, i: i64) -> i32` — `Some(s[i])` (a 1-code-point String) or
+/// None. Built on `__string_slice(s, i, i+1)`: a non-empty slice is Some.
+fn build_string_get() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    const I: u32 = 1;       // i64
+    const SLICED: u32 = 2;
+    const OPT: u32 = 3;
+
+    let body = vec![
+        // sliced = __string_slice(s, i, i+1)
+        Op::LocalGet(S), Op::LocalGet(I),
+        Op::LocalGet(I), Op::Const(Const::I64(1)), Op::BinOp(B::I64Add),
+        Op::Call { idx: rt.string_slice, pops: 3, pushes: 1 },
+        Op::LocalSet(SLICED),
+        // opt = __alloc(12)
+        Op::Const(Const::I32(12)),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 },
+        Op::LocalSet(OPT),
+        // if sliced byte length != 0 → Some(sliced) else None
+        Op::LocalGet(SLICED), Op::Load(LoadKind::I32),
+        Op::IfVoid {
+            then: vec![
+                Op::LocalGet(OPT), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
+                Op::LocalGet(OPT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+                Op::LocalGet(SLICED), Op::Store(StoreKind::I32),
+            ],
+            else_: vec![Op::LocalGet(OPT), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32)],
+        },
+        Op::LocalGet(OPT),
+    ];
+
+    WasmFunc {
+        name: "__string_get".into(),
+        params: vec![WasmTy::I32, WasmTy::I64],
+        results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32], // sliced, opt
+        body,
+    }
 }
 
 /// `__string_slice(s, start: i64, end: i64) -> i32`

@@ -1081,6 +1081,27 @@ mod tests {
         if let Some(r) = run(&[mx], "main") { assert_eq!(r, "7", "max(3,7)"); }
     }
 
+    /// string.get(s, i): Some(char) in range, None out of range.
+    /// `"hi".get(1)` → Some("i") (len 1, byte 'i'); `"hi".get(5)` → None.
+    #[test]
+    fn exec_intrinsic_string_get() {
+        let get = |s: &str, i: i64| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_string_char_at"), args: vec![lit_str(s), lit_int(i)] },
+            ty: Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::String]),
+            span: None, def_id: None };
+        // is_some("hi".get(1)) == 1 ; is_some("hi".get(5)) == 0
+        let is_some = |e: IrExpr| IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_option_is_some"), args: vec![e] }, ty: Ty::Bool, span: None, def_id: None };
+        let m1 = mk_func("main", Ty::Bool, is_some(get("hi", 1)));
+        if let Some(r) = run(&[m1], "main") { assert_eq!(r, "1", "get(1) is some"); }
+        let m2 = mk_func("main", Ty::Bool, is_some(get("hi", 5)));
+        if let Some(r) = run(&[m2], "main") { assert_eq!(r, "0", "get(5) is none"); }
+        // unwrap the Some and check the byte: "hi".get(1) → "i" → byte 0 == 105
+        let unwrapped = IrExpr { kind: IrExprKind::Unwrap { expr: Box::new(get("hi", 1)) }, ty: Ty::String, span: None, def_id: None };
+        let byte0 = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("__byte_at"), args: vec![unwrapped, lit_int(0)] }, ty: Ty::Int, span: None, def_id: None };
+        let m3 = mk_func("main", Ty::Int, byte0);
+        if let Some(r) = run(&[m3], "main") { assert_eq!(r, "105", "get(1)=='i'"); }
+    }
+
     /// result.map_err: Ok passes through, Err is mapped.
     #[test]
     fn exec_intrinsic_result_map_err() {
