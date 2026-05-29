@@ -2167,6 +2167,38 @@ mod tests {
         if let Some(r) = run_vt(&[main2], &vt, "main") { assert_eq!(r, "0", "None"); }
     }
 
+    /// map.entries / from_entries round-trip (Map[Int,Int]).
+    #[test]
+    fn exec_map_entries() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let map_ty = Ty::Applied(TC::Map, vec![Ty::Int, Ty::Int]);
+        let pair_ty = Ty::Tuple(vec![Ty::Int, Ty::Int]);
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let pair = |k: i64, v: i64| IrExpr { kind: IrExprKind::Tuple { elements: vec![lit_int(k), lit_int(v)] },
+            ty: pair_ty.clone(), span: None, def_id: None };
+        let entry_list = |pairs: &[(i64, i64)]| IrExpr {
+            kind: IrExprKind::List { elements: pairs.iter().map(|(k, v)| pair(*k, *v)).collect() },
+            ty: Ty::list(pair_ty.clone()), span: None, def_id: None };
+        let from_entries = |pairs: &[(i64, i64)]| call("almide_rt_map_from_entries", vec![entry_list(pairs)], map_ty.clone());
+        let get_or = |m: IrExpr, k: i64| call("almide_rt_map_get_or", vec![m, lit_int(k), lit_int(-1)], Ty::Int);
+        let len = |m: IrExpr| call("almide_rt_map_len", vec![m], Ty::Int);
+        let entries = |m: IrExpr| call("almide_rt_map_entries", vec![m], Ty::list(pair_ty.clone()));
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        // from_entries builds the map
+        ti(len(from_entries(&[(1, 10), (2, 20), (3, 30)])), "3", "from_entries len");
+        ti(get_or(from_entries(&[(1, 10), (2, 20)]), 2), "20", "from_entries get 2");
+        ti(get_or(from_entries(&[(1, 10), (2, 20)]), 9), "-1", "from_entries miss");
+        // entries length == map size
+        ti(len(from_entries(&[(5, 50), (6, 60)])), "2", "sanity");
+        ti(call("almide_rt_list_len", vec![entries(from_entries(&[(1, 10), (2, 20), (3, 30)]))], Ty::Int), "3", "entries len");
+        // round-trip: from_entries(entries(m)) preserves bindings
+        let rt = from_entries(&[(7, 70), (8, 80)]);
+        let round = call("almide_rt_map_from_entries", vec![entries(rt)], map_ty.clone());
+        ti(get_or(round, 8), "80", "entries→from_entries round-trip");
+    }
+
     /// Gap-closing intrinsics: float.floor/ceil, int.parse, option.to_list,
     /// option.and_then, string.lines.
     #[test]

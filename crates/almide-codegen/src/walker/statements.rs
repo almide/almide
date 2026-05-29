@@ -358,10 +358,6 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
 
 // ── Match arm rendering ──
 
-pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty) -> String {
-    render_match_arm_ty(ctx, arm, match_ty, None)
-}
-
 /// Render a match arm, threading the subject type so anonymous record patterns
 /// resolve their Rust struct name.
 pub fn render_match_arm_ty(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: Option<&almide_lang::types::Ty>) -> String {

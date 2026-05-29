@@ -136,6 +136,10 @@ pub fn lower_intrinsic(
             map_fold(&args[0], &args[1], &args[2], ret_ty, ctx),
         "almide_rt_map_filter" if args.len() == 2 && map_supported(&args[0].ty) =>
             map_filter(&args[0], &args[1], ctx),
+        "almide_rt_map_entries" if args.len() == 1 && map_supported(&args[0].ty) =>
+            map_entries(&args[0], ctx),
+        "almide_rt_map_from_entries" if args.len() == 1 && map_supported(ret_ty) =>
+            map_from_entries(&args[0], ret_ty, ctx),
         "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
         // sort: Int lists via the runtime selection sort; other element types
         // (Float/String/composite) fall back until typed comparators land.
@@ -818,6 +822,95 @@ fn map_merge_op(a: &IrExpr, b: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
     ops.extend(lower_expr(b, ctx));
     ops.push(Op::Const(Const::I32(kind)));
     ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
+}
+
+/// `map.entries(m) -> List[(K, V)]` — one heap tuple `[K@0][V@ksize]` per
+/// occupied slot, collected into a 4-byte-slot list. Tuple field offsets match
+/// the engine's tuple layout (natural-width packing).
+fn map_entries(m: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (_kind, k_ty, v_ty) = map_kv(&m.ty)?;
+    let ksize = wasm_byte_size(&k_ty);
+    let vsize = wasm_byte_size(&v_ty);
+    let k_lk = load_kind_of(ty_to_wasm(&k_ty));
+    let k_sk = store_kind_of(ty_to_wasm(&k_ty));
+    let v_lk = load_kind_of(ty_to_wasm(&v_ty));
+    let v_sk = store_kind_of(ty_to_wasm(&v_ty));
+    let alloc = (ctx.func_idx)("__alloc")?;
+    let out = ctx.alloc_local(WasmTy::I32);
+    let n = ctx.alloc_local(WasmTy::I32);
+    let idx = ctx.alloc_local(WasmTy::I32);
+    let ea = ctx.alloc_local(WasmTy::I32);
+    let tup = ctx.alloc_local(WasmTy::I32);
+
+    let (m_l, cap_l, slot_l, mut ops) = map_iter_prologue(m, ctx);
+    ops.push(Op::LocalGet(m_l)); ops.push(Op::Load(LoadKind::I32)); ops.push(Op::LocalSet(n)); // len
+    ops.extend(alloc_list(out, n, 4, alloc));
+    ops.push(Op::Const(Const::I32(0))); ops.push(Op::LocalSet(idx));
+
+    let mut occ = map_entry_into(m_l, cap_l, slot_l, ea);
+    // tup = alloc(ksize + vsize)
+    occ.push(Op::Const(Const::I32(ksize + vsize)));
+    occ.push(Op::Call { idx: alloc, pops: 1, pushes: 1 });
+    occ.push(Op::LocalSet(tup));
+    // tup[0] = key (slot is i64; K's load kind narrows for i32 K)
+    occ.extend(vec![Op::LocalGet(tup), Op::LocalGet(ea), Op::Load(k_lk), Op::Store(k_sk)]);
+    // tup[ksize] = val
+    occ.extend(vec![
+        Op::LocalGet(tup), Op::Const(Const::I32(ksize)), Op::BinOp(B::I32Add),
+        Op::LocalGet(ea), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::Load(v_lk), Op::Store(v_sk),
+    ]);
+    // out[8 + idx*4] = tup
+    occ.extend(vec![
+        Op::LocalGet(out), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(idx), Op::Const(Const::I32(4)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalGet(tup), Op::Store(StoreKind::I32),
+    ]);
+    occ.extend(vec![Op::LocalGet(idx), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(idx)]);
+    ops.extend(table_scan_loop(m_l, cap_l, slot_l, occ));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `map.from_entries(entries: List[(K,V)]) -> Map[K,V]` — insert each tuple's
+/// key/val into a fresh map.
+fn map_from_entries(list: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, k_ty, v_ty) = map_kv(ret_ty)?;
+    let ksize = wasm_byte_size(&k_ty);
+    let k_lk = load_kind_of(ty_to_wasm(&k_ty));
+    let v_lk = load_kind_of(ty_to_wasm(&v_ty));
+    let k_widen = matches!(ty_to_wasm(&k_ty), WasmTy::I32);
+    let v_widen = matches!(ty_to_wasm(&v_ty), WasmTy::I32);
+    let (new_idx, set_idx) = ((ctx.func_idx)("__map_new")?, (ctx.func_idx)("__map_set")?);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let tup = ctx.alloc_local(WasmTy::I32);
+    let kk = ctx.alloc_local(WasmTy::I64);
+    let vv = ctx.alloc_local(WasmTy::I64);
+
+    let (lp, mut ops) = list_loop_header(list, ctx);
+    ops.push(Op::Call { idx: new_idx, pops: 0, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+
+    let mut lb = vec![Op::LocalGet(lp.idx), Op::LocalGet(lp.len), Op::BinOp(B::I32GeU), Op::BrIf(1)];
+    // tup = list[idx]
+    lb.extend(load_elem(lp.xs, lp.idx, 4, LoadKind::I32));
+    lb.push(Op::LocalSet(tup));
+    // kk = widen(tup[0])
+    lb.push(Op::LocalGet(tup)); lb.push(Op::Load(k_lk));
+    if k_widen { lb.push(Op::UnOp(U::I64ExtendI32U)); }
+    lb.push(Op::LocalSet(kk));
+    // vv = widen(tup[ksize])
+    lb.push(Op::LocalGet(tup)); lb.push(Op::Const(Const::I32(ksize))); lb.push(Op::BinOp(B::I32Add)); lb.push(Op::Load(v_lk));
+    if v_widen { lb.push(Op::UnOp(U::I64ExtendI32U)); }
+    lb.push(Op::LocalSet(vv));
+    // out = __map_set(out, kk, vv, kind)
+    lb.extend(vec![
+        Op::LocalGet(out), Op::LocalGet(kk), Op::LocalGet(vv), Op::Const(Const::I32(kind)),
+        Op::Call { idx: set_idx, pops: 4, pushes: 1 }, Op::LocalSet(out),
+    ]);
+    lb.extend(vec![Op::LocalGet(lp.idx), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(lp.idx), Op::Br(0)]);
+    ops.push(Op::Block(vec![Op::Loop(lb)]));
+    ops.push(Op::LocalGet(out));
     Some(ops)
 }
 

@@ -6,7 +6,7 @@ use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
 use super::super::pass::Target;
 use super::types::render_type;
-use super::statements::{render_stmt, render_match_arm};
+use super::statements::render_stmt;
 use super::helpers::{template_or, terminate_stmt, indent_lines, render_body_content, contains_loop_control, ty_has_named_typevar, erase_named_typevars, ty_contains_name};
 
 /// Render a statement list. Peephole patterns are detected at IR level
