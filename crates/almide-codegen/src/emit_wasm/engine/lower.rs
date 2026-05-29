@@ -493,9 +493,9 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops.push(Op::LocalSet(rec));
 
             for (name, value) in fields.iter() {
-                let off = record_field_offset(&expr.ty, name.as_str(), ctx.record_types)
-                    .map(|(o, _)| o)
-                    .unwrap_or(0);
+                let Some((off, _)) = record_field_offset(&expr.ty, name.as_str(), ctx.record_types) else {
+                    return vec![Op::Unsupported("record-field-missing")];
+                };
                 ops.push(Op::LocalGet(rec));
                 if off != 0 {
                     ops.push(Op::Const(Const::I32(off)));
@@ -905,7 +905,9 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops.push(Op::MemoryCopy);
             // overwrite the explicitly-spread fields
             for (name, value) in fields.iter() {
-                let off = record_field_offset(&expr.ty, name.as_str(), ctx.record_types).map(|(o, _)| o).unwrap_or(0);
+                let Some((off, _)) = record_field_offset(&expr.ty, name.as_str(), ctx.record_types) else {
+                    return vec![Op::Unsupported("record-field-missing")];
+                };
                 ops.push(Op::LocalGet(out));
                 if off != 0 {
                     ops.push(Op::Const(Const::I32(off)));
@@ -1372,8 +1374,11 @@ fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut 
         // Tuple / Record: irrefutable structurally — the conjunction of the
         // refutable sub-patterns (literals, nested variants) at their slots.
         IrPattern::Tuple { .. } | IrPattern::RecordPattern { .. } => {
+            let Some(slots) = sub_slots(pattern, _subj_ty, ctx.record_types) else {
+                return vec![Op::Unsupported("pattern-unresolved-type")];
+            };
             let mut ops = vec![Op::Const(Const::I32(1))];
-            for (off, ty, p) in sub_slots(pattern, _subj_ty, ctx.record_types) {
+            for (off, ty, p) in slots {
                 if pattern_irrefutable(&p) { continue; }
                 let slot = ctx.alloc_local(ty_to_wasm(&ty));
                 ops.extend(load_at(subj, off, &ty, slot));
@@ -1385,11 +1390,14 @@ fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut 
         // List: a fixed-arity pattern matches only lists of that exact length,
         // plus any refutable element sub-patterns.
         IrPattern::List { elements } => {
+            let Some(slots) = sub_slots(pattern, _subj_ty, ctx.record_types) else {
+                return vec![Op::Unsupported("pattern-unresolved-type")];
+            };
             let mut ops = vec![
                 Op::LocalGet(subj), Op::Load(LoadKind::I32),
                 Op::Const(Const::I32(elements.len() as i32)), Op::BinOp(WBinOp::I32Eq),
             ];
-            for (off, ty, p) in sub_slots(pattern, _subj_ty, ctx.record_types) {
+            for (off, ty, p) in slots {
                 if pattern_irrefutable(&p) { continue; }
                 let slot = ctx.alloc_local(ty_to_wasm(&ty));
                 ops.extend(load_at(subj, off, &ty, slot));
@@ -1428,7 +1436,10 @@ fn pattern_fallback_ty(p: &IrPattern) -> Ty {
 
 /// The (byte offset, element type, sub-pattern) triples of a composite pattern,
 /// using `subj_ty` as the authority for layout (so offsets match construction).
-fn sub_slots(pattern: &IrPattern, subj_ty: &Ty, recs: &RecordLayouts) -> Vec<(i32, Ty, IrPattern)> {
+/// The (offset, type, sub-pattern) slots of a composite pattern. Returns `None`
+/// when a slot's type can't be resolved to a concrete WASM layout (so the
+/// caller rejects → legacy rather than binding at a guessed offset/width).
+fn sub_slots(pattern: &IrPattern, subj_ty: &Ty, recs: &RecordLayouts) -> Option<Vec<(i32, Ty, IrPattern)>> {
     match pattern {
         IrPattern::Tuple { elements } => {
             let elem_tys: Vec<Ty> = match subj_ty {
@@ -1438,28 +1449,31 @@ fn sub_slots(pattern: &IrPattern, subj_ty: &Ty, recs: &RecordLayouts) -> Vec<(i3
             let mut off = 0i32;
             let mut out = Vec::with_capacity(elements.len());
             for (i, p) in elements.iter().enumerate() {
-                let ty = elem_tys.get(i).cloned().unwrap_or(Ty::Int);
+                let ty = elem_tys.get(i)?.clone();
+                if ty.is_unresolved() { return None; }
                 out.push((off, ty.clone(), p.clone()));
                 off += wasm_byte_size(&ty);
             }
-            out
+            Some(out)
         }
         IrPattern::RecordPattern { fields, .. } => {
             let mut out = Vec::new();
             for f in fields {
                 let Some(p) = &f.pattern else { continue };
-                if let Some((off, fty)) = record_field_offset(subj_ty, &f.name, recs) {
-                    out.push((off, fty, p.clone()));
-                }
+                // A named field absent from the type, or an unresolved field
+                // type, means we can't place it — reject.
+                let (off, fty) = record_field_offset(subj_ty, &f.name, recs)?;
+                if fty.is_unresolved() { return None; }
+                out.push((off, fty, p.clone()));
             }
-            out
+            Some(out)
         }
         IrPattern::List { elements } => {
-            let ety = list_element_ty(subj_ty).unwrap_or(Ty::Int);
+            let ety = list_element_ty(subj_ty).filter(|t| !t.is_unresolved())?;
             let es = wasm_byte_size(&ety);
-            elements.iter().enumerate().map(|(i, p)| (8 + i as i32 * es, ety.clone(), p.clone())).collect()
+            Some(elements.iter().enumerate().map(|(i, p)| (8 + i as i32 * es, ety.clone(), p.clone())).collect())
         }
-        _ => vec![],
+        _ => Some(vec![]),
     }
 }
 
@@ -1513,8 +1527,11 @@ fn bind_pattern(pattern: &IrPattern, subj: Local, subj_ty: &Ty, ctx: &mut LowerC
             ops
         }
         IrPattern::Tuple { .. } | IrPattern::RecordPattern { .. } | IrPattern::List { .. } => {
+            let Some(slots) = sub_slots(pattern, subj_ty, ctx.record_types) else {
+                return vec![Op::Unsupported("pattern-unresolved-type")];
+            };
             let mut ops = Vec::new();
-            for (off, ty, p) in sub_slots(pattern, subj_ty, ctx.record_types) {
+            for (off, ty, p) in slots {
                 ops.extend(destructure_one(&p, subj, off, &ty, ctx));
             }
             ops
