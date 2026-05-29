@@ -2167,6 +2167,128 @@ mod tests {
         if let Some(r) = run_vt(&[main2], &vt, "main") { assert_eq!(r, "0", "None"); }
     }
 
+    /// Match destructuring: Tuple / Record / List patterns + nesting in Some.
+    #[test]
+    fn exec_match_destructure() {
+        use almide_ir::{IrMatchArm, IrPattern, IrFieldPattern};
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let bind = |id, ty: Ty| IrPattern::Bind { var: id, ty };
+        let var = |id, ty: Ty| IrExpr { kind: IrExprKind::Var { id }, ty, span: None, def_id: None };
+        let mk_match = |subject: IrExpr, arms: Vec<IrMatchArm>| IrExpr {
+            kind: IrExprKind::Match { subject: Box::new(subject), arms }, ty: Ty::Int, span: None, def_id: None };
+        let arm = |pattern, body| IrMatchArm { pattern, guard: None, body };
+        let wild = || IrMatchArm { pattern: IrPattern::Wildcard, guard: None, body: lit_int(0) };
+
+        // (a, b) => a + b   over (10, 20) → 30
+        {
+            let mut vt = VarTable::new();
+            let a = vt.alloc(sym("a"), Ty::Int, almide_ir::Mutability::Let, None);
+            let b = vt.alloc(sym("b"), Ty::Int, almide_ir::Mutability::Let, None);
+            let tup = IrExpr { kind: IrExprKind::Tuple { elements: vec![lit_int(10), lit_int(20)] },
+                ty: Ty::Tuple(vec![Ty::Int, Ty::Int]), span: None, def_id: None };
+            let body = binop(almide_ir::BinOp::AddInt, var(a, Ty::Int), var(b, Ty::Int), Ty::Int);
+            let m = mk_match(tup, vec![arm(IrPattern::Tuple { elements: vec![bind(a, Ty::Int), bind(b, Ty::Int)] }, body)]);
+            let f = mk_func("main", Ty::Int, m);
+            if let Some(r) = run_vt(&[f], &vt, "main") { assert_eq!(r, "30", "tuple (a,b)=>a+b"); }
+        }
+
+        // (1, b) => b ; _ => 0    refutable literal head
+        {
+            let build = |t0: i64| {
+                let mut vt = VarTable::new();
+                let b = vt.alloc(sym("b"), Ty::Int, almide_ir::Mutability::Let, None);
+                let tup = IrExpr { kind: IrExprKind::Tuple { elements: vec![lit_int(t0), lit_int(5)] },
+                    ty: Ty::Tuple(vec![Ty::Int, Ty::Int]), span: None, def_id: None };
+                let pat = IrPattern::Tuple { elements: vec![IrPattern::Literal { expr: lit_int(1) }, bind(b, Ty::Int)] };
+                (vt, mk_match(tup, vec![arm(pat, var(b, Ty::Int)), wild()]))
+            };
+            let (vt, m) = build(1);
+            let f = mk_func("main", Ty::Int, m);
+            if let Some(r) = run_vt(&[f], &vt, "main") { assert_eq!(r, "5", "(1,b)=>b matches"); }
+            let (vt, m) = build(2);
+            let f = mk_func("main", Ty::Int, m);
+            if let Some(r) = run_vt(&[f], &vt, "main") { assert_eq!(r, "0", "(1,b) no match → wildcard"); }
+        }
+
+        // {a, b} => a*10 + b    over {a:1, b:2} → 12
+        {
+            let mut vt = VarTable::new();
+            let a = vt.alloc(sym("a"), Ty::Int, almide_ir::Mutability::Let, None);
+            let b = vt.alloc(sym("b"), Ty::Int, almide_ir::Mutability::Let, None);
+            let rec_ty = Ty::Record { fields: vec![(sym("a"), Ty::Int), (sym("b"), Ty::Int)] };
+            let rec = IrExpr { kind: IrExprKind::Record { name: None, fields: vec![(sym("a"), lit_int(1)), (sym("b"), lit_int(2))] },
+                ty: rec_ty.clone(), span: None, def_id: None };
+            let pat = IrPattern::RecordPattern { name: String::new(), rest: false, fields: vec![
+                IrFieldPattern { name: "a".into(), pattern: Some(bind(a, Ty::Int)) },
+                IrFieldPattern { name: "b".into(), pattern: Some(bind(b, Ty::Int)) },
+            ] };
+            let body = binop(almide_ir::BinOp::AddInt,
+                binop(almide_ir::BinOp::MulInt, var(a, Ty::Int), lit_int(10), Ty::Int), var(b, Ty::Int), Ty::Int);
+            let m = mk_match(rec, vec![arm(pat, body)]);
+            let f = mk_func("main", Ty::Int, m);
+            if let Some(r) = run_vt(&[f], &vt, "main") { assert_eq!(r, "12", "record a,b => a*10+b"); }
+        }
+
+        // [a, b, c] => a + b + c   length-exact; mismatch falls through
+        {
+            let build = |elems: Vec<i64>| {
+                let mut vt = VarTable::new();
+                let a = vt.alloc(sym("a"), Ty::Int, almide_ir::Mutability::Let, None);
+                let b = vt.alloc(sym("b"), Ty::Int, almide_ir::Mutability::Let, None);
+                let c = vt.alloc(sym("c"), Ty::Int, almide_ir::Mutability::Let, None);
+                let list = IrExpr { kind: IrExprKind::List { elements: elems.into_iter().map(lit_int).collect() },
+                    ty: Ty::list(Ty::Int), span: None, def_id: None };
+                let pat = IrPattern::List { elements: vec![bind(a, Ty::Int), bind(b, Ty::Int), bind(c, Ty::Int)] };
+                let body = binop(almide_ir::BinOp::AddInt,
+                    binop(almide_ir::BinOp::AddInt, var(a, Ty::Int), var(b, Ty::Int), Ty::Int), var(c, Ty::Int), Ty::Int);
+                (vt, mk_match(list, vec![arm(pat, body), wild()]))
+            };
+            let (vt, m) = build(vec![7, 8, 9]);
+            let f = mk_func("main", Ty::Int, m);
+            if let Some(r) = run_vt(&[f], &vt, "main") { assert_eq!(r, "24", "[a,b,c] sum"); }
+            let (vt, m) = build(vec![7, 8]);
+            let f = mk_func("main", Ty::Int, m);
+            if let Some(r) = run_vt(&[f], &vt, "main") { assert_eq!(r, "0", "wrong length → wildcard"); }
+        }
+
+        // Some((a, b)) => a + b ; None => 0   nested tuple in Some
+        {
+            let opt_ty = Ty::Applied(TC::Option, vec![Ty::Tuple(vec![Ty::Int, Ty::Int])]);
+            let build = |subject: IrExpr, vt: &VarTable, a, b| {
+                let pat = IrPattern::Some { inner: Box::new(IrPattern::Tuple { elements: vec![bind(a, Ty::Int), bind(b, Ty::Int)] }) };
+                let body = binop(almide_ir::BinOp::AddInt, var(a, Ty::Int), var(b, Ty::Int), Ty::Int);
+                let _ = vt;
+                mk_match(subject, vec![arm(pat, body), IrMatchArm { pattern: IrPattern::None, guard: None, body: lit_int(0) }])
+            };
+            let mut vt = VarTable::new();
+            let a = vt.alloc(sym("a"), Ty::Int, almide_ir::Mutability::Let, None);
+            let b = vt.alloc(sym("b"), Ty::Int, almide_ir::Mutability::Let, None);
+            let inner = IrExpr { kind: IrExprKind::Tuple { elements: vec![lit_int(3), lit_int(4)] },
+                ty: Ty::Tuple(vec![Ty::Int, Ty::Int]), span: None, def_id: None };
+            let some = IrExpr { kind: IrExprKind::OptionSome { expr: Box::new(inner) }, ty: opt_ty.clone(), span: None, def_id: None };
+            let f = mk_func("main", Ty::Int, build(some, &vt, a, b));
+            if let Some(r) = run_vt(&[f], &vt, "main") { assert_eq!(r, "7", "Some((a,b))=>a+b"); }
+            let none = IrExpr { kind: IrExprKind::OptionNone, ty: opt_ty, span: None, def_id: None };
+            let f = mk_func("main", Ty::Int, build(none, &vt, a, b));
+            if let Some(r) = run_vt(&[f], &vt, "main") { assert_eq!(r, "0", "None → 0"); }
+        }
+
+        // mixed widths: (n: Int, s: String) => n + string.len(s)  over (5, "hi") → 7
+        {
+            let mut vt = VarTable::new();
+            let n = vt.alloc(sym("n"), Ty::Int, almide_ir::Mutability::Let, None);
+            let s = vt.alloc(sym("s"), Ty::String, almide_ir::Mutability::Let, None);
+            let tup = IrExpr { kind: IrExprKind::Tuple { elements: vec![lit_int(5), lit_str("hi")] },
+                ty: Ty::Tuple(vec![Ty::Int, Ty::String]), span: None, def_id: None };
+            let slen = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_string_len"),
+                args: vec![var(s, Ty::String)] }, ty: Ty::Int, span: None, def_id: None };
+            let body = binop(almide_ir::BinOp::AddInt, var(n, Ty::Int), slen, Ty::Int);
+            let pat = IrPattern::Tuple { elements: vec![bind(n, Ty::Int), bind(s, Ty::String)] };
+            let f = mk_func("main", Ty::Int, mk_match(tup, vec![arm(pat, body)]));
+            if let Some(r) = run_vt(&[f], &vt, "main") { assert_eq!(r, "7", "(n,s)=>n+len(s) mixed widths"); }
+        }
+    }
+
     /// List concatenation: `([1,2] + [3])[2]` → 3.
     #[test]
     fn exec_list_concat() {

@@ -1304,14 +1304,117 @@ fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut 
                 Op::BinOp(WBinOp::I32Eq),
             ]
         }
-        _ => vec![Op::Const(Const::I32(1))], // fallback: always match
+        // Tuple / Record: irrefutable structurally — the conjunction of the
+        // refutable sub-patterns (literals, nested variants) at their slots.
+        IrPattern::Tuple { .. } | IrPattern::RecordPattern { .. } => {
+            let mut ops = vec![Op::Const(Const::I32(1))];
+            for (off, ty, p) in sub_slots(pattern, _subj_ty) {
+                if pattern_irrefutable(&p) { continue; }
+                let slot = ctx.alloc_local(ty_to_wasm(&ty));
+                ops.extend(load_at(subj, off, &ty, slot));
+                ops.extend(pattern_condition(&p, slot, &ty, ctx));
+                ops.push(Op::BinOp(WBinOp::I32And));
+            }
+            ops
+        }
+        // List: a fixed-arity pattern matches only lists of that exact length,
+        // plus any refutable element sub-patterns.
+        IrPattern::List { elements } => {
+            let mut ops = vec![
+                Op::LocalGet(subj), Op::Load(LoadKind::I32),
+                Op::Const(Const::I32(elements.len() as i32)), Op::BinOp(WBinOp::I32Eq),
+            ];
+            for (off, ty, p) in sub_slots(pattern, _subj_ty) {
+                if pattern_irrefutable(&p) { continue; }
+                let slot = ctx.alloc_local(ty_to_wasm(&ty));
+                ops.extend(load_at(subj, off, &ty, slot));
+                ops.extend(pattern_condition(&p, slot, &ty, ctx));
+                ops.push(Op::BinOp(WBinOp::I32And));
+            }
+            ops
+        }
     }
 }
 
-/// Bind pattern variables to the subject value.
-/// Bind pattern variables, returning ops that load any payloads into their
-/// locals (to be emitted at the start of the arm body).
-fn bind_pattern(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
+/// A pattern that always matches (only binds or ignores), so it imposes no
+/// runtime condition.
+fn pattern_irrefutable(p: &IrPattern) -> bool {
+    match p {
+        IrPattern::Wildcard | IrPattern::Bind { .. } => true,
+        IrPattern::Tuple { elements } => elements.iter().all(pattern_irrefutable),
+        IrPattern::RecordPattern { fields, .. } =>
+            fields.iter().all(|f| f.pattern.as_ref().map_or(true, pattern_irrefutable)),
+        _ => false, // List (length), Literal, Some/None/Ok/Err, Constructor
+    }
+}
+
+/// Best-effort element/field type for a sub-pattern when the subject type is
+/// imprecise: a Bind/Literal carries its own type; composites are pointers.
+fn pattern_fallback_ty(p: &IrPattern) -> Ty {
+    match p {
+        IrPattern::Bind { ty, .. } => ty.clone(),
+        IrPattern::Literal { expr } => expr.ty.clone(),
+        IrPattern::Tuple { .. } | IrPattern::RecordPattern { .. } | IrPattern::List { .. }
+        | IrPattern::Some { .. } | IrPattern::None | IrPattern::Ok { .. }
+        | IrPattern::Err { .. } | IrPattern::Constructor { .. } => Ty::Unknown,
+        IrPattern::Wildcard => Ty::Unknown,
+    }
+}
+
+/// The (byte offset, element type, sub-pattern) triples of a composite pattern,
+/// using `subj_ty` as the authority for layout (so offsets match construction).
+fn sub_slots<'a>(pattern: &'a IrPattern, subj_ty: &Ty) -> Vec<(i32, Ty, IrPattern)> {
+    match pattern {
+        IrPattern::Tuple { elements } => {
+            let elem_tys: Vec<Ty> = match subj_ty {
+                Ty::Tuple(ts) if ts.len() == elements.len() => ts.clone(),
+                _ => elements.iter().map(pattern_fallback_ty).collect(),
+            };
+            let mut off = 0i32;
+            let mut out = Vec::with_capacity(elements.len());
+            for (i, p) in elements.iter().enumerate() {
+                let ty = elem_tys.get(i).cloned().unwrap_or(Ty::Int);
+                out.push((off, ty.clone(), p.clone()));
+                off += wasm_byte_size(&ty);
+            }
+            out
+        }
+        IrPattern::RecordPattern { fields, .. } => {
+            let mut out = Vec::new();
+            for f in fields {
+                let Some(p) = &f.pattern else { continue };
+                if let Some((off, fty)) = record_field_offset(subj_ty, &f.name) {
+                    out.push((off, fty, p.clone()));
+                }
+            }
+            out
+        }
+        IrPattern::List { elements } => {
+            let ety = list_element_ty(subj_ty).unwrap_or(Ty::Int);
+            let es = wasm_byte_size(&ety);
+            elements.iter().enumerate().map(|(i, p)| (8 + i as i32 * es, ety.clone(), p.clone())).collect()
+        }
+        _ => vec![],
+    }
+}
+
+/// `subj[offset]` loaded into local `slot` at `ty`'s natural width.
+fn load_at(base: Local, offset: i32, ty: &Ty, slot: Local) -> Vec<Op> {
+    let wt = ty_to_wasm(ty);
+    let mut ops = vec![Op::LocalGet(base)];
+    if offset != 0 {
+        ops.push(Op::Const(Const::I32(offset)));
+        ops.push(Op::BinOp(WBinOp::I32Add));
+    }
+    ops.push(Op::Load(load_kind_of(wt)));
+    ops.push(Op::LocalSet(slot));
+    ops
+}
+
+/// Bind pattern variables, returning ops that load payloads/sub-components into
+/// their locals (emitted at the start of the matched arm body). Recurses through
+/// Tuple / Record / List / Some / Ok / Err / Constructor.
+fn bind_pattern(pattern: &IrPattern, subj: Local, subj_ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
     match pattern {
         IrPattern::Bind { var, .. } => {
             // The bound variable aliases the subject local directly — no copy.
@@ -1321,40 +1424,70 @@ fn bind_pattern(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut Lower
             vec![]
         }
         // Tagged-union payloads live at offset 4 (after the i32 tag).
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
-            bind_payload(inner, subj, 4, ctx)
+        IrPattern::Some { inner } => {
+            let pty = option_arg(subj_ty).unwrap_or_else(|| pattern_fallback_ty(inner));
+            destructure_one(inner, subj, 4, &pty, ctx)
+        }
+        IrPattern::Ok { inner } => {
+            let pty = result_args(subj_ty).map(|(o, _)| o).unwrap_or_else(|| pattern_fallback_ty(inner));
+            destructure_one(inner, subj, 4, &pty, ctx)
+        }
+        IrPattern::Err { inner } => {
+            let pty = result_args(subj_ty).map(|(_, e)| e).unwrap_or_else(|| pattern_fallback_ty(inner));
+            destructure_one(inner, subj, 4, &pty, ctx)
         }
         IrPattern::Constructor { args, .. } => {
             // Constructor args are packed after the tag at their natural widths.
             let mut ops = Vec::new();
             let mut off = 4i32;
             for arg in args.iter() {
-                if let IrPattern::Bind { ty, .. } = arg {
-                    ops.extend(bind_payload(arg, subj, off, ctx));
-                    off += wasm_byte_size(ty);
-                }
+                let ty = pattern_fallback_ty(arg);
+                ops.extend(destructure_one(arg, subj, off, &ty, ctx));
+                off += wasm_byte_size(&ty);
             }
             ops
         }
-        _ => vec![], // Wildcard, Literal, Tuple/List/Record destructuring — TODO
+        IrPattern::Tuple { .. } | IrPattern::RecordPattern { .. } | IrPattern::List { .. } => {
+            let mut ops = Vec::new();
+            for (off, ty, p) in sub_slots(pattern, subj_ty) {
+                ops.extend(destructure_one(&p, subj, off, &ty, ctx));
+            }
+            ops
+        }
+        _ => vec![], // Wildcard, Literal, None
     }
 }
 
-/// Load `subj[offset]` into a fresh local and bind `inner` (a Bind pattern) to it.
-fn bind_payload(inner: &IrPattern, subj: Local, offset: i32, ctx: &mut LowerCtx) -> Vec<Op> {
-    let IrPattern::Bind { var, ty } = inner else { return vec![] };
-    let wt = ty_to_wasm(ty);
-    let local = ctx.alloc_local(wt);
-    if (var.0 as usize) < ctx.var_map.len() {
-        ctx.var_map[var.0 as usize] = Some(local);
+/// Load `base[offset]` into a fresh local, then bind `pattern` against it
+/// (aliasing for a leaf Bind, recursing for a nested composite/variant).
+fn destructure_one(pattern: &IrPattern, base: Local, offset: i32, ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
+    match pattern {
+        IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => vec![],
+        _ => {
+            let slot = ctx.alloc_local(ty_to_wasm(ty));
+            let mut ops = load_at(base, offset, ty, slot);
+            ops.extend(bind_pattern(pattern, slot, ty, ctx));
+            ops
+        }
     }
-    vec![
-        Op::LocalGet(subj),
-        Op::Const(Const::I32(offset)),
-        Op::BinOp(WBinOp::I32Add),
-        Op::Load(load_kind_of(wt)),
-        Op::LocalSet(local),
-    ]
+}
+
+/// `Option[T]` → T.
+fn option_arg(ty: &Ty) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty {
+        Ty::Applied(TC::Option, a) if !a.is_empty() => Some(a[0].clone()),
+        _ => None,
+    }
+}
+
+/// `Result[T, E]` → (T, E).
+fn result_args(ty: &Ty) -> Option<(Ty, Ty)> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty {
+        Ty::Applied(TC::Result, a) if a.len() == 2 => Some((a[0].clone(), a[1].clone())),
+        _ => None,
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
