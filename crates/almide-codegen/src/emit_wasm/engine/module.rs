@@ -207,6 +207,13 @@ fn assemble(
     if let Some(&main_idx) = name_idx.get("main") {
         exports.export("_start", wasm_encoder::ExportKind::Func, main_idx);
     }
+    // Export every user function under its own name so callers (and the
+    // wasmtime `--invoke` test harness) can reach them directly.
+    let mut by_name: Vec<(&String, FuncIdx)> = name_idx.iter().map(|(n, &i)| (n, i)).collect();
+    by_name.sort_by_key(|&(_, idx)| idx); // deterministic export order
+    for (name, idx) in by_name {
+        exports.export(name, wasm_encoder::ExportKind::Func, idx);
+    }
     module.section(&exports);
 
     // ── Code section ──
@@ -271,6 +278,101 @@ mod tests {
 
     fn lit_int(v: i64) -> IrExpr {
         IrExpr { kind: IrExprKind::LitInt { value: v }, ty: Ty::Int, span: None, def_id: None }
+    }
+
+    // ── wasmtime execution harness ──
+    //
+    // Builds a module, writes it to a temp file, and invokes a function via the
+    // wasmtime CLI. Returns the printed return value, or None if wasmtime is
+    // unavailable (so CI hosts without it skip rather than fail).
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static TMP_SEQ: AtomicU32 = AtomicU32::new(0);
+
+    fn wasmtime_available() -> bool {
+        std::process::Command::new("wasmtime")
+            .arg("--version")
+            .output()
+            .map_or(false, |o| o.status.success())
+    }
+
+    /// Build, invoke `func`, and return its printed result. `None` ⇒ skip.
+    fn run(funcs: &[IrFunction], func: &str) -> Option<String> {
+        if !wasmtime_available() {
+            eprintln!("[skip] wasmtime not found — skipping execution test");
+            return None;
+        }
+        let vt = VarTable::new();
+        let reg = LayoutRegistry::new();
+        let bytes = build_module(funcs, &vt, &reg).expect("build should succeed");
+        assert!(wasmparser::validate(&bytes).is_ok(), "module must validate before exec");
+
+        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir()
+            .join(format!("almide_engine_{}_{}.wasm", std::process::id(), seq));
+        std::fs::write(&path, &bytes).expect("write temp wasm");
+
+        let out = std::process::Command::new("wasmtime")
+            .arg("--invoke").arg(func)
+            .arg(&path)
+            .output()
+            .expect("spawn wasmtime");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            out.status.success(),
+            "wasmtime failed for `{}`: {}",
+            func,
+            String::from_utf8_lossy(&out.stderr),
+        );
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    /// `main() -> 42` actually returns 42 when executed.
+    #[test]
+    fn exec_const() {
+        let main = mk_func("main", Ty::Int, lit_int(42));
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "42");
+        }
+    }
+
+    /// `main() -> 1 + 2` executes to 3.
+    #[test]
+    fn exec_arithmetic() {
+        let body = IrExpr {
+            kind: IrExprKind::BinOp {
+                op: almide_ir::BinOp::AddInt,
+                left: Box::new(lit_int(1)),
+                right: Box::new(lit_int(2)),
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, body);
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "3");
+        }
+    }
+
+    /// End-to-end allocation: `[10, 20][1]` must return 20 at runtime,
+    /// exercising __alloc + element store + element load through the runtime.
+    #[test]
+    fn exec_list_index() {
+        let list = IrExpr {
+            kind: IrExprKind::List { elements: vec![lit_int(10), lit_int(20)] },
+            ty: Ty::list(Ty::Int), span: None, def_id: None,
+        };
+        let index = IrExpr {
+            kind: IrExprKind::IndexAccess {
+                object: Box::new(list),
+                index: Box::new(lit_int(1)),
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, index);
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "20", "list[1] should be 20 (alloc/store/load round-trip)");
+        }
     }
 
     /// A function returning a constant produces a valid, parseable WASM module.
