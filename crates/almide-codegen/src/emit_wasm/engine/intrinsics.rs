@@ -45,6 +45,17 @@ pub fn lower_intrinsic(
         // ── Tier 2: route to an existing runtime function ──
         "almide_rt_int_to_string" => call_runtime("__int_to_string", &args[0..1], 1, ctx),
         "almide_rt_float_to_string" => call_runtime("__float_to_string", &args[0..1], 1, ctx),
+        // float.floor / ceil — direct f64 ops
+        "almide_rt_float_floor" if args.len() == 1 => {
+            let mut o = lower_expr(&args[0], ctx); o.push(Op::UnOp(U::F64Floor)); Some(o)
+        }
+        "almide_rt_float_ceil" if args.len() == 1 => {
+            let mut o = lower_expr(&args[0], ctx); o.push(Op::UnOp(U::F64Ceil)); Some(o)
+        }
+        // int.parse(s) -> Result[Int, String]
+        "almide_rt_int_parse" if args.len() == 1 => int_parse(&args[0], ctx),
+        // string.lines(s) -> List[String]
+        "almide_rt_string_lines" if args.len() == 1 => call_runtime("__string_lines", args, 1, ctx),
         "almide_rt_io_print" if args.len() == 1 => call_runtime("__print", args, 0, ctx),
 
         // ── Tier 3: higher-order with an inline (non-capturing) lambda ──
@@ -70,6 +81,8 @@ pub fn lower_intrinsic(
         "almide_rt_result_unwrap_or" if args.len() == 2 =>
             Some(tagged_unwrap_or(&args[0], &args[1], false, ret_ty, ctx)),
         "almide_rt_option_map" if args.len() == 2 => option_map(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_option_to_list" if args.len() == 1 => option_to_list(&args[0], ret_ty, ctx),
+        "almide_rt_option_and_then" if args.len() == 2 => option_and_then(&args[0], &args[1], ctx),
         "almide_rt_result_map" if args.len() == 2 => result_map(&args[0], &args[1], ret_ty, ctx),
         "almide_rt_result_map_err" if args.len() == 2 => result_map_err(&args[0], &args[1], ret_ty, ctx),
         "almide_rt_string_slice" if args.len() == 3 =>
@@ -442,6 +455,73 @@ fn option_map(o: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option
     ops.push(Op::Load(LoadKind::I32)); // tag (nonzero = Some)
     ops.push(Op::IfVoid { then: some_branch, else_: none_branch });
     ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `option.to_list(o) -> List[A]` — `Some(x)` → `[x]`, `None` → `[]`.
+fn option_to_list(o: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let elem_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
+    let lk = load_kind_of(ty_to_wasm(&elem_ty));
+    let sk = store_kind_of(ty_to_wasm(&elem_ty));
+    let es = wasm_byte_size(&elem_ty);
+    let alloc = (ctx.func_idx)("__alloc")?;
+    let o_l = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let cnt = ctx.alloc_local(WasmTy::I32);
+
+    let mut ops = lower_expr(o, ctx);
+    ops.push(Op::LocalSet(o_l));
+
+    let mut some_branch = vec![Op::Const(Const::I32(1)), Op::LocalSet(cnt)];
+    some_branch.extend(alloc_list(out, cnt, es, alloc));
+    some_branch.extend(vec![
+        Op::LocalGet(out), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(o_l), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(lk),
+        Op::Store(sk),
+        Op::LocalGet(out),
+    ]);
+    let mut none_branch = vec![Op::Const(Const::I32(0)), Op::LocalSet(cnt)];
+    none_branch.extend(alloc_list(out, cnt, es, alloc));
+    none_branch.push(Op::LocalGet(out));
+
+    ops.push(Op::LocalGet(o_l));
+    ops.push(Op::Load(LoadKind::I32)); // tag
+    ops.push(Op::If { ty: WasmTy::I32, then: some_branch, else_: none_branch });
+    Some(ops)
+}
+
+/// `option.and_then(o, f: (A) -> Option[B]) -> Option[B]` — `Some(x)` → `f(x)`,
+/// `None` → `None` (the original None pointer is type-agnostic, reusable).
+fn option_and_then(o: &IrExpr, f: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let in_lk = load_kind_of(ty_to_wasm(&pty));
+    let o_l = ctx.alloc_local(WasmTy::I32);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+
+    let mut ops = lower_expr(o, ctx);
+    ops.push(Op::LocalSet(o_l));
+
+    let mut some_branch = vec![
+        Op::LocalGet(o_l), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(in_lk), Op::LocalSet(elem),
+    ];
+    some_branch.extend(lower_expr(&body, ctx)); // f(elem) → Option[B] pointer
+    let none_branch = vec![Op::LocalGet(o_l)]; // None passes through
+
+    ops.push(Op::LocalGet(o_l));
+    ops.push(Op::Load(LoadKind::I32)); // tag (nonzero = Some)
+    ops.push(Op::If { ty: WasmTy::I32, then: some_branch, else_: none_branch });
+    Some(ops)
+}
+
+/// `int.parse(s) -> Result[Int, String]` — calls __int_parse with an interned
+/// error message for the Err payload.
+fn int_parse(s: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let idx = (ctx.func_idx)("__int_parse")?;
+    let err_off = ctx.interner.intern("invalid integer");
+    let mut ops = lower_expr(s, ctx);
+    ops.push(Op::Const(Const::I32(err_off as i32)));
+    ops.push(Op::Call { idx, pops: 2, pushes: 1 });
     Some(ops)
 }
 

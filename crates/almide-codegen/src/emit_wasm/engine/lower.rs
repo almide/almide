@@ -363,6 +363,9 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
                 ops.push(Op::Call { idx, pops, pushes });
             } else {
                 // Stdlib intrinsic not implemented in v2 yet — reject (→ legacy).
+                if std::env::var_os("ALMIDE_WASM_V2_DUMP").is_some() {
+                    eprintln!("[v2-missing-intrinsic] {}", symbol.as_str());
+                }
                 ops.push(Op::Unsupported("runtime-call"));
             }
             ops
@@ -713,9 +716,16 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             let ptr = ctx.alloc_local(WasmTy::I32);
             ops.extend(lower_expr(inner, ctx));
             ops.push(Op::LocalTee(ptr));
-            // Check tag
+            // Check tag. Option: Some = tag != 0 → payload. Result: Ok = tag 0 →
+            // payload, so invert the tag test so `then` is always the payload arm.
             ops.push(Op::Load(LoadKind::I32)); // load tag
-            // If tag == 0 (None/Err), use fallback
+            let is_result = {
+                use almide_lang::types::constructor::TypeConstructorId as TC;
+                matches!(&inner.ty, Ty::Applied(TC::Result, _))
+            };
+            if is_result {
+                ops.push(Op::UnOp(WUnOp::I32Eqz)); // tag == 0 (Ok) → take payload
+            }
             let load_kind = match ty_to_wasm(&expr.ty) {
                 WasmTy::I64 => LoadKind::I64,
                 WasmTy::F64 => LoadKind::F64,

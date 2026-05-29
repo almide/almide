@@ -2167,6 +2167,71 @@ mod tests {
         if let Some(r) = run_vt(&[main2], &vt, "main") { assert_eq!(r, "0", "None"); }
     }
 
+    /// Gap-closing intrinsics: float.floor/ceil, int.parse, option.to_list,
+    /// option.and_then, string.lines.
+    #[test]
+    fn exec_gap_batch() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let lit_float = |v: f64| IrExpr { kind: IrExprKind::LitFloat { value: v }, ty: Ty::Float, span: None, def_id: None };
+        let fstr = |e: IrExpr| call("almide_rt_float_to_string", vec![e], Ty::String);
+        let byte = |e: IrExpr, i: i64| call("__byte_at", vec![e, lit_int(i)], Ty::Int);
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        // float.floor(2.7) → "2.0" ; float.ceil(2.3) → "3.0"
+        ti(byte(fstr(call("almide_rt_float_floor", vec![lit_float(2.7)], Ty::Float)), 0), "50", "floor 2.7 → '2'");
+        ti(byte(fstr(call("almide_rt_float_ceil", vec![lit_float(2.3)], Ty::Float)), 0), "51", "ceil 2.3 → '3'");
+        ti(byte(fstr(call("almide_rt_float_floor", vec![lit_float(-1.5)], Ty::Float)), 0), "45", "floor -1.5 → '-'");
+
+        // int.parse → Result[Int,String]; unwrap_or via ?? -1
+        let res_ty = Ty::Applied(TC::Result, vec![Ty::Int, Ty::String]);
+        let parse = |s: &str| {
+            let p = call("almide_rt_int_parse", vec![lit_str(s)], res_ty.clone());
+            IrExpr { kind: IrExprKind::UnwrapOr { expr: Box::new(p), fallback: Box::new(lit_int(-1)) },
+                     ty: Ty::Int, span: None, def_id: None }
+        };
+        ti(parse("42"), "42", "parse 42");
+        ti(parse("-7"), "-7", "parse -7");
+        ti(parse("abc"), "-1", "parse abc → Err");
+        ti(parse(""), "-1", "parse empty → Err");
+        ti(parse("1x"), "-1", "parse trailing junk → Err");
+
+        // option.to_list: Some(5) → [5] (len 1), None → [] (len 0)
+        let opt_int = Ty::Applied(TC::Option, vec![Ty::Int]);
+        let some5 = IrExpr { kind: IrExprKind::OptionSome { expr: Box::new(lit_int(5)) }, ty: opt_int.clone(), span: None, def_id: None };
+        let none = || IrExpr { kind: IrExprKind::OptionNone, ty: opt_int.clone(), span: None, def_id: None };
+        let to_list = |o: IrExpr| call("almide_rt_option_to_list", vec![o], Ty::list(Ty::Int));
+        ti(call("almide_rt_list_len", vec![to_list(some5.clone())], Ty::Int), "1", "to_list Some len");
+        ti(call("almide_rt_list_get_or", vec![to_list(some5), lit_int(0), lit_int(-1)], Ty::Int), "5", "to_list Some [0]");
+        ti(call("almide_rt_list_len", vec![to_list(none())], Ty::Int), "0", "to_list None len");
+
+        // option.and_then(Some(3), x => Some(x*10)) → Some(30) unwrap → 30
+        {
+            let mut vt = VarTable::new();
+            let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+            let var_x = || IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None };
+            let lam = IrExpr { kind: IrExprKind::Lambda { params: vec![(x, Ty::Int)],
+                body: Box::new(IrExpr { kind: IrExprKind::OptionSome {
+                    expr: Box::new(binop(almide_ir::BinOp::MulInt, var_x(), lit_int(10), Ty::Int)) },
+                    ty: opt_int.clone(), span: None, def_id: None }), lambda_id: None },
+                ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(opt_int.clone()) }, span: None, def_id: None };
+            let some3 = IrExpr { kind: IrExprKind::OptionSome { expr: Box::new(lit_int(3)) }, ty: opt_int.clone(), span: None, def_id: None };
+            let chained = call("almide_rt_option_and_then", vec![some3, lam], opt_int.clone());
+            let unwrapped = IrExpr { kind: IrExprKind::UnwrapOr { expr: Box::new(chained), fallback: Box::new(lit_int(-1)) },
+                ty: Ty::Int, span: None, def_id: None };
+            let m = mk_func("main", Ty::Int, unwrapped);
+            if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(r, "30", "and_then Some(3)*10"); }
+        }
+
+        // string.lines: "a\nb\nc" → 3 ; "a\n" → 1 ; "" → 0 ; "a\n\nb" → 3
+        let lines_len = |s: &str| call("almide_rt_list_len", vec![call("almide_rt_string_lines", vec![lit_str(s)], Ty::list(Ty::String))], Ty::Int);
+        ti(lines_len("a\nb\nc"), "3", "lines abc");
+        ti(lines_len("a\n"), "1", "lines trailing nl");
+        ti(lines_len(""), "0", "lines empty");
+        ti(lines_len("a\n\nb"), "3", "lines blank middle");
+    }
+
     /// Match destructuring: Tuple / Record / List patterns + nesting in Some.
     #[test]
     fn exec_match_destructure() {

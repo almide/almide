@@ -81,11 +81,13 @@ pub struct RuntimeFns {
     pub str_sub_bytes: FuncIdx,
     pub str_split: FuncIdx,
     pub str_join: FuncIdx,
+    pub int_parse: FuncIdx,
+    pub str_lines: FuncIdx,
 }
 
 /// The number of *defined* runtime functions (they occupy function indices
 /// `IMPORT_COUNT .. IMPORT_COUNT + COUNT`).
-pub const COUNT: u32 = 41;
+pub const COUNT: u32 = 43;
 
 impl RuntimeFns {
     /// Defined runtime functions in code-section order, offset past the imports.
@@ -133,11 +135,13 @@ impl RuntimeFns {
             str_sub_bytes: IMPORT_COUNT + 38,
             str_split: IMPORT_COUNT + 39,
             str_join: IMPORT_COUNT + 40,
+            int_parse: IMPORT_COUNT + 41,
+            str_lines: IMPORT_COUNT + 42,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 41] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 43] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -180,6 +184,8 @@ impl RuntimeFns {
             ("__string_sub_bytes", self.str_sub_bytes),
             ("__string_split", self.str_split),
             ("__string_join", self.str_join),
+            ("__int_parse", self.int_parse),
+            ("__string_lines", self.str_lines),
         ]
     }
 }
@@ -230,6 +236,8 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_string_sub_bytes(),
         build_string_split(),
         build_string_join(),
+        build_int_parse(),
+        build_string_lines(),
     ]
 }
 
@@ -912,6 +920,163 @@ fn build_string_join() -> WasmFunc {
     WasmFunc {
         name: "__string_join".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
         locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // n,sepl,total,out,dst,i,e,el
+        body,
+    }
+}
+
+/// `__int_parse(s, errmsg) -> i32` — parse a decimal integer (optional leading
+/// `-`) into `Result[Int, String]` (12B: [tag@0][payload@4]; Ok=0 i64, Err=1
+/// errmsg ptr). Empty input, a lone `-`, or any non-digit byte → Err(errmsg).
+fn build_int_parse() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    const ERR: u32 = 1;
+    const BL: u32 = 2;
+    const I: u32 = 3;
+    const NEG: u32 = 4;
+    const ACC: u32 = 5;   // i64
+    const ANY: u32 = 6;
+    const RES: u32 = 7;
+
+    // Err(errmsg): res = alloc(12); res[0]=1; res[4]=errmsg; return res
+    let mk_err = || vec![
+        Op::Const(Const::I32(12)), Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(RES),
+        Op::LocalGet(RES), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
+        Op::LocalGet(RES), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(ERR), Op::Store(StoreKind::I32),
+        Op::LocalGet(RES), Op::Return,
+    ];
+
+    let digit_loop = vec![
+        Op::LocalGet(I), Op::LocalGet(BL), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        // d = s[8+i] - 48 ; if d >=u 10 → Err (d stays on the stack for the test)
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(I), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+        Op::Const(Const::I32(48)), Op::BinOp(B::I32Sub),
+        Op::Const(Const::I32(10)), Op::BinOp(B::I32GeU),
+        Op::IfVoid { then: mk_err(), else_: vec![] },
+        // acc = acc*10 + d  (d currently in NEG temp — but NEG is the sign flag!). Recompute d.
+        Op::LocalGet(ACC), Op::Const(Const::I64(10)), Op::BinOp(B::I64Mul),
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(I), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+        Op::Const(Const::I32(48)), Op::BinOp(B::I32Sub), Op::UnOp(U::I64ExtendI32U),
+        Op::BinOp(B::I64Add), Op::LocalSet(ACC),
+        Op::Const(Const::I32(1)), Op::LocalSet(ANY),
+        Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(I), Op::Br(0),
+    ];
+
+    let body = vec![
+        Op::LocalGet(S), Op::Load(LoadKind::I32), Op::LocalSet(BL),
+        Op::Const(Const::I32(0)), Op::LocalSet(I),
+        Op::Const(Const::I32(0)), Op::LocalSet(NEG),
+        Op::Const(Const::I64(0)), Op::LocalSet(ACC),
+        Op::Const(Const::I32(0)), Op::LocalSet(ANY),
+        // empty → Err
+        Op::LocalGet(BL), Op::UnOp(U::I32Eqz), Op::IfVoid { then: mk_err(), else_: vec![] },
+        // leading '-'
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8), Op::Const(Const::I32(45)), Op::BinOp(B::I32Eq),
+        Op::IfVoid { then: vec![Op::Const(Const::I32(1)), Op::LocalSet(NEG), Op::Const(Const::I32(1)), Op::LocalSet(I)], else_: vec![] },
+        Op::Block(vec![Op::Loop(digit_loop)]),
+        // no digits consumed → Err
+        Op::LocalGet(ANY), Op::UnOp(U::I32Eqz), Op::IfVoid { then: mk_err(), else_: vec![] },
+        // apply sign
+        Op::LocalGet(NEG), Op::IfVoid { then: vec![Op::Const(Const::I64(0)), Op::LocalGet(ACC), Op::BinOp(B::I64Sub), Op::LocalSet(ACC)], else_: vec![] },
+        // Ok(acc)
+        Op::Const(Const::I32(12)), Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(RES),
+        Op::LocalGet(RES), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
+        Op::LocalGet(RES), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(ACC), Op::Store(StoreKind::I64),
+        Op::LocalGet(RES),
+    ];
+    WasmFunc {
+        name: "__int_parse".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I64, WasmTy::I32, WasmTy::I32], // bl,i,neg,acc,any,res
+        body,
+    }
+}
+
+/// `__string_lines(s) -> i32` — split into a `List[String]` on `\n`, with no
+/// trailing empty line for a final newline (`"a\n"` → `["a"]`). Line count =
+/// newline count, plus one when the last byte is not a newline.
+fn build_string_lines() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    const BL: u32 = 1;
+    const NLINES: u32 = 2;
+    const LIST: u32 = 3;
+    const IDX: u32 = 4;
+    const STARTB: u32 = 5;
+    const I: u32 = 6;
+
+    // byte s[8+i] == '\n'
+    let is_nl = |i_local: u32| vec![
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(i_local), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+        Op::Const(Const::I32(10)), Op::BinOp(B::I32Eq),
+    ];
+    let elem_addr = || vec![
+        Op::LocalGet(LIST), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(IDX), Op::Const(Const::I32(4)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+    ];
+
+    let count_loop = {
+        let mut v = vec![Op::LocalGet(I), Op::LocalGet(BL), Op::BinOp(B::I32GeU), Op::BrIf(1)];
+        v.extend(is_nl(I));
+        v.push(Op::IfVoid { then: vec![Op::LocalGet(NLINES), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(NLINES)], else_: vec![] });
+        v.extend(vec![Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(I), Op::Br(0)]);
+        v
+    };
+
+    let build_loop = {
+        let mut emit = is_nl(I);
+        // on newline: list[idx] = sub_bytes(s, startb, i); idx++; startb = i+1
+        let mut on_nl = elem_addr();
+        on_nl.extend(vec![
+            Op::LocalGet(S), Op::LocalGet(STARTB), Op::LocalGet(I),
+            Op::Call { idx: rt.str_sub_bytes, pops: 3, pushes: 1 }, Op::Store(StoreKind::I32),
+            Op::LocalGet(IDX), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(IDX),
+            Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(STARTB),
+        ]);
+        let mut v = vec![Op::LocalGet(I), Op::LocalGet(BL), Op::BinOp(B::I32GeU), Op::BrIf(1)];
+        v.append(&mut emit);
+        v.push(Op::IfVoid { then: on_nl, else_: vec![] });
+        v.extend(vec![Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(I), Op::Br(0)]);
+        v
+    };
+
+    let mut body = vec![
+        Op::LocalGet(S), Op::Load(LoadKind::I32), Op::LocalSet(BL),
+        Op::Const(Const::I32(0)), Op::LocalSet(NLINES),
+        Op::Const(Const::I32(0)), Op::LocalSet(I),
+        Op::Block(vec![Op::Loop(count_loop)]),
+        // if bl>0 and last byte != '\n' → nlines++
+        Op::LocalGet(BL),
+        Op::IfVoid {
+            then: {
+                let mut t = vec![Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(BL), Op::BinOp(B::I32Add), Op::Const(Const::I32(1)), Op::BinOp(B::I32Sub), Op::Load(LoadKind::U8), Op::Const(Const::I32(10)), Op::BinOp(B::I32Ne)];
+                t.push(Op::IfVoid { then: vec![Op::LocalGet(NLINES), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(NLINES)], else_: vec![] });
+                t
+            },
+            else_: vec![],
+        },
+        // list = alloc(8 + nlines*4) ; len = cap = nlines
+        Op::Const(Const::I32(8)), Op::LocalGet(NLINES), Op::Const(Const::I32(4)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(LIST),
+        Op::LocalGet(LIST), Op::LocalGet(NLINES), Op::Store(StoreKind::I32),
+        Op::LocalGet(LIST), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(NLINES), Op::Store(StoreKind::I32),
+        Op::Const(Const::I32(0)), Op::LocalSet(IDX),
+        Op::Const(Const::I32(0)), Op::LocalSet(STARTB),
+        Op::Const(Const::I32(0)), Op::LocalSet(I),
+        Op::Block(vec![Op::Loop(build_loop)]),
+        // final piece if idx < nlines (content after the last newline)
+        Op::LocalGet(IDX), Op::LocalGet(NLINES), Op::BinOp(B::I32LtU),
+    ];
+    let mut final_piece = elem_addr();
+    final_piece.extend(vec![
+        Op::LocalGet(S), Op::LocalGet(STARTB), Op::LocalGet(BL),
+        Op::Call { idx: rt.str_sub_bytes, pops: 3, pushes: 1 }, Op::Store(StoreKind::I32),
+    ]);
+    body.push(Op::IfVoid { then: final_piece, else_: vec![] });
+    body.push(Op::LocalGet(LIST));
+
+    WasmFunc {
+        name: "__string_lines".into(), params: vec![WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // bl,nlines,list,idx,startb,i
         body,
     }
 }
