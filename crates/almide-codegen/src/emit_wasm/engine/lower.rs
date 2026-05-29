@@ -728,8 +728,9 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
                 ops.push(Op::Alloc);
                 ops.push(Op::LocalSet(env_ptr));
 
-                // Store captures into env
-                for (i, (vid, _ty)) in captures.iter().enumerate() {
+                // Store captures into env. Each slot is 8 bytes; the value is
+                // written at its natural width to match EnvLoad's load width.
+                for (i, (vid, cap_ty)) in captures.iter().enumerate() {
                     ops.push(Op::LocalGet(env_ptr));
                     let off = (i as i32) * 8;
                     if off != 0 {
@@ -741,7 +742,12 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
                     } else {
                         ops.push(Op::Const(Const::I32(0)));
                     }
-                    ops.push(Op::Store(StoreKind::I32));
+                    let store_kind = match ty_to_wasm(cap_ty) {
+                        WasmTy::I64 => StoreKind::I64,
+                        WasmTy::F64 => StoreKind::F64,
+                        _ => StoreKind::I32,
+                    };
+                    ops.push(Op::Store(store_kind));
                 }
             }
 

@@ -947,6 +947,63 @@ mod tests {
         }
     }
 
+    /// Closure with a captured variable: `let n = 10; (x) => x + n` invoked
+    /// with 5 → 15. Exercises capture storage (ClosureCreate) and EnvLoad.
+    #[test]
+    fn exec_closure_capture() {
+        use almide_ir::{IrParam, ParamBorrow, CallTarget, IrStmt, IrStmtKind, Mutability};
+        let mut vt = VarTable::new();
+        let env = vt.alloc(sym("env"), Ty::Unknown, Mutability::Let, None);
+        let x = vt.alloc(sym("x"), Ty::Int, Mutability::Let, None);
+        let n = vt.alloc(sym("n"), Ty::Int, Mutability::Let, None);
+
+        // __lam(env, x) -> Int = x + EnvLoad(env, 0)
+        let env_load = IrExpr {
+            kind: IrExprKind::EnvLoad { env_var: env, index: 0 },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let lam_body = binop(
+            almide_ir::BinOp::AddInt,
+            IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None },
+            env_load, Ty::Int,
+        );
+        let mut lam = mk_func("__lam", Ty::Int, lam_body);
+        lam.params = vec![
+            IrParam { var: env, ty: Ty::Unknown, name: sym("env"), borrow: ParamBorrow::Own,
+                      open_record: None, default: None, attrs: vec![] },
+            IrParam { var: x, ty: Ty::Int, name: sym("x"), borrow: ParamBorrow::Own,
+                      open_record: None, default: None, attrs: vec![] },
+        ];
+
+        // main = { let n = 10; closure_of(__lam capturing n)(5) }
+        let closure = IrExpr {
+            kind: IrExprKind::ClosureCreate { func_name: sym("__lam"), captures: vec![(n, Ty::Int)] },
+            ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) },
+            span: None, def_id: None,
+        };
+        let call = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(closure) },
+                args: vec![lit_int(5)], type_args: vec![],
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main_body = IrExpr {
+            kind: IrExprKind::Block {
+                stmts: vec![IrStmt {
+                    kind: IrStmtKind::Bind { var: n, ty: Ty::Int, mutability: Mutability::Let, value: lit_int(10) },
+                    span: None,
+                }],
+                expr: Some(Box::new(call)),
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, main_body);
+        if let Some(r) = run_vt(&[lam, main], &vt, "main") {
+            assert_eq!(r, "15", "closure capturing n=10 called with 5");
+        }
+    }
+
     /// String equality: `"foo" == "foo"` → 1, `"foo" == "bar"` → 0,
     /// `"foo" != "bar"` → 1.
     #[test]
