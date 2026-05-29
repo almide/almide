@@ -105,14 +105,11 @@ fn convert_expr(
             let mut free = HashSet::new();
             collect_free_vars(&body, &param_ids, &mut free);
 
-            // 3a. No captures → keep as Lambda for potential inline expansion
-            //     in the WASM emitter (avoids call_indirect overhead).
-            if free.is_empty() {
-                return IrExpr {
-                    kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },
-                    ty, span, def_id: None,
-                };
-            }
+            // 3a. Non-capturing lambdas are lifted too (empty env), so they can
+            //     be passed/returned as first-class closure values. The WASM
+            //     emitter still inlines them in higher-order intrinsics by
+            //     reading the lifted body (see inline_lambda_n + FnBodies), so
+            //     there is no call_indirect penalty for the common HOF case.
 
             // 3b. Skip conversion for mutable captures (WASM emitter handles
             //     those via heap cells in the Lambda-based path)

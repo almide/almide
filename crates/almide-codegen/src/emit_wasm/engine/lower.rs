@@ -53,6 +53,9 @@ pub struct LowerCtx<'a> {
     /// Non-capturing lambdas bound to a `let` (ClosureConversion hoists them);
     /// recorded here so higher-order intrinsics can inline them at the use site.
     pub lambda_binds: std::collections::HashMap<VarId, IrExpr>,
+    /// `let f = ClosureCreate{..}` bindings, so a closure-valued var passed to a
+    /// higher-order intrinsic resolves (and inlines if non-capturing).
+    pub closure_binds: std::collections::HashMap<VarId, IrExpr>,
     /// Next scratch local index (for temporaries).
     next_local: u32,
     /// Named record type layouts, for resolving `Ty::Named` field offsets.
@@ -95,6 +98,7 @@ impl<'a> LowerCtx<'a> {
             interner,
             sigs,
             lambda_binds: std::collections::HashMap::new(),
+            closure_binds: std::collections::HashMap::new(),
             next_local: param_count,
             record_types,
             fn_bodies,
@@ -1018,6 +1022,12 @@ fn lower_stmt(stmt: &IrStmt, ctx: &mut LowerCtx) -> Vec<Op> {
             if matches!(value.kind, IrExprKind::Lambda { .. }) {
                 ctx.lambda_binds.insert(*var, value.clone());
                 return vec![];
+            }
+            // A closure-valued binding is also recorded so it can be inlined
+            // when passed to a HOF, while still being materialized as a local
+            // (it may also be used as a first-class value).
+            if matches!(value.kind, IrExprKind::ClosureCreate { .. }) {
+                ctx.closure_binds.insert(*var, value.clone());
             }
             let local = ctx.bind_var(*var, ty);
             let mut ops = lower_expr(value, ctx);
