@@ -1809,8 +1809,57 @@ fn load_elem(xs: u32, idx: u32, es: i32, lk: LoadKind) -> Vec<Op> {
 
 /// `list.map(xs, f)` with an inline lambda `f = (p) => body`. Builds a new list
 /// of the same length, applying the lowered body per element.
+/// How to apply a one-argument function to an element: inline its body
+/// (non-capturing / known lambda) or call it indirectly through its closure
+/// value (capturing closure, closure-bound var, or any first-class fn value).
+enum Fn1 {
+    Inline { param: almide_ir::VarId, body: IrExpr },
+    Indirect { cl: u32, arg_wt: WasmTy, ret: Ty },
+}
+
+/// Resolve a one-arg function argument into an applier. Returns
+/// (param_type, applier, prologue-ops emitted once before the loop).
+fn resolve_fn1(f: &IrExpr, ctx: &mut LowerCtx) -> Option<(Ty, Fn1, Vec<Op>)> {
+    if let Some((param, pty, body)) = inline_lambda(f, 1, ctx) {
+        return Some((pty, Fn1::Inline { param, body }, Vec::new()));
+    }
+    // First-class function value: call it indirectly. Types come from its Fn
+    // type (works for capturing closures and plain (A)->B parameters alike).
+    let (pty, ret) = match &f.ty {
+        Ty::Fn { params, ret } if params.len() == 1 => (params[0].clone(), (**ret).clone()),
+        _ => return None,
+    };
+    if pty.is_unresolved() || ret.is_unresolved() { return None; }
+    let cl = ctx.alloc_local(WasmTy::I32);
+    let mut prologue = lower_expr(f, ctx);
+    prologue.push(Op::LocalSet(cl));
+    let arg_wt = ty_to_wasm(&pty);
+    Some((pty, Fn1::Indirect { cl, arg_wt, ret }, prologue))
+}
+
+/// Apply the function to the value in `elem`, leaving the result on the stack.
+/// (Built once while constructing the loop body.)
+fn apply_fn1(applier: &Fn1, elem: u32, ctx: &mut LowerCtx) -> Vec<Op> {
+    match applier {
+        Fn1::Inline { param, body } => {
+            ctx.map_var(*param, elem);
+            lower_expr(body, ctx)
+        }
+        Fn1::Indirect { cl, arg_wt, ret } => {
+            // closure pair `[table_idx @0][env_ptr @4]`; call (env, arg) -> ret.
+            let sig = ctx.sigs.intern(vec![WasmTy::I32, *arg_wt], vec![ty_to_wasm(ret)]);
+            vec![
+                Op::LocalGet(*cl), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32),
+                Op::LocalGet(elem),
+                Op::LocalGet(*cl), Op::Load(LoadKind::I32),
+                Op::CallIndirect { sig, pops: 3, pushes: 1 },
+            ]
+        }
+    }
+}
+
 fn list_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
-    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let (pty, applier, prologue) = resolve_fn1(f, ctx)?;
     let in_es = super::lower::wasm_byte_size(&pty);
     let in_lk = load_kind_of(ty_to_wasm(&pty));
     let out_ty = concrete_ty(super::lower::list_element_ty(ret_ty))?;
@@ -1818,9 +1867,9 @@ fn list_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Op
     let out_sk = store_kind_of(ty_to_wasm(&out_ty));
 
     let (lp, mut ops) = list_loop_header(xs_expr, ctx);
+    ops.extend(prologue);
     let out = ctx.alloc_local(WasmTy::I32);
     let elem = ctx.alloc_local(ty_to_wasm(&pty));
-    ctx.map_var(pvar, elem);
 
     // out = __alloc(8 + len*out_es); out.len = out.cap = len
     let alloc = (ctx.func_idx)("__alloc")?;
@@ -1856,7 +1905,7 @@ fn list_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Op
     loop_body.push(Op::Const(Const::I32(out_es)));
     loop_body.push(Op::BinOp(B::I32Mul));
     loop_body.push(Op::BinOp(B::I32Add));
-    loop_body.extend(lower_expr(&body, ctx));
+    loop_body.extend(apply_fn1(&applier, elem, ctx));
     loop_body.push(Op::Store(out_sk));
     // idx++
     loop_body.push(Op::LocalGet(lp.idx));
@@ -1873,17 +1922,17 @@ fn list_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Op
 /// `list.filter(xs, pred)` with an inline lambda `pred = (p) => bool`.
 /// Over-allocates to the input length, then fixes len/cap to the match count.
 fn list_filter(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
-    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let (pty, applier, prologue) = resolve_fn1(f, ctx)?;
     let es = super::lower::wasm_byte_size(&pty);
     let lk = load_kind_of(ty_to_wasm(&pty));
     let sk = store_kind_of(ty_to_wasm(&pty));
     let _ = ret_ty;
 
     let (lp, mut ops) = list_loop_header(xs_expr, ctx);
+    ops.extend(prologue);
     let out = ctx.alloc_local(WasmTy::I32);
     let oc = ctx.alloc_local(WasmTy::I32); // matched count
     let elem = ctx.alloc_local(ty_to_wasm(&pty));
-    ctx.map_var(pvar, elem);
 
     // out = __alloc(8 + len*es) (worst case); oc = 0
     let alloc = (ctx.func_idx)("__alloc")?;
@@ -1913,7 +1962,7 @@ fn list_filter(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) ->
     loop_body.push(Op::BrIf(1));
     loop_body.extend(load_elem(lp.xs, lp.idx, es, lk));
     loop_body.push(Op::LocalSet(elem));
-    loop_body.extend(lower_expr(&body, ctx)); // predicate → i32 bool
+    loop_body.extend(apply_fn1(&applier, elem, ctx)); // predicate → i32 bool
     loop_body.push(Op::IfVoid { then: keep, else_: vec![] });
     loop_body.push(Op::LocalGet(lp.idx));
     loop_body.push(Op::Const(Const::I32(1)));
