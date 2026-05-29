@@ -35,6 +35,34 @@ use super::layout::LayoutRegistry;
 use super::data::DataInterner;
 use super::runtime::{self, RuntimeFns, HEAP_GLOBAL};
 
+/// Interns WASM function signatures `(params, results)` into stable type
+/// indices, shared between lowering (for `call_indirect`) and assembly (for the
+/// type section). Append-only, so indices handed out during lowering stay valid
+/// when assembly adds the concrete function signatures.
+#[derive(Default)]
+pub struct SigTable {
+    sigs: Vec<(Vec<WasmTy>, Vec<WasmTy>)>,
+}
+
+impl SigTable {
+    pub fn new() -> Self {
+        SigTable { sigs: Vec::new() }
+    }
+
+    /// Intern a signature, returning its type index.
+    pub fn intern(&mut self, params: Vec<WasmTy>, results: Vec<WasmTy>) -> u32 {
+        if let Some(i) = self.sigs.iter().position(|(p, r)| *p == params && *r == results) {
+            return i as u32;
+        }
+        self.sigs.push((params, results));
+        (self.sigs.len() - 1) as u32
+    }
+
+    fn all(&self) -> &[(Vec<WasmTy>, Vec<WasmTy>)] {
+        &self.sigs
+    }
+}
+
 /// Errors produced while building a module from IR.
 #[derive(Debug)]
 pub enum BuildError {
@@ -84,11 +112,13 @@ pub fn build_module(
     }
     let lookup = |name: &str| name_idx.get(name).copied();
 
-    // ── Phase B: lower user functions, interning string literals as we go ──
+    // ── Phase B: lower user functions, interning string literals and
+    //    call_indirect signatures as we go ──
     let mut interner = DataInterner::new(DATA_BASE);
+    let mut sigs = SigTable::new();
     let mut user_funcs: Vec<WasmFunc> = Vec::with_capacity(ir_funcs.len());
     for f in ir_funcs {
-        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup, &mut interner);
+        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup, &mut interner, &mut sigs);
         // Resolve Alloc / RcInc / RcDec / StringConcat into Calls to the runtime.
         // Stack-effect preserving, so verification below still holds.
         runtime::resolve_abstract_ops(&mut wf.body, &rt);
@@ -115,7 +145,7 @@ pub fn build_module(
     }
 
     // ── Phase E: assemble sections ──
-    Ok(assemble(&funcs, &name_idx, reg, &interner, heap_start))
+    Ok(assemble(&funcs, &name_idx, reg, &interner, heap_start, &mut sigs))
 }
 
 /// First offset of the string-literal data segment. Above the null page so
@@ -174,24 +204,24 @@ fn assemble(
     reg: &LayoutRegistry,
     interner: &DataInterner,
     heap_start: u32,
+    sigs: &mut SigTable,
 ) -> Vec<u8> {
     let mut module = Module::new();
 
-    // ── Type section (deduplicated signatures) ──
+    // Intern each function's signature into the shared table (call_indirect
+    // signatures were already interned during lowering; this only adds the
+    // concrete function signatures, never reordering existing entries).
+    let func_sig: Vec<u32> = funcs.iter()
+        .map(|f| sigs.intern(f.params.clone(), f.results.clone()))
+        .collect();
+
+    // ── Type section (every interned signature, in index order) ──
     let mut types = TypeSection::new();
-    let mut sig_map: HashMap<(Vec<WasmTy>, Vec<WasmTy>), u32> = HashMap::new();
-    let mut func_sig: Vec<u32> = Vec::with_capacity(funcs.len());
-    for f in funcs {
-        let key = (f.params.clone(), f.results.clone());
-        let idx = *sig_map.entry(key).or_insert_with(|| {
-            let i = types.len();
-            types.ty().function(
-                f.params.iter().map(|t| t.to_valtype()),
-                f.results.iter().map(|t| t.to_valtype()),
-            );
-            i
-        });
-        func_sig.push(idx);
+    for (params, results) in sigs.all() {
+        types.ty().function(
+            params.iter().map(|t| t.to_valtype()),
+            results.iter().map(|t| t.to_valtype()),
+        );
     }
     module.section(&types);
 
@@ -201,6 +231,19 @@ fn assemble(
         functions.function(sig);
     }
     module.section(&functions);
+
+    // ── Table section: one funcref slot per function so closures and FnRef
+    //    can call_indirect with table index == function index. ──
+    let n = funcs.len() as u64;
+    let mut tables = wasm_encoder::TableSection::new();
+    tables.table(wasm_encoder::TableType {
+        element_type: wasm_encoder::RefType::FUNCREF,
+        minimum: n,
+        maximum: Some(n),
+        table64: false,
+        shared: false,
+    });
+    module.section(&tables);
 
     // ── Memory section (single linear memory) ──
     let mut memory = MemorySection::new();
@@ -237,6 +280,16 @@ fn assemble(
         exports.export(name, wasm_encoder::ExportKind::Func, idx);
     }
     module.section(&exports);
+
+    // ── Element section: populate the table so slot i → function i. ──
+    let elem_funcs: Vec<u32> = (0..funcs.len() as u32).collect();
+    let mut elements = wasm_encoder::ElementSection::new();
+    elements.active(
+        Some(0),
+        &wasm_encoder::ConstExpr::i32_const(0),
+        wasm_encoder::Elements::Functions(std::borrow::Cow::Borrowed(&elem_funcs)),
+    );
+    module.section(&elements);
 
     // ── Code section ──
     let mut codes = CodeSection::new();
@@ -845,6 +898,52 @@ mod tests {
         let main = mk_func("main", Ty::Int, idx);
         if let Some(r) = run(&[main], "main") {
             assert_eq!(r, "20", "tuple.1 of (10,20)");
+        }
+    }
+
+    /// Closure call through the function table: a lifted lambda
+    /// `__lam(env, x) = x + 1` is created as a closure and invoked indirectly
+    /// with argument 5 → 6. Exercises ClosureCreate, the closure calling
+    /// convention, and call_indirect.
+    #[test]
+    fn exec_closure_indirect_call() {
+        use almide_ir::{IrParam, ParamBorrow, CallTarget};
+        let mut vt = VarTable::new();
+        let env = vt.alloc(sym("env"), Ty::Unknown, almide_ir::Mutability::Let, None);
+        let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+
+        // __lam(env, x) -> Int = x + 1
+        let lam_body = binop(
+            almide_ir::BinOp::AddInt,
+            IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None },
+            lit_int(1),
+            Ty::Int,
+        );
+        let mut lam = mk_func("__lam", Ty::Int, lam_body);
+        lam.params = vec![
+            IrParam { var: env, ty: Ty::Unknown, name: sym("env"), borrow: ParamBorrow::Own,
+                      open_record: None, default: None, attrs: vec![] },
+            IrParam { var: x, ty: Ty::Int, name: sym("x"), borrow: ParamBorrow::Own,
+                      open_record: None, default: None, attrs: vec![] },
+        ];
+
+        // closure = ClosureCreate(__lam, []) ; main = closure(5)
+        let closure = IrExpr {
+            kind: IrExprKind::ClosureCreate { func_name: sym("__lam"), captures: vec![] },
+            ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) },
+            span: None, def_id: None,
+        };
+        let call = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(closure) },
+                args: vec![lit_int(5)],
+                type_args: vec![],
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, call);
+        if let Some(r) = run_vt(&[lam, main], &vt, "main") {
+            assert_eq!(r, "6", "closure(5) where lam(x)=x+1");
         }
     }
 

@@ -20,6 +20,7 @@ use super::ir::{
 };
 use super::layout::{self, LayoutRegistry};
 use super::data::DataInterner;
+use super::module::SigTable;
 
 /// Lowering context for a single function.
 pub struct LowerCtx<'a> {
@@ -36,6 +37,8 @@ pub struct LowerCtx<'a> {
     pub func_idx: &'a dyn Fn(&str) -> Option<FuncIdx>,
     /// Shared interner for string literals (data segment).
     pub interner: &'a mut DataInterner,
+    /// Shared signature table for call_indirect type indices.
+    pub sigs: &'a mut SigTable,
     /// Next scratch local index (for temporaries).
     next_local: u32,
 }
@@ -47,6 +50,7 @@ impl<'a> LowerCtx<'a> {
         reg: &'a LayoutRegistry,
         func_idx: &'a dyn Fn(&str) -> Option<FuncIdx>,
         interner: &'a mut DataInterner,
+        sigs: &'a mut SigTable,
     ) -> Self {
         let mut var_map = vec![None; var_table.len()];
         let mut locals = Vec::new();
@@ -69,6 +73,7 @@ impl<'a> LowerCtx<'a> {
             reg,
             func_idx,
             interner,
+            sigs,
             next_local: param_count,
         }
     }
@@ -137,8 +142,9 @@ pub fn lower_function(
     reg: &LayoutRegistry,
     func_idx: &dyn Fn(&str) -> Option<FuncIdx>,
     interner: &mut DataInterner,
+    sigs: &mut SigTable,
 ) -> WasmFunc {
-    let mut ctx = LowerCtx::new(&func.params, var_table, reg, func_idx, interner);
+    let mut ctx = LowerCtx::new(&func.params, var_table, reg, func_idx, interner, sigs);
     let has_result = !matches!(func.ret_ty, Ty::Unit);
     let body = lower_expr(&func.body, &mut ctx);
 
@@ -935,15 +941,19 @@ fn lower_stmt(stmt: &IrStmt, ctx: &mut LowerCtx) -> Vec<Op> {
 // ── Call lowering ────────────────────────────────────────────────────
 
 fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
-    let mut ops = Vec::new();
+    let pushes = if matches!(ret_ty, Ty::Unit) { 0 } else { 1 };
 
-    // Lower arguments
+    // Computed (closure) calls have a different calling convention — the env
+    // pointer must be the first argument — so they build their own op sequence.
+    if let CallTarget::Computed { callee } = target {
+        return lower_indirect_call(callee, args, ret_ty, pushes, ctx);
+    }
+
+    let mut ops = Vec::new();
     for arg in args {
         ops.extend(lower_expr(arg, ctx));
     }
-
     let pops = args.len() as u8;
-    let pushes = if matches!(ret_ty, Ty::Unit) { 0 } else { 1 };
 
     match target {
         CallTarget::Named { name, .. } => {
@@ -963,18 +973,47 @@ fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut Lower
                 ops.push(Op::Unreachable);
             }
         }
-        CallTarget::Computed { callee } => {
-            // Indirect call through closure
-            let callee_ops = lower_expr(callee, ctx);
-            ops.extend(callee_ops);
-            // TODO: extract table_idx and env_ptr from closure pair
-            ops.push(Op::Unreachable); // placeholder
-        }
-        _ => {
-            ops.push(Op::Unreachable);
-        }
+        _ => ops.push(Op::Unreachable),
+    }
+    ops
+}
+
+/// Lower an indirect (closure) call.
+///
+/// Closure pair layout `[table_idx @ 0][env_ptr @ 4]`; lifted lambdas have the
+/// convention `(env_ptr, params...) -> ret`. So we push `env_ptr`, then the
+/// arguments, then the table index, and `call_indirect` with that signature.
+fn lower_indirect_call(
+    callee: &IrExpr, args: &[IrExpr], ret_ty: &Ty, pushes: u8, ctx: &mut LowerCtx,
+) -> Vec<Op> {
+    let cl = ctx.alloc_local(WasmTy::I32);
+    let mut ops = lower_expr(callee, ctx);
+    ops.push(Op::LocalSet(cl));
+
+    // env_ptr = closure[4]
+    ops.push(Op::LocalGet(cl));
+    ops.push(Op::Const(Const::I32(4)));
+    ops.push(Op::BinOp(WBinOp::I32Add));
+    ops.push(Op::Load(LoadKind::I32));
+
+    // arguments
+    for arg in args {
+        ops.extend(lower_expr(arg, ctx));
     }
 
+    // table_idx = closure[0]
+    ops.push(Op::LocalGet(cl));
+    ops.push(Op::Load(LoadKind::I32));
+
+    // Signature: (env_ptr: i32, arg types...) -> ret
+    let mut sig_params = vec![WasmTy::I32];
+    sig_params.extend(args.iter().map(|a| ty_to_wasm(&a.ty)));
+    let sig_results = if matches!(ret_ty, Ty::Unit) { vec![] } else { vec![ty_to_wasm(ret_ty)] };
+    let sig = ctx.sigs.intern(sig_params, sig_results);
+
+    // call_indirect pops the table index + every parameter (env + args).
+    let pops = (args.len() as u8) + 1 /* env */ + 1 /* table idx */;
+    ops.push(Op::CallIndirect { sig, pops, pushes });
     ops
 }
 
@@ -1311,6 +1350,7 @@ mod tests {
     use super::*;
     use super::super::ir::verify_func_stack;
     use super::super::data::DataInterner;
+    use super::super::module::SigTable;
     use almide_ir::{IrVisibility, Mutability};
     use almide_base::intern::sym;
 
@@ -1336,7 +1376,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new());
         assert_eq!(wasm_func.results, vec![WasmTy::I64]);
         assert!(verify_func_stack(&wasm_func).is_ok(), "stack verification failed: {:?}", verify_func_stack(&wasm_func));
     }
@@ -1361,7 +1401,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new());
         assert!(verify_func_stack(&wasm_func).is_ok());
         // Should be: Const(1), Const(2), I64Add
         assert_eq!(wasm_func.body.len(), 3);
@@ -1393,7 +1433,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new());
         assert!(verify_func_stack(&wasm_func).is_ok(), "{:?}", verify_func_stack(&wasm_func));
         assert!(wasm_func.results.is_empty());
     }
@@ -1418,7 +1458,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new());
         assert!(verify_func_stack(&wasm_func).is_ok(), "{:?}", verify_func_stack(&wasm_func));
     }
 }
