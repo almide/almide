@@ -98,6 +98,10 @@ pub fn lower_intrinsic(
             map_merge_op(&args[0], &args[1], ctx),
         "almide_rt_map_map_values" if args.len() == 2 && map_supported(&args[0].ty) && map_supported(ret_ty) =>
             map_map_values(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_map_fold" if args.len() == 3 && map_supported(&args[0].ty) =>
+            map_fold(&args[0], &args[1], &args[2], ret_ty, ctx),
+        "almide_rt_map_filter" if args.len() == 2 && map_supported(&args[0].ty) =>
+            map_filter(&args[0], &args[1], ctx),
         "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
         // sort: Int lists via the runtime selection sort; other element types
         // (Float/String/composite) fall back until typed comparators land.
@@ -530,6 +534,102 @@ fn map_map_values(m: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Op
     loop_body.extend([Op::LocalGet(slot_l), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(slot_l), Op::Br(0)]);
     ops.push(Op::Block(vec![Op::Loop(loop_body)]));
     ops.push(Op::LocalGet(out_l));
+    Some(ops)
+}
+
+/// Common map-iteration prologue: evaluate `m`, capture cap, set up a slot
+/// counter. Returns (m_local, cap_local, slot_local) and the prologue ops.
+fn map_iter_prologue(m: &IrExpr, ctx: &mut LowerCtx) -> (u32, u32, u32, Vec<Op>) {
+    let m_l = ctx.alloc_local(WasmTy::I32);
+    let cap_l = ctx.alloc_local(WasmTy::I32);
+    let slot_l = ctx.alloc_local(WasmTy::I32);
+    let mut ops = lower_expr(m, ctx);
+    ops.push(Op::LocalSet(m_l));
+    ops.push(Op::LocalGet(m_l)); ops.push(Op::Const(Const::I32(4))); ops.push(Op::BinOp(B::I32Add)); ops.push(Op::Load(LoadKind::I32)); ops.push(Op::LocalSet(cap_l));
+    ops.push(Op::Const(Const::I32(0))); ops.push(Op::LocalSet(slot_l));
+    (m_l, cap_l, slot_l, ops)
+}
+
+/// Ops loading the entry address for `slot` into local `ea` (m+8+cap+slot*16).
+fn map_entry_into(m_l: u32, cap_l: u32, slot_l: u32, ea: u32) -> Vec<Op> {
+    vec![
+        Op::LocalGet(m_l), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(cap_l), Op::BinOp(B::I32Add),
+        Op::LocalGet(slot_l), Op::Const(Const::I32(16)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalSet(ea),
+    ]
+}
+
+/// `map.fold(m, init, f: (A, K, V) -> A) -> A`.
+fn map_fold(m: &IrExpr, init: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (params, body) = inline_lambda_n(f, 3, ctx)?;
+    let (acc_v, _a) = params[0].clone();
+    let (k_v, k_ty) = params[1].clone();
+    let (v_v, v_ty) = params[2].clone();
+    let acc = ctx.alloc_local(ty_to_wasm(ret_ty));
+    let k_local = ctx.alloc_local(ty_to_wasm(&k_ty));
+    let v_local = ctx.alloc_local(ty_to_wasm(&v_ty));
+    let ea = ctx.alloc_local(WasmTy::I32);
+    ctx.map_var(acc_v, acc); ctx.map_var(k_v, k_local); ctx.map_var(v_v, v_local);
+
+    let mut ops = lower_expr(init, ctx);
+    ops.push(Op::LocalSet(acc));
+    let (m_l, cap_l, slot_l, pro) = map_iter_prologue(m, ctx);
+    ops.extend(pro);
+
+    let mut occ = map_entry_into(m_l, cap_l, slot_l, ea);
+    occ.push(Op::LocalGet(ea)); occ.push(Op::Load(load_kind_of(ty_to_wasm(&k_ty)))); occ.push(Op::LocalSet(k_local));
+    occ.push(Op::LocalGet(ea)); occ.push(Op::Const(Const::I32(8))); occ.push(Op::BinOp(B::I32Add)); occ.push(Op::Load(load_kind_of(ty_to_wasm(&v_ty)))); occ.push(Op::LocalSet(v_local));
+    occ.extend(lower_expr(&body, ctx)); occ.push(Op::LocalSet(acc));
+
+    let mut loop_body = vec![
+        Op::LocalGet(slot_l), Op::LocalGet(cap_l), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        Op::LocalGet(m_l), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(slot_l), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+    ];
+    loop_body.push(Op::IfVoid { then: occ, else_: vec![] });
+    loop_body.extend([Op::LocalGet(slot_l), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(slot_l), Op::Br(0)]);
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(acc));
+    Some(ops)
+}
+
+/// `map.filter(m, f: (K, V) -> Bool) -> Map[K,V]`.
+fn map_filter(m: &IrExpr, f: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, _k, _v) = map_kv(&m.ty)?;
+    let (params, body) = inline_lambda_n(f, 2, ctx)?;
+    let (k_v, k_ty) = params[0].clone();
+    let (v_v, v_ty) = params[1].clone();
+    let (new_idx, set_idx) = ((ctx.func_idx)("__map_new")?, (ctx.func_idx)("__map_set")?);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let k_local = ctx.alloc_local(ty_to_wasm(&k_ty));
+    let v_local = ctx.alloc_local(ty_to_wasm(&v_ty));
+    let ea = ctx.alloc_local(WasmTy::I32);
+    ctx.map_var(k_v, k_local); ctx.map_var(v_v, v_local);
+
+    let (m_l, cap_l, slot_l, mut ops) = map_iter_prologue(m, ctx);
+    ops.push(Op::Call { idx: new_idx, pops: 0, pushes: 1 }); ops.push(Op::LocalSet(out));
+
+    let mut occ = map_entry_into(m_l, cap_l, slot_l, ea);
+    occ.push(Op::LocalGet(ea)); occ.push(Op::Load(load_kind_of(ty_to_wasm(&k_ty)))); occ.push(Op::LocalSet(k_local));
+    occ.push(Op::LocalGet(ea)); occ.push(Op::Const(Const::I32(8))); occ.push(Op::BinOp(B::I32Add)); occ.push(Op::Load(load_kind_of(ty_to_wasm(&v_ty)))); occ.push(Op::LocalSet(v_local));
+    occ.extend(lower_expr(&body, ctx)); // predicate → i32 bool
+    // keep: out = __map_set(out, key_i64, val_i64, kind)
+    let keep = vec![
+        Op::LocalGet(out),
+        Op::LocalGet(ea), Op::Load(LoadKind::I64),
+        Op::LocalGet(ea), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I64),
+        Op::Const(Const::I32(kind)),
+        Op::Call { idx: set_idx, pops: 4, pushes: 1 }, Op::LocalSet(out),
+    ];
+    occ.push(Op::IfVoid { then: keep, else_: vec![] });
+
+    let mut loop_body = vec![
+        Op::LocalGet(slot_l), Op::LocalGet(cap_l), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        Op::LocalGet(m_l), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(slot_l), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+    ];
+    loop_body.push(Op::IfVoid { then: occ, else_: vec![] });
+    loop_body.extend([Op::LocalGet(slot_l), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(slot_l), Op::Br(0)]);
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(out));
     Some(ops)
 }
 

@@ -843,6 +843,70 @@ mod tests {
         ti(call_i("almide_rt_map_len", vec![set(lit(), 1, 99)], Ty::Int), "3", "len after overwrite");
     }
 
+    /// map.fold: sum keys+values of {1:10,2:20,3:30} → (1+2+3)+(10+20+30)=66.
+    #[test]
+    fn exec_map_fold() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let map_ty = Ty::Applied(TC::Map, vec![Ty::Int, Ty::Int]);
+        let mut vt = VarTable::new();
+        let acc = vt.alloc(sym("acc"), Ty::Int, almide_ir::Mutability::Let, None);
+        let k = vt.alloc(sym("k"), Ty::Int, almide_ir::Mutability::Let, None);
+        let v = vt.alloc(sym("v"), Ty::Int, almide_ir::Mutability::Let, None);
+        let var = |id| IrExpr { kind: IrExprKind::Var { id }, ty: Ty::Int, span: None, def_id: None };
+        // acc + k + v
+        let body = binop(almide_ir::BinOp::AddInt,
+            binop(almide_ir::BinOp::AddInt, var(acc), var(k), Ty::Int), var(v), Ty::Int);
+        let lam = IrExpr {
+            kind: IrExprKind::Lambda { params: vec![(acc, Ty::Int), (k, Ty::Int), (v, Ty::Int)], body: Box::new(body), lambda_id: None },
+            ty: Ty::Fn { params: vec![Ty::Int, Ty::Int, Ty::Int], ret: Box::new(Ty::Int) }, span: None, def_id: None,
+        };
+        let lit = IrExpr {
+            kind: IrExprKind::MapLiteral { entries: vec![(lit_int(1), lit_int(10)), (lit_int(2), lit_int(20)), (lit_int(3), lit_int(30))] },
+            ty: map_ty.clone(), span: None, def_id: None,
+        };
+        let folded = IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_map_fold"), args: vec![lit, lit_int(0), lam] },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let m = mk_func("main", Ty::Int, folded);
+        if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(r, "66", "fold sum keys+values"); }
+    }
+
+    /// map.filter: keep entries with value > 15 from {1:10,2:20,3:30} → {2,3}.
+    #[test]
+    fn exec_map_filter() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let map_ty = || Ty::Applied(TC::Map, vec![Ty::Int, Ty::Int]);
+        let mut vt = VarTable::new();
+        let k = vt.alloc(sym("k"), Ty::Int, almide_ir::Mutability::Let, None);
+        let v = vt.alloc(sym("v"), Ty::Int, almide_ir::Mutability::Let, None);
+        let lam = IrExpr {
+            kind: IrExprKind::Lambda {
+                params: vec![(k, Ty::Int), (v, Ty::Int)],
+                body: Box::new(binop(almide_ir::BinOp::Gt,
+                    IrExpr { kind: IrExprKind::Var { id: v }, ty: Ty::Int, span: None, def_id: None }, lit_int(15), Ty::Bool)),
+                lambda_id: None,
+            },
+            ty: Ty::Fn { params: vec![Ty::Int, Ty::Int], ret: Box::new(Ty::Bool) }, span: None, def_id: None,
+        };
+        let filtered = || IrExpr {
+            kind: IrExprKind::RuntimeCall {
+                symbol: sym("almide_rt_map_filter"),
+                args: vec![
+                    IrExpr { kind: IrExprKind::MapLiteral { entries: vec![(lit_int(1), lit_int(10)), (lit_int(2), lit_int(20)), (lit_int(3), lit_int(30))] }, ty: map_ty(), span: None, def_id: None },
+                    lam.clone(),
+                ],
+            },
+            ty: map_ty(), span: None, def_id: None,
+        };
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(&r, exp, "{}", msg); } };
+        let tb = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Bool, e); if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(&r, exp, "{}", msg); } };
+        ti(call("almide_rt_map_len", vec![filtered()], Ty::Int), "2", "filter len");
+        tb(call("almide_rt_map_contains", vec![filtered(), lit_int(1)], Ty::Bool), "0", "1 filtered out");
+        tb(call("almide_rt_map_contains", vec![filtered(), lit_int(3)], Ty::Bool), "1", "3 kept");
+    }
+
     /// map.map (map_values): `{1:10,2:20}.map(v => v+1)` → {1:11, 2:21}.
     #[test]
     fn exec_map_map_values() {
