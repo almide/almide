@@ -1081,6 +1081,16 @@ mod tests {
         if let Some(r) = run(&[mx], "main") { assert_eq!(r, "7", "max(3,7)"); }
     }
 
+    /// string.len counts UTF-8 code points, not bytes:
+    /// "café" is 5 bytes but 4 chars; "abc" is 3.
+    #[test]
+    fn exec_intrinsic_string_len_unicode() {
+        let cafe = mk_func("main", Ty::Int, rt_call("almide_rt_string_len", vec![lit_str("café")]));
+        if let Some(r) = run(&[cafe], "main") { assert_eq!(r, "4", "len(café) chars"); }
+        let abc = mk_func("main", Ty::Int, rt_call("almide_rt_string_len", vec![lit_str("abc")]));
+        if let Some(r) = run(&[abc], "main") { assert_eq!(r, "3", "len(abc)"); }
+    }
+
     /// list.get_or with in-bounds and out-of-bounds indices:
     /// [10,20,30].get_or(1, 99)==20 ; .get_or(5, 99)==99.
     #[test]

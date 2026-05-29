@@ -24,8 +24,9 @@ pub fn lower_intrinsic(
 ) -> Option<Vec<Op>> {
     match symbol {
         // ── Tier 1: pure-read primitives ──
-        // String/List length: load the i32 LEN field, widen to the Int (i64).
-        "almide_rt_string_len" => Some(len_field(&args[0], layout::STRING, string::LEN, ctx)),
+        // string.len counts UTF-8 code points (the documented semantics), not
+        // bytes. list.len is the element count (the LEN field directly).
+        "almide_rt_string_len" => Some(string_char_len(&args[0], ctx)),
         "almide_rt_list_len" => Some(len_field(&args[0], layout::LIST, list::LEN, ctx)),
 
         // is_empty: LEN == 0 (i32 bool).
@@ -532,6 +533,52 @@ fn store_kind_of(wt: WasmTy) -> StoreKind {
         WasmTy::F32 => SK::F32,
         WasmTy::I32 => SK::I32,
     }
+}
+
+/// `string.len` — count UTF-8 code points (bytes whose top two bits are not
+/// `10`, i.e. not continuation bytes), widened to i64.
+fn string_char_len(arg: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
+    let p = ctx.alloc_local(WasmTy::I32);
+    let bl = ctx.alloc_local(WasmTy::I32);
+    let cnt = ctx.alloc_local(WasmTy::I32);
+    let i = ctx.alloc_local(WasmTy::I32);
+    let mut ops = lower_expr(arg, ctx);
+    ops.push(Op::LocalSet(p));
+    ops.push(Op::LocalGet(p));
+    ops.push(Op::FieldLoad { layout: layout::STRING, field: string::LEN, kind: LoadKind::I32 });
+    ops.push(Op::LocalSet(bl));
+    ops.push(Op::Const(Const::I32(0)));
+    ops.push(Op::LocalSet(cnt));
+    ops.push(Op::Const(Const::I32(0)));
+    ops.push(Op::LocalSet(i));
+
+    let bump = vec![Op::LocalGet(cnt), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(cnt)];
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(i));
+    loop_body.push(Op::LocalGet(bl));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    // b = byte[p + 8 + i] ; if (b & 0xC0) != 0x80 → count++
+    loop_body.push(Op::LocalGet(p));
+    loop_body.push(Op::Const(Const::I32(8)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalGet(i));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::Load(LoadKind::U8));
+    loop_body.push(Op::Const(Const::I32(0xC0)));
+    loop_body.push(Op::BinOp(B::I32And));
+    loop_body.push(Op::Const(Const::I32(0x80)));
+    loop_body.push(Op::BinOp(B::I32Ne));
+    loop_body.push(Op::IfVoid { then: bump, else_: vec![] });
+    loop_body.push(Op::LocalGet(i));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(i));
+    loop_body.push(Op::Br(0));
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(cnt));
+    ops.push(Op::UnOp(U::I64ExtendI32U));
+    ops
 }
 
 /// `field` (i32) widened to i64 — for string/list length.
