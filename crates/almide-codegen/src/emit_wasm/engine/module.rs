@@ -1417,6 +1417,37 @@ mod tests {
         if let Some(r) = run(&[m3], "main") { assert_eq!(r, "1", "slice café[3,4] len chars"); }
     }
 
+    /// float.to_string — fixed 6-decimal, trailing zeros trimmed.
+    #[test]
+    fn exec_float_to_string() {
+        let lit_float = |v: f64| IrExpr { kind: IrExprKind::LitFloat { value: v }, ty: Ty::Float, span: None, def_id: None };
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let fts = |v: f64| call("almide_rt_float_to_string", vec![lit_float(v)], Ty::String);
+        let byte = |e: IrExpr, i: i64| call("__byte_at", vec![e, lit_int(i)], Ty::Int);
+        let len = |e: IrExpr| call("almide_rt_string_len", vec![e], Ty::Int);
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        // 1.5 → "1.5" : len 3, bytes '1'(49) '.'(46) '5'(53)
+        ti(len(fts(1.5)), "3", "1.5 len");
+        ti(byte(fts(1.5), 0), "49", "1.5[0]");
+        ti(byte(fts(1.5), 1), "46", "1.5[1]");
+        ti(byte(fts(1.5), 2), "53", "1.5[2]");
+        // 2.0 → "2.0" : trailing zeros trimmed to one frac digit
+        ti(len(fts(2.0)), "3", "2.0 len");
+        ti(byte(fts(2.0), 2), "48", "2.0 frac '0'");
+        // 3.14 → "3.14"
+        ti(len(fts(3.14)), "4", "3.14 len");
+        ti(byte(fts(3.14), 3), "52", "3.14[3]=='4'");
+        // -0.5 → "-0.5" : sign even when int part is 0
+        ti(len(fts(-0.5)), "4", "-0.5 len");
+        ti(byte(fts(-0.5), 0), "45", "-0.5[0]=='-'");
+        ti(byte(fts(-0.5), 1), "48", "-0.5[1]=='0'");
+        ti(byte(fts(-0.5), 3), "53", "-0.5[3]=='5'");
+        // 0.0 → "0.0"
+        ti(len(fts(0.0)), "3", "0.0 len");
+    }
+
     /// string.to_upper / to_lower / repeat / contains.
     #[test]
     fn exec_string_transforms() {

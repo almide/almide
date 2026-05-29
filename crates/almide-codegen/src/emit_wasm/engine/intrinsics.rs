@@ -44,6 +44,7 @@ pub fn lower_intrinsic(
 
         // ── Tier 2: route to an existing runtime function ──
         "almide_rt_int_to_string" => call_runtime("__int_to_string", &args[0..1], 1, ctx),
+        "almide_rt_float_to_string" => call_runtime("__float_to_string", &args[0..1], 1, ctx),
         "almide_rt_io_print" if args.len() == 1 => call_runtime("__print", args, 0, ctx),
 
         // ── Tier 3: higher-order with an inline (non-capturing) lambda ──

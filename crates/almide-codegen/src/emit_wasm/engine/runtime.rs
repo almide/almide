@@ -72,11 +72,12 @@ pub struct RuntimeFns {
     pub to_case: FuncIdx,
     pub str_repeat: FuncIdx,
     pub str_contains: FuncIdx,
+    pub float_to_string: FuncIdx,
 }
 
 /// The number of *defined* runtime functions (they occupy function indices
 /// `IMPORT_COUNT .. IMPORT_COUNT + COUNT`).
-pub const COUNT: u32 = 32;
+pub const COUNT: u32 = 33;
 
 impl RuntimeFns {
     /// Defined runtime functions in code-section order, offset past the imports.
@@ -115,11 +116,12 @@ impl RuntimeFns {
             to_case: IMPORT_COUNT + 29,
             str_repeat: IMPORT_COUNT + 30,
             str_contains: IMPORT_COUNT + 31,
+            float_to_string: IMPORT_COUNT + 32,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 32] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 33] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -153,6 +155,7 @@ impl RuntimeFns {
             ("__string_to_case", self.to_case),
             ("__string_repeat", self.str_repeat),
             ("__string_contains", self.str_contains),
+            ("__float_to_string", self.float_to_string),
         ]
     }
 }
@@ -194,6 +197,7 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_to_case(),
         build_str_repeat(),
         build_str_contains(),
+        build_float_to_string(),
     ]
 }
 
@@ -210,7 +214,7 @@ fn build_to_case() -> WasmFunc {
     const DELTA: u32 = 6;
     const B: u32 = 7;
 
-    let mut loop_body = vec![
+    let loop_body = vec![
         Op::LocalGet(I), Op::LocalGet(BL), Op::BinOp(B::I32GeU), Op::BrIf(1),
         // b = s[8+i]
         Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(I), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8), Op::LocalSet(B),
@@ -262,7 +266,7 @@ fn build_str_repeat() -> WasmFunc {
     const OUT: u32 = 5;
     const K: u32 = 6;
 
-    let mut loop_body = vec![
+    let loop_body = vec![
         Op::LocalGet(K), Op::LocalGet(NI), Op::BinOp(B::I32GeU), Op::BrIf(1),
         // memcpy(out + 8 + k*bl, s + 8, bl)
         Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
@@ -338,6 +342,120 @@ fn build_str_contains() -> WasmFunc {
     WasmFunc {
         name: "__string_contains".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
         locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // sl,subl,start,j,matched
+        body,
+    }
+}
+
+/// `__float_to_string(v: f64) -> i32` — fixed 6-decimal formatting with
+/// trailing zeros trimmed (minimum one fractional digit). Display-only: not a
+/// shortest round-trip (no scientific notation, no NaN/Inf handling).
+fn build_float_to_string() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const V: u32 = 0;     // f64 param
+    const NEG: u32 = 1;   // i32
+    const AV: u32 = 2;    // f64 (abs)
+    const IP: u32 = 3;    // i64 integer part (>= 0)
+    const FR: u32 = 4;    // i64 frac scaled to 6 digits, then trimmed
+    const FD: u32 = 5;    // i32 frac digit count
+    const ID: u32 = 6;    // i32 int digit count
+    const T: u32 = 7;     // i64 temp
+    const TOTAL: u32 = 8; // i32 byte length
+    const OUT: u32 = 9;   // i32 string ptr
+    const P: u32 = 10;    // i32 fill cursor
+    const CNT: u32 = 11;  // i32 digit loop counter
+
+    // base = OUT + 8 + NEG  (first int-digit byte)
+    let int_base = || vec![
+        Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(NEG), Op::BinOp(B::I32Add),
+    ];
+
+    // Trim trailing zeros: while FD >u 1 && FR % 10 == 0 { FR /= 10; FD-- }
+    let trim_loop = vec![
+        Op::LocalGet(FD), Op::Const(Const::I32(1)), Op::BinOp(B::I32GtU), Op::UnOp(U::I32Eqz), Op::BrIf(1),
+        Op::LocalGet(FR), Op::Const(Const::I64(10)), Op::BinOp(B::I64RemS), Op::Const(Const::I64(0)), Op::BinOp(B::I64Ne), Op::BrIf(1),
+        Op::LocalGet(FR), Op::Const(Const::I64(10)), Op::BinOp(B::I64DivS), Op::LocalSet(FR),
+        Op::LocalGet(FD), Op::Const(Const::I32(1)), Op::BinOp(B::I32Sub), Op::LocalSet(FD),
+        Op::Br(0),
+    ];
+    // Count int digits: ID=1; T=IP; while { T/=10; if T==0 break; ID++ }
+    let id_loop = vec![
+        Op::LocalGet(T), Op::Const(Const::I64(10)), Op::BinOp(B::I64DivS), Op::LocalSet(T),
+        Op::LocalGet(T), Op::Const(Const::I64(0)), Op::BinOp(B::I64Eq), Op::BrIf(1),
+        Op::LocalGet(ID), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(ID),
+        Op::Br(0),
+    ];
+    // Write `count` (ID or FD) digits backward from cursor P, sourcing T.
+    let digit_loop = |count: u32| vec![
+        Op::LocalGet(CNT), Op::LocalGet(count), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        Op::LocalGet(P), Op::Const(Const::I32(1)), Op::BinOp(B::I32Sub), Op::LocalSet(P),
+        Op::LocalGet(P),
+        Op::Const(Const::I32(48)), Op::LocalGet(T), Op::Const(Const::I64(10)), Op::BinOp(B::I64RemS), Op::UnOp(U::I32WrapI64), Op::BinOp(B::I32Add),
+        Op::Store(StoreKind::I8),
+        Op::LocalGet(T), Op::Const(Const::I64(10)), Op::BinOp(B::I64DivS), Op::LocalSet(T),
+        Op::LocalGet(CNT), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(CNT),
+        Op::Br(0),
+    ];
+
+    let mut body = vec![
+        // NEG = v < 0 ; AV = |v|
+        Op::LocalGet(V), Op::Const(Const::F64(0.0)), Op::BinOp(B::F64Lt), Op::LocalSet(NEG),
+        Op::LocalGet(V), Op::UnOp(U::F64Abs), Op::LocalSet(AV),
+        // IP = trunc(AV)
+        Op::LocalGet(AV), Op::UnOp(U::I64TruncF64S), Op::LocalSet(IP),
+        // FR = trunc((AV - (f64)IP) * 1e6 + 0.5)
+        Op::LocalGet(AV), Op::LocalGet(IP), Op::UnOp(U::F64ConvertI64S), Op::BinOp(B::F64Sub),
+        Op::Const(Const::F64(1_000_000.0)), Op::BinOp(B::F64Mul), Op::Const(Const::F64(0.5)), Op::BinOp(B::F64Add),
+        Op::UnOp(U::I64TruncF64S), Op::LocalSet(FR),
+        // carry: FR == 1e6 (rounded up) → IP++, FR=0
+        Op::LocalGet(FR), Op::Const(Const::I64(1_000_000)), Op::BinOp(B::I64GeS),
+        Op::IfVoid {
+            then: vec![
+                Op::LocalGet(IP), Op::Const(Const::I64(1)), Op::BinOp(B::I64Add), Op::LocalSet(IP),
+                Op::LocalGet(FR), Op::Const(Const::I64(1_000_000)), Op::BinOp(B::I64Sub), Op::LocalSet(FR),
+            ],
+            else_: vec![],
+        },
+        // FD = 6 ; trim
+        Op::Const(Const::I32(6)), Op::LocalSet(FD),
+        Op::Block(vec![Op::Loop(trim_loop)]),
+        // ID = count digits of IP
+        Op::Const(Const::I32(1)), Op::LocalSet(ID),
+        Op::LocalGet(IP), Op::LocalSet(T),
+        Op::Block(vec![Op::Loop(id_loop)]),
+        // TOTAL = NEG + ID + 1 + FD
+        Op::LocalGet(NEG), Op::LocalGet(ID), Op::BinOp(B::I32Add), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalGet(FD), Op::BinOp(B::I32Add), Op::LocalSet(TOTAL),
+        // OUT = alloc(8 + TOTAL) ; len = cap = TOTAL
+        Op::Const(Const::I32(8)), Op::LocalGet(TOTAL), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+        Op::LocalGet(OUT), Op::LocalGet(TOTAL), Op::Store(StoreKind::I32),
+        Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(TOTAL), Op::Store(StoreKind::I32),
+        // sign byte
+        Op::LocalGet(NEG),
+        Op::IfVoid {
+            then: vec![Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::Const(Const::I32(45)), Op::Store(StoreKind::I8)],
+            else_: vec![],
+        },
+    ];
+    // int digits: P = int_base + ID ; T = IP ; write ID digits backward
+    body.extend(int_base());
+    body.extend(vec![Op::LocalGet(ID), Op::BinOp(B::I32Add), Op::LocalSet(P)]);
+    body.extend(vec![Op::LocalGet(IP), Op::LocalSet(T), Op::Const(Const::I32(0)), Op::LocalSet(CNT)]);
+    body.push(Op::Block(vec![Op::Loop(digit_loop(ID))]));
+    // '.' at int_base + ID
+    body.extend(int_base());
+    body.extend(vec![Op::LocalGet(ID), Op::BinOp(B::I32Add), Op::Const(Const::I32(46)), Op::Store(StoreKind::I8)]);
+    // frac digits: P = int_base + ID + 1 + FD ; T = FR ; write FD digits backward
+    body.extend(int_base());
+    body.extend(vec![
+        Op::LocalGet(ID), Op::BinOp(B::I32Add), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalGet(FD), Op::BinOp(B::I32Add), Op::LocalSet(P),
+        Op::LocalGet(FR), Op::LocalSet(T), Op::Const(Const::I32(0)), Op::LocalSet(CNT),
+    ]);
+    body.push(Op::Block(vec![Op::Loop(digit_loop(FD))]));
+    body.push(Op::LocalGet(OUT));
+
+    WasmFunc {
+        name: "__float_to_string".into(), params: vec![WasmTy::F64], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::F64, WasmTy::I64, WasmTy::I64, WasmTy::I32, WasmTy::I32, WasmTy::I64, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32],
         body,
     }
 }
