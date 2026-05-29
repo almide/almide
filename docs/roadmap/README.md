@@ -6,10 +6,11 @@
 
 ## Active
 
-13 items
+14 items
 
 | Item | Description |
 |------|-------------|
+| [ADR: Almide does not adopt WASM-GC](active/adr-no-wasm-gc.md) | ADR — Almide does not adopt WASM-GC; stays linear-memory + Perceus, cherry-picks non-GC WASM features |
 | [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
