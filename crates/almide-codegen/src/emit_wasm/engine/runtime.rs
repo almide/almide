@@ -52,12 +52,13 @@ pub struct RuntimeFns {
     pub map_put: FuncIdx,   // internal in-place insert (no resize)
     pub map_set: FuncIdx,   // functional set (rebuild)
     pub map_get: FuncIdx,
+    pub map_get_or: FuncIdx,
     pub map_contains: FuncIdx,
     pub map_len: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 21;
+pub const COUNT: u32 = 22;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -82,13 +83,14 @@ impl RuntimeFns {
             map_put: 16,
             map_set: 17,
             map_get: 18,
-            map_contains: 19,
-            map_len: 20,
+            map_get_or: 19,
+            map_contains: 20,
+            map_len: 21,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 21] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 22] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -109,6 +111,7 @@ impl RuntimeFns {
             ("__map_put", self.map_put),
             ("__map_set", self.map_set),
             ("__map_get", self.map_get),
+            ("__map_get_or", self.map_get_or),
             ("__map_contains", self.map_contains),
             ("__map_len", self.map_len),
         ]
@@ -139,9 +142,49 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_map_put(),
         build_map_set(),
         build_map_get(),
+        build_map_get_or(),
         build_map_contains(),
         build_map_len(),
     ]
+}
+
+/// `__map_get_or(m, k, default: i64) -> i64` — value for `k`, or `default`.
+/// Like __map_get but returns the value directly (no Option allocation); this
+/// is the target of the `map.get(m, k) ?? default` fusion.
+fn build_map_get_or() -> WasmFunc {
+    const M: u32 = 0;
+    const K: u32 = 1;
+    const DEF: u32 = 2;
+    const CAP: u32 = 3;
+    const SLOT: u32 = 4;
+    const EA: u32 = 5;
+
+    let mut loop_body = Vec::new();
+    loop_body.extend(map_tag_addr(M, SLOT)); loop_body.push(Op::Load(LoadKind::U8));
+    loop_body.push(Op::UnOp(U::I32Eqz));
+    loop_body.push(Op::IfVoid { then: vec![Op::LocalGet(DEF), Op::Return], else_: vec![] });
+    loop_body.extend(map_entry_addr(M, CAP, SLOT)); loop_body.push(Op::LocalSet(EA));
+    loop_body.push(Op::LocalGet(EA)); loop_body.push(Op::Load(LoadKind::I64));
+    loop_body.push(Op::LocalGet(K)); loop_body.push(Op::BinOp(B::I64Eq));
+    loop_body.push(Op::IfVoid {
+        then: vec![Op::LocalGet(EA), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I64), Op::Return],
+        else_: vec![],
+    });
+    loop_body.extend([Op::LocalGet(SLOT), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT), Op::Br(0)]);
+
+    let body = vec![
+        Op::LocalGet(M), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(CAP),
+        Op::LocalGet(CAP), Op::UnOp(U::I32Eqz),
+        Op::IfVoid { then: vec![Op::LocalGet(DEF), Op::Return], else_: vec![] },
+        Op::LocalGet(K), Op::UnOp(U::I32WrapI64), Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT),
+        Op::Loop(loop_body),
+        Op::LocalGet(DEF), // unreachable
+    ];
+    WasmFunc {
+        name: "__map_get_or".into(), params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I64], results: vec![WasmTy::I64],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32], // cap, slot, ea
+        body,
+    }
 }
 
 // ── Map[Int, Int] runtime (linear-probed open addressing) ────────────

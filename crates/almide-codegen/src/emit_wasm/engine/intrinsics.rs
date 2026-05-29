@@ -80,6 +80,8 @@ pub fn lower_intrinsic(
             (ctx.func_idx)("__map_new").map(|idx| vec![Op::Call { idx, pops: 0, pushes: 1 }]),
         "almide_rt_map_get" if args.len() == 2 && is_int_int_map(&args[0].ty) =>
             call_runtime("__map_get", args, 1, ctx),
+        "almide_rt_map_get_or" if args.len() == 3 && is_int_int_map(&args[0].ty) =>
+            call_runtime("__map_get_or", args, 1, ctx),
         "almide_rt_map_set" if args.len() == 3 && is_int_int_map(&args[0].ty) =>
             call_runtime("__map_set", args, 1, ctx),
         "almide_rt_map_contains" if args.len() == 2 && is_int_int_map(&args[0].ty) =>
