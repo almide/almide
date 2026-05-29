@@ -270,15 +270,18 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
                 }
             } else if matches!(op, almide_ir::BinOp::ConcatList) {
                 // List concatenation: pass the element width so the runtime can
-                // copy raw bytes. (left.ty is List[T].)
-                let elem_size = list_element_ty(&left.ty)
-                    .map(|t| wasm_byte_size(&t))
-                    .unwrap_or(8);
-                ops.push(Op::Const(Const::I32(elem_size)));
-                if let Some(idx) = (ctx.func_idx)("__list_concat") {
-                    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
-                } else {
-                    ops.push(Op::Unreachable);
+                // copy raw bytes. (left.ty is List[T].) Reject (→ legacy) on an
+                // unresolved element rather than guessing a stride.
+                match list_element_ty(&left.ty) {
+                    Some(t) if !t.is_unresolved() => {
+                        ops.push(Op::Const(Const::I32(wasm_byte_size(&t))));
+                        if let Some(idx) = (ctx.func_idx)("__list_concat") {
+                            ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+                        } else {
+                            ops.push(Op::Unreachable);
+                        }
+                    }
+                    _ => ops.push(Op::Unsupported("concat-list-unresolved-elem")),
                 }
             }
             // Other None cases (ModFloat, Pow, matrix) have no runtime yet; they
@@ -1616,8 +1619,14 @@ fn record_total_size(ty: &Ty, recs: &RecordLayouts) -> Option<i32> {
 
 fn lower_for_in(var: VarId, iterable: &IrExpr, body: &[IrStmt], ctx: &mut LowerCtx) -> Vec<Op> {
     let mut ops = Vec::new();
-    // Element type from the iterable: List[T] / Set[T] → T (default Int).
-    let elem_ty = list_element_ty(&iterable.ty).unwrap_or(Ty::Int);
+    // Element type from the iterable: List[T] / Set[T] → T. A List/Set with an
+    // unresolved element would mis-stride, so reject (→ legacy). `None` (Range
+    // and other Int-yielding iterables) keeps the Int default.
+    let elem_ty = match list_element_ty(&iterable.ty) {
+        Some(t) if t.is_unresolved() => return vec![Op::Unsupported("forin-unresolved-elem")],
+        Some(t) => t,
+        None => Ty::Int,
+    };
     let elem_wasm = ty_to_wasm(&elem_ty);
     let elem_size = wasm_byte_size(&elem_ty);
     let (elem_load, elem_store) = (load_kind_of(elem_wasm), ()); // store unused here

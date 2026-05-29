@@ -230,7 +230,7 @@ fn list_sum(xs_expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
 /// elements (Int/Float/Bool) and String (deep eq); other element types fall
 /// back (None).
 fn list_contains(xs_expr: &IrExpr, x_expr: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
-    let elem_ty = super::lower::list_element_ty(&xs_expr.ty).unwrap_or(Ty::Int);
+    let elem_ty = concrete_ty(super::lower::list_element_ty(&xs_expr.ty))?;
     let wt = ty_to_wasm(&elem_ty);
     let es = wasm_byte_size(&elem_ty);
     let lk = load_kind_of(wt);
@@ -281,10 +281,10 @@ fn list_contains(xs_expr: &IrExpr, x_expr: &IrExpr, ctx: &mut LowerCtx) -> Optio
 fn result_map(r: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
     let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
     let in_lk = load_kind_of(ty_to_wasm(&pty));
-    let out_ok_ty = result_ok_ty(ret_ty).unwrap_or(Ty::Int);
+    let out_ok_ty = concrete_ty(result_ok_ty(ret_ty))?;
     let out_sk = store_kind_of(ty_to_wasm(&out_ok_ty));
     // Err payload type (E) for passthrough copy.
-    let err_ty = result_err_ty(&r.ty).unwrap_or(Ty::String);
+    let err_ty = concrete_ty(result_err_ty(&r.ty))?;
     let err_lk = load_kind_of(ty_to_wasm(&err_ty));
     let err_sk = store_kind_of(ty_to_wasm(&err_ty));
 
@@ -329,9 +329,9 @@ fn result_map(r: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option
 fn result_map_err(r: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
     let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
     let in_lk = load_kind_of(ty_to_wasm(&pty)); // E (incoming err)
-    let out_err_ty = result_err_ty(ret_ty).unwrap_or(Ty::String); // F
+    let out_err_ty = concrete_ty(result_err_ty(ret_ty))?; // F
     let out_sk = store_kind_of(ty_to_wasm(&out_err_ty));
-    let ok_ty = result_ok_ty(&r.ty).unwrap_or(Ty::Int); // A (passthrough)
+    let ok_ty = concrete_ty(result_ok_ty(&r.ty))?; // A (passthrough)
     let ok_lk = load_kind_of(ty_to_wasm(&ok_ty));
     let ok_sk = store_kind_of(ty_to_wasm(&ok_ty));
 
@@ -423,7 +423,7 @@ fn tagged_unwrap_or(v: &IrExpr, default: &IrExpr, payload_when_nonzero: bool, re
 fn option_map(o: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
     let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
     let in_lk = load_kind_of(ty_to_wasm(&pty));
-    let out_ty = option_payload_ty(ret_ty).unwrap_or(Ty::Int);
+    let out_ty = concrete_ty(option_payload_ty(ret_ty))?;
     let out_sk = store_kind_of(ty_to_wasm(&out_ty));
 
     let o_local = ctx.alloc_local(WasmTy::I32);
@@ -464,7 +464,7 @@ fn option_map(o: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option
 
 /// `option.to_list(o) -> List[A]` — `Some(x)` → `[x]`, `None` → `[]`.
 fn option_to_list(o: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
-    let elem_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
+    let elem_ty = concrete_ty(super::lower::list_element_ty(ret_ty))?;
     let lk = load_kind_of(ty_to_wasm(&elem_ty));
     let sk = store_kind_of(ty_to_wasm(&elem_ty));
     let es = wasm_byte_size(&elem_ty);
@@ -588,6 +588,13 @@ fn str_replace(args: &[IrExpr], all: i32, ctx: &mut LowerCtx) -> Option<Vec<Op>>
     ops.push(Op::Const(Const::I32(all)));
     ops.push(Op::Call { idx, pops: 4, pushes: 1 });
     Some(ops)
+}
+
+/// An element/payload type that resolves to a concrete WASM width. Returns
+/// `None` for `Unknown`/`TypeVar` so callers reject (→ legacy) instead of
+/// guessing i64 — a guessed width is silent load/store corruption.
+fn concrete_ty(ty: Option<Ty>) -> Option<Ty> {
+    ty.filter(|t| !t.is_unresolved())
 }
 
 /// Lower an expr and widen an i32-width result to i64 (map slots are i64).
@@ -1278,7 +1285,7 @@ fn option_payload_ty(ty: &Ty) -> Option<Ty> {
 
 /// `list.reverse(xs)` — new list with elements in reverse order.
 fn list_reverse(xs_expr: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
-    let elem_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
+    let elem_ty = concrete_ty(super::lower::list_element_ty(ret_ty))?;
     let es = wasm_byte_size(&elem_ty);
     let lk = load_kind_of(ty_to_wasm(&elem_ty));
     let sk = store_kind_of(ty_to_wasm(&elem_ty));
@@ -1329,7 +1336,7 @@ fn list_filter_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx
     let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
     let in_es = wasm_byte_size(&pty);
     let in_lk = load_kind_of(ty_to_wasm(&pty));
-    let out_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
+    let out_ty = concrete_ty(super::lower::list_element_ty(ret_ty))?;
     let out_es = wasm_byte_size(&out_ty);
     let out_sk = store_kind_of(ty_to_wasm(&out_ty));
     let out_lk = load_kind_of(ty_to_wasm(&out_ty));
@@ -1382,7 +1389,7 @@ fn list_flat_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) 
     let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
     let in_es = wasm_byte_size(&pty);
     let in_lk = load_kind_of(ty_to_wasm(&pty));
-    let out_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
+    let out_ty = concrete_ty(super::lower::list_element_ty(ret_ty))?;
     let out_es = wasm_byte_size(&out_ty);
 
     let (lp, mut ops) = list_loop_header(xs_expr, ctx);
@@ -1610,7 +1617,7 @@ fn list_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Op
     let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
     let in_es = super::lower::wasm_byte_size(&pty);
     let in_lk = load_kind_of(ty_to_wasm(&pty));
-    let out_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
+    let out_ty = concrete_ty(super::lower::list_element_ty(ret_ty))?;
     let out_es = super::lower::wasm_byte_size(&out_ty);
     let out_sk = store_kind_of(ty_to_wasm(&out_ty));
 
