@@ -72,12 +72,14 @@ List/Set with an unresolved element but keeps the Int default for ranges (`None`
 from `list_element_ty`); `ConcatList` rejects an unresolved stride. Differential
 gate unchanged (real programs carry resolved types).
 
-**Residual (lower priority):** match-destructure sub-types in `sub_slots` /
-`bind_pattern` use `pattern_fallback_ty` (the pattern's *own* declared `Bind`
-type) as fallback — concrete, so not a blind Int guess — except the List-pattern
-element (`list_element_ty(subj_ty).unwrap_or(Ty::Int)`), which still guesses for
-a list pattern on an unresolved scrutinee. Convert when `sub_slots` is made
-fallible.
+**Completed (commit 4999d608):** `sub_slots` is now fallible — `None` when a
+tuple element, record field, or list-pattern element can't resolve to a concrete
+layout; `pattern_condition`/`bind_pattern` reject on `None`. The Record-literal
+and SpreadRecord loops reject a field absent from the type. **No
+`unwrap_or(0 / 8 / Ty::Int / Ty::String)` remains in any offset/width position in
+the engine** — every layout decision is either proven or honestly rejected. The
+remaining `unwrap_or_else(pattern_fallback_ty)` sites are safe: they fall back to
+the pattern's *own* declared `Bind` type (concrete), not a blind guess.
 
 ---
 
