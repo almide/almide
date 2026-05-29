@@ -341,8 +341,9 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops
         }
 
-        // ── Call ──
-        IrExprKind::Call { target, args, .. } => {
+        // ── Call / TailCall (no WASM tail-call needed for correctness) ──
+        IrExprKind::Call { target, args, .. }
+        | IrExprKind::TailCall { target, args } => {
             lower_call(target, args, &expr.ty, ctx)
         }
 
@@ -1026,6 +1027,18 @@ fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut Lower
 
     match target {
         CallTarget::Named { name, .. } => {
+            // Prelude print builtins map to the WASI stdout runtime fns.
+            let builtin = match name.as_str() {
+                "print" => Some("__print"),
+                "println" | "eprintln" => Some("__println"),
+                _ => None,
+            };
+            if let Some(rt_name) = builtin {
+                if let Some(idx) = (ctx.func_idx)(rt_name) {
+                    ops.push(Op::Call { idx, pops, pushes: 0 });
+                    return ops;
+                }
+            }
             if let Some(idx) = (ctx.func_idx)(name.as_str()) {
                 ops.push(Op::Call { idx, pops, pushes });
             } else {

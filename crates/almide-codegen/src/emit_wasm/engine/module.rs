@@ -98,9 +98,10 @@ pub fn build_module(
     var_table: &VarTable,
     reg: &LayoutRegistry,
 ) -> Result<Vec<u8>, BuildError> {
-    // Runtime functions occupy the first `COUNT` indices; user functions follow.
+    // Imports occupy the lowest indices, then runtime functions, then user
+    // functions.
     let rt = RuntimeFns::fixed();
-    let base = runtime::COUNT;
+    let base = runtime::IMPORT_COUNT + runtime::COUNT;
 
     // ── Phase A: name → index for runtime fns and every user function ──
     let mut name_idx: HashMap<String, FuncIdx> = HashMap::new();
@@ -219,6 +220,8 @@ fn assemble(
     let func_sig: Vec<u32> = funcs.iter()
         .map(|f| sigs.intern(f.params.clone(), f.results.clone()))
         .collect();
+    // fd_write: (i32 fd, i32 iovs, i32 iovs_len, i32 nwritten) -> i32 errno.
+    let fd_write_sig = sigs.intern(vec![WasmTy::I32; 4], vec![WasmTy::I32]);
 
     // ── Type section (every interned signature, in index order) ──
     let mut types = TypeSection::new();
@@ -230,16 +233,23 @@ fn assemble(
     }
     module.section(&types);
 
-    // ── Function section (type index per function) ──
+    // ── Import section: WASI fd_write at function index 0 (imports precede
+    //    every defined function in the index space). ──
+    let mut imports = wasm_encoder::ImportSection::new();
+    imports.import("wasi_snapshot_preview1", "fd_write",
+        wasm_encoder::EntityType::Function(fd_write_sig));
+    module.section(&imports);
+
+    // ── Function section (type index per defined function) ──
     let mut functions = FunctionSection::new();
     for &sig in &func_sig {
         functions.function(sig);
     }
     module.section(&functions);
 
-    // ── Table section: one funcref slot per function so closures and FnRef
-    //    can call_indirect with table index == function index. ──
-    let n = funcs.len() as u64;
+    // ── Table section: one funcref slot per function (imports + defined) so
+    //    closures and FnRef can call_indirect with table index == func index. ──
+    let n = (runtime::IMPORT_COUNT as u64) + funcs.len() as u64;
     let mut tables = wasm_encoder::TableSection::new();
     tables.table(wasm_encoder::TableType {
         element_type: wasm_encoder::RefType::FUNCREF,
@@ -287,7 +297,7 @@ fn assemble(
     module.section(&exports);
 
     // ── Element section: populate the table so slot i → function i. ──
-    let elem_funcs: Vec<u32> = (0..funcs.len() as u32).collect();
+    let elem_funcs: Vec<u32> = (0..runtime::IMPORT_COUNT + funcs.len() as u32).collect();
     let mut elements = wasm_encoder::ElementSection::new();
     elements.active(
         Some(0),

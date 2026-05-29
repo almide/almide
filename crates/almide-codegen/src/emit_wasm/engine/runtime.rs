@@ -27,10 +27,17 @@ use super::layout::{self, LayoutRegistry, alloc};
 /// Index of the mutable i32 global holding the bump pointer (next free byte).
 pub const HEAP_GLOBAL: u32 = 0;
 
-/// Resolved indices of the runtime functions. Runtime functions always occupy
-/// the first slots in the module, so these are stable.
+/// Number of imported functions occupying the lowest function indices. The
+/// WASI `fd_write` import is always present at index 0, so every defined
+/// runtime/user function is shifted up by this amount.
+pub const IMPORT_COUNT: u32 = 1;
+
+/// Resolved indices of the runtime functions. Defined functions follow the
+/// imports, so their indices are offset by `IMPORT_COUNT`.
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeFns {
+    /// The wasi_snapshot_preview1.fd_write import (function index 0).
+    pub fd_write: FuncIdx,
     pub alloc: FuncIdx,
     pub rc_inc: FuncIdx,
     pub rc_dec: FuncIdx,
@@ -60,47 +67,53 @@ pub struct RuntimeFns {
     pub map_collect: FuncIdx, // keys/values into a List
     pub map_remove: FuncIdx,
     pub map_merge: FuncIdx,
+    pub print: FuncIdx,
+    pub println: FuncIdx,
 }
 
-/// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 27;
+/// The number of *defined* runtime functions (they occupy function indices
+/// `IMPORT_COUNT .. IMPORT_COUNT + COUNT`).
+pub const COUNT: u32 = 29;
 
 impl RuntimeFns {
-    /// The runtime functions occupy the first `COUNT` indices, in this order.
+    /// Defined runtime functions in code-section order, offset past the imports.
     pub const fn fixed() -> Self {
         RuntimeFns {
-            alloc: 0,
-            rc_inc: 1,
-            rc_dec: 2,
-            string_concat: 3,
-            strlen: 4,
-            byte_at: 5,
-            int_to_string: 6,
-            string_eq: 7,
-            range: 8,
-            list_concat: 9,
-            starts_with: 10,
-            ends_with: 11,
-            string_slice: 12,
-            string_get: 13,
-            list_sort_int: 14,
-            map_new: 15,
-            map_put: 16,
-            map_set: 17,
-            map_get: 18,
-            map_get_or: 19,
-            map_contains: 20,
-            map_len: 21,
-            map_hash: 22,
-            map_key_eq: 23,
-            map_collect: 24,
-            map_remove: 25,
-            map_merge: 26,
+            fd_write: 0,
+            alloc: IMPORT_COUNT,
+            rc_inc: IMPORT_COUNT + 1,
+            rc_dec: IMPORT_COUNT + 2,
+            string_concat: IMPORT_COUNT + 3,
+            strlen: IMPORT_COUNT + 4,
+            byte_at: IMPORT_COUNT + 5,
+            int_to_string: IMPORT_COUNT + 6,
+            string_eq: IMPORT_COUNT + 7,
+            range: IMPORT_COUNT + 8,
+            list_concat: IMPORT_COUNT + 9,
+            starts_with: IMPORT_COUNT + 10,
+            ends_with: IMPORT_COUNT + 11,
+            string_slice: IMPORT_COUNT + 12,
+            string_get: IMPORT_COUNT + 13,
+            list_sort_int: IMPORT_COUNT + 14,
+            map_new: IMPORT_COUNT + 15,
+            map_put: IMPORT_COUNT + 16,
+            map_set: IMPORT_COUNT + 17,
+            map_get: IMPORT_COUNT + 18,
+            map_get_or: IMPORT_COUNT + 19,
+            map_contains: IMPORT_COUNT + 20,
+            map_len: IMPORT_COUNT + 21,
+            map_hash: IMPORT_COUNT + 22,
+            map_key_eq: IMPORT_COUNT + 23,
+            map_collect: IMPORT_COUNT + 24,
+            map_remove: IMPORT_COUNT + 25,
+            map_merge: IMPORT_COUNT + 26,
+            print: IMPORT_COUNT + 27,
+            println: IMPORT_COUNT + 28,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 27] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 29] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -129,6 +142,8 @@ impl RuntimeFns {
             ("__map_collect", self.map_collect),
             ("__map_remove", self.map_remove),
             ("__map_merge", self.map_merge),
+            ("__print", self.print),
+            ("__println", self.println),
         ]
     }
 }
@@ -165,7 +180,55 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_map_collect(),
         build_map_remove(),
         build_map_merge(),
+        build_print(),
+        build_println(),
     ]
+}
+
+// ── WASI stdout (fd_write) ───────────────────────────────────────────
+//
+// A 16-byte scratch region in the null page (below DATA_BASE=16) holds the
+// iovec and the bytes-written slot for fd_write — print is synchronous so reuse
+// is safe. iov.ptr @0, iov.len @4, nwritten @8, newline byte @12.
+
+/// `__print(s: i32)` — write the string's bytes to stdout via fd_write(1, …).
+fn build_print() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    WasmFunc {
+        name: "__print".into(), params: vec![WasmTy::I32], results: vec![],
+        locals: vec![],
+        body: vec![
+            // iov.ptr = s + 8
+            Op::Const(Const::I32(0)), Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::Store(StoreKind::I32),
+            // iov.len = s.len (byte length)
+            Op::Const(Const::I32(4)), Op::LocalGet(S), Op::Load(LoadKind::I32), Op::Store(StoreKind::I32),
+            // fd_write(1, iov=0, iovcnt=1, nwritten=8) ; ignore errno
+            Op::Const(Const::I32(1)), Op::Const(Const::I32(0)), Op::Const(Const::I32(1)), Op::Const(Const::I32(8)),
+            Op::Call { idx: rt.fd_write, pops: 4, pushes: 1 },
+            Op::Drop,
+        ],
+    }
+}
+
+/// `__println(s: i32)` — print `s` then a newline.
+fn build_println() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    WasmFunc {
+        name: "__println".into(), params: vec![WasmTy::I32], results: vec![],
+        locals: vec![],
+        body: vec![
+            Op::LocalGet(S), Op::Call { idx: rt.print, pops: 1, pushes: 0 },
+            // newline byte at scratch+12, iov over it
+            Op::Const(Const::I32(12)), Op::Const(Const::I32(10)), Op::Store(StoreKind::I8),
+            Op::Const(Const::I32(0)), Op::Const(Const::I32(12)), Op::Store(StoreKind::I32),
+            Op::Const(Const::I32(4)), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
+            Op::Const(Const::I32(1)), Op::Const(Const::I32(0)), Op::Const(Const::I32(1)), Op::Const(Const::I32(8)),
+            Op::Call { idx: rt.fd_write, pops: 4, pushes: 1 },
+            Op::Drop,
+        ],
+    }
 }
 
 /// `__map_merge(a, b, kind) -> i32` — all of `a`, then all of `b` (b wins on
