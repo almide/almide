@@ -1417,6 +1417,40 @@ mod tests {
         if let Some(r) = run(&[m3], "main") { assert_eq!(r, "1", "slice café[3,4] len chars"); }
     }
 
+    /// string.replace / replace_first.
+    #[test]
+    fn exec_string_replace() {
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let rep = |sym_: &str, s: &str, from: &str, to: &str| call(sym_, vec![lit_str(s), lit_str(from), lit_str(to)], Ty::String);
+        let len = |e: IrExpr| call("almide_rt_string_len", vec![e], Ty::Int);
+        let byte = |e: IrExpr, i: i64| call("__byte_at", vec![e, lit_int(i)], Ty::Int);
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        // replace all "a"→"X" in "banana" → "bXnXnX" (len 6)
+        let r = || rep("almide_rt_string_replace", "banana", "a", "X");
+        ti(len(r()), "6", "replace all len");
+        ti(byte(r(), 1), "88", "replace all [1]=='X'");
+        ti(byte(r(), 0), "98", "replace all [0]=='b'");
+        // grow: replace "a"→"yy" in "aa" → "yyyy" (len 4)
+        ti(len(rep("almide_rt_string_replace", "aa", "a", "yy")), "4", "replace grow len");
+        // shrink: replace "ab"→"" in "abXab" → "X" (len 1)
+        ti(len(rep("almide_rt_string_replace", "abXab", "ab", "")), "1", "replace shrink len");
+        ti(byte(rep("almide_rt_string_replace", "abXab", "ab", ""), 0), "88", "replace shrink [0]=='X'");
+        // replace_first only: "banana" "a"→"X" → "bXnana" (len 6, [3]=='a')
+        let rf = || rep("almide_rt_string_replace_first", "banana", "a", "X");
+        ti(len(rf()), "6", "replace_first len");
+        ti(byte(rf(), 1), "88", "replace_first [1]=='X'");
+        ti(byte(rf(), 3), "97", "replace_first [3]=='a' (unchanged)");
+        // no match → unchanged
+        ti(len(rep("almide_rt_string_replace", "hello", "z", "Q")), "5", "replace no-match len");
+        // multi-char replacement with longer target: "cat"→"dog" in "cat cat"
+        let m = || rep("almide_rt_string_replace", "cat cat", "cat", "dog");
+        ti(len(m()), "7", "replace word len");
+        ti(byte(m(), 0), "100", "replace word [0]=='d'");
+        ti(byte(m(), 4), "100", "replace word [4]=='d'");
+    }
+
     /// string.index_of / last_index_of → Option[Int] (code-point index).
     #[test]
     fn exec_string_index_of() {

@@ -77,11 +77,12 @@ pub struct RuntimeFns {
     pub str_find_byte: FuncIdx,
     pub str_index_of: FuncIdx,
     pub str_last_index_of: FuncIdx,
+    pub str_replace: FuncIdx,
 }
 
 /// The number of *defined* runtime functions (they occupy function indices
 /// `IMPORT_COUNT .. IMPORT_COUNT + COUNT`).
-pub const COUNT: u32 = 37;
+pub const COUNT: u32 = 38;
 
 impl RuntimeFns {
     /// Defined runtime functions in code-section order, offset past the imports.
@@ -125,11 +126,12 @@ impl RuntimeFns {
             str_find_byte: IMPORT_COUNT + 34,
             str_index_of: IMPORT_COUNT + 35,
             str_last_index_of: IMPORT_COUNT + 36,
+            str_replace: IMPORT_COUNT + 37,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 37] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 38] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -168,6 +170,7 @@ impl RuntimeFns {
             ("__string_find_byte", self.str_find_byte),
             ("__string_index_of", self.str_index_of),
             ("__string_last_index_of", self.str_last_index_of),
+            ("__string_replace", self.str_replace),
         ]
     }
 }
@@ -214,6 +217,7 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_string_find_byte(),
         build_string_index_of(),
         build_string_last_index_of(),
+        build_string_replace(),
     ]
 }
 
@@ -575,6 +579,128 @@ fn build_string_last_index_of() -> WasmFunc {
     WasmFunc {
         name: "__string_last_index_of".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
         locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // pos,cur,opt,cp,bc
+        body,
+    }
+}
+
+/// `__string_replace(s, from, to, all: i32) -> i32` — replace occurrences of
+/// `from` with `to`. `all != 0` replaces every (non-overlapping) match, else
+/// only the first. Empty `from` is a no-op (returns a copy of `s`). Two passes:
+/// count matches to size the result, then copy segments + replacements.
+fn build_string_replace() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    const FROM: u32 = 1;
+    const TO: u32 = 2;
+    const ALL: u32 = 3;
+    const SL: u32 = 4;
+    const FROML: u32 = 5;
+    const TOL: u32 = 6;
+    const COUNT: u32 = 7;
+    const POS: u32 = 8;
+    const NEWLEN: u32 = 9;
+    const OUT: u32 = 10;
+    const SRC: u32 = 11;
+    const DST: u32 = 12;
+    const REM: u32 = 13;
+    const M: u32 = 14;
+    const SEG: u32 = 15;
+
+    // out + 8 + DST  (current write address)
+    let dst_addr = || vec![
+        Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(DST), Op::BinOp(B::I32Add),
+    ];
+    // s + 8 + SRC  (current read address)
+    let src_addr = || vec![
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(SRC), Op::BinOp(B::I32Add),
+    ];
+
+    let count_loop = vec![
+        Op::LocalGet(S), Op::LocalGet(FROM), Op::LocalGet(POS),
+        Op::Call { idx: rt.str_find_byte, pops: 3, pushes: 1 }, Op::LocalSet(M),
+        Op::LocalGet(M), Op::Const(Const::I32(0)), Op::BinOp(B::I32LtS), Op::BrIf(1),
+        Op::LocalGet(COUNT), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(COUNT),
+        Op::LocalGet(M), Op::LocalGet(FROML), Op::BinOp(B::I32Add), Op::LocalSet(POS),
+        Op::LocalGet(ALL), Op::UnOp(U::I32Eqz), Op::BrIf(1),
+        Op::Br(0),
+    ];
+
+    let mut build_loop = vec![
+        Op::LocalGet(REM), Op::UnOp(U::I32Eqz), Op::BrIf(1),
+        Op::LocalGet(S), Op::LocalGet(FROM), Op::LocalGet(SRC),
+        Op::Call { idx: rt.str_find_byte, pops: 3, pushes: 1 }, Op::LocalSet(M),
+        Op::LocalGet(M), Op::Const(Const::I32(0)), Op::BinOp(B::I32LtS), Op::BrIf(1),
+        // seg = m - src ; copy s[src..m]
+        Op::LocalGet(M), Op::LocalGet(SRC), Op::BinOp(B::I32Sub), Op::LocalSet(SEG),
+    ];
+    build_loop.extend(dst_addr());
+    build_loop.extend(src_addr());
+    build_loop.extend(vec![
+        Op::LocalGet(SEG), Op::MemoryCopy,
+        Op::LocalGet(DST), Op::LocalGet(SEG), Op::BinOp(B::I32Add), Op::LocalSet(DST),
+    ]);
+    // copy `to`
+    build_loop.extend(dst_addr());
+    build_loop.extend(vec![
+        Op::LocalGet(TO), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(TOL), Op::MemoryCopy,
+        Op::LocalGet(DST), Op::LocalGet(TOL), Op::BinOp(B::I32Add), Op::LocalSet(DST),
+        Op::LocalGet(M), Op::LocalGet(FROML), Op::BinOp(B::I32Add), Op::LocalSet(SRC),
+        Op::LocalGet(REM), Op::Const(Const::I32(1)), Op::BinOp(B::I32Sub), Op::LocalSet(REM),
+        Op::Br(0),
+    ]);
+
+    let mut body = vec![
+        Op::LocalGet(S), Op::Load(LoadKind::I32), Op::LocalSet(SL),
+        Op::LocalGet(FROM), Op::Load(LoadKind::I32), Op::LocalSet(FROML),
+        Op::LocalGet(TO), Op::Load(LoadKind::I32), Op::LocalSet(TOL),
+        // empty `from` → copy of s
+        Op::LocalGet(FROML), Op::UnOp(U::I32Eqz),
+        Op::IfVoid {
+            then: vec![
+                Op::Const(Const::I32(8)), Op::LocalGet(SL), Op::BinOp(B::I32Add),
+                Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+                Op::LocalGet(OUT), Op::LocalGet(SL), Op::Store(StoreKind::I32),
+                Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(SL), Op::Store(StoreKind::I32),
+                Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+                Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+                Op::LocalGet(SL), Op::MemoryCopy,
+                Op::LocalGet(OUT), Op::Return,
+            ],
+            else_: vec![],
+        },
+        // pass 1: count
+        Op::Const(Const::I32(0)), Op::LocalSet(COUNT),
+        Op::Const(Const::I32(0)), Op::LocalSet(POS),
+        Op::Block(vec![Op::Loop(count_loop)]),
+        // newlen = sl + count * (tol - froml)
+        Op::LocalGet(SL),
+        Op::LocalGet(COUNT), Op::LocalGet(TOL), Op::LocalGet(FROML), Op::BinOp(B::I32Sub), Op::BinOp(B::I32Mul),
+        Op::BinOp(B::I32Add), Op::LocalSet(NEWLEN),
+        Op::Const(Const::I32(8)), Op::LocalGet(NEWLEN), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+        Op::LocalGet(OUT), Op::LocalGet(NEWLEN), Op::Store(StoreKind::I32),
+        Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(NEWLEN), Op::Store(StoreKind::I32),
+        // pass 2: build
+        Op::Const(Const::I32(0)), Op::LocalSet(SRC),
+        Op::Const(Const::I32(0)), Op::LocalSet(DST),
+        Op::LocalGet(COUNT), Op::LocalSet(REM),
+        Op::Block(vec![Op::Loop(build_loop)]),
+    ];
+    // tail: copy s[src..sl]
+    body.extend(vec![Op::LocalGet(SL), Op::LocalGet(SRC), Op::BinOp(B::I32Sub), Op::LocalSet(SEG)]);
+    body.extend(dst_addr());
+    body.extend(src_addr());
+    body.extend(vec![Op::LocalGet(SEG), Op::MemoryCopy, Op::LocalGet(OUT)]);
+
+    WasmFunc {
+        name: "__string_replace".into(),
+        params: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![
+            WasmTy::I32, WasmTy::I32, WasmTy::I32, // sl,froml,tol
+            WasmTy::I32, WasmTy::I32, WasmTy::I32, // count,pos,newlen
+            WasmTy::I32, WasmTy::I32, WasmTy::I32, // out,src,dst
+            WasmTy::I32, WasmTy::I32, WasmTy::I32, // rem,m,seg
+        ],
         body,
     }
 }

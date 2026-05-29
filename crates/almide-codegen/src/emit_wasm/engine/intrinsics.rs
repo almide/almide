@@ -89,6 +89,8 @@ pub fn lower_intrinsic(
             call_runtime("__string_index_of", args, 1, ctx),
         "almide_rt_string_last_index_of" if args.len() == 2 =>
             call_runtime("__string_last_index_of", args, 1, ctx),
+        "almide_rt_string_replace" if args.len() == 3 => str_replace(args, 1, ctx),
+        "almide_rt_string_replace_first" if args.len() == 3 => str_replace(args, 0, ctx),
 
         // ── Map: Int or String keys; Int or pointer/i32 values (not Float). ──
         "almide_rt_map_new" if map_supported(ret_ty) =>
@@ -439,6 +441,17 @@ fn str_trim(s: &IrExpr, mode: i32, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
     let mut ops = lower_expr(s, ctx);
     ops.push(Op::Const(Const::I32(mode)));
     ops.push(Op::Call { idx, pops: 2, pushes: 1 });
+    Some(ops)
+}
+
+/// `string.replace`/`replace_first` — call __string_replace(s, from, to, all).
+fn str_replace(args: &[IrExpr], all: i32, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let idx = (ctx.func_idx)("__string_replace")?;
+    let mut ops = lower_expr(&args[0], ctx);
+    ops.extend(lower_expr(&args[1], ctx));
+    ops.extend(lower_expr(&args[2], ctx));
+    ops.push(Op::Const(Const::I32(all)));
+    ops.push(Op::Call { idx, pops: 4, pushes: 1 });
     Some(ops)
 }
 
